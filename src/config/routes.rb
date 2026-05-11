@@ -58,6 +58,7 @@ Rails.application.routes.draw do
       post :filter_ge_results
       get :get_annot_info
       get :get_annot_evidences
+      get :search_visualization_metadata
       get :get_cell_set_annotations
       get :discover_metadata_import_sources
       get :discover_metadata_import_from_project

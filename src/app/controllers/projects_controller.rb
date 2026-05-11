@@ -17,12 +17,12 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
-  GENE_DETAILS_CACHE_ATTRS = %w[ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
+  GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
   GENE_DETAILS_CACHE_TTL = 24.hours
 
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
@@ -2184,7 +2184,7 @@ class ProjectsController < ApplicationController
     cache_key =
       if gid_q.present? || ens_q.present? || sym_q.present?
         [
-          "search_gene/v2",
+          "search_gene/v4",
           db_version.to_s,
           @project.organism_id.to_s,
           gid_q,
@@ -2207,9 +2207,16 @@ class ProjectsController < ApplicationController
         { "hit" => false }
       end
 
-    @gene = payload["hit"] ? OpenStruct.new(payload["attrs"]) : nil
+    if payload["hit"] && payload["attrs"].is_a?(Hash) && payload["attrs"]["id"].to_i <= 0
+      refreshed_gene = search_gene_resolve_remote_gene(db_version)
+      payload["attrs"]["id"] = refreshed_gene.id if refreshed_gene
+    end
 
-    response.headers["Cache-Control"] = "private, max-age=3600"
+    @gene = payload["hit"] ? OpenStruct.new(payload["attrs"]) : nil
+    @gene_set_collection_memberships = build_gene_set_collection_memberships_for_gene(@gene, db_version)
+
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    response.headers["Pragma"] = "no-cache"
     render partial: 'projects/views/gene_details', layout: false
   end
 
@@ -2276,6 +2283,198 @@ class ProjectsController < ApplicationController
     end
 
     render partial: 'projects/views/gene_set_item_details', layout: false
+  end
+
+  # GET /projects/1/search_visualization_metadata?q=...
+  # Searches metadata names, category names and annotation content used by the visualization view.
+  def search_visualization_metadata
+    query = params[:q].to_s.strip
+    return render json: { query: query, results: [] } if query.blank?
+
+    limit = params[:limit].to_i
+    limit = 150 if limit <= 0
+    limit = 500 if limit > 500
+    safe_text = lambda do |value|
+      value.to_s.encode('UTF-8', invalid: :replace, undef: :replace, replace: '').scrub
+    rescue StandardError
+      value.to_s
+    end
+    metadata_label = lambda do |annot|
+      raw_name = safe_text.call(annot&.name)
+      cleaned = raw_name.gsub('/col_attrs/', '').gsub('/row_attrs/', '')
+      cleaned.present? ? cleaned : "Annotation #{annot&.id}"
+    end
+    query_lc = safe_text.call(query).downcase
+
+    metadata_scope = Annot.joins(:data_type)
+                         .where(project_id: @project.id, data_types: { name: %w[DISCRETE NUMERIC] })
+                         .select(:id, :name, :categories_json, :list_cat_json, :data_type_id)
+    metadata_rows = metadata_scope.to_a
+    metadata_by_id = metadata_rows.index_by(&:id)
+
+    results = []
+    seen = Set.new
+
+    metadata_rows.each do |metadata|
+      metadata_name = metadata_label.call(metadata)
+      if metadata_name.downcase.include?(query_lc)
+        key = "meta:#{metadata.id}:#{metadata_name.downcase}"
+        unless seen.include?(key)
+          results << {
+            type: 'metadata_name',
+            match_value: metadata_name,
+            metadata_id: metadata.id,
+            metadata_name: metadata_name
+          }
+          seen << key
+          break if results.length >= limit
+        end
+      end
+      next if results.length >= limit
+
+      categories = []
+      if metadata.categories_json.present?
+        parsed_categories =
+          begin
+            JSON.parse(safe_text.call(metadata.categories_json))
+          rescue JSON::ParserError, ArgumentError
+            nil
+          end
+        categories = if parsed_categories.is_a?(Hash)
+                       parsed_categories.keys
+                     elsif parsed_categories.is_a?(Array)
+                       parsed_categories
+                     else
+                       []
+                     end
+      end
+
+      categories.each_with_index do |category, idx|
+        category_name = safe_text.call(category)
+        next unless category_name.downcase.include?(query_lc)
+
+        key = "cat:#{metadata.id}:#{idx}:#{category_name.downcase}"
+        next if seen.include?(key)
+
+        results << {
+          type: 'category_name',
+          match_value: category_name,
+          metadata_id: metadata.id,
+          metadata_name: metadata_name,
+          category_name: category_name,
+          cat_idx: idx
+        }
+        seen << key
+        break if results.length >= limit
+      end
+      break if results.length >= limit
+    end
+
+    if results.length < limit
+      clas = Cla.active.where(project_id: @project.id, annot_id: metadata_by_id.keys)
+               .select(
+                 :id, :annot_id, :cat, :cat_idx, :name, :comment,
+                 :sorted_cell_ontology_term_ids, :cell_ontology_term_ids,
+                 :sorted_up_gene_ids, :up_gene_ids,
+                 :sorted_down_gene_ids, :down_gene_ids
+               )
+               .to_a
+
+      cot_ids = clas.flat_map do |cla|
+        parse_cla_field(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids)
+      end.map { |value| value.to_i }.select(&:positive?).uniq
+
+      cot_map = {}
+      if cot_ids.any?
+        CellOntologyTerm.where(id: cot_ids).pluck(:id, :identifier, :name).each do |id, identifier, name|
+          cot_map[id] = { identifier: identifier.to_s, name: name.to_s }
+        end
+      end
+
+      h_env = @project.version ? Basic.safe_parse_json(@project.version.env_json, {}) : {}
+      db_version = asap_data_db_name_for_env(h_env, context: "search_visualization_metadata")
+
+      gene_ids = clas.flat_map do |cla|
+        [
+          parse_cla_field(cla.sorted_up_gene_ids.presence || cla.up_gene_ids),
+          parse_cla_field(cla.sorted_down_gene_ids.presence || cla.down_gene_ids)
+        ].flatten
+      end.map { |value| value.to_i }.select(&:positive?).uniq
+
+      gene_map = {}
+      if db_version.present? && gene_ids.any?
+        RemoteGene.with_remote(db_version) do
+          RemoteGene.where(id: gene_ids).pluck(:id, :name, :ensembl_id).each do |gid, symbol, ensembl_id|
+            gene_map[gid.to_s] = { symbol: symbol.to_s, ensembl_id: ensembl_id.to_s }
+          end
+        end
+      end
+
+      clas.each do |cla|
+        metadata = metadata_by_id[cla.annot_id]
+        next unless metadata
+
+        metadata_name = metadata_label.call(metadata)
+        category_name = safe_text.call(cla.cat)
+        annotation_terms = []
+        annotation_terms << ['Annotation name', safe_text.call(cla.name)]
+        annotation_terms << ['Annotation comment', safe_text.call(cla.comment)]
+
+        parse_cla_field(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids).each do |cot_id|
+          cot = cot_map[cot_id.to_i]
+          next unless cot
+          annotation_terms << ['Ontology term', safe_text.call(cot[:identifier])]
+          annotation_terms << ['Ontology term', safe_text.call(cot[:name])]
+        end
+
+        parse_cla_field(cla.sorted_up_gene_ids.presence || cla.up_gene_ids).each do |gene_id|
+          gid = safe_text.call(gene_id)
+          g = gene_map[gid]
+          annotation_terms << ['Up gene id', gid]
+          if g
+            annotation_terms << ['Up gene symbol', safe_text.call(g[:symbol])]
+            annotation_terms << ['Up gene Ensembl', safe_text.call(g[:ensembl_id])]
+          end
+        end
+
+        parse_cla_field(cla.sorted_down_gene_ids.presence || cla.down_gene_ids).each do |gene_id|
+          gid = safe_text.call(gene_id)
+          g = gene_map[gid]
+          annotation_terms << ['Down gene id', gid]
+          if g
+            annotation_terms << ['Down gene symbol', safe_text.call(g[:symbol])]
+            annotation_terms << ['Down gene Ensembl', safe_text.call(g[:ensembl_id])]
+          end
+        end
+
+        match = annotation_terms.find do |_label, value|
+          value.present? && value.to_s.downcase.include?(query_lc)
+        end
+        next unless match
+
+        match_label, match_value = match
+        key = "annot:#{cla.id}:#{match_label.downcase}:#{match_value.to_s.downcase}"
+        next if seen.include?(key)
+
+        results << {
+          type: 'annotation',
+          match_value: match_value.to_s,
+          match_label: match_label,
+          metadata_id: cla.annot_id,
+          metadata_name: metadata_name,
+          category_name: category_name,
+          cat_idx: cla.cat_idx,
+          cla_id: cla.id
+        }
+        seen << key
+        break if results.length >= limit
+      end
+    end
+
+    render json: { query: query, results: results }
+  rescue StandardError => e
+    Rails.logger.error("[search_visualization_metadata] #{e.class}: #{e.message}")
+    render json: { error: 'Unable to search visualization metadata' }, status: :internal_server_error
   end
 
   # GET /projects/1/data_content
@@ -7228,12 +7427,12 @@ class ProjectsController < ApplicationController
       end
 
       if org_id.present?
-        if ens.present?
-          row = RemoteGene.find_by_organism_and_ensembl(org_id, ens, version: db_version)
-          return row if row
-        end
         if sym.present?
           row = RemoteGene.find_by_organism_and_symbol(org_id, sym, version: db_version)
+          return row if row
+        end
+        if ens.present?
+          row = RemoteGene.find_by_organism_and_ensembl(org_id, ens, version: db_version)
           return row if row
         end
       end
@@ -7246,6 +7445,126 @@ class ProjectsController < ApplicationController
       return RemoteGene.find_by_gene_symbol(sym, version: db_version) if sym.present?
 
       nil
+    end
+
+    def build_gene_set_collection_memberships_for_gene(gene, db_version)
+      memberships = []
+      return memberships if db_version.blank?
+
+      current_user_id = current_user&.id
+      gene_id = gene&.respond_to?(:id) ? gene.id.to_i : 0
+      return memberships unless gene_id.positive?
+
+      global_type_presentation = gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_GLOBAL)
+      imported_type_presentation = gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_IMPORTED)
+
+      if gene_id.positive?
+        RemoteGene.with_remote(db_version) do
+          conn = RemoteGene.connection
+          where_sql = [
+            "(gs.project_id IS NULL AND gs.ref_id IS NOT NULL)",
+            "gs.project_id = #{@project.id}"
+          ]
+          if current_user_id.present?
+            where_sql << "(gs.project_id IS NULL AND gs.user_id = #{current_user_id.to_i} AND gs.ref_id IS NULL)"
+          end
+
+          escaped_gene_id = conn.quote_string(gene_id.to_s)
+          gene_match_sql = "(',' || REGEXP_REPLACE(COALESCE(gsi.content, ''), '\\\\s+', '', 'g') || ',') LIKE '%,#{escaped_gene_id},%'"
+
+          rows = conn.select_all(<<~SQL)
+            SELECT
+              gs.id AS collection_id,
+              gs.label AS collection_label,
+              gs.ref_id,
+              gs.project_id,
+              ds.label AS database_name,
+              gsi.id AS item_id,
+              gsi.identifier AS item_identifier,
+              gsi.name AS item_name
+            FROM gene_sets gs
+            JOIN gene_set_items gsi ON gsi.gene_set_id = gs.id
+            LEFT JOIN db_sets ds ON ds.id = gs.ref_id
+            WHERE gs.organism_id = #{@project.organism_id.to_i}
+              AND COALESCE(gs.obsolete, FALSE) = FALSE
+              AND (#{where_sql.join(' OR ')})
+              AND #{gene_match_sql}
+            ORDER BY LOWER(COALESCE(gs.label, '')), LOWER(COALESCE(gsi.name, gsi.identifier, ''))
+          SQL
+
+          by_collection = {}
+          rows.each do |row|
+            collection_id = row['collection_id'].to_i
+            next if collection_id <= 0
+
+            entry = by_collection[collection_id]
+            unless entry
+              project_id = row['project_id']&.to_i
+              ref_id = row['ref_id']&.to_i
+              type_data = project_id.blank? && ref_id.present? ? global_type_presentation : imported_type_presentation
+              entry = {
+                id: collection_id,
+                label: row['collection_label'].to_s,
+                database_name: row['database_name'].to_s,
+                match_count: 0,
+                gene_sets: []
+              }.merge(type_data)
+              by_collection[collection_id] = entry
+            end
+
+            item_label = row['item_name'].to_s.strip
+            item_identifier = row['item_identifier'].to_s.strip
+            entry[:gene_sets] << {
+              id: row['item_id'].to_i,
+              label: item_label.presence || item_identifier,
+              identifier: item_identifier
+            }
+          end
+
+          by_collection.each_value do |entry|
+            entry[:match_count] = entry[:gene_sets].length
+            memberships << entry
+          end
+        end
+      end
+
+      local_collections = GeneSetCollection.where(project_id: @project.id).includes(:gene_set_collection_type).order(created_at: :desc)
+      local_collections.each do |collection|
+        payload = load_local_gene_set_collection_payload(collection.file_key, collection.name)
+        matched_sets = []
+
+        Array(payload['items']).each do |raw_item|
+          item = normalize_manual_gene_set_item(raw_item)
+          next unless item
+
+          genes = Array(item[:genes])
+          hit = genes.any? do |g|
+            gid = g[:gene_id].to_i
+            gid.positive? && gid == gene_id
+          end
+          next unless hit
+
+          matched_sets << {
+            id: item[:id].to_s,
+            label: item[:name].presence || item[:identifier].to_s,
+            identifier: item[:identifier].to_s
+          }
+        end
+        next if matched_sets.empty?
+
+        memberships << {
+          id: local_gene_set_collection_id(collection),
+          label: collection.name.to_s,
+          database_name: '',
+          match_count: matched_sets.length,
+          gene_sets: matched_sets
+        }.merge(gene_set_collection_type_presentation(gene_set_collection_type_key(collection)))
+      end
+
+      memberships.sort_by { |entry| entry[:label].to_s.downcase }
+    rescue StandardError => e
+      Rails.logger.error("[search_gene] Failed to build gene set memberships: #{e.class} - #{e.message}")
+      []
     end
 
     def apply_publication_snapshot_to_runs(relation)

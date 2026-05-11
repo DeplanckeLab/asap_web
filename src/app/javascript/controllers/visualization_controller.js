@@ -8572,6 +8572,290 @@ export default class extends Controller {
     }
   }
 
+  openMetadataSearchPopup(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const searchUrl = String(event.currentTarget?.dataset?.searchUrl || '').trim()
+    if (!searchUrl) return
+
+    this.metadataSearchUrl = searchUrl
+    this.ensureMetadataSearchModal()
+
+    this.metadataSearchOverlay.style.display = 'flex'
+    const savedQuery = this.loadSavedMetadataSearchQuery()
+    this.metadataSearchInput.value = savedQuery
+    if (savedQuery.length >= 2) {
+      this.performMetadataSearch()
+    } else {
+      this.metadataSearchResults.innerHTML = '<div style="padding: 12px; font-size: 12px; color: #6b7280;">Type at least 2 characters to search metadata.</div>'
+    }
+    this.metadataSearchInput.focus()
+  }
+
+  openMetadataInfoPopup(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const infoUrl = String(event.currentTarget?.dataset?.metadataInfoUrl || '').trim()
+    if (!infoUrl) return
+
+    this.ensureMetadataInfoModal()
+    this.metadataInfoOverlay.style.display = 'flex'
+    this.metadataInfoContent.innerHTML = '<div style="padding:16px;color:#6b7280;font-size:13px;"><i class="fas fa-spinner fa-spin" style="margin-right:6px;"></i>Loading metadata information...</div>'
+
+    fetch(infoUrl, { headers: { Accept: 'text/html' }, credentials: 'same-origin' })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+        return response.text()
+      })
+      .then((html) => {
+        this.metadataInfoContent.innerHTML = html
+      })
+      .catch((error) => {
+        this.metadataInfoContent.innerHTML = `<div style="padding:16px;color:#b91c1c;font-size:13px;">Failed to load metadata information: ${this.escapeHtml(error.message)}</div>`
+      })
+  }
+
+  closeMetadataInfoPopup() {
+    if (!this.metadataInfoOverlay) return
+    this.metadataInfoOverlay.style.display = 'none'
+    if (this.metadataInfoContent) {
+      this.metadataInfoContent.innerHTML = ''
+    }
+  }
+
+  ensureMetadataInfoModal() {
+    if (this.metadataInfoOverlay && this.metadataInfoOverlay.isConnected) return
+
+    const overlay = document.createElement('div')
+    overlay.id = 'metadata-info-popup-overlay'
+    overlay.style.cssText = 'display:none;position:fixed;inset:0;background-color:rgba(0,0,0,0.2);z-index:10030;align-items:center;justify-content:center;'
+
+    const dialog = document.createElement('div')
+    dialog.style.cssText = 'width:1100px;max-width:96vw;height:82vh;max-height:92vh;background:#fff;border-radius:12px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);display:flex;flex-direction:column;overflow:hidden;'
+    dialog.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #e5e7eb;background:#f9fafb;">
+        <div style="font-size:14px;font-weight:600;color:#111827;">Metadata information</div>
+        <button type="button" data-role="close" style="background:none;border:none;color:#6b7280;cursor:pointer;padding:4px;border-radius:4px;" title="Close">
+          <i class="fas fa-times" style="font-size:16px;"></i>
+        </button>
+      </div>
+      <div data-role="content" style="flex:1;overflow:auto;background:#f9fafb;"></div>
+    `
+
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+
+    this.metadataInfoOverlay = overlay
+    this.metadataInfoContent = dialog.querySelector('[data-role="content"]')
+    this.metadataInfoClose = dialog.querySelector('[data-role="close"]')
+
+    this.metadataInfoClose.addEventListener('click', () => this.closeMetadataInfoPopup())
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) this.closeMetadataInfoPopup()
+    })
+  }
+
+  closeMetadataSearchPopup() {
+    if (this.metadataSearchOverlay) {
+      this.metadataSearchOverlay.style.display = 'none'
+    }
+  }
+
+  ensureMetadataSearchModal() {
+    if (this.metadataSearchOverlay && this.metadataSearchOverlay.isConnected) return
+
+    const overlay = document.createElement('div')
+    overlay.id = 'metadata-search-popup-overlay'
+    overlay.style.cssText = 'display:none;position:fixed;inset:0;background-color:rgba(0,0,0,0.2);z-index:10020;align-items:center;justify-content:center;'
+
+    const dialog = document.createElement('div')
+    dialog.style.cssText = 'width:760px;max-width:96vw;max-height:90vh;background:#fff;border-radius:12px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);display:flex;flex-direction:column;overflow:hidden;'
+    dialog.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #e5e7eb;background:#f9fafb;">
+        <div style="font-size:14px;font-weight:600;color:#111827;">Search metadata</div>
+        <button type="button" data-role="close" style="background:none;border:none;color:#6b7280;cursor:pointer;padding:4px;border-radius:4px;" title="Close">
+          <i class="fas fa-times" style="font-size:16px;"></i>
+        </button>
+      </div>
+      <div style="padding:12px 16px;border-bottom:1px solid #e5e7eb;">
+        <input type="text" data-role="query" placeholder="Search metadata names, categories, annotations, ontology terms, gene symbols and Ensembl IDs..." style="width:100%;padding:9px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;color:#111827;outline:none;">
+      </div>
+      <div data-role="results" style="flex:1;min-height:200px;overflow:auto;"></div>
+    `
+
+    overlay.appendChild(dialog)
+    document.body.appendChild(overlay)
+
+    this.metadataSearchOverlay = overlay
+    this.metadataSearchInput = dialog.querySelector('[data-role="query"]')
+    this.metadataSearchResults = dialog.querySelector('[data-role="results"]')
+    this.metadataSearchClose = dialog.querySelector('[data-role="close"]')
+
+    this.metadataSearchClose.addEventListener('click', () => this.closeMetadataSearchPopup())
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) this.closeMetadataSearchPopup()
+    })
+
+    this.metadataSearchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        this.closeMetadataSearchPopup()
+      }
+    })
+
+    this.metadataSearchInput.addEventListener('input', () => {
+      this.saveMetadataSearchQuery(this.metadataSearchInput.value || '')
+      if (this.metadataSearchDebounceTimer) clearTimeout(this.metadataSearchDebounceTimer)
+      this.metadataSearchDebounceTimer = setTimeout(() => this.performMetadataSearch(), 220)
+    })
+
+    this.metadataSearchResults.addEventListener('click', async (e) => {
+      const button = e.target.closest('[data-search-result-index]')
+      if (!button) return
+      const idx = Number(button.dataset.searchResultIndex)
+      if (!Number.isInteger(idx) || !this.metadataSearchLastResults || !this.metadataSearchLastResults[idx]) return
+      await this.openMetadataSearchResult(this.metadataSearchLastResults[idx])
+      this.closeMetadataSearchPopup()
+    })
+  }
+
+  async performMetadataSearch() {
+    if (!this.metadataSearchUrl || !this.metadataSearchInput || !this.metadataSearchResults) return
+
+    const query = String(this.metadataSearchInput.value || '').trim()
+    if (query.length < 2) {
+      this.metadataSearchResults.innerHTML = '<div style="padding: 12px; font-size: 12px; color: #6b7280;">Type at least 2 characters to search metadata.</div>'
+      this.metadataSearchLastResults = []
+      return
+    }
+
+    const requestId = String(Date.now())
+    this.metadataSearchRequestId = requestId
+    this.metadataSearchResults.innerHTML = '<div style="padding: 12px; font-size: 12px; color: #6b7280;"><i class="fas fa-spinner fa-spin" style="margin-right:6px;"></i>Searching...</div>'
+
+    try {
+      const url = `${this.metadataSearchUrl}?q=${encodeURIComponent(query)}&limit=150`
+      const response = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json()
+      if (this.metadataSearchRequestId !== requestId) return
+
+      const results = Array.isArray(data.results) ? data.results : []
+      this.metadataSearchLastResults = results
+      if (results.length === 0) {
+        this.metadataSearchResults.innerHTML = '<div style="padding: 12px; font-size: 12px; color: #6b7280;">No results found.</div>'
+        return
+      }
+
+      const rows = results.map((row, idx) => {
+        const type = String(row.type || '')
+        const tagLabel = type === 'metadata_name' ? 'Metadata name' : (type === 'category_name' ? 'Category name' : 'Annotation')
+        const contextParts = []
+        if (row.metadata_name) contextParts.push(`Metadata: ${this.escapeHtml(String(row.metadata_name))}`)
+        if (row.category_name) contextParts.push(`Category: ${this.escapeHtml(String(row.category_name))}`)
+        const contextHtml = contextParts.length > 0
+          ? `<div style="margin-top:4px;font-size:11px;color:#6b7280;">${contextParts.join(' · ')}</div>`
+          : ''
+        const matchLabelHtml = row.match_label ? `<span style="font-size:11px;color:#6b7280;">${this.escapeHtml(String(row.match_label))}: </span>` : ''
+        return `
+          <button type="button" data-search-result-index="${idx}" style="width:100%;text-align:left;padding:10px 12px;border:none;border-bottom:1px solid #f3f4f6;background:#fff;cursor:pointer;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:11px;font-weight:600;">${tagLabel}</span>
+              <div style="font-size:13px;color:#111827;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${matchLabelHtml}${this.escapeHtml(String(row.match_value || ''))}</div>
+            </div>
+            ${contextHtml}
+          </button>
+        `
+      }).join('')
+      this.metadataSearchResults.innerHTML = rows
+    } catch (error) {
+      this.metadataSearchResults.innerHTML = `<div style="padding: 12px; font-size: 12px; color: #b91c1c;">Search failed: ${this.escapeHtml(error.message)}</div>`
+    }
+  }
+
+  async openMetadataSearchResult(result) {
+    const resultType = String(result?.type || '')
+    const metadataId = String(result?.metadata_id || '').trim()
+    const categoryName = String(result?.category_name || '').trim()
+    const catIdx = Number(result?.cat_idx)
+
+    if (!metadataId) return
+
+    if (resultType === 'metadata_name') {
+      await this.focusMetadataFilterItem(metadataId)
+      return
+    }
+
+    await this.expandCategoricalMetadataPanel(metadataId)
+
+    if (resultType === 'category_name') {
+      if (categoryName) {
+        await this.focusMetadataCategoryById(metadataId, categoryName)
+      } else {
+        await this.focusMetadataFilterItem(metadataId)
+      }
+      return
+    }
+
+    if (resultType === 'annotation') {
+      if (categoryName) {
+        await this.focusMetadataCategoryById(metadataId, categoryName)
+      } else {
+        await this.focusMetadataFilterItem(metadataId)
+      }
+
+      const escapedMetadataId = this.escapeAttributeSelectorValue(metadataId)
+      const metadataItem = document.querySelector(`[data-metadata-item="${escapedMetadataId}"]`) || document.querySelector(`[data-metadata-item="${metadataId}"]`)
+      let annotationButton = null
+      if (metadataItem && Number.isInteger(catIdx)) {
+        annotationButton = metadataItem.querySelector(`.category-annot-btn[data-metadata-id="${escapedMetadataId}"][data-cat-idx="${catIdx}"]`)
+      }
+      if (!annotationButton && metadataItem && categoryName) {
+        const escapedCategory = this.escapeAttributeSelectorValue(categoryName)
+        const categoryCheckbox = metadataItem.querySelector(`.category-checkbox[data-metadata-id="${escapedMetadataId}"][data-category="${escapedCategory}"]`)
+        const categoryRow = categoryCheckbox ? categoryCheckbox.closest('.metadata-category-row') : null
+        annotationButton = categoryRow ? categoryRow.querySelector('.category-annot-btn') : null
+      }
+      if (!annotationButton && metadataItem) {
+        annotationButton = metadataItem.querySelector('.category-annot-btn')
+      }
+
+      if (annotationButton) {
+        const categoryRow = annotationButton.closest('.metadata-category-row')
+        const scrollTarget = categoryRow || annotationButton.closest(`[data-metadata-item="${escapedMetadataId}"]`)
+        if (scrollTarget) {
+          scrollTarget.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+        }
+        annotationButton.click()
+      }
+    }
+  }
+
+  metadataSearchSessionStorageKey() {
+    const projectId = String(this.element?.dataset?.projectId || '').trim()
+    const keySuffix = projectId || window.location.pathname
+    return `visualization_metadata_search_query:${keySuffix}`
+  }
+
+  loadSavedMetadataSearchQuery() {
+    try {
+      return String(sessionStorage.getItem(this.metadataSearchSessionStorageKey()) || '')
+    } catch (_error) {
+      return ''
+    }
+  }
+
+  saveMetadataSearchQuery(value) {
+    try {
+      sessionStorage.setItem(this.metadataSearchSessionStorageKey(), String(value || ''))
+    } catch (_error) {
+      // Ignore browser storage failures.
+    }
+  }
+
   // Initialize draggable divider (moved from inline JS)
   initializeDraggableDivider() {
     if (!this.element?.isConnected) {

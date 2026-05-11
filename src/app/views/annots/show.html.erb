@@ -1,3 +1,4 @@
+<% unless @embedded %>
 <!-- Fixed header for annot - positioned below project header -->
 <div class="fixed top-16 left-0 right-0 z-40 flex-shrink-0 bg-white shadow-sm border-b border-gray-200">
   <div class="px-4 sm:px-6 lg:px-8">
@@ -35,11 +36,12 @@
     </div>
   </div>
 </div>
+<% end %>
 
 <!-- Scrollable content area -->
-<div class="flex-1 overflow-y-auto">
-  <div class="px-4 sm:px-6 lg:px-8 py-6 pt-24">
-    <% if flash[:notice].present? || flash[:alert].present? %>
+<div class="<%= @embedded ? '' : 'flex-1 overflow-y-auto' %>">
+  <div class="px-4 sm:px-6 lg:px-8 py-6 <%= @embedded ? 'pt-4' : 'pt-24' %>">
+    <% if !@embedded && (flash[:notice].present? || flash[:alert].present?) %>
       <div class="mb-4 space-y-2">
         <% if flash[:notice].present? %>
           <div class="rounded-md border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800"><%= flash[:notice] %></div>

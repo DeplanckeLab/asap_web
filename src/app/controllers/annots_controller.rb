@@ -12,6 +12,7 @@ class AnnotsController < ApplicationController
     @run = @annot.run
     @view_type = 'data'
     @from = params[:from] || 'data'
+    @embedded = params[:embedded].to_s == '1'
     @back_run_id = params[:run_id]
     @back_step_id = params[:step_id]
     
@@ -320,6 +321,8 @@ class AnnotsController < ApplicationController
         @disabled_data_type_ids << numeric_id if numeric_id
       end
     end
+
+    render :show, layout: false if @embedded
   end
 
   # GET /annots/:id/categories.json

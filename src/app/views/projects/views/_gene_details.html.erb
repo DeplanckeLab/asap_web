@@ -47,6 +47,53 @@
       </div>
     </div>
   <% end %>
+
+  <div class="pt-2 border-t border-gray-200">
+    <div class="flex items-center justify-between">
+      <span class="text-sm text-gray-500">Gene set collections</span>
+      <span class="text-xs text-gray-500"><%= Array(@gene_set_collection_memberships).length %> collections</span>
+    </div>
+
+    <% if Array(@gene_set_collection_memberships).any? %>
+      <div class="mt-2 space-y-2">
+        <% @gene_set_collection_memberships.each do |collection| %>
+          <details class="rounded border border-gray-200 bg-gray-50">
+            <summary class="cursor-pointer list-none px-3 py-2 hover:bg-gray-100">
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="text-sm font-medium text-gray-900 truncate"><%= collection[:label] %></div>
+                  <% if collection[:database_name].present? %>
+                    <div class="text-xs text-gray-500 truncate"><%= collection[:database_name] %></div>
+                  <% end %>
+                </div>
+                <div class="text-xs font-medium text-gray-600 whitespace-nowrap">
+                  <%= collection[:match_count].to_i %> gene sets
+                </div>
+              </div>
+            </summary>
+            <div class="border-t border-gray-200 bg-white px-3 py-2">
+              <div class="space-y-2">
+                <% Array(collection[:gene_sets]).each do |gene_set| %>
+                  <% item_label = gene_set[:label].presence || gene_set[:identifier].presence || 'Unnamed gene set' %>
+                  <button type="button"
+                          data-gene-set-item-card="true"
+                          data-gene-set-collection-id="<%= collection[:id] %>"
+                          data-gene-set-collection-label="<%= collection[:label] %>"
+                          data-gene-set-item-id="<%= gene_set[:id] %>"
+                          class="w-full text-left rounded border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors px-3 py-2">
+                    <div class="text-sm font-medium text-gray-900 truncate"><%= item_label %></div>
+                    <div class="text-xs text-gray-600 mt-1" data-gene-set-count-label="true">Loading coverage...</div>
+                  </button>
+                <% end %>
+              </div>
+            </div>
+          </details>
+        <% end %>
+      </div>
+    <% else %>
+      <div class="mt-2 text-sm text-gray-500">This gene is not present in any available gene set collection.</div>
+    <% end %>
+  </div>
 </div>
 <% else %>
 <div class="text-gray-500 text-sm">Gene not found.</div>

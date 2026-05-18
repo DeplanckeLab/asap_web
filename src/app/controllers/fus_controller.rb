@@ -392,7 +392,8 @@ class FusController < ApplicationController
     # Validate that we have either a dataset selection or parsing parameters
     # Note: delimiter can be empty string (for tab), so we check for key presence, not value presence
     has_dataset_selection = sel.present?
-    has_parsing_params = request_body.key?('delimiter') || gene_name_col.present? || request_body.key?('has_header')
+    has_parsing_params = request_body.key?('delimiter') || gene_name_col.present? || request_body.key?('has_header') ||
+                         request_body.key?('rowname_metadata') || request_body.key?('colname_metadata')
     
     unless has_dataset_selection || has_parsing_params
       render json: { error: 'Either dataset selection (sel) or parsing parameters (delimiter, gene_name_col, has_header) must be provided' }, status: :bad_request
@@ -444,6 +445,12 @@ class FusController < ApplicationController
     options[:delimiter] = delimiter if request_body.key?('delimiter')
     options[:gene_name_col] = gene_name_col if gene_name_col.present?
     options[:has_header] = has_header if has_header.present?
+    if request_body.key?('rowname_metadata')
+      options[:rowname_metadata] = request_body['rowname_metadata'].to_s.presence
+    end
+    if request_body.key?('colname_metadata')
+      options[:colname_metadata] = request_body['colname_metadata'].to_s.presence
+    end
 
     # Re-run preparsing with selected dataset or parsing parameters
     enqueued_at = Time.current

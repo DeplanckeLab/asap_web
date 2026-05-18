@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_06_093000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_12_103000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -435,7 +435,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_06_093000) do
     t.text "output_json", default: "{}"
     t.integer "pid"
     t.text "pipeline_parent_run_ids", default: ""
-    t.integer "pred_max_ram"
+    t.bigint "pred_max_ram"
     t.text "pred_params_json"
     t.integer "pred_process_duration"
     t.float "process_duration"

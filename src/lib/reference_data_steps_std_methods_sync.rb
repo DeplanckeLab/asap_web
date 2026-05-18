@@ -6,7 +6,9 @@ require "set"
 # Applies Step and StdMethod rows from a JSON snapshot produced by
 # ReferenceDataCompare / bin/rake reference_data:export.
 #
-# Matching: Step by +name+; StdMethod by (+step name+, +std_method name+).
+# Matching: Step by +name+ for full sync; Step and StdMethod by +id+ when +max_version_id+
+# is set (legacy prod/dev alignment). StdMethod names must be unique per snapshot +step_id+
+# for full sync only.
 # Foreign keys +docker_image_id+, +version_id+, +speed_id+ are remapped for the
 # target database using snapshot side tables when ids differ.
 class ReferenceDataStepsStdMethodsSync
@@ -22,17 +24,18 @@ class ReferenceDataStepsStdMethodsSync
     ]
   }.freeze
 
-  def initialize(snapshot_path:, dry_run: false, verbose: false)
+  def initialize(snapshot_path:, dry_run: false, verbose: false, max_version_id: nil)
     @snapshot_path = snapshot_path
     @dry_run = dry_run
     @verbose = verbose
+    @max_version_id = max_version_id
     @snapshot = nil
   end
 
   def run
     @snapshot = load_snapshot!(@snapshot_path)
-    steps_in = fetch_records!("Step")
-    methods_in = fetch_records!("StdMethod")
+    steps_in = filter_legacy_version!(fetch_records!("Step"))
+    methods_in = filter_legacy_version!(fetch_records!("StdMethod"))
 
     docker_by_src_id = index_optional_model!("DockerImage")
     version_by_src_id = index_optional_model!("Version")
@@ -42,8 +45,9 @@ class ReferenceDataStepsStdMethodsSync
     version_remap = build_version_remap(steps_in + methods_in, version_by_src_id)
     speed_remap = build_speed_remap(methods_in, speed_by_src_id)
 
-    snapshot_step_names = assert_unique_step_names!(steps_in)
-    snapshot_step_id_to_name = build_step_id_to_name(steps_in)
+    assert_unique_steps!(steps_in)
+    assert_unique_std_methods!(methods_in)
+    snapshot_step_id_lookup = build_step_id_lookup(steps_in)
 
     summary = {
       steps_created: 0,
@@ -60,7 +64,7 @@ class ReferenceDataStepsStdMethodsSync
       apply_std_methods!(
         steps_in,
         methods_in,
-        snapshot_step_id_to_name,
+        snapshot_step_id_lookup,
         docker_remap,
         version_remap,
         speed_remap,
@@ -70,11 +74,28 @@ class ReferenceDataStepsStdMethodsSync
       raise ActiveRecord::Rollback if @dry_run
     end
 
-    print_summary(summary, snapshot_step_names)
+    print_summary(summary, steps_in)
     summary
   end
 
   private
+
+  def match_by_version?
+    !@max_version_id.nil?
+  end
+
+  def match_by_id?
+    match_by_version?
+  end
+
+  def filter_legacy_version!(rows)
+    return rows if @max_version_id.nil?
+
+    rows.select do |row|
+      vid = row["version_id"]
+      !vid.nil? && vid.to_i < @max_version_id
+    end
+  end
 
   def load_snapshot!(path)
     raw = File.read(path)
@@ -107,24 +128,90 @@ class ReferenceDataStepsStdMethodsSync
     end
   end
 
-  def assert_unique_step_names!(steps_in)
+  def assert_unique_steps!(steps_in)
     seen = {}
     steps_in.each do |row|
-      n = row["name"].to_s
-      raise SyncError, "Step row without name: #{row.inspect}" if n.empty?
+      if match_by_id?
+        key = row["id"]
+        raise SyncError, "Step row without id: #{row.inspect}" if key.nil?
+      else
+        key = step_snapshot_key(row)
+        n = row["name"].to_s
+        raise SyncError, "Step row without name: #{row.inspect}" if n.empty?
+      end
 
-      seen[n] = (seen[n] || 0) + 1
+      seen[key] = (seen[key] || 0) + 1
     end
     dup = seen.select { |_, c| c > 1 }.keys
-    raise SyncError, "Duplicate step names in snapshot (cannot sync): #{dup.join(', ')}" if dup.any?
+    return if dup.empty?
 
-    seen.keys
+    message =
+      if match_by_id?
+        "Duplicate step ids in snapshot: #{dup.join(', ')}"
+      elsif match_by_version?
+        "Duplicate steps in snapshot (same name and version_id): #{format_step_keys(dup)}"
+      else
+        "Duplicate step names in snapshot (cannot sync): #{dup.map(&:first).join(', ')}"
+      end
+    raise SyncError, message
   end
 
-  def build_step_id_to_name(steps_in)
-    steps_in.each_with_object({}) do |row, h|
-      h[row["id"]] = row["name"].to_s
+  def assert_unique_std_methods!(methods_in)
+    seen = {}
+    methods_in.each do |row|
+      if match_by_id?
+        key = row["id"]
+        raise SyncError, "StdMethod row without id: #{row.inspect}" if key.nil?
+      else
+        sid = row["step_id"]
+        n = row["name"].to_s
+        raise SyncError, "StdMethod row without name (step_id=#{sid}): #{row.inspect}" if n.empty?
+        raise SyncError, "StdMethod row without step_id: #{row.inspect}" if sid.nil?
+
+        key = [sid, n]
+      end
+      seen[key] = (seen[key] || 0) + 1
     end
+    dup = seen.select { |_, c| c > 1 }.keys
+    return if dup.empty?
+
+    message =
+      if match_by_id?
+        "Duplicate std_method ids in snapshot: #{dup.join(', ')}"
+      else
+        "Duplicate std_methods in snapshot (same step_id and name): #{dup.map { |sid, n| "step_id=#{sid} name=#{n.inspect}" }.join(', ')}"
+      end
+    raise SyncError, message
+  end
+
+  def step_snapshot_key(row)
+    name = row["name"].to_s
+    return name unless match_by_version?
+
+    vid = row["version_id"]
+    raise SyncError, "Step #{name.inspect} missing version_id (required for legacy sync)" if vid.nil?
+
+    [name, vid]
+  end
+
+  def format_step_keys(keys)
+    keys.map do |key|
+      match_by_version? ? "name=#{key[0].inspect} version_id=#{key[1]}" : key.inspect
+    end.join(", ")
+  end
+
+  def build_step_id_lookup(steps_in)
+    steps_in.each_with_object({}) do |row, h|
+      h[row["id"]] = { "name" => row["name"].to_s, "version_id" => row["version_id"] }
+    end
+  end
+
+  def snapshot_step_keys_set(steps_in, version_remap)
+    steps_in.map do |row|
+      vid = row["version_id"]
+      mapped_vid = version_remap[vid] || vid
+      match_by_version? ? [row["name"].to_s, mapped_vid] : row["name"].to_s
+    end.to_set
   end
 
   def collect_docker_image_ids(rows)
@@ -152,7 +239,7 @@ class ReferenceDataStepsStdMethodsSync
       dst = DockerImage.find_by(name: src["name"].to_s, tag: src["tag"].to_s)
       unless dst
         raise SyncError,
-              "No production DockerImage for snapshot id #{src_id} name=#{src['name'].inspect} tag=#{src['tag'].inspect}"
+              "No target DockerImage for snapshot id #{src_id} name=#{src['name'].inspect} tag=#{src['tag'].inspect}"
       end
 
       remap[src_id] = dst.id
@@ -174,7 +261,7 @@ class ReferenceDataStepsStdMethodsSync
     src = version_by_src_id[source_id]
     if src.nil?
       raise SyncError,
-            "version_id #{source_id} is not present on production and snapshot has no Version row for it. " \
+            "version_id #{source_id} is not present on target and snapshot has no Version row for it. " \
             "Export with MODELS=...,Version or align Version primary keys."
     end
 
@@ -185,7 +272,7 @@ class ReferenceDataStepsStdMethodsSync
     return by_rel.first.id if by_rel.one?
 
     raise SyncError,
-          "Cannot map snapshot version id #{source_id} to production (description and release_date+beta not unique)"
+          "Cannot map snapshot version id #{source_id} to target (description and release_date+beta not unique)"
   end
 
   def build_speed_remap(std_methods_in, speed_by_src_id)
@@ -202,12 +289,12 @@ class ReferenceDataStepsStdMethodsSync
     src = speed_by_src_id[source_id]
     if src.nil?
       raise SyncError,
-            "speed_id #{source_id} is not present on production and snapshot has no Speed row for it. " \
+            "speed_id #{source_id} is not present on target and snapshot has no Speed row for it. " \
             "Export with MODELS=...,Speed or align Speed primary keys."
     end
 
     dst = Speed.find_by(name: src["name"].to_s)
-    raise SyncError, "No production Speed named #{src['name'].inspect} for snapshot speed id #{source_id}" unless dst
+    raise SyncError, "No target Speed named #{src['name'].inspect} for snapshot speed id #{source_id}" unless dst
 
     dst.id
   end
@@ -248,94 +335,238 @@ class ReferenceDataStepsStdMethodsSync
 
   def apply_steps!(steps_in, docker_remap, version_remap, summary)
     fk = { docker: docker_remap, version: version_remap }
-    steps_in.sort_by { |r| [r["rank"].to_i, r["name"].to_s] }.each do |src|
-      name = src["name"].to_s
-      prepared = prepare_row_for_model(Step, src, fk)
-      existing = Step.where(name: name).order(:id).to_a
-      if existing.size > 1
-        raise SyncError, "Multiple production Step rows with name #{name.inspect}; resolve manually before sync"
-      end
-
-      if existing.empty?
-        puts "[#{mode_label}] create Step name=#{name}"
-        summary[:steps_created] += 1
-        next if @dry_run
-
-        Step.create!(prepared)
+    sort_steps = match_by_id? ? ->(r) { r["id"].to_i } : ->(r) { [r["version_id"].to_i, r["rank"].to_i, r["name"].to_s] }
+    steps_in.sort_by(&sort_steps).each do |src|
+      if match_by_id?
+        apply_step_by_id!(src, fk, summary)
       else
-        record = existing.first
-        if record_attributes_match?(record, prepared)
-          summary[:steps_unchanged] += 1
-          next
-        end
-
-        puts "[#{mode_label}] update Step id=#{record.id} name=#{name}"
-        log_verbose_diff!(record, prepared)
-        summary[:steps_updated] += 1
-        next if @dry_run
-
-        record.update!(prepared)
+        apply_step_by_name!(src, fk, summary)
       end
     end
   end
 
-  def apply_std_methods!(steps_in, methods_in, snapshot_step_id_to_name, docker_remap, version_remap, speed_remap, summary)
+  def apply_step_by_id!(src, fk, summary)
+    src_id = src["id"]
+    raise SyncError, "Step row without id: #{src.inspect}" if src_id.nil?
+
+    prepared = prepare_row_for_model(Step, src, fk)
+    step_label = step_log_label(src_id, prepared["name"], prepared["version_id"])
+    record = Step.find_by(id: src_id)
+
+    if record.nil?
+      puts "[#{mode_label}] create Step #{step_label}"
+      summary[:steps_created] += 1
+      return if @dry_run
+
+      Step.create!(prepared.merge("id" => src_id))
+      return
+    end
+
+    if record_attributes_match?(record, prepared)
+      summary[:steps_unchanged] += 1
+      return
+    end
+
+    puts "[#{mode_label}] update Step #{step_label}"
+    log_verbose_diff!(record, prepared)
+    summary[:steps_updated] += 1
+    return if @dry_run
+
+    record.update!(prepared)
+  end
+
+  def apply_step_by_name!(src, fk, summary)
+    name = src["name"].to_s
+    prepared = prepare_row_for_model(Step, src, fk)
+    existing = find_target_steps(name, prepared["version_id"])
+    step_label = step_log_label(nil, name, prepared["version_id"])
+
+    if existing.size > 1
+      raise SyncError, "Multiple target Step rows for #{step_label}; resolve manually before sync"
+    end
+
+    if existing.empty?
+      puts "[#{mode_label}] create Step #{step_label}"
+      summary[:steps_created] += 1
+      return if @dry_run
+
+      Step.create!(prepared)
+      return
+    end
+
+    record = existing.first
+    if record_attributes_match?(record, prepared)
+      summary[:steps_unchanged] += 1
+      return
+    end
+
+    puts "[#{mode_label}] update Step id=#{record.id} #{step_label}"
+    log_verbose_diff!(record, prepared)
+    summary[:steps_updated] += 1
+    return if @dry_run
+
+    record.update!(prepared)
+  end
+
+  def apply_std_methods!(steps_in, methods_in, snapshot_step_id_lookup, docker_remap, version_remap, speed_remap, summary)
     fk = { docker: docker_remap, version: version_remap, speed: speed_remap }
-    names_in_snapshot = steps_in.map { |s| s["name"].to_s }.to_set
-    methods_in.sort_by { |r| [snapshot_step_id_to_name[r["step_id"]].to_s, r["name"].to_s] }.each do |src|
-      step_src_id = src["step_id"]
-      step_name = snapshot_step_id_to_name[step_src_id]
-      if step_name.blank?
-        raise SyncError, "StdMethod #{src['name'].inspect} references unknown snapshot step_id #{step_src_id}"
+    sort_methods =
+      if match_by_id?
+        ->(r) { r["id"].to_i }
+      else
+        lambda do |r|
+          info = snapshot_step_id_lookup[r["step_id"]] || {}
+          [info["name"].to_s, info["version_id"].to_i, r["name"].to_s]
+        end
       end
-
-      prod_step = Step.find_by(name: step_name)
-      pending_new_step = prod_step.nil? && names_in_snapshot.include?(step_name)
-      if prod_step.nil? && !pending_new_step
-        raise SyncError,
-              "StdMethod #{src['name'].inspect} needs Step name=#{step_name.inspect} on production (missing from snapshot and database)"
+    methods_in.sort_by(&sort_methods).each do |src|
+      if match_by_id?
+        apply_std_method_by_id!(src, fk, summary)
+      else
+        apply_std_method_by_name!(src, snapshot_step_id_lookup, steps_in, version_remap, fk, summary)
       end
+    end
+  end
 
-      if pending_new_step && @dry_run
-        mname = src["name"].to_s
-        raise SyncError, "StdMethod row without name (step #{step_name})" if mname.empty?
+  def apply_std_method_by_id!(src, fk, summary)
+    src_id = src["id"]
+    step_src_id = src["step_id"]
+    raise SyncError, "StdMethod row without id: #{src.inspect}" if src_id.nil?
+    raise SyncError, "StdMethod id=#{src_id} row without step_id: #{src.inspect}" if step_src_id.nil?
 
-        puts "[#{mode_label}] create StdMethod step=#{step_name} name=#{mname} (after new Step #{step_name} in same run)"
-        summary[:std_methods_created] += 1
-        next
-      end
+    unless Step.exists?(id: step_src_id)
+      raise SyncError,
+            "StdMethod id=#{src_id} references step_id=#{step_src_id} which is missing on target " \
+            "(create the Step first or align primary keys)"
+    end
 
+    prepared = prepare_row_for_model(StdMethod, src, fk)
+    prepared["step_id"] = step_src_id
+    method_label = std_method_log_label(src_id, step_src_id, prepared["name"], prepared["version_id"])
+    record = StdMethod.find_by(id: src_id)
+
+    if record.nil?
+      puts "[#{mode_label}] create StdMethod #{method_label}"
+      summary[:std_methods_created] += 1
+      return if @dry_run
+
+      StdMethod.create!(prepared.merge("id" => src_id))
+      return
+    end
+
+    if record_attributes_match?(record, prepared)
+      summary[:std_methods_unchanged] += 1
+      return
+    end
+
+    puts "[#{mode_label}] update StdMethod #{method_label}"
+    log_verbose_diff!(record, prepared)
+    summary[:std_methods_updated] += 1
+    return if @dry_run
+
+    record.update!(prepared)
+  end
+
+  def apply_std_method_by_name!(src, snapshot_step_id_lookup, steps_in, version_remap, fk, summary)
+    step_src_id = src["step_id"]
+    step_info = snapshot_step_id_lookup[step_src_id]
+    if step_info.nil?
+      raise SyncError, "StdMethod #{src['name'].inspect} references unknown snapshot step_id #{step_src_id}"
+    end
+
+    step_name = step_info["name"]
+    target_step = find_target_step(step_name, step_info["version_id"], version_remap)
+    step_keys_in_snapshot = snapshot_step_keys_set(steps_in, version_remap)
+    step_key = match_by_version? ? [step_name, remap_fk(step_info["version_id"], version_remap)] : step_name
+    pending_new_step = target_step.nil? && step_keys_in_snapshot.include?(step_key)
+    if target_step.nil? && !pending_new_step
+      raise SyncError,
+            "StdMethod #{src['name'].inspect} needs Step #{step_log_label(nil, step_name, step_info['version_id'])} on target " \
+            "(missing from snapshot and database)"
+    end
+
+    if pending_new_step && @dry_run
       mname = src["name"].to_s
       raise SyncError, "StdMethod row without name (step #{step_name})" if mname.empty?
 
-      prepared = prepare_row_for_model(StdMethod, src, fk)
-      prepared["step_id"] = prod_step.id
+      puts "[#{mode_label}] create StdMethod #{std_method_log_label(nil, nil, mname, step_info['version_id'], step_name: step_name)} " \
+           "(after new Step in same run)"
+      summary[:std_methods_created] += 1
+      return
+    end
 
-      existing = StdMethod.where(step_id: prod_step.id, name: mname).order(:id).to_a
-      if existing.size > 1
-        raise SyncError, "Multiple StdMethod rows for step=#{step_name} name=#{mname.inspect}"
-      end
+    mname = src["name"].to_s
+    raise SyncError, "StdMethod row without name (step #{step_name})" if mname.empty?
 
-      if existing.empty?
-        puts "[#{mode_label}] create StdMethod step=#{step_name} name=#{mname}"
-        summary[:std_methods_created] += 1
-        next if @dry_run
+    prepared = prepare_row_for_model(StdMethod, src, fk)
+    prepared["step_id"] = target_step.id
 
-        StdMethod.create!(prepared)
-      else
-        record = existing.first
-        if record_attributes_match?(record, prepared)
-          summary[:std_methods_unchanged] += 1
-          next
-        end
+    existing = StdMethod.where(step_id: target_step.id, name: mname).order(:id).to_a
+    if existing.size > 1
+      raise SyncError,
+            "Multiple StdMethod rows for step_id=#{target_step.id} (#{step_log_label(nil, step_name, target_step.version_id)}) " \
+            "name=#{mname.inspect}"
+    end
 
-        puts "[#{mode_label}] update StdMethod id=#{record.id} step=#{step_name} name=#{mname}"
-        log_verbose_diff!(record, prepared)
-        summary[:std_methods_updated] += 1
-        next if @dry_run
+    method_label = std_method_log_label(nil, target_step.id, mname, target_step.version_id, step_name: step_name)
 
-        record.update!(prepared)
-      end
+    if existing.empty?
+      puts "[#{mode_label}] create StdMethod #{method_label}"
+      summary[:std_methods_created] += 1
+      return if @dry_run
+
+      StdMethod.create!(prepared)
+      return
+    end
+
+    record = existing.first
+    if record_attributes_match?(record, prepared)
+      summary[:std_methods_unchanged] += 1
+      return
+    end
+
+    puts "[#{mode_label}] update StdMethod id=#{record.id} #{method_label}"
+    log_verbose_diff!(record, prepared)
+    summary[:std_methods_updated] += 1
+    return if @dry_run
+
+    record.update!(prepared)
+  end
+
+  def find_target_steps(name, version_id)
+    if match_by_version?
+      Step.where(name: name, version_id: version_id).order(:id).to_a
+    else
+      Step.where(name: name).order(:id).to_a
+    end
+  end
+
+  def find_target_step(name, source_version_id, version_remap)
+    if match_by_version?
+      target_version_id = remap_fk(source_version_id, version_remap)
+      Step.find_by(name: name, version_id: target_version_id)
+    else
+      Step.find_by(name: name)
+    end
+  end
+
+  def step_log_label(id, name, version_id)
+    if match_by_id?
+      "id=#{id} name=#{name.inspect} version_id=#{version_id}"
+    elsif match_by_version?
+      "name=#{name.inspect} version_id=#{version_id}"
+    else
+      "name=#{name.inspect}"
+    end
+  end
+
+  def std_method_log_label(id, step_id, method_name, version_id, step_name: nil)
+    if match_by_id?
+      "id=#{id} step_id=#{step_id} name=#{method_name.inspect} version_id=#{version_id}"
+    elsif match_by_version?
+      "step=#{step_name.inspect} version_id=#{version_id} name=#{method_name.inspect}"
+    else
+      "step=#{step_name.inspect} name=#{method_name.inspect}"
     end
   end
 
@@ -398,12 +629,14 @@ class ReferenceDataStepsStdMethodsSync
     @dry_run ? "dry-run" : "apply"
   end
 
-  def print_summary(summary, step_names)
+  def print_summary(summary, steps_in)
     puts ""
     puts "Summary (#{mode_label})"
     puts "  steps: created=#{summary[:steps_created]} updated=#{summary[:steps_updated]} unchanged=#{summary[:steps_unchanged]}"
     puts "  std_methods: created=#{summary[:std_methods_created]} updated=#{summary[:std_methods_updated]} unchanged=#{summary[:std_methods_unchanged]}"
-    puts "  snapshot step names: #{step_names.size}"
+    puts "  snapshot steps: #{steps_in.size}"
+    puts "  match key: #{match_by_id? ? 'id' : (match_by_version? ? 'name + version_id' : 'name')}"
+    puts "  version filter: version_id < #{@max_version_id}" if @max_version_id
     puts "  rolled back (dry-run)" if @dry_run
   end
 end

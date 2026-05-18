@@ -66,7 +66,9 @@ export default class extends Controller {
     this.parsingParams = {
       delimiter: '',  // Default to tab (empty string)
       gene_name_col: 'first',
-      has_header: true
+      has_header: true,
+      rowname_metadata: '',
+      colname_metadata: ''
     }
     this.currentDetectedFormat = null  // Track current file format
     this.projectNameTouched = false
@@ -1108,6 +1110,19 @@ export default class extends Controller {
     const datasets = Array.isArray(summary?.datasets) ? summary.datasets : []
     const detectedFormat = summary?.detected_format
     this.currentDetectedFormat = detectedFormat
+    if (datasets.length === 1 && datasets[0]?.name) {
+      this.selectedDatasetName = datasets[0].name
+    }
+    if (this.currentLegacyPreparsingVersion() && detectedFormat === 'H5AD') {
+      if (Object.prototype.hasOwnProperty.call(summary, 'row_names')) {
+        this.parsingParams.rowname_metadata =
+          summary.row_names !== null && summary.row_names !== undefined ? String(summary.row_names) : ''
+      }
+      if (Object.prototype.hasOwnProperty.call(summary, 'col_names')) {
+        this.parsingParams.colname_metadata =
+          summary.col_names !== null && summary.col_names !== undefined ? String(summary.col_names) : ''
+      }
+    }
     console.log('[FileUpload] Datasets found:', datasets.length, datasets)
     let html = ''
 
@@ -1173,6 +1188,10 @@ export default class extends Controller {
           </div>
         `
       }
+    }
+
+    if (detectedFormat === 'H5AD' && this.currentLegacyPreparsingVersion()) {
+      html += this.buildH5adGeneCellMetadataUI(summary)
     }
 
     // Add raw JSON output section (admin only)
@@ -1285,6 +1304,9 @@ export default class extends Controller {
     // Set up parsing parameters handlers if RAW_TEXT format
     if (detectedFormat === 'RAW_TEXT') {
       this.setupParsingParametersHandlers()
+    }
+    if (detectedFormat === 'H5AD' && this.currentLegacyPreparsingVersion()) {
+      this.setupH5adMetadataHandlers()
     }
     
     // Set up event handlers after HTML is inserted (admin only)
@@ -1479,6 +1501,8 @@ export default class extends Controller {
     const datasetMessage = isArchiveFormat
       ? 'Multiple datasets found in this archive. Please select one to proceed:'
       : 'Multiple datasets found in this file. Please select one to proceed:'
+    const rowAxis = detectedFormat === 'H5AD' ? 'genes' : this.rowLabelValue
+    const colAxis = detectedFormat === 'H5AD' ? 'cells' : this.colLabelValue
 
     let html = `
       <div class="rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-4 mb-4">
@@ -1523,11 +1547,11 @@ export default class extends Controller {
               </div>
               <dl class="mt-2 grid grid-cols-2 gap-3 text-sm text-gray-600 dark:text-gray-300">
                 <div>
-                  <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(this.colLabelValue)}</dt>
+                  <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(colAxis)}</dt>
                   <dd class="text-sm font-medium text-gray-900 dark:text-white">${cells}</dd>
                 </div>
                 <div>
-                  <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(this.rowLabelValue)}</dt>
+                  <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(rowAxis)}</dt>
                   <dd class="text-sm font-medium text-gray-900 dark:text-white">${genes}</dd>
                 </div>
               </dl>
@@ -1593,6 +1617,11 @@ export default class extends Controller {
         // Enable select button
         if (selectButton) {
           selectButton.disabled = false
+        }
+
+        if (detectedFormat === 'H5AD' && this.currentLegacyPreparsingVersion() && this.preparsingResultData) {
+          const pr = this.preparsingResultData
+          this.renderPreparsingResult(pr.summary, pr.warnings, pr.rawData)
         }
       })
     })
@@ -1685,7 +1714,12 @@ export default class extends Controller {
       if (versionField && versionField.value) {
         requestBody.version_id = versionField.value
       }
-      
+
+      if (this.currentLegacyPreparsingVersion() && this.currentDetectedFormat === 'H5AD') {
+        requestBody.rowname_metadata = this.parsingParams.rowname_metadata || ''
+        requestBody.colname_metadata = this.parsingParams.colname_metadata || ''
+      }
+
       const csrfToken = document.querySelector('[name="csrf-token"]')?.content
       const response = await fetch(`/fus/${this.fuId}/rerun_preparsing`, {
         method: 'POST',
@@ -1795,7 +1829,19 @@ export default class extends Controller {
     }
     const cells = this.formatNumber(dataset?.cell_count)
     const genes = this.formatNumber(dataset?.gene_count)
-    const metadataCount = Array.isArray(dataset?.existing_metadata) ? dataset.existing_metadata.length : 0
+    // Preparsing preview for H5AD is always genes (rows) x cells (columns), matching /var x /obs.
+    // Project-type row/col labels (e.g. samples x cells) must not override that for this card.
+    const rowAxisLabel = detectedFormat === 'H5AD' ? 'genes' : this.rowLabelValue
+    const colAxisLabel = detectedFormat === 'H5AD' ? 'cells' : this.colLabelValue
+    const metadataCount = (() => {
+      if (Array.isArray(dataset?.metadata) && dataset.metadata.length > 0) {
+        return dataset.metadata.length
+      }
+      if (Array.isArray(dataset?.existing_metadata)) {
+        return dataset.existing_metadata.length
+      }
+      return 0
+    })()
     const matrixType = dataset?.is_count_matrix ? 'Count matrix' : 'Expression matrix'
     // Format predicted RAM (value is in KB, convert to bytes using binary conversion 1024 to match system standard)
     const predictedRamValue = dataset?.predicted_ram
@@ -1826,7 +1872,7 @@ export default class extends Controller {
         tableHtml += '<thead><tr>'
         tableHtml += '<th class="border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 p-1 text-left font-semibold"></th>' // Empty corner
         for (let col = 0; col < maxCols; col++) {
-          const cellLabel = this.colLabelValue.charAt(0).toUpperCase() + this.colLabelValue.slice(1)
+          const cellLabel = colAxisLabel.charAt(0).toUpperCase() + colAxisLabel.slice(1)
           const cellName = cellNames[col] || `${cellLabel} ${col + 1}`
           tableHtml += `<th class="border border-gray-300 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 p-1 text-left font-semibold">${this.escapeHtml(cellName)}</th>`
         }
@@ -1844,7 +1890,7 @@ export default class extends Controller {
         if (geneNames.length > row) {
           tableHtml += `<td class="border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 p-1 font-semibold text-right">${this.escapeHtml(geneNames[row])}</td>`
         } else {
-          const geneLabel = this.rowLabelValue.charAt(0).toUpperCase() + this.rowLabelValue.slice(1)
+          const geneLabel = rowAxisLabel.charAt(0).toUpperCase() + rowAxisLabel.slice(1)
           tableHtml += `<td class="border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 p-1 font-semibold text-right">${geneLabel} ${row + 1}</td>`
         }
         // Matrix values
@@ -1874,7 +1920,7 @@ export default class extends Controller {
       
       sampleMatrixHtml = `
         <div class="mt-4">
-          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Sample Matrix (first ${maxRows} ${this.rowLabelValue}, first ${maxCols} ${this.colLabelValue})</p>
+          <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Sample Matrix (first ${maxRows} ${rowAxisLabel}, first ${maxCols} ${colAxisLabel})</p>
           <div class="overflow-x-auto max-w-full">
             ${tableHtml}
           </div>
@@ -1897,11 +1943,11 @@ export default class extends Controller {
         </div>
         <dl class="mt-4 grid grid-cols-2 gap-4 text-sm text-gray-600 dark:text-gray-300">
           <div>
-            <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(this.colLabelValue)} (columns)</dt>
+            <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(colAxisLabel)} (columns)</dt>
             <dd class="text-base font-medium text-gray-900 dark:text-white">${cells}</dd>
           </div>
           <div>
-            <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(this.rowLabelValue)} (rows)</dt>
+            <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(rowAxisLabel)} (rows)</dt>
             <dd class="text-base font-medium text-gray-900 dark:text-white">${genes}</dd>
           </div>
           <div>
@@ -2234,6 +2280,7 @@ export default class extends Controller {
 
   handleFormSubmit(e) {
     this.syncSelectedDatasetInput()
+    this.syncH5adMetadataHiddenFields()
 
     // If a file was selected, wait for upload to complete
     if (this.fuId && !this.isUploadComplete && this.currentUpload && !this.currentUpload.aborted) {
@@ -2623,7 +2670,9 @@ export default class extends Controller {
     this.parsingParams = {
       delimiter: '',
       gene_name_col: 'first',
-      has_header: true
+      has_header: true,
+      rowname_metadata: '',
+      colname_metadata: ''
     }
 
     // Reset form fields manually (only specific fields, NOT organism_id or version_id)
@@ -2653,6 +2702,174 @@ export default class extends Controller {
     // Update submit button state
     this.checkSubmitButton()
     this.updateResetButtonState()
+  }
+
+  currentLegacyPreparsingVersion() {
+    const versionField = this.form?.querySelector('[name="project[version_id]"]')
+    if (!versionField || !versionField.value) return false
+    const v = parseInt(versionField.value, 10)
+    return Number.isFinite(v) && v < 8
+  }
+
+  getEffectiveH5adMetadataDataset(datasets) {
+    if (!Array.isArray(datasets) || datasets.length === 0) return null
+    if (
+      this.selectedDatasetIndex !== null &&
+      this.selectedDatasetIndex !== undefined &&
+      this.selectedDatasetIndex >= 0 &&
+      this.selectedDatasetIndex < datasets.length
+    ) {
+      return datasets[this.selectedDatasetIndex]
+    }
+    return datasets[0]
+  }
+
+  buildH5adGeneCellMetadataUI(summary) {
+    if (!this.currentLegacyPreparsingVersion()) return ''
+    const datasets = Array.isArray(summary?.datasets) ? summary.datasets : []
+    const ds = this.getEffectiveH5adMetadataDataset(datasets)
+    const fromDataset = Array.isArray(ds?.metadata) ? ds.metadata : []
+    const fromSummary = Array.isArray(summary?.metadata) ? summary.metadata : []
+    const meta = fromDataset.length > 0 ? fromDataset : fromSummary
+    const geneOptions = meta.filter((e) => e.on === 'GENE' && e.type === 'STRING')
+    const cellOptions = meta.filter((e) => e.on === 'CELL' && e.type === 'STRING')
+
+    const curRow = this.parsingParams.rowname_metadata || ''
+    const curCol = this.parsingParams.colname_metadata || ''
+    const h5adRowAxis = 'genes'
+    const h5adColAxis = 'cells'
+    const rowWord = this.escapeHtml(this.capitalizeFirst(h5adRowAxis))
+    const colWord = this.escapeHtml(this.capitalizeFirst(h5adColAxis))
+
+    const rowOpts = [{ value: '', label: 'Select a row metadata' }].concat(
+      geneOptions.map((e) => ({ value: e.name, label: e.name }))
+    )
+    const colOpts = [{ value: '', label: 'Select a column metadata' }].concat(
+      cellOptions.map((e) => ({ value: e.name, label: e.name }))
+    )
+
+    const rowHtml = rowOpts
+      .map(
+        (opt) =>
+          `<option value="${this.escapeHtml(opt.value)}" ${opt.value === curRow ? 'selected' : ''}>${this.escapeHtml(
+            opt.label
+          )}</option>`
+      )
+      .join('')
+
+    const colHtml = colOpts
+      .map(
+        (opt) =>
+          `<option value="${this.escapeHtml(opt.value)}" ${opt.value === curCol ? 'selected' : ''}>${this.escapeHtml(
+            opt.label
+          )}</option>`
+      )
+      .join('')
+
+    return `
+      <div class="rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 p-4 mb-4">
+        <h3 class="text-base font-semibold text-indigo-900 dark:text-indigo-200 mb-3">H5AD name columns</h3>
+        <p class="text-xs text-gray-600 dark:text-gray-400 mb-4">Choose which AnnData HDF5 columns to use for ${rowWord} (matrix rows, AnnData var) and ${colWord} (matrix columns, AnnData obs) during parsing. Only 1D STRING columns matching matrix dimensions are listed.</p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label for="h5ad-rowname-metadata" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">${rowWord} names (rows)</label>
+            <select id="h5ad-rowname-metadata" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white text-sm">${rowHtml}</select>
+          </div>
+          <div>
+            <label for="h5ad-colname-metadata" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">${colWord} names (columns)</label>
+            <select id="h5ad-colname-metadata" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white text-sm">${colHtml}</select>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
+  setupH5adMetadataHandlers() {
+    const rowSel = this.preparsingResultTarget?.querySelector('#h5ad-rowname-metadata')
+    const colSel = this.preparsingResultTarget?.querySelector('#h5ad-colname-metadata')
+    if (rowSel) {
+      rowSel.addEventListener('change', (e) => {
+        this.parsingParams.rowname_metadata = e.target.value
+        this.updatePreparsingWithH5adNames()
+      })
+    }
+    if (colSel) {
+      colSel.addEventListener('change', (e) => {
+        this.parsingParams.colname_metadata = e.target.value
+        this.updatePreparsingWithH5adNames()
+      })
+    }
+  }
+
+  async updatePreparsingWithH5adNames() {
+    if (!this.fuId) return
+    this.setPreparsingStatus('Updating preparsing with custom name columns...', 'info', true)
+    try {
+      const organismField = this.form?.querySelector('[name="project[organism_id]"]')
+      const versionField = this.form?.querySelector('[name="project[version_id]"]')
+      const requestBody = {
+        rowname_metadata: this.parsingParams.rowname_metadata || '',
+        colname_metadata: this.parsingParams.colname_metadata || ''
+      }
+      if (this.selectedDatasetName) {
+        requestBody.sel = this.selectedDatasetName
+      }
+      if (organismField && organismField.value) {
+        requestBody.organism_id = parseInt(organismField.value, 10)
+      }
+      if (versionField && versionField.value) {
+        requestBody.version_id = parseInt(versionField.value, 10)
+      }
+      const csrfToken = document.querySelector('[name="csrf-token"]')?.content
+      const response = await fetch(`/fus/${this.fuId}/rerun_preparsing`, {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken,
+          'Content-Type': 'application/json',
+          Accept: 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      })
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Failed to update preparsing' }))
+        throw new Error(error.error || 'Failed to update preparsing')
+      }
+      if (this.fuId) {
+        this.subscribeToPreparsing(this.fuId)
+        this.startPreparsingStatusPoll(this.fuId)
+      }
+      this.setPreparsingStatus('Re-preparsing with updated name columns. Please wait...', 'info', true)
+    } catch (error) {
+      console.error('Error updating H5AD name columns:', error)
+      this.setPreparsingStatus(`Error: ${error.message}`, 'error')
+    }
+  }
+
+  syncH5adMetadataHiddenFields() {
+    if (!this.form) return
+    this.removeHiddenFieldByName('rowname_metadata')
+    this.removeHiddenFieldByName('colname_metadata')
+    if (!(this.currentLegacyPreparsingVersion() && this.currentDetectedFormat === 'H5AD')) {
+      return
+    }
+    this.ensureHiddenField('rowname_metadata', this.parsingParams.rowname_metadata || '')
+    this.ensureHiddenField('colname_metadata', this.parsingParams.colname_metadata || '')
+  }
+
+  ensureHiddenField(name, value) {
+    let el = this.form.querySelector(`input[type="hidden"][name="${name}"]`)
+    if (!el) {
+      el = document.createElement('input')
+      el.type = 'hidden'
+      el.name = name
+      this.form.appendChild(el)
+    }
+    el.value = value == null ? '' : String(value)
+  }
+
+  removeHiddenFieldByName(name) {
+    const el = this.form?.querySelector(`input[type="hidden"][name="${name}"]`)
+    if (el) el.remove()
   }
 
   capitalizeFirst(str) {

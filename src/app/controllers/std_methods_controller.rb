@@ -3,19 +3,19 @@ class StdMethodsController < ApplicationController
   before_action :ensure_admin!, except: [:index, :show]
 
   def index
-    @docker_images = DockerImage.order(:name)
-    @latest_docker_image_id = DockerImage.order(id: :desc).limit(1).pluck(:id).first
-    @selected_docker_image_id =
-      if params.key?(:docker_image_id)
-        params[:docker_image_id].presence
+    @versions = Version.where('id > 3').order(id: :desc)
+    @versions = @versions.where(activated: true) unless admin?
+    @latest_version_id = @versions.maximum(:id)
+
+    @selected_version_id =
+      if params.key?(:version_id)
+        params[:version_id].presence&.to_s
       else
-        @latest_docker_image_id&.to_s
+        @latest_version_id&.to_s
       end
 
     @std_methods = StdMethod.includes(:step, :docker_image).order(:name)
-    @std_methods = @std_methods.where(docker_image_id: @selected_docker_image_id) if @selected_docker_image_id.present?
-
-    @selected_version_id = resolve_version_id_for_docker_selection(@selected_docker_image_id)
+    @std_methods = @std_methods.where(version_id: @selected_version_id) if @selected_version_id.present?
   end
 
   def show
@@ -113,16 +113,6 @@ class StdMethodsController < ApplicationController
     Version.all.each_with_object([]) do |version, ids|
       ids << version.id if Basic.get_asap_docker(version)&.id == did
     end
-  end
-
-  def resolve_version_id_for_docker_selection(docker_image_id_str)
-    did = docker_image_id_str.to_s.presence&.to_i
-    return nil if did.blank? || did.zero?
-
-    vids = version_ids_for_docker_image(did)
-    return nil if vids.empty?
-
-    Version.where(id: vids, activated: true).order(id: :desc).pick(:id) || vids.max
   end
 end
 

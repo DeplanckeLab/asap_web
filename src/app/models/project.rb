@@ -4,6 +4,9 @@ class Project < ApplicationRecord
   include Elasticsearch::Model
   include Elasticsearch::Model::Callbacks
   before_save :sanitize_non_raw_text_parsing_attrs!
+  # Remove fus rows first (raw delete). Upload rows must not block project delete if
+  # association-dependent cleanup is skipped or the running app is an older image.
+  before_destroy :purge_fus_for_project_destroy!, prepend: true
   before_destroy :archive_runs_to_del_runs!
 
   # Associations
@@ -35,7 +38,8 @@ class Project < ApplicationRecord
   has_many :articles, through: :articles_projects
   has_many :exp_entries_projects, dependent: :delete_all
   has_many :exp_entries, through: :exp_entries_projects
-  
+  has_many :fus
+
   # Elasticsearch settings
   settings index: {
     number_of_shards: 1,
@@ -792,6 +796,10 @@ class Project < ApplicationRecord
   end
 
   private
+
+  def purge_fus_for_project_destroy!
+    Fu.where(project_id: id).delete_all
+  end
 
   # Centralized safeguard: before deleting a project, persist terminal run
   # metadata in del_runs so cleanup jobs and UI can retain run history.

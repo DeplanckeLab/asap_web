@@ -5,6 +5,7 @@ import {
   queryDeSecondMetadataHidden
 } from "visualization/de_second_metadata_attrs"
 import { resetInputDataWidgetToEmptyPlaceholder } from "lib/reset_input_data_widget_placeholder"
+import { evaluateAttrExpression, attrExpressionsDebugLog } from "lib/attr_selection_expression"
 
 export default class extends Controller {
   static targets = [
@@ -32,6 +33,7 @@ export default class extends Controller {
 
   connect() {
     this._predictionPreventSubmit = false
+    this._applyingDefaultExpr = false
     this._resourcePredictionTimer = null
     console.log("=== [FormReqController] CONNECTED ===")
     console.log("[FormReqController] Element:", this.element)
@@ -504,7 +506,102 @@ export default class extends Controller {
       field.value = value == null ? '' : String(value)
     })
   }
-  
+
+  applyDefaultExpressionsFromSelections() {
+    if (!this.hasAttrsContainerTarget) {
+      return
+    }
+    this._applyingDefaultExpr = true
+    try {
+      this.attrsContainerTarget.querySelectorAll('[data-attr-default-expression]').forEach((container) => {
+        const expr = (container.getAttribute('data-attr-default-expression') || '').trim()
+        if (!expr) {
+          return
+        }
+        const attrName = container.getAttribute('data-attr-name')
+        attrExpressionsDebugLog('default_expression_try', { attrName, expr })
+        if (container.dataset.defaultExprUserTouched === '1') {
+          attrExpressionsDebugLog('default_expression_skip', { attrName, reason: 'user_touched' })
+          return
+        }
+        if (container.offsetParent === null) {
+          attrExpressionsDebugLog('default_expression_skip', { attrName, reason: 'hidden' })
+          return
+        }
+        if (!this.isDependencySatisfied(container)) {
+          attrExpressionsDebugLog('default_expression_skip', { attrName, reason: 'dependency_unmet' })
+          return
+        }
+        const widget = container.getAttribute('data-attr-widget')
+        if (widget === 'checkbox' || widget === 'hidden' || widget === 'input_data') {
+          attrExpressionsDebugLog('default_expression_skip', { attrName, reason: 'widget', widget })
+          return
+        }
+        if (!attrName) {
+          return
+        }
+        const input = container.querySelector(`#attrs_${attrName}, input[name="attrs[${attrName}]"], select[name="attrs[${attrName}]"], textarea[name="attrs[${attrName}]"]`)
+        if (!input || input.type === 'checkbox') {
+          attrExpressionsDebugLog('default_expression_skip', { attrName, reason: 'no_input' })
+          return
+        }
+        const cur = String(input.value || '').trim()
+        const ev = evaluateAttrExpression(this.attrsContainerTarget, expr)
+        if (!ev.ok || !Number.isFinite(ev.value)) {
+          attrExpressionsDebugLog('default_expression_skip', { attrName, reason: 'evaluate_failed', ev })
+          return
+        }
+        const strVal = String(ev.value)
+        if (cur === strVal && container.dataset.defaultExprLastApplied === strVal) {
+          attrExpressionsDebugLog('default_expression_skip', { attrName, reason: 'unchanged', strVal })
+          return
+        }
+        attrExpressionsDebugLog('default_expression_apply', { attrName, from: cur, to: strVal, ev })
+        input.value = strVal
+        container.dataset.defaultExprLastApplied = strVal
+        container.dataset.defaultExprFromAuto = '1'
+        console.log(
+          '[attrs] default_expression applied field=' + attrName +
+            ' value=' + strVal +
+            ' expr=' + expr +
+            ' arithmetic=' + String(ev.substituted || '')
+        )
+      })
+    } finally {
+      this._applyingDefaultExpr = false
+    }
+  }
+
+  bindDefaultExpressionTouchGuards() {
+    if (!this.hasAttrsContainerTarget) {
+      return
+    }
+    this.attrsContainerTarget.querySelectorAll('[data-attr-default-expression]').forEach((container) => {
+      const expr = (container.getAttribute('data-attr-default-expression') || '').trim()
+      if (!expr) {
+        return
+      }
+      const attrName = container.getAttribute('data-attr-name')
+      const widget = container.getAttribute('data-attr-widget')
+      if (!attrName || widget === 'checkbox' || widget === 'hidden' || widget === 'input_data') {
+        return
+      }
+      const input = container.querySelector(`#attrs_${attrName}, input[name="attrs[${attrName}]"], select[name="attrs[${attrName}]"], textarea[name="attrs[${attrName}]"]`)
+      if (!input || input.type === 'checkbox') {
+        return
+      }
+      const markTouched = () => {
+        if (this._applyingDefaultExpr) {
+          return
+        }
+        container.dataset.defaultExprUserTouched = '1'
+        container.dataset.defaultExprFromAuto = ''
+      }
+      input.addEventListener('input', markTouched)
+      input.addEventListener('change', markTouched)
+    })
+  }
+
   initializeAttributeListeners() {
     // Handle checkbox changes for attributes loaded dynamically
     const checkboxes = this.attrsContainerTarget.querySelectorAll('.std_form_checkbox')
@@ -531,12 +628,16 @@ export default class extends Controller {
         this.validateForm()
       })
     })
-    
+
+    this.bindDefaultExpressionTouchGuards()
+
     // Listen to input-data-selector validation events
     const inputDataSelectors = this.attrsContainerTarget.querySelectorAll('[data-controller*="input-data-selector"]')
     inputDataSelectors.forEach(selector => {
       // Listen for custom validation events from input-data-selector
       selector.addEventListener('validation-changed', () => {
+        this.syncDependencyVisibility()
+        this.applyDefaultExpressionsFromSelections()
         this.validateForm()
         this.scheduleResourcePrediction()
       })
@@ -546,6 +647,7 @@ export default class extends Controller {
     this.syncDeGroupVisibility()
     this.syncSecondGroupMetadataVisibility()
     this.syncDependencyVisibility()
+    this.applyDefaultExpressionsFromSelections()
     this.validateForm()
     this.scheduleResourcePrediction()
   }
@@ -620,6 +722,75 @@ export default class extends Controller {
     return this.unmetRequiredAttrs(container).length === 0
   }
 
+  humanizeAttrName(attrName) {
+    const s = String(attrName || '')
+      .replace(/_/g, ' ')
+      .trim()
+    if (!s) {
+      return 'this field'
+    }
+    return s.replace(/\b\w/g, (c) => c.toUpperCase())
+  }
+
+  cleanDependencyLabelText(labelEl) {
+    if (!labelEl) {
+      return ''
+    }
+    const clone = labelEl.cloneNode(true)
+    clone.querySelectorAll('[data-dependency-missing-badge]').forEach((el) => {
+      el.remove()
+    })
+    clone.querySelectorAll('[data-input-data-validation-inline]').forEach((el) => {
+      el.remove()
+    })
+    clone.querySelectorAll('span.ml-2').forEach((el) => {
+      el.remove()
+    })
+    return String(clone.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  labelForDependencyAttr(attrName) {
+    if (!this.hasAttrsContainerTarget) {
+      return this.humanizeAttrName(attrName)
+    }
+    const name = String(attrName || '')
+    const escaped = name.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+    const dep = this.attrsContainerTarget.querySelector(`[data-attr-name="${escaped}"]`)
+    if (!dep) {
+      return this.humanizeAttrName(attrName)
+    }
+    let lab = dep.querySelector(`label[for="attrs_${name}"]`)
+    if (!lab) {
+      lab = dep.querySelector(`label[for="checkbox-${name}"]`)
+    }
+    if (!lab) {
+      lab = dep.querySelector(':scope > label')
+    }
+    if (!lab) {
+      lab = dep.querySelector('label')
+    }
+    const cleaned = this.cleanDependencyLabelText(lab)
+    return cleaned || this.humanizeAttrName(attrName)
+  }
+
+  defaultRequiresMessage(unmetAttrNames) {
+    const labels = unmetAttrNames.map((n) => this.labelForDependencyAttr(n)).filter(Boolean)
+    if (labels.length === 0) {
+      return 'Required fields must be set first'
+    }
+    if (labels.length === 1) {
+      return `Requires ${labels[0]} to be set first`
+    }
+    if (labels.length === 2) {
+      return `Requires ${labels[0]} and ${labels[1]} to be set first`
+    }
+    const head = labels.slice(0, -1).join(', ')
+    const tail = labels[labels.length - 1]
+    return `Requires ${head}, and ${tail} to be set first`
+  }
+
   syncDependencyVisibility() {
     if (!this.hasAttrsContainerTarget) {
       return
@@ -649,8 +820,7 @@ export default class extends Controller {
         if (message.length > 0) {
           badge.textContent = message
         } else {
-          console.warn('[FormReqController] Missing requires_message for', container.getAttribute('data-attr-name'))
-          badge.textContent = 'Missing dependency message'
+          badge.textContent = this.defaultRequiresMessage(unmet)
         }
       } else if (badge) {
         badge.remove()
@@ -857,6 +1027,8 @@ export default class extends Controller {
       const maxItems = container.getAttribute('data-attr-max-items')
       const minVal = container.getAttribute('data-attr-min-val')
       const maxVal = container.getAttribute('data-attr-max-val')
+      const minValExpression = container.getAttribute('data-attr-min-val-expression')
+      const maxValExpression = container.getAttribute('data-attr-max-val-expression')
       
       // Skip hidden widgets
       if (widget === 'hidden') {
@@ -909,7 +1081,7 @@ export default class extends Controller {
         }
       } else {
         // For other widgets (text, select), check the input/select element
-        const input = container.querySelector(`#attrs_${attrName}, input[name="attrs[${attrName}]"], select[name="attrs[${attrName}]"]`)
+        const input = container.querySelector(`#attrs_${attrName}, input[name="attrs[${attrName}]"], select[name="attrs[${attrName}]"], textarea[name="attrs[${attrName}]"]`)
         if (input) {
           if (input.type === 'checkbox') {
             value = input.checked ? input.value : null
@@ -928,17 +1100,47 @@ export default class extends Controller {
         errors.push(`${label}: This field is required`)
       }
       
-      // Check min_val/max_val constraints for numeric values
-      if (!isEmpty && value && (minVal || maxVal)) {
+      // Check min_val / max_val and optional *_expression (expression wins over static bound)
+      const minExprTrimmed = minValExpression ? String(minValExpression).trim() : ''
+      const maxExprTrimmed = maxValExpression ? String(maxValExpression).trim() : ''
+      const staticMinActive = !minExprTrimmed && minVal && String(minVal).trim() !== ''
+      const staticMaxActive = !maxExprTrimmed && maxVal && String(maxVal).trim() !== ''
+      const hasNumericBounds =
+        staticMinActive ||
+        staticMaxActive ||
+        minExprTrimmed !== '' ||
+        maxExprTrimmed !== ''
+      if (!isEmpty && typeof value === 'string' && hasNumericBounds) {
         const numValue = parseFloat(value)
         if (!isNaN(numValue)) {
-          if (minVal && numValue < parseFloat(minVal)) {
-            isValid = false
-            errors.push(`${attrName}: Value must be at least ${minVal}`)
+          let effectiveMin = null
+          if (minExprTrimmed) {
+            const dmin = evaluateAttrExpression(this.attrsContainerTarget, minExprTrimmed)
+            if (dmin.ok && Number.isFinite(dmin.value)) {
+              effectiveMin = dmin.value
+            }
+          } else if (staticMinActive) {
+            effectiveMin = parseFloat(minVal)
           }
-          if (maxVal && numValue > parseFloat(maxVal)) {
+          if (effectiveMin != null && !isNaN(effectiveMin) && numValue < effectiveMin - 1e-9) {
             isValid = false
-            errors.push(`${attrName}: Value must be at most ${maxVal}`)
+            const roundedMin = Number.isInteger(effectiveMin) ? String(Math.round(effectiveMin)) : String(effectiveMin)
+            errors.push(`${attrName}: Value must be at least ${roundedMin}`)
+          }
+
+          let effectiveMax = null
+          if (maxExprTrimmed) {
+            const dyn = evaluateAttrExpression(this.attrsContainerTarget, maxExprTrimmed)
+            if (dyn.ok && Number.isFinite(dyn.value)) {
+              effectiveMax = dyn.value
+            }
+          } else if (staticMaxActive) {
+            effectiveMax = parseFloat(maxVal)
+          }
+          if (effectiveMax != null && !isNaN(effectiveMax) && numValue > effectiveMax + 1e-9) {
+            isValid = false
+            const rounded = Number.isInteger(effectiveMax) ? String(Math.round(effectiveMax)) : String(effectiveMax)
+            errors.push(`${attrName}: Value must be at most ${rounded}`)
           }
         }
       }

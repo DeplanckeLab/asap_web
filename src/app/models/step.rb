@@ -26,4 +26,8 @@ class Step < ApplicationRecord
   def clustering_step?
     name == 'clustering'
   end
+
+  def label_with_id
+    "#{label.presence || name} (#{id})"
+  end
 end

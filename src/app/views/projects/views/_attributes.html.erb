@@ -34,14 +34,16 @@
     # min_val/max_val pair, the range is already rendered as the list of
     # options, so we skip badges there to avoid redundancy.
     if widget != 'select'
-      min_val = attr['min_val']
-      max_val = attr['max_val']
-      if min_val.present? && max_val.present?
-        badges << %(<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700 ring-1 ring-inset ring-gray-200">#{min_val} &le; value &le; #{max_val}</span>)
-      elsif min_val.present?
-        badges << %(<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700 ring-1 ring-inset ring-gray-200">&ge; #{min_val}</span>)
-      elsif max_val.present?
-        badges << %(<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700 ring-1 ring-inset ring-gray-200">&le; #{max_val}</span>)
+      unless attr['min_val_expression'].present? || attr['max_val_expression'].present?
+        min_val = attr['min_val']
+        max_val = attr['max_val']
+        if min_val.present? && max_val.present?
+          badges << %(<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700 ring-1 ring-inset ring-gray-200">#{min_val} &le; value &le; #{max_val}</span>)
+        elsif min_val.present?
+          badges << %(<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700 ring-1 ring-inset ring-gray-200">&ge; #{min_val}</span>)
+        elsif max_val.present?
+          badges << %(<span class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-700 ring-1 ring-inset ring-gray-200">&le; #{max_val}</span>)
+        end
       end
     end
 
@@ -86,6 +88,11 @@
               <% next unless attr && attr['widget'] && !attr['obsolete'] %>
               <% form_attr_name = "attrs[" + attr_name + "]" %>
               <% attr_val = @h_attr_vals[attr_name] %>
+              <% scalar_value_for_field = if attr['default_expression'].present?
+                   attr_val.nil? ? '' : attr_val
+                 else
+                   attr_val || attr['default'] || ''
+                 end %>
               
               <div id="form-container_<%= attr_name %>" 
                    class="mb-4"
@@ -98,7 +105,10 @@
                    data-attr-min-items="<%= attr['min_nber_items'] || 0 %>"
                    data-attr-max-items="<%= attr['max_nber_items'] || '' %>"
                    data-attr-min-val="<%= attr['min_val'] || '' %>"
-                   data-attr-max-val="<%= attr['max_val'] || '' %>">
+                   data-attr-max-val="<%= attr['max_val'] || '' %>"
+                   data-attr-min-val-expression="<%= h(attr['min_val_expression'].to_s) %>"
+                   data-attr-max-val-expression="<%= h(attr['max_val_expression'].to_s) %>"
+                   data-attr-default-expression="<%= h(attr['default_expression'].to_s) %>">
                 <% if attr['widget'] != 'checkbox' && attr['widget'] != 'hidden' %>
                   <label for="attrs_<%= attr_name %>" class="block text-sm font-medium text-gray-700 mb-2">
                     <%= raw(attr['label'] || attr_name.humanize) %>
@@ -239,18 +249,23 @@
                         <%= hidden_field_tag form_attr_name, initial_hidden_value, { id: "attrs_#{attr_name}", data: { 'input-data-selector-target': 'hiddenField' } } %>
                       </div>
                     <% else %>
-                      <p class="text-sm text-red-600">No matching metadata found. Please complete <%= attr['source_steps'].join(' or ') %> first.</p>
+                      <% step_hint = attr['source_steps'].present? ? attr['source_steps'].to_sentence : 'the upstream steps' %>
+                      <% if candidate_annots.empty? %>
+                        <p class="text-sm italic text-gray-500">No metadata is available yet. Complete <%= step_hint %> first.</p>
+                      <% else %>
+                        <p class="text-sm italic text-gray-500">No metadata matches this field's requirements (expected data types are not present on datasets from <%= step_hint %>).</p>
+                      <% end %>
                     <% end %>
                   <% else %>
                     <input type="text" id="attrs_<%= attr_name %>" name="<%= form_attr_name %>" 
-                           value="<%= attr_val || attr['default'] || '' %>" 
+                           value="<%= scalar_value_for_field %>" 
                            placeholder="<%= attr['placeholder'] || '' %>"
                            class="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900">
                   <% end %>
                   
                 <% when 'textfield' %>
                   <input type="text" id="attrs_<%= attr_name %>" name="<%= form_attr_name %>" 
-                         value="<%= attr_val || attr['default'] || '' %>" 
+                         value="<%= scalar_value_for_field %>" 
                          placeholder="<%= attr['placeholder'] || '' %>"
                          class="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900">
                   <% if attr['description'].present? %>
@@ -258,7 +273,7 @@
                   <% end %>
                   
                 <% when 'hidden' %>
-                  <%= hidden_field_tag form_attr_name, attr_val || attr['default'] || '' %>
+                  <%= hidden_field_tag form_attr_name, scalar_value_for_field %>
                   
                 <% when 'checkbox' %>
                   <div class="flex items-center">
@@ -287,7 +302,7 @@
                   <% end %>
                   <% l.unshift([attr['null_name'] || "None", '']) unless attr['not_null'] %>
                   <%= select_tag form_attr_name, 
-                      options_for_select(l, attr_val || attr['default']), 
+                      options_for_select(l, scalar_value_for_field), 
                       { class: 'w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white',
                         id: "attrs_#{attr_name}" } %>
                   <% if attr['description'].present? %>
@@ -297,7 +312,7 @@
                 <% else %>
                   <%# Default: text field %>
                   <input type="text" id="attrs_<%= attr_name %>" name="<%= form_attr_name %>" 
-                         value="<%= attr_val || attr['default'] || '' %>" 
+                         value="<%= scalar_value_for_field %>" 
                          placeholder="<%= attr['placeholder'] || '' %>"
                          class="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900">
                 <% end %>

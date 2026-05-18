@@ -49,7 +49,7 @@
     <div>
       <%= form.label :step_id, "Step", class: "block text-sm font-medium text-gray-700" %>
       <div class="mt-1">
-        <%= form.collection_select :step_id, (@steps || Step.none), :id, :label, { prompt: "Select a step..." }, { class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" } %>
+        <%= form.collection_select :step_id, (@steps || Step.none), :id, :label_with_id, { prompt: "Select a step..." }, { class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" } %>
       </div>
     </div>
 

@@ -32,3 +32,14 @@
   updates:
     has_std_view: false
 
+# PCA step was stored with docker_image_id 2 while the ASAP run image in use is 3.
+# prepare_steps_with_status only loads steps for Basic.get_asap_docker(project.version),
+# so a mismatched docker_image_id hides PCA from the pipeline panel. Skips if already fixed.
+- model: Step
+  find_by:
+    id: 72
+    name: "pca"
+    docker_image_id: 2
+  updates:
+    docker_image_id: 3
+

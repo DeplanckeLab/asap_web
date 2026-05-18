@@ -3,17 +3,19 @@ class StepsController < ApplicationController
   before_action :ensure_admin!, except: [:index, :show]
 
   def index
-    @docker_images = DockerImage.order(:name)
-    @latest_docker_image_id = DockerImage.order(id: :desc).limit(1).pluck(:id).first
-    @selected_docker_image_id =
-      if params.key?(:docker_image_id)
-        params[:docker_image_id].presence
+    @versions = Version.where('id > 3').order(id: :desc)
+    @versions = @versions.where(activated: true) unless admin?
+    @latest_version_id = @versions.maximum(:id)
+
+    @selected_version_id =
+      if params.key?(:version_id)
+        params[:version_id].presence&.to_s
       else
-        @latest_docker_image_id&.to_s
+        @latest_version_id&.to_s
       end
 
     @steps = Step.includes(:docker_image).order(:rank, :name)
-    @steps = @steps.where(docker_image_id: @selected_docker_image_id) if @selected_docker_image_id.present?
+    @steps = @steps.where(version_id: @selected_version_id) if @selected_version_id.present?
   end
 
   def show

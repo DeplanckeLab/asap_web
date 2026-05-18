@@ -1,3 +1,5 @@
+require 'zlib'
+
 module Basic
 
   # Cla rows created by parsing / load_annot (add_clas) use this cla_sources.id (ASAP auto annotation).
@@ -442,6 +444,114 @@ module Basic
         raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq (for example: ASAP_RUN_DOCKER_NETWORK=asap2_test_default), then restart those services.'
       end
       "docker run --network=#{run_network} -e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm #{user_data_docker_volume_mount_arg} -v /srv/asap_run/srv:/srv #{ENV.fetch('ASAP_DOCKER_NAME', 'fabdavid/asap_run')}:#{image_tag} -c"
+    end
+
+    # Yield an IO positioned at the start of the Matrix Market body (plain or gzip-compressed).
+    def with_matrix_market_io(path)
+      File.open(path, 'rb') do |f|
+        magic = f.read(2)
+        if magic == "\x1f\x8b"
+          Zlib::GzipReader.open(path) { |gz| yield gz }
+        else
+          f.rewind
+          yield f
+        end
+      end
+    end
+
+    # Single-file Matrix Market (coordinate or array) without 10x barcodes/features sidecars.
+    def layout_matrix_market_sparse_or_array_file?(path)
+      return false unless File.file?(path)
+
+      header = nil
+      with_matrix_market_io(path) { |io| header = io.readline }
+      s = header.to_s.strip
+      return false unless s.start_with?('%%MatrixMarket')
+
+      !!(s =~ /matrix\s+(coordinate|array)\b/i)
+    rescue StandardError
+      false
+    end
+
+    # First non-comment line after the %%MatrixMarket header gives nrow and ncol (coordinate files
+    # also list nnz on the same line; array format lists only m and n).
+    def matrix_market_row_col_counts(path)
+      with_matrix_market_io(path) do |io|
+        header = io.readline
+        raise ArgumentError, 'Not Matrix Market' unless header.to_s.start_with?('%%MatrixMarket')
+
+        while (line = io.readline)
+          t = line.strip
+          next if t.empty?
+          next if t.start_with?('%')
+
+          parts = t.split
+          raise ArgumentError, "Bad Matrix Market dimension line: #{t.inspect}" if parts.size < 2
+
+          return parts[0].to_i, parts[1].to_i
+        end
+      end
+      raise ArgumentError, "No dimension line found in Matrix Market file #{path}"
+    end
+
+    # Prefer the path parse.rake passes; also check canonical project root `input_file` when the
+    # upload is still named input_file.gz (first bytes are gzip, not %%MatrixMarket) or when the
+    # decompressed matrix already lives at input_file.
+    def first_matrix_market_source_path_for_conversion(file_path, base_dir)
+      candidates = [file_path.to_s, (base_dir + 'input_file').to_s].uniq
+      candidates.each do |p|
+        next unless File.file?(p)
+        return p if layout_matrix_market_sparse_or_array_file?(p)
+      end
+      nil
+    end
+
+    def matrix_market_file_gzip_compressed?(path)
+      return false unless File.file?(path)
+
+      File.open(path, 'rb') { |f| f.read(2) } == "\x1f\x8b"
+    rescue StandardError
+      false
+    end
+
+    # HDF5 superblock (Cell Ranger / mtx_to_h5 output, some other matrix containers; not used for .h5ad heuristics here).
+    def hdf5_superblock_file?(path)
+      return false unless File.file?(path)
+
+      sig = File.binread(path, 8)
+      sig == ["894844460d0a1a0a"].pack('H*')
+    rescue StandardError
+      false
+    end
+
+    # Preparsing may already expose 10x as HDF5 (input.h5 or extensionless input_file). The legacy
+    # gunzip/tar branch must not run on that stream or the file is corrupted and Java fails.
+    def skip_legacy_archive_pipeline_for_v7_h5_matrix?(path)
+      return false unless File.file?(path)
+
+      p = path.to_s
+      pl = p.downcase
+      return false if pl.end_with?('.h5ad')
+      return true if pl.end_with?('.h5')
+      return true if File.basename(p) == 'input.h5'
+      return true if File.basename(p) == 'input_file' && hdf5_superblock_file?(path)
+
+      false
+    end
+
+    # v7 parsing: write parsing/output.json so the UI can show displayed_error (same shape as HCA errors).
+    def write_parsing_output_json_displayed_error(base_dir, logger, messages)
+      out = Pathname.new(base_dir.to_s) + 'parsing' + 'output.json'
+      FileUtils.mkdir_p(out.parent.to_s)
+      lines = Array(messages).flatten.map { |m| m.to_s.strip }.reject(&:blank?)
+      lines = ['Parsing failed'] if lines.empty?
+      payload = {
+        'displayed_error' => lines,
+        'status_id' => 4
+      }
+      File.open(out.to_s, 'w') { |f| f.write(payload.to_json) }
+    rescue StandardError => e
+      (logger || Rails.logger).error("[Basic] Failed to write parsing output.json: #{e.class} #{e.message}")
     end
 
     def get_asap_docker_for_markers project
@@ -1807,7 +1917,90 @@ module Basic
           logger.debug("FINAL_PATH:" + h5_file_path.to_s)
           return { :file_path => h5_file_path, :type => 'MEX' }
         end
+        write_parsing_output_json_displayed_error(
+          base_dir,
+          logger,
+          [
+            'Incomplete Matrix Market (MTX) for v7 conversion.',
+            'The pre-extracted bundle contains matrix.mtx but mtx_to_h5.R did not produce input.h5. Check barcodes.tsv and features.tsv (or genes.tsv) next to matrix.mtx, or use parsing with version 8 or later.'
+          ]
+        )
         raise "MTX to H5 conversion failed for pre-extracted bundle at #{resolved_input_path}"
+      end
+
+      if skip_legacy_archive_pipeline_for_v7_h5_matrix?(file_path.to_s)
+        logger.debug("V7_SKIP_LEGACY_ARCHIVE_PIPELINE: input already HDF5 matrix at #{file_path}")
+        return { :file_path => file_path, :type => 'MEX' }
+      end
+
+      # Single-file Matrix Market (coordinate/array): the v7 image already ships mtx_to_h5.R,
+      # which expects matrix.mtx + barcodes.tsv + features.tsv. No new R script or image
+      # rebuild: stage a minimal bundle under the project dir, then call the same R entrypoint.
+      mtx_src = first_matrix_market_source_path_for_conversion(file_path, base_dir)
+      if mtx_src
+        h5_file_path = base_dir + 'input.h5'
+        bundle_dir = base_dir + 'coordinate_mtx_bundle_for_h5'
+        nrow = nil
+        ncol = nil
+        begin
+          nrow, ncol = matrix_market_row_col_counts(mtx_src)
+        rescue StandardError => e
+          write_parsing_output_json_displayed_error(
+            base_dir,
+            logger,
+            [
+              'Incomplete or invalid Matrix Market (MTX) for v7 conversion.',
+              "Could not read matrix dimensions from the file header: #{e.message}"
+            ]
+          )
+          raise
+        end
+        if nrow <= 0 || ncol <= 0
+          write_parsing_output_json_displayed_error(
+            base_dir,
+            logger,
+            [
+              'Incomplete Matrix Market (MTX) for v7 conversion.',
+              "Invalid dimensions read from the file: #{nrow} rows x #{ncol} columns."
+            ]
+          )
+          raise ArgumentError, "Invalid Matrix Market dimensions nrow=#{nrow}, ncol=#{ncol} for #{mtx_src}"
+        end
+
+        FileUtils.rm_rf(bundle_dir) if File.exist?(bundle_dir.to_s)
+        FileUtils.mkdir_p(bundle_dir)
+        begin
+          dest_mtx = (bundle_dir + 'matrix.mtx').to_s
+          if matrix_market_file_gzip_compressed?(mtx_src)
+            Zlib::GzipReader.open(mtx_src.to_s) do |gz|
+              File.open(dest_mtx, 'wb') { |out| IO.copy_stream(gz, out) }
+            end
+          else
+            FileUtils.cp(mtx_src, dest_mtx)
+          end
+          File.write((bundle_dir + 'features.tsv').to_s, (1..nrow).map { |i| "Gene_#{i}" }.join("\n") + "\n")
+          File.write((bundle_dir + 'barcodes.tsv').to_s, (1..ncol).map { |i| "Cell_#{i}" }.join("\n") + "\n")
+
+          cmd = "#{asap_run_docker_cmd_prefix('v7')} 'Rscript --vanilla /srv/mtx_to_h5.R #{bundle_dir} #{h5_file_path}'"
+          logger.debug("STAGED_COORDINATE_MTX_TO_H5_CMD: #{cmd}")
+          `#{cmd}`
+          if File.exist?(h5_file_path) && File.size(h5_file_path).to_i > 0
+            logger.debug("FINAL_PATH:" + h5_file_path.to_s)
+            return { :file_path => h5_file_path, :type => 'MEX' }
+          end
+          write_parsing_output_json_displayed_error(
+            base_dir,
+            logger,
+            [
+              'Incomplete Matrix Market (MTX) for v7 conversion.',
+              'This file is Matrix Market coordinate or array format without barcodes.tsv and features.tsv. ASAP synthesized Gene_* and Cell_* labels and ran mtx_to_h5.R, but no input.h5 was produced.',
+              'Upload a full 10x-style bundle (matrix.mtx with barcodes and features) in one folder or archive, or use parsing with version 8 or later.'
+            ]
+          )
+          raise "mtx_to_h5.R did not produce a non-empty file at #{h5_file_path} (staged bundle from coordinate Matrix Market at #{mtx_src})"
+        ensure
+          FileUtils.rm_rf(bundle_dir) if File.exist?(bundle_dir.to_s)
+        end
       end
 
       if File.exist? input_dir
@@ -1942,6 +2135,34 @@ module Basic
         end
       end
       
+      if init_file_path == file_path && File.exist?(input_dir.to_s) && File.directory?(input_dir.to_s)
+        extracted_entries = Dir.entries(input_dir).reject { |e| e.start_with?('.') || e == 'input_file.tar' || e == 'input_file.zip' }
+        h5_entries  = extracted_entries.select { |e| e.match(/\.h5$/i) && File.file?(input_dir + e) }
+        h5ad_entries = extracted_entries.select { |e| e.match(/\.h5ad$/i) && File.file?(input_dir + e) }
+        loom_entries = extracted_entries.select { |e| e.match(/\.loom$/i) && File.file?(input_dir + e) }
+        if h5ad_entries.size >= 1
+          extracted_h5ad = input_dir + h5ad_entries.first
+          dest = base_dir + h5ad_entries.first
+          FileUtils.cp(extracted_h5ad.to_s, dest.to_s)
+          file_path = dest
+          type = 'H5AD'
+          logger.debug("EXTRACTED_H5AD_FROM_ARCHIVE: #{file_path}")
+        elsif h5_entries.size >= 1
+          extracted_h5 = input_dir + h5_entries.first
+          FileUtils.cp(extracted_h5.to_s, h5_file_path.to_s)
+          file_path = h5_file_path
+          type = 'MEX'
+          logger.debug("EXTRACTED_H5_FROM_ARCHIVE: #{file_path}")
+        elsif loom_entries.size >= 1
+          extracted_loom = input_dir + loom_entries.first
+          dest = base_dir + 'input.loom'
+          FileUtils.cp(extracted_loom.to_s, dest.to_s)
+          file_path = dest
+          type = 'LOOM'
+          logger.debug("EXTRACTED_LOOM_FROM_ARCHIVE: #{file_path}")
+        end
+      end
+
       logger.debug("#{init_file_path} == #{file_path}")
       
       if init_file_path == file_path
@@ -1961,7 +2182,15 @@ module Basic
         end
         
       end
-      
+
+      # gunzip removes input_file.gz and leaves base_dir/input_file, but file_path
+      # often still points at the original Pathname (e.g. .../input_file.gz). Callers
+      # and re-parses must see the path that actually exists on disk.
+      if !File.exist?(file_path.to_s) && File.exist?(tmp_file_path.to_s)
+        file_path = tmp_file_path
+        logger.debug("LEGACY_INPUT: using existing #{file_path} after decompress (original path missing)")
+      end
+
       logger.debug("FINAL_PATH:" + file_path.to_s)
       return {:file_path => file_path, :type => type}
     end

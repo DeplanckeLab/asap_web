@@ -811,6 +811,9 @@ class ProjectsController < ApplicationController
         tmp_attrs[k] = params[k]
       end
     end
+    [:rowname_metadata, :colname_metadata].each do |k|
+      tmp_attrs[k] = params[k] if params.key?(k)
+    end
     # The UI submits dataset selection as `sel`; persist canonical key `sel_name` for parse task.
     if tmp_attrs[:sel].present?
       tmp_attrs[:sel_name] = tmp_attrs[:sel]
@@ -1129,6 +1132,9 @@ class ProjectsController < ApplicationController
         if params[k].present? && (!params[k].is_a?(String) || !params[k].strip.empty?)
           tmp_attrs[k] = params[k]
         end
+      end
+      [:rowname_metadata, :colname_metadata].each do |k|
+        tmp_attrs[k] = params[k] if params.key?(k)
       end
       # Keep previously detected file type when reset form does not submit one.
       existing_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}).deep_symbolize_keys
@@ -6872,6 +6878,16 @@ class ProjectsController < ApplicationController
 
       restored_file_size = File.size(upload_file_path)
       Rails.logger.info("[reset_parsing] MTX bundle reset: kept bundle at #{upload_dir + 'input_file'} and original upload at #{upload_file_path}")
+    elsif !version_v8_or_later?(@original_project.version_id) && File.exist?(upload_file_path)
+      # v<8: the fus/ directory holds the original upload and is the ground truth.
+      # The legacy parsing pipeline modifies files in-place at the project root,
+      # so copying from project root back to fus/ would propagate corruption.
+      # Instead, keep fus/ intact and only clear preparsing artifacts.
+      %w[output.json output.err].each do |name|
+        FileUtils.rm_f((upload_dir + name).to_s)
+      end
+      restored_file_size = File.size(upload_file_path)
+      Rails.logger.info("[reset_parsing] v<8 reset: kept original upload at #{upload_file_path} (#{restored_file_size} bytes)")
     else
       source_realpath = begin
         File.realpath(source_path)

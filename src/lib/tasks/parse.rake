@@ -238,7 +238,34 @@ task :parse, [:project_key] => [:environment] do |t, args|
                else
                  project_dir + ("input." + project.extension)
                end
-    
+
+    # Keep disk and projects.input_filename in sync when the DB still references a
+    # name that no longer exists at the project root. Common cases: legacy
+    # convert_other_formats ran gunzip (input_file.gz removed, input_file remains) but
+    # input_filename was never updated; or an older layout used plain input_file.
+    # reset_parsing already reconciles candidates; parse must too or Java fails.
+    unless File.exist?(filepath.to_s)
+      input_filename_candidates = [
+        project.input_filename,
+        (fu.upload_file_name if fu),
+        'input_file.tar.gz',
+        'input_file.tgz',
+        'input_file.zip',
+        'input_file.gz',
+        'input_file'
+      ].compact.map(&:to_s).uniq
+      resolved_name = input_filename_candidates.find do |candidate|
+        candidate.present? && File.exist?(project_dir + candidate)
+      end
+      if resolved_name
+        filepath = project_dir + resolved_name
+        if project.input_filename.to_s != resolved_name
+          logger.warn("[ParseRake] Missing #{project_dir + project.input_filename}; using #{filepath} and syncing projects.input_filename")
+          project.update_column(:input_filename, resolved_name)
+        end
+      end
+    end
+
     ### write file from hca
     h_output_hca = nil
     if p['provider_project_id'] and p['provider_project_id'] != ''
@@ -340,6 +367,25 @@ task :parse, [:project_key] => [:environment] do |t, args|
           end
         end
 
+        # When preparsing already extracted an archive and identified a specific file
+        # (e.g. one of several H5 files inside a zip), use that file directly instead
+        # of re-extracting the archive and guessing which file to pick.
+        if fu && %w[H5_10x H5AD LOOM].include?(file_type)
+          begin
+            preparsing_output_file = fu.upload_dir + "output.json"
+            if File.exist?(preparsing_output_file)
+              h_prep = Basic.safe_parse_json(File.read(preparsing_output_file), {})
+              prep_file_path = h_prep['file_path'].to_s
+              if prep_file_path.present? && File.file?(prep_file_path)
+                filepath = Pathname.new(prep_file_path)
+                logger.info("[ParseRake] Using preparsing file_path for v<8 #{file_type}: #{filepath}")
+              end
+            end
+          rescue => e
+            logger.warn("[ParseRake] Could not resolve preparsing file_path for #{file_type}: #{e.class} - #{e.message}")
+          end
+        end
+
         begin
           conv_res = Basic.convert_other_formats(filepath, logger)
           if conv_res && conv_res[:file_path].present? && conv_res[:file_path].to_s != filepath.to_s
@@ -369,6 +415,34 @@ task :parse, [:project_key] => [:environment] do |t, args|
         rescue => e
           logger.error("[ParseRake] Legacy conversion failed for #{filepath}: #{e.class} - #{e.message}")
           raise
+        end
+
+        # After decompress / rename, the real file may be input_file while DB still
+        # says input_file.gz; keep projects.input_filename aligned with project root.
+        if filepath.parent.expand_path == project_dir.expand_path
+          bn = filepath.basename.to_s
+          if project.input_filename.to_s != bn
+            logger.info("[ParseRake] Syncing projects.input_filename #{project.input_filename.inspect} -> #{bn} (legacy conversion output path)")
+            project.update_column(:input_filename, bn)
+          end
+        end
+      end
+
+      # Preparsing can set RAW_TEXT for a Matrix Market coordinate/array body; Java then treats
+      # the first line as a single-column header and fails (e.g. expected 30087 columns).
+      if version.id < 8 && File.file?(filepath.to_s) && !filepath.to_s.downcase.end_with?('.h5') &&
+         Basic.layout_matrix_market_sparse_or_array_file?(filepath.to_s)
+        fmt = file_type.to_s.upcase
+        if %w[RAW_TEXT RAW].include?(fmt)
+          Basic.write_parsing_output_json_displayed_error(
+            project_dir,
+            logger,
+            [
+              'Preparsing labeled this file as RAW_TEXT, but it is Matrix Market (MTX) coordinate or array format.',
+              'v7 cannot run the text matrix parser on this file. Set the matrix type to MTX if the form allows it, re-upload so preparsing detects MTX, or use parsing with version 8 or later.'
+            ]
+          )
+          raise "Matrix Market input is not compatible with RAW_TEXT parsing for v7 (see parsing/output.json)."
         end
       end
 
@@ -403,6 +477,36 @@ task :parse, [:project_key] => [:environment] do |t, args|
       # Java H5AD parser crashes with a NullPointerException if selection is missing.
        group_names = []
        file_type = (h_types[file_type]) ? h_types[file_type] : file_type
+
+      # ASAP.jar has no -type MTX. Real MTX must become H5 via convert_other_formats
+      # (then file_type is MEX -> H5_10x). If preparsing said MTX but conversion did not
+      # yield input.h5, Java would fail with "This file type 'MTX' does not exist."
+      if version.id < 8 && file_type.to_s.upcase == 'MTX'
+        fp_s = filepath.to_s
+        if fp_s.downcase.end_with?('.h5')
+          file_type = 'H5_10x'
+          p['sel_name'] = 'mtx' if p['sel_name'].blank?
+          logger.info("[ParseRake] MTX preparsing with H5 on disk at #{filepath}; using Java type H5_10x")
+        elsif fp_s.downcase.end_with?('.mtx') && File.file?(fp_s)
+          raise "Matrix Market .mtx is not accepted directly by Java; mtx_to_h5 did not produce input.h5. Ensure matrix.mtx is in a 10x-style folder layout with barcodes and features."
+        else
+          mtx_header = if File.file?(fp_s)
+                         begin
+                           File.open(fp_s, 'r') { |f| f.readline }.to_s.strip
+                         rescue StandardError
+                           ''
+                         end
+                       else
+                         ''
+                       end
+          if mtx_header.start_with?('%%MatrixMarket')
+            raise "Preparsing decoded this Matrix Market file and showed a dense tab preview, but the file on disk is still sparse Matrix Market (starts with %%MatrixMarket). The v7 Java step cannot read that as RAW_TEXT (first line is not a tab- or comma-separated header). Use a version with the Python parser path, or upload a 10x-style matrix.mtx folder, or export a dense matrix text file."
+          end
+          logger.warn("[ParseRake] file_type MTX but path #{filepath} is not H5 or .mtx; preparsing may have misclassified. Using RAW_TEXT for Java.")
+          file_type = 'RAW_TEXT'
+        end
+      end
+
        if version.id < 8 && ['H5AD', 'H5_10x'].include?(file_type) && p['sel_name'].blank?
          begin
           upload_dir = fu.upload_dir
@@ -464,6 +568,73 @@ task :parse, [:project_key] => [:environment] do |t, args|
         end
       end
 
+      if version.id < 8 && file_type == 'H5AD'
+        phase_start.call('h5ad_csc_to_csr')
+        h5ad_work_copy = tmp_dir + File.basename(filepath.to_s)
+        FileUtils.cp(filepath.to_s, h5ad_work_copy.to_s)
+        filepath = h5ad_work_copy
+
+        convert_script = <<~PYTHON
+          import h5py, scipy.sparse, numpy as np, sys
+          f = h5py.File(sys.argv[1], 'r+')
+          def cvt(g):
+              if g.attrs.get('encoding-type','') == 'csc_matrix':
+                  s = tuple(g.attrs['shape'])
+                  m = scipy.sparse.csc_matrix((g['data'][:], g['indices'][:], g['indptr'][:]), shape=s).tocsr()
+                  del g['data'], g['indices'], g['indptr']
+                  g.create_dataset('data', data=m.data, chunks=True)
+                  g.create_dataset('indices', data=m.indices, chunks=True)
+                  g.create_dataset('indptr', data=m.indptr, chunks=True)
+                  g.attrs['encoding-type'] = 'csr_matrix'
+          def fix_categorical_na_codes(group):
+              for key in list(group.keys()):
+                  child = group[key]
+                  if not isinstance(child, h5py.Group):
+                      continue
+                  if 'categories' in child and 'codes' in child:
+                      codes = np.asarray(child['codes'][:])
+                      if codes.size == 0 or not np.issubdtype(codes.dtype, np.integer):
+                          continue
+                      if not (codes < 0).any():
+                          continue
+                      cats = child['categories'][:]
+                      if cats.dtype == object:
+                          cats_list = [c.decode('utf-8') if isinstance(c, (bytes, bytearray)) else str(c) for c in cats]
+                      else:
+                          cats_list = [str(c) for c in cats]
+                      na_idx = next((i for i, c in enumerate(cats_list) if c in ('nan', 'NA', '')), None)
+                      if na_idx is None:
+                          na_idx = len(cats_list)
+                          cats_list.append('nan')
+                          del child['categories']
+                          child.create_dataset('categories', data=np.array(cats_list, dtype=object))
+                      new_codes = codes.astype(np.int32, copy=True)
+                      new_codes[codes < 0] = na_idx
+                      del child['codes']
+                      child.create_dataset('codes', data=new_codes)
+                  else:
+                      fix_categorical_na_codes(child)
+          cvt(f['X'])
+          if 'layers' in f:
+              for n in f['layers']:
+                  if isinstance(f['layers'][n], h5py.Group):
+                      cvt(f['layers'][n])
+          for section in ('obs', 'var'):
+              if section in f:
+                  fix_categorical_na_codes(f[section])
+          f.close()
+        PYTHON
+        convert_cmd = "docker exec asap_run_prod python3 -c #{convert_script.shellescape} #{filepath.to_s.shellescape}"
+        logger.info("[ParseRake] Preparing H5AD for Java v7 parsing (CSC->CSR, categorical NA codes) at #{filepath}")
+        convert_output = `#{convert_cmd} 2>&1`
+        unless $?.success?
+          logger.error("[ParseRake] H5AD Java prep failed: #{convert_output}")
+          raise "H5AD preparation for Java v7 parsing failed: #{convert_output}"
+        end
+        logger.info("[ParseRake] H5AD Java prep complete for #{filepath}")
+        phase_end.call('h5ad_csc_to_csr')
+      end
+
       # Only add -col and -header for RAW_TEXT file type
       if file_type == 'RAW_TEXT'
         # -col parameter: gene name column (default: "first" if not specified)
@@ -480,16 +651,15 @@ task :parse, [:project_key] => [:environment] do |t, args|
         end
         header_value = (has_header.to_s == '1' || has_header.to_s == 'true') ? 'true' : 'false'
         opts.push({'opt' => "-header", 'value' => header_value})
-      else
-        # For non-RAW_TEXT types, only add if explicitly specified
-        opts.push({'opt' => "-col", 'value' => p["gene_name_col"]}) if p["gene_name_col"].present?
-        opts.push({'opt' => "-header", 'value' => ((p['has_header'] and p['has_header'].to_i == 1) ? 'true' : 'false')}) if p['has_header'].present?
       end
       
       opts.push({'opt' => "-d", 'value' => p["delimiter"]}) if p["delimiter"] and p['delimiter'] != ''
       
-      opts.push({'opt' => '--row-names', 'value' => p['rowname_metadata']}) if p['rowname_metadata']
-      opts.push({'opt' => '--col-names', 'value' => p['colname_metadata']}) if p['colname_metadata']
+      # In Ruby, empty string is truthy for `if p['rowname_metadata']`, which produced
+      # `--row-names` with no value so the next argv token (`--col-names`) was consumed
+      # as the row path and failed as "`--col-names` does not exist in the input H5ad file."
+      opts.push({'opt' => '--row-names', 'value' => p['rowname_metadata']}) if p['rowname_metadata'].to_s.strip.present?
+      opts.push({'opt' => '--col-names', 'value' => p['colname_metadata']}) if p['colname_metadata'].to_s.strip.present?
 
       opts += [
                {'opt' => "-ncells", 'value' => p["nber_cols"]},
@@ -947,7 +1117,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
           logger.info("[ParseRake] No metadata copying needed, marking as complete")
         end
 
-        if ["H5AD"].include? h_preparsing["detected_format"]
+        if ["H5AD"].include?(h_preparsing["detected_format"]) && h_parsing["existing_metadata"]
           phase_start.call('metadata_copy_h5ad')
           list_metadata = h_parsing["existing_metadata"].select{|e| !h_parsing_metadata[e]}
           if list_metadata

@@ -24,7 +24,8 @@ class FuPreparsingService
 
     working_file = prepare_input_file
     @logger.info("[FuPreparsingService] Working file: #{working_file}")
-    run_preparsing(working_file)
+    preparsing_input = resolve_java_preparsing_h5ad_path(working_file)
+    run_preparsing(preparsing_input, working_file)
 
     output = load_output_json
     summary = build_summary(output)
@@ -39,7 +40,7 @@ class FuPreparsingService
     result_payload = {
       summary: summary,
       warnings: collect_warnings(output),
-      raw_output: output,  # Include raw Python script output (now with predictions)
+      raw_output: output,  # Preparsing output.json (Python or Java), possibly updated with predictions
       prediction_debug: summary[:prediction_debug]  # Include prediction debug data
     }
     service_elapsed_ms = ((Time.current - service_started_at) * 1000).round
@@ -56,20 +57,20 @@ class FuPreparsingService
     @logger.info("[FuPreparsingService] File size: #{File.size(path) if path && File.exist?(path)}")
     raise "Uploaded file missing for Fu ##{@fu.id}" unless path && File.exist?(path)
 
-    # Python preparsing script handles all file formats (RDS, compressed files, etc.) internally
-    # so we pass the original file directly
+    # Preparsing (Python or legacy Java) handles decompression and format detection internally
     path
   rescue StandardError => e
     raise "Input preparation failed: #{e.message}"
   end
 
-  def run_preparsing(file_path)
+  def run_preparsing(preparsing_file, original_upload_path = nil)
+    original_upload_path ||= preparsing_file
     output_file = upload_dir + 'output.json'
     error_file = upload_dir + 'output.err'
     FileUtils.rm_f(output_file)
     FileUtils.rm_f(error_file)
 
-    cmd = build_command(file_path)
+    cmd = build_command(preparsing_file)
     @command = cmd  # Store command for JSON output
     @logger.info("[FuPreparsingService] Running preparsing: #{cmd}")
     
@@ -83,7 +84,7 @@ class FuPreparsingService
     @logger.info("[FuPreparsingService] STDERR: #{stderr_str}") unless stderr_str.blank?
     File.write(error_file, stderr_str.to_s) unless stderr_str.blank?
 
-    # Python preparsing script may return non-zero exit code but still generate output.json with error info
+    # Preparsing may return non-zero exit code but still generate output.json with error info
     # Check if output file exists - if it does, we can process it even if command "failed"
     unless output_file.exist?
       error_msg = if error_file.exist? && !error_file.read.empty?
@@ -122,6 +123,146 @@ class FuPreparsingService
         end
       end
     end
+  ensure
+    cleanup_java_preparsing_h5ad_csr_workcopy(preparsing_file, original_upload_path)
+  end
+
+  def preparsing_version_id
+    v = safe_integer(@options[:version_id])
+    return v if v
+
+    safe_integer(@fu.project&.version_id)
+  end
+
+  # Java ASAP.jar -T Preparsing for all legacy releases (version_id < 8).
+  # Java does not accept CSC /X; convert a work copy to CSR first (same as parse.rake at parse time).
+  def legacy_java_preparsing?
+    vid = preparsing_version_id
+    vid.present? && vid < 8
+  end
+
+  def h5ad_upload_path?(path)
+    File.extname(path.to_s).downcase == '.h5ad'
+  end
+
+  def resolve_java_preparsing_h5ad_path(working_file)
+    wf = working_file.to_s
+    return working_file unless legacy_java_preparsing? && h5ad_upload_path?(wf)
+    return working_file unless h5ad_needs_csr_for_java_preparsing?(wf)
+
+    work = (upload_dir + '.__preparsing_java_csr.h5ad').to_s
+    FileUtils.rm_f(work)
+    FileUtils.cp(wf, work)
+    @logger.info("[FuPreparsingService] H5AD has CSC sparse matrix groups; converting work copy for Java preparsing: #{work}")
+    begin
+      run_h5ad_csc_to_csr_in_container!(work)
+    rescue StandardError => e
+      FileUtils.rm_f(work)
+      raise e
+    end
+    work
+  end
+
+  H5AD_CSC_DETECT_PY = (<<~'PYTHON').freeze
+    import h5py, sys
+
+    def is_csc(g):
+        if not isinstance(g, h5py.Group):
+            return False
+        enc = g.attrs.get("encoding-type", "")
+        if isinstance(enc, bytes):
+            enc = enc.decode("ascii", "replace")
+        return enc == "csc_matrix"
+
+    path = sys.argv[1]
+    with h5py.File(path, "r") as f:
+        if "X" in f and is_csc(f["X"]):
+            print("yes")
+            sys.exit(0)
+        if "layers" in f:
+            for n in f["layers"]:
+                lg = f["layers"][n]
+                if isinstance(lg, h5py.Group) and is_csc(lg):
+                    print("yes")
+                    sys.exit(0)
+        if "raw" in f and isinstance(f["raw"], h5py.Group) and "X" in f["raw"]:
+            rx = f["raw"]["X"]
+            if isinstance(rx, h5py.Group) and is_csc(rx):
+                print("yes")
+                sys.exit(0)
+    print("no")
+  PYTHON
+
+  H5AD_CSC_TO_CSR_PY = (<<~'PYTHON').freeze
+    import h5py, scipy.sparse, sys
+    f = h5py.File(sys.argv[1], "r+")
+
+    def cvt(g):
+        enc = g.attrs.get("encoding-type", "")
+        if isinstance(enc, bytes):
+            enc = enc.decode("ascii", "replace")
+        if enc == "csc_matrix":
+            s = tuple(g.attrs["shape"])
+            m = scipy.sparse.csc_matrix((g["data"][:], g["indices"][:], g["indptr"][:]), shape=s).tocsr()
+            del g["data"], g["indices"], g["indptr"]
+            g.create_dataset("data", data=m.data, chunks=True)
+            g.create_dataset("indices", data=m.indices, chunks=True)
+            g.create_dataset("indptr", data=m.indptr, chunks=True)
+            g.attrs["encoding-type"] = "csr_matrix"
+
+    cvt(f["X"])
+    if "layers" in f:
+        for n in f["layers"]:
+            if isinstance(f["layers"][n], h5py.Group):
+                cvt(f["layers"][n])
+    if "raw" in f and "X" in f["raw"]:
+        rx = f["raw"]["X"]
+        if isinstance(rx, h5py.Group):
+            cvt(rx)
+    f.close()
+  PYTHON
+
+  def h5ad_needs_csr_for_java_preparsing?(host_path)
+    stdout, stderr, status = Open3.capture3(
+      'docker', 'exec',
+      '--user', '1006:1006',
+      '--workdir', upload_dir.to_s,
+      ENV.fetch('ASAP_RUN_CONTAINER'),
+      'python3', '-c', H5AD_CSC_DETECT_PY, host_path.to_s
+    )
+    unless status.success?
+      @logger.warn("[FuPreparsingService] H5AD CSC detect failed (exit #{status.exitstatus}): #{stderr.to_s.strip.presence || stdout.to_s.strip}")
+      return false
+    end
+
+    stdout.to_s.strip == 'yes'
+  end
+
+  def run_h5ad_csc_to_csr_in_container!(host_path)
+    stdout, stderr, status = Open3.capture3(
+      'docker', 'exec',
+      '--user', '1006:1006',
+      '--workdir', upload_dir.to_s,
+      ENV.fetch('ASAP_RUN_CONTAINER'),
+      'python3', '-c', H5AD_CSC_TO_CSR_PY, host_path.to_s
+    )
+    return if status.success?
+
+    msg = stderr.to_s.strip.presence || stdout.to_s.strip.presence || "exit #{status.exitstatus}"
+    raise "H5AD CSC to CSR conversion failed for preparsing: #{msg}"
+  end
+
+  def cleanup_java_preparsing_h5ad_csr_workcopy(preparsing_file, original_upload_path)
+    return if preparsing_file.to_s == original_upload_path.to_s
+
+    FileUtils.rm_f(preparsing_file.to_s)
+    @logger.info("[FuPreparsingService] Removed H5AD preparsing CSR work copy #{preparsing_file}")
+  rescue StandardError => e
+    @logger.warn("[FuPreparsingService] Could not remove H5AD preparsing work copy: #{e.message}")
+  end
+
+  def asap_jar_path
+    ENV.fetch('ASAP_JAR_PATH', '/srv/ASAP.jar')
   end
 
   def build_command(file_path)
@@ -131,56 +272,67 @@ class FuPreparsingService
     @logger.info("[FuPreparsingService] Upload directory: #{upload_dir_str}")
     @logger.info("[FuPreparsingService] File exists before command? #{File.exist?(file_path)}")
 
-    #docker_tag = get_docker_image_tag
-    # Construct script name using the tag (e.g., 'v8' -> 'preparse.v8.py')
-    # Ensure tag has 'v' prefix
-    #tag_with_v = docker_tag.start_with?('v') ? docker_tag : "v#{docker_tag}"
-    python_script_name = "preparse.v8.py"
-    
-    script_args = ['python3', "/srv/#{python_script_name}"]
-    script_args << '--sel' << @options[:sel].to_s if @options[:sel].present?
-    script_args << '--col' << @options[:gene_name_col].to_s if @options[:gene_name_col].present?
-    # Check if delimiter key exists and has a non-empty value
-    # Empty string means tab delimiter - don't pass --delim argument (script defaults to tab)
-    # Only pass --delim when delimiter is explicitly set to a non-empty value
-    if @options.key?(:delimiter) && @options[:delimiter] != nil && @options[:delimiter].to_s != ''
-      delim_value = @options[:delimiter].to_s
-      # Add delimiter argument - Shellwords.join will handle proper escaping
-      script_args << '--delim' << delim_value
-    end
-    if @options.key?(:has_header)
-      header_value = (@options[:has_header] == '1' || @options[:has_header] == true) ? 'true' : 'false'
-      script_args << '--header' << header_value
-    end
+    script_cmd = if legacy_java_preparsing?
+                   @logger.info("[FuPreparsingService] Using legacy Java preparsing (ASAP.jar -T Preparsing, version_id=#{preparsing_version_id})")
+                   build_java_preparsing_inner_command(file_path, upload_dir_str)
+                 else
+                   build_python_preparsing_inner_command(file_path, upload_dir_str)
+                 end
 
-    # Note: organism_id is not passed to the preparsing script
-    # It's stored in options for use in predictions later
-    script_args << '-f' << file_path.to_s
-    script_args << '-o' << upload_dir_str
-    script_cmd = Shellwords.join(script_args)
-    
     @logger.info("[FuPreparsingService] fu upload dir: #{@fu.upload_dir}")
-    @logger.info("[FuPreparsingService] File path to pass to Python: #{file_path}")
-    @logger.info("[FuPreparsingService] Python script: #{python_script_name}")
-    
-    # Use docker exec on the configured ASAP run container
-    # Run as rvmuser (UID 1006) which is the default user in the Dockerfile
-    # This ensures files are created with the correct ownership
-    # Set working directory to output directory so extracted files go there
+    @logger.info("[FuPreparsingService] Preparsing inner command: #{script_cmd}")
+
     docker_cmd = [
       'docker', 'exec',
-      '--user', '1006:1006',  # rvmuser:rvmuser (matches Dockerfile USER directive)
-      '--workdir', upload_dir_str,  # Set working directory to output directory
+      '--user', '1006:1006',
+      '--workdir', upload_dir_str,
       ENV.fetch('ASAP_RUN_CONTAINER'),
       '/bin/sh', '-c', script_cmd
-     ]
+    ]
 
     full_cmd = Shellwords.join(docker_cmd)
     @logger.info("[FuPreparsingService] Docker command: #{full_cmd}")
     full_cmd
   end
 
- 
+  # Stock preparse.v8.py for version 8+ (and any non-legacy preparsing path).
+  def build_python_preparsing_inner_command(file_path, upload_dir_str)
+    python_script_name = 'preparse.v8.py'
+    script_args = ['python3', "/srv/#{python_script_name}"]
+    script_args << '--sel' << @options[:sel].to_s if @options[:sel].present?
+    script_args << '--col' << @options[:gene_name_col].to_s if @options[:gene_name_col].present?
+    if @options.key?(:delimiter) && !@options[:delimiter].nil? && @options[:delimiter].to_s != ''
+      script_args << '--delim' << @options[:delimiter].to_s
+    end
+    if @options.key?(:has_header)
+      header_value = (@options[:has_header] == '1' || @options[:has_header] == true) ? 'true' : 'false'
+      script_args << '--header' << header_value
+    end
+    script_args << '-f' << file_path.to_s
+    script_args << '-o' << upload_dir_str
+    Shellwords.join(script_args)
+  end
+
+  # model.Parameters.loadPreparsing (Java) for Fu upload preparsing.
+  def build_java_preparsing_inner_command(file_path, upload_dir_str)
+    script_args = ['java', '-jar', asap_jar_path, '-T', 'Preparsing', '-f', file_path.to_s, '-o', upload_dir_str]
+    script_args << '-sel' << @options[:sel].to_s if @options[:sel].present?
+    if @options[:rowname_metadata].present?
+      script_args << '--row-names' << @options[:rowname_metadata].to_s
+    end
+    if @options[:colname_metadata].present?
+      script_args << '--col-names' << @options[:colname_metadata].to_s
+    end
+    if @options.key?(:delimiter) && !@options[:delimiter].nil? && @options[:delimiter].to_s != ''
+      script_args << '-d' << @options[:delimiter].to_s
+    end
+    if @options.key?(:has_header)
+      hv = (@options[:has_header] == '1' || @options[:has_header] == true) ? 'true' : 'false'
+      script_args << '-header' << hv
+    end
+    script_args << '-col' << @options[:gene_name_col].to_s if @options[:gene_name_col].present?
+    Shellwords.join(script_args)
+  end
 
   def load_output_json
     output_path = upload_dir + 'output.json'
@@ -200,6 +352,8 @@ class FuPreparsingService
       @logger.warn("[FuPreparsingService] No datasets found in preparsing output. File may be an archive listing files only, or preparsing may have failed to detect matrix data.")
     end
     
+    top_level_metadata = Array(output['metadata']).compact
+
     datasets = Array(list_groups).map do |group|
       # Parse genes and cells - they can be arrays (from JSON) or Python list strings like "['gene1', 'gene2']"
       genes = parse_genes_or_cells(group['genes'])
@@ -207,7 +361,10 @@ class FuPreparsingService
       
       nber_rows = group['nber_rows'] || group['nb_genes']
       nber_cols = group['nber_cols'] || group['nb_cells']
-      
+
+      # Java ASAP writes H5AD metadata at output root; merge into each dataset for the upload UI.
+      merged_metadata = group['metadata'].presence || top_level_metadata.presence
+
       dataset_hash = {
         name: group['group'],
         cell_count: nber_cols,  # Use nber_cols if available
@@ -215,7 +372,7 @@ class FuPreparsingService
         predicted_ram: group['pred_max_ram'],
         predicted_duration: group['pred_process_duration'],
         is_count_matrix: group['is_count'] == 1 || group['is_count'] == '1' || group['is_count'] == true,
-        metadata: group['metadata'],
+        metadata: merged_metadata,
         existing_metadata: group['existing_metadata'],
         sample_matrix: group['matrix'],  # Include sample matrix
         genes: genes,  # Parsed gene names array
@@ -271,7 +428,11 @@ class FuPreparsingService
       primary_dimensions: primary_dimensions(primary_dataset),
       command: @command  # Include the preparsing command
     }
-    
+    if output['detected_format'].to_s == 'H5AD'
+      summary[:row_names] = output['row_names'].presence
+      summary[:col_names] = output['col_names'].presence
+    end
+
     # Add prediction debug data to summary (always include, even if empty)
     summary[:prediction_debug] = @prediction_debug_data
     

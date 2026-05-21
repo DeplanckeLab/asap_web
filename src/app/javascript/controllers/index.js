@@ -199,6 +199,10 @@ import GuidedTourPlayerController from "controllers/guided_tour_player_controlle
 application.register("guided-tour-player", GuidedTourPlayerController)
 console.log('Guided tour player controller registered')
 
+import TableRowFilterController from "controllers/table_row_filter_controller"
+application.register("table-row-filter", TableRowFilterController)
+console.log('Table row filter controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

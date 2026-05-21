@@ -14,7 +14,7 @@ class StdMethodsController < ApplicationController
         @latest_version_id&.to_s
       end
 
-    @std_methods = StdMethod.includes(:step, :docker_image).order(:name)
+    @std_methods = StdMethod.includes(:docker_image, step: :docker_image).order(:name)
     @std_methods = @std_methods.where(version_id: @selected_version_id) if @selected_version_id.present?
   end
 

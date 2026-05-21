@@ -36,44 +36,77 @@
     <% end %>
   </div>
 
-  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-    <table class="min-w-full divide-y divide-gray-200 text-sm">
-      <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600">
-        <tr>
-          <th scope="col" class="px-3 py-2 text-left">ID</th>
-          <th scope="col" class="px-3 py-2 text-left">Rank</th>
-          <th scope="col" class="px-3 py-2 text-left">Object Name</th>
-          <th scope="col" class="px-3 py-2 text-left">Name</th>
-          <th scope="col" class="px-3 py-2 text-left">Label</th>
-          <th scope="col" class="px-3 py-2 text-right"></th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-gray-100 text-sm text-gray-700">
-        <% @steps.each do |step| %>
+  <div class="space-y-3" data-controller="table-row-filter">
+    <div class="rounded-lg border border-gray-200 bg-white shadow-sm p-4">
+      <label class="block text-sm font-medium text-gray-700 mb-1" for="steps_table_filter">Filter table</label>
+      <input
+        type="search"
+        id="steps_table_filter"
+        autocomplete="off"
+        placeholder="Type to filter by any text in step or docker image fields"
+        class="w-full max-w-xl rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
+        data-table-row-filter-target="input"
+        data-action="input->table-row-filter#filter"
+      />
+      <div class="mt-3 flex items-start gap-2">
+        <input
+          type="checkbox"
+          id="steps_table_filter_columns_only"
+          class="mt-1 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+          data-table-row-filter-target="columnsOnly"
+          data-action="change->table-row-filter#filter"
+        />
+        <label for="steps_table_filter_columns_only" class="text-sm text-gray-700">
+          Only search the columns shown in the table (ID, Rank, Object Name, Name, Label)
+        </label>
+      </div>
+    </div>
+
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+      <table class="min-w-full divide-y divide-gray-200 text-sm">
+        <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600">
           <tr>
-            <td class="px-3 py-2"><%= step.id %></td>
-            <td class="px-3 py-2"><%= step.rank.presence || '—' %></td>
-            <td class="px-3 py-2"><%= step.obj_name.presence || '—' %></td>
-            <td class="px-3 py-2">
-              <span class="font-medium text-gray-900"><%= step.name.presence || '—' %></span>
-            </td>
-            <td class="px-3 py-2 text-gray-700"><%= step.label.presence || '—' %></td>
-            <td class="px-3 py-2 text-right">
-              <%= link_to 'Show', step_path(step), class: 'text-gray-600 hover:text-gray-800' %>
-              <% if admin? %>
-                <span class="mx-2 text-gray-300">|</span>
-                <%= link_to 'Edit', edit_step_path(step), class: 'text-gray-600 hover:text-gray-800' %>
-                <span class="mx-2 text-gray-300">|</span>
-                <%= link_to 'Destroy', step_path(step),
-                            method: :delete,
-                            data: { confirm: 'Are you sure?' },
-                            class: 'text-red-600 hover:text-red-700' %>
-              <% end %>
-            </td>
+            <th scope="col" class="px-3 py-2 text-left">ID</th>
+            <th scope="col" class="px-3 py-2 text-left">Rank</th>
+            <th scope="col" class="px-3 py-2 text-left">Object Name</th>
+            <th scope="col" class="px-3 py-2 text-left">Name</th>
+            <th scope="col" class="px-3 py-2 text-left">Label</th>
+            <th scope="col" class="px-3 py-2 text-right"></th>
           </tr>
-        <% end %>
-      </tbody>
-    </table>
+        </thead>
+        <tbody
+          class="divide-y divide-gray-100 text-sm text-gray-700"
+          data-table-row-filter-target="tbody"
+        >
+          <% @steps.each do |step| %>
+            <%= tag.tr data: {
+              row_filter_text: step_index_row_filter_text(step),
+              row_filter_columns: step_index_row_filter_text_table_columns(step)
+            } do %>
+              <td class="px-3 py-2"><%= step.id %></td>
+              <td class="px-3 py-2"><%= step.rank.presence || '—' %></td>
+              <td class="px-3 py-2"><%= step.obj_name.presence || '—' %></td>
+              <td class="px-3 py-2">
+                <span class="font-medium text-gray-900"><%= step.name.presence || '—' %></span>
+              </td>
+              <td class="px-3 py-2 text-gray-700"><%= step.label.presence || '—' %></td>
+              <td class="px-3 py-2 text-right">
+                <%= link_to 'Show', step_path(step), class: 'text-gray-600 hover:text-gray-800' %>
+                <% if admin? %>
+                  <span class="mx-2 text-gray-300">|</span>
+                  <%= link_to 'Edit', edit_step_path(step), class: 'text-gray-600 hover:text-gray-800' %>
+                  <span class="mx-2 text-gray-300">|</span>
+                  <%= link_to 'Destroy', step_path(step),
+                              method: :delete,
+                              data: { confirm: 'Are you sure?' },
+                              class: 'text-red-600 hover:text-red-700' %>
+                <% end %>
+              </td>
+            <% end %>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <% if @steps.empty? %>

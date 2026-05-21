@@ -909,6 +909,67 @@ module ApplicationHelper
     project_path(project, view: 'analysis', step_id: step.id, run_id: run.id)
   end
 
+  # Lowercase blob of ActiveRecord column values for client-side table filtering.
+  def activerecord_attribute_search_blob(*records)
+    fragments = []
+    records.compact.each do |record|
+      next unless record.respond_to?(:attributes)
+
+      fragments.concat(record.attributes.values.map { |v| v.nil? ? '' : v.to_s })
+    end
+    fragments.join(' ')
+  end
+
+  # Std methods index: std_method columns, related step and docker images, display-only tokens.
+  def std_method_index_row_filter_text(std_method)
+    step = std_method.step
+    text = activerecord_attribute_search_blob(
+      std_method,
+      step,
+      std_method.docker_image,
+      step&.docker_image
+    )
+    text += " #{std_method.command_program}" if std_method.respond_to?(:command_program)
+    text += " #{std_method.obsolete? ? 'no' : 'yes'}"
+    text.downcase
+  end
+
+  # Steps index: step columns and optional docker image.
+  def step_index_row_filter_text(step)
+    activerecord_attribute_search_blob(step, step.docker_image).downcase
+  end
+
+  # Std methods index table: same visible cell text as the index view (excludes action column).
+  def std_method_index_row_filter_text_table_columns(std_method)
+    step = std_method.step
+    step_cell =
+      if step
+        (step.label.presence || step.name).to_s
+      else
+        '—'
+      end
+    [
+      std_method.id.to_s,
+      step_cell,
+      (std_method.name.presence || '—').to_s,
+      (std_method.label.presence || '—').to_s,
+      (std_method.command_program.presence || '—').to_s,
+      (std_method.speed_id.presence ? std_method.speed_id.to_s : '—'),
+      (std_method.obsolete? ? 'no' : 'yes')
+    ].join(' ').downcase
+  end
+
+  # Steps index table: same visible cell text as the index view (excludes action column).
+  def step_index_row_filter_text_table_columns(step)
+    [
+      step.id.to_s,
+      (step.rank.presence || '—').to_s,
+      (step.obj_name.presence || '—').to_s,
+      (step.name.presence || '—').to_s,
+      (step.label.presence || '—').to_s
+    ].join(' ').downcase
+  end
+
   DEFAULT_META_DESCRIPTION = 'A collaborative portal to analyze single-cell transcriptomics data.'.freeze
 
   def default_meta_description

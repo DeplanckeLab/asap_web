@@ -24,6 +24,8 @@ class ReferenceDataStepsStdMethodsSync
     ]
   }.freeze
 
+  TIMESTAMP_COLUMNS = %w[created_at updated_at].freeze
+
   def initialize(snapshot_path:, dry_run: false, verbose: false, max_version_id: nil)
     @snapshot_path = snapshot_path
     @dry_run = dry_run
@@ -581,6 +583,8 @@ class ReferenceDataStepsStdMethodsSync
   end
 
   def comparable_value(column, value)
+    return timestamp_epoch_seconds(value) if TIMESTAMP_COLUMNS.include?(column)
+
     v = value
     if json_text_column?(column)
       return nil if v.nil?
@@ -589,6 +593,24 @@ class ReferenceDataStepsStdMethodsSync
       normalize_json_string(str)
     end
     v
+  end
+
+  # Snapshot JSON stores timestamps as strings without subseconds; compare at second resolution.
+  def timestamp_epoch_seconds(value)
+    return nil if value.nil?
+
+    time =
+      case value
+      when ActiveSupport::TimeWithZone, Time
+        value
+      when String
+        Time.zone.parse(value)
+      else
+        nil
+      end
+    return nil if time.nil?
+
+    time.utc.to_i
   end
 
   def json_text_column?(column)

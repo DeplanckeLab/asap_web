@@ -133,7 +133,7 @@ class SlurmService
         return normalize_status(status)
       end
 
-      sacct_accounting_unavailable = result.match?(/Unable to connect to database/i)
+      sacct_accounting_unavailable = result.match?(/Unable to connect to database|Problem talking to the database|Connection refused/i)
       
       # If sacct fails, check output files as fallback before surfacing infra errors.
       if run

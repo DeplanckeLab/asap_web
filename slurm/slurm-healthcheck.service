@@ -1,0 +1,9 @@
+[Unit]
+Description=Slurm services healthcheck
+After=network.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/srv/asap/slurm/slurm_healthcheck.sh
+StandardOutput=journal
+StandardError=journal

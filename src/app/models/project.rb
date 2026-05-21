@@ -386,6 +386,37 @@ class Project < ApplicationRecord
     name.presence || key.presence || "Project #{id}"
   end
 
+  def version_for_catalog
+    if version_id.present?
+      version.presence || Version.find_by(id: version_id)
+    else
+      nil
+    end
+  end
+
+  def asap_docker_image_for_catalog
+    v = version_for_catalog
+    v ? Basic.get_asap_docker(v) : nil
+  end
+
+  def catalog_steps
+    v = version_for_catalog
+    img = asap_docker_image_for_catalog
+    return Step.none unless v && img
+
+    Step.where(version_id: v.id, docker_image_id: img.id)
+  end
+
+  def catalog_std_methods(include_obsolete: false)
+    v = version_for_catalog
+    img = asap_docker_image_for_catalog
+    return StdMethod.none unless v && img
+
+    rel = StdMethod.where(version_id: v.id, docker_image_id: img.id)
+    rel = rel.where(obsolete: false) unless include_obsolete
+    rel
+  end
+
   def broadcast(step_id)
     ProjectBroadcastJob.perform_later(id, step_id)
   end

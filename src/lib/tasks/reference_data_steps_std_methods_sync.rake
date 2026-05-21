@@ -79,21 +79,21 @@ namespace :reference_data do
       ["version_id IS NOT NULL AND version_id < ?", max_version_id]
     end
 
-    def load_reference_rows_from_db!(db_config, max_version_id: nil, exclude_deprecated: false)
+    def load_reference_rows_from_db!(db_config, max_version_id: nil, exclude_hidden: false, exclude_obsolete: false)
       SourceReferenceBase.establish_connection(db_config)
       step_scope = max_version_id ? legacy_version_scope(max_version_id) : nil
       std_method_scope = step_scope
       steps = if step_scope
         relation = SourceStep.where(step_scope)
-        exclude_deprecated ? relation.where(hidden: [false, nil]) : relation
+        exclude_hidden ? relation.where(hidden: [false, nil]) : relation
       else
-        exclude_deprecated ? SourceStep.where(hidden: [false, nil]) : SourceStep.all
+        exclude_hidden ? SourceStep.where(hidden: [false, nil]) : SourceStep.all
       end
       std_methods = if std_method_scope
         relation = SourceStdMethod.where(std_method_scope)
-        exclude_deprecated ? relation.where(obsolete: [false, nil]) : relation
+        exclude_obsolete ? relation.where(obsolete: [false, nil]) : relation
       else
-        exclude_deprecated ? SourceStdMethod.where(obsolete: [false, nil]) : SourceStdMethod.all
+        exclude_obsolete ? SourceStdMethod.where(obsolete: [false, nil]) : SourceStdMethod.all
       end
       step_rows = steps.order(:id).map(&:attributes)
       step_ids = step_rows.map { |row| row["id"] }
@@ -139,15 +139,21 @@ namespace :reference_data do
       load_reference_rows_from_db!(
         source_cfg,
         max_version_id: max_version_id,
-        exclude_deprecated: true
+        exclude_hidden: false,
+        exclude_obsolete: true
       )
     end
 
-    def build_temp_snapshot_from_source_db_for_reference_sync!
+    def build_temp_snapshot_from_source_db_for_reference_sync!(max_version_id: nil, exclude_hidden: false, exclude_obsolete: false)
       source_cfg = source_db_config_for_reference_sync
       return nil if source_cfg.nil?
 
-      rows = load_reference_rows_from_db!(source_cfg)
+      rows = load_reference_rows_from_db!(
+        source_cfg,
+        max_version_id: max_version_id,
+        exclude_hidden: exclude_hidden,
+        exclude_obsolete: exclude_obsolete
+      )
       build_temp_snapshot_from_rows!(rows, label: "source_db")
     end
 
@@ -158,7 +164,8 @@ namespace :reference_data do
       rows = load_reference_rows_from_db!(
         source_cfg,
         max_version_id: max_version_id,
-        exclude_deprecated: true
+        exclude_hidden: false,
+        exclude_obsolete: true
       )
       build_temp_snapshot_from_rows!(rows, label: "production_legacy")
     end
@@ -196,8 +203,48 @@ namespace :reference_data do
       generated_snapshot&.close!
     end
 
+    desc "Apply Step and StdMethod from development to the current DB (production). " \
+         "Match by primary key id; version_id < MAX_VERSION_ID (default 9, includes v8). " \
+         "Hidden steps included; obsolete std_methods excluded. " \
+         "Set DEV_POSTGRES_DB (and DEV_DB_HOST/DEV_DB_PORT). DRY_RUN=1, VERBOSE=1"
+    task sync_from_dev: :environment do
+      unless Rails.env.production?
+        puts "This task writes to the current database. Run with RAILS_ENV=production so the target is production."
+        exit 1
+      end
+
+      max_version_id = ENV.fetch("MAX_VERSION_ID", "9").to_i
+      dry = ENV["DRY_RUN"].to_s.strip == "1"
+      verbose = ENV["VERBOSE"].to_s.strip == "1"
+
+      generated_snapshot = build_temp_snapshot_from_source_db_for_reference_sync!(
+        max_version_id: max_version_id,
+        exclude_hidden: false,
+        exclude_obsolete: true
+      )
+      if generated_snapshot.nil?
+        puts "Usage:"
+        puts "  RAILS_ENV=production bin/rake reference_data:steps_std_methods:sync_from_dev"
+        puts "  Set DEV_POSTGRES_DB=asap2_development (and DEV_DB_HOST/DEV_DB_PORT if needed)."
+        puts "Optional: MAX_VERSION_ID=9  DRY_RUN=1  VERBOSE=1"
+        exit 1
+      end
+
+      puts "Applying development Step/StdMethod (version_id < #{max_version_id}, including hidden steps) to production"
+      puts "  dry_run=#{dry}  match_by=id"
+
+      ReferenceDataStepsStdMethodsSync.new(
+        snapshot_path: generated_snapshot.path,
+        dry_run: dry,
+        verbose: verbose,
+        max_version_id: max_version_id
+      ).run
+    ensure
+      generated_snapshot&.close!
+    end
+
     desc "Compare Step and StdMethod with version_id < MAX_VERSION_ID (default 8) between source DB (dev) and current DB. " \
-         "Obsolete std_methods and hidden steps are excluded. Set SOURCE_DATABASE_URL or DEV_POSTGRES_DB. VERBOSE=1, OUT=report.json"
+         "Includes hidden steps; obsolete std_methods excluded. Set SOURCE_DATABASE_URL or DEV_POSTGRES_DB. VERBOSE=1, OUT=report.json"
     task compare_legacy_versions: :environment do
       max_version_id = ENV.fetch("MAX_VERSION_ID", "8").to_i
       verbose = ENV["VERBOSE"].to_s.strip == "1"
@@ -222,6 +269,7 @@ namespace :reference_data do
         source_versions: source_rows[:versions],
         source_speeds: source_rows[:speeds],
         max_version_id: max_version_id,
+        include_hidden: true,
         verbose: verbose
       ).run
 
@@ -234,7 +282,7 @@ namespace :reference_data do
     end
 
     desc "Apply Step and StdMethod with version_id < MAX_VERSION_ID from production to the current DB (development). " \
-         "Set PROD_POSTGRES_DB or SOURCE_DATABASE_URL (+ optional PROD_DB_HOST/PROD_DB_PORT). DRY_RUN=1, VERBOSE=1"
+         "Includes hidden steps; obsolete std_methods excluded. Set PROD_POSTGRES_DB or SOURCE_DATABASE_URL. DRY_RUN=1, VERBOSE=1"
     task sync_legacy_versions_to_dev: :environment do
       if Rails.env.production?
         puts "This task writes to the current database. Run with RAILS_ENV=development so the target is development."
@@ -257,7 +305,7 @@ namespace :reference_data do
         exit 1
       end
 
-      puts "Applying production Step/StdMethod (version_id < #{max_version_id}) to #{Rails.env} database"
+      puts "Applying production Step/StdMethod (version_id < #{max_version_id}, including hidden steps) to #{Rails.env} database"
       ReferenceDataStepsStdMethodsSync.new(
         snapshot_path: generated_snapshot.path,
         dry_run: dry,

@@ -8,11 +8,12 @@ require "set"
 #
 # Matching follows ReferenceDataStepsStdMethodsSync with legacy scope: Step and
 # StdMethod by primary key +id+.
-# Obsolete std_methods and hidden steps are excluded. Foreign keys are remapped on the source side.
+# Obsolete std_methods are excluded by default. Hidden steps are included when +include_hidden+ is true.
+# Foreign keys are remapped on the source side.
 class ReferenceDataStepsStdMethodsCompare
   CompareError = Class.new(StandardError)
 
-  IGNORED_COLUMNS = %w[id created_at updated_at step_id].freeze
+  IGNORED_COLUMNS = %w[id created_at updated_at].freeze
 
   def initialize(
     source_steps:,
@@ -21,6 +22,7 @@ class ReferenceDataStepsStdMethodsCompare
     source_versions:,
     source_speeds:,
     max_version_id: 8,
+    include_hidden: false,
     verbose: false
   )
     @source_steps = source_steps
@@ -29,11 +31,13 @@ class ReferenceDataStepsStdMethodsCompare
     @source_versions = source_versions
     @source_speeds = source_speeds
     @max_version_id = max_version_id
+    @include_hidden = include_hidden
     @verbose = verbose
   end
 
   def run
-    steps_in = filter_not_hidden_steps!(filter_legacy_version!(@source_steps))
+    steps_in = filter_legacy_version!(@source_steps)
+    steps_in = filter_not_hidden_steps!(steps_in) unless @include_hidden
     methods_in = filter_std_methods_for_steps!(
       filter_not_obsolete!(filter_legacy_version!(@source_std_methods)),
       steps_in
@@ -51,8 +55,8 @@ class ReferenceDataStepsStdMethodsCompare
     assert_unique_std_methods!(methods_in)
     snapshot_step_id_lookup = build_step_id_lookup(steps_in)
 
-    target_steps = active_steps_scope.order(:id).to_a
-    target_std_methods = std_methods_for_steps(target_steps, active_std_methods_scope.order(:id).to_a)
+    target_steps = target_steps_scope.order(:id).to_a
+    target_std_methods = std_methods_for_steps(target_steps, target_std_methods_scope.order(:id).to_a)
 
     step_report = compare_steps!(steps_in, target_steps, docker_remap, version_remap)
     std_method_report = compare_std_methods!(
@@ -66,7 +70,7 @@ class ReferenceDataStepsStdMethodsCompare
 
     report = {
       max_version_id: @max_version_id,
-      version_filter: "version_id < #{@max_version_id}, match by id, obsolete std_methods and hidden steps excluded",
+      version_filter: version_filter_label,
       steps: step_report,
       std_methods: std_method_report,
       has_differences: step_report[:has_differences] || std_method_report[:has_differences]
@@ -99,7 +103,7 @@ class ReferenceDataStepsStdMethodsCompare
     @skipped_std_methods_without_step = skipped.size
     if skipped.any? && @verbose
       skipped.each do |row|
-        puts "Skipping std_method #{row['name'].inspect} step_id=#{row['step_id']} (step hidden or outside version filter)"
+        puts "Skipping std_method #{row['name'].inspect} step_id=#{row['step_id']} (parent step outside version filter)"
       end
     end
     methods_in.select { |row| step_ids.include?(row["step_id"]) }
@@ -110,12 +114,29 @@ class ReferenceDataStepsStdMethodsCompare
     std_methods.select { |row| step_ids.include?(row.step_id) }
   end
 
+  def version_filter_label
+    scope = "version_id < #{@max_version_id}, match by id, obsolete std_methods excluded"
+    @include_hidden ? "#{scope}, hidden steps included" : "#{scope}, hidden steps excluded"
+  end
+
+  def target_steps_scope
+    if @include_hidden
+      Step.where("version_id < ?", @max_version_id)
+    else
+      active_steps_scope
+    end
+  end
+
+  def target_std_methods_scope
+    StdMethod.where("version_id < ? AND COALESCE(obsolete, false) = ?", @max_version_id, false)
+  end
+
   def active_steps_scope
     Step.where("version_id < ? AND COALESCE(hidden, false) = ?", @max_version_id, false)
   end
 
   def active_std_methods_scope
-    StdMethod.where("version_id < ? AND COALESCE(obsolete, false) = ?", @max_version_id, false)
+    target_std_methods_scope
   end
 
   def index_by_id!(rows, label)

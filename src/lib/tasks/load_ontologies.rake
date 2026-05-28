@@ -1,12 +1,35 @@
 desc '####################### load ontology terms'
 task load_ontologies: :environment do
+  require 'shellwords'
   puts 'Executing...'
   
   now = Time.now
   
-  data_dir = Pathname.new(APP_CONFIG[:data_dir])
+  data_dir_value = if defined?(APP_CONFIG) && APP_CONFIG.respond_to?(:[])
+                     APP_CONFIG[:data_dir]
+                   end
+  data_dir_value = ENV['DATA_DIR'] if data_dir_value.blank?
+  data_dir_value = '/data/asap/' if data_dir_value.blank?
+  data_dir = Pathname.new(data_dir_value)
   ontology_dir = data_dir + 'ontologies'
   owl2obo_bin = "java -jar #{data_dir + "bin" + "owl2obo.jar"}"
+
+  def fetch_ontology_file(file_path, url)
+    escaped_file = Shellwords.escape(file_path.to_s)
+    escaped_url = Shellwords.escape(url.to_s)
+    use_conditional = File.exist?(file_path)
+
+    cmd = if use_conditional
+            "curl -L -sS -z #{escaped_file} -o #{escaped_file} -w '%{http_code}' #{escaped_url}"
+          else
+            "curl -L -sS -o #{escaped_file} -w '%{http_code}' #{escaped_url}"
+          end
+
+    http_code = `#{cmd}`.to_s.strip
+    raise "Unable to download ontology from #{url} (HTTP #{http_code})" unless %w[200 304].include?(http_code)
+
+    http_code == '200'
+  end
   
   def load_ontology_term co, h_term
 
@@ -81,7 +104,7 @@ task load_ontologies: :environment do
         
         if h_co_term != h_existing_cot
           puts "Update with #{h_co_term.to_json}"
-          cot.update_attributes(h_co_term)
+          cot.update!(h_co_term)
         else
           puts "No need to update"
         end
@@ -89,7 +112,7 @@ task load_ontologies: :environment do
     end 
   end
 
-  output_json = Pathname.new(APP_CONFIG[:data_dir]) + 'tmp' + 'tool_versions.json'
+  output_json = Pathname.new(data_dir_value) + 'tmp' + 'tool_versions.json'
   
   h_tool_versions = Basic.safe_parse_json(output_json, {})
   h_new_tool_versions = {}
@@ -99,17 +122,24 @@ task load_ontologies: :environment do
   
   #  filename = Pathname.new(APP_CONFIG[:data_dir]) + "hcao" + "hcao.obo"
   #  CellOntology.where(:tag => 'FBdv').all.each do |co|
-  CellOntology.where(:obsolete => false, :tag => ['AEO', 'CARO']).order("id desc").all.each do |co|
+  CellOntology.where(:obsolete => false).order("id desc").all.each do |co|
     ## download file
     ori_file = ontology_dir + "#{co.id}.#{co.format}"
-    cmd = `wget -O #{ori_file} '#{co.file_url}'`
-    `#{cmd}`
+    source_changed = fetch_ontology_file(ori_file, co.file_url)
     
     obo_file = ori_file
     if co.format == 'owl'
       obo_file = ontology_dir + "#{co.id}.obo"
-      cmd = "#{owl2obo_bin} -i #{ori_file} -o #{obo_file}"
-      `#{cmd}`
+      if source_changed || !File.exist?(obo_file)
+        cmd = "#{owl2obo_bin} -i #{ori_file} -o #{obo_file}"
+        `#{cmd}`
+      end
+    end
+
+    terms_already_loaded = CellOntologyTerm.where(cell_ontology_id: co.id).exists?
+    if !source_changed && File.exist?(obo_file) && terms_already_loaded
+      puts "No source changes for #{co.tag}; skipping parse/update."
+      next
     end
     
     h_term = {}
@@ -124,7 +154,7 @@ task load_ontologies: :environment do
 
     potential_date_fields = ['date', 'remark', 'data-version']
     single_fields = ['id', 'name', 'def', 'namespace', 'comment']
-    multiple_fields = ['synonyms', 'alt_id', 'is_a', 'part_of', 'disjoint_from']
+    multiple_fields = ['synonyms', 'alt_id', 'is_a', 'part_of', 'disjoint_from', 'xref', 'equivalent_to', 'consider', 'replaced_by']
     flag_term = 0
     
     File.open(obo_file) do |f|
@@ -144,7 +174,7 @@ task load_ontologies: :environment do
             puts "ERROR! #{t[1]} is not recognized as a date"
           end
           if h_new_tool_versions[co.tag]
-            co.update_attributes(:latest_version => h_new_tool_versions[co.tag])
+            co.update!(:latest_version => h_new_tool_versions[co.tag])
           end
         #          date: 26:03:2020  
         elsif t[0] == 'data-version' and m = t[1].match(/(\d+)-(\d+)-(\d+)/) and m[1].to_i > 2000

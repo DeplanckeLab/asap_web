@@ -16,69 +16,12 @@ class StandaloneOntologyComplianceChecker
   end
 
   def run
-    co_id_to_tag = CellOntology.pluck(:id, :tag).to_h
-    otts = OntologyTermType.compliance_field_groups.to_a
-    return result if otts.empty?
-
-    tax_id = extract_tax_id(@organism_term_id)
-    ontologies = CellOntology.where(id: otts.flat_map(&:cell_ontology_ids_list).uniq).index_by(&:id)
-
-    otts.each do |ott|
-      fg = ott.to_field_group(co_id_to_tag)
-      term_path = path_for_format(fg[:term_path])
-      next if term_path.blank?
-
-      values = @field_values[term_path]
-      next if values.blank?
-
-      if fg[:term_valid_values].present?
-        validate_enum(term_path, fg[:term_valid_values], values)
-        next
-      end
-
-      prefixes = fg[:term_ontology_prefixes] || []
-      next if prefixes.empty?
-
-      valid_co_ids = ott.cell_ontology_ids_list.select do |co_id|
-        co = ontologies[co_id]
-        next false unless co
-        co.tax_ids.blank? || (tax_id.present? && co.tax_ids.to_s.split(',').map(&:strip).include?(tax_id))
-      end
-      next if valid_co_ids.empty?
-
-      scope = CellOntologyTerm.where(original: true, cell_ontology_id: valid_co_ids)
-      allowed = allowed_free_text_values(ott, term_path)
-
-      all_terms = values.flat_map { |v| split_multi(v) }.reject(&:blank?).uniq
-      ontology_terms = all_terms.reject { |t| allowed.include?(t) }
-      existing = ontology_terms.any? ? scope.where(identifier: ontology_terms).pluck(:identifier).to_set : Set.new
-
-      invalid = all_terms.select do |term|
-        next false if allowed.include?(term)
-        !existing.include?(term)
-      end
-
-      if invalid.any?
-        @errors << {
-          field: term_path,
-          message: "Unknown ontology identifier(s) for uploaded file: #{invalid.first(5).join(', ')}#{invalid.size > 5 ? ', ...' : ''}"
-        }
-      else
-        @valid_checks << {
-          field: term_path,
-          message: "All ontology identifiers in '#{term_path}' resolved in authorized ontologies"
-        }
-      end
-    end
-
-    result
+    Scfair::OntologySemanticsValidator.new(field_values: @field_values, format: @format).call
   end
 
   private
 
-  def result
-    { errors: @errors, warnings: @warnings, valid_checks: @valid_checks }
-  end
+  def result; { errors: @errors, warnings: @warnings, valid_checks: @valid_checks }; end
 
   def path_for_format(path)
     return nil if path.blank?

@@ -2,7 +2,7 @@
   <div class="mb-8">
     <h1 class="text-3xl font-bold text-gray-900">Standalone scFAIR Compliance Check</h1>
     <p class="mt-2 text-gray-600">
-      Upload a single <code>.loom</code> or <code>.h5ad</code> file and run compliance checks without creating a project.
+      Upload a single <code>.loom</code> or <code>.h5ad</code> file and run compliance checks.
     </p>
   </div>
 
@@ -20,8 +20,22 @@
         </select>
       </div>
       <div class="text-sm text-gray-600 md:pt-8">
-        The validator runs asynchronously and streams progress live.
       </div>
+    </div>
+
+    <div class="mb-4">
+      <label class="mr-4">
+        <input type="radio" name="source_mode" value="upload" checked
+               data-isolated-compliance-target="sourceUpload"
+               data-action="change->isolated-compliance#sourceChanged">
+        Upload from browser
+      </label>
+      <label>
+        <input type="radio" name="source_mode" value="url"
+               data-isolated-compliance-target="sourceUrl"
+               data-action="change->isolated-compliance#sourceChanged">
+        Download from URL
+      </label>
     </div>
 
     <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-blue-400 transition-colors"
@@ -40,12 +54,20 @@
       </button>
     </div>
 
+    <div class="hidden mb-4" data-isolated-compliance-target="urlWrap">
+      <input type="url"
+             placeholder="https://example.org/data.h5ad"
+             class="w-full border rounded p-2"
+             data-isolated-compliance-target="urlInput"
+             data-action="input->isolated-compliance#urlChanged">
+    </div>
+
     <div class="mt-4 hidden" data-isolated-compliance-target="fileInfo"></div>
 
-    <div class="mt-6 flex items-center justify-between">
-      <div class="text-sm text-gray-700" data-isolated-compliance-target="statusText">Waiting for file selection</div>
+    <div class="mt-6 flex items-center justify-between gap-4">
+      <div class="text-sm text-gray-700 flex-1 min-h-[1.25rem]" data-isolated-compliance-target="statusText">Waiting for file selection</div>
       <button type="button"
-              class="px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              class="shrink-0 px-5 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
               data-isolated-compliance-target="runButton"
               data-action="click->isolated-compliance#run"
               disabled>
@@ -54,6 +76,12 @@
     </div>
 
     <div class="mt-4 hidden" data-isolated-compliance-target="progressWrap">
+      <div class="text-sm font-medium mb-1 flex items-center gap-2 text-gray-700">
+        <span class="hidden" data-isolated-compliance-target="progressSpinner">
+          <i class="fas fa-spinner fa-spin" aria-hidden="true"></i>
+        </span>
+        <span data-isolated-compliance-target="progressTitle">Validation in progress...</span>
+      </div>
       <div class="h-2 bg-gray-200 rounded">
         <div class="h-2 bg-blue-600 rounded transition-all" style="width: 0%" data-isolated-compliance-target="progressBar"></div>
       </div>

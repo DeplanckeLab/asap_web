@@ -414,7 +414,7 @@ class StandaloneH5adValidatorService
       info: info,
       valid_checks: valid_checks,
       field_values: field_values,
-      schema_version: Scfair::CheckCatalog.schema!('scfair_7_1_0')[:schema_version],
+      schema_version: '7.1.0',
       validated_at: Time.current.iso8601
     )
   rescue StreamingError => e
@@ -425,7 +425,7 @@ class StandaloneH5adValidatorService
       info: [],
       valid_checks: [],
       field_values: {},
-      schema_version: Scfair::CheckCatalog.schema!('scfair_7_1_0')[:schema_version],
+      schema_version: '7.1.0',
       validated_at: Time.current.iso8601
     )
   rescue JSON::ParserError => e
@@ -436,7 +436,7 @@ class StandaloneH5adValidatorService
       info: [],
       valid_checks: [],
       field_values: {},
-      schema_version: Scfair::CheckCatalog.schema!('scfair_7_1_0')[:schema_version],
+      schema_version: '7.1.0',
       validated_at: Time.current.iso8601
     )
   end

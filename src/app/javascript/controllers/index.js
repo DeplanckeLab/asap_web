@@ -167,6 +167,10 @@ import ComplianceFixController from "controllers/compliance_fix_controller"
 application.register("compliance-fix", ComplianceFixController)
 console.log('Compliance fix controller registered')
 
+import IsolatedComplianceController from "controllers/isolated_compliance_controller"
+application.register("isolated-compliance", IsolatedComplianceController)
+console.log('Isolated compliance controller registered')
+
 import CloneOverlayController from "controllers/clone_overlay_controller"
 application.register("clone-overlay", CloneOverlayController)
 console.log('Clone overlay controller registered')
@@ -206,10 +210,6 @@ console.log('Table row filter controller registered')
 import ConfirmDeleteController from "controllers/confirm_delete_controller"
 application.register("confirm-delete", ConfirmDeleteController)
 console.log('Confirm delete controller registered')
-
-import IsolatedComplianceController from "controllers/isolated_compliance_controller"
-application.register("isolated-compliance", IsolatedComplianceController)
-console.log('Isolated compliance controller registered')
 
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))

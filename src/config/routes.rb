@@ -77,6 +77,8 @@ Rails.application.routes.draw do
       post :delete_gene_set_collection
       get :selection_states
       get :sample_identifiers
+      get :project_data_files
+      get :data_file_metadata_catalog
     end
   end
   
@@ -221,8 +223,8 @@ Rails.application.routes.draw do
   namespace :api, defaults: { format: :json } do
     get 'projects', to: '/projects#index'
     get 'projects/:id', to: '/projects#show'
-    get 'projects/:id/data_file_metadata_catalog', to: '/projects#data_file_metadata_catalog'
     get 'projects/:id/project_data_files', to: '/projects#project_data_files'
+    get 'projects/:id/data_file_metadata_catalog', to: '/projects#data_file_metadata_catalog'
     resources :guided_tours, only: %i[index show]
     get 'openapi.yaml', to: '/home#openapi_spec', defaults: { format: nil }
   end

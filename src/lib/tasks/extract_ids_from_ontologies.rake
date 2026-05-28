@@ -1,12 +1,94 @@
 desc '####################### extract ids from ontologies'
 task extract_ids_from_ontologies: :environment do
+  require 'ostruct'
   puts 'Executing...'
 
   now = Time.now
 
-  data_dir = Pathname.new(APP_CONFIG[:data_dir])
+  data_dir_value = if defined?(APP_CONFIG) && APP_CONFIG.respond_to?(:[])
+                     APP_CONFIG[:data_dir]
+                   end
+  data_dir_value = ENV['DATA_DIR'] if data_dir_value.blank?
+  data_dir_value = '/data/asap/' if data_dir_value.blank?
+  data_dir = Pathname.new(data_dir_value)
   ontology_dir = data_dir + 'ontologies'
   latest_asap_data_version = 5
+  remote_db_version = ENV['ASAP2_REMOTE_DB'].presence
+  if remote_db_version.blank?
+    configured_versions = if defined?(Asap2RemoteRecord::REMOTE_DB_NAMES)
+                            Asap2RemoteRecord::REMOTE_DB_NAMES.map(&:to_s)
+                          else
+                            []
+                          end
+    newest_configured = configured_versions
+                          .map { |name| [name, name[/\Aasap_data_v(\d+)\z/, 1]&.to_i] }
+                          .select { |(_name, ver)| ver.present? }
+                          .max_by { |(_name, ver)| ver }
+    remote_db_version = newest_configured&.first || "asap_data_v#{latest_asap_data_version}"
+  end
+  puts "Using remote gene DB: #{remote_db_version}"
+
+  # Normalize ontology references stored in content_json, e.g.
+  # - "efo:EFO_0001457" -> "EFO:0001457"
+  # - "CL:0002306 {is_inferred=\"true\"}" -> "CL:0002306"
+  def normalize_ontology_identifier(raw)
+    return nil if raw.nil?
+
+    s = raw.to_s.strip
+    s = s.sub(/\s*\{.*\}\s*$/, '')
+    s = s.sub(/^efo:EFO_(\d+)$/i, 'EFO:\1')
+    s = s.sub(/^obo:(\w+)_(\d+)$/i, '\1:\2')
+    if (m = s.match(/^([a-z]+):([A-Za-z]+)_(\d+)$/))
+      s = "#{m[2].upcase}:#{m[3]}"
+    end
+    s
+  end
+
+  def extract_identifiers_from_value(value, out = [])
+    case value
+    when Array
+      value.each { |entry| extract_identifiers_from_value(entry, out) }
+    when Hash
+      value.each_value { |entry| extract_identifiers_from_value(entry, out) }
+    else
+      str = value.to_s
+      return out if str.blank?
+
+      str.scan(/[A-Za-z][A-Za-z0-9_]*:[A-Za-z0-9_]+/).each do |match|
+        out << normalize_ontology_identifier(match)
+      end
+    end
+    out
+  end
+
+  def cross_ontology_bridge_terms(cot_identifier, h_cot, h_terms, has_native_parent:)
+    return [] if has_native_parent
+
+    src_prefix = cot_identifier.to_s.split(':', 2).first&.upcase
+    return [] if src_prefix.blank?
+
+    candidates = []
+    candidates |= extract_identifiers_from_value(h_cot['xref'])
+    candidates |= extract_identifiers_from_value(h_cot['equivalent_to'])
+    candidates |= extract_identifiers_from_value(h_cot['consider'])
+    candidates |= extract_identifiers_from_value(h_cot['replaced_by'])
+    candidates |= extract_identifiers_from_value(h_cot['def'])
+
+    relationship_hash = h_cot['relationship'].is_a?(Hash) ? h_cot['relationship'] : {}
+    relationship_hash.each do |rel, values|
+      next if rel.to_s == 'part_of'
+      candidates |= extract_identifiers_from_value(values)
+    end
+
+    candidates
+      .compact
+      .uniq
+      .select { |identifier| h_terms[identifier] }
+      .select do |identifier|
+        dst_prefix = identifier.to_s.split(':', 2).first&.upcase
+        dst_prefix.present? && dst_prefix != src_prefix
+      end
+  end
 
   def add_lineage tmp, cur_id, h_parents
     if tmp and cur_id and h_parents and h_parents[cur_id] and h_parents[cur_id].size > 0
@@ -44,9 +126,14 @@ task extract_ids_from_ontologies: :environment do
     puts " - get genes..."
     h_genes = {}
     organism_ids =  co.organisms.map{|o| o.id}
-    ConnectionSwitch.with_db(:data_with_version, latest_asap_data_version) do
-      Gene.where(:organism_id => organism_ids).all.each do |g|
-        h_genes[g.ensembl_id] = g
+    organism_ids_i = organism_ids.map(&:to_i).uniq
+    if organism_ids_i.any?
+      RemoteGene.with_remote(remote_db_version) do
+        RemoteGene.where(organism_id: organism_ids_i).pluck(:id, :ensembl_id).each do |id, ensembl_id|
+          e = ensembl_id.to_s
+          next if e.blank?
+          h_genes[e] = OpenStruct.new(id: id.to_i, ensembl_id: e)
+        end
       end
     end
     
@@ -90,14 +177,30 @@ task extract_ids_from_ontologies: :environment do
           end
         end
         tmp_list.uniq!
-	h_parents_by_id[cot.id] =(h_cot["is_a"]) ? h_cot["is_a"].map{|e| (h_terms[e]) ? h_terms[e].id : nil}.compact : []
-        h_parents_by_id[cot.id] |=(h_cot["relationship"] and  h_cot["relationship"]["part_of"]) ? h_cot["relationship"]["part_of"].map{|e| (h_terms[e]) ? h_terms[e].id : nil}.compact : []
+        is_a_terms = Array(h_cot["is_a"]).map { |e| normalize_ontology_identifier(e) }
+        part_of_terms = Array(h_cot.dig("relationship", "part_of")).map { |e| normalize_ontology_identifier(e) }
+        bridge_terms = cross_ontology_bridge_terms(
+          cot.identifier,
+          h_cot,
+          h_terms,
+          has_native_parent: is_a_terms.any? || part_of_terms.any?
+        )
 
-        if h_cot["is_a"]
-          h_cot["is_a"].select{|e| h_terms[e] and h_terms[cot.identifier]}.map{|e| h_children[h_terms[e].id] ||= []; h_children[h_terms[e].id].push h_terms[cot.identifier].id}
+	h_parents_by_id[cot.id] = is_a_terms.map { |e| h_terms[e]&.id }.compact
+        h_parents_by_id[cot.id] |= part_of_terms.map { |e| h_terms[e]&.id }.compact
+        h_parents_by_id[cot.id] |= bridge_terms.map { |e| h_terms[e]&.id }.compact
+
+        if is_a_terms.any?
+          is_a_terms.select { |e| h_terms[e] and h_terms[cot.identifier] }
+                    .map { |e| h_children[h_terms[e].id] ||= []; h_children[h_terms[e].id].push h_terms[cot.identifier].id }
         end
-        if h_cot["relationship"] and  h_cot["relationship"]["part_of"]
-          h_cot["relationship"]["part_of"].select{|e| h_terms[e] and h_terms[cot.identifier]}.map{|e| h_children[h_terms[e].id] ||= []; h_children[h_terms[e].id].push h_terms[cot.identifier].id}
+        if part_of_terms.any?
+          part_of_terms.select { |e| h_terms[e] and h_terms[cot.identifier] }
+                      .map { |e| h_children[h_terms[e].id] ||= []; h_children[h_terms[e].id].push h_terms[cot.identifier].id }
+        end
+        if bridge_terms.any?
+          bridge_terms.select { |e| h_terms[e] and h_terms[cot.identifier] }
+                      .map { |e| h_children[h_terms[e].id] ||= []; h_children[h_terms[e].id].push h_terms[cot.identifier].id }
         end
 #        h_parents_by_id[cot.id].map{|e| h_children}
         h_upd = {
@@ -108,7 +211,7 @@ task extract_ids_from_ontologies: :environment do
         #        h_parents_by_id[cot.id] = h_upd[:parent_term_ids]
         #        h_parents[cot.id] = h_upd[:parent_term_ids]
         puts h_upd.to_json	
-        cot.update_attributes(h_upd)
+        cot.update!(h_upd)
         
       end
       
@@ -133,7 +236,7 @@ task extract_ids_from_ontologies: :environment do
           :lineage => lineage.join(",")
         }
 
-        h_terms2[k].update_attributes(h_upd) if h_terms2[k]
+        h_terms2[k].update!(h_upd) if h_terms2[k]
       
       end
 
@@ -146,7 +249,7 @@ task extract_ids_from_ontologies: :environment do
         }
 
 	puts "-#{k}-"
-        h_terms2[k].update_attributes(h_upd)
+        h_terms2[k].update!(h_upd)
 
       end
 
@@ -157,7 +260,7 @@ task extract_ids_from_ontologies: :environment do
   end
   
   h_children.each_key do |e|
-    h_terms2[e].update_attributes(:children_term_ids =>  (h_children[e]) ? h_children[e].join(",") : '')
+    h_terms2[e].update!(:children_term_ids =>  (h_children[e]) ? h_children[e].join(",") : '')
   end
 
   

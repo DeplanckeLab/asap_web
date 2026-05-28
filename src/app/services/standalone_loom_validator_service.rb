@@ -113,7 +113,7 @@ class StandaloneLoomValidatorService
       info: [],
       valid_checks: [],
       field_values: {},
-      schema_version: Scfair::CheckCatalog.schema!('scfair_7_1_0')[:schema_version],
+      schema_version: '7.1.0',
       validated_at: Time.current.iso8601
     )
   end
@@ -138,7 +138,7 @@ class StandaloneLoomValidatorService
       info: [],
       valid_checks: [],
       field_values: {},
-      schema_version: Scfair::CheckCatalog.schema!('scfair_7_1_0')[:schema_version],
+      schema_version: '7.1.0',
       validated_at: Time.current.iso8601
     )
   rescue StandardError => e
@@ -149,7 +149,7 @@ class StandaloneLoomValidatorService
       info: [],
       valid_checks: [],
       field_values: {},
-      schema_version: Scfair::CheckCatalog.schema!('scfair_7_1_0')[:schema_version],
+      schema_version: '7.1.0',
       validated_at: Time.current.iso8601
     )
   end

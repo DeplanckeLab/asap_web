@@ -4,22 +4,24 @@
 <% content_for :head do %>
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
   <style>
-    /* Keep docs readable within the existing site layout */
     #swagger-ui .topbar {
       display: none;
     }
 
-    /* Match site typography for the main Swagger title */
     #swagger-ui .info .title {
       font-family: inherit;
       font-weight: 700;
       letter-spacing: 0;
     }
 
-    /* Hide Try it out only for GET /projects */
     #operations-Projects-listProjectsApi .try-out__btn,
     #operations-Projects-listProjectsApi .execute-wrapper {
       display: none !important;
+    }
+
+    #swagger-ui .data-file-select {
+      min-width: 20rem;
+      max-width: 100%;
     }
   </style>
 <% end %>
@@ -33,9 +35,158 @@
 <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
 <script>
   (function () {
-    const openApiUrl = "/api/openapi.yaml?v=" + Date.now();
+    function installInlineDataFileDropdown() {
+      const root = document.getElementById("swagger-ui");
+      if (!root) return;
+      if (window.__apiDocInlineDataFileDropdownInit) return;
+      window.__apiDocInlineDataFileDropdownInit = true;
+
+      function normalizeLabel(text) {
+        return (text || "").replace(/\s+/g, " ").trim().replace(/\s*\*\s*$/, "").trim();
+      }
+
+      function findCatalogOp() {
+        const ops = root.querySelectorAll(".opblock");
+        for (const op of ops) {
+          const pathNode = op.querySelector(".opblock-summary-path");
+          if (!pathNode || !pathNode.textContent.includes("data_file_metadata_catalog")) continue;
+          return op;
+        }
+        return null;
+      }
+
+      function findParamRow(op, paramName) {
+        if (!op) return null;
+        const byAttr = op.querySelector(`tr[data-param-name="${paramName}"]`);
+        if (byAttr) return byAttr;
+        const rows = op.querySelectorAll("table.parameters tr");
+        for (const row of rows) {
+          const nameCell = row.querySelector(".parameter__name");
+          if (normalizeLabel(nameCell && nameCell.textContent) === paramName) return row;
+        }
+        return null;
+      }
+
+      function findControl(row) {
+        if (!row) return null;
+        return row.querySelector("input, select, textarea");
+      }
+
+      function buildSelect(previousValue, paths) {
+        const select = document.createElement("select");
+        select.className = "data-file-select";
+        select.dataset.dataFileSelect = "true";
+
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = paths.length ? "Select a data file..." : "No data files found for this project";
+        select.appendChild(placeholder);
+
+        paths.forEach((path) => {
+          const option = document.createElement("option");
+          option.value = path;
+          option.textContent = path;
+          select.appendChild(option);
+        });
+
+        if (previousValue && paths.includes(previousValue)) {
+          select.value = previousValue;
+        }
+        return select;
+      }
+
+      function replaceDataFileControl(op, paths) {
+        const dataFileRow = findParamRow(op, "data_file");
+        if (!dataFileRow) return;
+
+        let input = dataFileRow.querySelector("input");
+        let select = dataFileRow.querySelector("select.data-file-select");
+
+        if (!input && select) {
+          input = document.createElement("input");
+          input.type = "text";
+          input.value = select.value || "";
+          input.style.display = "none";
+          dataFileRow.appendChild(input);
+        }
+        if (!input) return;
+
+        if (!select) {
+          select = buildSelect(input.value, paths);
+          select.className = `${input.className} data-file-select`;
+          input.insertAdjacentElement("afterend", select);
+          input.readOnly = true;
+          input.style.opacity = "0.6";
+        } else {
+          const previous = select.value || input.value;
+          const rebuilt = buildSelect(previous, paths);
+          rebuilt.className = select.className;
+          select.replaceWith(rebuilt);
+          select = rebuilt;
+        }
+
+        const syncToInput = () => {
+          input.value = select.value;
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+        select.onchange = syncToInput;
+        syncToInput();
+      }
+
+      function refreshPaths(op) {
+        const projectKeyRow = findParamRow(op, "project_key");
+        const projectKeyControl = findControl(projectKeyRow);
+        const projectKey = projectKeyControl && projectKeyControl.value ? projectKeyControl.value.trim() : "";
+        if (!projectKey) {
+          replaceDataFileControl(op, []);
+          return;
+        }
+
+        fetch(`/api/projects/${encodeURIComponent(projectKey)}/project_data_files`, {
+          credentials: "same-origin",
+          headers: { Accept: "application/json" }
+        })
+          .then((response) => {
+            if (!response.ok) throw new Error("Failed to load data files");
+            return response.json();
+          })
+          .then((payload) => replaceDataFileControl(op, payload.data_files || []))
+          .catch(() => replaceDataFileControl(op, []));
+      }
+
+      let refreshTimer = null;
+      function maybeRefresh() {
+        if (refreshTimer) window.clearTimeout(refreshTimer);
+        refreshTimer = window.setTimeout(() => {
+          refreshTimer = null;
+          const op = findCatalogOp();
+          if (!op) return;
+          const dataFileRow = findParamRow(op, "data_file");
+          if (!dataFileRow) return;
+          refreshPaths(op);
+        }, 120);
+      }
+
+      root.addEventListener("click", (event) => {
+        if (event.target.closest(".try-out__btn")) {
+          maybeRefresh();
+        }
+      });
+
+      root.addEventListener("input", (event) => {
+        const row = event.target.closest("tr");
+        if (!row) return;
+        const nameCell = row.querySelector(".parameter__name");
+        const label = normalizeLabel(nameCell && nameCell.textContent);
+        if (label === "project_key" || row.getAttribute("data-param-name") === "project_key") {
+          maybeRefresh();
+        }
+      });
+    }
+
     window.ui = SwaggerUIBundle({
-      url: openApiUrl,
+      url: "/api/openapi.yaml?v=" + Date.now(),
       dom_id: "#swagger-ui",
       deepLinking: true,
       presets: [SwaggerUIBundle.presets.apis],
@@ -43,7 +194,36 @@
       defaultModelsExpandDepth: 10,
       defaultModelExpandDepth: 10,
       displayRequestDuration: true,
-      layout: "BaseLayout"
+      layout: "BaseLayout",
+      requestInterceptor: function (req) {
+        try {
+          if (req.url && req.url.includes("/data_file_metadata_catalog")) {
+            const allOps = document.querySelectorAll("#swagger-ui .opblock");
+            let catalogOp = null;
+            allOps.forEach((candidate) => {
+              const pathNode = candidate.querySelector(".opblock-summary-path");
+              if (pathNode && pathNode.textContent.includes("data_file_metadata_catalog")) {
+                catalogOp = candidate;
+              }
+            });
+            const select = catalogOp ? catalogOp.querySelector("select.data-file-select") : null;
+            if (select && select.value) {
+              const url = new URL(req.url, window.location.origin);
+              url.searchParams.set("data_file", select.value);
+              req.url = url.toString();
+            }
+          }
+        } catch (e) {
+          // Keep request unchanged on interceptor issues.
+        }
+        return req;
+      },
+      onComplete: function () {
+        installInlineDataFileDropdown();
+        if (window.initApiDocDataFileDropdown) {
+          window.initApiDocDataFileDropdown();
+        }
+      }
     });
   })();
 </script>

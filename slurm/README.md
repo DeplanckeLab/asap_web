@@ -38,6 +38,27 @@ To regenerate resource knobs on the current machine, run:
 ```
 Review the resulting local `slurm.conf` before deploying to `/etc/slurm`.
 
+### Jobs stuck pending (queue position not moving, nothing RUN)
+
+If the UI shows a Slurm queue position but no jobs run, check the compute daemon on the **host** (not only the controller):
+
+```bash
+./slurm/ensure-compute-node.sh
+# or:
+systemctl status slurmd
+sinfo -Ne
+squeue -t PD -o '%i %r'
+```
+
+When `slurmd` is inactive or the node is `down` / `Not responding`, pending jobs stay in `PD` with reasons like `ReqNodeNotAvail` even if the queue position number changes. Fix:
+
+```bash
+sudo systemctl enable --now slurmd
+sinfo -Ne   # node should become idle
+```
+
+Cancel orphan Slurm jobs that no longer match a Run in the database with `scancel <job_id>`.
+
 ### Accessing SLURM
 
 From the `website` container, you can access SLURM commands:

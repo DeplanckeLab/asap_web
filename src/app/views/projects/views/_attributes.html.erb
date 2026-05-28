@@ -156,6 +156,30 @@
                     <% if defined?(@selected_loom_file) && @selected_loom_file.present? %>
                       <% candidate_annots = candidate_annots.select { |annot| annot.filepath == @selected_loom_file } %>
                     <% end %>
+                    <% source_methods_filter = attr['source_methods'] %>
+                    <% excluded_source_methods_filter = attr['excluded_source_methods'] %>
+                    <% if source_methods_filter.present? || excluded_source_methods_filter.present? %>
+                      <% h_steps_by_id = applicable_steps.index_by(&:id) %>
+                      <% annot_run_ids_for_filter = candidate_annots.flat_map { |a| [a.run_id, a.ori_run_id, a.store_run_id] }.compact.uniq %>
+                      <% h_runs_for_filter = Run.where(id: annot_run_ids_for_filter).index_by(&:id) %>
+                      <% h_std_methods_for_filter = StdMethod.where(id: h_runs_for_filter.values.map(&:std_method_id).compact.uniq).index_by(&:id) %>
+                      <% candidate_annots = candidate_annots.select do |annot|
+                           run = h_runs_for_filter[annot.run_id] || h_runs_for_filter[annot.ori_run_id] || h_runs_for_filter[annot.store_run_id]
+                           next true unless run&.std_method_id
+                           std_method = h_std_methods_for_filter[run.std_method_id]
+                           next true unless std_method
+                           source_step = h_steps_by_id[run.step_id]
+                           next true unless source_step
+                           step_name = source_step.name
+                           if source_methods_filter.present? && source_methods_filter[step_name].present?
+                             next source_methods_filter[step_name].include?(std_method.name)
+                           end
+                           if excluded_source_methods_filter.present? && excluded_source_methods_filter[step_name].present?
+                             next !excluded_source_methods_filter[step_name].include?(std_method.name)
+                           end
+                           true
+                         end %>
+                    <% end %>
                     <% matching_annots = candidate_annots.select do |annot|
                          next false if annot.data_class_ids.blank?
                          annot_data_class_names = annot.data_class_ids.split(',').map { |dc_id| h_data_classes[dc_id.to_i] }.compact

@@ -203,6 +203,14 @@ import TableRowFilterController from "controllers/table_row_filter_controller"
 application.register("table-row-filter", TableRowFilterController)
 console.log('Table row filter controller registered')
 
+import ConfirmDeleteController from "controllers/confirm_delete_controller"
+application.register("confirm-delete", ConfirmDeleteController)
+console.log('Confirm delete controller registered')
+
+import IsolatedComplianceController from "controllers/isolated_compliance_controller"
+application.register("isolated-compliance", IsolatedComplianceController)
+console.log('Isolated compliance controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

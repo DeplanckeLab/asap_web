@@ -236,6 +236,8 @@ class SlurmService
     full_id = full_id.strip
     return nil unless st == 'PD'
 
+    reason = pending_job_slurm_reason(id)
+
     escaped_part = Shellwords.escape(partition)
     raw = `squeue -h -t PD -p #{escaped_part} -o '%i %p' 2>&1`
     return nil unless $?.success?
@@ -257,13 +259,64 @@ class SlurmService
     idx = rows.index { |r| r[:full_id] == full_id }
     return nil if idx.nil?
 
+    cluster = cluster_compute_summary
     {
       position: idx + 1,
       pending_count: rows.size,
-      partition: partition
+      partition: partition,
+      reason: reason,
+      cluster: cluster
     }
   rescue StandardError => e
     @logger.warn("[SlurmService] pending_job_queue_snapshot failed for #{slurm_job_id.inspect}: #{e.class} #{e.message}")
+    nil
+  end
+
+  # Slurm REASON field for a pending job (e.g. ReqNodeNotAvail, Resources).
+  def pending_job_slurm_reason(slurm_job_id)
+    id = slurm_job_id.to_i
+    return nil if id <= 0
+
+    raw = `squeue -h -j #{id} -o '%r' 2>&1`.strip
+    return nil unless $?.success?
+    return nil if raw.blank? || raw.downcase.include?('invalid')
+
+    raw
+  rescue StandardError => e
+    @logger.warn("[SlurmService] pending_job_slurm_reason failed for #{slurm_job_id.inspect}: #{e.class} #{e.message}")
+    nil
+  end
+
+  # Node states from sinfo (-Nel): used to explain jobs stuck pending with no RUN jobs.
+  def cluster_compute_summary
+    raw = `sinfo -Ne -h -o '%N|%T|%E' 2>&1`
+    return nil unless $?.success?
+
+    nodes = []
+    raw.each_line do |line|
+      line = line.strip
+      next if line.blank?
+
+      name, state, reason = line.split('|', 3)
+      next if name.blank?
+
+      nodes << {
+        name: name.strip,
+        state: state.to_s.strip,
+        reason: reason.to_s.strip
+      }
+    end
+    return nil if nodes.empty?
+
+    down = nodes.select { |n| n[:state].match?(/down|drain|fail/i) }
+    {
+      nodes: nodes,
+      all_down: down.size == nodes.size,
+      any_down: down.any?,
+      down_names: down.map { |n| n[:name] }
+    }
+  rescue StandardError => e
+    @logger.warn("[SlurmService] cluster_compute_summary failed: #{e.class} #{e.message}")
     nil
   end
 

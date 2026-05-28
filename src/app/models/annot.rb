@@ -4,6 +4,7 @@ class Annot < ApplicationRecord
   belongs_to :project
   belongs_to :step, optional: true
   belongs_to :run, optional: true
+  belongs_to :data_transformation, optional: true
   belongs_to :data_type, optional: true
   belongs_to :output_attr, optional: true
   belongs_to :user, optional: true

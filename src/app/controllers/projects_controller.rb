@@ -17,9 +17,9 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
@@ -4543,6 +4543,37 @@ class ProjectsController < ApplicationController
     end
   end
 
+  # GET /projects/:id/project_data_files
+  # GET /api/projects/:id/project_data_files
+  def project_data_files
+    data_files = Annot.where(project_id: @project.id)
+                      .where.not(filepath: [nil, ''])
+                      .distinct
+                      .pluck(:filepath)
+                      .map { |path| Basic.normalize_data_file_path(path) }
+                      .select { |path| Basic.data_file_type_from_path(path) }
+                      .uniq
+                      .sort
+
+    render json: { data_files: data_files }
+  end
+
+  # GET /projects/:id/data_file_metadata_catalog?data_file=parsing/output.loom
+  # GET /api/projects/:id/data_file_metadata_catalog?data_file=parsing/output.h5ad
+  def data_file_metadata_catalog
+    data_file = params[:data_file].presence || params[:filepath].presence
+    if data_file.blank?
+      return render json: { error: 'data_file parameter is required' }, status: :bad_request
+    end
+
+    catalog = Basic.generate_data_file_metadata_catalog(@project, data_file)
+    if catalog.nil?
+      return render json: { error: 'Data file not found for this project' }, status: :not_found
+    end
+
+    render json: catalog
+  end
+
   # GET /projects/1/get_step
   def get_step
     # Placeholder for get_step action
@@ -6244,6 +6275,7 @@ class ProjectsController < ApplicationController
     queue_position = nil
     wait_time = nil
     slurm_queue_hover = nil
+    slurm_blocker_message = nil
     show_slurm_queue = nil
 
     if slurm_job_id.present?
@@ -6276,6 +6308,7 @@ class ProjectsController < ApplicationController
           queue_position = slurm_service.get_job_queue_position(slurm_job_id, run_status_id, job_status: job_status, run: run)
           snap = slurm_service.pending_job_queue_snapshot(slurm_job_id)
           slurm_queue_hover = MarkerQueueText.hover_summary(snap, queue_position)
+          slurm_blocker_message = MarkerQueueText.blocker_message(snap: snap)
         end
         Rails.logger.info("[queue_position] For SLURM job #{slurm_job_id}, run status_id: #{run_status_id}, queue_position: #{queue_position.inspect}, wait_time: #{wait_time.inspect}")
       rescue => e
@@ -6289,6 +6322,7 @@ class ProjectsController < ApplicationController
       queue_position: queue_position,
       wait_time: wait_time,
       slurm_queue_hover: slurm_queue_hover,
+      slurm_blocker_message: slurm_blocker_message,
       show_slurm_queue: show_slurm_queue
     }
   end
@@ -11230,6 +11264,30 @@ class ProjectsController < ApplicationController
             annot_run && source_step_ids.include?(annot_run.step_id)
           end
         end
+
+        # Apply source_methods / excluded_source_methods filtering
+        source_methods_filter = attr_config['source_methods']
+        excluded_source_methods_filter = attr_config['excluded_source_methods']
+        if source_methods_filter.present? || excluded_source_methods_filter.present?
+          h_steps_by_id = h_steps_by_name.values.index_by(&:id)
+          source_annots = source_annots.select do |annot|
+            run = annot.run_id ? (annot.run rescue Run.find_by(id: annot.run_id)) : nil
+            run ||= Run.find_by(id: annot.ori_run_id) if annot.ori_run_id
+            next true unless run&.std_method_id
+            method_record = StdMethod.find_by(id: run.std_method_id)
+            next true unless method_record
+            source_step = h_steps_by_id[run.step_id]
+            step_name = source_step&.name
+            next true unless step_name
+            if source_methods_filter.present? && source_methods_filter[step_name].present?
+              next source_methods_filter[step_name].include?(method_record.name)
+            end
+            if excluded_source_methods_filter.present? && excluded_source_methods_filter[step_name].present?
+              next !excluded_source_methods_filter[step_name].include?(method_record.name)
+            end
+            true
+          end
+        end
         
         # If no valid_types specified, just check if any annotations exist from source steps
         if valid_types.blank?
@@ -12876,6 +12934,30 @@ class ProjectsController < ApplicationController
                             nil
                           end
               annot_run && source_step_ids.include?(annot_run.step_id)
+            end
+          end
+
+          # Apply source_methods / excluded_source_methods filtering
+          source_methods_filter = attr_config['source_methods']
+          excluded_source_methods_filter = attr_config['excluded_source_methods']
+          if source_methods_filter.present? || excluded_source_methods_filter.present?
+            h_std_methods_by_id = @h_std_methods_by_id_cache ||= StdMethod.where(id: runs_by_id.values.map(&:std_method_id).compact.uniq).index_by(&:id)
+            h_steps_by_id = @h_steps_by_name.values.index_by(&:id)
+            source_annots = source_annots.select do |annot|
+              run = runs_by_id[annot.run_id] || runs_by_id[annot.ori_run_id]
+              next true unless run&.std_method_id
+              method_record = h_std_methods_by_id[run.std_method_id]
+              next true unless method_record
+              source_step = h_steps_by_id[run.step_id]
+              next true unless source_step
+              step_name = source_step.name
+              if source_methods_filter.present? && source_methods_filter[step_name].present?
+                next source_methods_filter[step_name].include?(method_record.name)
+              end
+              if excluded_source_methods_filter.present? && excluded_source_methods_filter[step_name].present?
+                next !excluded_source_methods_filter[step_name].include?(method_record.name)
+              end
+              true
             end
           end
           

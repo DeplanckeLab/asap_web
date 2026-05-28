@@ -16,8 +16,10 @@
            <% end %>>
         <i class="fas fa-clock text-yellow-500 text-5xl mb-4 cursor-help" data-queue-position-target="waitingIcon" aria-hidden="true"></i>
         <h3 class="text-xl font-semibold text-gray-900 mb-2"><%= step_label %> is waiting</h3>
-        <p class="text-gray-600 mb-4">The <%= step_label.downcase %> job is queued and will start shortly.</p>
+        <p class="text-gray-600 mb-4" data-queue-position-target="statusMessage">The <%= step_label.downcase %> job is queued and will start shortly.</p>
         <% if run.slurm_job_id.present? %>
+          <div data-queue-position-target="blockerMessage"
+               class="hidden max-w-xl mx-auto text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-4 py-3 mb-4 text-left"></div>
           <% if run.submitted_at %>
             <div class="text-sm text-gray-600 mb-3">
               <span class="font-medium">Waiting time:</span>

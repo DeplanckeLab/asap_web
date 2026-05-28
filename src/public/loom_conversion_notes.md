@@ -132,3 +132,64 @@ Nested objects (e.g. `spatial`, `contributors`) should be flattened using slash-
 
 Following this guide should keep Loom exports compliant with the H5AD-based schema expectations while highlighting where manual documentation or auxiliary files are required.
 
+## 5. Deterministic Loom -> H5AD Reconstruction Contract
+
+To ensure conversion can rebuild proper AnnData fields without heuristics, Loom files SHOULD embed a global JSON manifest:
+
+- Global attribute key: `anndata_mapping`
+- Type: JSON object
+- Role: explicit path contract between Loom datasets and AnnData slots
+
+### 5.1 Required manifest keys
+
+| Key | Type | Purpose |
+| --- | --- | --- |
+| `version` | `str` | Mapping schema version |
+| `orientation` | `str` | Matrix orientation (`genes_x_cells` for ASAP Loom) |
+| `x_path` | `str` | Path to main matrix (usually `/matrix`) |
+| `obs_path` | `str` | Prefix for observation metadata (ASAP: `/col_attrs`) |
+| `var_path` | `str` | Prefix for variable metadata (ASAP: `/row_attrs`) |
+| `obs_index_key` | `str` | Observation index key (e.g. `CellID`) |
+| `var_index_key` | `str` | Variable index key (e.g. `feature_id`) |
+
+### 5.2 Required when present
+
+| Key | Purpose |
+| --- | --- |
+| `raw_x_path` | Path for raw matrix (`raw.X`) |
+| `raw_var_path` | Path for raw variable metadata table |
+| `layers` | Mapping `layer_name -> loom_path` |
+| `obsm` | Mapping `obsm_key -> loom_path` |
+| `varm` | Mapping `varm_key -> loom_path` |
+| `obsp` | Mapping `obsp_key -> loom_path` |
+| `varp` | Mapping `varp_key -> loom_path` |
+
+### 5.3 Conversion behavior (how to apply metadata)
+
+The conversion tool MUST follow the manifest as source of truth:
+
+1. Read and validate `anndata_mapping`.
+2. Resolve paths exactly as declared (no path guessing/fallback).
+3. Build `adata.X` from `x_path` with orientation-aware transpose as needed.
+4. Build `adata.obs` from `obs_path/*`, using `obs_index_key` as `.obs_names`.
+5. Build `adata.var` from `var_path/*`, using `var_index_key` as `.var_names`.
+6. Build `adata.layers` from manifest `layers`.
+7. Build `adata.raw` from `raw_x_path` and `raw_var_path` (or declared raw-var strategy).
+8. Build `adata.obsm`, `adata.varm`, `adata.obsp`, `adata.varp` from declared mappings.
+9. Copy global metadata to `adata.uns`, decoding JSON for keys declared as JSON entries.
+10. Run post-conversion validations required by target schema.
+
+### 5.4 Validation requirements after conversion
+
+After reconstructing H5AD, converter (or post-step validator) SHOULD enforce:
+
+- index uniqueness (`obs_names`, `var_names`)
+- matrix/layer alignment
+- pairwise matrix shape checks for `obsp`/`varp`
+- required metadata presence
+- AnnData-specific encoding checks (dtype/sparsity/categories)
+
+### 5.5 Why this contract is needed
+
+Without an explicit manifest, conversion tools must infer orientation and metadata paths. That inference is fragile and can silently misplace fields (`obs` vs `var`) or fail to reconstruct optional AnnData slots (`raw`, `obsp`, `varp`, `varm`, `obsm`) in a schema-valid way.
+

@@ -17,6 +17,8 @@ Rails.application.routes.draw do
       get :get_commands
       get :get_file
       get :get_loom_files_json
+      get :data_file_metadata_catalog
+      get :project_data_files
       get :get_step
       get :get_run
       get :get_lineage
@@ -192,6 +194,10 @@ Rails.application.routes.draw do
     get 'ontology_autocomplete', action: :ontology_autocomplete, as: :compliance_ontology_autocomplete
     post 'resolve_ontology_terms', action: :resolve_ontology_terms, as: :compliance_resolve_ontology_terms
   end
+
+  get '/compliance/file-check', to: 'compliance_file_checks#index', as: :compliance_file_check
+  post '/compliance/file-check', to: 'compliance_file_checks#create', as: :compliance_file_check_create
+  get '/compliance/file-check/:task_id/status', to: 'compliance_file_checks#status', as: :compliance_file_check_status
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.
@@ -215,6 +221,8 @@ Rails.application.routes.draw do
   namespace :api, defaults: { format: :json } do
     get 'projects', to: '/projects#index'
     get 'projects/:id', to: '/projects#show'
+    get 'projects/:id/data_file_metadata_catalog', to: '/projects#data_file_metadata_catalog'
+    get 'projects/:id/project_data_files', to: '/projects#project_data_files'
     resources :guided_tours, only: %i[index show]
     get 'openapi.yaml', to: '/home#openapi_spec', defaults: { format: nil }
   end

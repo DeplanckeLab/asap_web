@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_12_103000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_21_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -69,6 +69,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_103000) do
     t.text "categories_json"
     t.datetime "created_at", precision: nil
     t.text "data_class_ids"
+    t.integer "data_transformation_id"
     t.integer "data_type_id"
     t.integer "dim", limit: 2
     t.text "filepath"
@@ -99,6 +100,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_103000) do
     t.datetime "updated_at", precision: nil
     t.integer "user_id"
     t.integer "version_nber", default: 1
+    t.index ["data_transformation_id"], name: "index_annots_on_data_transformation_id"
     t.index ["project_id", "name"], name: "idx_annots_project_name"
     t.index ["project_id", "store_run_id", "filepath", "name"], name: "idx_annots_finish_run_lookup"
   end
@@ -404,6 +406,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_103000) do
     t.datetime "created_at", precision: nil
     t.text "name"
     t.datetime "updated_at", precision: nil
+  end
+
+  create_table "data_transformations", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "description"
+    t.string "label", null: false
+    t.string "name", null: false
+    t.datetime "updated_at", null: false
   end
 
   create_table "data_types", id: :serial, force: :cascade do |t|
@@ -1463,6 +1473,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_12_103000) do
   add_foreign_key "annot_cell_sets", "cell_sets", name: "annot_cell_sets_cell_set_id_fkey"
   add_foreign_key "annot_cell_sets", "projects", name: "annot_cell_sets_project_id_fkey"
   add_foreign_key "annots", "attr_outputs", name: "annots_attr_output_id_fkey"
+  add_foreign_key "annots", "data_transformations"
   add_foreign_key "annots", "data_types", name: "annots_data_type_id_fkey"
   add_foreign_key "annots", "output_attrs", name: "annots_output_attr_id_fkey"
   add_foreign_key "annots", "projects", name: "annots_project_id_fkey"

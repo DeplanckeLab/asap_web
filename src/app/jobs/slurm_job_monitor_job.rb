@@ -361,7 +361,8 @@ class SlurmJobMonitorJob < ApplicationJob
 
     queue_position = slurm_service.get_job_queue_position(run.slurm_job_id, run.status_id)
     snap = slurm_service.pending_job_queue_snapshot(run.slurm_job_id)
-    signature = [queue_position, snap&.dig(:pending_count), snap&.dig(:partition)&.to_s]
+    blocker = MarkerQueueText.blocker_message(snap: snap)
+    signature = [queue_position, snap&.dig(:pending_count), snap&.dig(:partition)&.to_s, snap&.dig(:reason), blocker]
     previous = Rails.cache.read(queue_position_cache_key(run.id))
     return if previous == signature
 
@@ -386,6 +387,7 @@ class SlurmJobMonitorJob < ApplicationJob
     end
     hover = MarkerQueueText.hover_summary(snap, queue_position)
     payload[:slurm_queue_hover] = hover if hover.present?
+    payload[:slurm_blocker_message] = blocker if blocker.present?
 
     ActionCable.server.broadcast("project_#{run.project_id}", payload)
   rescue StandardError => e

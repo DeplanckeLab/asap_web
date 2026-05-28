@@ -12,7 +12,7 @@ export default class extends Controller {
     submittedAt: String
   }
 
-  static targets = ["position", "waitTime", "queueInfo", "emptyQueue", "waitingTime", "waitingIcon", "queueLine"]
+  static targets = ["position", "waitTime", "queueInfo", "emptyQueue", "waitingTime", "waitingIcon", "queueLine", "blockerMessage", "statusMessage"]
 
   connect() {
     this.subscribeToProject()
@@ -96,6 +96,7 @@ export default class extends Controller {
       this.clearSlurmHover()
     }
 
+    this.applySlurmBlocker(data.slurm_blocker_message)
     this.applyQueuePosition(data.queue_position, data.slurm_queue_hover)
   }
 
@@ -247,6 +248,7 @@ export default class extends Controller {
         this.syncSlurmHover(data.slurm_queue_hover)
       }
 
+      this.applySlurmBlocker(data.slurm_blocker_message)
       this.applyQueuePosition(data.queue_position, data.slurm_queue_hover)
 
       if (data.wait_time !== null && data.wait_time !== undefined && this.hasWaitTimeTarget) {
@@ -271,6 +273,28 @@ export default class extends Controller {
       return `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`
     }
     return `${minutes}:${String(secs).padStart(2, "0")}`
+  }
+
+  applySlurmBlocker(message) {
+    if (!this.hasBlockerMessageTarget) {
+      return
+    }
+
+    const text = message != null ? String(message).trim() : ""
+    if (text === "") {
+      this.blockerMessageTarget.classList.add("hidden")
+      this.blockerMessageTarget.textContent = ""
+      if (this.hasStatusMessageTarget) {
+        this.statusMessageTarget.classList.remove("hidden")
+      }
+      return
+    }
+
+    this.blockerMessageTarget.textContent = text
+    this.blockerMessageTarget.classList.remove("hidden")
+    if (this.hasStatusMessageTarget) {
+      this.statusMessageTarget.classList.add("hidden")
+    }
   }
 
   applyQueuePosition(queuePosition, slurmQueueHover) {

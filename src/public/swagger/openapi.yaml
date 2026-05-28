@@ -35,12 +35,12 @@ paths:
                       doi: "10.1038/s41586-020-03188-8"
                       version: "v8"
                       organism: "Homo sapiens"
-                      annotation_groups: []
+                      metadata_lists: []
                     - public_key: "ASAP50"
                       key: "def456"
                       version: "v8"
                       organism: "Mus musculus"
-                      annotation_groups: []
+                      metadata_lists: []
         '404':
           description: Projects JSON file not found.
   /projects/{project_key}:
@@ -73,6 +73,8 @@ paths:
                   value:
                     public_key: "ASAP48"
                     key: "abc123"
+                    url: "https://example.org/projects/abc123"
+                    json_url: "https://example.org/api/projects/abc123"
                     doi: "10.1038/s41586-020-03188-8"
                     asap_data_db: "asap_data_v8"
                     asap_data_db_url: "https://example.org/dumps/asap_data_v8.sql.gz"
@@ -106,20 +108,22 @@ paths:
                       - identifier_type: "GEO"
                         identifier: "GSE123456"
                         url: "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE123456"
-                    annotation_groups:
-                      - annot_id: 101
-                        annot_run_id: 202
-                        metadata: "Cell type"
-                        origin:
+                    metadata_lists:
+                      - id: 101
+                        run_id: 202
+                        path: "/col_attrs/Cell_type"
+                        run_pipeline:
                           - run_id: 202
-                            step: "clustering"
-                            std_method: "leiden"
+                            step_id: 12
+                            step_label: "clustering"
+                            method_id: 34
+                            method_label: "leiden"
                             num: 1
                             attrs: {}
                             command: "python run.py"
                             docker_repo: "dockerhub"
-                            docker_container_url: null
-                            docker_container_name: "asap-run:latest"
+                            docker_image_url: "https://hub.docker.com/layers/fabdavid/asap_run/v5.1"
+                            docker_image_name: "fabdavid/asap_run:v5.1"
                         annotations:
                           - id: 5501
                             num: 1
@@ -135,7 +139,6 @@ paths:
                                 name: "neuron"
                                 description: "A neural cell."
                                 ontology: "Cell Ontology"
-                            annot_id: 101
                             up_genes:
                               - name: "SLC17A7"
                                 ensembl_id: "ENSG00000179520"
@@ -169,14 +172,150 @@ paths:
                             updated_at: "2026-03-26T17:30:00Z"
         '404':
           description: Project not found.
+  /projects/{project_key}/data_file_metadata_catalog:
+    get:
+      summary: Get data file metadata catalog
+      description: |
+        Returns the cross-tool metadata catalog for one project data file (LOOM, H5AD, RDS, etc.).
+        The catalog is intended for embedding in the file (location is format-specific) or exchange between tools.
+        Payload is normalized as `list_of_projects`, `list_of_runs`, and `list_of_metadata`,
+        where each metadata entry references pipeline runs through `pipeline_run_idx`.
+      operationId: getDataFileMetadataCatalogApi
+      tags:
+        - Projects
+      parameters:
+        - name: project_key
+          in: path
+          required: true
+          description: Project identifier (key, or public id format like `icmuj3` or `ASAP48`).
+          schema:
+            type: string
+        - name: data_file
+          in: query
+          required: true
+          description: Project-relative data file path (for example `parsing/output.loom` or `parsing/output.h5ad`). In the API documentation try-it-out form, this field is shown as a dropdown after `project_key` is set.
+          schema:
+            type: string
+            example: parsing/output.loom
+      responses:
+        '200':
+          description: Data file metadata catalog JSON.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataFileMetadataCatalog'
+        '400':
+          description: Missing `data_file` query parameter.
+        '404':
+          description: Project or data file not found.
 components:
   schemas:
+    DataFileMetadataCatalog:
+      title: Data file metadata catalog
+      type: object
+      description: |
+        Metadata catalog for one project data file.
+        Projects and runs are de-duplicated, and each metadata entry references pipeline runs by index.
+      properties:
+        schema_version:
+          type: string
+          description: Catalog schema version.
+          example: "1"
+        data_file_url:
+          type: string
+          format: uri
+          description: URL to download or access the data file in this project.
+          example: https://example.org/projects/abc123/get_file?filename=parsing%2Foutput.loom
+        data_file_type:
+          type: string
+          description: Data file format.
+          enum:
+            - LOOM
+            - H5AD
+            - RDS
+          example: LOOM
+        list_of_projects:
+          type: array
+          description: Projects/tools that contributed metadata in this catalog.
+          items:
+            $ref: '#/components/schemas/DataFileCatalogProject'
+        list_of_runs:
+          type: array
+          description: Run pipeline entries ordered by run creation date.
+          items:
+            $ref: '#/components/schemas/DataFileCatalogRun'
+        list_of_metadata:
+          type: array
+          description: Metadata columns described in this data file.
+          items:
+            $ref: '#/components/schemas/DataFileCatalogMetadata'
+    DataFileCatalogProject:
+      title: Data file catalog project
+      type: object
+      description: One project/tool identifier referenced by runs.
+      properties:
+        tool:
+          type: string
+          description: Name of the tool that produced metadata.
+          example: ASAP
+        identifier:
+          type: string
+          description: Project/tool-specific identifier.
+          example: abc123
+        url:
+          type: string
+          format: uri
+          description: URL of the project HTML page.
+          example: https://example.org/projects/abc123
+        json_url:
+          type: string
+          format: uri
+          description: URL of the project JSON export.
+          example: https://example.org/api/projects/abc123
+    DataFileCatalogRun:
+      title: Data file catalog run
+      allOf:
+        - $ref: '#/components/schemas/Run'
+        - type: object
+          properties:
+            project_idx:
+              type: integer
+              description: Index in `list_of_projects` for the project/tool owning this run.
+              example: 0
+    DataFileCatalogMetadata:
+      title: Data file catalog metadata
+      type: object
+      description: One metadata column with annotation labels and indexed pipeline references.
+      properties:
+        id:
+          type: integer
+          description: ASAP annotation row identifier when produced on ASAP.
+          example: 101
+        run_id:
+          type: integer
+          description: ASAP run identifier that produced this metadata column.
+          example: 202
+        path:
+          type: string
+          description: Metadata column path within the data file.
+          example: /col_attrs/Cell_type
+        pipeline_run_idx:
+          type: array
+          description: Indexes in `list_of_runs` describing the pipeline that produced this metadata.
+          items:
+            type: integer
+            example: 0
+        annotations:
+          type: array
+          description: Community annotation labels for this metadata column.
+          items:
+            $ref: '#/components/schemas/AnnotationItem'
     ProjectExport:
       title: Project Export
       type: object
       description: |
         Full project export generated by `Basic.generate_project_json`.
-        It includes project metadata, reproducibility links, source experiments, and annotation groups.
+        It includes project metadata, reproducibility links, source experiments, and metadata lists.
       properties:
         public_key:
           type: string
@@ -186,6 +325,16 @@ components:
           type: string
           description: Internal unique project key used in API routes.
           example: abc123
+        url:
+          type: string
+          format: uri
+          description: URL of the project HTML page.
+          example: https://example.org/projects/abc123
+        json_url:
+          type: string
+          format: uri
+          description: URL of this project JSON export (`GET /api/projects/{project_key}`).
+          example: https://example.org/api/projects/abc123
         doi:
           type: string
           description: Publication DOI attached to the project when available. Omitted when unavailable.
@@ -264,11 +413,11 @@ components:
           description: Source experiment identifiers and URLs.
           items:
             $ref: '#/components/schemas/ProjectExperiment'
-        annotation_groups:
+        metadata_lists:
           type: array
-          description: Annotation groups containing labels, provenance, and annotations.
+          description: List of metadata.
           items:
-            $ref: '#/components/schemas/AnnotationGroup'
+            $ref: '#/components/schemas/Metadata'
       additionalProperties: true
     ProjectExperiment:
       title: Project Experiment
@@ -288,47 +437,55 @@ components:
           format: uri
           description: Direct link to the accession entry.
           example: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE123456
-    AnnotationGroup:
-      title: Annotation Group
+    Metadata:
+      title: Metadata
       type: object
-      description: Group of annotations associated with one metadata field.
+      description: Labels and provenance for one metadata column (for example cell type or cluster).
       properties:
-        annot_id:
+        id:
           type: integer
-          description: Annotation object identifier.
+          description: ASAP annotation row identifier for this metadata column.
           example: 101
-        annot_run_id:
+        run_id:
           type: integer
-          description: Run identifier that produced this annotation metadata.
+          description: Run identifier that produced this metadata column on ASAP.
           example: 202
-        metadata:
+        path:
           type: string
-          description: Metadata name associated with this annotation group.
-          example: Cell type
-        origin:
+          description: Metadata column path within the data file.
+          example: /col_attrs/Cell_type
+        run_pipeline:
           type: array
-          description: Run lineage and reproducibility metadata.
+          description: Pipeline of runs that produced this metadata.
           items:
-            $ref: '#/components/schemas/AnnotationOrigin'
+            $ref: '#/components/schemas/Run'
         annotations:
           type: array
           description: Individual annotation entries.
           items:
             $ref: '#/components/schemas/AnnotationItem'
-    AnnotationOrigin:
-      title: Annotation Origin
+    Run:
+      title: Run
       type: object
-      description: One lineage entry describing where annotation data comes from.
+      description: One step in the run pipeline that produced this metadata.
       properties:
         run_id:
           type: integer
           description: Run identifier.
           example: 202
-        step:
+        step_id:
+          type: integer
+          description: Pipeline step identifier.
+          example: 12
+        step_label:
           type: string
           description: Pipeline step label.
           example: clustering
-        std_method:
+        method_id:
+          type: integer
+          description: Method identifier.
+          example: 34
+        method_label:
           type: string
           description: Method label used in that step.
           example: leiden
@@ -346,17 +503,18 @@ components:
           type: string
           description: Docker repository/provider label. Omitted when unavailable.
           example: dockerhub
-        docker_container_url:
+        docker_image_url:
           type: string
-          description: Docker image URL when available. Omitted when unavailable.
-        docker_container_name:
+          description: Docker Hub layers page URL for the image tag. Omitted when unavailable.
+          example: https://hub.docker.com/layers/fabdavid/asap_run/v5.1
+        docker_image_name:
           type: string
           description: Docker image name and tag when available. Omitted when unavailable.
-          example: asap-run:latest
+          example: fabdavid/asap_run:v5.1
     AnnotationItem:
       title: Annotation Item
       type: object
-      description: One annotation label entry inside `annotation_groups[].annotations`.
+      description: One annotation label entry inside `metadata_lists[].annotations`.
       properties:
         id:
           type: integer
@@ -397,10 +555,6 @@ components:
           description: Cell ontology terms attached to this annotation.
           items:
             $ref: '#/components/schemas/CellOntologyTermRef'
-        annot_id:
-          type: integer
-          description: Metadata annotation identifier linking to the parent metadata entry.
-          example: 101
         up_genes:
           type: array
           description: Genes enriched/up-regulated for this annotation. Omitted when unavailable.

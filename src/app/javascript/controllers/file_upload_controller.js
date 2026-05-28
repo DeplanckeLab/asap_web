@@ -78,6 +78,7 @@ export default class extends Controller {
     this.preparsingResultData = null  // Store preparsing result for re-rendering
     // Initialize labels from current project_type selection
     this.updateProjectTypeLabels()
+    this.updateProjectTypeAvailability()
     this.updateSupportedFormats()  // Filter format list + UI text based on current version
     this.resetPreparsingState()
     this.showUploadInputs()
@@ -2252,9 +2253,11 @@ export default class extends Controller {
     const versionField = this.form?.querySelector('[name="project[version_id]"]')
     const hasVersion = versionField && versionField.value && versionField.value !== ''
 
-    // 5. Project type is selected
+    // 5. Project type is selected (not required for versions < 6)
     const projectTypeField = this.form?.querySelector('[name="project[project_type_id]"]')
-    const hasProjectType = projectTypeField && projectTypeField.value && projectTypeField.value !== ''
+    const versionId = this.currentVersionId()
+    const projectTypeNotRequired = Number.isFinite(versionId) && versionId < 5
+    const hasProjectType = projectTypeNotRequired || (projectTypeField && projectTypeField.value && projectTypeField.value !== '')
 
     if (isIntegrateMode) {
       // In integrate mode, enable if organism, version, and project type are set
@@ -2886,6 +2889,27 @@ export default class extends Controller {
       console.error('Error loading project types data:', e)
       return {}
     }
+  }
+
+  updateProjectTypeAvailability() {
+    const projectTypeField = this.form?.querySelector('[name="project[project_type_id]"]')
+    if (!projectTypeField) return
+
+    const versionId = this.currentVersionId()
+    const shouldDisable = Number.isFinite(versionId) && versionId < 5
+
+    projectTypeField.disabled = shouldDisable
+    if (shouldDisable) {
+      projectTypeField.value = ''
+      projectTypeField.classList.add('bg-gray-100', 'dark:bg-gray-600', 'text-gray-500', 'dark:text-gray-400', 'cursor-not-allowed')
+      projectTypeField.classList.remove('focus:outline-none', 'focus:ring-2', 'focus:ring-blue-500', 'dark:bg-gray-700', 'dark:text-white')
+    } else {
+      projectTypeField.classList.remove('bg-gray-100', 'dark:bg-gray-600', 'text-gray-500', 'dark:text-gray-400', 'cursor-not-allowed')
+      projectTypeField.classList.add('focus:outline-none', 'focus:ring-2', 'focus:ring-blue-500', 'dark:bg-gray-700', 'dark:text-white')
+    }
+
+    this.updateProjectTypeLabels()
+    this.checkSubmitButton()
   }
 
   updateProjectTypeLabels() {

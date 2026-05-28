@@ -244,6 +244,9 @@ class CxgLoomValidatorService
     _stdout, stderr, status = Open3.capture3(*cmd)
 
     unless status.success?
+      fallback = extract_from_loom_file_h5py
+      return fallback if fallback
+
       @warnings << { field: 'file_info', message: "Could not extract file structure: #{stderr.strip}" }
       return nil
     end
@@ -288,11 +291,75 @@ class CxgLoomValidatorService
         has_matrix: has_matrix
       }
     rescue JSON::ParserError => e
+      fallback = extract_from_loom_file_h5py
+      return fallback if fallback
+
       @warnings << { field: 'file_info', message: "Could not parse file structure: #{e.message}" }
       nil
     ensure
       FileUtils.rm_f(output_file)
     end
+  end
+
+  def extract_from_loom_file_h5py
+    script = <<~PYTHON
+      import h5py
+      import json
+      import sys
+
+      loom_path = sys.argv[1]
+      with h5py.File(loom_path, "r") as f:
+        col_attrs = list(f["col_attrs"].keys()) if "col_attrs" in f else []
+        row_attrs = list(f["row_attrs"].keys()) if "row_attrs" in f else []
+        global_attrs = list(f["attrs"].keys()) if "attrs" in f else []
+        layers = list(f["layers"].keys()) if "layers" in f else []
+        has_matrix = "/matrix" in f
+
+        n_cells = None
+        n_genes = None
+        if has_matrix:
+          m = f["/matrix"]
+          if len(m.shape) >= 2:
+            n_genes = int(m.shape[0])
+            n_cells = int(m.shape[1])
+
+      print(json.dumps({
+        "n_cells": n_cells,
+        "n_genes": n_genes,
+        "col_attrs": col_attrs,
+        "row_attrs": row_attrs,
+        "global_attrs": global_attrs,
+        "layers": layers,
+        "has_matrix": has_matrix
+      }))
+    PYTHON
+
+    stdout, stderr, status = Open3.capture3(
+      'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-', @loom_path,
+      stdin_data: script
+    )
+    unless status.success?
+      @warnings << { field: 'file_info', message: "Could not extract file structure with fallback: #{stderr.to_s.strip}" }
+      return nil
+    end
+
+    parsed = JSON.parse(stdout)
+    @warnings << { field: 'file_info', message: 'Using h5py structure fallback (ASAP.jar ListMetadata unavailable for this file)' }
+    {
+      n_cells: parsed['n_cells'],
+      n_genes: parsed['n_genes'],
+      col_attrs: parsed['col_attrs'] || [],
+      row_attrs: parsed['row_attrs'] || [],
+      global_attrs: parsed['global_attrs'] || [],
+      layers: parsed['layers'] || [],
+      has_matrix: parsed['has_matrix'] == true
+    }
+  rescue JSON::ParserError => e
+    @warnings << { field: 'file_info', message: "Could not parse fallback file structure: #{e.message}" }
+    nil
+  rescue StandardError => e
+    @warnings << { field: 'file_info', message: "Could not extract file structure fallback: #{e.message}" }
+    nil
   end
 
   def validate_cell_metadata

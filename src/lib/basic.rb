@@ -1,9 +1,21 @@
+require 'cgi'
 require 'zlib'
 
 module Basic
 
   # Cla rows created by parsing / load_annot (add_clas) use this cla_sources.id (ASAP auto annotation).
   ASAP_AUTO_CLA_SOURCE_ID = 3
+
+  # Suggested embedded JSON key for the cross-tool metadata catalog (location depends on file format: LOOM attrs, H5AD, RDS, etc.).
+  DATA_FILE_METADATA_CATALOG_ATTR = 'metadata_catalog'
+  DATA_FILE_METADATA_CATALOG_SCHEMA_VERSION = '1'
+  DATA_FILE_METADATA_CATALOG_TOOL_ASAP = 'ASAP'
+  DATA_FILE_TYPES = %w[LOOM H5AD RDS].freeze
+  DATA_FILE_TYPE_BY_EXTENSION = {
+    '.loom' => 'LOOM',
+    '.h5ad' => 'H5AD',
+    '.rds' => 'RDS'
+  }.freeze
 
   # Raised when a cloned project needs the same metadata column on the immediate parent project
   # (see marker_groups_annot_id) and that source Annot row cannot be found.
@@ -20,130 +32,84 @@ module Basic
       db_name
     end
 
-    def generate_project_json p
+    def project_export_server_url
+      ENV.fetch('SERVER_URL').to_s.chomp('/')
+    end
 
+    def normalize_data_file_path(path)
+      path.to_s.strip.sub(%r{\A/+}, '')
+    end
+
+    def data_file_type_from_path(path)
+      DATA_FILE_TYPE_BY_EXTENSION[File.extname(path.to_s).downcase]
+    end
+
+    def data_file_url_for_project(project, data_file_path)
+      "#{project_export_server_url}/projects/#{project.key}/get_file?filename=#{CGI.escape(data_file_path)}"
+    end
+
+    # Docker Hub image page (layers view), e.g. fabdavid/asap_run:v5.1 ->
+    # https://hub.docker.com/layers/fabdavid/asap_run/v5.1
+    def dockerhub_layers_url(image_name)
+      return nil if image_name.blank?
+
+      image_ref = image_name.to_s.strip.split('@').first
+      repo, tag = if image_ref.include?(':')
+        image_ref.rpartition(':').values_at(0, 2)
+      else
+        [image_ref, 'latest']
+      end
+      return nil if repo.blank? || repo.include?(' ') || repo.include?('://')
+      return nil unless repo.match?(%r{\A[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]+(?:/[a-z0-9][a-z0-9_.-]+)?\z}i)
+
+      "https://hub.docker.com/layers/#{repo}/#{tag}"
+    end
+
+    def build_export_lookup_tables
       h_references = {}
-      Article.all.map{|a| h_references[a.doi] = a}
+      Article.all.each { |a| h_references[a.doi] = a }
       h_organisms = {}
-      Organism.all.map{|e| h_organisms[e.id] = e}
+      Organism.all.each { |e| h_organisms[e.id] = e }
       h_identifier_types = {}
-      IdentifierType.all.map{|it| h_identifier_types[it.id] = it}
+      IdentifierType.all.each { |it| h_identifier_types[it.id] = it }
       h_cla_sources = {}
-      ClaSource.all.map{|cla_source| h_cla_sources[cla_source.id] = cla_source}
+      ClaSource.all.each { |cla_source| h_cla_sources[cla_source.id] = cla_source }
       h_cell_ontologies = {}
-      CellOntology.all.map{|co| h_cell_ontologies[co.id] = co}
+      CellOntology.all.each { |co| h_cell_ontologies[co.id] = co }
       h_envs = {}
-      Version.all.map{|v| h_envs[v.id] = Basic.safe_parse_json(v.env_json, {})}
+      Version.all.each { |v| h_envs[v.id] = Basic.safe_parse_json(v.env_json, {}) }
       h_steps = {}
-      Step.all.map{|s| h_steps[s.id] =s}
+      Step.all.each { |s| h_steps[s.id] = s }
       h_std_methods = {}
-      StdMethod.all.map{|s| h_std_methods[s.id] = s}
+      StdMethod.all.each { |s| h_std_methods[s.id] = s }
       h_project_types = {}
-      ProjectType.all.map{|e| h_project_types[e.id] = e}
-      
-      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s + p.key
-      
-      h_env = h_envs[p.version_id]
-      asap_data_db = Basic.asap_data_db_name_from_env!(h_env)
-
-      clas = Cla.where(:project_id => p.id).all.map{|e|
-
-        up_genes = (e.up_gene_ids and e.up_gene_ids.size > 0) ? Basic.sql_query2(:asap_data, h_env['asap_data_db_version'], 'genes', '', '*', "id in (#{e.up_gene_ids})").map{|g| Basic.format_gene(g)} : nil
-        # logger.debug(e.up_gene_ids.split(","))                                                                                                                                                                                               
-        down_genes = (e.down_gene_ids and e.down_gene_ids.size > 0) ? Basic.sql_query2(:asap_data, h_env['asap_data_db_version'], 'genes', '', '*', "id in (#{e.down_gene_ids})").map{|g| Basic.format_gene(g)} : nil
-
-        cots =  (e.cell_ontology_term_ids) ?
-        ::CellOntologyTerm.where(:id => e.cell_ontology_term_ids.split(",")).all.map{|cot|
-          {
-            :identifier => cot.identifier,
-            :name => cot.name,
-            :description => cot.description,
-            :ontology => h_cell_ontologies[cot.cell_ontology_id].name
-          }
-        } : nil
-
-        {
-          :id => e.id,
-          :num => e.num,
-          :name => e.name,
-          :cell_set_key => (cs = e.cell_set) ? cs.key : nil,
-          :comment => e.comment,
-          :project_id => e.project_id,
-          :clone_id => e.clone_id,
-          :cat => e.cat,
-          :cat_idx => e.cat_idx,
-          :cell_ontology_terms => cots || [],
-          :annot_id => e.annot_id,
-          :up_genes => up_genes,
-          :down_genes => down_genes,
-          :orcid_user => OrcidUser.where(:id => e.orcid_user_id).first,
-          :user_id => (u = User.where(:id => e.user_id).first) ? u.email : nil,
-          :source => (e.cla_source_id and h_cla_sources[e.cla_source_id]) ? h_cla_sources[e.cla_source_id].name : nil,
-          :nber_agree => e.nber_agree,
-          :nber_disagree => e.nber_disagree,
-          :score => e.nber_agree - e.nber_disagree,
-          :obsolete => e.obsolete,
-          :created_at => e.created_at,
-          :updated_at => e.updated_at
-        }
+      ProjectType.all.each { |e| h_project_types[e.id] = e }
+      {
+        :h_references => h_references,
+        :h_organisms => h_organisms,
+        :h_identifier_types => h_identifier_types,
+        :h_cla_sources => h_cla_sources,
+        :h_cell_ontologies => h_cell_ontologies,
+        :h_envs => h_envs,
+        :h_steps => h_steps,
+        :h_std_methods => h_std_methods,
+        :h_project_types => h_project_types
       }
-      h_annots = {}
-      h_clas = {}
-      clas.map{|cla|
-        h_annots[cla[:annot_id]] = {};
-        h_clas[cla[:annot_id]] ||= [];
-        h_clas[cla[:annot_id]].push cla
-      }
+    end
 
-      if p.public_id == 93
-        #puts clas.to_json
-        #   puts h_clas.to_json
-      end
-
-      Annot.where(:id => h_annots.keys).all.map{|a| h_annots[a.id] = a}
-      annotation_groups = []
-      h_annots.each_key do |annot_id|
-        annot = h_annots[annot_id]
-        run = Run.where(:id => annot.run_id).first
-        lineage_runs = Run.where(:id => run.lineage_run_ids.split(",")).all + [run]
-        h_command = Basic.safe_parse_json(run.command_json, {})
-        #  command = (h_command['docker_call']) ? h_command['docker_call'].gsub(project_dir.to_s, "$PROJECT_DIR") : nil
-        command = Basic.build_cmd(h_command).gsub(project_dir.to_s, "$PROJECT_DIR").gsub(/postgres\:\d+\/asap_data_v\d+/, ('$ASAP_DATA_DB_HOST:$ASAP_DATA_DB_PORT/' + asap_data_db))
-        docker_container = ""
-        if h_command['docker_call'] and m = h_command['docker_call'].match(/([\w\d\:\/]+) -c$/)
-          docker_container = m[1]
-        end
-        origin = lineage_runs.map{|e|
-          {
-            :run_id => e.id,
-            :step => h_steps[e.step_id].label,
-            :std_method => h_std_methods[e.std_method_id].label,
-            :num => e.num,
-            :attrs => Basic.safe_parse_json(e.attrs_json, {}),
-            :command => ((h_steps[e.step_id].name != 'parsing') ? command : nil),
-            :docker_repo => "dockerhub",
-            :docker_container_url => nil,
-            :docker_container_name => docker_container
-          }
-        }
-        annotation_group = {
-          :origin => origin,
-          :annot_id => annot.id,
-          :annot_run_id => annot.run_id,
-          :metadata => annot.name,
-          :annotations => h_clas[annot_id].select{|e| e[:num] and e[:score]}.sort{|a, b| [b[:score], a[:num]] <=> [a[:score], b[:num]]}
-        }
-        annotation_groups.push annotation_group
-      end
-      h = {
+    def project_export_context_for_metadata(p, tables)
+      server_url = project_export_server_url
+      h_references = tables[:h_references]
+      h_organisms = tables[:h_organisms]
+      h_identifier_types = tables[:h_identifier_types]
+      h_project_types = tables[:h_project_types]
+      {
         :public_key => p.public_key,
         :key => p.key,
+        :url => "#{server_url}/projects/#{p.key}",
+        :json_url => "#{server_url}/api/projects/#{p.key}",
         :doi => p.doi,
-        :asap_data_db => asap_data_db,
-        :asap_data_db_url => ENV.fetch('SERVER_URL') + "/dumps/#{asap_data_db}.sql.gz",
         :version => "v" + p.version_id.to_s,
-        :reproducibility_instructions_url => ENV.fetch('SERVER_URL') + "/projects/#{p.key}/instructions",
-        :reproducibility_script_url => ENV.fetch('SERVER_URL') + "/projects/#{p.key}/get_commands",
         :nber_cols => p.nber_cols,
         :nber_rows => p.nber_rows,
         :reference => h_references[p.doi],
@@ -154,25 +120,160 @@ module Basic
         :organism => h_organisms[p.organism_id].name,
         :cloned_project_id => p.cloned_project_id,
         :project_type => (h_project_types[p.project_type_id]) ? h_project_types[p.project_type_id].name : nil,
-        :nber_cloned => p.nber_cloned,
-        :nber_views => p.nber_views,
-        :disk_size_archived => p.disk_size_archived,
-        :project_cell_set_key => (pcs = p.project_cell_set) ? pcs.key : nil,
-        :experiments => p.exp_entries.map{|e|
+        :experiments => p.exp_entries.map { |e|
           {
             :identifier_type => h_identifier_types[e.identifier_type_id].name,
-            :identifier =>  e.identifier,
+            :identifier => e.identifier,
             :url => h_identifier_types[e.identifier_type_id].url_mask.gsub(/\#\{id\}/, e.identifier)
           }
-        },
-        :annotation_groups => annotation_groups
+        }
       }
+    end
 
+    def build_cla_export_hash(e, h_env, tables)
+      h_cell_ontologies = tables[:h_cell_ontologies]
+      h_cla_sources = tables[:h_cla_sources]
+
+      up_genes = (e.up_gene_ids and e.up_gene_ids.size > 0) ? Basic.sql_query2(:asap_data, h_env['asap_data_db_version'], 'genes', '', '*', "id in (#{e.up_gene_ids})").map { |g| Basic.format_gene(g) } : nil
+      down_genes = (e.down_gene_ids and e.down_gene_ids.size > 0) ? Basic.sql_query2(:asap_data, h_env['asap_data_db_version'], 'genes', '', '*', "id in (#{e.down_gene_ids})").map { |g| Basic.format_gene(g) } : nil
+
+      cots = (e.cell_ontology_term_ids) ?
+        ::CellOntologyTerm.where(:id => e.cell_ontology_term_ids.split(",")).all.map { |cot|
+          {
+            :identifier => cot.identifier,
+            :name => cot.name,
+            :description => cot.description,
+            :ontology => h_cell_ontologies[cot.cell_ontology_id].name
+          }
+        } : nil
+
+      {
+        :id => e.id,
+        :num => e.num,
+        :name => e.name,
+        :cell_set_key => (cs = e.cell_set) ? cs.key : nil,
+        :comment => e.comment,
+        :project_id => e.project_id,
+        :clone_id => e.clone_id,
+        :cat => e.cat,
+        :cat_idx => e.cat_idx,
+        :cell_ontology_terms => cots || [],
+        :up_genes => up_genes,
+        :down_genes => down_genes,
+        :orcid_user => OrcidUser.where(:id => e.orcid_user_id).first,
+        :user_id => (u = User.where(:id => e.user_id).first) ? u.email : nil,
+        :source => (e.cla_source_id and h_cla_sources[e.cla_source_id]) ? h_cla_sources[e.cla_source_id].name : nil,
+        :nber_agree => e.nber_agree,
+        :nber_disagree => e.nber_disagree,
+        :score => e.nber_agree - e.nber_disagree,
+        :obsolete => e.obsolete,
+        :created_at => e.created_at,
+        :updated_at => e.updated_at
+      }
+    end
+
+    def build_clas_index_for_project(p, tables, data_file_path: nil)
+      h_env = tables[:h_envs][p.version_id]
+      h_annots = {}
+      h_clas = {}
+      cla_scope = Cla.where(:project_id => p.id)
+      if data_file_path.present?
+        annot_ids = Annot.where(:project_id => p.id, :filepath => data_file_path).pluck(:id)
+        cla_scope = cla_scope.where(:annot_id => annot_ids)
+      end
+      cla_scope.find_each do |e|
+        cla = build_cla_export_hash(e, h_env, tables)
+        h_annots[e.annot_id] = {}
+        h_clas[e.annot_id] ||= []
+        h_clas[e.annot_id].push cla
+      end
+      Annot.where(:id => h_annots.keys).all.each { |a| h_annots[a.id] = a }
+      { :h_annots => h_annots, :h_clas => h_clas }
+    end
+
+    def sanitize_export_command_paths(command, project, project_dir)
+      return command if command.blank?
+
+      user_id = project.user_id.to_s
+      project_key = project.key.to_s
+      user_data_dir = ENV.fetch('USER_DATA_DIR').to_s.chomp('/')
+      data_roots = [
+        Pathname.new(user_data_dir).parent.to_s,
+        user_data_dir,
+        '/data/asap2',
+        '/data/asap2_test'
+      ].map { |root| root.to_s.chomp('/') }.uniq
+
+      prefixes = [project_dir.to_s.chomp('/')]
+      data_roots.each do |root|
+        prefixes << "#{root}/users/#{user_id}/#{project_key}"
+        prefixes << "#{root}/#{user_id}/#{project_key}"
+      end
+
+      cmd = command.dup
+      prefixes.uniq.reject(&:blank?).sort_by { |path| -path.length }.each do |prefix|
+        cmd = cmd.gsub(prefix, '$PROJECT_DIR')
+      end
+      cmd
+    end
+
+    def build_run_pipeline_for_annot(annot, project, project_dir, tables, asap_data_db)
+      h_steps = tables[:h_steps]
+      h_std_methods = tables[:h_std_methods]
+      run = Run.where(:id => annot.run_id).first
+      return [] unless run
+
+      lineage_runs = Run.where(:id => run.lineage_run_ids.split(",")).all + [run]
+      h_command = Basic.safe_parse_json(run.command_json, {})
+      command = Basic.build_cmd(h_command)
+      command = sanitize_export_command_paths(command, project, project_dir)
+      command = command.gsub(/postgres\:\d+\/asap_data_v\d+/, ('$ASAP_DATA_DB_HOST:$ASAP_DATA_DB_PORT/' + asap_data_db))
+      docker_image_name = ""
+      if h_command['docker_call'] and m = h_command['docker_call'].match(/([\w\d\:\/]+) -c$/)
+        docker_image_name = m[1]
+      end
+      docker_image_url = dockerhub_layers_url(docker_image_name)
+      lineage_runs.map { |e|
+        {
+          :run_id => e.id,
+          :step_id => e.step_id,
+          :step_label => h_steps[e.step_id].label,
+          :method_id => e.std_method_id,
+          :method_label => h_std_methods[e.std_method_id].label,
+          :num => e.num,
+          :attrs => Basic.safe_parse_json(e.attrs_json, {}),
+          :command => ((h_steps[e.step_id].name != 'parsing') ? command : nil),
+          :docker_repo => "dockerhub",
+          :docker_image_url => docker_image_url,
+          :docker_image_name => docker_image_name
+        }
+      }
+    end
+
+    def build_metadata_list_entries(p, index, project_dir, tables, asap_data_db, data_file_path: nil)
+      h_clas = index[:h_clas]
+      metadata_lists = []
+      annots_scope = Annot.where(:project_id => p.id, :dim => 1)
+      annots_scope = annots_scope.where(:filepath => data_file_path) if data_file_path.present?
+      annots_scope.order(:name).find_each do |annot|
+        metadata_id = annot.id
+        metadata_lists.push(
+          :run_pipeline => build_run_pipeline_for_annot(annot, p, project_dir, tables, asap_data_db),
+          :id => annot.id,
+          :run_id => annot.run_id,
+          :path => annot.name,
+          :annotations => (h_clas[metadata_id] || []).select { |e| e[:num] and e[:score] }.sort { |a, b| [b[:score], a[:num]] <=> [a[:score], b[:num]] }
+        )
+      end
+      metadata_lists
+    end
+
+    def append_ontology_terms_to_project_export!(h, p, h_annots)
       h_cots = {}
-      ::CellOntologyTerm.where(:id => OtProject.where(:project_id => p.id).all.map{|e| e.cell_ontology_term_id}.uniq).all.each do |cot|
+      ::CellOntologyTerm.where(:id => OtProject.where(:project_id => p.id).all.map { |e| e.cell_ontology_term_id }.uniq).all.each do |cot|
         h_cots[cot.id] = cot
       end
-      
+
       OntologyTermType.all.each do |ott|
         ott_key = ott.name
         ot_projects = OtProject.where(:ontology_term_type_id => ott.id, :project_id => p.id).all
@@ -180,7 +281,7 @@ module Basic
         if ott_project and ott_project.not_applicable
           h[ott_key] = nil
         else
-          h[ott_key] = ot_projects.map{|otp|
+          h[ott_key] = ot_projects.map { |otp|
             {
               :identifier => (cot_id = otp.cell_ontology_term_id) ? h_cots[cot_id].identifier : nil,
               :name => (cot_id) ? h_cots[cot_id].name : otp.free_text,
@@ -188,11 +289,117 @@ module Basic
             }
           }
         end
-        
       end
-            
-      return h
+      h
+    end
 
+    def generate_project_json p
+      tables = build_export_lookup_tables
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s + p.key
+      h_env = tables[:h_envs][p.version_id]
+      asap_data_db = Basic.asap_data_db_name_from_env!(h_env)
+      index = build_clas_index_for_project(p, tables)
+      metadata_lists = build_metadata_list_entries(p, index, project_dir, tables, asap_data_db)
+      annots_by_id = Annot.where(:project_id => p.id).index_by(&:id)
+      server_url = project_export_server_url
+      h = {
+        :public_key => p.public_key,
+        :key => p.key,
+        :url => "#{server_url}/projects/#{p.key}",
+        :json_url => "#{server_url}/api/projects/#{p.key}",
+        :doi => p.doi,
+        :asap_data_db => asap_data_db,
+        :asap_data_db_url => ENV.fetch('SERVER_URL') + "/dumps/#{asap_data_db}.sql.gz",
+        :version => "v" + p.version_id.to_s,
+        :reproducibility_instructions_url => ENV.fetch('SERVER_URL') + "/projects/#{p.key}/instructions",
+        :reproducibility_script_url => ENV.fetch('SERVER_URL') + "/projects/#{p.key}/get_commands",
+        :nber_cols => p.nber_cols,
+        :nber_rows => p.nber_rows,
+        :reference => tables[:h_references][p.doi],
+        :tissue => p.tissue,
+        :technology => p.technology,
+        :extra_info => p.extra_info,
+        :tax_id => tables[:h_organisms][p.organism_id].tax_id,
+        :organism => tables[:h_organisms][p.organism_id].name,
+        :cloned_project_id => p.cloned_project_id,
+        :project_type => (tables[:h_project_types][p.project_type_id]) ? tables[:h_project_types][p.project_type_id].name : nil,
+        :nber_cloned => p.nber_cloned,
+        :nber_views => p.nber_views,
+        :disk_size_archived => p.disk_size_archived,
+        :project_cell_set_key => (pcs = p.project_cell_set) ? pcs.key : nil,
+        :experiments => p.exp_entries.map { |e|
+          {
+            :identifier_type => tables[:h_identifier_types][e.identifier_type_id].name,
+            :identifier => e.identifier,
+            :url => tables[:h_identifier_types][e.identifier_type_id].url_mask.gsub(/\#\{id\}/, e.identifier)
+          }
+        },
+        :metadata_lists => metadata_lists
+      }
+      append_ontology_terms_to_project_export!(h, p, annots_by_id)
+    end
+
+    # Cross-tool metadata catalog for one project data file (LOOM, H5AD, RDS, etc.).
+    # Persisted location is format-specific; see DATA_FILE_METADATA_CATALOG_ATTR.
+    def generate_data_file_metadata_catalog(p, data_file_path)
+      data_file_path = normalize_data_file_path(data_file_path)
+      return nil if data_file_path.blank?
+      return nil unless Annot.where(:project_id => p.id, :filepath => data_file_path).exists?
+
+      data_file_type = data_file_type_from_path(data_file_path)
+      return nil unless data_file_type
+
+      tables = build_export_lookup_tables
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s + p.key
+      h_env = tables[:h_envs][p.version_id]
+      asap_data_db = Basic.asap_data_db_name_from_env!(h_env)
+      index = build_clas_index_for_project(p, tables, :data_file_path => data_file_path)
+      project_ctx = project_export_context_for_metadata(p, tables)
+      lists = build_metadata_list_entries(p, index, project_dir, tables, asap_data_db, data_file_path: data_file_path)
+
+      list_of_projects = [
+        {
+          :tool => DATA_FILE_METADATA_CATALOG_TOOL_ASAP,
+          :identifier => p.key,
+          :url => project_ctx[:url],
+          :json_url => project_ctx[:json_url]
+        }
+      ]
+
+      run_entries_by_id = {}
+      lists.each do |entry|
+        Array(entry[:run_pipeline]).each do |run_entry|
+          run_id = run_entry[:run_id].to_i
+          next unless run_id.positive?
+          run_entries_by_id[run_id] ||= run_entry
+        end
+      end
+      run_created_at_by_id = Run.where(:id => run_entries_by_id.keys).pluck(:id, :created_at).to_h
+      sorted_run_ids = run_entries_by_id.keys.sort_by { |rid| [run_created_at_by_id[rid] || Time.at(0), rid] }
+
+      list_of_runs = []
+      run_idx_by_id = {}
+      sorted_run_ids.each_with_index do |rid, idx|
+        run_idx_by_id[rid] = idx
+        list_of_runs << run_entries_by_id[rid].merge(:project_idx => 0)
+      end
+
+      list_of_metadata = lists.map do |entry|
+        pipeline_run_idx = Array(entry[:run_pipeline]).map { |run_entry|
+          rid = run_entry[:run_id].to_i
+          run_idx_by_id[rid]
+        }.compact
+        entry.except(:run_pipeline).merge(:pipeline_run_idx => pipeline_run_idx)
+      end
+
+      {
+        :schema_version => DATA_FILE_METADATA_CATALOG_SCHEMA_VERSION,
+        :data_file_url => data_file_url_for_project(p, data_file_path),
+        :data_file_type => data_file_type,
+        :list_of_projects => list_of_projects,
+        :list_of_runs => list_of_runs,
+        :list_of_metadata => list_of_metadata
+      }
     end
 
       def format_gene g
@@ -611,6 +818,9 @@ module Basic
     # omit_when_null skips the entry if the value is blank (nothing added). You do not need
     # null_value on that entry; it is only for entries that stay on the command with a literal
     # when the resolved value is blank.
+    # valueless_flag: for argparse-style boolean flags (store_true). When the resolved value is
+    # truthy, emit only the flag name (e.g. --chunked) with no following argument; when falsy,
+    # skip the entry entirely. Do not combine with a truthy checkbox value on the command line.
     # omit_when_all_against_compl skips when attrs["all_against_compl"] is true (same mechanism,
     # useful when the value can be non-empty but the flag must still drop the cli flag).
     #
@@ -685,6 +895,10 @@ module Basic
       if command_json_boolean_truthy?(entry['omit_when_null'])
         v = value_after_template_expand
         return true if v.nil? || v.to_s.strip == ''
+      end
+
+      if command_json_boolean_truthy?(entry['valueless_flag'])
+        return true unless command_json_boolean_truthy?(value_after_template_expand)
       end
 
       false
@@ -2954,6 +3168,68 @@ module Basic
 
     end
     
+    # Map output.json log fields (is_log_transformed, log_type, log_base) to data_transformations.id.
+    # Returns nil when log status is unknown or not provided.
+    def data_transformation_id_from_log_attrs(attrs)
+      return nil unless attrs.is_a?(Hash)
+      return nil unless attrs.key?('is_log_transformed')
+
+      transformed = attrs['is_log_transformed']
+      if transformed == false || transformed == 0 || transformed == '0' || transformed.to_s.downcase == 'false'
+        return 1
+      end
+      unless transformed == true || transformed == 1 || transformed == '1' || transformed.to_s.downcase == 'true'
+        return nil
+      end
+
+      log_type = attrs['log_type'].to_s.downcase
+      return nil if log_type.include?('pearson') || log_type.include?('residual')
+
+      base = attrs['log_base']
+      return 2 if base.to_f == 10.0 || log_type.include?('log10')
+      return 3 if base.to_f == 2.0 || log_type.include?('log2')
+
+      4
+    end
+
+    def output_log_transform_block(h_results)
+      return nil unless h_results.is_a?(Hash)
+
+      %w[normalization scaling hvg pca clustering].each do |key|
+        block = h_results[key]
+        return block if block.is_a?(Hash) && block.key?('is_log_transformed')
+      end
+      h_results.each_value do |v|
+        next unless v.is_a?(Hash) && v.key?('is_log_transformed')
+        return v
+      end
+      nil
+    end
+
+    def input_matrix_data_transformation_id_for_run(run, h_attrs = nil, cache = nil)
+      cache ||= {}
+      return cache[:input_matrix_data_transformation_id] if cache.key?(:input_matrix_data_transformation_id)
+
+      h_attrs ||= Basic.safe_parse_json(run.attrs_json, {})
+      im = h_attrs['input_matrix']
+      im = im.first if im.is_a?(Array) && im.any?
+      im = im if im.is_a?(Hash)
+
+      annot = nil
+      if im.is_a?(Hash)
+        if im['annot_id'].present?
+          annot = Annot.find_by(id: im['annot_id'])
+        elsif im['output_dataset'].present?
+          scope = Annot.where(project_id: run.project_id, name: im['output_dataset'])
+          scope = scope.where(filepath: im['output_filename']) if im['output_filename'].present?
+          scope = scope.where(run_id: im['run_id']) if im['run_id'].present?
+          annot = scope.order(id: :desc).first
+        end
+      end
+
+      cache[:input_matrix_data_transformation_id] = annot&.data_transformation_id
+    end
+
     def load_annot run, meta, relative_filepath, h_data_types, h_data_classes, logger, cache = nil
       cache ||= {}
       project_by_id = cache[:project_by_id] ||= {}
@@ -3153,6 +3429,17 @@ module Basic
           :output_attr_id => (output_attr) ? output_attr.id : nil,
           :user_id => run.user_id
         }
+
+        if meta['on'] == 'EXPRESSION_MATRIX' || meta['name'].to_s.start_with?('/layers/')
+          dt_id = if meta.key?('is_log_transformed')
+                    data_transformation_id_from_log_attrs(meta)
+                  elsif cache && cache[:data_transformation_from_output]
+                    cache[:data_transformation_id]
+                  else
+                    cache[:data_transformation_id] if cache
+                  end
+          h_annot[:data_transformation_id] = dt_id unless dt_id.nil?
+        end
         
 #        annot = Annot.where(:name => meta['name'], :filepath => relative_filepath, :store_run_id => (fo) ? fo.run_id : nil, :project_id => run.project_id).first
 
@@ -3642,6 +3929,11 @@ module Basic
           value = value_str.gsub(/(\#\{[\w_]+?\})/) { |var| h_var[var[2..-2]] }
           next if skip_command_json_arg_or_opt_entry?(opt, h_var, p, value)
 
+          if command_json_boolean_truthy?(opt['valueless_flag'])
+            list_opts.push({:opt => opt['opt'], :param_key => opt['param_key'], :value => ''})
+            next
+          end
+
           list_opts.push({:opt => opt['opt'], :param_key => opt['param_key'], :value => (value != nil and value != '') ? value : opt["null_value"]})
         end
       end
@@ -3775,7 +4067,7 @@ module Basic
       h_cmd['args'] ||= []
       cmd_parts = [
         h_cmd['program'],
-        h_cmd['opts'].map { |e| "#{e['opt']} #{safe_cmdline_param(e['value'])}" }.join(' '),
+        h_cmd['opts'].map { |e| command_json_opt_shell_fragment(e) }.join(' '),
         h_cmd['args'].map { |e| safe_cmdline_param(e['value']) }.join(' '),
         (h_cmd['exec_stdout']) ? "1> #{h_cmd['exec_stdout']}" : nil,
         (h_cmd['exec_stderr']) ? "2> #{h_cmd['exec_stderr']}" : nil
@@ -3866,6 +4158,15 @@ module Basic
       return cmd
     end
 
+    def command_json_opt_shell_fragment(entry)
+      opt = entry['opt']
+      val = entry['value']
+      return opt.to_s if val.nil? || val.to_s.strip == ''
+
+      "#{opt} #{safe_cmdline_param(val)}"
+    end
+    private :command_json_opt_shell_fragment
+
     def safe_cmdline_param p
       p = p.to_s
       contains_quotes = false
@@ -3899,7 +4200,7 @@ module Basic
       
       cmd_parts = [
                    program_cmd,
-                   h_cmd['opts'].map{|e| "#{e['opt']} #{safe_cmdline_param(e['value'])}"}.join(" "), 
+                   h_cmd['opts'].map { |e| command_json_opt_shell_fragment(e) }.join(" "), 
                    h_cmd['args'].map{|e| safe_cmdline_param(e['value'])}.join(" "),
                    (h_cmd['exec_stdout']) ? "1> #{h_cmd['exec_stdout']}" : nil,
                    (h_cmd['exec_stderr']) ? "2> #{h_cmd['exec_stderr']}" : nil
@@ -4199,6 +4500,8 @@ module Basic
         'output_dir' => output_dir, #project_dir + step.name + run.id.to_s,
         'step_tag' => step.tag,
         'std_method_name' => (std_method = run.std_method) ? std_method.name : step.name,
+        'std_method_label' => (std_method = run.std_method) ? std_method.label : step.label,
+        'std_method_short_label' => (std_method = run.std_method) ? std_method.short_label : step.short_label,
         'run_num' => run.num
       }
 
@@ -4522,6 +4825,20 @@ puts "TEST RUN"
       logger.info("[Basic.finish_run] h_output_files keys: #{h_output_files.keys.inspect}")
       logger.debug("[Basic.finish_run] h_output_files: #{h_output_files.to_json}")
       finish_run_cache = {}
+      input_dt_id = input_matrix_data_transformation_id_for_run(run, h_attrs, finish_run_cache)
+      log_block = output_log_transform_block(h_results)
+      output_log_specified = log_block.is_a?(Hash) && log_block.key?('is_log_transformed')
+      if output_log_specified
+        finish_run_cache[:data_transformation_from_output] = true
+        finish_run_cache[:data_transformation_id] = data_transformation_id_from_log_attrs(log_block)
+        logger.info("[Basic.finish_run] data_transformation_id=#{finish_run_cache[:data_transformation_id].inspect} from output log block")
+      else
+        finish_run_cache[:data_transformation_from_output] = false
+        finish_run_cache[:data_transformation_id] = input_dt_id
+        if input_dt_id
+          logger.info("[Basic.finish_run] data_transformation_id=#{input_dt_id.inspect} inherited from input matrix")
+        end
+      end
       ## edit type of output_files in function of properties described in output.json
       ActiveRecord::Base.transaction do
         h_output_files.each_key do |k|

@@ -18,11 +18,13 @@ This specification is format-bridge focused: it defines how to store data in Loo
 
 ASAP internal Loom orientation is genes x cells.
 
+`parse.v8.py` selects one primary matrix from `"/X"`, `"/raw/X"`, or `"/raw.X"` (or `--sel`) and writes it to `"/matrix"`. Other candidate matrices with matching dimensions are written to `"/layers/{safe_name}"` (for example `"/layers/X"`, `"/layers/raw_X"`).
+
 | Logical AnnData object | Loom storage (ASAP orientation) |
 | --- | --- |
-| `X` | `/matrix` (genes x cells in ASAP Loom) |
+| `X` | path declared in `x_path` (often `"/matrix"` or `"/layers/X"`) |
 | `layers[name]` | `/layers/{name}` |
-| `raw.X` | `/layers/raw` (required if raw exists) |
+| `raw.X` | path declared in `raw_x_path`; can be `"/matrix"` when raw is selected as primary |
 | `obs` columns | `/col_attrs/{field}` |
 | `var` columns | `/row_attrs/{field}` |
 | `obs.index` | `/col_attrs/CellID` (or declared equivalent) |
@@ -40,7 +42,7 @@ This manifest is the single source of truth used by the conversion tool.
 
 - `version` (string): mapping schema version, e.g. `"1.0.0"`
 - `orientation` (string): `"genes_x_cells"` for ASAP Loom
-- `x_path` (string): path to main matrix, normally `"/matrix"`
+- `x_path` (string): path to the normalized (or primary analysis) matrix for `adata.X`
 - `obs_path` (string): path prefix for obs columns, normally `"/col_attrs"`
 - `var_path` (string): path prefix for var columns, normally `"/row_attrs"`
 - `obs_index_key` (string): e.g. `"CellID"`
@@ -48,9 +50,9 @@ This manifest is the single source of truth used by the conversion tool.
 
 ### Required when data exists
 
-- `raw_x_path` (string): required if raw matrix exists
+- `raw_x_path` (string): required only when a raw matrix exists in Loom
 - `raw_var_path` (string): required if raw var table is stored separately
-- `layers` (object): mapping from AnnData layer names to Loom dataset paths
+- `layers` (object): mapping from AnnData layer names to Loom dataset paths (only for matrices distinct from `x_path` and `raw_x_path`)
 - `obsm` (object): mapping from obsm keys to Loom dataset paths
 - `varm` (object): mapping from varm keys to Loom dataset paths
 - `obsp` (object): mapping from obsp keys to Loom dataset paths
@@ -89,14 +91,24 @@ Recommended storage prefixes:
 
 These paths MUST be declared in `anndata_mapping`.
 
+For ASAP Loom files where embeddings are stored directly in attribute groups (as written by `parse.v8.py`), map them to the corresponding axis:
+
+- obs-level embeddings (for example `X_umap`) -> `/col_attrs/...` in `obsm`
+- var-level embeddings -> `/row_attrs/...` in `varm`
+
 ### 3) Raw representation
+
+scFAIR does not require `raw.X` in all cases. When raw is absent, `var.feature_is_filtered` must be present with all values `False`.
 
 If raw is intended in H5AD:
 
-- raw matrix MUST exist as `/layers/raw` (or path declared in manifest)
+- raw matrix MUST be declared via `raw_x_path` only (do not also map the same dataset under `layers`)
+- when raw is selected as primary during Loom creation, `raw_x_path` SHOULD be `"/matrix"` and normalized `X` SHOULD be declared in `x_path` (for example `"/layers/X"`)
 - raw var metadata MUST be available, either:
   - at dedicated dataset/table path (preferred), or
   - duplicated in var with explicit `raw_var_fields` declaration in manifest
+
+If normalized `X` is selected as primary and written to `"/matrix"`, raw is considered absent: omit `raw_x_path` and do not declare a raw entry in `layers`.
 
 ### 4) Categorical metadata
 
@@ -127,27 +139,29 @@ Not allowed for primary analytical arrays:
 4. Dimensions align with orientation declaration.
 5. Pairwise matrices are square and dimensions match obs/var cardinality.
 6. Required schema metadata fields are present.
+7. The same Loom dataset path is not mapped to both `raw_x_path` and `layers` (avoids duplicate raw representation in H5AD).
 
 If any check fails, file is non-compliant for deterministic H5AD reconstruction.
 
-## Minimal manifest example
+## Minimal manifest examples
+
+Case A: raw selected as primary during Loom creation (`/matrix` stores raw matrix, normalized `X` in a layer).
 
 ```json
 {
   "version": "1.0.0",
   "orientation": "genes_x_cells",
-  "x_path": "/matrix",
+  "x_path": "/layers/X",
   "obs_path": "/col_attrs",
   "var_path": "/row_attrs",
   "obs_index_key": "CellID",
   "var_index_key": "feature_id",
-  "raw_x_path": "/layers/raw",
+  "raw_x_path": "/matrix",
   "layers": {
-    "normalized": "/matrix",
-    "raw": "/layers/raw"
+    "X": "/layers/X"
   },
   "obsm": {
-    "X_umap": "/embeddings/obsm/X_umap"
+    "X_umap": "/col_attrs/X_umap"
   },
   "varm": {},
   "obsp": {
@@ -165,8 +179,32 @@ If any check fails, file is non-compliant for deterministic H5AD reconstruction.
 }
 ```
 
+Case B: normalized `X` selected as primary (`/matrix` stores normalized matrix, no raw matrix).
+
+```json
+{
+  "version": "1.0.0",
+  "orientation": "genes_x_cells",
+  "x_path": "/matrix",
+  "obs_path": "/col_attrs",
+  "var_path": "/row_attrs",
+  "obs_index_key": "CellID",
+  "var_index_key": "feature_id",
+  "layers": {},
+  "obsm": {
+    "X_umap": "/col_attrs/X_umap"
+  },
+  "varm": {},
+  "obsp": {
+    "connectivities": "/pairwise/obsp/connectivities",
+    "distances": "/pairwise/obsp/distances"
+  },
+  "varp": {},
+  "uns_json_keys": ["analysis_pipeline", "spatial"]
+}
+```
+
 ## Non-goals
 
 - This spec does not redefine scFAIR biological semantics.
 - This spec only guarantees representational completeness for conversion.
-

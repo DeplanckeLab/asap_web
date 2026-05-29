@@ -32,6 +32,7 @@ src/app/assets/builds
 nohup.out
 
 public/assets
+src/public/data/asap-old/input_examples
 
 */node_modules
 .env.prod

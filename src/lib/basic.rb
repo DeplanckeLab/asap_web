@@ -731,19 +731,26 @@ module Basic
       false
     end
 
-    # Preparsing may already expose 10x as HDF5 (input.h5 or extensionless input_file). The legacy
-    # gunzip/tar branch must not run on that stream or the file is corrupted and Java fails.
+    # Preparsing may already expose 10x or AnnData as HDF5 on disk. The legacy gunzip/tar branch
+    # must not run on those streams or the file is corrupted and Java / h5py prep fails.
     def skip_legacy_archive_pipeline_for_v7_h5_matrix?(path)
       return false unless File.file?(path)
 
       p = path.to_s
       pl = p.downcase
-      return false if pl.end_with?('.h5ad')
+      return true if pl.end_with?('.h5ad')
       return true if pl.end_with?('.h5')
       return true if File.basename(p) == 'input.h5'
       return true if File.basename(p) == 'input_file' && hdf5_superblock_file?(path)
 
       false
+    end
+
+    def legacy_archive_skip_type_for_v7(path)
+      pl = path.to_s.downcase
+      return 'H5AD' if pl.end_with?('.h5ad')
+
+      'MEX'
     end
 
     # v7 parsing: write parsing/output.json so the UI can show displayed_error (same shape as HCA errors).
@@ -759,6 +766,502 @@ module Basic
       File.open(out.to_s, 'w') { |f| f.write(payload.to_json) }
     rescue StandardError => e
       (logger || Rails.logger).error("[Basic] Failed to write parsing output.json: #{e.class} #{e.message}")
+    end
+
+    # Preparsing may write file_path under global fus/<id>/ while the Fu now lives under project/fus/<id>/.
+    def resolve_preparsed_input_file_path(fu, h_preparsing: nil)
+      return nil unless fu
+
+      h_prep = h_preparsing
+      if h_prep.nil?
+        output_path = fu.upload_dir + 'output.json'
+        return nil unless output_path.file?
+
+        h_prep = safe_parse_json(output_path.read, {})
+      end
+
+      prep_path = h_prep['file_path'].to_s.strip
+      return nil if prep_path.blank?
+
+      staging_dir = fu.global_upload_dir.to_s
+      if staging_dir.present? && prep_path.start_with?(staging_dir)
+        rest = prep_path.delete_prefix(staging_dir).sub(/\A\/+/, '')
+        prep_path = File.join(fu.upload_dir.to_s, rest)
+      end
+
+      File.file?(prep_path) ? prep_path : nil
+    end
+
+    # Archive members are often listed with a directory prefix; the UI may submit only the basename.
+    def reconcile_archive_sel_name!(parsing_attrs, upload_dir)
+      return parsing_attrs unless parsing_attrs.is_a?(Hash)
+
+      sel = parsing_attrs[:sel_name] || parsing_attrs['sel_name']
+      return parsing_attrs if sel.blank? || sel.to_s.include?('/')
+
+      output_path = Pathname.new(upload_dir.to_s) + 'output.json'
+      return parsing_attrs unless output_path.file?
+
+      h_prep = safe_parse_json(output_path.read, {})
+      list_files = Array(h_prep['list_files'])
+      return parsing_attrs if list_files.empty?
+
+      sel_s = sel.to_s
+      matches = list_files.filter_map do |entry|
+        fn = entry.is_a?(Hash) ? entry['filename'] : entry
+        fn = fn.to_s.strip
+        next if fn.blank?
+
+        fn if fn == sel_s || fn.end_with?("/#{sel_s}")
+      end.uniq
+
+      return parsing_attrs unless matches.size == 1
+
+      if parsing_attrs.key?(:sel_name)
+        parsing_attrs[:sel_name] = matches.first
+      else
+        parsing_attrs['sel_name'] = matches.first
+      end
+      parsing_attrs
+    end
+
+    # After archive member selection, detected_format can still be ARCHIVE* while list_groups holds matrix info.
+    def effective_preparsing_file_type(h_preparsing)
+      fmt = h_preparsing['detected_format'].to_s
+      return fmt if fmt.present? && !fmt.match?(/\AARCHIVE/i)
+
+      fp = h_preparsing['file_path'].to_s
+      return 'RAW_TEXT' if fp.match?(/\.(txt|tsv|csv)(\.gz)?\z/i)
+      return 'MTX' if fp.match?(/\.mtx(\.gz)?\z/i)
+      return 'H5AD' if fp.match?(/\.h5ad(\.gz)?\z/i)
+      return 'LOOM' if fp.match?(/\.loom\z/i)
+      return 'MEX' if fp.match?(/\.h5\z/i)
+
+      if Array(h_preparsing['list_groups']).any? do |g|
+           g.is_a?(Hash) && (g['nber_rows'].present? || g['nb_genes'].present?)
+         end
+        return 'RAW_TEXT'
+      end
+
+      fmt
+    end
+
+    # 10x / Matrix Market triplet inside a tar.gz (e.g. pbmc3k_filtered_gene_bc_matrices.tar.gz).
+    # Returns { matrix:, barcodes:, features: } member paths when the archive has exactly one complete triplet.
+    def mtx_triplet_from_archive_list(list_files)
+      paths = mtx_archive_list_paths(list_files)
+      groups = Hash.new { |h, k| h[k] = {} }
+
+      paths.each do |path|
+        role = classify_mtx_archive_member(path)
+        next unless role
+
+        dir = File.dirname(path)
+        dir = '' if dir == '.'
+        groups[dir][role] = path
+      end
+
+      complete = groups.select { |_dir, g| g[:matrix] && g[:barcodes] && g[:features] }
+      return nil unless complete.size == 1
+
+      complete.values.first
+    end
+
+    def mtx_archive_list_paths(list_files)
+      Array(list_files).filter_map do |entry|
+        path = if entry.is_a?(Hash)
+                 entry['filename'] || entry['path']
+               else
+                 entry
+               end
+        path = path.to_s.strip
+        next if path.blank?
+        next if path.end_with?('/')
+
+        path
+      end
+    end
+
+    def mtx_triplet_base_filename(path)
+      name = File.basename(path.to_s)
+      loop do
+        stripped = name.sub(/\.(gz|bz2|xz)\z/i, '')
+        break if stripped == name
+
+        name = stripped
+      end
+      name
+    end
+
+    def classify_mtx_archive_member(path)
+      base = mtx_triplet_base_filename(path).downcase
+      return :matrix if base.end_with?('.mtx')
+      return :barcodes if base.match?(/\Abarcodes?\.(tsv|csv)\z/)
+      return :features if base.match?(/\A(genes|features)\.(tsv|csv)\z/)
+
+      nil
+    end
+
+    def extract_mtx_triplet_from_archive(archive_path, triplet, dest_dir, logger: Rails.logger)
+      raise ArgumentError, 'incomplete MTX triplet' unless triplet.is_a?(Hash) &&
+                                                            triplet[:matrix] && triplet[:barcodes] && triplet[:features]
+
+      FileUtils.mkdir_p(dest_dir)
+      {
+        'matrix.mtx' => triplet[:matrix],
+        'barcodes.tsv' => triplet[:barcodes],
+        'features.tsv' => triplet[:features]
+      }.each do |canonical, member|
+        extract_archive_member_to_file(
+          archive_path,
+          member,
+          File.join(dest_dir.to_s, canonical),
+          logger: logger
+        )
+      end
+      dest_dir
+    end
+
+    def convert_mtx_bundle_dir_to_h5(bundle_dir, h5_path, logger: Rails.logger)
+      bundle_dir = Pathname.new(bundle_dir.to_s)
+      raise ArgumentError, "missing matrix.mtx in #{bundle_dir}" unless (bundle_dir + 'matrix.mtx').file?
+
+      h5_path = Pathname.new(h5_path.to_s)
+      cmd = "#{asap_run_docker_cmd_prefix('v7')} 'Rscript --vanilla /srv/mtx_to_h5.R #{bundle_dir} #{h5_path}'"
+      logger.info("[Basic] MTX bundle -> H5: #{cmd}")
+      `#{cmd}`
+      unless h5_path.file? && h5_path.size.positive?
+        raise "mtx_to_h5.R did not produce a non-empty file at #{h5_path}"
+      end
+
+      h5_path.to_s
+    end
+
+    def mtx_bundle_dimensions(bundle_dir)
+      bundle = Pathname.new(bundle_dir.to_s)
+      barcodes = bundle + 'barcodes.tsv'
+      features = bundle + 'features.tsv'
+      raise ArgumentError, "missing barcodes.tsv in #{bundle}" unless barcodes.file?
+      raise ArgumentError, "missing features.tsv in #{bundle}" unless features.file?
+
+      n_cells = count_nonempty_lines(barcodes)
+      n_genes = count_nonempty_lines(features)
+      raise ArgumentError, "empty barcodes or features in #{bundle}" if n_cells <= 0 || n_genes <= 0
+
+      { nber_rows: n_genes, nber_cols: n_cells }
+    end
+
+    def build_mtx_archive_preparsing_output(bundle_dir, h5_path: nil)
+      dims = mtx_bundle_dimensions(bundle_dir)
+      h5 = h5_path.to_s
+      use_h5 = h5.present? && File.file?(h5) && File.size(h5).positive?
+      {
+        'detected_format' => use_h5 ? 'MEX' : 'MTX',
+        'file_path' => use_h5 ? h5 : Pathname.new(bundle_dir.to_s).to_s,
+        'list_files' => nil,
+        'list_groups' => [
+          {
+            'group' => 'mtx',
+            'nber_rows' => dims[:nber_rows],
+            'nber_cols' => dims[:nber_cols],
+            'nb_genes' => dims[:nber_rows],
+            'nb_cells' => dims[:nber_cols],
+            'is_count' => 1
+          }
+        ]
+      }
+    end
+
+    def count_nonempty_lines(path)
+      count = 0
+      File.foreach(path.to_s) do |line|
+        count += 1 if line.strip.present?
+      end
+      count
+    end
+
+    def raw_text_matrix_file?(path)
+      File.file?(path.to_s) && path.to_s.match?(/\.(txt|tsv|csv)\z/i)
+    end
+
+    # Scan a tabular matrix the same way Java v7 parseText does (split with limit -1).
+    def raw_text_matrix_scan(file_path, gene_name_col: 'first', delimiter: nil, has_header: true)
+      raise ArgumentError, "Not a file: #{file_path}" unless File.file?(file_path.to_s)
+
+      delim = raw_text_matrix_delimiter(delimiter)
+      header_row = raw_text_matrix_has_header_row?(has_header)
+      header_field_count = nil
+      expected_data_fields = nil
+      n_cells = nil
+      n_rows = 0
+      bad_rows = []
+      line_num = 0
+
+      File.foreach(file_path.to_s) do |line|
+        line_num += 1
+        fields = raw_text_matrix_split_line(line, delim)
+        next if fields.size == 1 && fields[0].to_s.empty?
+
+        if header_row && line_num == 1
+          header_field_count = fields.size
+          next
+        end
+
+        if expected_data_fields.nil?
+          expected_data_fields = fields.size
+          n_cells = raw_text_matrix_java_ncells(
+            header_field_count,
+            expected_data_fields,
+            gene_name_col,
+            header_row
+          )
+        elsif fields.size != expected_data_fields
+          bad_rows << [line_num, fields.size]
+        end
+        n_rows += 1
+      end
+
+      {
+        consistent: bad_rows.empty?,
+        header_field_count: header_field_count,
+        expected_data_fields: expected_data_fields,
+        n_cells: n_cells,
+        n_rows: n_rows,
+        bad_rows: bad_rows
+      }
+    end
+
+    def raw_text_matrix_dimensions(file_path, gene_name_col: 'first', delimiter: nil, has_header: true)
+      scan = raw_text_matrix_scan(
+        file_path,
+        gene_name_col: gene_name_col,
+        delimiter: delimiter,
+        has_header: has_header
+      )
+      { nber_rows: scan[:n_rows], nber_cols: scan[:n_cells] }
+    end
+
+    def raw_text_matrix_java_ncells(header_field_count, data_field_count, gene_name_col, has_header)
+      unless has_header
+        return raw_text_matrix_cell_column_count(data_field_count, gene_name_col)
+      end
+      return nil unless header_field_count.to_i.positive? && data_field_count.to_i.positive?
+
+      if data_field_count == header_field_count + 1
+        header_field_count
+      elsif data_field_count == header_field_count
+        raw_text_matrix_cell_column_count(header_field_count, gene_name_col)
+      else
+        raw_text_matrix_cell_column_count(data_field_count, gene_name_col)
+      end
+    end
+
+    def raw_text_matrix_expected_data_fields(n_cells, gene_name_col)
+      n = n_cells.to_i
+      return nil unless n.positive?
+
+      case gene_name_col.to_s.downcase
+      when 'first', 'last'
+        n + 1
+      else
+        n
+      end
+    end
+
+    # Use a clean matrix file for Java parsing. Re-extract from the upload archive when the
+    # on-disk copy has inconsistent row widths (common after legacy tar conversion).
+    def materialize_raw_text_matrix_for_parse!(filepath:, fu:, parsing_attrs:, tmp_dir:, logger: Rails.logger)
+      fp = filepath.to_s
+      gene_name_col = parsing_attrs['gene_name_col'] || parsing_attrs[:gene_name_col] || 'first'
+      delimiter = parsing_attrs.key?('delimiter') ? parsing_attrs['delimiter'] : parsing_attrs[:delimiter]
+      has_header = parsing_attrs.key?('has_header') ? parsing_attrs['has_header'] : parsing_attrs[:has_header]
+      has_header = '1' if has_header.nil? || has_header == ''
+
+      if raw_text_matrix_file?(fp)
+        scan = raw_text_matrix_scan(
+          fp,
+          gene_name_col: gene_name_col,
+          delimiter: delimiter,
+          has_header: has_header
+        )
+        if scan[:consistent] && scan[:n_cells].to_i.positive?
+          return Pathname.new(fp)
+        end
+
+        logger.warn(
+          "[Basic] RAW_TEXT matrix at #{fp} is inconsistent for Java " \
+          "(expected #{scan[:expected_data_fields]} fields/row, #{scan[:bad_rows].size} bad rows)"
+        )
+      end
+
+      archive_path, member_path = resolve_raw_text_archive_member(fu, parsing_attrs, fp)
+      unless archive_path.present? && member_path.present?
+        validate_raw_text_matrix_for_java!(
+          fp,
+          gene_name_col: gene_name_col,
+          delimiter: delimiter,
+          has_header: has_header
+        ) if raw_text_matrix_file?(fp)
+        return Pathname.new(fp)
+      end
+
+      dest = Pathname.new(tmp_dir) + 'raw_text_matrix.tsv'
+      extract_archive_member_to_file(archive_path, member_path, dest, logger: logger)
+      scan = raw_text_matrix_scan(
+        dest.to_s,
+        gene_name_col: gene_name_col,
+        delimiter: delimiter,
+        has_header: has_header
+      )
+      unless scan[:consistent] && scan[:n_cells].to_i.positive?
+        examples = scan[:bad_rows].first(5).map { |ln, nf| "line #{ln}=#{nf}" }.join(', ')
+        raise "Matrix #{member_path} in #{archive_path} has inconsistent row widths " \
+              "(expected #{scan[:expected_data_fields]} tab fields per row). #{examples}"
+      end
+
+      logger.info(
+        "[Basic] Materialized RAW_TEXT matrix from #{archive_path}:#{member_path} -> #{dest} " \
+        "(#{scan[:n_rows]} genes x #{scan[:n_cells]} cells)"
+      )
+      dest
+    end
+
+    def validate_raw_text_matrix_for_java!(file_path, gene_name_col: 'first', delimiter: nil, has_header: true)
+      scan = raw_text_matrix_scan(
+        file_path,
+        gene_name_col: gene_name_col,
+        delimiter: delimiter,
+        has_header: has_header
+      )
+      return scan if scan[:consistent]
+
+      examples = scan[:bad_rows].first(5).map { |ln, nf| "line #{ln} has #{nf} fields" }.join('; ')
+      raise "Tabular matrix #{file_path} has #{scan[:bad_rows].size} row(s) with the wrong number of " \
+            "tab-separated fields (expected #{scan[:expected_data_fields]} per data row). #{examples}"
+    end
+
+    def resolve_raw_text_archive_member(fu, parsing_attrs, current_filepath)
+      sel = parsing_attrs['sel_name'] || parsing_attrs[:sel_name]
+      if sel.blank? && fu
+        output_path = fu.upload_dir + 'output.json'
+        if output_path.file?
+          h_prep = safe_parse_json(output_path.read, {})
+          prep_path = h_prep['file_path'].to_s
+          if prep_path.present?
+            basename = File.basename(prep_path)
+            list_files = Array(h_prep['list_files'])
+            matches = list_files.filter_map do |entry|
+              fn = entry.is_a?(Hash) ? entry['filename'] : entry
+              fn = fn.to_s.strip
+              next if fn.blank?
+
+              fn if fn == basename || fn.end_with?("/#{basename}")
+            end.uniq
+            sel = matches.first if matches.size == 1
+          end
+        end
+      end
+      return [nil, nil] if sel.blank?
+
+      attrs = { 'sel_name' => sel.to_s }
+      attrs = reconcile_archive_sel_name!(attrs, fu.upload_dir) if fu
+      member_path = attrs['sel_name'] || attrs[:sel_name]
+
+      archive_candidates = []
+      archive_candidates << fu.file_path if fu
+      archive_candidates << current_filepath.to_s
+      if fu
+        upload_dir = fu.upload_dir.to_s
+        Dir.glob(File.join(upload_dir, 'input_file.tar*')).each { |p| archive_candidates << p }
+        Dir.glob(File.join(upload_dir, 'input_file.tgz')).each { |p| archive_candidates << p }
+      end
+
+      archive_path = archive_candidates.find do |c|
+        c.present? && File.file?(c.to_s) && c.to_s.match?(/\.(tar\.gz|tgz|tbz2|txz|tar)(\..*)?\z/i)
+      end
+      [archive_path, member_path]
+    end
+
+    def extract_archive_member_to_file(archive_path, member_path, dest_path, logger: Rails.logger)
+      archive_path = File.expand_path(archive_path.to_s)
+      dest_path = File.expand_path(dest_path.to_s)
+      member_path = member_path.to_s
+      FileUtils.mkdir_p(File.dirname(dest_path))
+
+      cmd = if archive_path.match?(/\.(tar\.gz|tgz)(\..*)?\z/i)
+              ['tar', '-xOzf', archive_path, member_path]
+            elsif archive_path.match?(/\.tar(\..*)?\z/i)
+              ['tar', '-xOf', archive_path, member_path]
+            else
+              raise "Unsupported archive format for RAW_TEXT extraction: #{archive_path}"
+            end
+
+      logger.info("[Basic] Extracting #{member_path} from #{archive_path} to #{dest_path}")
+      File.open(dest_path, 'wb') do |out|
+        IO.popen(cmd, 'rb', err: [:child, :out]) do |io|
+          IO.copy_stream(io, out)
+        end
+      end
+      unless $?.success?
+        raise "Failed to extract #{member_path} from #{archive_path} (exit #{$?.exitstatus})"
+      end
+      dest_path
+    end
+
+    def raw_text_matrix_delimiter(delimiter)
+      delim = delimiter.nil? ? "\t" : delimiter.to_s
+      delim.empty? ? "\t" : delim
+    end
+
+    def raw_text_matrix_has_header_row?(has_header)
+      has_header != false && has_header != '0' && has_header.to_s.downcase != 'false'
+    end
+
+    def raw_text_matrix_split_line(line, delim)
+      line.delete_suffix("\n").delete_suffix("\r").split(delim, -1)
+    end
+
+    def raw_text_matrix_cell_column_count(field_count, gene_name_col)
+      count = field_count.to_i
+      return count if count <= 0
+
+      case gene_name_col.to_s.downcase
+      when 'first', 'last'
+        count - 1
+      else
+        count
+      end
+    end
+
+    def sync_raw_text_dimensions_from_file!(output, gene_name_col: 'first', delimiter: nil, has_header: true)
+      return output unless output.is_a?(Hash)
+
+      fp = output['file_path'].to_s
+      return output unless raw_text_matrix_file?(fp)
+
+      dims = raw_text_matrix_dimensions(
+        fp,
+        gene_name_col: gene_name_col,
+        delimiter: delimiter,
+        has_header: has_header
+      )
+      return output if dims[:nber_rows].to_i <= 0 || dims[:nber_cols].to_i <= 0
+
+      groups = Array(output['list_groups'])
+      if groups.any?
+        groups.each do |g|
+          next unless g.is_a?(Hash)
+
+          g['nber_rows'] = dims[:nber_rows]
+          g['nber_cols'] = dims[:nber_cols]
+          g['nb_genes'] = dims[:nber_rows] if g.key?('nb_genes')
+          g['nb_cells'] = dims[:nber_cols] if g.key?('nb_cells')
+        end
+      else
+        output['nber_rows'] = dims[:nber_rows]
+        output['nber_cols'] = dims[:nber_cols]
+      end
+      output
     end
 
     def get_asap_docker_for_markers project
@@ -2143,8 +2646,9 @@ module Basic
       end
 
       if skip_legacy_archive_pipeline_for_v7_h5_matrix?(file_path.to_s)
-        logger.debug("V7_SKIP_LEGACY_ARCHIVE_PIPELINE: input already HDF5 matrix at #{file_path}")
-        return { :file_path => file_path, :type => 'MEX' }
+        kind = legacy_archive_skip_type_for_v7(file_path)
+        logger.debug("V7_SKIP_LEGACY_ARCHIVE_PIPELINE: input already HDF5 (#{kind}) at #{file_path}")
+        return { :file_path => file_path, :type => kind }
       end
 
       # Single-file Matrix Market (coordinate/array): the v7 image already ships mtx_to_h5.R,

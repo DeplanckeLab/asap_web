@@ -37,7 +37,9 @@ export default class extends Controller {
     loadRunPanel: Boolean,
     loadSubView: Boolean,
     subViewStepId: Number,
-    loomFile: String
+    loomFile: String,
+    stepIdToName: Object,
+    parsingStepId: Number
   }
 
   get projectIdentifier() {
@@ -239,13 +241,10 @@ export default class extends Controller {
         console.log('[StepSelectorController] Step element found:', stepElement)
         if (stepElement) {
           const stepId = stepElement.getAttribute('data-step-id')
-          const stepName = stepElement.getAttribute('data-step-name')
           console.log('[StepSelectorController] Loading step results for step_id:', stepId)
           controller.currentStepId = stepId.toString()
           controller.element.setAttribute('data-current-step-id', stepId.toString())
-          // Parsing has its own custom results view; it must never be rendered
-          // through the generic run panel even when a run_id is present.
-          if (runIdFromUrl && stepName !== 'parsing' && typeof loadRunInRightPanel === 'function') {
+          if (runIdFromUrl && !controller.isParsingStepId(stepId) && typeof loadRunInRightPanel === 'function') {
             controller.saveState(stepId, 'run', runIdFromUrl)
             setTimeout(() => {
               loadRunInRightPanel(`/runs/${runIdFromUrl}`, stepId)
@@ -253,7 +252,16 @@ export default class extends Controller {
             return true
           }
           const extraQuery = showFormFromUrl === '1' ? '&show_form=1' : ''
-          controller.loadStepResults(stepId, stepElement, true, extraQuery, 'connect:url_step')
+          if (controller.isParsingStepId(stepId)) {
+            controller.loadParsingStepResults(stepId, 'connect:url_step')
+          } else {
+            controller.loadStepResults(stepId, stepElement, true, extraQuery, 'connect:url_step')
+          }
+          return true
+        } else if (controller.isParsingStepId(stepIdFromUrl)) {
+          controller.currentStepId = stepIdFromUrl.toString()
+          controller.element.setAttribute('data-current-step-id', stepIdFromUrl.toString())
+          controller.loadParsingStepResults(stepIdFromUrl, 'connect:url_step_no_element')
           return true
         } else {
           console.warn('[StepSelectorController] Step element not found for step_id:', stepIdFromUrl)
@@ -268,14 +276,13 @@ export default class extends Controller {
         const stepElement = controller.element.querySelector(`[data-step-id="${savedState.stepId}"]`)
         if (stepElement) {
           const stepId = savedState.stepId
-          const stepName = stepElement.getAttribute('data-step-name')
           console.log('[StepSelectorController] Restoring step_id from localStorage:', stepId)
           controller.currentStepId = stepId.toString()
           controller.element.setAttribute('data-current-step-id', stepId.toString())
           
           // If saved state was showing a run, load the run directly
           // (except for parsing, which always uses its own results view).
-          if (savedState.contentType === 'run' && savedState.runId && stepName !== 'parsing') {
+          if (savedState.contentType === 'run' && savedState.runId && !controller.isParsingStepId(stepId)) {
             console.log('[StepSelectorController] Restoring run panel for run_id:', savedState.runId)
             // Hide empty state and loading state, show loading
             if (controller.hasEmptyStateTarget) {
@@ -297,8 +304,11 @@ export default class extends Controller {
             return true
           }
           
-          // Regular step load
-          controller.loadStepResults(stepId, stepElement, true, '', 'connect:restore_state_step')
+          if (controller.isParsingStepId(stepId)) {
+            controller.loadParsingStepResults(stepId, 'connect:restore_state_step')
+          } else {
+            controller.loadStepResults(stepId, stepElement, true, '', 'connect:restore_state_step')
+          }
           return true
         } else {
           console.warn('[StepSelectorController] Saved step element not found for step_id:', savedState.stepId)
@@ -636,7 +646,11 @@ export default class extends Controller {
           (Date.now() - this._lastStepResultsLoadedAt) < 3000
         if (sameStepJustLoaded) return
 
-        this.loadStepResults(currentStepId, currentStepEl, false)
+        if (this.isParsingStepId(currentStepId)) {
+          this.loadParsingStepResults(currentStepId, 'reconcileCurrentStepOnConnect')
+        } else {
+          this.loadStepResults(currentStepId, currentStepEl, false)
+        }
       })
       .catch((error) => {
         console.warn('[StepSelectorController] reconcileCurrentStepOnConnect failed:', error)
@@ -767,24 +781,22 @@ export default class extends Controller {
     if (panelMatchesRun) {
       this.updateRunSummaryPanelBadge(runSummaryPanel, runStatus)
 
-      if (typeof loadRunInRightPanel === 'function') {
-        // Fire the reload on the next tick (no long delay). The previous 150ms
-        // window was large enough for other websocket events arriving in the
-        // same burst (e.g. markers_run_status_changed) to clear this.reloadTimeout
-        // via handleStatusUpdate before the reload actually executed, which is
-        // why the right panel appeared to miss the waiting -> running
-        // transition while terminal transitions still refreshed.
-        clearTimeout(this.reloadTimeout)
-        this.reloadTimeout = setTimeout(() => {
+      clearTimeout(this.reloadTimeout)
+      this.reloadTimeout = setTimeout(() => {
+        if (this.isParsingStepId(stepForPanel)) {
+          this.loadParsingStepResults(stepForPanel, 'run_status_changed:parsing_results')
+          return
+        }
+        if (typeof loadRunInRightPanel === 'function') {
           console.log('[RSC.applyRunStatusChange] firing loadRunInRightPanel', {
             runId: runStatus.run_id,
             stepId: stepForPanel
           })
           loadRunInRightPanel(`/runs/${runStatus.run_id}`, String(stepForPanel))
-        }, 0)
-      } else {
-        console.warn('[RSC.applyRunStatusChange] loadRunInRightPanel is NOT defined')
-      }
+        } else {
+          console.warn('[RSC.applyRunStatusChange] loadRunInRightPanel is NOT defined')
+        }
+      }, 0)
       return
     }
 
@@ -814,6 +826,10 @@ export default class extends Controller {
 
       clearTimeout(this.reloadTimeout)
       this.reloadTimeout = setTimeout(() => {
+        if (isTerminalStatus && this.isParsingStepId(currentStepIdNum)) {
+          this.loadParsingStepResults(currentStepIdNum, 'run_status_changed:parsing_terminal')
+          return
+        }
         if (isTerminalStatus && typeof loadRunInRightPanel === 'function') {
           console.log('[RSC.applyRunStatusChange] firing loadRunInRightPanel for terminal transition from intermediate status', {
             stepId: currentStepIdNum,
@@ -823,12 +839,16 @@ export default class extends Controller {
           loadRunInRightPanel(`/runs/${runStatus.run_id}`, String(currentStepIdNum))
           return
         }
-        console.log('[RSC.applyRunStatusChange] firing loadStepResults for intermediate status transition', {
-          stepId: currentStepIdNum,
-          runId: runStatus.run_id,
-          statusId: statusIdNum
-        })
-        this.loadStepResults(currentStepIdNum, stepEl, false, '', 'run_status_changed')
+        if (this.isParsingStepId(currentStepIdNum)) {
+          this.loadParsingStepResults(currentStepIdNum, 'run_status_changed:intermediate')
+        } else {
+          console.log('[RSC.applyRunStatusChange] firing loadStepResults for intermediate status transition', {
+            stepId: currentStepIdNum,
+            runId: runStatus.run_id,
+            statusId: statusIdNum
+          })
+          this.loadStepResults(currentStepIdNum, stepEl, false, '', 'run_status_changed')
+        }
       }, 0)
     }
   }
@@ -941,11 +961,15 @@ export default class extends Controller {
         const isShowingFailedPanel = shownStatusId === 4
 
         if (isShowingFailedPanel && this.isParsingInProgressStatus(parsingStatus)) {
-          const stepElForReload = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
           clearTimeout(this.reloadTimeout)
           this.reloadTimeout = setTimeout(() => {
-            if (stepElForReload) {
-              this.loadStepResults(this.currentStepId, stepElForReload, false)
+            if (this.isParsingStepId(this.currentStepId)) {
+              this.loadParsingStepResults(this.currentStepId, 'websocket:parsing_failed_to_progress')
+            } else {
+              const stepElForReload = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
+              if (stepElForReload) {
+                this.loadStepResults(this.currentStepId, stepElForReload, false)
+              }
             }
           }, 300)
         }
@@ -972,6 +996,7 @@ export default class extends Controller {
             typeof loadRunInRightPanel === 'function' &&
             canonicalDetails &&
             parseInt(canonicalDetails.stepId, 10) === currentStepIdNum &&
+            !this.isParsingStepId(currentStepIdNum) &&
             this._analysisUriAllowsAutoOpenRunPanel()
           const panelRunIdToReload =
             (runPanel && panelRunId && panelStepNum === currentStepIdNum)
@@ -980,7 +1005,9 @@ export default class extends Controller {
           if (panelRunIdToReload) {
             clearTimeout(this.reloadTimeout)
             this.reloadTimeout = setTimeout(() => {
-              if (typeof loadRunInRightPanel === 'function') {
+              if (this.isParsingStepId(currentStepIdNum)) {
+                this.loadParsingStepResults(currentStepIdNum, 'websocket:run_panel_reload')
+              } else if (typeof loadRunInRightPanel === 'function') {
                 loadRunInRightPanel(`/runs/${panelRunIdToReload}`, String(currentStepIdNum))
               }
               this._syncHeaderRunCountsFromServer()
@@ -989,13 +1016,17 @@ export default class extends Controller {
             const runsTotal = this.sumWebsocketStepRunCounts(data)
             const showingRunsEmptyState = !!this.contentTarget.querySelector('[data-step-runs-empty-state="true"]')
             if (runsTotal > 0 && showingRunsEmptyState) {
-              const stepElForReload = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
-              if (stepElForReload) {
-                clearTimeout(this.reloadTimeout)
-                this.reloadTimeout = setTimeout(() => {
-                  this.loadStepResults(this.currentStepId, stepElForReload, false)
-                }, 300)
-              }
+              clearTimeout(this.reloadTimeout)
+              this.reloadTimeout = setTimeout(() => {
+                if (this.isParsingStepId(this.currentStepId)) {
+                  this.loadParsingStepResults(this.currentStepId, 'websocket:runs_empty_state')
+                } else {
+                  const stepElForReload = this.element.querySelector(`[data-step-id="${this.currentStepId}"]`)
+                  if (stepElForReload) {
+                    this.loadStepResults(this.currentStepId, stepElForReload, false)
+                  }
+                }
+              }, 300)
             }
           }
         }
@@ -1168,6 +1199,9 @@ export default class extends Controller {
   }
 
   _analysisRestoreRunPanelFromCanonicalUrl(stepIdString, query) {
+    if (this.isParsingStepId(stepIdString)) {
+      return
+    }
     if (typeof loadRunInRightPanel !== 'function') {
       return
     }
@@ -1215,6 +1249,9 @@ export default class extends Controller {
   }
 
   _analysisAutoOpenSingleRunAfterStepResults(stepIdString, loadQuery) {
+    if (this.isParsingStepId(stepIdString)) {
+      return
+    }
     if (!this._analysisStepQueryAllowsAutoOpenRunPanel(loadQuery)) {
       return
     }
@@ -1457,7 +1494,11 @@ export default class extends Controller {
     if (shouldReload) {
       clearTimeout(this.reloadTimeout)
       this.reloadTimeout = setTimeout(() => {
-        this.loadStepResults(stepId, stepElForReload, false)
+        if (this.isParsingStepId(stepId)) {
+          this.loadParsingStepResults(stepId, 'updateStepStatusBadge')
+        } else {
+          this.loadStepResults(stepId, stepElForReload, false)
+        }
       }, 300)
     }
   }
@@ -1476,6 +1517,37 @@ export default class extends Controller {
 
   isTerminalParsingStatus(status) {
     return status === 'success' || status === 'failed'
+  }
+
+  stepNameForId(stepId) {
+    if (stepId == null || stepId === '') return null
+    const sid = stepId.toString()
+    const stepEl = this.element.querySelector(`[data-step-id="${sid}"]`)
+    const fromDom = stepEl && stepEl.getAttribute('data-step-name')
+    if (fromDom) return fromDom.trim().toLowerCase()
+    if (this.hasStepIdToNameValue && this.stepIdToNameValue[sid]) {
+      return String(this.stepIdToNameValue[sid]).trim().toLowerCase()
+    }
+    return null
+  }
+
+  isParsingStepId(stepId) {
+    if (stepId == null || stepId === '') return false
+    const sid = stepId.toString()
+    if (this.hasParsingStepIdValue && String(this.parsingStepIdValue) === sid) {
+      return true
+    }
+    return this.stepNameForId(sid) === 'parsing'
+  }
+
+  loadParsingStepResults(stepId, source = 'unknown') {
+    const stepIdString = stepId != null ? stepId.toString() : ''
+    if (!stepIdString) return
+    let stepEl = this.element.querySelector(`[data-step-id="${stepIdString}"]`)
+    if (!stepEl) {
+      stepEl = { getAttribute: () => stepIdString }
+    }
+    this.loadStepResults(stepIdString, stepEl, true, '', source)
   }
 
   isParsingInProgressStatus(status) {
@@ -1505,7 +1577,11 @@ export default class extends Controller {
       // Save state to localStorage for when user returns from visualization view
       this.saveState(stepId, 'step', null)
       // Load step results
-      this.loadStepResults(stepId, firstStep, true, '', 'selectFirstAvailableStep')
+      if (this.isParsingStepId(stepId)) {
+        this.loadParsingStepResults(stepId, 'selectFirstAvailableStep')
+      } else {
+        this.loadStepResults(stepId, firstStep, true, '', 'selectFirstAvailableStep')
+      }
       return true
     }
     return false
@@ -1550,6 +1626,11 @@ export default class extends Controller {
       if (typeof window.updateAnalysisLoomFilterWarning === 'function') {
         window.updateAnalysisLoomFilterWarning()
       }
+      return
+    }
+
+    if (this.isParsingStepId(stepId)) {
+      this.loadParsingStepResults(stepId, 'selectStep')
       return
     }
 
@@ -1598,6 +1679,11 @@ export default class extends Controller {
       if (typeof window.updateAnalysisLoomFilterWarning === 'function') {
         window.updateAnalysisLoomFilterWarning()
       }
+      return
+    }
+
+    if (this.isParsingStepId(stepId)) {
+      this.loadParsingStepResults(stepId, 'selectStepFromDropdown')
       return
     }
 
@@ -1784,12 +1870,10 @@ export default class extends Controller {
     
     // Save state to localStorage for when user returns from visualization view
     const canonicalForSave = this._analysisCanonicalRunDetailsFromUrl()
-    const stepElementForSave = this.element.querySelector(`[data-step-id="${stepIdString}"]`)
-    const stepNameForSave = stepElementForSave ? stepElementForSave.getAttribute('data-step-name') : null
     const preserveRunInStorage =
       canonicalForSave &&
       canonicalForSave.stepId === String(stepIdString) &&
-      stepNameForSave !== 'parsing' &&
+      !this.isParsingStepId(stepIdString) &&
       this._analysisUriAllowsAutoOpenRunPanel() &&
       this._analysisStepQueryAllowsAutoOpenRunPanel(extraQuery) &&
       !String(extraQuery || '').includes('show_form') &&
@@ -1956,7 +2040,7 @@ export default class extends Controller {
       const existingRunId = existingPanel && existingPanel.getAttribute('data-run-id')
       const canLoadRunPanel = typeof loadRunInRightPanel === 'function'
 
-      if (autoRunId && allowAutoRunPanel && canLoadRunPanel) {
+      if (autoRunId && allowAutoRunPanel && canLoadRunPanel && !controller.isParsingStepId(stepIdString)) {
         if (existingRunId && existingRunId === autoRunId) {
           if (controller.hasLoadingStateTarget) {
             controller.loadingStateTarget.style.display = 'none'

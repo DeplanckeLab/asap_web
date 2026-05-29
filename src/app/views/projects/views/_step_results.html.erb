@@ -6,9 +6,10 @@
   <% single_run_status_id = single_run_status_run&.status_id.to_i if single_run_status_run %>
   <% show_single_run_intermediate = @step.name != 'parsing' && single_run_status_run && [1, 2, 6].include?(single_run_status_id) %>
   <% show_single_run_failed_summary = @step.name != 'parsing' && single_run_status_run && single_run_status_id == 4 && !show_form_requested %>
-  <%# If show_form or show_custom_form is true, always use std_step (which handles the form display) %>
-  <%# Otherwise, check for step-specific partial %>
-  <% if show_single_run_intermediate %>
+  <%# Parsing always uses the dedicated _parsing partial (never std_step / std_run_view). %>
+  <% if @step.name == 'parsing' %>
+    <%= render partial: 'projects/views/parsing' %>
+  <% elsif show_single_run_intermediate %>
     <%= render partial: 'projects/views/single_run_intermediate_status', locals: { run: single_run_status_run } %>
     <%= render partial: 'projects/views/run_metadata', locals: { run: single_run_status_run, results: @h_res, queue_position: @queue_position, slurm_queue_hover: @slurm_queue_hover } %>
   <% elsif show_single_run_failed_summary %>

@@ -31,6 +31,7 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
     end
     
     @organism = Organism.first || Organism.create!(name: 'Test Organism')
+    @preparsing_version_id = (ENV['ASAP_VERSION_ID']&.to_i).presence || 8
     
     # Track Fu records created during this test
     @created_fu_ids = []
@@ -125,7 +126,7 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
         fu.update!(upload_file_name: upload_filename)
         
         # Run preparsing service
-        service = FuPreparsingService.new(fu, { organism_id: @organism.id })
+        service = FuPreparsingService.new(fu, { organism_id: @organism.id, version_id: @preparsing_version_id })
         
         result = service.call
         
@@ -244,7 +245,7 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
       FileUtils.cp(source_file, upload_path)
       fu.update!(upload_file_name: upload_filename)
       
-      service = FuPreparsingService.new(fu, { organism_id: @organism.id })
+      service = FuPreparsingService.new(fu, { organism_id: @organism.id, version_id: @preparsing_version_id })
       
       result = service.call
       assert result[:summary].present?, "Should have summary"
@@ -302,7 +303,7 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
     fu.update!(upload_file_name: upload_filename)
     
     # Test without organism_id - preparsing should still work
-    service = FuPreparsingService.new(fu, {})
+    service = FuPreparsingService.new(fu, { version_id: @preparsing_version_id })
     result = service.call
     
     # Preparsing should succeed
@@ -315,6 +316,33 @@ class FuPreparsingServiceTest < TestBaseWithoutFixtures
     
     FileUtils.rm_rf(upload_dir) if upload_dir.exist?
     fu.destroy
+  end
+
+  test "preparsing engine selection follows version_id from options" do
+    fu = Fu.create!(
+      user: @user,
+      upload_file_name: 'input_file',
+      upload_file_size: 1,
+      status: 'uploaded',
+      name: 'engine_selection_test'
+    )
+    @created_fu_ids << fu.id
+
+    java_service = FuPreparsingService.new(fu, { version_id: 7 })
+    assert java_service.send(:legacy_java_preparsing?)
+    assert_equal 7, java_service.send(:preparsing_version_id)
+    assert java_service.send(:use_java_preparsing?, '/data/foo.tab')
+    assert java_service.send(:use_java_preparsing?, '/data/foo.rds')
+    assert java_service.send(:legacy_rds_preparsing?, '/data/foo.rds')
+
+    python_service = FuPreparsingService.new(fu, { version_id: 8 })
+    assert_not python_service.send(:legacy_java_preparsing?)
+    assert_not python_service.send(:legacy_rds_preparsing?, '/data/foo.rds')
+    assert_equal 'preparse.v8.py', python_service.send(:python_preparsing_script_name)
+
+    assert_raises(ArgumentError) do
+      FuPreparsingService.new(fu, {}).send(:preparsing_version_id)
+    end
   end
 end
 

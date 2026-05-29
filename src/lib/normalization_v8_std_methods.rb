@@ -3,6 +3,7 @@
 # Upserts ASAP release v8 normalization StdMethod rows from the LogNormalize (seurat) template.
 module NormalizationV8StdMethods
   VERSION_ID = 8
+  OUTPUT_MATRIX_DATASET = "/layers/_norm_\#{run_num}_\#{std_method_name}".freeze
 
   ATTR_LAYOUT_JSON = <<~JSON.strip
     [
@@ -57,7 +58,6 @@ module NormalizationV8StdMethods
           link: "[<a href=\"https://satijalab.org/seurat/reference/normalizedata\">Reference</a>]",
           program: "Rscript --vanilla normalization.v8.R",
           cli_method: "LogNormalize",
-          output_layer: "/layers/normalized_ln",
           handles_log: false,
           project_types: %w[sc]
         },
@@ -68,7 +68,6 @@ module NormalizationV8StdMethods
           link: "[<a href=\"https://satijalab.org/seurat/reference/normalizedata\">Reference</a>]",
           program: "Rscript --vanilla normalization.v8.R",
           cli_method: "RC",
-          output_layer: "/layers/normalized_rc",
           handles_log: false,
           project_types: %w[sc]
         },
@@ -79,7 +78,6 @@ module NormalizationV8StdMethods
           link: "[<a href=\"https://satijalab.org/seurat/reference/normalizedata\">Reference</a>]",
           program: "Rscript --vanilla normalization.v8.R",
           cli_method: "CLR",
-          output_layer: "/layers/normalized_clr",
           handles_log: true,
           project_types: %w[sc]
         },
@@ -90,7 +88,6 @@ module NormalizationV8StdMethods
           link: "[<a href=\"https://satijalab.org/seurat/reference/sctransform\">Reference</a>]",
           program: "Rscript --vanilla normalization.v8.R",
           cli_method: "SCTransform",
-          output_layer: "/layers/normalized_sct",
           handles_log: true,
           project_types: %w[sc]
         },
@@ -101,7 +98,6 @@ module NormalizationV8StdMethods
           link: "[<a href=\"https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.normalize_total.html\">Reference</a>]",
           program: "python3.12 normalize.v8.py",
           cli_method: "normalize_total",
-          output_layer: "/layers/normalized_py",
           handles_log: true,
           project_types: %w[sc],
           python_log: true
@@ -157,7 +153,7 @@ module NormalizationV8StdMethods
         {
           "opt" => "--output_meta",
           "param_key" => "output_matrix_dataset",
-          "value" => defn[:output_layer]
+          "value" => OUTPUT_MATRIX_DATASET
         },
         { "opt" => "--output_dir", "param_key" => "output_dir" }
       ]

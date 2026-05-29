@@ -61,6 +61,7 @@ export default class extends Controller {
     this.selectedDatasetName = null
     this.selectedFileIndex = null
     this.selectedFileName = null
+    this.selectedArchiveEntry = null  // Full archive member path for sel (e.g. folder/file.txt)
     this.archiveFilesData = null  // Store original archive file list data
     this.cameFromArchive = false  // Track if current result came from archive selection
     this.parsingParams = {
@@ -70,6 +71,8 @@ export default class extends Controller {
       rowname_metadata: '',
       colname_metadata: ''
     }
+    this.h5adMetadataChosenByUser = false
+    this.h5adMetadataRerunTimer = null
     this.currentDetectedFormat = null  // Track current file format
     this.projectNameTouched = false
     this.projectNameInputHandler = null
@@ -171,8 +174,7 @@ export default class extends Controller {
       this.form.removeEventListener('submit', this.handleFormSubmit)
     }
     
-    this.teardownPreparsingSubscription()
-    this.stopDownloadStatusPoll()
+    this.stopAllUploadTracking()
     if (this.projectNameInputHandler && this.projectNameInputElement) {
       this.projectNameInputElement.removeEventListener('input', this.projectNameInputHandler)
       this.projectNameInputHandler = null
@@ -319,6 +321,15 @@ export default class extends Controller {
 
   handleFiles(files) {
     if (!files || files.length === 0) return
+
+    if (!this.currentVersionId()) {
+      if (this.hasStatusTarget) {
+        this.statusTarget.textContent = 'Select an ASAP release before uploading a file.'
+        this.statusTarget.classList.remove('text-gray-600', 'text-green-600')
+        this.statusTarget.classList.add('text-red-600')
+      }
+      return
+    }
     
     const file = files[0]
     this.isUploadComplete = false
@@ -350,8 +361,9 @@ export default class extends Controller {
     this.isPreparsingComplete = false
     this.hasMatrixData = false
     this.archiveFilesData = null
+    this.selectedArchiveEntry = null
     this.cameFromArchive = false
-    this.teardownPreparsingSubscription()
+    this.stopAllUploadTracking()
     this.resetPreparsingState()
     this.checkSubmitButton()
     
@@ -547,10 +559,10 @@ export default class extends Controller {
     if (organismField && organismField.value) {
       formData.append('organism_id', organismField.value)
     }
-    
-    const versionField = this.form?.querySelector('[name="project[version_id]"]')
-    if (versionField && versionField.value) {
-      formData.append('version_id', versionField.value)
+
+    const versionId = this.currentVersionId()
+    if (versionId) {
+      formData.append('version_id', versionId)
     }
     
     const csrfToken = document.querySelector('[name="csrf-token"]')?.content
@@ -641,12 +653,36 @@ export default class extends Controller {
     }
   }
 
+  stopPreparsingStatusPoll() {
+    if (this.preparsingStatusPollInterval) {
+      clearInterval(this.preparsingStatusPollInterval)
+      this.preparsingStatusPollInterval = null
+    }
+  }
+
+  stopAllUploadTracking() {
+    this.stopDownloadStatusPoll()
+    this.stopPreparsingStatusPoll()
+    this.teardownPreparsingSubscription()
+    if (this.h5adMetadataRerunTimer) {
+      clearTimeout(this.h5adMetadataRerunTimer)
+      this.h5adMetadataRerunTimer = null
+    }
+    this.downloadCompletionHandled = false
+    this.isDownloadInProgress = false
+    this.resetDownloadButtonState()
+  }
+
   startDownloadStatusPoll(fuId) {
     if (!fuId) return
     this.stopDownloadStatusPoll()
     this.downloadCompletionHandled = false
 
     this.downloadStatusPollInterval = setInterval(async () => {
+      if (fuId.toString() !== this.fuId?.toString()) {
+        this.stopDownloadStatusPoll()
+        return
+      }
       try {
         const csrfToken = document.querySelector('[name="csrf-token"]')?.content
         const response = await fetch(`/fus/upload_status?fu_id=${encodeURIComponent(fuId)}`, {
@@ -674,10 +710,30 @@ export default class extends Controller {
           return
         }
 
+        if (status.status === 'preparsing_failed') {
+          this.stopDownloadStatusPoll()
+          this.resetDownloadButtonState()
+          if (this.hasStatusTarget) {
+            this.statusTarget.textContent = 'Preparsing failed on server'
+            this.statusTarget.classList.remove('text-gray-600', 'text-green-600', 'text-yellow-600')
+            this.statusTarget.classList.add('text-red-600')
+          }
+          this.showPreparsingPanel()
+          this.handlePreparsingUpdate({
+            status: 'failed',
+            stage: 'preparsing',
+            fu_id: fuId,
+            error: 'Preparsing failed after download'
+          })
+          return
+        }
+
         const isReadyForPreparsingFlow = (
           status.status === 'uploaded' ||
           status.status === 'preparsing' ||
-          status.status === 'preparsed'
+          status.status === 'preparsed' ||
+          status.status === 'completed' ||
+          (status.complete === true && status.status !== 'downloading')
         )
 
         if (isReadyForPreparsingFlow) {
@@ -705,6 +761,7 @@ export default class extends Controller {
   }
 
   handleDownloadCompletedFromStatus(status) {
+    if (status.fu_id && this.fuId && status.fu_id.toString() !== this.fuId.toString()) return
     if (this.downloadCompletionHandled) return
     this.downloadCompletionHandled = true
 
@@ -880,10 +937,66 @@ export default class extends Controller {
     }
   }
 
+  preparsingStatusUrl(fuId) {
+    const params = new URLSearchParams()
+    const versionId = this.currentVersionId()
+    if (versionId) {
+      params.set('version_id', versionId)
+    }
+    const organismField = this.form?.querySelector('[name="project[organism_id]"]')
+    if (organismField && organismField.value) {
+      params.set('organism_id', organismField.value)
+    }
+    const qs = params.toString()
+    return `/fus/${fuId}/preparsing_status${qs ? `?${qs}` : ''}`
+  }
+
+  applyPreparsingStatusResponse(fuId, data) {
+    if (!data) return
+    if (fuId && this.fuId && fuId.toString() !== this.fuId.toString()) return
+
+    if ((data.status === 'preparsed' || data.status === 'completed') && data.summary) {
+      this.handlePreparsingUpdate({
+        status: 'completed',
+        stage: 'preparsing',
+        fu_id: fuId,
+        summary: data.summary,
+        warnings: data.warnings || [],
+        raw_output: data.raw_output,
+        prediction_debug: data.prediction_debug
+      })
+      return
+    }
+
+    if (data.status === 'preparsing_failed') {
+      this.handlePreparsingUpdate({
+        status: 'failed',
+        stage: 'preparsing',
+        fu_id: fuId,
+        error: data.error || 'Preparsing failed'
+      })
+      return
+    }
+
+    if (data.status === 'preparsing' || data.status === 'downloading' || data.status === 'uploaded') {
+      const message =
+        data.status === 'downloading'
+          ? 'Download finishing on server. Preparsing will start shortly...'
+          : data.status === 'uploaded'
+            ? 'Upload complete. Preparsing will start automatically...'
+            : 'Preparsing in progress. Please wait...'
+      this.setPreparsingStatus(message, 'info', true)
+      if (!this.preparsingStatusPollInterval) {
+        this.startPreparsingStatusPoll(fuId)
+      }
+    }
+  }
+
   async checkPreparsingStatus(fuId) {
+    if (fuId && this.fuId && fuId.toString() !== this.fuId.toString()) return
     try {
       const csrfToken = document.querySelector('[name="csrf-token"]')?.content
-      const response = await fetch(`/fus/${fuId}/preparsing_status`, {
+      const response = await fetch(this.preparsingStatusUrl(fuId), {
         method: 'GET',
         headers: {
           'X-CSRF-Token': csrfToken,
@@ -893,43 +1006,10 @@ export default class extends Controller {
 
       if (response.ok) {
         const data = await response.json()
-        if (data.status === 'preparsed' && data.summary) {
-          console.log('[FileUpload] Preparsing already complete, fetching results...')
-          // Simulate websocket message format to reuse existing handler
-          const websocketData = {
-            status: 'completed',
-            stage: 'preparsing',
-            fu_id: fuId,
-            summary: data.summary,
-            warnings: data.warnings || [],
-            raw_output: data.raw_output,
-            prediction_debug: data.prediction_debug
-          }
-          this.handlePreparsingUpdate(websocketData)
-        } else if (data.status === 'preparsing') {
-          console.log('[FileUpload] Preparsing in progress, will poll for status...')
-          this.setPreparsingStatus('Preparsing in progress. Please wait...', 'info', true)
-          // Start polling for status updates (in case websocket misses the message)
-          this.startPreparsingStatusPoll(fuId)
-        } else if (data.status === 'uploaded') {
-          console.log('[FileUpload] Upload complete, waiting for preparsing to start...')
-          this.setPreparsingStatus('Upload complete. Preparsing will start automatically...', 'info', true)
-          // Start polling for status updates - preparsing should start soon
-          this.startPreparsingStatusPoll(fuId)
-        } else if (data.status === 'preparsing_failed') {
-          console.log('[FileUpload] Preparsing failed')
-          const websocketData = {
-            status: 'failed',
-            stage: 'preparsing',
-            fu_id: fuId,
-            error: data.error || 'Preparsing failed'
-          }
-          this.handlePreparsingUpdate(websocketData)
-        }
+        this.applyPreparsingStatusResponse(fuId, data)
       }
     } catch (error) {
       console.error('[FileUpload] Error checking preparsing status:', error)
-      // Don't show error to user, just wait for websocket update
     }
   }
 
@@ -938,32 +1018,32 @@ export default class extends Controller {
       this.preparsingSubscription.unsubscribe()
       this.preparsingSubscription = null
     }
-    // Stop any polling
-    if (this.preparsingStatusPollInterval) {
-      clearInterval(this.preparsingStatusPollInterval)
-      this.preparsingStatusPollInterval = null
-    }
   }
 
-  startPreparsingStatusPoll(fuId, maxAttempts = 60) {
-    // Stop any existing poll
-    if (this.preparsingStatusPollInterval) {
-      clearInterval(this.preparsingStatusPollInterval)
-    }
-    
+  startPreparsingStatusPoll(fuId, maxAttempts = 900) {
+    this.stopPreparsingStatusPoll()
+
     let attempts = 0
     this.preparsingStatusPollInterval = setInterval(async () => {
-      attempts++
-      if (attempts > maxAttempts) {
-        clearInterval(this.preparsingStatusPollInterval)
-        this.preparsingStatusPollInterval = null
-        console.warn('[FileUpload] Stopped polling - max attempts reached')
+      if (fuId.toString() !== this.fuId?.toString()) {
+        this.stopPreparsingStatusPoll()
         return
       }
-      
+      attempts++
+      if (attempts > maxAttempts) {
+        this.stopPreparsingStatusPoll()
+        console.warn('[FileUpload] Stopped preparsing poll - max attempts reached')
+        this.setPreparsingStatus(
+          'Preparsing is taking longer than expected. Please refresh the page or try again.',
+          'warning',
+          false
+        )
+        return
+      }
+
       try {
         const csrfToken = document.querySelector('[name="csrf-token"]')?.content
-        const response = await fetch(`/fus/${fuId}/preparsing_status`, {
+        const response = await fetch(this.preparsingStatusUrl(fuId), {
           method: 'GET',
           headers: {
             'X-CSRF-Token': csrfToken,
@@ -971,46 +1051,19 @@ export default class extends Controller {
           }
         })
 
-        if (response.ok) {
-          const data = await response.json()
-          if (data.status === 'preparsed' && data.summary) {
-            console.log('[FileUpload] Preparsing complete (from polling), fetching results...')
-            clearInterval(this.preparsingStatusPollInterval)
-            this.preparsingStatusPollInterval = null
-            // Simulate websocket message format to reuse existing handler
-            const websocketData = {
-              status: 'completed',
-              stage: 'preparsing',
-              fu_id: fuId,
-              summary: data.summary,
-              warnings: data.warnings || [],
-              raw_output: data.raw_output,
-              prediction_debug: data.prediction_debug
-            }
-            this.handlePreparsingUpdate(websocketData)
-          } else if (data.status === 'preparsing') {
-            console.log('[FileUpload] Preparsing started (from polling)')
-            // Update status message to indicate preparsing has started
-            this.setPreparsingStatus('Preparsing in progress. Please wait...', 'info', true)
-            // Continue polling - websocket should handle completion, but polling is backup
-          } else if (data.status === 'preparsing_failed') {
-            console.log('[FileUpload] Preparsing failed (from polling)')
-            clearInterval(this.preparsingStatusPollInterval)
-            this.preparsingStatusPollInterval = null
-            const websocketData = {
-              status: 'failed',
-              stage: 'preparsing',
-              fu_id: fuId,
-              error: data.error || 'Preparsing failed'
-            }
-            this.handlePreparsingUpdate(websocketData)
-          }
-          // If still 'uploaded', continue polling (preparsing should start soon)
+        if (!response.ok) return
+
+        const data = await response.json()
+        if ((data.status === 'preparsed' || data.status === 'completed') && data.summary) {
+          this.stopPreparsingStatusPoll()
+        } else if (data.status === 'preparsing_failed') {
+          this.stopPreparsingStatusPoll()
         }
+        this.applyPreparsingStatusResponse(fuId, data)
       } catch (error) {
         console.error('[FileUpload] Error polling preparsing status:', error)
       }
-    }, 1000) // Poll every second
+    }, 1000)
   }
 
   handlePreparsingUpdate(data) {
@@ -1041,16 +1094,19 @@ export default class extends Controller {
     switch (data.status) {
       case 'started':
         this.hasMatrixData = false  // Reset when new preparsing starts
+        if (!this.h5adMetadataChosenByUser) {
+          this.parsingParams.rowname_metadata = ''
+          this.parsingParams.colname_metadata = ''
+        }
         this.setPreparsingStatus('Preparsing started. This can take a few minutes.', 'info', true)
         this.checkSubmitButton()
         break
-      case 'completed':
+      case 'completed': {
+        const alreadyDisplayed = this.isPreparsingComplete
         this.isPreparsingComplete = true
         // Check if we have actual dataset/matrix data (not just list_files for ARCHIVE)
         const datasets = Array.isArray(data.summary?.datasets) ? data.summary.datasets : []
-        const isArchiveWithFiles = data.summary?.detected_format === 'ARCHIVE' && 
-                                   Array.isArray(data.summary?.list_files) && 
-                                   data.summary.list_files.length > 0
+        const isArchiveWithFiles = this.isArchiveAwaitingFileSelection(data.summary)
         // We have matrix data if we have datasets, OR if this is not an archive format requiring file selection
         this.hasMatrixData = datasets.length > 0 || (!isArchiveWithFiles && !data.summary?.displayed_error)
         
@@ -1066,9 +1122,23 @@ export default class extends Controller {
           websocket_message: data,  // Full websocket message
           prediction_debug: data.prediction_debug || data.summary?.prediction_debug || null  // Prediction tool debug data
         }
-        this.renderPreparsingResult(data.summary, data.warnings, this.rawPreparsingData)
+        this.preparsingResultData = {
+          summary: data.summary,
+          warnings: data.warnings,
+          rawData: this.rawPreparsingData
+        }
+        const skipH5adRerender =
+          alreadyDisplayed &&
+          data.summary?.detected_format === 'H5AD' &&
+          this.h5adMetadataChosenByUser
+        if (skipH5adRerender) {
+          this.syncH5adMetadataHiddenFields()
+        } else {
+          this.renderPreparsingResult(data.summary, data.warnings, this.rawPreparsingData)
+        }
         this.checkSubmitButton()
         break
+      }
       case 'failed':
         this.isPreparsingComplete = false
         this.hasMatrixData = false
@@ -1113,16 +1183,15 @@ export default class extends Controller {
     this.currentDetectedFormat = detectedFormat
     if (datasets.length === 1 && datasets[0]?.name) {
       this.selectedDatasetName = datasets[0].name
+      if (this.cameFromArchive && !this.selectedArchiveEntry) {
+        const rawSel = rawData?.raw_output?.sel || rawData?.python_raw_output?.sel
+        if (rawSel) {
+          this.selectedArchiveEntry = rawSel
+        }
+      }
     }
-    if (this.currentLegacyPreparsingVersion() && detectedFormat === 'H5AD') {
-      if (Object.prototype.hasOwnProperty.call(summary, 'row_names')) {
-        this.parsingParams.rowname_metadata =
-          summary.row_names !== null && summary.row_names !== undefined ? String(summary.row_names) : ''
-      }
-      if (Object.prototype.hasOwnProperty.call(summary, 'col_names')) {
-        this.parsingParams.colname_metadata =
-          summary.col_names !== null && summary.col_names !== undefined ? String(summary.col_names) : ''
-      }
+    if (detectedFormat === 'H5AD') {
+      this.captureH5adMetadataSelections()
     }
     console.log('[FileUpload] Datasets found:', datasets.length, datasets)
     let html = ''
@@ -1144,13 +1213,13 @@ export default class extends Controller {
       `
     }
 
-    // Show parsing parameters for RAW_TEXT format
-    if (detectedFormat === 'RAW_TEXT') {
+    // Show parsing parameters for RAW_TEXT or archive uploads (text matrix inside tar.gz needs header/delimiter for Java v7).
+    if (detectedFormat === 'RAW_TEXT' || (this.isArchivePreparsingFormat(detectedFormat) && !this.cameFromArchive)) {
       html += this.buildParsingParametersUI()
     }
     
-    // Check for ARCHIVE format with list_files
-    const isArchiveFormat = summary?.detected_format === 'ARCHIVE'
+    // Check for ARCHIVE format with list_files (Java v7: ARCHIVE_COMPRESSED, Python v8: ARCHIVE)
+    const isArchiveFormat = this.isArchivePreparsingFormat(summary?.detected_format)
     const listFiles = Array.isArray(summary?.list_files) ? summary.list_files : []
     
     // Store archive files data if this is an archive format (for potential back navigation)
@@ -1191,7 +1260,7 @@ export default class extends Controller {
       }
     }
 
-    if (detectedFormat === 'H5AD' && this.currentLegacyPreparsingVersion()) {
+    if (detectedFormat === 'H5AD') {
       html += this.buildH5adGeneCellMetadataUI(summary)
     }
 
@@ -1292,6 +1361,9 @@ export default class extends Controller {
     // Set up event handlers for archive file selection
     if (isArchiveFormat && listFiles.length > 0 && !this.cameFromArchive) {
       this.setupArchiveFileSelectionHandlers(listFiles, summary?.detected_format)
+      if (detectedFormat === 'RAW_TEXT' || this.isArchivePreparsingFormat(detectedFormat)) {
+        this.setupParsingParametersHandlers()
+      }
     }
     // Set up event handlers for dataset selection (if multiple datasets)
     else if (datasets.length > 1) {
@@ -1306,8 +1378,9 @@ export default class extends Controller {
     if (detectedFormat === 'RAW_TEXT') {
       this.setupParsingParametersHandlers()
     }
-    if (detectedFormat === 'H5AD' && this.currentLegacyPreparsingVersion()) {
+    if (detectedFormat === 'H5AD') {
       this.setupH5adMetadataHandlers()
+      this.syncH5adMetadataHiddenFields()
     }
     
     // Set up event handlers after HTML is inserted (admin only)
@@ -1466,6 +1539,7 @@ export default class extends Controller {
           selectedFilenameWithoutExt = selectedFilenameWithoutExt.substring(0, lastDotIndex)
         }
         this.originalFilename = selectedFilenameWithoutExt
+        this.selectedArchiveEntry = filename
         
         // Re-run preparsing with selected file
         // Mark that we came from archive so we can show back button later
@@ -1497,8 +1571,7 @@ export default class extends Controller {
   }
 
   buildDatasetSelectionUI(datasets, detectedFormat) {
-    const archiveFormats = ['ARCHIVE', 'ARCHIVE_COMPRESSED']
-    const isArchiveFormat = archiveFormats.includes(detectedFormat)
+    const isArchiveFormat = this.isArchivePreparsingFormat(detectedFormat)
     const datasetMessage = isArchiveFormat
       ? 'Multiple datasets found in this archive. Please select one to proceed:'
       : 'Multiple datasets found in this file. Please select one to proceed:'
@@ -1620,7 +1693,7 @@ export default class extends Controller {
           selectButton.disabled = false
         }
 
-        if (detectedFormat === 'H5AD' && this.currentLegacyPreparsingVersion() && this.preparsingResultData) {
+        if (detectedFormat === 'H5AD' && this.preparsingResultData) {
           const pr = this.preparsingResultData
           this.renderPreparsingResult(pr.summary, pr.warnings, pr.rawData)
         }
@@ -1695,30 +1768,16 @@ export default class extends Controller {
         sel: datasetName
       }
       
-      // Include parsing parameters if available (for text files)
-      if (this.parsingParams) {
-        if (this.parsingParams.delimiter !== undefined) {
-          requestBody.delimiter = this.parsingParams.delimiter
-        }
-        if (this.parsingParams.gene_name_col !== undefined) {
-          requestBody.gene_name_col = this.parsingParams.gene_name_col
-        }
-        if (this.parsingParams.has_header !== undefined) {
-          requestBody.has_header = this.parsingParams.has_header ? '1' : '0'
-        }
+      if (this.shouldSendTextParsingParams(datasetName)) {
+        this.appendTextParsingParamsToRequest(requestBody)
       }
-      
+
       if (organismField && organismField.value) {
         requestBody.organism_id = organismField.value
       }
-      
+
       if (versionField && versionField.value) {
         requestBody.version_id = versionField.value
-      }
-
-      if (this.currentLegacyPreparsingVersion() && this.currentDetectedFormat === 'H5AD') {
-        requestBody.rowname_metadata = this.parsingParams.rowname_metadata || ''
-        requestBody.colname_metadata = this.parsingParams.colname_metadata || ''
       }
 
       const csrfToken = document.querySelector('[name="csrf-token"]')?.content
@@ -1987,6 +2046,37 @@ export default class extends Controller {
     }
   }
 
+  // Java legacy preparsing labels tar.gz as ARCHIVE_COMPRESSED; Python v8 uses ARCHIVE.
+  isArchivePreparsingFormat(detectedFormat) {
+    const fmt = (detectedFormat || '').toString().toUpperCase()
+    return fmt === 'ARCHIVE' || fmt === 'ARCHIVE_COMPRESSED'
+  }
+
+  isArchiveAwaitingFileSelection(summary) {
+    if (!summary) return false
+    const listFiles = Array.isArray(summary.list_files) ? summary.list_files : []
+    return this.isArchivePreparsingFormat(summary.detected_format) && listFiles.length > 0
+  }
+
+  isTextMatrixFilename(filename) {
+    const name = (filename || '').toString().toLowerCase()
+    return /\.(txt|tsv|csv)$/.test(name)
+  }
+
+  shouldSendTextParsingParams(datasetName) {
+    return this.currentDetectedFormat === 'RAW_TEXT' || this.isTextMatrixFilename(datasetName)
+  }
+
+  appendTextParsingParamsToRequest(requestBody) {
+    if (this.parsingParams.delimiter !== undefined) {
+      requestBody.delimiter = this.parsingParams.delimiter
+    } else {
+      requestBody.delimiter = ''
+    }
+    requestBody.gene_name_col = this.parsingParams.gene_name_col || 'first'
+    requestBody.has_header = this.parsingParams.has_header !== false ? '1' : '0'
+  }
+
   escapeHtml(value) {
     if (value === null || value === undefined) return ''
     return String(value).replace(/[&<>"']/g, (char) => ({
@@ -2163,6 +2253,54 @@ export default class extends Controller {
     return Number.isFinite(parsed) ? parsed : null
   }
 
+  onVersionChange() {
+    const versionId = this.currentVersionId()
+    if (!versionId) return
+
+    if (this.fuId && this.isUploadComplete) {
+      this.rerunPreparsingForVersionChange(versionId)
+    }
+  }
+
+  async rerunPreparsingForVersionChange(versionId) {
+    if (!this.fuId || !versionId) return
+
+    this.isPreparsingComplete = false
+    this.hasMatrixData = false
+    this.showPreparsingPanel()
+    this.setPreparsingStatus('Release changed. Re-running preparsing...', 'info', true)
+
+    try {
+      const organismField = this.form?.querySelector('[name="project[organism_id]"]')
+      const requestBody = { version_id: versionId }
+      if (organismField && organismField.value) {
+        requestBody.organism_id = parseInt(organismField.value, 10)
+      }
+
+      const csrfToken = document.querySelector('[name="csrf-token"]')?.content
+      const response = await fetch(`/fus/${this.fuId}/rerun_preparsing`, {
+        method: 'POST',
+        headers: {
+          'X-CSRF-Token': csrfToken,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      })
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Failed to re-run preparsing' }))
+        throw new Error(error.error || 'Failed to re-run preparsing')
+      }
+
+      this.subscribeToPreparsing(this.fuId)
+      this.startPreparsingStatusPoll(this.fuId)
+    } catch (error) {
+      console.error('[FileUpload] Error re-running preparsing after version change:', error)
+      this.setPreparsingStatus(`Error: ${error.message}`, 'error')
+    }
+  }
+
   isFormatSupportedInVersion(format, versionId) {
     if (!format) return false
     const introducedIn = parseInt(format.introduced_in_version_id, 10)
@@ -2302,7 +2440,7 @@ export default class extends Controller {
   syncSelectedDatasetInput() {
     if (!this.form) return
 
-    let selectedName = this.selectedDatasetName
+    let selectedName = this.selectedArchiveEntry || this.selectedDatasetName
     if (!selectedName) {
       const checkedRadio = this.form.querySelector('input[name="dataset_selection"]:checked')
       if (checkedRadio) {
@@ -2382,17 +2520,22 @@ export default class extends Controller {
       this.statusTarget.classList.add('text-yellow-600')
     }
 
+    this.stopPreparsingStatusPoll()
+    this.teardownPreparsingSubscription()
+    this.downloadCompletionHandled = false
+
     try {
       const organismField = this.form?.querySelector('[name="project[organism_id]"]')
-      const versionField = this.form?.querySelector('[name="project[version_id]"]')
-      
-      const requestBody = { url: url }
+      const versionId = this.currentVersionId()
+
+      if (!versionId) {
+        throw new Error('Select an ASAP release before downloading from a URL')
+      }
+
+      const requestBody = { url: url, version_id: versionId }
       
       if (organismField && organismField.value) {
-        requestBody.organism_id = parseInt(organismField.value)
-      }
-      if (versionField && versionField.value) {
-        requestBody.version_id = parseInt(versionField.value)
+        requestBody.organism_id = parseInt(organismField.value, 10)
       }
       
       const csrfToken = document.querySelector('[name="csrf-token"]')?.content
@@ -2418,6 +2561,23 @@ export default class extends Controller {
       if (this.hasProgressTarget) {
         this.progressTarget.classList.remove('hidden')
       }
+
+      const terminalStatuses = ['uploaded', 'preparsing', 'preparsed', 'completed']
+      if (result.reused && terminalStatuses.includes(result.status)) {
+        this.downloadCompletionHandled = false
+        this.updateDownloadProgress(result.size || 0, result.size || 0)
+        this.handleDownloadCompletedFromStatus({
+          exists: true,
+          fu_id: result.fu_id,
+          size: result.size,
+          total_size: result.size,
+          status: result.status,
+          complete: true,
+          filename: result.filename
+        })
+        return
+      }
+
       this.updateDownloadProgress(0, 0)
       this.startDownloadStatusPoll(this.fuId)
 
@@ -2548,12 +2708,12 @@ export default class extends Controller {
       const organismField = this.form?.querySelector('[name="project[organism_id]"]')
       const versionField = this.form?.querySelector('[name="project[version_id]"]')
       
-      const requestBody = {
-        // No sel parameter for text file re-parsing with parameters only
-        delimiter: this.parsingParams.delimiter !== undefined ? this.parsingParams.delimiter : '',
-        gene_name_col: this.parsingParams.gene_name_col || 'first',
-        has_header: this.parsingParams.has_header !== false ? '1' : '0'
+      const requestBody = {}
+      const archiveSel = this.selectedArchiveEntry || this.selectedDatasetName
+      if (archiveSel && this.isTextMatrixFilename(archiveSel)) {
+        requestBody.sel = archiveSel
       }
+      this.appendTextParsingParamsToRequest(requestBody)
       
       if (organismField && organismField.value) {
         requestBody.organism_id = parseInt(organismField.value)
@@ -2658,16 +2818,17 @@ export default class extends Controller {
     this.selectedDatasetName = null
     this.selectedFileIndex = null
     this.selectedFileName = null
+    this.selectedArchiveEntry = null
     this.archiveFilesData = null
     this.cameFromArchive = false
     this.projectNameTouched = false
     
-    // Reset preparsing state
+    // Reset preparsing state and stop background polls/subscriptions
     this.resetPreparsingState()
-    
-    // Unsubscribe from preparsing updates
-    this.teardownPreparsingSubscription()
-    this.stopDownloadStatusPoll()
+    this.stopAllUploadTracking()
+    this.h5adMetadataChosenByUser = false
+    this.preparsingResultData = null
+    this.rawPreparsingData = null
 
     // Reset parsing parameters
     this.parsingParams = {
@@ -2714,6 +2875,22 @@ export default class extends Controller {
     return Number.isFinite(v) && v < 8
   }
 
+  h5adMetadataOptionValue(entry) {
+    if (!entry) return ''
+    if (entry.path) return String(entry.path)
+    if (entry.on === 'GENE') return `/var/${entry.name}`
+    if (entry.on === 'CELL') return `/obs/${entry.name}`
+    return entry.name ? String(entry.name) : ''
+  }
+
+  normalizeH5adJavaMetadataPath(value, axis) {
+    const s = (value == null ? '' : String(value)).trim()
+    if (!s) return ''
+    if (s.startsWith('/')) return s
+    const prefix = axis === 'row' ? '/var/' : '/obs/'
+    return `${prefix}${s.replace(/^\//, '')}`
+  }
+
   getEffectiveH5adMetadataDataset(datasets) {
     if (!Array.isArray(datasets) || datasets.length === 0) return null
     if (
@@ -2728,7 +2905,6 @@ export default class extends Controller {
   }
 
   buildH5adGeneCellMetadataUI(summary) {
-    if (!this.currentLegacyPreparsingVersion()) return ''
     const datasets = Array.isArray(summary?.datasets) ? summary.datasets : []
     const ds = this.getEffectiveH5adMetadataDataset(datasets)
     const fromDataset = Array.isArray(ds?.metadata) ? ds.metadata : []
@@ -2737,18 +2913,26 @@ export default class extends Controller {
     const geneOptions = meta.filter((e) => e.on === 'GENE' && e.type === 'STRING')
     const cellOptions = meta.filter((e) => e.on === 'CELL' && e.type === 'STRING')
 
-    const curRow = this.parsingParams.rowname_metadata || ''
-    const curCol = this.parsingParams.colname_metadata || ''
+    let curRow = this.parsingParams.rowname_metadata || ''
+    let curCol = this.parsingParams.colname_metadata || ''
+    const defaultRowEntry = geneOptions.find((e) => e.name === '_index')
+    const defaultColEntry = cellOptions.find((e) => e.name === '_index')
+    if (!curRow && defaultRowEntry && !this.h5adMetadataChosenByUser) {
+      curRow = this.h5adMetadataOptionValue(defaultRowEntry)
+    }
+    if (!curCol && defaultColEntry && !this.h5adMetadataChosenByUser) {
+      curCol = this.h5adMetadataOptionValue(defaultColEntry)
+    }
     const h5adRowAxis = 'genes'
     const h5adColAxis = 'cells'
     const rowWord = this.escapeHtml(this.capitalizeFirst(h5adRowAxis))
     const colWord = this.escapeHtml(this.capitalizeFirst(h5adColAxis))
 
     const rowOpts = [{ value: '', label: 'Select a row metadata' }].concat(
-      geneOptions.map((e) => ({ value: e.name, label: e.name }))
+      geneOptions.map((e) => ({ value: this.h5adMetadataOptionValue(e), label: e.name }))
     )
     const colOpts = [{ value: '', label: 'Select a column metadata' }].concat(
-      cellOptions.map((e) => ({ value: e.name, label: e.name }))
+      cellOptions.map((e) => ({ value: this.h5adMetadataOptionValue(e), label: e.name }))
     )
 
     const rowHtml = rowOpts
@@ -2787,19 +2971,60 @@ export default class extends Controller {
     `
   }
 
+  captureH5adMetadataSelections() {
+    if (!this.hasPreparsingResultTarget) return
+    const rowSel = this.preparsingResultTarget.querySelector('#h5ad-rowname-metadata')
+    const colSel = this.preparsingResultTarget.querySelector('#h5ad-colname-metadata')
+    if (rowSel?.value) {
+      this.parsingParams.rowname_metadata = this.normalizeH5adJavaMetadataPath(rowSel.value, 'row')
+      this.h5adMetadataChosenByUser = true
+    }
+    if (colSel?.value) {
+      this.parsingParams.colname_metadata = this.normalizeH5adJavaMetadataPath(colSel.value, 'col')
+      this.h5adMetadataChosenByUser = true
+    }
+  }
+
+  onH5adMetadataChange(axis, value) {
+    this.h5adMetadataChosenByUser = true
+    const normalized = this.normalizeH5adJavaMetadataPath(value, axis)
+    if (axis === 'row') {
+      this.parsingParams.rowname_metadata = normalized
+    } else {
+      this.parsingParams.colname_metadata = normalized
+    }
+    this.syncH5adMetadataHiddenFields()
+    this.checkSubmitButton()
+    if (this.currentLegacyPreparsingVersion()) {
+      this.scheduleH5adMetadataRerun()
+    }
+  }
+
+  scheduleH5adMetadataRerun() {
+    if (this.h5adMetadataRerunTimer) {
+      clearTimeout(this.h5adMetadataRerunTimer)
+    }
+    this.h5adMetadataRerunTimer = setTimeout(() => {
+      this.h5adMetadataRerunTimer = null
+      const row = this.normalizeH5adJavaMetadataPath(this.parsingParams.rowname_metadata, 'row').trim()
+      const col = this.normalizeH5adJavaMetadataPath(this.parsingParams.colname_metadata, 'col').trim()
+      if (row && col) {
+        this.updatePreparsingWithH5adNames()
+      }
+    }, 600)
+  }
+
   setupH5adMetadataHandlers() {
     const rowSel = this.preparsingResultTarget?.querySelector('#h5ad-rowname-metadata')
     const colSel = this.preparsingResultTarget?.querySelector('#h5ad-colname-metadata')
     if (rowSel) {
       rowSel.addEventListener('change', (e) => {
-        this.parsingParams.rowname_metadata = e.target.value
-        this.updatePreparsingWithH5adNames()
+        this.onH5adMetadataChange('row', e.target.value)
       })
     }
     if (colSel) {
       colSel.addEventListener('change', (e) => {
-        this.parsingParams.colname_metadata = e.target.value
-        this.updatePreparsingWithH5adNames()
+        this.onH5adMetadataChange('col', e.target.value)
       })
     }
   }
@@ -2810,9 +3035,12 @@ export default class extends Controller {
     try {
       const organismField = this.form?.querySelector('[name="project[organism_id]"]')
       const versionField = this.form?.querySelector('[name="project[version_id]"]')
-      const requestBody = {
-        rowname_metadata: this.parsingParams.rowname_metadata || '',
-        colname_metadata: this.parsingParams.colname_metadata || ''
+      const requestBody = {}
+      if (this.h5adMetadataChosenByUser) {
+        const rowPath = this.normalizeH5adJavaMetadataPath(this.parsingParams.rowname_metadata, 'row').trim()
+        const colPath = this.normalizeH5adJavaMetadataPath(this.parsingParams.colname_metadata, 'col').trim()
+        if (rowPath) requestBody.rowname_metadata = rowPath
+        if (colPath) requestBody.colname_metadata = colPath
       }
       if (this.selectedDatasetName) {
         requestBody.sel = this.selectedDatasetName
@@ -2852,11 +3080,21 @@ export default class extends Controller {
     if (!this.form) return
     this.removeHiddenFieldByName('rowname_metadata')
     this.removeHiddenFieldByName('colname_metadata')
-    if (!(this.currentLegacyPreparsingVersion() && this.currentDetectedFormat === 'H5AD')) {
+    if (this.currentDetectedFormat !== 'H5AD') {
       return
     }
-    this.ensureHiddenField('rowname_metadata', this.parsingParams.rowname_metadata || '')
-    this.ensureHiddenField('colname_metadata', this.parsingParams.colname_metadata || '')
+    const rowSel = this.preparsingResultTarget?.querySelector('#h5ad-rowname-metadata')
+    const colSel = this.preparsingResultTarget?.querySelector('#h5ad-colname-metadata')
+    let rowVal = (this.parsingParams.rowname_metadata || '').trim()
+    let colVal = (this.parsingParams.colname_metadata || '').trim()
+    if (!rowVal && rowSel?.value) {
+      rowVal = this.normalizeH5adJavaMetadataPath(rowSel.value, 'row')
+    }
+    if (!colVal && colSel?.value) {
+      colVal = this.normalizeH5adJavaMetadataPath(colSel.value, 'col')
+    }
+    this.ensureHiddenField('rowname_metadata', rowVal)
+    this.ensureHiddenField('colname_metadata', colVal)
   }
 
   ensureHiddenField(name, value) {

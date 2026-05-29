@@ -164,6 +164,11 @@ class FusController < ApplicationController
       }
       
       if is_complete
+        if version_id.blank?
+          render json: { error: 'Select an ASAP release before finishing the upload' }, status: :unprocessable_entity
+          return
+        end
+
         Rails.logger.info("[FusController#upload_chunk] Upload complete, enqueueing preparsing job. organism_id: #{organism_id.inspect}, version_id: #{version_id.inspect}")
         enqueue_preparsing_job(fu, organism_id: organism_id, version_id: version_id)
       else
@@ -213,7 +218,10 @@ class FusController < ApplicationController
     if fu
       current_size = (fu.file_path && File.exist?(fu.file_path)) ? File.size(fu.file_path) : 0
       total_size = fu.upload_file_size || 0
-      is_complete = fu.status == 'uploaded' || fu.status == 'preparsing' || fu.status == 'preparsed' || fu.complete?
+      # Do not treat size match alone as complete while URL download job is still running;
+      # otherwise the UI hands off to preparsing before FuDownloadFromUrlJob updates status.
+      is_complete = %w[uploaded preparsing preparsed completed].include?(fu.status) ||
+                    (fu.status != 'downloading' && fu.complete?)
 
       # Only mark as resumable if we have valid size information
       resumable = fu.resumable? && total_size > 0 && current_size >= 0 && current_size <= total_size
@@ -272,7 +280,8 @@ class FusController < ApplicationController
       input_filename = "input_file#{file_ext}"
 
       # Temporary reuse optimization: if same URL was already downloaded by this user, reuse it.
-      reusable_fu = fu_scope_for_current_actor.where(url: normalized_url)
+      # Only unattached uploads: a Fu already linked to a project must not be reused for a new project.
+      reusable_fu = fu_scope_for_current_actor.where(url: normalized_url, project_id: nil)
                       .where(status: %w[downloading uploaded preparsing preparsed completed])
                       .order(updated_at: :desc)
                       .detect do |candidate|
@@ -288,6 +297,40 @@ class FusController < ApplicationController
       if reusable_fu
         upload_path = reusable_fu.file_path
         size = (upload_path && File.exist?(upload_path)) ? File.size(upload_path) : 0
+        organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)
+        version_id = request_body['version_id'] || safe_integer_param(:version_id)
+
+        if preparsing_result_stale?(reusable_fu, requested_version_id: version_id)
+          Rails.logger.info(
+            "[FusController#download_from_url] Re-preparsing reused Fu##{reusable_fu.id} " \
+            "(stale output or version #{version_id} != #{reusable_fu.preparsing_version_id})"
+          )
+          enqueue_preparsing_job(reusable_fu, organism_id: organism_id, version_id: version_id)
+          reusable_fu.reload
+
+          session[:file_upload] = {
+            fu_id: reusable_fu.id,
+            original_filename: reusable_fu.name.presence || filename,
+            input_filename: reusable_fu.upload_file_name,
+            path: upload_path&.to_s,
+            size: size,
+            total_size: reusable_fu.upload_file_size || size,
+            complete: false,
+            organism_id: organism_id,
+            version_id: version_id
+          }
+
+          render json: {
+            success: true,
+            fu_id: reusable_fu.id,
+            filename: reusable_fu.name.presence || filename,
+            size: size,
+            status: reusable_fu.status,
+            reused: false
+          }
+          return
+        end
+
         status = reusable_fu.status == 'completed' ? 'uploaded' : reusable_fu.status
         is_complete = %w[uploaded preparsing preparsed completed].include?(reusable_fu.status)
 
@@ -299,8 +342,8 @@ class FusController < ApplicationController
           size: size,
           total_size: reusable_fu.upload_file_size || size,
           complete: is_complete,
-          organism_id: request_body['organism_id'] || safe_integer_param(:organism_id),
-          version_id: request_body['version_id'] || safe_integer_param(:version_id)
+          organism_id: organism_id,
+          version_id: version_id
         }
 
         render json: {
@@ -395,8 +438,10 @@ class FusController < ApplicationController
     has_parsing_params = request_body.key?('delimiter') || gene_name_col.present? || request_body.key?('has_header') ||
                          request_body.key?('rowname_metadata') || request_body.key?('colname_metadata')
     
-    unless has_dataset_selection || has_parsing_params
-      render json: { error: 'Either dataset selection (sel) or parsing parameters (delimiter, gene_name_col, has_header) must be provided' }, status: :bad_request
+    has_version_rerun = request_body.key?('version_id') && request_body['version_id'].present?
+
+    unless has_dataset_selection || has_parsing_params || has_version_rerun
+      render json: { error: 'Either dataset selection (sel), parsing parameters (delimiter, gene_name_col, has_header), or version_id must be provided' }, status: :bad_request
       return
     end
 
@@ -435,6 +480,11 @@ class FusController < ApplicationController
     options[:organism_id] = organism_id if organism_id.present?
     options[:version_id] = version_id if version_id.present?
     
+    if version_id.blank?
+      render json: { error: 'version_id is required to re-run preparsing' }, status: :bad_request
+      return
+    end
+
     Rails.logger.info("[FusController#rerun_preparsing] Final options before adding other params: #{options.inspect}")
     
     # Add dataset selection if provided
@@ -446,16 +496,22 @@ class FusController < ApplicationController
     options[:gene_name_col] = gene_name_col if gene_name_col.present?
     options[:has_header] = has_header if has_header.present?
     if request_body.key?('rowname_metadata')
-      options[:rowname_metadata] = request_body['rowname_metadata'].to_s.presence
+      options[:rowname_metadata] = H5adPreparsingMetadata.java_metadata_path(
+        request_body['rowname_metadata'],
+        :row
+      )
     end
     if request_body.key?('colname_metadata')
-      options[:colname_metadata] = request_body['colname_metadata'].to_s.presence
+      options[:colname_metadata] = H5adPreparsingMetadata.java_metadata_path(
+        request_body['colname_metadata'],
+        :col
+      )
     end
 
     # Re-run preparsing with selected dataset or parsing parameters
     enqueued_at = Time.current
     options[:enqueued_at] = enqueued_at.iso8601
-    fu.update!(status: 'preparsing')
+    fu.update!(status: 'preparsing', preparsing_version_id: version_id)
     job = FuPreparsingJob.perform_later(fu.id, options.compact)
     Rails.logger.info("[FusController#rerun_preparsing] Enqueued FuPreparsingJob for Fu##{fu.id} job_id=#{job.job_id} enqueued_at=#{enqueued_at.utc.iso8601}")
 
@@ -487,16 +543,29 @@ class FusController < ApplicationController
     end
 
     if fu.status == 'uploaded' && fu.complete?
-      enqueue_preparsing_job(fu)
+      version_id = preparsing_version_id_from_request
+      organism_id = safe_integer_param(:organism_id) || session[:file_upload]&.dig(:organism_id)
+      enqueue_preparsing_job(fu, organism_id: organism_id, version_id: version_id)
       fu.reload
     end
 
     # Return status and preparsing results if available
-    if fu.status == 'preparsed'
+    if fu.status == 'preparsed' || fu.status == 'completed'
+      if preparsing_result_stale?(fu)
+        version_id = preparsing_version_id_from_request || fu.preparsing_version_id
+        organism_id = safe_integer_param(:organism_id) || session[:file_upload]&.dig(:organism_id)
+        Rails.logger.info("[FusController#preparsing_status] Re-preparsing Fu##{fu.id}: stale preparsing result")
+        fu.update!(status: 'preparsing')
+        enqueue_preparsing_job(fu, organism_id: organism_id, version_id: version_id)
+        fu.reload
+        render json: { status: fu.status }
+        return
+      end
+
       # Use the service to load preparsing results (reuses existing logic)
       begin
-        service = FuPreparsingService.new(fu, {})
-        output = service.send(:load_output_json)
+        service = FuPreparsingService.new(fu, preparsing_status_service_options(fu))
+        output = service.send(:load_output_with_enrichment)
         summary = service.send(:build_summary, output)
         warnings = service.send(:collect_warnings, output)
         prediction_debug = summary[:prediction_debug] || nil
@@ -525,6 +594,48 @@ class FusController < ApplicationController
   end
 
   private
+
+  def preparsing_version_id_from_request
+    safe_integer_param(:version_id) || session[:file_upload]&.dig(:version_id)
+  end
+
+  def preparsing_status_service_options(fu)
+    version_id = preparsing_version_id_from_request || fu.preparsing_version_id
+    opts = {}
+    opts[:version_id] = version_id if version_id.present?
+    opts
+  end
+
+  def preparsing_result_stale?(fu, requested_version_id: nil)
+    requested_version_id ||= preparsing_version_id_from_request
+
+    if requested_version_id.present? && fu.preparsing_version_id.present?
+      return true if requested_version_id.to_i != fu.preparsing_version_id.to_i
+    end
+
+    output_path = fu.upload_dir + 'output.json'
+    return true unless output_path.exist?
+
+    output = JSON.parse(output_path.read)
+
+    version_id = requested_version_id || fu.preparsing_version_id
+    return false unless version_id.present? && version_id.to_i < 8
+
+    name = fu.upload_file_name.to_s.downcase
+
+    if name.end_with?('.h5ad') && err.include?('__categories')
+      return true
+    end
+
+    return false unless name.end_with?('.rds')
+
+    format = output['detected_format'].to_s
+    return true if format == 'COMPRESSED'
+
+    format == 'RDS' && !(fu.upload_dir + 'input.loom').exist?
+  rescue JSON::ParserError, StandardError
+    true
+  end
 
   def enqueue_preparsing_job(fu, organism_id: nil, version_id: nil)
     # Get organism_id and version_id from:
@@ -556,10 +667,15 @@ class FusController < ApplicationController
     options[:organism_id] = organism_id if organism_id.present?
     options[:version_id] = version_id if version_id.present?
     options[:enqueued_at] = enqueue_started_at.iso8601
-    
+
+    if version_id.blank?
+      raise ArgumentError,
+            'version_id is required to enqueue preparsing (select a release on the upload form)'
+    end
+
     Rails.logger.info("[FusController#enqueue_preparsing_job] Options hash: #{options.inspect}")
     
-    fu.update!(status: 'preparsing')
+    fu.update!(status: 'preparsing', preparsing_version_id: version_id)
     job = FuPreparsingJob.perform_later(fu.id, options)
     
     enqueue_elapsed_ms = ((Time.current - enqueue_started_at) * 1000).round

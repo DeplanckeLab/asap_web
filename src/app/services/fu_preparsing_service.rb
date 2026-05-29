@@ -24,10 +24,22 @@ class FuPreparsingService
 
     working_file = prepare_input_file
     @logger.info("[FuPreparsingService] Working file: #{working_file}")
-    preparsing_input = resolve_java_preparsing_h5ad_path(working_file)
+    @legacy_rds_upload = legacy_rds_preparsing?(working_file)
+    preparsing_input = resolve_preparsing_input(working_file)
     run_preparsing(preparsing_input, working_file)
 
     output = load_output_json
+    mtx_result = maybe_extract_single_mtx_archive!(output, working_file)
+    if mtx_result.is_a?(Hash) && mtx_result[:synthetic_output]
+      output = mtx_result[:synthetic_output]
+      persist_preparsing_output_json(output)
+    elsif mtx_result.present?
+      run_preparsing(mtx_result, working_file)
+      output = load_output_json
+    end
+    output = apply_legacy_rds_preparsing_labels(output, working_file) if @legacy_rds_upload
+    output = enrich_h5ad_metadata_if_needed!(output)
+    output = sync_raw_text_preparsing_dimensions!(output)
     summary = build_summary(output)
     
     # Write predictions back to output.json so they're available when reading the file later
@@ -127,136 +139,238 @@ class FuPreparsingService
     cleanup_java_preparsing_h5ad_csr_workcopy(preparsing_file, original_upload_path)
   end
 
+  # Release for preparsing: job options, persisted Fu column, then bound project.
   def preparsing_version_id
-    v = safe_integer(@options[:version_id])
-    return v if v
+    if @options[:version_id].present?
+      vid = safe_integer(@options[:version_id])
+      return vid if vid
 
-    safe_integer(@fu.project&.version_id)
+      raise ArgumentError, "version_id could not be parsed: #{@options[:version_id].inspect}"
+    end
+
+    if @fu.preparsing_version_id.present?
+      return @fu.preparsing_version_id
+    end
+
+    project_vid = safe_integer(@fu.project&.version_id)
+    return project_vid if project_vid
+
+    raise ArgumentError,
+          'version_id is required for preparsing (select a release on the upload form)'
   end
 
-  # Java ASAP.jar -T Preparsing for all legacy releases (version_id < 8).
+  # Java ASAP.jar -T Preparsing for legacy releases (version_id < 8).
   # Java does not accept CSC /X; convert a work copy to CSR first (same as parse.rake at parse time).
   def legacy_java_preparsing?
-    vid = preparsing_version_id
-    vid.present? && vid < 8
+    preparsing_version_id < 8
   end
+
+  def rds_upload_path?(path)
+    File.extname(path.to_s).downcase == '.rds'
+  end
+
+  # Java treats gzip-wrapped RDS as COMPRESSED; convert to LOOM first (same as parse.rake v<8).
+  def legacy_rds_preparsing?(file_path)
+    legacy_java_preparsing? && rds_upload_path?(file_path)
+  end
+
+  def use_java_preparsing?(file_path)
+    legacy_java_preparsing?
+  end
+
+  def python_preparsing_script_name
+    "preparse.v#{preparsing_version_id}.py"
+  end
+
+  LEGACY_RDS_LOOM_BASENAME = 'input.loom'
 
   def h5ad_upload_path?(path)
     File.extname(path.to_s).downcase == '.h5ad'
   end
 
+  def resolve_preparsing_input(working_file)
+    if legacy_rds_preparsing?(working_file)
+      convert_legacy_rds_to_loom!(working_file)
+    elsif legacy_java_preparsing? && h5ad_upload_path?(working_file)
+      resolve_java_preparsing_h5ad_path(working_file)
+    else
+      working_file
+    end
+  end
+
+  def legacy_rds_loom_path
+    upload_dir + LEGACY_RDS_LOOM_BASENAME
+  end
+
+  def convert_legacy_rds_to_loom!(rds_path)
+    loom_path = legacy_rds_loom_path.to_s
+    FileUtils.rm_f(loom_path)
+
+    inner = Shellwords.join(
+      ['Rscript', '--vanilla', '/srv/convert_seurat.R', rds_path.to_s, loom_path]
+    )
+    docker_cmd = [
+      'docker', 'exec',
+      '--user', '1006:1006',
+      '--workdir', upload_dir.to_s,
+      ENV.fetch('ASAP_RUN_CONTAINER'),
+      '/bin/sh', '-c', inner
+    ]
+    full_cmd = Shellwords.join(docker_cmd)
+    @logger.info("[FuPreparsingService] Converting RDS to LOOM for legacy preparsing: #{full_cmd}")
+
+    stdout, stderr, status = Open3.capture3(full_cmd)
+    unless status.success?
+      msg = stderr.to_s.strip.presence || stdout.to_s.strip.presence || "exit #{status.exitstatus}"
+      raise "RDS to LOOM conversion failed: #{msg}"
+    end
+    unless File.exist?(loom_path) && File.size(loom_path).positive?
+      raise "RDS to LOOM conversion did not produce #{loom_path}"
+    end
+
+    @logger.info("[FuPreparsingService] RDS converted to #{loom_path} (#{File.size(loom_path)} bytes)")
+    loom_path
+  end
+
+  # Java/Python first pass on tar.gz often returns ARCHIVE* + list_files. When the archive
+  # contains exactly one 10x MTX triplet (matrix.mtx + barcodes + genes/features), extract
+  # it and finalize preparsing as MTX/MEX instead of manual file selection.
+  def maybe_extract_single_mtx_archive!(output, archive_path)
+    fmt = output['detected_format'].to_s
+    return nil unless fmt.match?(/\AARCHIVE(_COMPRESSED)?\z/i)
+
+    triplet = Basic.mtx_triplet_from_archive_list(output['list_files'])
+    return nil unless triplet
+
+    bundle_dir = upload_dir + 'input_file'
+    FileUtils.rm_rf(bundle_dir) if bundle_dir.exist?
+    Basic.extract_mtx_triplet_from_archive(
+      archive_path.to_s,
+      triplet,
+      bundle_dir.to_s,
+      logger: @logger
+    )
+
+    if legacy_java_preparsing?
+      h5_path = upload_dir + 'input.h5'
+      begin
+        convert_mtx_bundle_to_h5_for_preparsing!(bundle_dir, h5_path)
+      rescue StandardError => e
+        @logger.warn(
+          "[FuPreparsingService] v7 MTX->H5 failed (#{e.message}); " \
+          'preparsing will report MTX bundle only'
+        )
+        h5_path = nil
+      end
+      synthetic = Basic.build_mtx_archive_preparsing_output(
+        bundle_dir.to_s,
+        h5_path: h5_path&.to_s
+      )
+      @logger.info(
+        "[FuPreparsingService] v7: auto-detected 10x MTX triplet in archive; " \
+        "preparsing output set to #{synthetic['detected_format']} " \
+        "(#{synthetic.dig('list_groups', 0, 'nber_rows')}x#{synthetic.dig('list_groups', 0, 'nber_cols')})"
+      )
+      return { synthetic_output: synthetic }
+    end
+
+    @logger.info(
+      "[FuPreparsingService] Auto-detected 10x MTX triplet in archive; " \
+      "re-running Python preparsing on #{bundle_dir}"
+    )
+    bundle_dir.to_s
+  rescue StandardError => e
+    @logger.warn(
+      "[FuPreparsingService] Could not auto-extract MTX triplet from archive: #{e.class} - #{e.message}"
+    )
+    nil
+  end
+
+  # Same docker exec path as RDS->LOOM (not docker run): upload_dir must match preparsing workdir.
+  def convert_mtx_bundle_to_h5_for_preparsing!(bundle_dir, h5_path)
+    FileUtils.rm_f(h5_path.to_s)
+    inner = Shellwords.join(
+      ['Rscript', '--vanilla', '/srv/mtx_to_h5.R', bundle_dir.to_s, h5_path.to_s]
+    )
+    docker_cmd = [
+      'docker', 'exec',
+      '--user', '1006:1006',
+      '--workdir', upload_dir.to_s,
+      ENV.fetch('ASAP_RUN_CONTAINER'),
+      '/bin/sh', '-c', inner
+    ]
+    full_cmd = Shellwords.join(docker_cmd)
+    @logger.info("[FuPreparsingService] MTX bundle -> H5 for v7 preparsing: #{full_cmd}")
+
+    stdout, stderr, status = Open3.capture3(full_cmd)
+    unless status.success?
+      msg = stderr.to_s.strip.presence || stdout.to_s.strip.presence || "exit #{status.exitstatus}"
+      raise "MTX to H5 conversion failed: #{msg}"
+    end
+    unless h5_path.exist? && h5_path.size.positive?
+      raise "MTX to H5 conversion did not produce #{h5_path}"
+    end
+    @logger.info("[FuPreparsingService] Wrote #{h5_path} (#{h5_path.size} bytes)")
+    h5_path
+  end
+
+  def sync_raw_text_preparsing_dimensions!(output)
+    return output unless output.is_a?(Hash)
+    return output unless output['file_path'].present?
+
+    gene_name_col = @options[:gene_name_col].presence || 'first'
+    delimiter = @options.key?(:delimiter) ? @options[:delimiter] : ''
+    has_header = @options.key?(:has_header) ? @options[:has_header] : true
+    Basic.sync_raw_text_dimensions_from_file!(
+      output,
+      gene_name_col: gene_name_col,
+      delimiter: delimiter,
+      has_header: has_header
+    )
+  rescue StandardError => e
+    @logger.warn("[FuPreparsingService] Could not sync RAW_TEXT dimensions from file: #{e.class} - #{e.message}")
+    output
+  end
+
+  def apply_legacy_rds_preparsing_labels(output, original_rds_path)
+    loom_path = legacy_rds_loom_path
+    output['detected_format'] = 'RDS'
+    output['file_path'] = loom_path.to_s if loom_path.exist?
+    output['source_rds_path'] = original_rds_path.to_s
+    persist_preparsing_output_json(output)
+    output
+  end
+
+  def persist_preparsing_output_json(output)
+    output_path = upload_dir + 'output.json'
+    File.write(output_path, JSON.generate(output))
+    FileUtils.chmod(0664, output_path)
+  rescue StandardError => e
+    @logger.warn("[FuPreparsingService] Could not persist relabeled preparsing output: #{e.message}")
+  end
+
   def resolve_java_preparsing_h5ad_path(working_file)
     wf = working_file.to_s
     return working_file unless legacy_java_preparsing? && h5ad_upload_path?(wf)
-    return working_file unless h5ad_needs_csr_for_java_preparsing?(wf)
 
-    work = (upload_dir + '.__preparsing_java_csr.h5ad').to_s
-    FileUtils.rm_f(work)
-    FileUtils.cp(wf, work)
-    @logger.info("[FuPreparsingService] H5AD has CSC sparse matrix groups; converting work copy for Java preparsing: #{work}")
+    needs_upgrade = H5adJavaPrep.has_legacy_categories?(wf, workdir: upload_dir)
+    needs_csr = H5adJavaPrep.needs_csr?(wf, workdir: upload_dir)
+    return working_file unless needs_upgrade || needs_csr
+
     begin
-      run_h5ad_csc_to_csr_in_container!(work)
+      H5adJavaPrep.prepare_work_copy!(wf, workdir: upload_dir, logger: @logger)
     rescue StandardError => e
-      FileUtils.rm_f(work)
+      FileUtils.rm_f(File.join(upload_dir.to_s, H5adJavaPrep::LEGACY_JAVA_H5AD_WORK_SUFFIX))
       raise e
     end
-    work
-  end
-
-  H5AD_CSC_DETECT_PY = (<<~'PYTHON').freeze
-    import h5py, sys
-
-    def is_csc(g):
-        if not isinstance(g, h5py.Group):
-            return False
-        enc = g.attrs.get("encoding-type", "")
-        if isinstance(enc, bytes):
-            enc = enc.decode("ascii", "replace")
-        return enc == "csc_matrix"
-
-    path = sys.argv[1]
-    with h5py.File(path, "r") as f:
-        if "X" in f and is_csc(f["X"]):
-            print("yes")
-            sys.exit(0)
-        if "layers" in f:
-            for n in f["layers"]:
-                lg = f["layers"][n]
-                if isinstance(lg, h5py.Group) and is_csc(lg):
-                    print("yes")
-                    sys.exit(0)
-        if "raw" in f and isinstance(f["raw"], h5py.Group) and "X" in f["raw"]:
-            rx = f["raw"]["X"]
-            if isinstance(rx, h5py.Group) and is_csc(rx):
-                print("yes")
-                sys.exit(0)
-    print("no")
-  PYTHON
-
-  H5AD_CSC_TO_CSR_PY = (<<~'PYTHON').freeze
-    import h5py, scipy.sparse, sys
-    f = h5py.File(sys.argv[1], "r+")
-
-    def cvt(g):
-        enc = g.attrs.get("encoding-type", "")
-        if isinstance(enc, bytes):
-            enc = enc.decode("ascii", "replace")
-        if enc == "csc_matrix":
-            s = tuple(g.attrs["shape"])
-            m = scipy.sparse.csc_matrix((g["data"][:], g["indices"][:], g["indptr"][:]), shape=s).tocsr()
-            del g["data"], g["indices"], g["indptr"]
-            g.create_dataset("data", data=m.data, chunks=True)
-            g.create_dataset("indices", data=m.indices, chunks=True)
-            g.create_dataset("indptr", data=m.indptr, chunks=True)
-            g.attrs["encoding-type"] = "csr_matrix"
-
-    cvt(f["X"])
-    if "layers" in f:
-        for n in f["layers"]:
-            if isinstance(f["layers"][n], h5py.Group):
-                cvt(f["layers"][n])
-    if "raw" in f and "X" in f["raw"]:
-        rx = f["raw"]["X"]
-        if isinstance(rx, h5py.Group):
-            cvt(rx)
-    f.close()
-  PYTHON
-
-  def h5ad_needs_csr_for_java_preparsing?(host_path)
-    stdout, stderr, status = Open3.capture3(
-      'docker', 'exec',
-      '--user', '1006:1006',
-      '--workdir', upload_dir.to_s,
-      ENV.fetch('ASAP_RUN_CONTAINER'),
-      'python3', '-c', H5AD_CSC_DETECT_PY, host_path.to_s
-    )
-    unless status.success?
-      @logger.warn("[FuPreparsingService] H5AD CSC detect failed (exit #{status.exitstatus}): #{stderr.to_s.strip.presence || stdout.to_s.strip}")
-      return false
-    end
-
-    stdout.to_s.strip == 'yes'
-  end
-
-  def run_h5ad_csc_to_csr_in_container!(host_path)
-    stdout, stderr, status = Open3.capture3(
-      'docker', 'exec',
-      '--user', '1006:1006',
-      '--workdir', upload_dir.to_s,
-      ENV.fetch('ASAP_RUN_CONTAINER'),
-      'python3', '-c', H5AD_CSC_TO_CSR_PY, host_path.to_s
-    )
-    return if status.success?
-
-    msg = stderr.to_s.strip.presence || stdout.to_s.strip.presence || "exit #{status.exitstatus}"
-    raise "H5AD CSC to CSR conversion failed for preparsing: #{msg}"
   end
 
   def cleanup_java_preparsing_h5ad_csr_workcopy(preparsing_file, original_upload_path)
     return if preparsing_file.to_s == original_upload_path.to_s
+    return unless H5adJavaPrep.legacy_java_h5ad_work_path?(preparsing_file)
 
     FileUtils.rm_f(preparsing_file.to_s)
-    @logger.info("[FuPreparsingService] Removed H5AD preparsing CSR work copy #{preparsing_file}")
+    @logger.info("[FuPreparsingService] Removed H5AD Java preparsing work copy #{preparsing_file}")
   rescue StandardError => e
     @logger.warn("[FuPreparsingService] Could not remove H5AD preparsing work copy: #{e.message}")
   end
@@ -272,10 +386,16 @@ class FuPreparsingService
     @logger.info("[FuPreparsingService] Upload directory: #{upload_dir_str}")
     @logger.info("[FuPreparsingService] File exists before command? #{File.exist?(file_path)}")
 
-    script_cmd = if legacy_java_preparsing?
-                   @logger.info("[FuPreparsingService] Using legacy Java preparsing (ASAP.jar -T Preparsing, version_id=#{preparsing_version_id})")
+    vid = preparsing_version_id
+    script_cmd = if use_java_preparsing?(file_path)
+                   if @legacy_rds_upload && file_path.to_s.end_with?('.loom')
+                     @logger.info("[FuPreparsingService] Using legacy Java preparsing on converted LOOM (from RDS, version_id=#{vid})")
+                   else
+                     @logger.info("[FuPreparsingService] Using legacy Java preparsing (ASAP.jar -T Preparsing, version_id=#{vid})")
+                   end
                    build_java_preparsing_inner_command(file_path, upload_dir_str)
                  else
+                   @logger.info("[FuPreparsingService] Using Python preparsing (#{python_preparsing_script_name}, version_id=#{vid})")
                    build_python_preparsing_inner_command(file_path, upload_dir_str)
                  end
 
@@ -295,9 +415,8 @@ class FuPreparsingService
     full_cmd
   end
 
-  # Stock preparse.v8.py for version 8+ (and any non-legacy preparsing path).
   def build_python_preparsing_inner_command(file_path, upload_dir_str)
-    python_script_name = 'preparse.v8.py'
+    python_script_name = python_preparsing_script_name
     script_args = ['python3', "/srv/#{python_script_name}"]
     script_args << '--sel' << @options[:sel].to_s if @options[:sel].present?
     script_args << '--col' << @options[:gene_name_col].to_s if @options[:gene_name_col].present?
@@ -315,13 +434,17 @@ class FuPreparsingService
 
   # model.Parameters.loadPreparsing (Java) for Fu upload preparsing.
   def build_java_preparsing_inner_command(file_path, upload_dir_str)
+    apply_java_raw_text_sel_defaults! if @options[:sel].present?
+
     script_args = ['java', '-jar', asap_jar_path, '-T', 'Preparsing', '-f', file_path.to_s, '-o', upload_dir_str]
     script_args << '-sel' << @options[:sel].to_s if @options[:sel].present?
-    if @options[:rowname_metadata].present?
-      script_args << '--row-names' << @options[:rowname_metadata].to_s
+    row_path = H5adPreparsingMetadata.java_metadata_path(@options[:rowname_metadata], :row)
+    col_path = H5adPreparsingMetadata.java_metadata_path(@options[:colname_metadata], :col)
+    if row_path.present?
+      script_args << '--row-names' << row_path
     end
-    if @options[:colname_metadata].present?
-      script_args << '--col-names' << @options[:colname_metadata].to_s
+    if col_path.present?
+      script_args << '--col-names' << col_path
     end
     if @options.key?(:delimiter) && !@options[:delimiter].nil? && @options[:delimiter].to_s != ''
       script_args << '-d' << @options[:delimiter].to_s
@@ -334,6 +457,21 @@ class FuPreparsingService
     Shellwords.join(script_args)
   end
 
+  # Java preparsing of a RAW_TEXT member inside tar.gz needs -header/-col (same defaults as project create).
+  def apply_java_raw_text_sel_defaults!
+    sel = @options[:sel].to_s
+    return if sel.blank?
+
+    basename = File.basename(sel)
+    return unless basename.match?(/\.(txt|tsv|csv)\z/i)
+
+    @options[:gene_name_col] = 'first' unless @options.key?(:gene_name_col) && @options[:gene_name_col].present?
+    unless @options.key?(:has_header)
+      @options[:has_header] = '1'
+    end
+    @options[:delimiter] = '' unless @options.key?(:delimiter)
+  end
+
   def load_output_json
     output_path = upload_dir + 'output.json'
     raise "Missing output file at #{output_path}" unless output_path.exist?
@@ -341,6 +479,25 @@ class FuPreparsingService
     JSON.parse(output_path.read)
   rescue JSON::ParserError => e
     raise "Unable to parse preparsing output: #{e.message}"
+  end
+
+  def load_output_with_enrichment
+    enrich_h5ad_metadata_if_needed!(load_output_json)
+  end
+
+  def enrich_h5ad_metadata_if_needed!(output)
+    metadata_was_blank = H5adPreparsingMetadata.metadata_blank?(output)
+    output = H5adPreparsingMetadata.enrich_output!(
+      output,
+      host_path: @fu.file_path,
+      workdir: upload_dir,
+      logger: @logger
+    )
+    output = H5adPreparsingMetadata.normalize_output_metadata_paths!(output)
+    if metadata_was_blank && !H5adPreparsingMetadata.metadata_blank?(output)
+      (upload_dir + 'output.json').write(JSON.pretty_generate(output))
+    end
+    output
   end
 
   def build_summary(output)
@@ -429,8 +586,8 @@ class FuPreparsingService
       command: @command  # Include the preparsing command
     }
     if output['detected_format'].to_s == 'H5AD'
-      summary[:row_names] = output['row_names'].presence
-      summary[:col_names] = output['col_names'].presence
+      summary[:row_names] = H5adPreparsingMetadata.java_metadata_path(output['row_names'], :row).presence
+      summary[:col_names] = H5adPreparsingMetadata.java_metadata_path(output['col_names'], :col).presence
     end
 
     # Add prediction debug data to summary (always include, even if empty)

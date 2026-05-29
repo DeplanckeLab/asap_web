@@ -367,30 +367,77 @@ task :parse, [:project_key] => [:environment] do |t, args|
           end
         end
 
-        # When preparsing already extracted an archive and identified a specific file
-        # (e.g. one of several H5 files inside a zip), use that file directly instead
-        # of re-extracting the archive and guessing which file to pick.
-        if fu && %w[H5_10x H5AD LOOM].include?(file_type)
+        # When preparsing already extracted an archive member, use that path directly instead
+        # of passing the archive to Java with a -sel basename (fails for nested paths).
+        if fu
           begin
             preparsing_output_file = fu.upload_dir + "output.json"
             if File.exist?(preparsing_output_file)
               h_prep = Basic.safe_parse_json(File.read(preparsing_output_file), {})
-              prep_file_path = h_prep['file_path'].to_s
-              if prep_file_path.present? && File.file?(prep_file_path)
-                filepath = Pathname.new(prep_file_path)
-                logger.info("[ParseRake] Using preparsing file_path for v<8 #{file_type}: #{filepath}")
+              prep_file_path = Basic.resolve_preparsed_input_file_path(fu, h_preparsing: h_prep)
+              if prep_file_path.present?
+                archive_path = /\.(tar|tgz|tbz2|txz|zip|bz2|7z)(\..*)?\z/i
+                if prep_file_path.match?(archive_path)
+                  if %w[H5_10x H5AD LOOM].include?(file_type)
+                    filepath = Pathname.new(prep_file_path)
+                    logger.info("[ParseRake] Using preparsing file_path for v<8 #{file_type}: #{filepath}")
+                  end
+                else
+                  filepath = Pathname.new(prep_file_path)
+                  effective_fmt = Basic.effective_preparsing_file_type(h_prep)
+                  if effective_fmt.present?
+                    file_type = effective_fmt
+                    p['file_type'] = effective_fmt
+                  end
+                  if file_type.to_s.upcase == 'RAW_TEXT' || prep_file_path.match?(/\.(txt|tsv|csv)(\..*)?\z/i)
+                    p.delete('sel_name')
+                    p.delete(:sel_name)
+                  end
+                  logger.info("[ParseRake] Using preparsed member file for v<8 parsing: #{filepath} (file_type=#{file_type})")
+                end
               end
+              p = Basic.reconcile_archive_sel_name!(p, fu.upload_dir)
             end
           rescue => e
-            logger.warn("[ParseRake] Could not resolve preparsing file_path for #{file_type}: #{e.class} - #{e.message}")
+            logger.warn("[ParseRake] Could not resolve preparsing file_path: #{e.class} - #{e.message}")
           end
         end
 
+        # Unpack gzip-wrapped H5AD before legacy convert_other_formats, which would otherwise
+        # treat the file as a generic archive and corrupt it (gunzip/tar on a plain .h5ad).
+        if file_type == 'H5AD' || filepath.to_s.downcase.end_with?('.h5ad', '.h5ad.gz')
+          begin
+            magic = File.open(filepath.to_s, 'rb') { |f| f.read(2) }
+            if magic&.bytes == [0x1f, 0x8b]
+              ungzipped_h5ad = tmp_dir + 'input_file.uncompressed.h5ad'
+              Zlib::GzipReader.open(filepath.to_s) do |gz|
+                File.open(ungzipped_h5ad.to_s, 'wb') do |out|
+                  IO.copy_stream(gz, out)
+                end
+              end
+              filepath = ungzipped_h5ad
+              logger.info("[ParseRake] Detected gzipped H5AD input, unpacked to #{filepath} before legacy conversion")
+            end
+          rescue => e
+            logger.error("[ParseRake] Failed to unpack gzipped H5AD #{filepath}: #{e.class} - #{e.message}")
+            raise
+          end
+        end
+
+        skip_legacy_convert = version.id < 8 &&
+                              file_type.to_s.upcase == 'RAW_TEXT' &&
+                              Basic.raw_text_matrix_file?(filepath.to_s)
+
         begin
-          conv_res = Basic.convert_other_formats(filepath, logger)
-          if conv_res && conv_res[:file_path].present? && conv_res[:file_path].to_s != filepath.to_s
-            filepath = conv_res[:file_path]
-            logger.info("[ParseRake] Legacy conversion changed input path to #{filepath}")
+          if skip_legacy_convert
+            logger.info("[ParseRake] Skipping legacy convert_other_formats for RAW_TEXT matrix at #{filepath}")
+            conv_res = nil
+          else
+            conv_res = Basic.convert_other_formats(filepath, logger)
+            if conv_res && conv_res[:file_path].present? && conv_res[:file_path].to_s != filepath.to_s
+              filepath = conv_res[:file_path]
+              logger.info("[ParseRake] Legacy conversion changed input path to #{filepath}")
+            end
           end
 
           converted_type = conv_res && conv_res[:type]
@@ -443,27 +490,6 @@ task :parse, [:project_key] => [:environment] do |t, args|
             ]
           )
           raise "Matrix Market input is not compatible with RAW_TEXT parsing for v7 (see parsing/output.json)."
-        end
-      end
-
-      # Java H5AD parser expects an actual HDF5 file. If the uploaded input is
-      # gzipped (common for *.h5ad.gz), unpack it before launching parsing.
-      if version.id < 8 && file_type == 'H5AD'
-        begin
-          magic = File.open(filepath.to_s, 'rb') { |f| f.read(2) }
-          if magic&.bytes == [0x1f, 0x8b]
-            ungzipped_h5ad = tmp_dir + 'input_file.uncompressed.h5ad'
-            Zlib::GzipReader.open(filepath.to_s) do |gz|
-              File.open(ungzipped_h5ad.to_s, 'wb') do |out|
-                IO.copy_stream(gz, out)
-              end
-            end
-            filepath = ungzipped_h5ad
-            logger.info("[ParseRake] Detected gzipped H5AD input, unpacked to #{filepath}")
-          end
-        rescue => e
-          logger.error("[ParseRake] Failed to prepare H5AD input file #{filepath}: #{e.class} - #{e.message}")
-          raise
         end
       end
 
@@ -574,6 +600,10 @@ task :parse, [:project_key] => [:environment] do |t, args|
         FileUtils.cp(filepath.to_s, h5ad_work_copy.to_s)
         filepath = h5ad_work_copy
 
+        if H5adJavaPrep.has_legacy_categories?(filepath.to_s, workdir: tmp_dir)
+          H5adJavaPrep.migrate_legacy_categories!(filepath.to_s, workdir: tmp_dir, logger: logger)
+        end
+
         convert_script = <<~PYTHON
           import h5py, scipy.sparse, numpy as np, sys
           f = h5py.File(sys.argv[1], 'r+')
@@ -637,6 +667,16 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
       # Only add -col and -header for RAW_TEXT file type
       if file_type == 'RAW_TEXT'
+        if version.id < 8 && fu
+          filepath = Basic.materialize_raw_text_matrix_for_parse!(
+            filepath: filepath,
+            fu: fu,
+            parsing_attrs: p,
+            tmp_dir: tmp_dir,
+            logger: logger
+          )
+        end
+
         # -col parameter: gene name column (default: "first" if not specified)
         gene_name_col = p["gene_name_col"]
         if gene_name_col.blank? || gene_name_col == 'NA' || gene_name_col == 'none'
@@ -651,6 +691,26 @@ task :parse, [:project_key] => [:environment] do |t, args|
         end
         header_value = (has_header.to_s == '1' || has_header.to_s == 'true') ? 'true' : 'false'
         opts.push({'opt' => "-header", 'value' => header_value})
+
+        if File.file?(filepath.to_s)
+          dims = Basic.raw_text_matrix_dimensions(
+            filepath.to_s,
+            gene_name_col: gene_name_col,
+            delimiter: p['delimiter'],
+            has_header: has_header
+          )
+          if dims[:nber_rows].to_i.positive? && dims[:nber_cols].to_i.positive?
+            if p['nber_cols'].to_i != dims[:nber_cols].to_i || p['nber_rows'].to_i != dims[:nber_rows].to_i
+              logger.warn(
+                "[ParseRake] Syncing RAW_TEXT dimensions from file header for Java: " \
+                "preparsing attrs #{p['nber_rows']}x#{p['nber_cols']} -> #{dims[:nber_rows]}x#{dims[:nber_cols]} " \
+                "(file #{filepath})"
+              )
+            end
+            p['nber_cols'] = dims[:nber_cols]
+            p['nber_rows'] = dims[:nber_rows]
+          end
+        end
       end
       
       opts.push({'opt' => "-d", 'value' => p["delimiter"]}) if p["delimiter"] and p['delimiter'] != ''

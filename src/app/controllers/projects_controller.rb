@@ -723,11 +723,10 @@ class ProjectsController < ApplicationController
     @project_types = ProjectType.order(:name)
     @versions = available_versions
     @file_formats = FileFormat.ordered
-    # Set default version to the latest available version
-    @project.version_id = @versions.first&.id if @versions.any?
-    # Fetch organisms based on selected version (default to latest)
-    @organisms = fetch_organisms_for_version(@project.version_id || @versions.first&.id)
-    @grouped_organisms = group_organisms(@organisms, version_id: @project.version_id || @versions.first&.id)
+    @project.version_id = @versions.first&.id if @project.version_id.blank?
+    default_version_for_organisms = @project.version_id
+    @organisms = fetch_organisms_for_version(default_version_for_organisms)
+    @grouped_organisms = group_organisms(@organisms, version_id: default_version_for_organisms)
 
     # Handle integration mode
     # Source keys can arrive via URL params (from reset_parsing redirect) or session
@@ -813,6 +812,10 @@ class ProjectsController < ApplicationController
     end
     [:rowname_metadata, :colname_metadata].each do |k|
       tmp_attrs[k] = params[k] if params.key?(k)
+    end
+    if tmp_attrs[:file_type].to_s == 'H5AD'
+      tmp_attrs[:rowname_metadata] = H5adPreparsingMetadata.java_metadata_path(tmp_attrs[:rowname_metadata], :row) if tmp_attrs[:rowname_metadata].present?
+      tmp_attrs[:colname_metadata] = H5adPreparsingMetadata.java_metadata_path(tmp_attrs[:colname_metadata], :col) if tmp_attrs[:colname_metadata].present?
     end
     # The UI submits dataset selection as `sel`; persist canonical key `sel_name` for parse task.
     if tmp_attrs[:sel].present?
@@ -5988,47 +5991,52 @@ class ProjectsController < ApplicationController
       
       # For parsing step, load the results from output.json
       if @step.name == 'parsing'
-        # @parsing_run is already set above if @current_run exists
+        # @parsing_run is already set above if @current_run exists (loom-filtered @runs).
+        # Fall back to the project's parsing run so the custom view still works when a loom
+        # filter hides that run from @runs.
         @parsing_run ||= @current_run if @current_run
-        
+        unless @parsing_run
+          @parsing_run = apply_publication_snapshot_to_runs(
+            @project.runs.where(step_id: @step.id)
+          ).order(created_at: :desc).first
+        end
+
         @results = nil
-        
-        # Load results if we have a run (completed or failed)
-        # After restart, runs are deleted, so @parsing_run will be nil or have a different status
-        if @parsing_run && (@parsing_run.status_id == 3 || @parsing_run.status_id == 4)
-          project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
-          step_dir = project_dir + 'parsing'
-          # Parsing output is stored at the parsing step root.
-          output_json = step_dir + 'output.json'
-          
-          # Load output.json if it exists
-          if File.exist?(output_json)
-            @results = Basic.safe_parse_json(File.read(output_json), {})
-            
-            # If output.json contains displayed_error, the parsing actually failed
-            # Update the run and project_step status to reflect this
-            if @results && @results['displayed_error'].present?
-              error_msg = if @results['displayed_error'].is_a?(Array)
-                @results['displayed_error'].join('; ')
-              else
-                @results['displayed_error'].to_s
-              end
-              
-              # Update run status to failed if we have a run that was marked as complete
-              if @parsing_run && @parsing_run.status_id == 3
-                @parsing_run.update(status_id: 4, error: error_msg)
-                @parsing_run.reload
-              end
-              
-              # Update project_step status to failed if it was marked as complete
-              if @project_step && @project_step.status_id == 3
-                @project_step.update(status_id: 4, error_message: error_msg)
-                @project_step.reload
-              end
+
+        project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+        step_dir = project_dir + 'parsing'
+        # Parsing output is stored at the parsing step root.
+        output_json = step_dir + 'output.json'
+
+        parsing_in_progress = @parsing_run && [1, 2].include?(@parsing_run.status_id)
+
+        # Load output.json when parsing is not actively running (completed, failed, or stale file after reset).
+        if File.exist?(output_json) && !parsing_in_progress
+          @results = Basic.safe_parse_json(File.read(output_json), {})
+
+          # If output.json contains displayed_error, the parsing actually failed
+          # Update the run and project_step status to reflect this
+          if @results && @results['displayed_error'].present?
+            error_msg = if @results['displayed_error'].is_a?(Array)
+              @results['displayed_error'].join('; ')
+            else
+              @results['displayed_error'].to_s
+            end
+
+            # Update run status to failed if we have a run that was marked as complete
+            if @parsing_run && @parsing_run.status_id == 3
+              @parsing_run.update(status_id: 4, error: error_msg)
+              @parsing_run.reload
+            end
+
+            # Update project_step status to failed if it was marked as complete
+            if @project_step && @project_step.status_id == 3
+              @project_step.update(status_id: 4, error_message: error_msg)
+              @project_step.reload
             end
           end
         end
-        
+
         # Build summary arrays for warnings and errors based on all conditions in the view
         @parsing_warnings = []
         @parsing_infos = []
@@ -6213,6 +6221,13 @@ class ProjectsController < ApplicationController
             render partial: 'projects/views/cluster_comparison', layout: false
             return
           end
+
+          # Parsing always uses the dedicated partial (never std_step / std_run_view).
+          if @step&.name == 'parsing'
+            render partial: 'projects/views/parsing', layout: false
+            return
+          end
+
           # If show_form is requested, return just the form (for AJAX or new page),
           # except for single-run steps with a specific view and existing runs:
           # these must always render the summary/view, not the form.
@@ -9011,6 +9026,16 @@ class ProjectsController < ApplicationController
 
       @runs = apply_publication_snapshot_to_runs(@project.runs.includes(:annots))
       prepare_steps_with_status
+
+      @parsing_step = parsing_step_for_project(@project)
+      @parsing_step_id = @parsing_step&.id
+      pipeline_step_names_by_id = @steps_with_status.each_with_object({}) do |entry, map|
+        step = entry[:step]
+        next unless step
+
+        map[step.id.to_s] = step.name.to_s
+      end
+      @analysis_step_id_to_name = pipeline_step_names_by_id.merge(@analysis_step_id_to_name)
 
       @load_run_panel = false
       @run_panel_html = nil

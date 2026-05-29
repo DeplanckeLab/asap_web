@@ -77,8 +77,8 @@
           <%= form.label :version_id, "ASAP Release", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
           <%= form.select :version_id,
                 options_from_collection_for_select(@versions || [], :id, lambda { |v| v.respond_to?(:beta) && v.beta ? "#{v.id} (beta)" : v.id.to_s }, project.version_id),
-                { prompt: "Select ASAP release" },
-                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white", data: { file_upload_target: "versionSelect", action: "change->file-upload#checkSubmitButton change->file-upload#updateSupportedFormats change->file-upload#updateProjectTypeAvailability change->organism-selector#reloadOrganisms" } } %>
+                (project.version_id.present? ? {} : { prompt: "Select ASAP release" }),
+                { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white", data: { file_upload_target: "versionSelect", action: "change->file-upload#onVersionChange change->file-upload#checkSubmitButton change->file-upload#updateSupportedFormats change->file-upload#updateProjectTypeAvailability change->organism-selector#reloadOrganisms" } } %>
         </div>
         </div>
 

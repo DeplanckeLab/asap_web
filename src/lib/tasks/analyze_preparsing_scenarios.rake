@@ -80,7 +80,8 @@ namespace :preparsing do
         fu.update!(upload_file_name: upload_filename)
         
         # Run preparsing
-        service = FuPreparsingService.new(fu, { organism_id: organism.id })
+        preparsing_version_id = (ENV['ASAP_VERSION_ID']&.to_i).presence || 8
+        service = FuPreparsingService.new(fu, { organism_id: organism.id, version_id: preparsing_version_id })
         result = service.call
         
         # Analyze the output

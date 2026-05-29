@@ -59,13 +59,19 @@ class FuDownloadFromUrlJob < ApplicationJob
     downloaded_size = File.size(upload_file_path)
     raise "Downloaded file is missing or empty" unless File.exist?(upload_file_path) && downloaded_size > 0
 
+    if version_id.blank?
+      raise ArgumentError,
+            'version_id is required for URL download preparsing (select a release on the upload form)'
+    end
+
     options = {}
     options[:organism_id] = organism_id if organism_id.present?
-    options[:version_id] = version_id if version_id.present?
+    options[:version_id] = version_id
 
     fu.update!(
       upload_file_size: downloaded_size,
-      status: 'preparsing'
+      status: 'preparsing',
+      preparsing_version_id: version_id
     )
     broadcast(fu.id, status: 'started')
 

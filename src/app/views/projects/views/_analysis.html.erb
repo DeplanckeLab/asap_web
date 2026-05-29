@@ -7,7 +7,9 @@
      data-step-selector-load-run-panel-value="<%= @load_run_panel %>"
      data-step-selector-load-sub-view-value="<%= @load_sub_view %>"
      data-step-selector-sub-view-step-id-value="<%= @selected_step_id %>"
-     data-step-selector-loom-file-value="<%= @selected_loom_file.to_s %>">
+     data-step-selector-loom-file-value="<%= @selected_loom_file.to_s %>"
+     data-step-selector-step-id-to-name-value="<%= (@analysis_step_id_to_name || {}).to_json %>"
+     <% if @parsing_step_id.present? %>data-step-selector-parsing-step-id-value="<%= @parsing_step_id %>"<% end %>>
   <!-- Header -->
   <div class="mb-4 flex-shrink-0">
     <div class="flex items-center justify-between gap-3 mb-2">
@@ -429,7 +431,11 @@
         if (controller && typeof controller.loadStepResults === 'function') {
           controller.loomFileValue = selectedLoom === '__all__' ? '' : selectedLoom
           const stepElement = stepSelectorElement.querySelector(`[data-step-id="${currentStepId}"]`) || { getAttribute: () => currentStepId }
-          controller.loadStepResults(currentStepId, stepElement, false, `loom_file=${encodeURIComponent(selectedLoom)}`)
+          if (typeof controller.isParsingStepId === 'function' && controller.isParsingStepId(currentStepId)) {
+            controller.loadParsingStepResults(currentStepId, 'loom_filter_change')
+          } else {
+            controller.loadStepResults(currentStepId, stepElement, false, `loom_file=${encodeURIComponent(selectedLoom)}`)
+          }
 
           const newUrl = new URL(window.location.href)
           newUrl.searchParams.set('view', 'analysis')
@@ -725,6 +731,14 @@
     const controller = window.Stimulus.getControllerForElementAndIdentifier(stepSelectorElement, 'step-selector')
     if (!controller || !controller.hasContentTarget) {
       console.error('[loadRunInRightPanel] Step selector controller or content target not found')
+      return
+    }
+
+    const effectiveStepIdForRouting = stepId || controller.currentStepId
+    if (effectiveStepIdForRouting && typeof controller.isParsingStepId === 'function' && controller.isParsingStepId(effectiveStepIdForRouting)) {
+      if (typeof controller.loadParsingStepResults === 'function') {
+        controller.loadParsingStepResults(effectiveStepIdForRouting, 'loadRunInRightPanel:parsing')
+      }
       return
     }
 

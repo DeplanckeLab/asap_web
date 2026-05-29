@@ -124,7 +124,7 @@ class ProjectInputFinalizerService
     return unless File.exist?(preparsing_output_file)
 
     h_preparsing = Basic.safe_parse_json(File.read(preparsing_output_file), {})
-    detected_format = h_preparsing["detected_format"]
+    detected_format = Basic.effective_preparsing_file_type(h_preparsing)
     return unless detected_format.present?
 
     h_parsing_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}).deep_symbolize_keys
@@ -134,6 +134,7 @@ class ProjectInputFinalizerService
     unless is_raw_text
       [:delimiter, :gene_name_col, :has_header].each { |k| h_parsing_attrs.delete(k) }
     end
+    h_parsing_attrs = Basic.reconcile_archive_sel_name!(h_parsing_attrs, upload_dir)
     @project.parsing_attrs_json = h_parsing_attrs.to_json
     @logger.info("[ProjectsController#create] Stored detected file_type '#{detected_format}' in parsing_attrs_json")
   rescue => e

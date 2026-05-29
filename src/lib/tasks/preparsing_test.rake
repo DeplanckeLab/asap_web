@@ -6,6 +6,7 @@ namespace :preparsing do
     puts ""
     puts "NOTE: Make sure /mnt/asap-old/input_examples/ is mounted in docker-compose.yml"
     puts "      and the container has been restarted."
+    puts "      Public URLs: https://asap-test.epfl.ch/data/asap-old/input_examples/<filename>"
     puts ""
     
     # Run tests directly (rails test handles environment automatically)

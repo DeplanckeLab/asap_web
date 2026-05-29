@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_05_21_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_05_29_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -658,6 +658,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_21_190000) do
   create_table "fus", id: :integer, default: -> { "nextval('courses_id_seq'::regclass)" }, force: :cascade do |t|
     t.datetime "created_at", precision: nil
     t.text "name"
+    t.integer "preparsing_version_id"
     t.integer "project_id"
     t.text "project_key"
     t.text "status"
@@ -670,6 +671,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_05_21_190000) do
     t.text "url"
     t.integer "user_id"
     t.boolean "visible"
+    t.index ["preparsing_version_id"], name: "index_fus_on_preparsing_version_id"
   end
 
   create_table "gene_enrichments", id: :serial, force: :cascade do |t|

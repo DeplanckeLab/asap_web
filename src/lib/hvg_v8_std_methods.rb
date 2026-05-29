@@ -25,13 +25,21 @@ module HvgV8StdMethods
     ]
   JSON
 
+  # hvg.asap.3.R reads commandArgs(trailingOnly=TRUE) as fixed positional args (no optparse).
+  SEURAT_SELECTION_METHOD = {
+    "vst" => "vst",
+    "dispersion" => "disp",
+    "mvp" => "mean.var.plot"
+  }.freeze
+
   R_BASE_ARGS = [
     { "param_key" => "input_matrix_filename" },
     { "param_key" => "raw_matrix_dataset", "value" => "/matrix" },
     { "param_key" => "input_matrix_dataset" },
     { "param_key" => "output_matrix_dataset", "value" => '/row_attrs/hvg_#{run_num}_#{std_method_name}' },
     { "param_key" => "output_dir" },
-    { "param_key" => "std_method_name" }
+    { "param_key" => "seurat_selection_method" },
+    { "param_key" => "n_top_genes" }
   ].freeze
 
   PARAM_DEFS = {
@@ -270,11 +278,17 @@ module HvgV8StdMethods
 
     def command_json_for(defn)
       if defn[:r_params]
-        opts = defn[:r_params].map { |k| { "opt" => "--#{k}", "param_key" => k } }
+        seurat_method = SEURAT_SELECTION_METHOD.fetch(defn[:name])
+        args = R_BASE_ARGS.map do |entry|
+          if entry["param_key"] == "seurat_selection_method"
+            { "value" => seurat_method }
+          else
+            entry.dup
+          end
+        end
         {
           "program" => "Rscript --vanilla hvg.asap.3.R",
-          "args" => R_BASE_ARGS,
-          "opts" => opts,
+          "args" => args,
           "predict_params" => %w[nber_cols nber_rows std_method_name]
         }
       else

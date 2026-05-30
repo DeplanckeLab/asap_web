@@ -1538,13 +1538,14 @@ export default class extends Controller {
         if (lastDotIndex > 0) {
           selectedFilenameWithoutExt = selectedFilenameWithoutExt.substring(0, lastDotIndex)
         }
+        const previousSelection = this.selectedArchiveEntry || this.selectedDatasetName
         this.originalFilename = selectedFilenameWithoutExt
         this.selectedArchiveEntry = filename
         
         // Re-run preparsing with selected file
         // Mark that we came from archive so we can show back button later
         this.cameFromArchive = true
-        await this.rerunPreparsingWithDataset(filename)
+        await this.rerunPreparsingWithDataset(filename, previousSelection)
       })
     }
   }
@@ -1671,10 +1672,11 @@ export default class extends Controller {
       radio.addEventListener('change', (e) => {
         const index = parseInt(e.target.value)
         const dataset = datasets[index]
+        const previousSelection = this.selectedDatasetName || this.selectedArchiveEntry
         this.selectedDatasetIndex = index
         const datasetDisplayName = this.getDatasetDisplayName(dataset)
         this.selectedDatasetName = datasetDisplayName || dataset?.name || dataset?.group || null
-        this.maybeSetProjectNameFromDataset(this.selectedDatasetName)
+        this.maybeSetProjectNameFromDataset(this.selectedDatasetName, previousSelection)
         
         // Update UI to highlight selected option
         const options = this.preparsingResultTarget.querySelectorAll('.dataset-option')
@@ -1737,15 +1739,16 @@ export default class extends Controller {
         this.originalFilename = selectedNameWithoutExt
         
         // Re-run preparsing with selected dataset
-        await this.rerunPreparsingWithDataset(datasetName)
+        const previousSelection = this.selectedDatasetName || this.selectedArchiveEntry
+        await this.rerunPreparsingWithDataset(datasetName, previousSelection)
       })
     }
   }
 
-  async rerunPreparsingWithDataset(datasetName) {
+  async rerunPreparsingWithDataset(datasetName, previousDatasetName = null) {
     if (!this.fuId || !datasetName) return
 
-    this.maybeSetProjectNameFromDataset(datasetName)
+    this.maybeSetProjectNameFromDataset(datasetName, previousDatasetName)
     this.setPreparsingStatus(`Re-running preparsing for: ${this.escapeHtml(datasetName)}...`, 'info', true)
     
     // Disable the select button during processing (could be dataset or archive file button)
@@ -2114,7 +2117,27 @@ export default class extends Controller {
     return name
   }
 
-  maybeSetProjectNameFromDataset(datasetName) {
+  normalizeProjectNameCandidate(name) {
+    let label = (name || '').trim()
+    if (!label) return ''
+
+    const hasSlash = label.includes('/')
+    const hasExtension = label.includes('.')
+    if (!hasSlash && hasExtension) {
+      label = label.replace(/\.[^.]+$/, '')
+    }
+
+    return label
+  }
+
+  projectNameMatchesSelection(projectName, selectionName) {
+    const normalizedProjectName = this.normalizeProjectNameCandidate(projectName)
+    const normalizedSelection = this.normalizeProjectNameCandidate(selectionName)
+    if (!normalizedProjectName || !normalizedSelection) return false
+    return normalizedProjectName === normalizedSelection
+  }
+
+  maybeSetProjectNameFromDataset(datasetName, previousDatasetName = null) {
     if (this.projectNameTouched) return
 
     const inputEl = this.projectNameInputElement ||
@@ -2123,11 +2146,15 @@ export default class extends Controller {
 
     if (!inputEl) return
 
-    const trimmed = (datasetName || '').trim()
-    if (!trimmed) return
+    const displayName = this.normalizeProjectNameCandidate(datasetName)
+    if (!displayName) return
 
-    // Use the dataset name as-is (it should already be the display name without extensions)
-    inputEl.value = trimmed
+    const currentName = (inputEl.value || '').trim()
+    if (currentName !== '' && !this.projectNameMatchesSelection(currentName, previousDatasetName)) {
+      return
+    }
+
+    inputEl.value = displayName
   }
 
   showUploadInputs() {

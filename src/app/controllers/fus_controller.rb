@@ -623,8 +623,11 @@ class FusController < ApplicationController
 
     name = fu.upload_file_name.to_s.downcase
 
-    if name.end_with?('.h5ad') && err.include?('__categories')
-      return true
+    if name.end_with?('.h5ad')
+      host_path = (fu.upload_dir + fu.upload_file_name).to_s
+      return false unless File.file?(host_path)
+
+      return H5adJavaPrep.has_legacy_categories?(host_path, workdir: fu.upload_dir)
     end
 
     return false unless name.end_with?('.rds')
@@ -633,7 +636,7 @@ class FusController < ApplicationController
     return true if format == 'COMPRESSED'
 
     format == 'RDS' && !(fu.upload_dir + 'input.loom').exist?
-  rescue JSON::ParserError, StandardError
+  rescue JSON::ParserError
     true
   end
 

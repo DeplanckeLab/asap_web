@@ -1811,7 +1811,8 @@ export default class extends Controller {
       this.setPreparsingStatus(`Preparsing for "${this.escapeHtml(datasetName)}" started. Please wait...`, 'info', true)
     } catch (error) {
       console.error('Error re-running preparsing:', error)
-      this.setPreparsingStatus(`Error: ${error.message}`, 'error')
+      this.stopPreparsingStatusPoll()
+      this.setPreparsingStatus(`Error: ${error.message}`, 'error', false)
       if (selectButton && originalButtonText) {
         selectButton.disabled = false
         selectButton.textContent = originalButtonText
@@ -2324,7 +2325,8 @@ export default class extends Controller {
       this.startPreparsingStatusPoll(this.fuId)
     } catch (error) {
       console.error('[FileUpload] Error re-running preparsing after version change:', error)
-      this.setPreparsingStatus(`Error: ${error.message}`, 'error')
+      this.stopPreparsingStatusPoll()
+      this.setPreparsingStatus(`Error: ${error.message}`, 'error', false)
     }
   }
 
@@ -2782,7 +2784,8 @@ export default class extends Controller {
       this.setPreparsingStatus('Re-preparsing with new parameters. Please wait...', 'info', true)
     } catch (error) {
       console.error('Error updating preparsing:', error)
-      this.setPreparsingStatus(`Error: ${error.message}`, 'error')
+      this.stopPreparsingStatusPoll()
+      this.setPreparsingStatus(`Error: ${error.message}`, 'error', false)
     }
   }
 
@@ -3099,7 +3102,8 @@ export default class extends Controller {
       this.setPreparsingStatus('Re-preparsing with updated name columns. Please wait...', 'info', true)
     } catch (error) {
       console.error('Error updating H5AD name columns:', error)
-      this.setPreparsingStatus(`Error: ${error.message}`, 'error')
+      this.stopPreparsingStatusPoll()
+      this.setPreparsingStatus(`Error: ${error.message}`, 'error', false)
     }
   }
 

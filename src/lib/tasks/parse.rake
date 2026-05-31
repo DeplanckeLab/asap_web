@@ -596,72 +596,9 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
       if version.id < 8 && file_type == 'H5AD'
         phase_start.call('h5ad_csc_to_csr')
-        h5ad_work_copy = tmp_dir + File.basename(filepath.to_s)
-        FileUtils.cp(filepath.to_s, h5ad_work_copy.to_s)
-        filepath = h5ad_work_copy
-
-        if H5adJavaPrep.has_legacy_categories?(filepath.to_s, workdir: tmp_dir)
-          H5adJavaPrep.migrate_legacy_categories!(filepath.to_s, workdir: tmp_dir, logger: logger)
-        end
-
-        convert_script = <<~PYTHON
-          import h5py, scipy.sparse, numpy as np, sys
-          f = h5py.File(sys.argv[1], 'r+')
-          def cvt(g):
-              if g.attrs.get('encoding-type','') == 'csc_matrix':
-                  s = tuple(g.attrs['shape'])
-                  m = scipy.sparse.csc_matrix((g['data'][:], g['indices'][:], g['indptr'][:]), shape=s).tocsr()
-                  del g['data'], g['indices'], g['indptr']
-                  g.create_dataset('data', data=m.data, chunks=True)
-                  g.create_dataset('indices', data=m.indices, chunks=True)
-                  g.create_dataset('indptr', data=m.indptr, chunks=True)
-                  g.attrs['encoding-type'] = 'csr_matrix'
-          def fix_categorical_na_codes(group):
-              for key in list(group.keys()):
-                  child = group[key]
-                  if not isinstance(child, h5py.Group):
-                      continue
-                  if 'categories' in child and 'codes' in child:
-                      codes = np.asarray(child['codes'][:])
-                      if codes.size == 0 or not np.issubdtype(codes.dtype, np.integer):
-                          continue
-                      if not (codes < 0).any():
-                          continue
-                      cats = child['categories'][:]
-                      if cats.dtype == object:
-                          cats_list = [c.decode('utf-8') if isinstance(c, (bytes, bytearray)) else str(c) for c in cats]
-                      else:
-                          cats_list = [str(c) for c in cats]
-                      na_idx = next((i for i, c in enumerate(cats_list) if c in ('nan', 'NA', '')), None)
-                      if na_idx is None:
-                          na_idx = len(cats_list)
-                          cats_list.append('nan')
-                          del child['categories']
-                          child.create_dataset('categories', data=np.array(cats_list, dtype=object))
-                      new_codes = codes.astype(np.int32, copy=True)
-                      new_codes[codes < 0] = na_idx
-                      del child['codes']
-                      child.create_dataset('codes', data=new_codes)
-                  else:
-                      fix_categorical_na_codes(child)
-          cvt(f['X'])
-          if 'layers' in f:
-              for n in f['layers']:
-                  if isinstance(f['layers'][n], h5py.Group):
-                      cvt(f['layers'][n])
-          for section in ('obs', 'var'):
-              if section in f:
-                  fix_categorical_na_codes(f[section])
-          f.close()
-        PYTHON
-        convert_cmd = "docker exec asap_run_prod python3 -c #{convert_script.shellescape} #{filepath.to_s.shellescape}"
-        logger.info("[ParseRake] Preparing H5AD for Java v7 parsing (CSC->CSR, categorical NA codes) at #{filepath}")
-        convert_output = `#{convert_cmd} 2>&1`
-        unless $?.success?
-          logger.error("[ParseRake] H5AD Java prep failed: #{convert_output}")
-          raise "H5AD preparation for Java v7 parsing failed: #{convert_output}"
-        end
-        logger.info("[ParseRake] H5AD Java prep complete for #{filepath}")
+        filepath = Pathname.new(
+          H5adJavaPrep.prepare_parse_work_copy!(filepath.to_s, workdir: tmp_dir, logger: logger)
+        )
         phase_end.call('h5ad_csc_to_csr')
       end
 

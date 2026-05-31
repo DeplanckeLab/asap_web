@@ -49,6 +49,11 @@ module H5adJavaPrep
         for section in ("obs", "var"):
             if section in f and isinstance(f[section], h5py.Group):
                 migrate_table(f[section])
+        raw = f.get("raw")
+        if isinstance(raw, h5py.Group):
+            for section in ("obs", "var"):
+                if section in raw and isinstance(raw[section], h5py.Group):
+                    migrate_table(raw[section])
   PYTHON
 
   H5AD_LEGACY_CATEGORIES_DETECT_PY = (<<~'PYTHON').freeze
@@ -125,6 +130,83 @@ module H5adJavaPrep
     f.close()
   PYTHON
 
+  # v7 Java parse prep: CSC->CSR on all matrix groups and remap categorical NA (-1) codes
+  # under obs/var and raw/obs/raw/var (required when sel_name is /raw/X).
+  H5AD_JAVA_PARSE_PREP_PY = (<<~'PYTHON').freeze
+    import h5py, scipy.sparse, numpy as np, sys
+
+    def cvt(g):
+        if not isinstance(g, h5py.Group):
+            return
+        enc = g.attrs.get("encoding-type", "")
+        if isinstance(enc, bytes):
+            enc = enc.decode("ascii", "replace")
+        if enc != "csc_matrix":
+            return
+        s = tuple(g.attrs["shape"])
+        m = scipy.sparse.csc_matrix((g["data"][:], g["indices"][:], g["indptr"][:]), shape=s).tocsr()
+        del g["data"], g["indices"], g["indptr"]
+        g.create_dataset("data", data=m.data, chunks=True)
+        g.create_dataset("indices", data=m.indices, chunks=True)
+        g.create_dataset("indptr", data=m.indptr, chunks=True)
+        g.attrs["encoding-type"] = "csr_matrix"
+
+    def fix_categorical_na_codes(group):
+        for key in list(group.keys()):
+            child = group[key]
+            if not isinstance(child, h5py.Group):
+                continue
+            if "categories" in child and "codes" in child:
+                codes = np.asarray(child["codes"][:])
+                if codes.size == 0 or not np.issubdtype(codes.dtype, np.integer):
+                    continue
+                if not (codes < 0).any():
+                    continue
+                cats = child["categories"][:]
+                if cats.dtype == object:
+                    cats_list = [
+                        c.decode("utf-8") if isinstance(c, (bytes, bytearray)) else str(c)
+                        for c in cats
+                    ]
+                else:
+                    cats_list = [str(c) for c in cats]
+                na_idx = next((i for i, c in enumerate(cats_list) if c in ("nan", "NA", "")), None)
+                if na_idx is None:
+                    na_idx = len(cats_list)
+                    cats_list.append("nan")
+                    del child["categories"]
+                    child.create_dataset("categories", data=np.array(cats_list, dtype=object))
+                new_codes = codes.astype(np.int32, copy=True)
+                new_codes[codes < 0] = na_idx
+                del child["codes"]
+                child.create_dataset("codes", data=new_codes)
+            else:
+                fix_categorical_na_codes(child)
+
+    def prep_table(group):
+        fix_categorical_na_codes(group)
+
+    path = sys.argv[1]
+    with h5py.File(path, "r+") as f:
+        if "X" in f and isinstance(f["X"], h5py.Group):
+            cvt(f["X"])
+        if "layers" in f:
+            for name in f["layers"]:
+                lg = f["layers"][name]
+                if isinstance(lg, h5py.Group):
+                    cvt(lg)
+        raw = f.get("raw")
+        if isinstance(raw, h5py.Group):
+            if "X" in raw and isinstance(raw["X"], h5py.Group):
+                cvt(raw["X"])
+            for section in ("obs", "var"):
+                if section in raw and isinstance(raw[section], h5py.Group):
+                    prep_table(raw[section])
+        for section in ("obs", "var"):
+            if section in f and isinstance(f[section], h5py.Group):
+                prep_table(f[section])
+  PYTHON
+
   module_function
 
   def legacy_java_h5ad_work_path?(path)
@@ -182,10 +264,32 @@ module H5adJavaPrep
       logger.info("[H5adJavaPrep] Migrating legacy __categories before Java parse: #{path}")
       migrate_legacy_categories!(path, workdir: workdir, logger: logger)
     end
-    return unless needs_csr?(path, workdir: workdir)
+    run_java_parse_prep!(path, workdir: workdir, logger: logger)
+  end
 
-    logger.info("[H5adJavaPrep] Converting CSC to CSR before Java parse: #{path}")
-    convert_csc_to_csr!(path, workdir: workdir, logger: logger)
+  def prepare_parse_work_copy!(source_path, workdir:, logger: Rails.logger)
+    work = File.join(workdir.to_s, File.basename(source_path.to_s))
+    unless File.expand_path(source_path.to_s) == File.expand_path(work)
+      FileUtils.cp(source_path.to_s, work)
+    end
+    if has_legacy_categories?(work, workdir: workdir)
+      logger.info("[H5adJavaPrep] Migrating legacy __categories before Java v7 parse: #{work}")
+      migrate_legacy_categories!(work, workdir: workdir, logger: logger)
+    end
+    run_java_parse_prep!(work, workdir: workdir, logger: logger)
+    work
+  end
+
+  def run_java_parse_prep!(host_path, workdir:, logger: Rails.logger)
+    logger.info("[H5adJavaPrep] Preparing H5AD for Java v7 parse (CSC->CSR, categorical NA codes): #{host_path}")
+    run_docker_python_script(
+      host_path,
+      workdir,
+      H5AD_JAVA_PARSE_PREP_PY,
+      logger: logger,
+      label: 'H5AD Java v7 parse prep'
+    )
+    logger.info("[H5adJavaPrep] H5AD Java v7 parse prep complete for #{host_path}")
   end
 
   def docker_python_one_liner(host_path, workdir, script)

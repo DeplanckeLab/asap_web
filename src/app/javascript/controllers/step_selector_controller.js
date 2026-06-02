@@ -190,6 +190,7 @@ export default class extends Controller {
       console.log('[StepSelectorController] Sub-view content server-rendered, setting up state for step:', subViewStepId)
       this.currentStepId = subViewStepId.toString()
       this.element.setAttribute('data-current-step-id', subViewStepId.toString())
+      this.updateActiveStep(subViewStepId)
       this.saveState(subViewStepId, 'step', null)
       this._executeInlineScripts()
       this.subscribeToProject()
@@ -203,6 +204,7 @@ export default class extends Controller {
       console.log('[StepSelectorController] Run panel content server-rendered, setting up state for step:', stepIdFromUrl)
       this.currentStepId = stepIdFromUrl.toString()
       this.element.setAttribute('data-current-step-id', stepIdFromUrl.toString())
+      this.updateActiveStep(stepIdFromUrl)
       this.saveState(stepIdFromUrl, 'run', runIdFromUrl)
       this._executeInlineScripts()
       this.subscribeToProject()
@@ -244,6 +246,7 @@ export default class extends Controller {
           console.log('[StepSelectorController] Loading step results for step_id:', stepId)
           controller.currentStepId = stepId.toString()
           controller.element.setAttribute('data-current-step-id', stepId.toString())
+          controller.updateActiveStep(stepId)
           if (runIdFromUrl && !controller.isParsingStepId(stepId) && typeof loadRunInRightPanel === 'function') {
             controller.saveState(stepId, 'run', runIdFromUrl)
             setTimeout(() => {
@@ -261,6 +264,7 @@ export default class extends Controller {
         } else if (controller.isParsingStepId(stepIdFromUrl)) {
           controller.currentStepId = stepIdFromUrl.toString()
           controller.element.setAttribute('data-current-step-id', stepIdFromUrl.toString())
+          controller.updateActiveStep(stepIdFromUrl)
           controller.loadParsingStepResults(stepIdFromUrl, 'connect:url_step_no_element')
           return true
         } else {
@@ -1373,6 +1377,8 @@ export default class extends Controller {
           if (typeof window.updateStepPipelineColorDots === 'function') {
             window.updateStepPipelineColorDots()
           }
+
+          controller.updateActiveStep(controller.currentStepId)
         }
       }
     })
@@ -1578,6 +1584,7 @@ export default class extends Controller {
       // Set currentStepId before loading
       this.currentStepId = stepId.toString()
       this.element.setAttribute('data-current-step-id', stepId.toString())
+      this.updateActiveStep(stepId)
       // Save state to localStorage for when user returns from visualization view
       this.saveState(stepId, 'step', null)
       // Load step results
@@ -1618,8 +1625,7 @@ export default class extends Controller {
     // Update dropdown button if it exists
     this.updateDropdownButton(stepElement)
     
-    // Update selected step in dropdown list
-    this.updateDropdownListSelection(stepId)
+    this.updateActiveStep(stepId)
 
     // If graph mode is active, keep graph view and only update node highlighting
     if (this.isGraphModeActive()) {
@@ -1673,6 +1679,8 @@ export default class extends Controller {
     if (stepElement && stepElement.nodeType === 1) {
       this.updateDropdownButton(stepElement)
     }
+
+    this.updateActiveStep(stepId)
 
     // If graph mode is active, keep graph view and only update node highlighting
     if (this.isGraphModeActive()) {
@@ -1869,6 +1877,7 @@ export default class extends Controller {
     this.currentStepId = stepIdString
     this.element.setAttribute('data-current-step-id', stepIdString)
     this._pendingLoadStepId = stepIdString
+    this.updateActiveStep(stepIdString)
     console.log('[StepSelectorController] New currentStepId:', this.currentStepId, 'type:', typeof this.currentStepId)
     console.log('[StepSelectorController] Stored stepIdString:', stepIdString)
     
@@ -2467,12 +2476,59 @@ export default class extends Controller {
     return this.statusIconsValue.find(s => s.key === statusName)
   }
 
-  // Note: updateActiveStep is no longer needed - the server renders the border
-  // This method is kept for backwards compatibility but does nothing
-  // The border is now handled entirely by the server in _steps_panel.html.erb
-  updateActiveStep(activeElement) {
-    // Server handles border rendering, so this is a no-op
-    // Kept for backwards compatibility in case any code still calls it
+  _stepsPanelStepRows() {
+    const roots = []
+    if (this.hasStepsPanelTarget) {
+      roots.push(this.stepsPanelTarget)
+    }
+    const dropdownMenu = document.querySelector('[data-controller~="dropdown"] [data-dropdown-target="menu"]')
+    if (dropdownMenu) {
+      roots.push(dropdownMenu)
+    }
+
+    const contentRoots = Array.from(this.element.querySelectorAll('[data-step-selector-target="content"]'))
+    const isInsideContent = (el) => contentRoots.some((root) => root.contains(el))
+
+    const rows = []
+    roots.forEach((root) => {
+      root.querySelectorAll('.step-item[data-step-id]').forEach((el) => {
+        if (!isInsideContent(el)) {
+          rows.push(el)
+        }
+      })
+    })
+    return rows
+  }
+
+  updateActiveStep(activeElementOrStepId) {
+    let stepId = null
+    if (
+      activeElementOrStepId != null &&
+      typeof activeElementOrStepId === 'object' &&
+      typeof activeElementOrStepId.getAttribute === 'function'
+    ) {
+      stepId = activeElementOrStepId.getAttribute('data-step-id')
+    } else if (activeElementOrStepId != null) {
+      stepId = String(activeElementOrStepId)
+    }
+    if (!stepId) {
+      stepId = this.currentStepId || this.element.getAttribute('data-current-step-id')
+    }
+    if (!stepId) {
+      return
+    }
+
+    const stepIdStr = String(stepId)
+    this._stepsPanelStepRows().forEach((el) => {
+      const isSelected = el.getAttribute('data-step-id') === stepIdStr
+      el.style.borderLeft = isSelected ? '4px solid #007bff' : '4px solid transparent'
+      if (isSelected) {
+        el.classList.add('active')
+      } else {
+        el.classList.remove('active')
+      }
+    })
+    this.updateDropdownListSelection(stepIdStr)
   }
 }
 

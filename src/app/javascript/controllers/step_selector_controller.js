@@ -1487,9 +1487,9 @@ export default class extends Controller {
         const statusConfig = this.getStatusIconConfig(status)
         if (statusConfig) {
           const spinClass = status === 'running' && statusConfig.icon_spin ? ' ' + statusConfig.icon_spin : ''
-          iconElement.className = statusConfig.icon_base + spinClass + ' text-lg ' + statusConfig.active_color
+          iconElement.className = statusConfig.icon_base + spinClass + ' text-sm ' + statusConfig.active_color
         } else {
-          iconElement.className = 'far fa-circle text-lg opacity-30'
+          iconElement.className = 'far fa-circle text-sm text-gray-400'
         }
 
         const badgeElement = stepElement.querySelector('.inline-flex.items-center')

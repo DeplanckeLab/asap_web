@@ -10,36 +10,11 @@
     <% if run.created_at %>
       <% metadata_parts << "<span class='nowrap'>#{display_date_short(run.created_at)}</span>" %>
     <% end %>
-    <%# Waiting time - show if waiting_duration is set, or calculate from submitted_at to start_time, or show ongoing wait if status is waiting %>
-    <% if run.waiting_duration %>
-      <% metadata_parts << "<span class='nowrap'><i class='fas fa-hourglass-half text-gray-400 mr-1'></i>Wait #{duration(run.waiting_duration.round)}</span>" %>
-    <% elsif run.submitted_at && run.start_time %>
-      <%# Calculate waiting time from submitted_at to start_time %>
-      <%# wait_time = (run.start_time - run.submitted_at).round %>
-      <%# metadata_parts << "<span class='nowrap'><i class='fas fa-hourglass-half text-gray-400 mr-1'></i>Wait #{duration(wait_time)}</span>" %>
-    <% elsif [1, 6].include?(run.status_id) && run.submitted_at %>
-      <%# Ongoing wait: the run-timer Stimulus controller ticks every second
-         using submitted_at as the reference point, same mechanism as the
-         running timer and the parsing page. %>
-      <% wait_time_display = duration((Time.now - run.submitted_at).round) %>
-      <% slurm_hover_for_clock = local_assigns[:slurm_queue_hover] %>
-      <% clock_i = if slurm_hover_for_clock.present?
-           %(<i class="fas fa-clock text-gray-400 mr-1 cursor-help" data-slurm-queue-waiting-icon="true" title="#{h(slurm_hover_for_clock)}" aria-label="#{h(slurm_hover_for_clock)}"></i>)
-         else
-           %(<i class="fas fa-clock text-gray-400 mr-1"></i>)
-         end %>
-      <% wait_html = "<span id='ongoing_wait_#{run.id}' class='nowrap' data-controller='run-timer' data-run-timer-submitted-at-value='#{run.submitted_at.iso8601}'>" \
-                    "#{clock_i}Wait " \
-                    "<span data-run-timer-target='elapsedTime' class='font-mono'>#{wait_time_display}</span>" \
-                    "</span>" %>
-      <% metadata_parts << wait_html %>
-
-      <%# Slurm queue position for pending runs: renders the queue-position
-         Stimulus controller, which fetches the position on connect and then
-         stays in sync via ProjectChannel broadcasts. The element removes
-         itself automatically when the run leaves the pending/waiting state
-         (see queue_position_controller.js). %>
+    <%# Wait time in the info bar only after the job leaves the queue (running or finished);
+       while waiting, it is shown in the main status panel. %>
+    <% if [1, 6].include?(run.status_id) %>
       <% if run.slurm_job_id.present? %>
+        <%# Slurm queue position while queued (waiting time is in the status panel, not here). %>
         <% initial_position = (local_assigns[:queue_position] if local_assigns[:queue_position]) %>
         <% queue_html = "<span class='nowrap'" \
                        " data-controller='queue-position'" \
@@ -54,6 +29,16 @@
                        "</span>" \
                        "</span>" %>
         <% metadata_parts << queue_html %>
+      <% end %>
+    <% else %>
+      <% wait_time_display = nil %>
+      <% if run.waiting_duration %>
+        <% wait_time_display = duration(run.waiting_duration.round) %>
+      <% elsif run.submitted_at && run.start_time %>
+        <% wait_time_display = duration((run.start_time - run.submitted_at).round) %>
+      <% end %>
+      <% if wait_time_display %>
+        <% metadata_parts << "<span class='nowrap'><i class='fas fa-hourglass-half text-gray-400 mr-1'></i>Wait #{wait_time_display}</span>" %>
       <% end %>
     <% end %>
     <%# Running time - use duration if available, otherwise calculate from start_time %>
@@ -71,25 +56,13 @@
       <% is_running = true %>
     <% end %>
     
-    <% if run_time_display %>
-      <% if is_running %>
-        <%# Live-updating running time (same mechanism as the parsing page):
-           the run-timer Stimulus controller ticks every second using
-           data-run-timer-start-time-value as its reference point. %>
-        <% expected_suffix = run.pred_process_duration ? " <span class='text-gray-500'>(expected #{duration(run.pred_process_duration.to_i)})</span>" : "" %>
-        <% run_time_html = "<span id='ongoing_run_#{run.id}' class='nowrap' data-controller='run-timer' data-run-timer-start-time-value='#{run.start_time.iso8601}'>" \
-                          "<i class='fas fa-clock text-gray-400 mr-1'></i>Run " \
-                          "<span data-run-timer-target='elapsedTime' class='font-mono'>#{run_time_display}</span>" \
-                          "#{expected_suffix}" \
-                          "</span>" %>
-        <% metadata_parts << run_time_html %>
-      <% else %>
-        <% run_time_text = "<i class='fas fa-clock text-gray-400 mr-1'></i>Run #{run_time_display}" %>
-        <% if run.pred_process_duration %>
-          <% run_time_text += " <span class='text-gray-500'>(expected #{duration(run.pred_process_duration.to_i)})</span>" %>
-        <% end %>
-        <% metadata_parts << "<span class='nowrap'>#{run_time_text}</span>" %>
+    <%# Run duration in the info bar only after the job finishes; while running, elapsed time is shown in the main status panel. %>
+    <% if run_time_display && !is_running %>
+      <% run_time_text = "<i class='fas fa-clock text-gray-400 mr-1'></i>Run #{run_time_display}" %>
+      <% if run.pred_process_duration %>
+        <% run_time_text += " <span class='text-gray-500'>(expected #{duration(run.pred_process_duration.to_i)})</span>" %>
       <% end %>
+      <% metadata_parts << "<span class='nowrap'>#{run_time_text}</span>" %>
     <% end %>
     <%# Idle time - check both results['time_idle'] and run.process_idle_duration %>
     <% idle_time_display = nil %>

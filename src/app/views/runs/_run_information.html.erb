@@ -40,7 +40,7 @@
       </div>
     <% end %>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <% if run.waiting_duration %>
+      <% if run.waiting_duration && ![1, 6].include?(run.status_id) %>
         <div>
           <span class="text-xs font-medium text-gray-500 uppercase">Waiting Time</span>
           <div class="text-xs text-gray-500 mt-1">

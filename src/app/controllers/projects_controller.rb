@@ -1264,7 +1264,9 @@ class ProjectsController < ApplicationController
             slurm_job_id: nil,
             pid: nil,
             start_time: nil,
-            duration: nil
+            duration: nil,
+            submitted_at: Time.current,
+            waiting_duration: nil
           )
         end
 
@@ -5865,7 +5867,16 @@ class ProjectsController < ApplicationController
       runs_scope = @project.runs.where(step_id: step_ids_for_runs).includes(:status)
       if @selected_loom_file.present? && all_annots_for_loom
         loom_run_ids = all_annots_for_loom.select { |a| a.filepath == @selected_loom_file }.map(&:run_id).compact.uniq
-        runs_scope = runs_scope.where(id: loom_run_ids) if loom_run_ids.any?
+        if loom_run_ids.any?
+          run_ids_for_scope = loom_run_ids.dup
+          # Single-run steps: queued/running jobs have no matrix annots yet; keep them visible.
+          unless @step.multiple_runs
+            active_ids = @project.runs.where(step_id: step_ids_for_runs, status_id: [1, 2, 6]).pluck(:id)
+            run_ids_for_scope.concat(active_ids)
+            run_ids_for_scope.uniq!
+          end
+          runs_scope = runs_scope.where(id: run_ids_for_scope)
+        end
       end
       runs_scope = apply_publication_snapshot_to_runs(runs_scope)
       @runs = runs_scope.includes(:annots, :status).order(created_at: :desc)
@@ -9116,8 +9127,6 @@ class ProjectsController < ApplicationController
     end
 
     def analysis_loom_file_candidate
-      return @available_loom_files.first if @available_loom_files&.one?
-
       session[:analysis_loom_file] ||= {}
       project_session_key = @project.id.to_s
       param_loom = params[:loom_file]
@@ -9135,6 +9144,14 @@ class ProjectsController < ApplicationController
     def assign_analysis_loom_file_from_session!
       session[:analysis_loom_file] ||= {}
       project_session_key = @project.id.to_s
+
+      # One loom file: no contextual filter (matches analysis UI where the picker is hidden).
+      if @available_loom_files&.one?
+        @selected_loom_file = nil
+        session[:analysis_loom_file][project_session_key] = '__all__'
+        return
+      end
+
       candidate_loom = analysis_loom_file_candidate
 
       if candidate_loom == '__all__'
@@ -9159,7 +9176,15 @@ class ProjectsController < ApplicationController
       runs_scope = @project.runs.where(step_id: step_ids_for_runs)
       if selected_loom_file.present? && all_annots_for_loom
         loom_run_ids = all_annots_for_loom.select { |a| a.filepath == selected_loom_file }.map(&:run_id).compact.uniq
-        runs_scope = runs_scope.where(id: loom_run_ids) if loom_run_ids.any?
+        if loom_run_ids.any?
+          run_ids_for_scope = loom_run_ids.dup
+          unless step.multiple_runs
+            active_ids = @project.runs.where(step_id: step_ids_for_runs, status_id: [1, 2, 6]).pluck(:id)
+            run_ids_for_scope.concat(active_ids)
+            run_ids_for_scope.uniq!
+          end
+          runs_scope = runs_scope.where(id: run_ids_for_scope)
+        end
       end
       runs_scope = apply_publication_snapshot_to_runs(runs_scope)
       ids = runs_scope.order(created_at: :desc).limit(2).pluck(:id)
@@ -13175,7 +13200,7 @@ class ProjectsController < ApplicationController
           "##{run.id}, " +
           [
             "<span class='nowrap'>#{run.created_at&.strftime("%Y-%m-%d %H:%M") || 'N/A'}</span>",
-            ((run.waiting_duration) ? "<span class='nowrap'>Wait #{helpers.duration(run.waiting_duration.to_i)}</span>" : ((run.status_id == 1) ? "<span id='ongoing_wait_#{run.id}' class='nowrap'>Wait #{helpers.duration((Time.now - (run.submitted_at || run.created_at)).to_i)}</span>" : nil)),
+            ((run.waiting_duration && ![1, 6].include?(run.status_id)) ? "<span class='nowrap'>Wait #{helpers.duration(run.waiting_duration.to_i)}</span>" : (([1, 6].include?(run.status_id) && run.submitted_at) ? "<span id='ongoing_wait_#{run.id}' class='nowrap'>Wait #{helpers.duration((Time.now - run.submitted_at).to_i)}</span>" : nil)),
             ((run.duration && run.status_id != 2) ? "<span class='nowrap'>Run #{helpers.duration(run.duration.to_i)}</span>" : (([1, 2].include?(run.status_id)) ? "<br/>#{estimated_time_txt}<span id='ongoing_run_#{run.id}' class='nowrap'>Run #{helpers.duration((run.start_time) ? (Time.now - run.start_time).to_i : 0)}</span>" : nil)),
             ((run.max_ram) ? "<span class='nowrap'>Max. RAM #{helpers.display_mem(run.max_ram * 1000)}</span>" : nil),
             "created by #{(admin? && @h_users[run.user_id]) ? 'Admin' : (@h_users[run.user_id]&.email&.split(/\@/)&.first || 'Unknown')}"

@@ -24,6 +24,16 @@ class Run < ApplicationRecord
     step&.name == 'clustering'
   end
 
+  # Reset queue-wait clock fields when the same Run row is reused for a new attempt
+  # (re-run, re-parse, project reset). Call before setting status to waiting/submitted.
+  def reset_wait_timing!
+    update!(
+      submitted_at: Time.current,
+      waiting_duration: nil,
+      start_time: nil
+    )
+  end
+
   # Push a synchronous run-level status change over ActionCable.
   #
   # This is the single source of truth for UI-facing run transitions: it

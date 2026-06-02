@@ -4802,7 +4802,8 @@ module Basic
       if run.status_id.to_i == 1
         run.update(
           status_id: 6,
-          submitted_at: run.submitted_at || Time.now
+          submitted_at: Time.now,
+          waiting_duration: nil
         )
       end
 

@@ -180,6 +180,10 @@ class ProjectParsingJob < ApplicationJob
         output_json: h_outputs.to_json,
         error: nil,
         slurm_job_id: nil,
+        submitted_at: Time.current,
+        waiting_duration: nil,
+        start_time: nil,
+        duration: nil,
         async: true # Execute through SLURM via exec_run
       }
       

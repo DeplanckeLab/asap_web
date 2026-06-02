@@ -100,6 +100,7 @@ class RunExecutionJob < ApplicationJob
     run.update(
       status_id: 1,
       start_time: nil,
+      waiting_duration: nil,
       pid: slurm_job_id.to_i,
       slurm_job_id: slurm_job_id.to_i
     )

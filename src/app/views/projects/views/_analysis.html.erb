@@ -472,6 +472,14 @@
     }
   }
 
+  function updateStepPipelineColorDots() {
+    const button = document.getElementById('analysis-pipeline-toggle-button')
+    const showDots = button && button.dataset && button.dataset.mode === 'details'
+    document.querySelectorAll('.step-pipeline-color-dot').forEach((dot) => {
+      dot.classList.toggle('hidden', !showDots)
+    })
+  }
+
   function setPipelineHeaderButtonMode(mode) {
     const button = document.getElementById('analysis-pipeline-toggle-button')
     if (!button) return
@@ -483,6 +491,7 @@
       button.dataset.mode = 'graph'
       button.textContent = 'Pipeline Graph'
     }
+    updateStepPipelineColorDots()
     updateAnalysisLoomFilterWarning()
   }
 
@@ -869,6 +878,7 @@
   }
 
   console.log('[Analysis] selected_run_id=<%= @selected_run_id.inspect %>, selected_step_id=<%= @selected_step_id.inspect %>, load_run_panel=<%= @load_run_panel.inspect %>, load_sub_view=<%= @load_sub_view.inspect %>')
+  updateStepPipelineColorDots()
   updateAnalysisLoomFilterWarning()
 
   ;(function restorePanelModeAfterLoomSwitch() {

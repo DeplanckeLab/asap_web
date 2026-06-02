@@ -1369,6 +1369,10 @@ export default class extends Controller {
               })
             }
           })
+
+          if (typeof window.updateStepPipelineColorDots === 'function') {
+            window.updateStepPipelineColorDots()
+          }
         }
       }
     })

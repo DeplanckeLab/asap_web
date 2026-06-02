@@ -51,7 +51,7 @@
           </div>
         </div>
 
-        <% if defined?(@available_loom_files) && @available_loom_files.present? %>
+        <% if defined?(@available_loom_files) && @available_loom_files.many? %>
           <div class="inline-flex items-center h-9">
             <div class="inline-flex h-9 items-center px-3 border border-gray-300 rounded-l-md bg-gray-50 text-xs font-medium text-gray-700">
               <i class="fa fa-filter mr-1"></i>
@@ -192,6 +192,22 @@
 
 
 <script>
+  function analysisSelectedLoomFile() {
+    const loomSelect = document.getElementById('analysis-loom-select')
+    if (loomSelect && loomSelect.value) {
+      try {
+        const selectedUrl = new URL(loomSelect.value, window.location.origin)
+        return selectedUrl.searchParams.get('loom_file')
+      } catch (_e) {
+        return null
+      }
+    }
+
+    const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]')
+    const loomFromData = stepSelectorElement && stepSelectorElement.getAttribute('data-step-selector-loom-file-value')
+    return loomFromData || null
+  }
+
   function updateAnalysisLoomFilterWarning() {
     const warningIcon = document.getElementById('loom-filter-warning-icon')
     const warningCount = document.getElementById('loom-filter-warning-count')
@@ -341,17 +357,9 @@
       url.searchParams.delete('run_id')
     }
 
-    const loomSelect = document.getElementById('analysis-loom-select')
-    if (loomSelect && loomSelect.value) {
-      try {
-        const selectedUrl = new URL(loomSelect.value, window.location.origin)
-        const selectedLoom = selectedUrl.searchParams.get('loom_file')
-        if (selectedLoom) {
-          url.searchParams.set('loom_file', selectedLoom)
-        }
-      } catch (_e) {
-        // no-op
-      }
+    const selectedLoom = analysisSelectedLoomFile()
+    if (selectedLoom) {
+      url.searchParams.set('loom_file', selectedLoom)
     }
 
     return url.toString()
@@ -502,14 +510,7 @@
 
   function appendLoomContextToUrl(url) {
     try {
-      const dropdown = document.getElementById('analysis-loom-select')
-      if (!dropdown) return url
-
-      const selectedOption = dropdown.options[dropdown.selectedIndex]
-      if (!selectedOption || !selectedOption.value) return url
-
-      const selectedUrl = new URL(selectedOption.value, window.location.origin)
-      const selectedLoom = selectedUrl.searchParams.get('loom_file')
+      const selectedLoom = analysisSelectedLoomFile()
       if (!selectedLoom) return url
 
       const targetUrl = new URL(url, window.location.origin)

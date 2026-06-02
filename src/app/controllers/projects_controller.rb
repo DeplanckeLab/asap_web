@@ -4597,34 +4597,13 @@ class ProjectsController < ApplicationController
                         .where(status_id: 3)
 
     # Apply loom-file context filter when available (same as analysis view)
-    selected_loom_file = nil
     begin
       all_annots_for_loom = load_loom_file_list_context
       if @available_loom_files.present?
-        session[:analysis_loom_file] ||= {}
-        project_session_key = @project.id.to_s
-        param_loom = params[:loom_file]
-        stored_loom = session[:analysis_loom_file][project_session_key] || session[:analysis_loom_file][@project.id]
-        candidate_loom = if param_loom.present?
-                           param_loom
-                         elsif stored_loom.present?
-                           stored_loom
-                         else
-                           '__all__'
-                         end
-        if candidate_loom == '__all__'
-          selected_loom_file = nil
-          session[:analysis_loom_file][project_session_key] = '__all__'
-        elsif @available_loom_files.include?(candidate_loom)
-          selected_loom_file = candidate_loom
-          session[:analysis_loom_file][project_session_key] = selected_loom_file
-        else
-          selected_loom_file = @available_loom_files.first
-          session[:analysis_loom_file][project_session_key] = selected_loom_file if selected_loom_file.present?
-        end
+        assign_analysis_loom_file_from_session!
 
-        if selected_loom_file && all_annots_for_loom
-          loom_run_ids = all_annots_for_loom.select { |a| a.filepath == selected_loom_file }.map(&:run_id).compact.uniq
+        if @selected_loom_file && all_annots_for_loom
+          loom_run_ids = all_annots_for_loom.select { |a| a.filepath == @selected_loom_file }.map(&:run_id).compact.uniq
           runs_scope = runs_scope.where(id: loom_run_ids) if loom_run_ids.any?
         end
       end
@@ -5846,38 +5825,13 @@ class ProjectsController < ApplicationController
       Rails.logger.info("Project steps ensured")
 
       # Load loom file context for filtering runs and inputs (analysis-style context)
-      selected_loom_file = nil
       all_annots_for_loom = nil
       begin
         all_annots_for_loom = load_loom_file_list_context
-        if @available_loom_files.present?
-          session[:analysis_loom_file] ||= {}
-          project_session_key = @project.id.to_s
-          param_loom = params[:loom_file]
-          stored_loom = session[:analysis_loom_file][project_session_key] || session[:analysis_loom_file][@project.id]
-          candidate_loom = if param_loom.present?
-                             param_loom
-                           elsif stored_loom.present?
-                             stored_loom
-                           else
-                             '__all__'
-                           end
-
-          if candidate_loom == '__all__'
-            selected_loom_file = nil
-            session[:analysis_loom_file][project_session_key] = '__all__'
-          elsif @available_loom_files.include?(candidate_loom)
-            selected_loom_file = candidate_loom
-            session[:analysis_loom_file][project_session_key] = selected_loom_file
-          else
-            selected_loom_file = nil
-            session[:analysis_loom_file][project_session_key] = '__all__'
-          end
-        end
+        assign_analysis_loom_file_from_session! if @available_loom_files.present?
       rescue => e
         Rails.logger.error("[step_results] Error loading loom file context: #{e.class} - #{e.message}")
       end
-      @selected_loom_file ||= selected_loom_file
       
       step_id = params[:step_id]
       if step_id.blank?
@@ -7128,28 +7082,7 @@ class ProjectsController < ApplicationController
     begin
       all_annots_for_loom = load_loom_file_list_context
       if @available_loom_files.present?
-        session[:analysis_loom_file] ||= {}
-        project_session_key = @project.id.to_s
-        param_loom = params[:loom_file]
-        stored_loom = session[:analysis_loom_file][project_session_key] || session[:analysis_loom_file][@project.id]
-        candidate_loom = if param_loom.present?
-                           param_loom
-                         elsif stored_loom.present?
-                           stored_loom
-                         else
-                           @available_loom_files.first
-                         end
-
-        if candidate_loom == '__all__'
-          @selected_loom_file = nil
-          session[:analysis_loom_file][project_session_key] = '__all__'
-        elsif @available_loom_files.include?(candidate_loom)
-          @selected_loom_file = candidate_loom
-          session[:analysis_loom_file][project_session_key] = @selected_loom_file
-        else
-          @selected_loom_file = nil
-          session[:analysis_loom_file][project_session_key] = '__all__'
-        end
+        assign_analysis_loom_file_from_session!
 
         if @selected_loom_file && all_annots_for_loom
           loom_run_ids = all_annots_for_loom.select { |a| a.filepath == @selected_loom_file }.map(&:run_id).compact.uniq
@@ -9182,19 +9115,27 @@ class ProjectsController < ApplicationController
       end
     end
 
-    def assign_analysis_loom_file_from_session!
+    def analysis_loom_file_candidate
+      return @available_loom_files.first if @available_loom_files&.one?
+
       session[:analysis_loom_file] ||= {}
       project_session_key = @project.id.to_s
       param_loom = params[:loom_file]
       stored_loom = session[:analysis_loom_file][project_session_key] || session[:analysis_loom_file][@project.id]
 
-      candidate_loom = if param_loom.present?
-                         param_loom
-                       elsif stored_loom.present?
-                         stored_loom
-                       else
-                         '__all__'
-                       end
+      if param_loom.present?
+        param_loom
+      elsif stored_loom.present?
+        stored_loom
+      else
+        '__all__'
+      end
+    end
+
+    def assign_analysis_loom_file_from_session!
+      session[:analysis_loom_file] ||= {}
+      project_session_key = @project.id.to_s
+      candidate_loom = analysis_loom_file_candidate
 
       if candidate_loom == '__all__'
         @selected_loom_file = nil

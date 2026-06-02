@@ -19,6 +19,7 @@ import {
   queryDeSecondMetadataHidden
 } from "visualization/de_second_metadata_attrs"
 import { resetInputDataWidgetToEmptyPlaceholder } from "lib/reset_input_data_widget_placeholder"
+import { formatNumberWithDelimiter } from "lib/number_format"
 import consumer from "channels/consumer"
 
 const VISUALIZATION_ONTOP_UI_ROOT_SELECTOR = [
@@ -1257,7 +1258,7 @@ export default class extends Controller {
       return null
     }
 
-    return num.toLocaleString()
+    return formatNumberWithDelimiter(num)
   }
 
   getLoomDisplayLabel(loomFile) {

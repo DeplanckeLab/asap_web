@@ -1,5 +1,6 @@
 import { Controller } from "@hotwired/stimulus"
 import consumer from "channels/consumer"
+import { formatNumberWithDelimiter } from "lib/number_format"
 
 // Connects to data-controller="file-upload"
 export default class extends Controller {
@@ -2095,7 +2096,7 @@ export default class extends Controller {
   formatNumber(value) {
     if (value === null || value === undefined || value === '') return 'n/a'
     const number = Number(value)
-    return Number.isFinite(number) ? number.toLocaleString() : this.escapeHtml(value)
+    return Number.isFinite(number) ? formatNumberWithDelimiter(number) : this.escapeHtml(value)
   }
 
   getDatasetDisplayName(dataset) {

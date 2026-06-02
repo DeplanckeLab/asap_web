@@ -10,6 +10,7 @@ import {
   DISCRETE_PALETTE_HIGH_CONTRAST,
   VALID_DISCRETE_PALETTE_IDS
 } from 'visualization/discrete_palettes'
+import { formatNumberWithDelimiter } from 'lib/number_format'
 
 export class UIManager {
   constructor(controller) {
@@ -842,9 +843,9 @@ export class UIManager {
     if (!pointCountElement) return
 
     const totalPoints = this.controller.currentCoordinates?.length || 0
-    const totalPointsText = totalPoints.toLocaleString()
+    const totalPointsText = formatNumberWithDelimiter(totalPoints)
     const setPointCountMarkup = (visibleCount, currentColor = '', currentWeight = '') => {
-      const visiblePointsText = visibleCount.toLocaleString()
+      const visiblePointsText = formatNumberWithDelimiter(visibleCount)
       pointCountElement.innerHTML = `<span class="point-count-current">${visiblePointsText}</span><span class="point-count-total" style="color: #6b7280;"> / ${totalPointsText}</span>`
 
       const currentCountElement = pointCountElement.querySelector('.point-count-current')
@@ -870,7 +871,7 @@ export class UIManager {
       setPointCountMarkup(filteredCount, currentCountColor, currentCountWeight)
       
       // Create detailed tooltip
-      let tooltip = `${filteredCount.toLocaleString()} of ${totalPoints.toLocaleString()} points visible (${percentage}%)`
+      let tooltip = `${formatNumberWithDelimiter(filteredCount)} of ${formatNumberWithDelimiter(totalPoints)} points visible (${percentage}%)`
       if (filteringSummary) {
         tooltip += `\n\nActive filters: ${filteringSummary}`
       }
@@ -1395,7 +1396,7 @@ export class UIManager {
         }
         
         // Update the count display
-        countElement.textContent = visibleCount.toLocaleString()
+        countElement.textContent = formatNumberWithDelimiter(visibleCount)
         
         // Add visual indicators
         const debugEntry = debugSummary.get(metadataId) || {
@@ -1426,7 +1427,7 @@ export class UIManager {
           
           // Add hover tooltip
           const percentage = ((visibleCount / totalCount) * 100).toFixed(1)
-          countElement.title = `${visibleCount.toLocaleString()} of ${totalCount.toLocaleString()} cells (${percentage}% visible after filtering)`
+          countElement.title = `${formatNumberWithDelimiter(visibleCount)} of ${formatNumberWithDelimiter(totalCount)} cells (${percentage}% visible after filtering)`
           debugEntry.categoriesReduced += 1
           if (debugEntry.reducedSamples.length < 3) {
             debugEntry.reducedSamples.push({
@@ -1439,7 +1440,7 @@ export class UIManager {
           // No filtering - normal appearance
           countElement.style.color = '#6b7280'
           countElement.style.fontWeight = '500'
-          countElement.title = `${totalCount.toLocaleString()} cells (100% visible)`
+          countElement.title = `${formatNumberWithDelimiter(totalCount)} cells (100% visible)`
           if (debugEntry.unchangedSamples.length < 3 && totalCount > 0) {
             debugEntry.unchangedSamples.push({
               category,
@@ -1499,7 +1500,7 @@ export class UIManager {
     
     if (countElement) {
       const selectionDisplay = this.controller.getSelectionCountDisplayData()
-      countElement.textContent = selectionDisplay.count.toLocaleString()
+      countElement.textContent = formatNumberWithDelimiter(selectionDisplay.count)
       countElement.title = selectionDisplay.title
       countElement.style.color = selectionDisplay.count > 0 ? '#1f2937' : '#6b7280'
       countElement.style.fontWeight = selectionDisplay.count > 0 ? '600' : '500'
@@ -1537,8 +1538,8 @@ export class UIManager {
       // Some visible cells are not selected
       button.disabled = false
       const remainingCount = visibleCount - selectedCount
-      button.textContent = `Add ${remainingCount.toLocaleString()} visible`
-      button.title = `Add ${remainingCount.toLocaleString()} remaining visible cells to selection`
+      button.textContent = `Add ${formatNumberWithDelimiter(remainingCount)} visible`
+      button.title = `Add ${formatNumberWithDelimiter(remainingCount)} remaining visible cells to selection`
     }
   }
 

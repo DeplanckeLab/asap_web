@@ -88,10 +88,10 @@ module ApplicationHelper
     format('%02d:%02d:%02d', hours, minutes, seconds)
   end
 
-  # Format number with thousand delimiters
+  # Format number with thousand delimiters (apostrophe, e.g. 1'234'567)
   def number_with_delimiter(number)
     return "0" if number.nil?
-    number.to_s.reverse.gsub(/(\d{3})(?=\d)/, '\\1,').reverse
+    number.to_s.reverse.gsub(/(\d{3})(?=\d)/, "\\1'").reverse
   end
   
   # Note: exportable? is now defined in ProjectAuthorization concern

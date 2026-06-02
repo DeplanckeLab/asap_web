@@ -1,5 +1,6 @@
 import { Controller } from "@hotwired/stimulus"
 import consumer, { dispatchProjectStepRunsChangedFromCable } from "channels/consumer"
+import { formatNumberWithDelimiter } from "lib/number_format"
 
 export default class extends Controller {
   static targets = ["statusCount", "statusIcon", "statusButton", "cellCount"]
@@ -78,7 +79,7 @@ export default class extends Controller {
     // Update cell count from broadcast data
     if (this.hasCellCountTarget && data.cell_count !== undefined) {
       const cellCount = parseInt(data.cell_count) || 0
-      const formatted = cellCount.toLocaleString()
+      const formatted = formatNumberWithDelimiter(cellCount)
       const colLabel = data.col_label || 'cells'
       console.log(`[HeaderRunStatus] Updating cell count: ${formatted} ${colLabel}`)
       this.cellCountTarget.innerHTML = `<i class="fas fa-circle text-gray-400 mr-1 flex-shrink-0"></i>${formatted} ${colLabel}`

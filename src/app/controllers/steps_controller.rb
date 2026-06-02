@@ -1,5 +1,6 @@
 class StepsController < ApplicationController
   before_action :set_step, only: [:show, :edit, :update, :destroy]
+  before_action :ensure_admin!, only: [:reorder]
   before_action :ensure_admin!, except: [:index, :show]
 
   def index
@@ -48,6 +49,22 @@ class StepsController < ApplicationController
   def destroy
     @step.destroy
     redirect_to steps_url, notice: 'Step was successfully destroyed.'
+  end
+
+  def reorder
+    ids = params.require(:ordered_ids).map(&:to_i)
+    steps = Step.where(id: ids).index_by(&:id)
+
+    Step.transaction do
+      ids.each_with_index do |id, index|
+        step = steps[id]
+        next if step.nil?
+
+        step.update!(rank: index + 1)
+      end
+    end
+
+    head :ok
   end
 
   private

@@ -66,6 +66,9 @@
       <table class="min-w-full divide-y divide-gray-200 text-sm">
         <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600">
           <tr>
+            <% if admin? %>
+              <th scope="col" class="w-10 px-3 py-2 text-left"></th>
+            <% end %>
             <th scope="col" class="px-3 py-2 text-left">ID</th>
             <th scope="col" class="px-3 py-2 text-left">Rank</th>
             <th scope="col" class="px-3 py-2 text-left">Object Name</th>
@@ -77,14 +80,42 @@
         <tbody
           class="divide-y divide-gray-100 text-sm text-gray-700"
           data-table-row-filter-target="tbody"
+          <% if admin? %>
+            data-controller="sortable-list"
+            data-sortable-list-url-value="<%= reorder_steps_path %>"
+            data-sortable-list-item-selector-value="tr[data-id]"
+          <% end %>
         >
           <% @steps.each do |step| %>
-            <%= tag.tr data: {
+            <% row_data = {
+              id: step.id,
               row_filter_text: step_index_row_filter_text(step),
               row_filter_columns: step_index_row_filter_text_table_columns(step)
-            } do %>
+            } %>
+            <% row_data[:action] = "dragover->sortable-list#dragover drop->sortable-list#drop" if admin? %>
+            <%= tag.tr data: row_data, class: ("hover:bg-gray-50" if admin?) do %>
+              <% if admin? %>
+                <td class="px-3 py-2">
+                  <span
+                    draggable="true"
+                    class="inline-flex cursor-grab select-none items-center text-gray-400 hover:text-gray-600"
+                    title="Drag to reorder"
+                    data-action="dragstart->sortable-list#dragstart dragend->sortable-list#dragend"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                      <circle cx="6" cy="5" r="1.25"></circle>
+                      <circle cx="14" cy="5" r="1.25"></circle>
+                      <circle cx="6" cy="10" r="1.25"></circle>
+                      <circle cx="14" cy="10" r="1.25"></circle>
+                      <circle cx="6" cy="15" r="1.25"></circle>
+                      <circle cx="14" cy="15" r="1.25"></circle>
+                    </svg>
+                    <span class="sr-only">Drag to reorder</span>
+                  </span>
+                </td>
+              <% end %>
               <td class="px-3 py-2"><%= step.id %></td>
-              <td class="px-3 py-2"><%= step.rank.presence || '—' %></td>
+              <td class="px-3 py-2" data-rank-label><%= step.rank.presence || '—' %></td>
               <td class="px-3 py-2"><%= step.obj_name.presence || '—' %></td>
               <td class="px-3 py-2">
                 <span class="font-medium text-gray-900"><%= step.name.presence || '—' %></span>

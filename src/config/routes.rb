@@ -129,7 +129,9 @@ Rails.application.routes.draw do
   resources :project_types
   resources :ontology_term_types
   resources :cell_ontologies
-  resources :steps
+  resources :steps do
+    patch :reorder, on: :collection
+  end
   resources :std_methods
   resources :statuses
   resources :guided_tours do

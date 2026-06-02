@@ -2,6 +2,8 @@
 <% # Calculate selected step info before the dropdown div %>
 <% selected_step_info = @steps_with_status&.find { |s| @selected_step_id && s[:step].id == @selected_step_id } %>
 <% selected_step = selected_step_info ? selected_step_info[:step] : (@steps_with_status&.first&.dig(:step)) %>
+<% selected_latest_run = selected_step_info ? selected_step_info[:latest_run] : (@steps_with_status&.first&.dig(:latest_run)) %>
+<% selected_display_name = selected_step ? selected_step.pipeline_label_for(selected_latest_run) : nil %>
 <% selected_status = selected_step_info ? selected_step_info[:status] : (@steps_with_status&.first&.dig(:status)) %>
 <% selected_is_complete = selected_step_info ? selected_step_info[:is_complete] : (@steps_with_status&.first&.dig(:is_complete)) %>
 <% selected_is_available = selected_step_info ? selected_step_info[:is_available] : (@steps_with_status&.first&.dig(:is_available)) %>
@@ -37,7 +39,7 @@
             <% end %>
           </div>
           <span class="<%= !selected_is_available ? 'text-gray-500' : (selected_is_complete ? 'text-green-600' : 'text-gray-900') %> text-sm font-semibold truncate">
-            <%= selected_step.label.presence || selected_step.name %>
+            <%= selected_display_name %>
           </span>
         <% end %>
       </div>
@@ -49,7 +51,7 @@
               title="Availability details"
               data-step-help-trigger
               data-step-help-available="false"
-              data-step-help-title="<%= h((selected_step.label.presence || selected_step.name).to_s) %>"
+              data-step-help-title="<%= h(selected_display_name.to_s) %>"
               data-step-help-detail="<%= h(selected_lock_reason.to_s) %>"
               aria-label="Availability details for this step">
         <span class="sr-only">Availability details</span>
@@ -70,7 +72,7 @@
           <% status = step_info[:status] %>
           <% status_counts = step_info[:status_counts] || { waiting: 0, running: 0, completed: 0, failed: 0 } %>
           <% lock_reason = step_info[:lock_reason] %>
-          <% row_display_name = step.label.presence || step.name %>
+          <% row_display_name = step.pipeline_label_for(step_info[:latest_run]) %>
           <% 
             # Compare using effective_selected_step_id or selected_step.id
             # Ensure we match what's shown in the button

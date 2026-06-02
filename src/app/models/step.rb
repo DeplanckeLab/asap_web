@@ -1,4 +1,6 @@
 class Step < ApplicationRecord
+  PIPELINE_LABEL_STRATEGY_STD_METHOD_IF_SINGLE_RUN = 'std_method_if_single_run'.freeze
+
   has_many :runs, dependent: :destroy
   has_many :reqs, dependent: :destroy
   has_many :annots, through: :runs
@@ -29,5 +31,23 @@ class Step < ApplicationRecord
 
   def label_with_id
     "#{label.presence || name} (#{id})"
+  end
+
+  def pipeline_label_for(run = nil)
+    strategy = pipeline_label_strategy
+    if strategy == PIPELINE_LABEL_STRATEGY_STD_METHOD_IF_SINGLE_RUN && !multiple_runs
+      std_method = run&.std_method
+      return std_method.label.presence || std_method.name.titleize if std_method
+    end
+
+    label.presence || name
+  end
+
+  private
+
+  def pipeline_label_strategy
+    return nil if attrs_json.blank?
+
+    Basic.safe_parse_json(attrs_json, {})['pipeline_label_strategy']
   end
 end

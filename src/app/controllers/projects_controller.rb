@@ -11477,9 +11477,10 @@ class ProjectsController < ApplicationController
         # Use the run's status_id directly, not project_step status_id
         # Get the most recent run for this step (to show current/active status), or fall back to project_step if no run exists
         step_runs = @runs.select { |r| r.step_id == step.id }
+        latest_run = step_runs.max_by(&:created_at)
         if step_runs.any?
           # Use the most recent run's status (to show current/active status)
-          status_id = step_runs.max_by(&:created_at)&.status_id
+          status_id = latest_run&.status_id
         else
           status_id = project_step&.status_id
         end
@@ -11552,6 +11553,7 @@ class ProjectsController < ApplicationController
         
         @steps_with_status << {
           step: step,
+          latest_run: latest_run,
           project_step: project_step,
           status_id: status_id,
           status: status_id.present? && @h_statuses[status_id] ? @h_statuses[status_id].name : 'not_started',

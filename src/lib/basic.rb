@@ -4239,10 +4239,25 @@ module Basic
               
               linked_run = Run.where(:id => dt['run_id']).first
               h_parent_runs[linked_run.id] = linked_run
-              
-              lineage_runs = Run.where(:id => linked_run.lineage_run_ids.split(",")).all
-              norm_dataset = Annot.joins(:step).where(:run_id => lineage_runs, :steps => {:name => "normalization"}, :dim => 3).first
-              h_var['norm_matrix_dataset'] = norm_dataset.name if norm_dataset
+
+              # pca_seurat command_json arg 3 (norm_matrix_dataset): resolve from normalization
+              # in the input matrix run's ancestors. Include linked_run itself — when the user
+              # selects the normalization layer, lineage_run_ids often lists only parsing, not
+              # the normalization run that produced the matrix.
+              if k.to_s == 'input_matrix' && linked_run
+                lineage_run_ids = linked_run.lineage_run_ids.to_s.split(',').map(&:strip).reject(&:blank?).map(&:to_i)
+                lineage_run_ids << linked_run.id
+                norm_dataset = Annot.joins(:step).where(
+                  run_id: lineage_run_ids.uniq,
+                  steps: { name: 'normalization' },
+                  dim: 3
+                ).order(id: :desc).first
+                if norm_dataset
+                  h_var['norm_matrix_dataset'] = norm_dataset.name
+                elsif linked_run.step&.name == 'normalization' && dt['output_dataset'].present?
+                  h_var['norm_matrix_dataset'] = dt['output_dataset']
+                end
+              end
 
               h_linked_run_outputs = nil
               if !linked_run

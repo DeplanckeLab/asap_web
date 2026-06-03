@@ -17,7 +17,8 @@ export default class extends Controller {
     minItems: { type: Number, default: 0 },
     maxItems: { type: Number, default: null },
     isMultiple: Boolean,
-    dropdownPlaceholder: { type: String, default: "" }
+    dropdownPlaceholder: { type: String, default: "" },
+    selectedLoomFile: { type: String, default: "" }
   }
 
   emptyDropdownLabel() {
@@ -479,6 +480,68 @@ export default class extends Controller {
     return best
   }
 
+  optionStepRank(optionValue) {
+    const rank = Number(optionValue && optionValue.step_rank)
+    return Number.isFinite(rank) ? rank : -1
+  }
+
+  // Prefer the matrix from the latest pipeline step (highest Step#rank), not DOM/name order.
+  selectBestByReverseStepRank(inputs) {
+    if (!inputs || inputs.length === 0) {
+      return null
+    }
+    if (inputs.length === 1) {
+      return inputs[0]
+    }
+    let best = inputs[0]
+    let bestRank = this.optionStepRank(this.parseOptionValue(best))
+    for (let i = 1; i < inputs.length; i++) {
+      const candidate = inputs[i]
+      const rank = this.optionStepRank(this.parseOptionValue(candidate))
+      if (rank > bestRank) {
+        best = candidate
+        bestRank = rank
+      } else if (rank === bestRank) {
+        const bestArea = this.optionArea(this.parseOptionValue(best))
+        const candidateArea = this.optionArea(this.parseOptionValue(candidate))
+        if (candidateArea > bestArea) {
+          best = candidate
+        }
+      }
+    }
+    return best
+  }
+
+  isLoomFilterActive() {
+    return String(this.selectedLoomFileValue || "").trim().length > 0
+  }
+
+  isParsingLoomFile(loomFile) {
+    const source = String(loomFile || "").trim().toLowerCase()
+    if (!source) {
+      return false
+    }
+    return /(^|\/)parsing(\/|$)/.test(source)
+  }
+
+  // When analysis has no loom filter, prefer the main parsing/output.loom over other files.
+  loomFilesForRecommendation(loomKeys) {
+    const keys = Array.isArray(loomKeys) ? loomKeys.slice() : []
+    if (this.isLoomFilterActive() || keys.length <= 1) {
+      return keys
+    }
+    const parsing = []
+    const other = []
+    keys.forEach((loomFile) => {
+      if (this.isParsingLoomFile(loomFile)) {
+        parsing.push(loomFile)
+      } else {
+        other.push(loomFile)
+      }
+    })
+    return parsing.concat(other)
+  }
+
   findRecommendedMatrixInputForLoom(loomFile) {
     const candidates = this.optionTargets.filter((input) => {
       const optionValue = this.parseOptionValue(input)
@@ -490,7 +553,7 @@ export default class extends Controller {
 
     const p1 = candidates.filter((input) => this.isAsapNormalizedDataset(this.parseOptionValue(input)))
     if (p1.length > 0) {
-      return p1[0]
+      return this.selectBestByReverseStepRank(p1)
     }
 
     const p2 = candidates.filter((input) => {
@@ -498,7 +561,7 @@ export default class extends Controller {
       return this.isMatrixDataset(value) && this.isCountDataset(value)
     })
     if (p2.length > 0) {
-      return p2[0]
+      return this.selectBestByReverseStepRank(p2)
     }
 
     const p3 = candidates.filter((input) => {
@@ -506,7 +569,7 @@ export default class extends Controller {
       return this.isLayerDataset(value) && this.isCountDataset(value)
     })
     if (p3.length > 0) {
-      return this.selectTopByArea(p3)
+      return this.selectBestByReverseStepRank(p3)
     }
 
     const p4 = candidates.filter((input) => {
@@ -514,15 +577,15 @@ export default class extends Controller {
       return this.isMatrixDataset(value) && !this.isCountDataset(value)
     })
     if (p4.length > 0) {
-      return p4[0]
+      return this.selectBestByReverseStepRank(p4)
     }
 
     const p5 = candidates.filter((input) => this.isLayerDataset(this.parseOptionValue(input)))
     if (p5.length > 0) {
-      return p5[0]
+      return this.selectBestByReverseStepRank(p5)
     }
 
-    return candidates[0]
+    return this.selectBestByReverseStepRank(candidates)
   }
 
   clearRecommendationBadge(input) {
@@ -580,7 +643,14 @@ export default class extends Controller {
       loomGroups[loomFile].push(input)
     })
 
-    Object.keys(loomGroups).forEach((loomFile) => {
+    let loomFiles = this.loomFilesForRecommendation(Object.keys(loomGroups))
+    if (!this.isLoomFilterActive() && loomFiles.length > 1) {
+      const parsingOnly = loomFiles.filter((loomFile) => this.isParsingLoomFile(loomFile))
+      if (parsingOnly.length > 0) {
+        loomFiles = parsingOnly
+      }
+    }
+    loomFiles.forEach((loomFile) => {
       const recommended = this.findRecommendedMatrixInputForLoom(loomFile)
       if (recommended) {
         this.addRecommendationBadge(recommended)
@@ -651,7 +721,7 @@ export default class extends Controller {
       loomGroups[loomFile].push(input)
     })
 
-    const loomKeys = Object.keys(loomGroups)
+    const loomKeys = this.loomFilesForRecommendation(Object.keys(loomGroups))
     if (loomKeys.length === 0) {
       return null
     }

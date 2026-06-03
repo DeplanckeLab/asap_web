@@ -140,31 +140,40 @@
                            true
                          end
                        } %>
-                    <% source_step_ids = attr['source_steps'].flat_map { |ssn| applicable_steps.select { |s| s.name == ssn }.map(&:id) }.compact.uniq %>
-                    <% source_runs = @h_runs.values.select { |r| source_step_ids.include?(r.step_id) } %>
+                    <% allowed_source_step_names = Array(attr['source_steps']).map(&:to_s) %>
+                    <% h_steps_by_id = applicable_steps.index_by(&:id) %>
+                    <% source_runs = @h_runs.values.select do |r|
+                         step_name = h_steps_by_id[r.step_id]&.name
+                         step_name.present? && allowed_source_step_names.include?(step_name)
+                       end %>
                     <% source_run_ids = source_runs.map(&:id) %>
                     <% h_data_classes = {} %>
                     <% DataClass.all.each { |dc| h_data_classes[dc.id] = dc.name } %>
-                    <% candidate_annots = Annot.where(project_id: @project.id)
-                                              .where(
-                                                "step_id IN (:step_ids) OR ori_step_id IN (:step_ids) OR run_id IN (:run_ids) OR ori_run_id IN (:run_ids) OR store_run_id IN (:run_ids)",
-                                                step_ids: source_step_ids.presence || [-1],
-                                                run_ids: source_run_ids.presence || [-1]
-                                              )
-                                              .order(:name, :id)
-                                              .to_a %>
+                    <%# Only matrices from successful runs of the listed source_steps (run.step, not ori/store links). %>
+                    <% candidate_annots = if source_run_ids.any?
+                                            Annot.where(project_id: @project.id, run_id: source_run_ids)
+                                                 .order(:name, :id)
+                                                 .to_a
+                                                 .select do |annot|
+                                                   run = @h_runs[annot.run_id]
+                                                   next false unless run
+                                                   step_name = h_steps_by_id[run.step_id]&.name
+                                                   allowed_source_step_names.include?(step_name)
+                                                 end
+                                          else
+                                            []
+                                          end %>
                     <% if defined?(@selected_loom_file) && @selected_loom_file.present? %>
                       <% candidate_annots = candidate_annots.select { |annot| annot.filepath == @selected_loom_file } %>
                     <% end %>
                     <% source_methods_filter = attr['source_methods'] %>
                     <% excluded_source_methods_filter = attr['excluded_source_methods'] %>
                     <% if source_methods_filter.present? || excluded_source_methods_filter.present? %>
-                      <% h_steps_by_id = applicable_steps.index_by(&:id) %>
-                      <% annot_run_ids_for_filter = candidate_annots.flat_map { |a| [a.run_id, a.ori_run_id, a.store_run_id] }.compact.uniq %>
+                      <% annot_run_ids_for_filter = candidate_annots.map(&:run_id).compact.uniq %>
                       <% h_runs_for_filter = Run.where(id: annot_run_ids_for_filter).index_by(&:id) %>
                       <% h_std_methods_for_filter = StdMethod.where(id: h_runs_for_filter.values.map(&:std_method_id).compact.uniq).index_by(&:id) %>
                       <% candidate_annots = candidate_annots.select do |annot|
-                           run = h_runs_for_filter[annot.run_id] || h_runs_for_filter[annot.ori_run_id] || h_runs_for_filter[annot.store_run_id]
+                           run = h_runs_for_filter[annot.run_id] || @h_runs[annot.run_id]
                            next true unless run&.std_method_id
                            std_method = h_std_methods_for_filter[run.std_method_id]
                            next true unless std_method
@@ -208,7 +217,8 @@
                            data-input-data-selector-min-items-value="<%= min_items %>"
                            data-input-data-selector-max-items-value="<%= max_items || '' %>"
                            data-input-data-selector-is-multiple-value="<%= is_multiple ? 'true' : 'false' %>"
-                           data-input-data-selector-dropdown-placeholder-value="<%= h(input_data_dropdown_placeholder.to_s) %>">
+                           data-input-data-selector-dropdown-placeholder-value="<%= h(input_data_dropdown_placeholder.to_s) %>"
+                           data-input-data-selector-selected-loom-file-value="<%= h((defined?(@selected_loom_file) && @selected_loom_file).to_s) %>">
                         <button type="button"
                                 data-input-data-selector-target="dropdownButton"
                                 data-action="click->input-data-selector#toggleDropdown"
@@ -238,7 +248,9 @@
                                    nber_rows: annot.nber_rows,
                                    nber_cols: annot.nber_cols,
                                    imported: annot.imported,
-                                   from_asap_pipeline: from_asap_pipeline
+                                   from_asap_pipeline: from_asap_pipeline,
+                                   step_name: step&.name,
+                                   step_rank: step&.rank
                                  } %>
                               <% data_value = data_hash.to_json %>
                               <% display_label = [step&.label.presence || step&.name&.humanize, annot.display_name].compact.join(' - ') %>

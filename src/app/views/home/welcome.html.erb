@@ -46,13 +46,30 @@
         <%= render "cite_button" %>
       </div>
 
-      <!-- Tutorial Link (Replacement for the video) -->
-      <div class="mt-4">
-        <a class="inline-flex items-center gap-x-1.5 text-sm font-medium text-blue-600 decoration-2 hover:underline focus:outline-none focus:underline dark:text-blue-500" href="<%= public_guided_tours_path %>">
-          Check the guided tours
-          <svg class="shrink-0 size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-        </a>
-      </div>
+      <% unless user_signed_in? %>
+        <% sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '1').to_i %>
+        <% sandbox_delete_label = sandbox_idle_days == 1 ? '24 hours' : "#{sandbox_idle_days} days" %>
+        <div class="mt-6 max-w-2xl mx-auto rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-left shadow-sm dark:border-blue-500/30 dark:bg-blue-500/10">
+          <p class="text-sm font-medium text-gray-900 dark:text-neutral-200">
+            <%= link_to "Create a free account", new_user_registration_path, class: "text-blue-700 hover:underline dark:text-blue-400" %>
+            to keep your analyses and collaborate with others.
+          </p>
+          <p class="mt-2 text-sm text-gray-700 dark:text-neutral-300">
+            In guest mode, projects are temporary sandboxes and are deleted after <%= sandbox_delete_label %> without activity.
+            With an account you can:
+          </p>
+          <ul class="mt-2 text-sm text-gray-700 list-disc list-inside space-y-1 dark:text-neutral-300">
+            <li>Keep projects in your personal workspace (not subject to sandbox auto-deletion)</li>
+            <li>Publish projects and make them discoverable by others</li>
+            <li>Share your projects with collaborators and set specific permissions</li>
+            <li>Submit community annotations (requires linking your ORCID in account settings)</li>
+          </ul>
+          <p class="mt-2 text-sm text-gray-600 dark:text-neutral-400">
+            Already have an account?
+            <%= link_to "Sign in", new_user_session_path, class: "text-blue-700 hover:underline dark:text-blue-400" %>.
+          </p>
+        </div>
+      <% end %>
 
       <!-- Feedback (Centered) -->
       <div class="mt-6 flex flex-wrap justify-center gap-4">

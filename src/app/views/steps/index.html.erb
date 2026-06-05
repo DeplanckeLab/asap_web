@@ -1,5 +1,5 @@
 <% content_for :title, "Steps - ASAP" %>
-<div class="max-w-5xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+<div class="max-w-5xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6" data-controller="confirm-delete">
   <div class="mb-8 flex items-center justify-between">
     <div>
       <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">Steps</h1>
@@ -127,10 +127,13 @@
                   <span class="mx-2 text-gray-300">|</span>
                   <%= link_to 'Edit', edit_step_path(step), class: 'text-gray-600 hover:text-gray-800' %>
                   <span class="mx-2 text-gray-300">|</span>
-                  <%= link_to 'Destroy', step_path(step),
-                              method: :delete,
-                              data: { confirm: 'Are you sure?' },
-                              class: 'text-red-600 hover:text-red-700' %>
+                  <button type="button"
+                          class="text-red-600 hover:text-red-700 bg-transparent border-0 p-0 cursor-pointer text-sm font-normal"
+                          data-action="click->confirm-delete#open"
+                          data-confirm-delete-url-param="<%= step_path(step) %>"
+                          data-confirm-delete-label-param="<%= step.label.presence || step.name.presence || "Step ##{step.id}" %>">
+                    Destroy
+                  </button>
                 <% end %>
               </td>
             <% end %>
@@ -145,5 +148,7 @@
       No steps have been recorded yet.
     </div>
   <% end %>
+
+  <%= render "shared/confirm_delete_modal" %>
 </div>
 

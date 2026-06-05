@@ -30,6 +30,7 @@ src/nohup.out
 src/app/javascript/controllers/visualization/README.md
 src/app/assets/builds
 nohup.out
+build.log
 
 public/assets
 src/public/data/asap-old/input_examples

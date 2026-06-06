@@ -63,7 +63,7 @@ module Scfair
       return 'schema.version' if field.match?(/\A(uns\/schema_version|\/attrs\/schema_version)\z/)
       return 'cross-field.constraints' if field.start_with?('cross-field')
       return 'ontology.semantics' if field.start_with?('ontology.semantics.')
-      return 'ontology.organism_dev_stage' if field.start_with?('ontology.organism_dev_stage')
+      return 'ontology.organism_specific' if field.start_with?('ontology.organism_specific')
       return 'extension.spatial' if field.start_with?('extension.spatial')
       return 'extension.perturb' if field.start_with?('extension.perturb')
       return 'extension.atac' if field.start_with?('extension.atac')

@@ -30,12 +30,12 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
 
   test 'builds cross-field rule detail' do
     detail = Scfair::CheckDetailBuilder.call(
-      field: 'cross-field.CF-4-donor-id',
+      field: 'cross-field.CF-3-donor-id',
       message: 'donor_id must not be "na" unless tissue_type is "cell line"',
       format: 'h5ad'
     )
 
-    assert_equal 'CF-4: donor_id consistency', detail[:title]
+    assert_equal 'CF-3: donor_id consistency', detail[:title]
     assert_match(/donor_id must not be "na"/, detail[:summary])
   end
 
@@ -131,5 +131,53 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
     assert item[:detail].present?
     assert_equal 'uns.required_presence', item[:detail][:category_id]
     assert_equal item[:message], item[:detail][:result_message]
+  end
+
+  test 'shows organism-specific applicability for development stage semantic checks' do
+    detail = Scfair::CheckDetailBuilder.call(
+      field: 'ontology.semantics.development_stage_ontology_term_id.descendants',
+      message: 'Descendant/root restriction checks passed',
+      format: 'h5ad',
+      field_values: {
+        'uns/organism_ontology_term_id' => ['NCBITaxon:9606'],
+        'uns/organism' => ['Homo sapiens'],
+        'obs/development_stage_ontology_term_id' => ['HsapDv:0000095']
+      }
+    )
+
+    applicable = detail[:constraints].find { |row| row[:label] == 'Organism-specific prefix rules' }
+    assert_match(/Applicable/, applicable[:value])
+    assert_match(/Organism-specific constraints/, applicable[:value])
+  end
+
+  test 'shows organism-specific tissue context in semantic popup' do
+    detail = Scfair::CheckDetailBuilder.call(
+      field: 'ontology.semantics.tissue_ontology_term_id.descendants',
+      message: 'Descendant/root restriction checks passed',
+      format: 'h5ad',
+      field_values: {
+        'uns/organism_ontology_term_id' => ['NCBITaxon:7227'],
+        'obs/tissue_type' => ['tissue'],
+        'obs/tissue_ontology_term_id' => ['FBbt:10000000']
+      }
+    )
+
+    prefixes = detail[:constraints].find { |row| row[:label] == 'Allowed tissue prefixes' }
+    assert_includes prefixes[:value], 'UBERON:*'
+    assert_includes prefixes[:value], 'FBbt:*'
+  end
+
+  test 'shows organism-specific ethnicity context in semantic popup' do
+    detail = Scfair::CheckDetailBuilder.call(
+      field: 'ontology.semantics.self_reported_ethnicity_ontology_term_id.descendants',
+      message: 'Descendant/root restriction checks passed',
+      format: 'h5ad',
+      field_values: {
+        'uns/organism_ontology_term_id' => ['NCBITaxon:9606']
+      }
+    )
+
+    note = detail[:constraints].find { |row| row[:label] == 'Organism-specific rules' }
+    assert_match(/Homo sapiens/, note[:value])
   end
 end

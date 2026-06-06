@@ -181,6 +181,56 @@ module Scfair
       raw.each_with_object({}) { |(org, prefix), h| h[org.to_s] = prefix.to_s }.freeze
     end
 
+    def organism_cell_type_mapping
+      raw = data.dig(:cross_field, :organism_cell_type_prefixes) || {}
+      raw.each_with_object({}) do |(org, prefixes), hash|
+        hash[org.to_s] = Array(prefixes).map(&:to_s)
+      end.freeze
+    end
+
+    def organism_cell_type_default_prefixes
+      Array(data.dig(:cross_field, :organism_cell_type_default_prefixes) || %w[CL]).map(&:to_s).freeze
+    end
+
+    def organism_cell_type_prefixes_for(organism)
+      organism_cell_type_mapping[organism.to_s] || organism_cell_type_default_prefixes
+    end
+
+    def organism_tissue_mapping
+      raw = data.dig(:cross_field, :organism_tissue_prefixes) || {}
+      raw.each_with_object({}) do |(org, prefixes), hash|
+        hash[org.to_s] = Array(prefixes).map(&:to_s)
+      end.freeze
+    end
+
+    def organism_tissue_default_prefixes
+      Array(data.dig(:cross_field, :organism_tissue_default_prefixes) || %w[UBERON]).map(&:to_s).freeze
+    end
+
+    def organism_tissue_prefixes_for(organism)
+      organism_tissue_mapping[organism.to_s] || organism_tissue_default_prefixes
+    end
+
+    def organism_ethnicity_human
+      data.dig(:cross_field, :organism_ethnicity_human).to_s
+    end
+
+    def organism_ethnicity_prefixes
+      Array(data.dig(:cross_field, :organism_ethnicity_prefixes) || %w[HANCESTRO AfPO]).map(&:to_s).freeze
+    end
+
+    def organism_ethnicity_special_values
+      Array(data.dig(:cross_field, :organism_ethnicity_special_values) || %w[unknown na multiethnic]).map(&:to_s).freeze
+    end
+
+    def organism_celegans_sex_organism
+      data.dig(:cross_field, :organism_celegans_sex_organism).to_s
+    end
+
+    def organism_celegans_sex_terms
+      Array(data.dig(:cross_field, :organism_celegans_sex_terms) || %w[PATO:0000384 PATO:0001340]).map(&:to_s).freeze
+    end
+
     def label_pairs
       raw = data[:label_pairs] || {}
       raw.each_with_object({}) { |(term, label), h| h[term.to_s] = label.to_s }.freeze

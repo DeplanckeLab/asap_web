@@ -594,7 +594,6 @@ class ScfairLoomValidatorService
     tissue_type = tissue_type_values.first
 
     # Check each unique suspension_type value against the assay constraint
-    cross_field_errors_before = @errors.size + @warnings.size
     suspension_values.each do |susp|
       violations = check_cross_field_constraints(
         organism_tax_id: organism,
@@ -650,11 +649,6 @@ class ScfairLoomValidatorService
     # Deduplicate: the cartesian product above may produce duplicate messages
     @errors.uniq!
     @warnings.uniq!
-
-    cross_field_errors_after = @errors.size + @warnings.size
-    if cross_field_errors_after == cross_field_errors_before
-      @valid_checks << { field: 'cross-field', message: 'All cross-field schema constraints satisfied' }
-    end
   end
 
   # Validate that all ontology term values present in the metadata actually

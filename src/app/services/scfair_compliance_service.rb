@@ -102,7 +102,7 @@ class ScfairComplianceService
     result[:check_groups] = Array(result[:check_groups]).map do |group|
       category_id = group[:id] || group['id']
       items = Array(group[:items] || group['items']).map do |item|
-        item = Scfair::CheckDetailBuilder.enrich_item(item, format: format, category_id: category_id)
+        item = Scfair::CheckDetailBuilder.enrich_item(item, format: format, category_id: category_id, field_values: field_values)
         attach_field_values(item, field_values, category_id)
       end
       group.merge(items: items)
@@ -114,7 +114,7 @@ class ScfairComplianceService
 
   def enrich_items(items, format, field_values = {})
     Array(items).map do |item|
-      enriched = Scfair::CheckDetailBuilder.enrich_item(item, format: format)
+      enriched = Scfair::CheckDetailBuilder.enrich_item(item, format: format, field_values: field_values)
       attach_field_values(enriched, field_values, Scfair::ComplianceReportGrouper.category_for(
         field: enriched[:field] || enriched['field'],
         message: enriched[:message] || enriched['message'],

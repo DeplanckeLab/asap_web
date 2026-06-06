@@ -391,6 +391,7 @@ export default class extends Controller {
     const valid = result.valid
     const groups = result.check_groups || []
     const issueContext = { baseWarnings: warnings, baseErrors: errors }
+    const checkCounts = this.summarizeGroupedChecks(groups, issueContext)
 
     this.checkDetails = []
     this.resultWrapTarget.classList.remove("hidden")
@@ -400,7 +401,7 @@ export default class extends Controller {
           ${valid ? "Compliant" : "Not compliant"} (${result.format?.toUpperCase() || "FILE"})
         </div>
         <div class="text-sm text-gray-700 mt-1">
-          ${errors.length} error(s), ${warnings.length} warning(s)
+          ${this.renderGlobalCheckSummary(errors.length, warnings.length, checkCounts)}
         </div>
         <div class="text-xs text-gray-600 mt-2">Click a message to view rule details.</div>
       </div>
@@ -540,6 +541,39 @@ export default class extends Controller {
       seen.add(key)
       return true
     })
+  }
+
+  summarizeGroupedChecks(groups, issueContext = {}) {
+    const counts = { passed: 0, skipped: 0, failed: 0, warning: 0 }
+    groups.forEach((group) => {
+      (group.items || []).forEach((item) => {
+        const status = this.resolveCheckStatus(item, issueContext)
+        if (Object.prototype.hasOwnProperty.call(counts, status)) counts[status] += 1
+      })
+    })
+    return counts
+  }
+
+  renderGlobalCheckSummary(errorCount, warningCount, checkCounts) {
+    const parts = []
+    if (errorCount > 0) {
+      parts.push(this.renderSummaryCountBadge(errorCount, "error(s)", "bg-red-100 text-red-800"))
+    }
+    if (warningCount > 0) {
+      parts.push(this.renderSummaryCountBadge(warningCount, "warning(s)", "bg-yellow-100 text-yellow-800"))
+    }
+    const plain = []
+    if (checkCounts.passed > 0) plain.push(`${checkCounts.passed} passed`)
+    if (checkCounts.skipped > 0) plain.push(`${checkCounts.skipped} not applicable`)
+    if (plain.length > 0) {
+      parts.push(`<span class="text-gray-700">${plain.join(", ")}</span>`)
+    }
+    if (parts.length === 0) return ""
+    return `<span class="inline-flex flex-wrap items-center gap-2">${parts.join("")}</span>`
+  }
+
+  renderSummaryCountBadge(count, label, colorClass) {
+    return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colorClass}">${count} ${label}</span>`
   }
 
   renderDetailList(title, items, context = {}) {

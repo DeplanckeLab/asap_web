@@ -70,17 +70,6 @@ module ScfairSchemaRules
   )
     violations = []
 
-    # Rule 1: Non-human organism -> ethnicity MUST be "na"
-    if organism_tax_id.present? && organism_tax_id != '9606' && organism_tax_id != 'NCBITaxon:9606'
-      if ethnicity_term_id.present? && ethnicity_term_id != 'na'
-        violations << {
-          field: '/col_attrs/self_reported_ethnicity_ontology_term_id',
-          severity: :error,
-          message: "Organism is not Homo sapiens -- self_reported_ethnicity_ontology_term_id MUST be \"na\", got \"#{ethnicity_term_id}\"."
-        }
-      end
-    end
-
     # Rule 2: assay -> suspension_type consistency
     if assay_term_id.present? && suspension_type.present?
       allowed = resolve_suspension_type_for_assay(assay_term_id)

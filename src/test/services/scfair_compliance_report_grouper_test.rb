@@ -86,4 +86,27 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
     assert_equal 1, groups.size
     assert_equal 'failed', groups.first[:items].first[:status]
   end
+
+  test 'catalog id matches grouper category for cross-field rule checks' do
+    catalog = Scfair::Rules.checks_for('h5ad')
+    cross_field_entry = catalog.find { |entry| entry[:id].to_s.include?('cross') }
+    assert_equal 'cross-field.constraints', cross_field_entry[:id]
+
+    valid_checks = [
+      { field: 'cross-field.CF-1-assay-suspension', status: 'passed', message: 'Assay/suspension_type consistency' },
+      { field: 'cross-field.CF-3-donor-id', status: 'passed', message: 'donor_id consistency OK' }
+    ]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: [],
+      warnings: [],
+      format: 'h5ad'
+    )
+
+    cross_field_group = groups.find { |group| group[:id] == 'cross-field.constraints' }
+    assert_not_nil cross_field_group
+    assert_equal 2, cross_field_group[:items].size
+  end
 end

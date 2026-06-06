@@ -223,6 +223,21 @@ cross_field:
     NCBITaxon:6239: WBls
     NCBITaxon:7955: ZFS
     NCBITaxon:7227: FBdv
+  organism_cell_type_prefixes:
+    NCBITaxon:6239: [CL, WBbt]
+    NCBITaxon:7955: [CL, ZFA]
+    NCBITaxon:7227: [CL, FBbt]
+  organism_cell_type_default_prefixes: [CL]
+  organism_tissue_prefixes:
+    NCBITaxon:6239: [UBERON, WBbt]
+    NCBITaxon:7955: [UBERON, ZFA]
+    NCBITaxon:7227: [UBERON, FBbt]
+  organism_tissue_default_prefixes: [UBERON]
+  organism_ethnicity_human: NCBITaxon:9606
+  organism_ethnicity_prefixes: [HANCESTRO, AfPO]
+  organism_ethnicity_special_values: [unknown, na, multiethnic]
+  organism_celegans_sex_organism: NCBITaxon:6239
+  organism_celegans_sex_terms: [PATO:0000384, PATO:0001340]
 
 checks_catalog:
   common:
@@ -238,14 +253,14 @@ checks_catalog:
     - id: ontology.format
       label: Ontology identifier format checks
       applies_to: [loom, h5ad]
-    - id: cross_field.constraints
+    - id: cross-field.constraints
       label: Cross-field schema constraints
       applies_to: [loom, h5ad]
     - id: ontology.database_resolution
       label: Ontology term resolution in ASAP DB
       applies_to: [loom, h5ad]
-    - id: ontology.organism_dev_stage
-      label: Organism-specific development stage constraints
+    - id: ontology.organism_specific
+      label: Organism-specific constraints
       applies_to: [loom, h5ad]
     - id: ontology.semantics
       label: Ontology semantic constraints

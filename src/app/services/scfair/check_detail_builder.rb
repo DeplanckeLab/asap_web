@@ -3,73 +3,80 @@
 module Scfair
   class CheckDetailBuilder
     CROSS_FIELD_RULES = {
-      'cross-field.CF-1a-ethnicity-non-human' => {
-        title: 'CF-1a: Non-human ethnicity',
-        summary: 'For non-human organisms, self_reported_ethnicity_ontology_term_id must be "na".'
-      },
-      'cross-field.CF-1b-ethnicity-human' => {
-        title: 'CF-1b: Human ethnicity',
-        summary: 'For Homo sapiens, self_reported_ethnicity_ontology_term_id must not be "na" (use HANCESTRO terms, "unknown", or "multiethnic").'
-      },
-      'cross-field.CF-2-assay-suspension' => {
-        title: 'CF-2: Assay and suspension_type',
+      'cross-field.CF-1-assay-suspension' => {
+        title: 'CF-1: Assay and suspension_type',
         summary: 'suspension_type must be consistent with assay_ontology_term_id according to the schema assay map.'
       },
-      'cross-field.CF-3a-cell-line-ethnicity' => {
-        title: 'CF-3a: Cell line ethnicity',
+      'cross-field.CF-2a-cell-line-ethnicity' => {
+        title: 'CF-2a: Cell line ethnicity',
         summary: 'When tissue_type is "cell line", self_reported_ethnicity_ontology_term_id must be "na".'
       },
-      'cross-field.CF-3b-cell-line-sex' => {
-        title: 'CF-3b: Cell line sex',
+      'cross-field.CF-2b-cell-line-sex' => {
+        title: 'CF-2b: Cell line sex',
         summary: 'When tissue_type is "cell line", sex_ontology_term_id must be "na".'
       },
-      'cross-field.CF-3c-cell-line-development-stage' => {
-        title: 'CF-3c: Cell line development stage',
+      'cross-field.CF-2c-cell-line-development-stage' => {
+        title: 'CF-2c: Cell line development stage',
         summary: 'When tissue_type is "cell line", development_stage_ontology_term_id must be "unknown".'
       },
-      'cross-field.CF-3d-cell-line-donor-id' => {
-        title: 'CF-3d: Cell line donor_id',
+      'cross-field.CF-2d-cell-line-donor-id' => {
+        title: 'CF-2d: Cell line donor_id',
         summary: 'When tissue_type is "cell line", donor_id must be "na".'
       },
-      'cross-field.CF-3e-cell-line-suspension' => {
-        title: 'CF-3e: Cell line suspension_type',
+      'cross-field.CF-2e-cell-line-suspension' => {
+        title: 'CF-2e: Cell line suspension_type',
         summary: 'When tissue_type is "cell line", suspension_type must be "na".'
       },
-      'cross-field.CF-3f-cell-line-tissue-id' => {
-        title: 'CF-3f: Cell line tissue identifier',
+      'cross-field.CF-2f-cell-line-tissue-id' => {
+        title: 'CF-2f: Cell line tissue identifier',
         summary: 'When tissue_type is "cell line", tissue_ontology_term_id should be a Cellosaurus term (CVCL_*).'
       },
-      'cross-field.CF-4-donor-id' => {
-        title: 'CF-4: donor_id consistency',
+      'cross-field.CF-3-donor-id' => {
+        title: 'CF-3: donor_id consistency',
         summary: 'donor_id must not be "na" unless tissue_type is "cell line".'
       },
-      'cross-field.CF-5-organoid-tissue' => {
-        title: 'CF-5: Organoid tissue constraint',
+      'cross-field.CF-4-organoid-tissue' => {
+        title: 'CF-4: Organoid tissue constraint',
         summary: 'When tissue_type is "organoid", tissue_ontology_term_id must not be embryo (UBERON:0000922).'
       },
-      'cross-field.CF-6-spatial-assay-uniformity' => {
-        title: 'CF-6: Spatial assay uniformity',
+      'cross-field.CF-5-spatial-assay-uniformity' => {
+        title: 'CF-5: Spatial assay uniformity',
         summary: 'Spatial assay datasets (Visium, Slide-seq) must use a single assay value across all cells.'
       },
-      'cross-field.CF-7-celegans-sex' => {
-        title: 'CF-7: C. elegans sex constraint',
-        summary: 'For C. elegans (NCBITaxon:6239), sex must be male (PATO:0000384), hermaphrodite (PATO:0001340), unknown, or na.'
-      },
-      'cross-field.CF-8-spatial-primary-data' => {
-        title: 'CF-8: Spatial is_primary_data',
+      'cross-field.CF-6-spatial-primary-data' => {
+        title: 'CF-6: Spatial is_primary_data',
         summary: 'When spatial.is_single is false, is_primary_data must be false.'
       },
-      'cross-field.CF-9-cell-line-cell-type' => {
-        title: 'CF-9: Cell line cell type',
+      'cross-field.CF-7-cell-line-cell-type' => {
+        title: 'CF-7: Cell line cell type',
         summary: 'When tissue_type is "cell line", cell_type_ontology_term_id should be "na" or "unknown".'
       },
-      'cross-field.CF-12-visium-in-tissue' => {
-        title: 'CF-12: Visium in_tissue spots',
+      'cross-field.CF-9-visium-in-tissue' => {
+        title: 'CF-9: Visium in_tissue spots',
         summary: 'Visium spots with in_tissue=0 must use cell_type_ontology_term_id=unknown.'
+      }
+    }.freeze
+
+    ORGANISM_SPECIFIC_RULES = {
+      'ontology.organism_specific.development_stage' => {
+        title: 'Development stage ontology prefix',
+        summary: 'development_stage_ontology_term_id must use the taxon-specific stage ontology prefix for the organism (e.g. HsapDv for human).'
       },
-      'cross-field.constraints' => {
-        title: 'Cross-field schema constraints',
-        summary: 'Combined cross-field rules linking metadata fields (assay, tissue_type, organism, spatial flags, etc.).'
+      'ontology.organism_specific.cell_type' => {
+        title: 'Cell type ontology prefix',
+        summary: 'cell_type_ontology_term_id must use CL or the taxon-specific cell ontology prefix for model organisms.'
+      },
+      'ontology.organism_specific.tissue' => {
+        title: 'Tissue ontology prefix',
+        summary: 'tissue_ontology_term_id must use UBERON, Cellosaurus (cell lines), or taxon-specific anatomy prefixes for model organisms.'
+      },
+      'ontology.organism_specific.ethnicity' => {
+        title: 'Ethnicity vs organism',
+        summary: 'Non-human datasets must use ethnicity "na"; Homo sapiens must use HANCESTRO/AfPO terms (not "na").'
+      },
+      'ontology.organism_specific.sex' => {
+        title: 'C. elegans sex terms',
+        summary: 'For Caenorhabditis elegans, sex_ontology_term_id must be male, hermaphrodite, unknown, or na.'
       }
     }.freeze
 
@@ -80,7 +87,7 @@ module Scfair
       'ontology.format' => 'Ontology term identifiers must use valid OBO-style PREFIX:ID format and allowed prefixes.',
       'cross-field.constraints' => 'Metadata fields must satisfy cross-field consistency rules.',
       'ontology.database_resolution' => 'Ontology terms must resolve to known entries in the ASAP ontology database.',
-      'ontology.organism_dev_stage' => 'development_stage_ontology_term_id must use the ontology prefix expected for the organism.',
+      'ontology.organism_specific' => 'Metadata fields whose allowed ontology terms depend on the dataset organism.',
       'ontology.semantics' => 'Ontology terms must satisfy semantic constraints (roots, forbidden branches, allowed values).',
       'loom.paths' => 'Required Loom HDF5 paths for observation and dataset metadata.',
       'loom.mapping_manifest' => 'The anndata_mapping manifest documents Loom to AnnData path mapping.',
@@ -142,22 +149,23 @@ module Scfair
       message.to_s.match?(PRESENCE_CHECK)
     end
 
-    def self.call(field:, message:, format:, category_id: nil)
-      new(field: field, message: message, format: format, category_id: category_id).call
+    def self.call(field:, message:, format:, category_id: nil, field_values: nil)
+      new(field: field, message: message, format: format, category_id: category_id, field_values: field_values).call
     end
 
-    def self.enrich_item(item, format:, category_id: nil)
+    def self.enrich_item(item, format:, category_id: nil, field_values: nil)
       field = (item[:field] || item['field']).to_s
       message = (item[:message] || item['message']).to_s
-      detail = call(field: field, message: message, format: format, category_id: category_id)
+      detail = call(field: field, message: message, format: format, category_id: category_id, field_values: field_values)
       item.merge(detail: detail)
     end
 
-    def initialize(field:, message:, format:, category_id: nil)
+    def initialize(field:, message:, format:, category_id: nil, field_values: nil)
       @field = field.to_s
       @message = message.to_s
       @format = format.to_s
       @category_id = category_id.to_s.presence
+      @field_values = field_values || {}
     end
 
     def call
@@ -188,11 +196,17 @@ module Scfair
         detail[:summary] = cross_field[:summary]
       end
 
-      cf11 = @field.match(/\Across-field\.CF-11-(.+)\z/)
-      if cf11
-        id_field = cf11[1]
+      organism_rule = ORGANISM_SPECIFIC_RULES[@field]
+      if organism_rule
+        detail[:title] = organism_rule[:title]
+        detail[:summary] = organism_rule[:summary]
+      end
+
+      cf8 = @field.match(/\Across-field\.CF-8-(.+)\z/)
+      if cf8
+        id_field = cf8[1]
         label_field = Rules.label_pairs[id_field]
-        detail[:title] = 'CF-11: Label and ontology ID consistency'
+        detail[:title] = 'CF-8: Label and ontology ID consistency'
         detail[:summary] = "When #{id_field} is a special value (na or unknown), the paired label field #{label_field} must match."
       end
 
@@ -328,12 +342,9 @@ module Scfair
         rows << { label: 'Allowed special values', value: allowed_special.join(', ') } if allowed_special.any?
       end
 
-      if category_id == 'ontology.organism_dev_stage'
-        mapping = Rules.organism_dev_stage_mapping
-        rows << {
-          label: 'Organism to development stage prefix',
-          value: mapping.map { |org, prefix| "#{org} -> #{prefix}" }.join('; ')
-        }
+      if category_id == 'ontology.organism_specific'
+        rule = @field.sub(/\Aontology\.organism_specific\./, '')
+        append_organism_specific_check_constraints(rows, rule)
       end
 
       if category_id == 'cross-field.constraints' && field_name == 'suspension_type'
@@ -378,6 +389,8 @@ module Scfair
         rows << { label: 'Requirement', value: 'Each label must match the canonical name of its ontology term ID' }
       end
 
+      append_organism_specific_semantic_context(rows, field_name)
+
       rows
     end
 
@@ -413,6 +426,270 @@ module Scfair
 
       prefixes = Array(ontology_cfg[:prefixes]).map(&:to_s)
       rows << { label: 'Allowed prefixes', value: prefixes.join(', ') } if prefixes.any?
+    end
+
+    def append_organism_specific_semantic_context(rows, field_name)
+      case field_name
+      when 'development_stage_ontology_term_id'
+        append_organism_dev_stage_semantic_context(rows)
+      when 'cell_type_ontology_term_id'
+        append_organism_cell_type_semantic_context(rows)
+      when 'tissue_ontology_term_id'
+        append_organism_tissue_semantic_context(rows)
+      when 'self_reported_ethnicity_ontology_term_id'
+        append_organism_ethnicity_semantic_context(rows)
+      when 'disease_ontology_term_id'
+        rows << {
+          label: 'Organism-specific rules',
+          value: 'Not applicable — disease_ontology_term_id uses the same MONDO and PATO:0000461 requirements for all organisms'
+        }
+      end
+    end
+
+    def append_organism_dev_stage_semantic_context(rows)
+      organism = organism_from_field_values
+      mapping = Rules.organism_dev_stage_mapping
+      term_id = organism[:term_id]
+
+      if term_id.blank?
+        rows << {
+          label: 'Organism-specific prefix rules',
+          value: 'Not applicable — organism_ontology_term_id is not set in this file'
+        }
+        return
+      end
+
+      expected_prefix = mapping[term_id]
+      organism_display = organism_display_name(organism)
+
+      if expected_prefix.blank?
+        rows << {
+          label: 'Organism-specific prefix rules',
+          value: "Not applicable — #{organism_display} has no mapped development stage prefix in scFAIR #{Rules.schema_version}"
+        }
+        return
+      end
+
+      rows << {
+        label: 'Organism-specific prefix rules',
+        value: 'Applicable — validated under "Organism-specific constraints"'
+      }
+      rows << { label: 'File organism', value: organism_display }
+      rows << {
+        label: 'Required development stage prefix',
+        value: "#{expected_prefix}:* (special values unknown and na are also allowed)"
+      }
+      rows << {
+        label: 'Interaction with semantic rules',
+        value: 'Prefix requirements apply in addition to the semantic constraints above; both must pass for real ontology terms'
+      }
+
+      prefix_status = organism_dev_stage_prefix_status(expected_prefix)
+      rows << prefix_status if prefix_status
+    end
+
+    def append_organism_cell_type_semantic_context(rows)
+      organism = organism_from_field_values
+      term_id = organism[:term_id]
+
+      if term_id.blank?
+        rows << {
+          label: 'Organism-specific prefix rules',
+          value: 'Not applicable — organism_ontology_term_id is not set in this file'
+        }
+        return
+      end
+
+      allowed_prefixes = Rules.organism_cell_type_prefixes_for(term_id)
+      organism_display = organism_display_name(organism)
+      mapped = Rules.organism_cell_type_mapping.key?(term_id)
+
+      rows << {
+        label: 'Organism-specific prefix rules',
+        value: 'Applicable — validated under "Organism-specific constraints"'
+      }
+      rows << { label: 'File organism', value: organism_display }
+      rows << {
+        label: 'Allowed cell type prefixes',
+        value: "#{allowed_prefixes.map { |prefix| "#{prefix}:*" }.join(' or ')} (special values unknown and na are also allowed)"
+      }
+      unless mapped
+        rows << {
+          label: 'Schema note',
+          value: 'For this organism, scFAIR expects CL terms or taxon-neutral descendants of CL:0000000'
+        }
+      end
+      rows << {
+        label: 'Interaction with semantic rules',
+        value: 'Prefix requirements apply in addition to descendant, banned-term, and other semantic constraints above'
+      }
+
+      prefix_status = organism_cell_type_prefix_status(allowed_prefixes)
+      rows << prefix_status if prefix_status
+    end
+
+    def append_organism_tissue_semantic_context(rows)
+      organism = organism_from_field_values
+      term_id = organism[:term_id]
+      tissue_type = first_obs_value('tissue_type')
+
+      if term_id.blank?
+        rows << { label: 'Organism-specific prefix rules', value: 'Not applicable — organism_ontology_term_id is not set in this file' }
+        return
+      end
+
+      organism_display = organism_display_name(organism)
+      if tissue_type == 'cell line'
+        rows << { label: 'Organism-specific prefix rules', value: 'Applicable — cell line tissue must use Cellosaurus CVCL_* terms' }
+        rows << { label: 'File organism', value: organism_display }
+        rows << { label: 'Required tissue format', value: 'CVCL_* (Cellosaurus)' }
+        return
+      end
+
+      allowed_prefixes = tissue_type == 'primary cell culture' ? Rules.organism_cell_type_prefixes_for(term_id) : Rules.organism_tissue_prefixes_for(term_id)
+      rows << { label: 'Organism-specific prefix rules', value: 'Applicable — validated under "Organism-specific constraints"' }
+      rows << { label: 'File organism', value: organism_display }
+      rows << {
+        label: 'Allowed tissue prefixes',
+        value: "#{allowed_prefixes.map { |prefix| "#{prefix}:*" }.join(' or ')}#{tissue_type == 'primary cell culture' ? ' (primary cell culture follows cell type rules)' : ''}"
+      }
+      prefix_status = organism_tissue_prefix_status(allowed_prefixes, tissue_type)
+      rows << prefix_status if prefix_status
+    end
+
+    def append_organism_ethnicity_semantic_context(rows)
+      organism = organism_from_field_values
+      term_id = organism[:term_id]
+
+      if term_id.blank?
+        rows << { label: 'Organism-specific rules', value: 'Not applicable — organism_ontology_term_id is not set in this file' }
+        return
+      end
+
+      organism_display = organism_display_name(organism)
+      if term_id == Rules.organism_ethnicity_human
+        rows << { label: 'Organism-specific rules', value: 'Applicable — Homo sapiens ethnicity constraints' }
+        rows << { label: 'File organism', value: organism_display }
+        rows << { label: 'Requirement', value: 'Must not be "na"; use HANCESTRO/AfPO terms, "unknown", or "multiethnic"' }
+      else
+        rows << { label: 'Organism-specific rules', value: 'Applicable — non-human ethnicity must be "na"' }
+        rows << { label: 'File organism', value: organism_display }
+        rows << { label: 'Requirement', value: 'self_reported_ethnicity_ontology_term_id must be "na"' }
+      end
+    end
+
+    def append_organism_specific_check_constraints(rows, rule)
+      case rule
+      when 'development_stage'
+        mapping = Rules.organism_dev_stage_mapping
+        rows << { label: 'Organism to stage prefix', value: mapping.map { |org, prefix| "#{org} -> #{prefix}" }.join('; ') }
+        rows << { label: 'Special values', value: 'unknown, na' }
+      when 'cell_type'
+        rows << { label: 'Default prefixes', value: Rules.organism_cell_type_default_prefixes.join(', ') }
+        mapped = Rules.organism_cell_type_mapping.map { |org, prefixes| "#{org} -> #{prefixes.join('/')}" }.join('; ')
+        rows << { label: 'Model organism prefixes', value: mapped } if mapped.present?
+        rows << { label: 'Special values', value: 'unknown, na' }
+      when 'tissue'
+        rows << { label: 'Default prefixes', value: Rules.organism_tissue_default_prefixes.join(', ') }
+        mapped = Rules.organism_tissue_mapping.map { |org, prefixes| "#{org} -> #{prefixes.join('/')}" }.join('; ')
+        rows << { label: 'Model organism prefixes', value: mapped } if mapped.present?
+        rows << { label: 'Cell line tissue', value: 'Must use Cellosaurus CVCL_* terms' }
+        rows << { label: 'Primary cell culture', value: 'Follows cell_type_ontology_term_id prefix rules' }
+      when 'ethnicity'
+        rows << { label: 'Human organism', value: Rules.organism_ethnicity_human }
+        rows << { label: 'Human allowed prefixes', value: Rules.organism_ethnicity_prefixes.join(', ') }
+        rows << { label: 'Human special values', value: Rules.organism_ethnicity_special_values.join(', ') }
+        rows << { label: 'Non-human requirement', value: 'self_reported_ethnicity_ontology_term_id must be "na"' }
+      when 'sex'
+        rows << { label: 'Organism', value: Rules.organism_celegans_sex_organism }
+        rows << { label: 'Allowed sex terms', value: Rules.organism_celegans_sex_terms.join(', ') }
+        rows << { label: 'Special values', value: 'unknown, na' }
+      end
+    end
+
+    def organism_from_field_values
+      term_key = Rules.field_path(@format, :uns, 'organism_ontology_term_id')
+      label_key = @format == 'h5ad' ? 'uns/organism' : '/attrs/organism'
+      term_id = Array(@field_values[term_key]).first.to_s.strip.presence
+      label = Array(@field_values[label_key]).first.to_s.strip.presence
+      { term_id: term_id, label: label }
+    end
+
+    def organism_display_name(organism)
+      organism[:label].present? ? "#{organism[:label]} (#{organism[:term_id]})" : organism[:term_id].to_s
+    end
+
+    def organism_dev_stage_prefix_status(expected_prefix)
+      dev_key = Rules.field_path(@format, :obs, 'development_stage_ontology_term_id')
+      dev_values = split_field_values(@field_values[dev_key])
+      return nil if dev_values.empty?
+
+      invalid = dev_values.reject do |value|
+        %w[unknown na].include?(value) || value.start_with?("#{expected_prefix}:")
+      end
+
+      if invalid.any?
+        {
+          label: 'Organism-specific prefix status',
+          value: "Not satisfied — unexpected terms: #{invalid.uniq.first(5).join(', ')}"
+        }
+      else
+        {
+          label: 'Organism-specific prefix status',
+          value: 'Satisfied by current development_stage_ontology_term_id values'
+        }
+      end
+    end
+
+    def organism_cell_type_prefix_status(allowed_prefixes)
+      cell_key = Rules.field_path(@format, :obs, 'cell_type_ontology_term_id')
+      cell_values = split_field_values(@field_values[cell_key])
+      return nil if cell_values.empty?
+
+      invalid = cell_values.reject do |value|
+        %w[unknown na].include?(value) || allowed_prefixes.any? { |prefix| value.start_with?("#{prefix}:") }
+      end
+
+      if invalid.any?
+        {
+          label: 'Organism-specific prefix status',
+          value: "Not satisfied — unexpected terms: #{invalid.uniq.first(5).join(', ')}"
+        }
+      else
+        {
+          label: 'Organism-specific prefix status',
+          value: 'Satisfied by current cell_type_ontology_term_id values'
+        }
+      end
+    end
+
+    def organism_tissue_prefix_status(allowed_prefixes, tissue_type)
+      tissue_key = Rules.field_path(@format, :obs, 'tissue_ontology_term_id')
+      tissue_values = split_field_values(@field_values[tissue_key])
+      return nil if tissue_values.empty?
+
+      invalid = if tissue_type == 'cell line'
+                  tissue_values.reject { |value| value.start_with?('CVCL_') }
+                else
+                  special = tissue_type == 'primary cell culture' ? %w[unknown na] : []
+                  tissue_values.reject do |value|
+                    special.include?(value) || allowed_prefixes.any? { |prefix| value.start_with?("#{prefix}:") }
+                  end
+                end
+
+      if invalid.any?
+        { label: 'Organism-specific prefix status', value: "Not satisfied — unexpected terms: #{invalid.uniq.first(5).join(', ')}" }
+      else
+        { label: 'Organism-specific prefix status', value: 'Satisfied by current tissue_ontology_term_id values' }
+      end
+    end
+
+    def first_obs_value(field_name)
+      Array(@field_values[Rules.field_path(@format, :obs, field_name)]).first.to_s.strip.presence
+    end
+
+    def split_field_values(raw)
+      Array(raw).flat_map { |value| value.to_s.split(' || ') }.map(&:strip).reject(&:blank?)
     end
 
     def presence_check?

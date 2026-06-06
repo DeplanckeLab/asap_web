@@ -506,6 +506,12 @@ class ScfairLoomValidatorService
     # Cellosaurus uses underscore: CVCL_XXXX
 
     if term.start_with?('CVCL_')
+      unless valid_prefixes.include?('CVCL')
+        @errors << {
+          field: field,
+          message: "Invalid ontology term format: '#{term}'. Cellosaurus CVCL_* terms are not allowed for this field."
+        }
+      end
       return
     end
 

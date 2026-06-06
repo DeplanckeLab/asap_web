@@ -95,5 +95,37 @@
       <div data-isolated-compliance-target="resultBody"></div>
     </div>
   </div>
+
+  <div data-isolated-compliance-target="detailModal"
+       class="hidden fixed inset-0 z-50"
+       role="dialog"
+       aria-modal="true"
+       aria-labelledby="compliance-check-detail-title"
+       data-action="click->isolated-compliance#closeCheckDetailOnBackdrop keydown@window->isolated-compliance#closeCheckDetailOnEscape">
+    <div class="absolute inset-0 bg-black/50"></div>
+    <div class="absolute inset-0 overflow-y-auto pointer-events-none">
+      <div class="flex min-h-full items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col border border-gray-200 pointer-events-auto"
+             data-action="click->isolated-compliance#stopCheckDetailPanelClick">
+          <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between gap-3">
+            <h2 id="compliance-check-detail-title"
+                data-isolated-compliance-target="detailTitle"
+                class="text-base font-semibold text-gray-900 m-0 pr-2">
+              Rule details
+            </h2>
+            <button type="button"
+                    class="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                    data-action="click->isolated-compliance#closeCheckDetail"
+                    aria-label="Close">
+              Close
+            </button>
+          </div>
+          <div data-isolated-compliance-target="detailBody"
+               class="px-5 py-4 overflow-y-auto text-sm text-gray-700">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 

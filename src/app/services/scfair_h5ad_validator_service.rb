@@ -151,18 +151,30 @@ class ScfairH5adValidatorService
       prefixes = ONTOLOGY_FIELDS[field_path]
       specials = SPECIAL_VALUES.get(field_path, set())
       field_values[field_path] = values
+      issues = 0
       for value in values:
         for term in [t.strip() for t in value.split(" || ")]:
           if term in specials:
             continue
           if term.startswith("CVCL_"):
+            if "CVCL" not in prefixes:
+              errors.append({
+                "field": field_path,
+                "message": f"Invalid ontology format: {term}. Cellosaurus CVCL_* terms are not allowed for this field."
+              })
+              issues += 1
             continue
           if not re.match(r"^[A-Za-z]+:\\d+$", term):
             errors.append({"field": field_path, "message": f"Invalid ontology format: {term}"})
+            issues += 1
             continue
           prefix = term.split(":")[0]
           if prefix not in prefixes:
             warnings.append({"field": field_path, "message": f"Unexpected ontology prefix '{prefix}' for {field_path}"})
+            issues += 1
+      if issues == 0:
+        field_name = field_path.split("/")[-1]
+        valid_checks.append({"field": field_path, "message": f"Ontology terms in '{field_name}' have valid format"})
 
     def check_enum_values(field_path, values):
       allowed = ENUM_FIELDS.get(field_path)

@@ -48,4 +48,42 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
     assert_equal 1, groups.first[:items].size
     assert_equal 'failed', groups.first[:items].first[:status]
   end
+
+  test 'omits catalog categories with no recorded checks' do
+    catalog = [
+      { id: 'obs.required_presence', label: 'Required observation metadata fields' },
+      { id: 'ontology.format', label: 'Ontology identifier format checks' }
+    ]
+    valid_checks = [{ field: 'obs/tissue_type', message: 'Required field present', status: 'passed' }]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: [],
+      warnings: [],
+      format: 'h5ad'
+    )
+
+    assert_equal 1, groups.size
+    assert_equal 'obs.required_presence', groups.first[:id]
+  end
+
+  test 'routes loom cross-field violation messages to cross-field.constraints' do
+    catalog = [{ id: 'cross-field.constraints', label: 'Cross-field schema constraints' }]
+    errors = [{
+      field: '/col_attrs/suspension_type',
+      message: 'For assay EFO:0008720, suspension_type MUST be one of: nucleus. Got "cell".'
+    }]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: [],
+      errors: errors,
+      warnings: [],
+      format: 'loom'
+    )
+
+    assert_equal 1, groups.size
+    assert_equal 'failed', groups.first[:items].first[:status]
+  end
 end

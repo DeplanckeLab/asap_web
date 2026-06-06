@@ -29,8 +29,12 @@ class ScfairComplianceService
     if format == 'loom'
       errors = base_result.errors
       warnings = base_result.warnings
+      cross_field = Scfair::CrossFieldConstraintEvaluator.new(
+        field_values: base_result.field_values || {},
+        format: format
+      ).call
       valid_checks = reconcile_schema_version_checks(
-        base_result.valid_checks,
+        base_result.valid_checks + cross_field[:valid_checks],
         errors,
         warnings,
         format
@@ -53,6 +57,7 @@ class ScfairComplianceService
       valid_checks = reconcile_schema_version_checks(valid_checks, errors, warnings, format)
     end
 
+    errors, warnings = promote_valid_check_issues(valid_checks, errors, warnings)
     valid_checks = mirror_metadata_field_checks(valid_checks, errors, warnings)
     check_groups = Scfair::ComplianceReportGrouper.call(
       checks_catalog: Scfair::CheckCatalog.checks_for(format),
@@ -64,13 +69,14 @@ class ScfairComplianceService
 
     tick('finalizing', 'Finalizing compliance report', 95, format: format)
 
-    {
+    enrich_with_details(
       valid: errors.empty?,
       format: format,
       schema_id: schema[:id],
       schema_version: schema[:schema_version],
       source_url: schema[:source_url],
       validated_at: Time.current.iso8601,
+      field_values: base_result.field_values || {},
       errors: errors,
       warnings: warnings,
       info: base_result.info,
@@ -83,10 +89,71 @@ class ScfairComplianceService
         info_count: base_result.info.count,
         valid_checks_count: valid_checks.count
       }
-    }
+    )
   end
 
   private
+
+  def enrich_with_details(result)
+    format = result[:format]
+    field_values = result[:field_values] || {}
+    result[:errors] = enrich_items(result[:errors], format, field_values)
+    result[:warnings] = enrich_items(result[:warnings], format, field_values)
+    result[:check_groups] = Array(result[:check_groups]).map do |group|
+      category_id = group[:id] || group['id']
+      items = Array(group[:items] || group['items']).map do |item|
+        item = Scfair::CheckDetailBuilder.enrich_item(item, format: format, category_id: category_id)
+        attach_field_values(item, field_values, category_id)
+      end
+      group.merge(items: items)
+    end
+    result
+  end
+
+  PRESENCE_VALUE_CATEGORIES = %w[uns.required_presence obs.required_presence].freeze
+
+  def enrich_items(items, format, field_values = {})
+    Array(items).map do |item|
+      enriched = Scfair::CheckDetailBuilder.enrich_item(item, format: format)
+      attach_field_values(enriched, field_values, Scfair::ComplianceReportGrouper.category_for(
+        field: enriched[:field] || enriched['field'],
+        message: enriched[:message] || enriched['message'],
+        format: format
+      ))
+    end
+  end
+
+  def attach_field_values(item, field_values, category_id)
+    return item unless show_field_values?(item, category_id)
+
+    field = (item[:field] || item['field']).to_s
+    values = lookup_field_values(field_values, field)
+    return item if values.blank?
+
+    item.merge(values: values)
+  end
+
+  def show_field_values?(item, category_id)
+    id = category_id.to_s
+    return false unless PRESENCE_VALUE_CATEGORIES.include?(id) || dataset_metadata_loom_path?(item, id)
+
+    status = (item[:status] || item['status']).to_s
+    return false if status == 'failed'
+
+    Scfair::CheckDetailBuilder.presence_check_message?(item[:message] || item['message'])
+  end
+
+  def dataset_metadata_loom_path?(item, category_id)
+    return false unless category_id == 'loom.paths'
+
+    field = (item[:field] || item['field']).to_s
+    field.start_with?('/attrs/')
+  end
+
+  def lookup_field_values(field_values, field)
+    raw = field_values[field] || field_values[field.to_sym]
+    Array(raw).map(&:to_s).map(&:strip).reject(&:blank?).presence
+  end
 
   def detect_format(path)
     ext = File.extname(path).downcase
@@ -120,10 +187,22 @@ class ScfairComplianceService
   end
 
   def first_organism(field_values, format)
-    return nil if field_values.blank?
+    file_organism(field_values, format)[:term_id]
+  end
 
-    key = format == 'h5ad' ? 'uns/organism_ontology_term_id' : '/attrs/organism_ontology_term_id'
-    Array(field_values[key]).first
+  def file_organism(field_values, format)
+    return { term_id: nil, label: nil, present: false } if field_values.blank?
+
+    term_key = Scfair::Rules.field_path(format, :uns, 'organism_ontology_term_id')
+    label_key = format == 'h5ad' ? 'uns/organism' : '/attrs/organism'
+    term_id = Array(field_values[term_key]).first.to_s.strip.presence
+    label = Array(field_values[label_key]).first.to_s.strip.presence
+
+    {
+      term_id: term_id,
+      label: label,
+      present: term_id.present? || label.present?
+    }
   end
 
   def schema_version_evaluation(field_values, format)
@@ -152,6 +231,35 @@ class ScfairComplianceService
   end
 
   METADATA_FIELD_CHECK = /\A(uns\/|obs\/|\/attrs\/|\/col_attrs\/)/
+
+  def promote_valid_check_issues(valid_checks, errors, warnings)
+    promoted_errors = Array(errors).dup
+    promoted_warnings = Array(warnings).dup
+    error_fields = promoted_errors.map { |entry| (entry[:field] || entry['field']).to_s }.to_set
+    warning_fields = promoted_warnings.map { |entry| (entry[:field] || entry['field']).to_s }.to_set
+
+    Array(valid_checks).each do |check|
+      field = (check[:field] || check['field']).to_s
+      message = (check[:message] || check['message']).to_s
+      status = (check[:status] || check['status']).to_s.strip.downcase
+      next if field.blank? || message.blank?
+
+      case status
+      when 'failed'
+        next if error_fields.include?(field)
+
+        promoted_errors << { field: field, message: message }
+        error_fields << field
+      when 'warning'
+        next if warning_fields.include?(field)
+
+        promoted_warnings << { field: field, message: message }
+        warning_fields << field
+      end
+    end
+
+    [promoted_errors, promoted_warnings]
+  end
 
   def mirror_metadata_field_checks(valid_checks, errors, warnings)
     checks = valid_checks.dup

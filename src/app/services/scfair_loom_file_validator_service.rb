@@ -9,23 +9,26 @@ class ScfairLoomFileValidatorService
 
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
 
-  FIELD_VALUES_PY = <<~PYTHON
+  LOOM_FIELD_VALUE_PATHS = (
+    Scfair::Rules.required_uns_fields('loom').map { |name| "/attrs/#{name}" } +
+    %w[
+      /col_attrs/assay_ontology_term_id
+      /col_attrs/cell_type_ontology_term_id
+      /col_attrs/development_stage_ontology_term_id
+      /col_attrs/disease_ontology_term_id
+      /col_attrs/sex_ontology_term_id
+      /col_attrs/tissue_ontology_term_id
+      /col_attrs/self_reported_ethnicity_ontology_term_id
+    ]
+  ).uniq.freeze
+
+  FIELD_VALUES_PY_TEMPLATE = <<~'PYTHON'
     import json
     import sys
     import h5py
 
     loom_path = sys.argv[1]
-    fields = [
-      "/col_attrs/assay_ontology_term_id",
-      "/col_attrs/cell_type_ontology_term_id",
-      "/col_attrs/development_stage_ontology_term_id",
-      "/col_attrs/disease_ontology_term_id",
-      "/col_attrs/sex_ontology_term_id",
-      "/col_attrs/tissue_ontology_term_id",
-      "/col_attrs/self_reported_ethnicity_ontology_term_id",
-      "/attrs/organism_ontology_term_id",
-      "/attrs/schema_version"
-    ]
+    fields = %<fields>s
 
     out = {}
     with h5py.File(loom_path, "r") as f:
@@ -156,8 +159,9 @@ class ScfairLoomFileValidatorService
   end
 
   def extract_field_values
+    py = format(FIELD_VALUES_PY_TEMPLATE, fields: LOOM_FIELD_VALUE_PATHS.to_json)
     cmd = ['docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-', @loom_path]
-    stdout, stderr, status = Open3.capture3(*cmd, stdin_data: FIELD_VALUES_PY)
+    stdout, stderr, status = Open3.capture3(*cmd, stdin_data: py)
     return {} unless status.success?
     JSON.parse(stdout)
   rescue JSON::ParserError => e

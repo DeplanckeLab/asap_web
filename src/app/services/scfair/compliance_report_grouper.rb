@@ -12,6 +12,16 @@ module Scfair
       ).call
     end
 
+    def self.category_for(field:, message:, format:, check_id: nil)
+      new(
+        checks_catalog: [],
+        valid_checks: [],
+        errors: [],
+        warnings: [],
+        format: format
+      ).category_for({ field: field, message: message, check_id: check_id })
+    end
+
     def initialize(checks_catalog:, valid_checks:, errors:, warnings:, format:)
       @checks_catalog = Array(checks_catalog)
       @valid_checks = Array(valid_checks)
@@ -32,12 +42,49 @@ module Scfair
         end
       end
 
-      @checks_catalog.map do |entry|
+      @checks_catalog.filter_map do |entry|
         id = entry[:id] || entry['id']
         label = entry[:label] || entry['label']
         items = grouped_items[id].values.sort_by { |item| item[:field].to_s }
+        next if items.empty?
+
         { id: id, label: label, items: items }
       end
+    end
+
+    def category_for(entry)
+      check_id = entry[:check_id] || entry['check_id']
+      return check_id.to_s if check_id.present?
+
+      field = (entry[:field] || entry['field']).to_s
+      message = (entry[:message] || entry['message']).to_s
+      return nil if field.blank?
+
+      return 'schema.version' if field.match?(/\A(uns\/schema_version|\/attrs\/schema_version)\z/)
+      return 'cross-field.constraints' if field.start_with?('cross-field')
+      return 'ontology.semantics' if field.start_with?('ontology.semantics.')
+      return 'ontology.organism_dev_stage' if field.start_with?('ontology.organism_dev_stage')
+      return 'extension.spatial' if field.start_with?('extension.spatial')
+      return 'extension.perturb' if field.start_with?('extension.perturb')
+      return 'extension.atac' if field.start_with?('extension.atac')
+      return 'extension.analysis_json' if field.start_with?('extension.analysis_json')
+      return 'loom.mapping_manifest' if field.include?('anndata_mapping')
+      return 'h5ad.embeddings' if field.start_with?('obsm')
+      return 'h5ad.matrix_encoding' if field == 'X'
+      return 'h5ad.structure' if field == 'obs'
+
+      if ontology_term_field?(field)
+        return 'ontology.database_resolution' if database_resolution_message?(message)
+        return 'ontology.format' if ontology_format_message?(message) || passed_ontology_format?(message)
+      end
+
+      return 'cross-field.constraints' if cross_field_constraint_message?(field, message)
+
+      return 'uns.required_presence' if field.start_with?('uns/')
+      return 'obs.required_presence' if field.start_with?('obs/')
+      return 'loom.paths' if field.start_with?('/col_attrs/') || field.start_with?('/attrs/') || field.in?(%w[file dimensions])
+
+      nil
     end
 
     private
@@ -71,39 +118,6 @@ module Scfair
       end
     end
 
-    def category_for(entry)
-      check_id = entry[:check_id] || entry['check_id']
-      return check_id.to_s if check_id.present?
-
-      field = (entry[:field] || entry['field']).to_s
-      message = (entry[:message] || entry['message']).to_s
-      return nil if field.blank?
-
-      return 'schema.version' if field.match?(/\A(uns\/schema_version|\/attrs\/schema_version)\z/)
-      return 'cross-field.constraints' if field.start_with?('cross-field')
-      return 'ontology.semantics' if field.start_with?('ontology.semantics.')
-      return 'ontology.organism_dev_stage' if field.start_with?('ontology.organism_dev_stage')
-      return 'extension.spatial' if field.start_with?('extension.spatial')
-      return 'extension.perturb' if field.start_with?('extension.perturb')
-      return 'extension.atac' if field.start_with?('extension.atac')
-      return 'extension.analysis_json' if field.start_with?('extension.analysis_json')
-      return 'loom.mapping_manifest' if field.include?('anndata_mapping')
-      return 'h5ad.embeddings' if field.start_with?('obsm')
-      return 'h5ad.matrix_encoding' if field == 'X'
-      return 'h5ad.structure' if field == 'obs'
-
-      if ontology_term_field?(field)
-        return 'ontology.database_resolution' if database_resolution_message?(message)
-        return 'ontology.format' if ontology_format_message?(message) || passed_ontology_format?(message)
-      end
-
-      return 'uns.required_presence' if field.start_with?('uns/')
-      return 'obs.required_presence' if field.start_with?('obs/')
-      return 'loom.paths' if field.start_with?('/col_attrs/') || field.start_with?('/attrs/') || field.in?(%w[file dimensions])
-
-      nil
-    end
-
     def ontology_term_field?(field)
       field.include?('_ontology_term_id') ||
         field.match?(/\A\/attrs\/organism\z/) ||
@@ -120,6 +134,24 @@ module Scfair
 
     def passed_ontology_format?(message)
       message.match?(/valid format|Ontology terms in .* have valid format/i)
+    end
+
+    CROSS_FIELD_METADATA_FIELDS = %w[
+      suspension_type tissue_type donor_id assay_ontology_term_id
+      self_reported_ethnicity_ontology_term_id sex_ontology_term_id
+      development_stage_ontology_term_id tissue_ontology_term_id
+      cell_type_ontology_term_id is_primary_data in_tissue
+    ].freeze
+
+    def cross_field_constraint_message?(field, message)
+      return true if field.start_with?('cross-field')
+
+      field_name = field.split('/').last.to_s
+      return false unless CROSS_FIELD_METADATA_FIELDS.include?(field_name)
+
+      message.match?(
+        /MUST|must not|must be|For assay|tissue_type is|Organism is|Organoid|Visium|C\. elegans|spatial\.is_single|Label must match special ontology id/i
+      )
     end
   end
 end

@@ -19,7 +19,10 @@ export default class extends Controller {
     "progressBar",
     "progressDetail",
     "resultWrap",
-    "resultBody"
+    "resultBody",
+    "detailModal",
+    "detailTitle",
+    "detailBody"
   ]
 
   static values = {
@@ -34,6 +37,7 @@ export default class extends Controller {
     this.taskId = null
     this.fuId = null
     this.currentProgress = 0
+    this.checkDetails = []
     this.setupDropzone()
     this.applySourceMode()
   }
@@ -388,6 +392,7 @@ export default class extends Controller {
     const groups = result.check_groups || []
     const issueContext = { baseWarnings: warnings, baseErrors: errors }
 
+    this.checkDetails = []
     this.resultWrapTarget.classList.remove("hidden")
     this.resultBodyTarget.innerHTML = `
       <div class="mb-4 p-4 rounded border ${valid ? "border-green-300 bg-green-50" : "border-red-300 bg-red-50"}">
@@ -397,11 +402,110 @@ export default class extends Controller {
         <div class="text-sm text-gray-700 mt-1">
           ${errors.length} error(s), ${warnings.length} warning(s)
         </div>
+        <div class="text-xs text-gray-600 mt-2">Click a message to view rule details.</div>
       </div>
       ${this.renderList("Errors", errors, "red", { defaultStatus: "failed" })}
       ${this.renderList("Warnings", warnings, "yellow", { defaultStatus: "warning" })}
       ${groups.map((group) => this.renderDetailList(group.label, group.items || [], issueContext)).join("")}
     `
+    this.bindCheckDetailClicks()
+  }
+
+  formatFieldValues(values) {
+    if (!values || values.length === 0) return ""
+    const limit = 3
+    if (values.length <= limit) {
+      return `<span class="text-gray-600"> — ${this.escape(values.join(", "))}</span>`
+    }
+    const preview = values.slice(0, limit).join(", ")
+    return `<span class="text-gray-600"> — ${this.escape(preview)} (+${values.length - limit} more)</span>`
+  }
+
+  registerCheckDetail(detail) {
+    if (!detail || typeof detail !== "object") return null
+    const index = this.checkDetails.length
+    this.checkDetails.push(detail)
+    return index
+  }
+
+  bindCheckDetailClicks() {
+    this.resultBodyTarget.querySelectorAll("[data-check-detail-index]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        const index = Number(event.currentTarget.dataset.checkDetailIndex)
+        this.showCheckDetail(index)
+      })
+    })
+  }
+
+  showCheckDetail(index) {
+    const detail = this.checkDetails[index]
+    if (!detail || !this.hasDetailModalTarget) return
+
+    this.detailTitleTarget.textContent = detail.title || detail.field || "Rule details"
+    this.detailBodyTarget.innerHTML = this.renderCheckDetailBody(detail)
+    this.detailModalTarget.classList.remove("hidden")
+    document.body.classList.add("overflow-hidden")
+  }
+
+  closeCheckDetail(event) {
+    if (event) event.preventDefault()
+    if (!this.hasDetailModalTarget) return
+    this.detailModalTarget.classList.add("hidden")
+    document.body.classList.remove("overflow-hidden")
+  }
+
+  closeCheckDetailOnBackdrop(event) {
+    if (event.target === this.detailModalTarget) {
+      this.closeCheckDetail(event)
+    }
+  }
+
+  closeCheckDetailOnEscape(event) {
+    if (event.key === "Escape" && this.hasDetailModalTarget && !this.detailModalTarget.classList.contains("hidden")) {
+      this.closeCheckDetail(event)
+    }
+  }
+
+  stopCheckDetailPanelClick(event) {
+    event.stopPropagation()
+  }
+
+  renderCheckDetailBody(detail) {
+    const rows = []
+
+    if (detail.category_label) {
+      rows.push(`<div><span class="font-medium text-gray-900">Category:</span> ${this.escape(detail.category_label)}</div>`)
+    }
+    if (detail.field) {
+      rows.push(`<div><span class="font-medium text-gray-900">Field:</span> <code class="px-1 rounded bg-slate-100">${this.escape(detail.field)}</code></div>`)
+    }
+    if (detail.summary) {
+      rows.push(`<div class="mt-3"><span class="font-medium text-gray-900">Rule:</span> ${this.escape(detail.summary)}</div>`)
+    }
+    if (detail.result_message) {
+      rows.push(`<div class="mt-3"><span class="font-medium text-gray-900">Result:</span> ${this.escape(detail.result_message)}</div>`)
+    }
+
+    const constraints = Array.isArray(detail.constraints) ? detail.constraints : []
+    if (constraints.length > 0) {
+      const constraintLines = constraints.map((row) => {
+        const label = this.escape(row.label || row["label"] || "")
+        const value = this.escape(row.value || row["value"] || "")
+        return `<li><span class="font-medium">${label}:</span> ${value}</li>`
+      }).join("")
+      rows.push(`<div class="mt-3"><div class="font-medium text-gray-900 mb-1">Constraints</div><ul class="list-disc pl-5 space-y-1">${constraintLines}</ul></div>`)
+    }
+
+    if (detail.schema_version) {
+      rows.push(`<div class="mt-3 text-sm text-gray-600">Reference schema version: ${this.escape(detail.schema_version)}</div>`)
+    }
+
+    if (detail.schema_url) {
+      const url = this.escape(detail.schema_url)
+      rows.push(`<div class="mt-3"><a href="${url}" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:underline">Open scFAIR schema documentation</a></div>`)
+    }
+
+    return rows.join("")
   }
 
   promoteCheckIssues(checks, baseWarnings = [], baseErrors = []) {
@@ -439,14 +543,7 @@ export default class extends Controller {
   }
 
   renderDetailList(title, items, context = {}) {
-    if (!items || items.length === 0) {
-      return `
-        <div class="mb-4 p-3 rounded border border-slate-200 bg-slate-50">
-          <div class="font-medium mb-2">${this.escape(title)} (0)</div>
-          <p class="text-sm text-gray-600">No checks recorded for this category.</p>
-        </div>
-      `
-    }
+    if (!items || items.length === 0) return ""
     return this.renderList(title, items, "detail", context)
   }
 
@@ -476,11 +573,17 @@ export default class extends Controller {
     const lines = items.map((it) => {
       const field = this.escape(it.field || "-")
       const msg = this.escape(it.message || "")
+      const valueText = this.formatFieldValues(it.values || it["values"])
       const statusKey = this.resolveCheckStatus(it, resolveOptions)
       const st = statusPalette[statusKey] || statusPalette.passed
       const codeClass = st.code
       const badge = `<span class="ml-2 px-1.5 py-0.5 rounded text-xs ${st.badge}">${st.label}</span>`
-      return `<li class="text-sm"><code class="px-1 rounded ${codeClass}">${field}</code>${badge} ${msg}</li>`
+      const detailIndex = this.registerCheckDetail(it.detail)
+      const clickable = detailIndex !== null ? " cursor-pointer hover:bg-white/70 rounded px-1 -mx-1" : ""
+      const detailAttr = detailIndex !== null
+        ? ` data-check-detail-index="${detailIndex}" title="Show rule details"`
+        : ""
+      return `<li class="text-sm${clickable}"${detailAttr}><code class="px-1 rounded ${codeClass}">${field}</code>${badge} ${msg}${valueText}</li>`
     }).join("")
     return `
       <div class="mb-4 p-3 rounded border ${style.box}">

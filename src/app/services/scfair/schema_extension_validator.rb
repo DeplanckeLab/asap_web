@@ -37,7 +37,9 @@ module Scfair
       end
 
       if atac_enabled?
-        valid_checks << { field: 'extension.atac', status: 'warning', message: 'ATAC extension detected; fragment assets should be provided separately' }
+        message = 'ATAC extension detected; fragment assets should be provided separately'
+        warnings << { field: 'extension.atac', message: message }
+        valid_checks << { field: 'extension.atac', status: 'warning', message: message }
       else
         valid_checks << { field: 'extension.atac', status: 'skipped', message: 'No ATAC extension detected' }
       end
@@ -45,7 +47,9 @@ module Scfair
       if analysis_json_enabled?
         valid_checks << { field: 'extension.analysis_json', status: 'passed', message: 'analysis_json metadata present' }
       else
-        valid_checks << { field: 'extension.analysis_json', status: 'warning', message: 'analysis_json metadata not found (recommended)' }
+        message = 'analysis_json metadata not found (recommended)'
+        warnings << { field: 'extension.analysis_json', message: message }
+        valid_checks << { field: 'extension.analysis_json', status: 'warning', message: message }
       end
 
       { errors: errors, warnings: warnings, valid_checks: valid_checks }

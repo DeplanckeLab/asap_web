@@ -19,7 +19,6 @@ module Scfair
         path = path_for(field_name)
         values = split_values(@field_values[path])
         next if values.empty?
-        field_failed = false
 
         allowed_check_failed = false
         banned_check_failed = false
@@ -36,7 +35,6 @@ module Scfair
               field: "ontology.semantics.#{field_name}.ordering",
               message: "#{field_name} values must be unique and sorted lexically with ' || ' separator"
             }
-            field_failed = true
             ordering_check_failed = true
           end
         end
@@ -46,7 +44,6 @@ module Scfair
 
           unless @resolver.exists?(identifier)
             @errors << { field: "ontology.semantics.#{field_name}.existence", message: "#{identifier}: term not found in ontology DB" }
-            field_failed = true
             allowed_check_failed = true
             next
           end
@@ -55,11 +52,12 @@ module Scfair
             next
           end
 
+          next if cellosaurus_term?(field_name, identifier)
+
           if rules[:any_roots].present?
             ok = rules[:any_roots].any? { |root| @resolver.descendant_of?(identifier, root) }
             unless ok
               @errors << { field: "ontology.semantics.#{field_name}.lineage", message: "#{identifier}: must be under #{rules[:any_roots].join(' or ')}" }
-              field_failed = true
               lineage_check_failed = true
             end
           end
@@ -68,7 +66,6 @@ module Scfair
             rules[:forbidden_branches].each do |root|
               if @resolver.descendant_of?(identifier, root)
                 @errors << { field: "ontology.semantics.#{field_name}.lineage", message: "#{identifier}: must not be under #{root}" }
-                field_failed = true
                 banned_check_failed = true
               end
             end
@@ -76,7 +73,6 @@ module Scfair
 
           if rules[:forbidden_exact]&.include?(identifier)
             @errors << { field: "ontology.semantics.#{field_name}.forbidden", message: "#{identifier}: forbidden term for #{field_name}" }
-            field_failed = true
             banned_check_failed = true
           end
         end
@@ -84,7 +80,11 @@ module Scfair
         pair = check_label_id_pair(field_name, values, allowed_specials)
         if pair[:error]
           @errors << pair[:error]
-          field_failed = true
+          checks << {
+            field: pair[:error][:field],
+            status: 'failed',
+            message: pair[:error][:message]
+          }
           special_check_failed = true if pair[:error][:field].to_s.include?('special')
         elsif pair[:check]
           checks << pair[:check]
@@ -95,16 +95,23 @@ module Scfair
           status: allowed_check_failed ? 'failed' : 'passed',
           message: allowed_check_failed ? 'Allowed/known ontology term checks failed' : 'Allowed/known ontology term checks passed'
         }
-        checks << {
-          field: "ontology.semantics.#{field_name}.banned_terms",
-          status: banned_check_failed ? 'failed' : 'passed',
-          message: banned_check_failed ? 'Banned ontology term checks failed' : 'Banned ontology term checks passed'
-        }
-        checks << {
-          field: "ontology.semantics.#{field_name}.descendants",
-          status: lineage_check_failed ? 'failed' : 'passed',
-          message: lineage_check_failed ? 'Descendant/root restriction checks failed' : 'Descendant/root restriction checks passed'
-        }
+
+        if rules[:forbidden_exact].present? || rules[:forbidden_branches].present?
+          checks << {
+            field: "ontology.semantics.#{field_name}.banned_terms",
+            status: banned_check_failed ? 'failed' : 'passed',
+            message: banned_check_failed ? 'Banned ontology term checks failed' : 'Banned ontology term checks passed'
+          }
+        end
+
+        if rules[:any_roots].present?
+          checks << {
+            field: "ontology.semantics.#{field_name}.descendants",
+            status: lineage_check_failed ? 'failed' : 'passed',
+            message: lineage_check_failed ? 'Descendant/root restriction checks failed' : 'Descendant/root restriction checks passed'
+          }
+        end
+
         if rules[:sorted_multi]
           checks << {
             field: "ontology.semantics.#{field_name}.sorted_multi",
@@ -112,6 +119,7 @@ module Scfair
             message: ordering_check_failed ? 'Multi-value ordering/uniqueness failed' : 'Multi-value ordering/uniqueness passed'
           }
         end
+
         if allowed_specials.any?
           special_list = allowed_specials.join(', ')
           checks << {
@@ -124,17 +132,8 @@ module Scfair
                      end
           }
         end
-
-        checks << {
-          field: "ontology.semantics.#{field_name}",
-          status: field_failed ? 'failed' : 'passed',
-          message: field_failed ? "Semantic constraints failed for #{field_name}" : "Semantic constraints satisfied for #{field_name}"
-        }
       end
 
-      if @errors.empty?
-        @valid_checks << { field: 'ontology.semantics', status: 'passed', message: 'Ontology semantic constraints satisfied' }
-      end
       { errors: @errors.uniq, warnings: @warnings.uniq, valid_checks: (@valid_checks + checks).uniq }
     end
 
@@ -160,6 +159,10 @@ module Scfair
       return false if allowed_specials.blank?
 
       allowed_specials.include?(v)
+    end
+
+    def cellosaurus_term?(field_name, identifier)
+      identifier.to_s.start_with?('CVCL_') && Rules.ontology_prefixes(field_name).include?('CVCL')
     end
 
     def check_label_id_pair(field_name, id_values, allowed_specials = [])

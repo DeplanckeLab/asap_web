@@ -33,8 +33,14 @@ class ScfairComplianceService
         field_values: base_result.field_values || {},
         format: format
       ).call
+      extensions = Scfair::SchemaExtensionValidator.new(
+        field_values: base_result.field_values || {},
+        format: format
+      ).call
+      errors.concat(extensions[:errors])
+      warnings.concat(extensions[:warnings])
       valid_checks = reconcile_schema_version_checks(
-        base_result.valid_checks + cross_field[:valid_checks],
+        base_result.valid_checks + cross_field[:valid_checks] + extensions[:valid_checks],
         errors,
         warnings,
         format

@@ -116,6 +116,31 @@ constants:
     - EFO:0022860
   slide_seq_assay: EFO:0030062
 
+spatial_extension:
+  root_scalar_key: is_single
+  library:
+    allowed_keys: [images, scalefactors]
+    required_when_visium_is_single: [images, scalefactors]
+  images:
+    allowed_keys: [hires, fullres]
+    required_when_visium_is_single: [hires]
+    array:
+      dtype: uint8
+      ndim: 3
+      channel_sizes: [3, 4]
+    hires_max_dimension:
+      EFO:0022860: 4000
+      default: 2000
+  obsm_spatial:
+    h5ad_key: obsm/spatial
+    loom_key: /col_attrs/spatial
+    min_columns: 2
+    dtype_kinds: [f, i, u]
+    required_when_is_single: true
+  scalefactors:
+    allowed_keys: [spot_diameter_fullres, tissue_hires_scalef]
+    required_when_visium_is_single: [spot_diameter_fullres, tissue_hires_scalef]
+
 semantic_rules:
   assay_ontology_term_id:
     any_roots: [EFO:0002772, EFO:0010183]
@@ -243,54 +268,37 @@ checks_catalog:
   common:
     - id: obs.required_presence
       label: Required observation metadata fields
-      applies_to: [loom, h5ad]
     - id: uns.required_presence
       label: Required dataset metadata fields
-      applies_to: [loom, h5ad]
     - id: schema.version
       label: Schema version compatibility
-      applies_to: [loom, h5ad]
     - id: ontology.format
       label: Ontology identifier format checks
-      applies_to: [loom, h5ad]
     - id: cross-field.constraints
       label: Cross-field schema constraints
-      applies_to: [loom, h5ad]
     - id: ontology.database_resolution
       label: Ontology term resolution in ASAP DB
-      applies_to: [loom, h5ad]
     - id: ontology.organism_specific
       label: Organism-specific constraints
-      applies_to: [loom, h5ad]
     - id: ontology.semantics
       label: Ontology semantic constraints
-      applies_to: [loom, h5ad]
+    - id: extension.spatial
+      label: Spatial schema extension checks
   loom_only:
     - id: loom.paths
       label: Loom metadata path checks
-      applies_to: [loom]
     - id: loom.mapping_manifest
       label: anndata_mapping manifest checks
-      applies_to: [loom]
   h5ad_only:
     - id: h5ad.structure
       label: AnnData structural integrity
-      applies_to: [h5ad]
     - id: h5ad.embeddings
       label: obsm/varm/obsp/varp checks
-      applies_to: [h5ad]
     - id: h5ad.matrix_encoding
       label: Matrix encoding and finite value checks
-      applies_to: [h5ad]
-    - id: extension.spatial
-      label: Spatial schema extension checks
-      applies_to: [h5ad]
     - id: extension.perturb
       label: Perturbation schema extension checks
-      applies_to: [h5ad]
     - id: extension.atac
       label: ATAC schema extension checks
-      applies_to: [h5ad]
     - id: extension.analysis_json
       label: analysis_json extension checks
-      applies_to: [h5ad]

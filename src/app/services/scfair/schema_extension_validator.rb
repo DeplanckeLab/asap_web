@@ -5,6 +5,7 @@ module Scfair
     def initialize(field_values:, format:)
       @field_values = field_values || {}
       @format = format
+      @resolver = OntologyLineageResolver.new
     end
 
     def call
@@ -12,18 +13,9 @@ module Scfair
       warnings = []
       valid_checks = []
 
-      if spatial_enabled?
-        required = spatial_required_fields
-        missing = required.reject { |k| present?(k) }
-        if missing.any?
-          errors << { field: 'extension.spatial.required', message: "Spatial extension missing required fields: #{missing.join(', ')}" }
-          valid_checks << { field: 'extension.spatial', status: 'failed', message: 'Spatial schema checks failed' }
-        else
-          valid_checks << { field: 'extension.spatial', status: 'passed', message: 'Spatial schema checks passed' }
-        end
-      else
-        valid_checks << { field: 'extension.spatial', status: 'skipped', message: 'No spatial extension detected' }
-      end
+      spatial_result = validate_spatial_extension
+      errors.concat(spatial_result[:errors])
+      valid_checks.concat(spatial_result[:valid_checks])
 
       if perturb_enabled?
         if present?(key('obs/genetic_perturbation_id')) && !present?(key('obs/genetic_perturbation_strategy'))
@@ -59,24 +51,68 @@ module Scfair
 
     def key(path)
       return path if @format == 'h5ad'
+
       "/#{path}"
     end
 
     def present?(k)
-      vals = @field_values[k]
-      vals.present? && Array(vals).any? { |v| v.to_s.strip != '' }
+      SpatialAssayHelper.present_values?(@field_values[k])
     end
 
     def spatial_enabled?
-      present?(key('uns/spatial')) || present?(key('attrs/spatial'))
+      SpatialAssayHelper.spatial_enabled?(@field_values, @format, resolver: @resolver)
     end
 
-    def spatial_required_fields
-      if @format == 'h5ad'
-        %w[obs/array_row obs/array_col obs/in_tissue]
-      else
-        %w[/col_attrs/array_row /col_attrs/array_col /col_attrs/in_tissue]
+    def validate_spatial_extension
+      unless spatial_enabled?
+        return {
+          errors: [],
+          valid_checks: [{ field: 'extension.spatial', status: 'skipped', message: 'No spatial extension detected' }]
+        }
       end
+
+      errors = []
+      valid_checks = []
+
+      structure_result = SpatialStructureValidator.new(
+        field_values: @field_values,
+        format: @format,
+        resolver: @resolver
+      ).call
+      errors.concat(structure_result[:errors])
+      valid_checks.concat(structure_result[:valid_checks])
+
+      assets_result = SpatialAssetsValidator.new(
+        field_values: @field_values,
+        format: @format,
+        resolver: @resolver,
+        structure: structure_result[:structure]
+      ).call
+      errors.concat(assets_result[:errors])
+      valid_checks.concat(assets_result[:valid_checks])
+
+      obs_missing = spatial_obs_missing_fields
+      if obs_missing.any?
+        errors << {
+          field: 'extension.spatial.obs',
+          message: "Spatial extension missing required observation fields: #{obs_missing.join(', ')}"
+        }
+      end
+
+      spatial_failed = errors.any?
+      valid_checks << {
+        field: 'extension.spatial',
+        status: spatial_failed ? 'failed' : 'passed',
+        message: spatial_failed ? 'Spatial schema checks failed' : 'Spatial schema checks passed'
+      }
+
+      { errors: errors, valid_checks: valid_checks }
+    end
+
+    def spatial_obs_missing_fields
+      return [] unless SpatialAssayHelper.visium_obs_fields_required?(@field_values, @format, resolver: @resolver)
+
+      SpatialAssayHelper.visium_obs_field_paths(@format).reject { |field_path| present?(field_path) }
     end
 
     def perturb_enabled?
@@ -88,10 +124,10 @@ module Scfair
       vals = Array(@field_values[assay_key]).flat_map { |v| v.to_s.split(' || ') }.map(&:strip)
       return true if vals.include?('EFO:0030059') # 10x multiome
 
-      resolver = Scfair::OntologyLineageResolver.new
       vals.any? do |v|
         next false if v.blank?
-        resolver.descendant_of?(v, 'EFO:0010891') # scATAC-seq root and descendants
+
+        @resolver.descendant_of?(v, 'EFO:0010891') # scATAC-seq root and descendants
       end || present?(key('uns/atac')) || present?(key('attrs/atac'))
     end
 

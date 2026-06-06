@@ -10,6 +10,7 @@ module Scfair
     end
 
     def call
+      @resolver = OntologyLineageResolver.new
       prefix = @format == 'h5ad' ? 'obs/' : '/col_attrs/'
       organism_key = @format == 'h5ad' ? 'uns/organism_ontology_term_id' : '/attrs/organism_ontology_term_id'
       organism = first(@field_values[organism_key])
@@ -61,9 +62,8 @@ module Scfair
         message: tissue_type == 'organoid' ? (organoid_bad ? 'Organoid tissue must not be embryo (UBERON:0000922)' : 'Organoid tissue constraints OK') : 'Not applicable'
       }
 
-      visium_terms = Scfair::SchemaConstants::VISIUM_ASSAY_TERMS + [Scfair::SchemaConstants::SLIDE_SEQ_ASSAY]
-      assays = Array(@field_values["#{prefix}assay_ontology_term_id"]).flat_map { |v| v.to_s.split(' || ') }.map(&:strip).uniq
-      spatial_assays = assays & visium_terms
+      assays = SpatialAssayHelper.assay_terms(@field_values, @format)
+      spatial_assays = assays.select { |term| SpatialAssayHelper.spatial_assay?(term, resolver: @resolver) }
       mixed_spatial = spatial_assays.any? && assays.size > 1
       rule_checks << {
         field: 'cross-field.CF-5-spatial-assay-uniformity',
@@ -72,12 +72,15 @@ module Scfair
       }
 
       is_primary = first(@field_values["#{prefix}is_primary_data"])
-      is_single = first(@field_values[@format == 'h5ad' ? 'uns/spatial/is_single' : '/attrs/spatial/is_single'])
-      cf6_bad = is_single == 'false' && is_primary == 'true'
+      is_single_present = SpatialAssayHelper.present_values?(
+        @field_values[SpatialAssayHelper.spatial_is_single_key(@format)]
+      )
+      is_single_false = is_single_present && !SpatialAssayHelper.spatial_is_single?(@field_values, @format)
+      cf6_bad = is_single_false && is_primary == 'true'
       rule_checks << {
         field: 'cross-field.CF-6-spatial-primary-data',
-        status: is_single.present? ? (cf6_bad ? 'failed' : 'passed') : 'skipped',
-        message: is_single.present? ? (cf6_bad ? 'is_primary_data must be false when spatial.is_single is false' : 'Spatial primary-data constraint OK') : 'Not applicable'
+        status: is_single_present ? (cf6_bad ? 'failed' : 'passed') : 'skipped',
+        message: is_single_present ? (cf6_bad ? 'is_primary_data must be false when spatial.is_single is false' : 'Spatial primary-data constraint OK') : 'Not applicable'
       }
 
       cell_type = first(@field_values["#{prefix}cell_type_ontology_term_id"])
@@ -92,14 +95,7 @@ module Scfair
       rule_checks.concat(cf8[:checks])
       errors.concat(cf8[:errors])
 
-      in_tissue = first(@field_values["#{prefix}in_tissue"])
-      visium = assays.any? { |a| Scfair::SchemaConstants::VISIUM_ASSAY_TERMS.include?(a) }
-      cf9_bad = visium && in_tissue == '0' && cell_type != 'unknown'
-      rule_checks << {
-        field: 'cross-field.CF-9-visium-in-tissue',
-        status: visium ? (cf9_bad ? 'failed' : 'passed') : 'skipped',
-        message: visium ? (cf9_bad ? 'Visium spots with in_tissue=0 must use cell_type_ontology_term_id=unknown' : 'Visium in_tissue constraint OK') : 'Not applicable'
-      }
+      rule_checks << cf9_visium_in_tissue_check(prefix, assays)
 
       { errors: errors, warnings: warnings, valid_checks: rule_checks }
     end
@@ -185,6 +181,59 @@ module Scfair
         field: "cross-field.#{id}",
         status: failed ? 'failed' : 'passed',
         message: message
+      }
+    end
+
+    def cf9_visium_in_tissue_check(prefix, assays)
+      visium = assays.any? { |term| SpatialAssayHelper.visium_assay?(term, resolver: @resolver) }
+      unless visium
+        return {
+          field: 'cross-field.CF-9-visium-in-tissue',
+          status: 'skipped',
+          message: 'Not applicable'
+        }
+      end
+
+      unless SpatialAssayHelper.spatial_is_single?(@field_values, @format)
+        return {
+          field: 'cross-field.CF-9-visium-in-tissue',
+          status: 'skipped',
+          message: 'Not applicable (requires spatial.is_single=true)'
+        }
+      end
+
+      in_tissue_vals = Array(@field_values["#{prefix}in_tissue"]).map(&:to_s).uniq
+      cell_type_vals = Array(@field_values["#{prefix}cell_type_ontology_term_id"]).map(&:to_s).uniq
+
+      if in_tissue_vals.blank?
+        return {
+          field: 'cross-field.CF-9-visium-in-tissue',
+          status: 'skipped',
+          message: 'Not applicable (in_tissue not present)'
+        }
+      end
+
+      unless in_tissue_vals.include?('0')
+        return {
+          field: 'cross-field.CF-9-visium-in-tissue',
+          status: 'passed',
+          message: 'Visium in_tissue constraint OK'
+        }
+      end
+
+      if in_tissue_vals != ['0']
+        return {
+          field: 'cross-field.CF-9-visium-in-tissue',
+          status: 'skipped',
+          message: 'Per-spot in_tissue/cell_type pairing not available in metadata summary'
+        }
+      end
+
+      cf9_bad = cell_type_vals.any? { |value| value != 'unknown' }
+      {
+        field: 'cross-field.CF-9-visium-in-tissue',
+        status: cf9_bad ? 'failed' : 'passed',
+        message: cf9_bad ? 'Visium spots with in_tissue=0 must use cell_type_ontology_term_id=unknown' : 'Visium in_tissue constraint OK'
       }
     end
 

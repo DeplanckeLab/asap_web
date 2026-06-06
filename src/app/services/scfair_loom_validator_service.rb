@@ -895,14 +895,11 @@ class ScfairLoomValidatorService
   end
 
   def is_visium_assay?(assay_term)
-    # EFO:0010961 is Visium Spatial Gene Expression and descendants
     return false unless assay_term
-    
-    visium_terms = %w[
-      EFO:0010961 EFO:0022857 EFO:0022859 EFO:0022860
-    ]
-    terms = assay_term.to_s.split(' || ').map(&:strip)
-    terms.any? { |t| visium_terms.include?(t) }
+
+    assay_term.to_s.split(' || ').map(&:strip).any? do |term|
+      Scfair::SpatialAssayHelper.visium_assay?(term)
+    end
   end
 
   def get_global_attr(key)

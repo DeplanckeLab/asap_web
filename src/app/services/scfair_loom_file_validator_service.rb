@@ -9,51 +9,65 @@ class ScfairLoomFileValidatorService
 
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
 
-  LOOM_FIELD_VALUE_PATHS = (
-    Scfair::Rules.required_uns_fields('loom').map { |name| "/attrs/#{name}" } +
-    %w[
-      /col_attrs/assay_ontology_term_id
-      /col_attrs/cell_type_ontology_term_id
-      /col_attrs/development_stage_ontology_term_id
-      /col_attrs/disease_ontology_term_id
-      /col_attrs/sex_ontology_term_id
-      /col_attrs/tissue_ontology_term_id
-      /col_attrs/self_reported_ethnicity_ontology_term_id
-    ]
-  ).uniq.freeze
+  LOOM_FIELD_VALUE_PATHS = Scfair::Rules.compliance_field_value_paths('loom').freeze
 
   FIELD_VALUES_PY_TEMPLATE = <<~'PYTHON'
     import json
     import sys
     import h5py
+    import numpy as np
 
     loom_path = sys.argv[1]
     fields = %<fields>s
 
+    def capture_dataset(path, ds, out):
+      if len(ds.shape) == 0:
+        val = ds[()]
+        if isinstance(val, bytes):
+          val = val.decode("utf-8", "replace")
+        out[path] = [str(val)]
+        return
+
+      if len(ds.shape) >= 2:
+        out[path] = ["__array__"]
+        out[f"{path}#shape"] = [",".join(str(int(s)) for s in ds.shape)]
+        out[f"{path}#dtype"] = [str(ds.dtype)]
+        if len(ds.shape) == 2 and np.issubdtype(ds.dtype, np.floating):
+          arr = ds[()]
+          out[f"{path}#has_inf"] = [str(bool(np.isinf(arr).any())).lower()]
+          out[f"{path}#has_nan"] = [str(bool(np.isnan(arr).any())).lower()]
+        return
+
+      raw = ds[()]
+      try:
+        itr = raw.tolist()
+      except Exception:
+        itr = [raw]
+      if not isinstance(itr, list):
+        itr = [itr]
+      vals = []
+      for v in itr:
+        if isinstance(v, bytes):
+          vals.append(v.decode("utf-8", "replace"))
+        else:
+          vals.append(str(v))
+      vals = [v for v in vals if v and v != "None"]
+      if vals:
+        out[path] = sorted(list(set(vals)))[:200]
+
     out = {}
     with h5py.File(loom_path, "r") as f:
-      for path in fields:
+      paths = set(fields)
+      paths.update(path for path in f.keys() if path.startswith("/attrs/spatial/"))
+      paths.update(path for path in f.keys() if path == "/col_attrs/spatial")
+      for path in sorted(paths):
         if path not in f:
           continue
-        ds = f[path]
-        vals = []
-        if len(ds.shape) == 0:
-          vals = [str(ds[()])]
-        else:
-          raw = ds[()]
-          try:
-            itr = raw.tolist()
-          except Exception:
-            itr = [raw]
-          if not isinstance(itr, list):
-            itr = [itr]
-          for v in itr:
-            if isinstance(v, bytes):
-              vals.append(v.decode("utf-8", "replace"))
-            else:
-              vals.append(str(v))
-        vals = [v for v in vals if v and v != "None"]
-        out[path] = sorted(list(set(vals)))[:200]
+        capture_dataset(path, f[path], out)
+      if "/matrix" in f:
+        sh = f["/matrix"].shape
+        if len(sh) >= 2:
+          out["matrix/n_obs"] = [str(int(sh[1]))]
     print(json.dumps(out))
   PYTHON
 
@@ -185,4 +199,3 @@ class ScfairLoomFileValidatorService
     end
   end
 end
-

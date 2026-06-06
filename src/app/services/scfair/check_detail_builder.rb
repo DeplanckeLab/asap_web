@@ -53,7 +53,7 @@ module Scfair
       },
       'cross-field.CF-9-visium-in-tissue' => {
         title: 'CF-9: Visium in_tissue spots',
-        summary: 'Visium spots with in_tissue=0 must use cell_type_ontology_term_id=unknown.'
+        summary: 'When spatial.is_single is true, Visium spots with in_tissue=0 must use cell_type_ontology_term_id=unknown.'
       }
     }.freeze
 
@@ -95,6 +95,12 @@ module Scfair
       'h5ad.embeddings' => 'Optional embedding matrices in obsm/varm/obsp/varp.',
       'h5ad.matrix_encoding' => 'Expression matrix encoding and finite numeric values.',
       'extension.spatial' => 'Spatial transcriptomics extension metadata under uns/spatial.',
+      'extension.spatial.structure' => 'uns/spatial dictionary structure (is_single, library images, scalefactors).',
+      'extension.spatial.library' => 'Visium library identifier block under uns/spatial when is_single is true.',
+      'extension.spatial.obs' => 'Visium spot metadata columns (array_row, array_col, in_tissue).',
+      'extension.spatial.assets' => 'Spatial tissue images and obsm spatial coordinate embedding.',
+      'extension.spatial.obsm' => 'obsm spatial embedding required when spatial.is_single is true.',
+      'extension.spatial.images.hires' => 'Visium hires tissue image array (uint8, shape, pixel size).',
       'extension.perturb' => 'Genetic perturbation extension metadata.',
       'extension.atac' => 'ATAC-seq extension metadata.',
       'extension.analysis_json' => 'analysis_json extension metadata.'

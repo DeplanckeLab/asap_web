@@ -32,6 +32,7 @@ class ScfairH5adValidatorService
     ONTOLOGY_FIELDS = RULES["ontology_fields"]
     SPECIAL_VALUES = {k: set(v) for k, v in RULES["special_values"].items()}
     ENUM_FIELDS = RULES.get("enum_fields", {})
+    SPATIAL_OBS_FIELDS = ["array_row", "array_col", "in_tissue"]
 
     TOTAL_STEPS = 8 + len(REQUIRED_OBS) + len(REQUIRED_UNS) + len(ONTOLOGY_FIELDS)
 
@@ -118,6 +119,84 @@ class ScfairH5adValidatorService
         return [str(val)]
       return []
 
+    def store_array_metadata(path, shape, dtype, has_inf=None, has_nan=None):
+      field_values[path] = ["__array__"]
+      field_values[f"{path}#shape"] = [",".join(str(int(s)) for s in shape)]
+      field_values[f"{path}#dtype"] = [str(dtype)]
+      if has_inf is not None:
+        field_values[f"{path}#has_inf"] = [str(bool(has_inf)).lower()]
+      if has_nan is not None:
+        field_values[f"{path}#has_nan"] = [str(bool(has_nan)).lower()]
+
+    def store_obsm_spatial_metadata(arr):
+      arr = np.asarray(arr)
+      store_array_metadata(
+        "obsm/spatial",
+        arr.shape,
+        arr.dtype,
+        np.isinf(arr).any(),
+        np.isnan(arr).any()
+      )
+
+    def flatten_spatial_h5py(group, prefix):
+      for key in group.keys():
+        path = f"{prefix}/{key}"
+        node = group[key]
+        if isinstance(node, h5py.Group):
+          flatten_spatial_h5py(node, path)
+        elif isinstance(node, h5py.Dataset):
+          if len(node.shape) >= 3:
+            store_array_metadata(path, node.shape, node.dtype)
+          elif len(node.shape) == 0:
+            val = node[()]
+            if isinstance(val, bytes):
+              val = val.decode("utf-8", "replace")
+            field_values[path] = [str(val)]
+          else:
+            field_values[path] = ["__array__"]
+
+    def flatten_spatial_dict(value, prefix):
+      if not isinstance(value, dict):
+        return
+      for key, val in value.items():
+        path = f"{prefix}/{key}"
+        if isinstance(val, dict):
+          flatten_spatial_dict(val, path)
+        elif isinstance(val, np.ndarray):
+          if val.ndim >= 3:
+            store_array_metadata(path, val.shape, val.dtype)
+          else:
+            field_values[path] = ["__array__"]
+        else:
+          field_values[path] = [str(val)]
+
+    def extract_spatial_from_uns_h5py(uns_group):
+      if uns_group is None or "spatial" not in uns_group:
+        return
+      spatial = uns_group["spatial"]
+      if isinstance(spatial, h5py.Group):
+        flatten_spatial_h5py(spatial, "uns/spatial")
+
+    def extract_spatial_obs_h5py(obs_group, obs_present):
+      if obs_group is None:
+        return
+      for field in SPATIAL_OBS_FIELDS:
+        if field not in obs_present:
+          continue
+        vals = read_obs_column_values(obs_group, field)
+        if vals:
+          field_values[f"obs/{field}"] = vals[:200]
+
+    def extract_spatial_from_adata(adata):
+      spatial = adata.uns.get("spatial")
+      if isinstance(spatial, dict):
+        flatten_spatial_dict(spatial, "uns/spatial")
+      for field in SPATIAL_OBS_FIELDS:
+        if field in adata.obs.columns:
+          values = [str(v) for v in adata.obs[field].dropna().astype(str).unique().tolist()]
+          if values:
+            field_values[f"obs/{field}"] = values[:200]
+
     def matrix_shape_h5py(root):
       if "X" not in root:
         return None, None
@@ -194,6 +273,7 @@ class ScfairH5adValidatorService
       if not n_obs or not n_vars or n_obs <= 0 or n_vars <= 0:
         errors.append({"field": "X", "message": "AnnData has invalid or unreadable matrix shape"})
       else:
+        field_values["matrix/n_obs"] = [str(n_obs)]
         valid_checks.append({"field": "X", "message": f"Matrix shape OK ({n_obs} cells x {n_vars} genes)"})
 
       emit_progress("obs", "Checking observation metadata structure")
@@ -254,6 +334,9 @@ class ScfairH5adValidatorService
         else:
           errors.append({"field": f"uns/{field}", "message": "Missing required dataset metadata field"})
 
+      extract_spatial_from_uns_h5py(uns_group)
+      extract_spatial_obs_h5py(obs_group, obs_present)
+
       if obs_group is not None:
         for field_path in ONTOLOGY_FIELDS:
           if not field_path.startswith("obs/"):
@@ -286,6 +369,8 @@ class ScfairH5adValidatorService
           if arr is None:
             errors.append({"field": f"obsm/{key}", "message": "Could not read embedding array"})
             continue
+          if key == "spatial":
+            store_obsm_spatial_metadata(arr)
           if n_obs and arr.shape[0] != n_obs:
             errors.append({"field": f"obsm/{key}", "message": "Embedding row count does not match n_obs"})
           if arr.ndim != 2 or arr.shape[1] < 2:
@@ -305,6 +390,7 @@ class ScfairH5adValidatorService
       if adata.n_obs <= 0 or adata.n_vars <= 0:
         errors.append({"field": "X", "message": "AnnData has invalid shape"})
       else:
+        field_values["matrix/n_obs"] = [str(adata.n_obs)]
         valid_checks.append({"field": "X", "message": f"Matrix shape OK ({adata.n_obs} cells x {adata.n_vars} genes)"})
 
       emit_progress("obs", "Checking observation metadata columns")
@@ -328,6 +414,8 @@ class ScfairH5adValidatorService
         else:
           errors.append({"field": f"uns/{field}", "message": "Missing required dataset metadata field"})
 
+      extract_spatial_from_adata(adata)
+
       for field_path in ONTOLOGY_FIELDS:
         space, key = field_path.split("/", 1)
         emit_progress("ontology", f"Checking {field_path} format")
@@ -342,6 +430,8 @@ class ScfairH5adValidatorService
       emit_progress("obsm", "Checking embeddings (obsm)")
       for key in adata.obsm.keys():
         arr = np.asarray(adata.obsm[key])
+        if key == "spatial":
+          store_obsm_spatial_metadata(arr)
         if arr.shape[0] != adata.n_obs:
           errors.append({"field": f"obsm/{key}", "message": "Embedding row count does not match n_obs"})
         if arr.ndim != 2 or arr.shape[1] < 2:

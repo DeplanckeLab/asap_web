@@ -7,9 +7,15 @@ class FusController < ApplicationController
     total_chunks = params[:total_chunks].to_i
     file_size = params[:file_size].to_i
     fu_id = params[:fu_id]
+    upload_type = resolved_upload_type
+    compliance_upload = compliance_upload?(upload_type)
     
     # Clean filename
     filename.gsub!(/[()\[\]#?$]/, '')
+
+    if compliance_upload
+      ComplianceFileCheckQueueService.validate_upload!(filename: filename, file_size: file_size)
+    end
     
     # Extract file extension and create input filename.
     # Preserve compound archive extensions like .tar.gz.
@@ -33,7 +39,8 @@ class FusController < ApplicationController
              upload_file_name: input_filename,
              upload_file_size: file_size,
              status: 'uploading',
-             name: filename
+             name: filename,
+             upload_type: upload_type
            )
          end
     
@@ -151,19 +158,38 @@ class FusController < ApplicationController
       version_id = safe_integer_param(:version_id)
       
       # Store upload info in session for project creation
-      session[:file_upload] = {
-        fu_id: fu.id,
-        original_filename: filename,
-        input_filename: input_filename,
-        path: upload_file_path.to_s,
-        size: current_size,
-        total_size: file_size,
-        complete: is_complete,
-        organism_id: organism_id,
-        version_id: version_id
-      }
+      unless compliance_upload?(fu.upload_type)
+        session[:file_upload] = {
+          fu_id: fu.id,
+          original_filename: filename,
+          input_filename: input_filename,
+          path: upload_file_path.to_s,
+          size: current_size,
+          total_size: file_size,
+          complete: is_complete,
+          organism_id: organism_id,
+          version_id: version_id
+        }
+      end
       
       if is_complete
+        if compliance_upload?(fu.upload_type)
+          schema_id = params[:schema_id].presence || 'scfair_7_1_0'
+          queue_result = ComplianceFileCheckQueueService.call(fu: fu, schema_id: schema_id)
+          progress = 100.0
+          render json: {
+            fu_id: fu.id,
+            chunk_index: chunk_index,
+            uploaded_size: current_size,
+            complete: true,
+            progress: progress,
+            task_id: queue_result[:task_id],
+            status: queue_result[:status],
+            schema_id: queue_result[:schema_id]
+          }
+          return
+        end
+
         if version_id.blank?
           render json: { error: 'Select an ASAP release before finishing the upload' }, status: :unprocessable_entity
           return
@@ -183,6 +209,8 @@ class FusController < ApplicationController
         complete: is_complete,
         progress: progress
       }
+    rescue ArgumentError => e
+      render json: { error: e.message }, status: :unprocessable_entity
     rescue => e
       Rails.logger.error "Upload error: #{e.message}"
       Rails.logger.error e.backtrace.join("\n")
@@ -207,12 +235,14 @@ class FusController < ApplicationController
     fu = if fu_id.present?
            find_fu_for_current_actor(fu_id)
          else
-           # Find most recent incomplete upload for this user and filename
-           fu_scope_for_current_actor.where(
+           scope = fu_scope_for_current_actor.where(
              upload_file_name: input_filename,
-             status: ['uploading', 'downloading', 'uploaded'],
+             status: ['uploading', 'downloading', 'uploaded', 'validating', 'validated', 'validation_failed'],
              project_id: nil
-           ).order(created_at: :desc).first
+           )
+           upload_type_id = upload_type_id_from_name_param
+           scope = scope.where(upload_type: upload_type_id) if upload_type_id.present?
+           scope.order(created_at: :desc).first
          end
     
     if fu
@@ -220,8 +250,13 @@ class FusController < ApplicationController
       total_size = fu.upload_file_size || 0
       # Do not treat size match alone as complete while URL download job is still running;
       # otherwise the UI hands off to preparsing before FuDownloadFromUrlJob updates status.
-      is_complete = %w[uploaded preparsing preparsed completed].include?(fu.status) ||
-                    (fu.status != 'downloading' && fu.complete?)
+      is_complete = if compliance_upload?(fu.upload_type)
+                      %w[validating validated validation_failed].include?(fu.status) ||
+                        (fu.status != 'downloading' && fu.complete?)
+                    else
+                      %w[uploaded preparsing preparsed completed].include?(fu.status) ||
+                        (fu.status != 'downloading' && fu.complete?)
+                    end
 
       # Only mark as resumable if we have valid size information
       resumable = fu.resumable? && total_size > 0 && current_size >= 0 && current_size <= total_size
@@ -740,6 +775,24 @@ class FusController < ApplicationController
 
   def build_input_filename(filename)
     "input_file#{extract_upload_extension(filename)}"
+  end
+
+  def resolved_upload_type
+    upload_type_id_from_name_param || UploadType.id_for('project_input')
+  end
+
+  def compliance_upload?(upload_type_id)
+    UploadType.name_for(upload_type_id) == 'compliance_file_check'
+  end
+
+  def upload_type_id_from_name_param
+    name = params[:upload_type_name].to_s.strip
+    return if name.blank?
+
+    id = UploadType.id_for(name)
+    raise ArgumentError, "Unknown upload type: #{name}" unless id
+
+    id
   end
 
   def extract_upload_extension(filename)

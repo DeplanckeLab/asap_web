@@ -4,8 +4,8 @@
 
 This report compares the **scFAIR core schema 7.1.0** ([`schema.md`](https://github.com/scFAIR/scFAIR/blob/main/schema/7.1.0/schema.md)) with ASAP’s **Loom cell metadata compliance validator**:
 
-* Validator: `CxgLoomValidatorService` (`src/app/services/cxg_loom_validator_service.rb`)
-* Shared cross-field rules: `CxgSchemaRules` (`src/app/models/concerns/cxg_schema_rules.rb`)
+* Validator: `ScfairLoomValidatorService` (`src/app/services/scfair_loom_validator_service.rb`)
+* Shared cross-field rules: `ScfairSchemaRules` (`src/app/models/concerns/scfair_schema_rules.rb`)
 
 The validator focuses on Loom/ASAP metadata paths:
 
@@ -53,7 +53,7 @@ When this report says **Both**, the rule applies to the **same metadata or matri
 
 | Status | Meaning |
 | --- | --- |
-| Yes | Enforced (or substantially enforced) in `CxgLoomValidatorService` today |
+| Yes | Enforced (or substantially enforced) in `ScfairLoomValidatorService` today |
 | Partial | Presence, format, or subset of constraints only |
 | No | Not implemented |
 | N/A | Out of validator scope (not “not applicable to Loom”) |
@@ -167,7 +167,7 @@ The validator’s code explicitly states it **does not enforce pinned ontology v
 
 | Rule | Format | Loom | At Loom→H5AD | Status | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Non-human → ethnicity `na` | Both | Yes | Yes | Partial | In `CxgSchemaRules` |
+| Non-human → ethnicity `na` | Both | Yes | Yes | Partial | In `ScfairSchemaRules` |
 | assay → `suspension_type` | Both | Yes | Yes | Partial | |
 | `tissue_type` = cell line cascade | Both | Yes | Yes | Partial | |
 | CL descendants, banned terms, sorted `||` | Both | Yes | Yes | No | Validator gap; enforceable on H5AD after convert |

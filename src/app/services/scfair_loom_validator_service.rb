@@ -28,67 +28,20 @@ require 'shellwords'
 # but uses its own ontology and reference database versions associated with each
 # ASAP version. The specific versions pinned by the upstream schema are NOT enforced.
 # This validator checks ontology term FORMAT (PREFIX:ID) but not specific versions.
-class CxgLoomValidatorService
-  include CxgSchemaRules
+class ScfairLoomValidatorService
+  include ScfairSchemaRules
 
-  SCHEMA_VERSION = '7.1.0'
+  SCHEMA_VERSION = Scfair::Rules.schema_version
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
 
-  # Valid ontology prefixes for different field types
-  VALID_ONTOLOGY_PREFIXES = {
-    assay: ['EFO'],
-    cell_type: ['CL', 'WBbt', 'ZFA', 'FBbt'],
-    development_stage: ['HsapDv', 'MmusDv', 'WBls', 'ZFS', 'FBdv', 'UBERON'],
-    disease: ['MONDO', 'PATO'],
-    sex: ['PATO'],
-    tissue: ['UBERON', 'CVCL', 'WBbt', 'ZFA', 'FBbt'],
-    ethnicity: ['HANCESTRO', 'AfPO'],
-    organism: ['NCBITaxon']
-  }.freeze
-
-  # Valid values for enumerated fields
-  VALID_TISSUE_TYPES = ['tissue', 'organoid', 'cell line', 'primary cell culture'].freeze
-  VALID_SUSPENSION_TYPES = ['cell', 'nucleus', 'na'].freeze
-
-  # Schema-allowed special (non-ontology) values per ontology field.
-  # These are free-text values that the scFAIR schema explicitly permits
-  # alongside ontology term identifiers.
-  ALLOWED_SPECIAL_VALUES = {
-    '/col_attrs/cell_type_ontology_term_id'                     => %w[unknown na].freeze,
-    '/col_attrs/sex_ontology_term_id'                           => %w[unknown na].freeze,
-    '/col_attrs/development_stage_ontology_term_id'             => %w[unknown na].freeze,
-    '/col_attrs/self_reported_ethnicity_ontology_term_id'       => %w[unknown na multiethnic].freeze,
-    '/col_attrs/disease_ontology_term_id'                       => %w[].freeze,
-    '/col_attrs/tissue_ontology_term_id'                        => %w[].freeze,
-    '/col_attrs/assay_ontology_term_id'                         => %w[].freeze,
-  }.freeze
-  # Required cell metadata fields (curator must annotate)
-  REQUIRED_CELL_METADATA = %w[
-    assay_ontology_term_id
-    cell_type_ontology_term_id
-    development_stage_ontology_term_id
-    disease_ontology_term_id
-    donor_id
-    is_primary_data
-    self_reported_ethnicity_ontology_term_id
-    sex_ontology_term_id
-    suspension_type
-    tissue_ontology_term_id
-    tissue_type
-  ].freeze
-
-  # Required global attributes
-  REQUIRED_GLOBAL_ATTRS = %w[title organism_ontology_term_id].freeze
-
-  # Ontology label fields: these are the human-readable names corresponding to *_ontology_term_id fields.
-  # They are required alongside their _ontology_term_id counterpart.
-  ONTOLOGY_LABEL_CELL_METADATA = %w[
-    assay cell_type development_stage disease
-    self_reported_ethnicity sex tissue
-  ].freeze
-
-  # Ontology label for global attrs
-  ONTOLOGY_LABEL_GLOBAL_ATTRS = %w[organism].freeze
+  VALID_ONTOLOGY_PREFIXES = Scfair::Rules.ontology_prefixes_legacy_hash
+  VALID_TISSUE_TYPES = Scfair::Rules.enum_field_values('tissue_type')
+  VALID_SUSPENSION_TYPES = Scfair::Rules.enum_field_values('suspension_type')
+  ALLOWED_SPECIAL_VALUES = Scfair::Rules.allowed_special_values('loom')
+  REQUIRED_CELL_METADATA = Scfair::Rules.required_observation_fields
+  REQUIRED_GLOBAL_ATTRS = Scfair::Rules.required_uns_term_fields('loom')
+  ONTOLOGY_LABEL_CELL_METADATA = Scfair::Rules.required_observation_labels
+  ONTOLOGY_LABEL_GLOBAL_ATTRS = Scfair::Rules.required_uns_labels
 
   Result = Struct.new(:valid?, :errors, :warnings, :info, :valid_checks, :schema_version, :validated_at, :field_resolutions, keyword_init: true)
 
@@ -118,7 +71,7 @@ class CxgLoomValidatorService
 
   def validate
     t_total = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    @logger.info("[CxgLoomValidatorService] Starting validation for: #{@loom_path} (project: #{@project&.id || 'none'})")
+    @logger.info("[ScfairLoomValidatorService] Starting validation for: #{@loom_path} (project: #{@project&.id || 'none'})")
     
     unless File.exist?(@loom_path)
       @errors << { field: 'file', message: "File not found: #{@loom_path}" }
@@ -139,6 +92,10 @@ class CxgLoomValidatorService
       @logger.info("[Validator TIMING] validate_required_global_attributes: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(3)}s")
 
       t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      validate_schema_version
+      @logger.info("[Validator TIMING] validate_schema_version: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(3)}s")
+
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       validate_ontology_terms
       @logger.info("[Validator TIMING] validate_ontology_terms: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(3)}s")
 
@@ -157,7 +114,7 @@ class CxgLoomValidatorService
       @logger.info("[Validator TIMING] TOTAL validation: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t_total).round(3)}s -- Errors: #{@errors.count}, Warnings: #{@warnings.count}")
     rescue StandardError => e
       @errors << { field: 'validation', message: "Validation failed with error: #{e.message}" }
-      @logger.error("[CxgLoomValidatorService] Validation error: #{e.message}")
+      @logger.error("[ScfairLoomValidatorService] Validation error: #{e.message}")
       @logger.error(e.backtrace.join("\n"))
     end
 
@@ -239,7 +196,7 @@ class CxgLoomValidatorService
 
   # Use ASAP.jar ListMetadata to read structure directly from the loom file
   def extract_from_loom_file
-    output_file = "/tmp/cxg_validation_#{SecureRandom.hex(8)}.json"
+    output_file = "/tmp/scfair_validation_#{SecureRandom.hex(8)}.json"
     cmd = asap_command('-T', 'ListMetadata', '-f', @loom_path, '-o', output_file)
     _stdout, stderr, status = Open3.capture3(*cmd)
 
@@ -460,7 +417,9 @@ class CxgLoomValidatorService
     # Check required global attributes
     REQUIRED_GLOBAL_ATTRS.each do |attr|
       if global_attrs.include?(attr)
-        @valid_checks << { field: "/attrs/#{attr}", message: "Found /attrs/#{attr} metadata", check_type: 'presence' }
+        unless attr == 'schema_version'
+          @valid_checks << { field: "/attrs/#{attr}", message: "Found /attrs/#{attr} metadata", check_type: 'presence' }
+        end
       else
         @errors << { field: "/attrs/#{attr}", message: "Missing /attrs/#{attr} metadata (required by schema)", check_type: 'presence' }
       end
@@ -480,6 +439,17 @@ class CxgLoomValidatorService
     if organism
       validate_ontology_term_format(organism, '/attrs/organism_ontology_term_id', VALID_ONTOLOGY_PREFIXES[:organism])
     end
+  end
+
+  def validate_schema_version
+    result = Scfair::SchemaVersionEvaluator.call(
+      file_version: get_global_attr('schema_version'),
+      reference_version: Scfair::Rules.schema_version,
+      format: 'loom'
+    )
+    @errors.concat(result[:errors])
+    @warnings.concat(result[:warnings])
+    @valid_checks.concat(result[:valid_checks])
   end
 
   def validate_ontology_terms
@@ -574,7 +544,7 @@ class CxgLoomValidatorService
     end
   end
 
-  # Cross-field constraint checks using the shared CxgSchemaRules module.
+  # Cross-field constraint checks using the shared ScfairSchemaRules module.
   # These rules enforce dependencies between fields (e.g. assay determines
   # suspension_type, tissue_type="cell line" forces several fields to "na").
   def validate_cross_field_constraints

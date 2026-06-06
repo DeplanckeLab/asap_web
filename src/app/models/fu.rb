@@ -1,7 +1,7 @@
 class Fu < ApplicationRecord
   # Model for tracking file uploads with resumable capability
   # Used to store temporary upload information before project creation
-  
+
   belongs_to :project, optional: true
   belongs_to :user, optional: true
   

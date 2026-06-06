@@ -1,7 +1,5 @@
 class ComplianceFileChecksController < ApplicationController
   skip_before_action :authenticate_user!, raise: false
-  MAX_UPLOAD_SIZE = 50.gigabytes
-  ALLOWED_EXTENSIONS = %w[.loom .h5ad].freeze
 
   def index
     @available_schemas = [{ id: 'scfair_7_1_0', label: 'scFAIR 7.1.0' }]
@@ -11,14 +9,10 @@ class ComplianceFileChecksController < ApplicationController
   def create
     schema_id = params[:schema_id].presence || 'scfair_7_1_0'
     source = params[:source].to_s
-    source = 'upload' if source.blank?
+    raise ArgumentError, 'Browser uploads use chunked upload via /fus/upload_chunk' if source.blank? || source == 'upload'
 
     task_id = SecureRandom.uuid
-    tmp_path = if source == 'url'
-                 download_remote_file!(task_id)
-               else
-                 store_uploaded_file!(task_id)
-               end
+    tmp_path = download_remote_file!(task_id)
 
     initial = {
       status: 'queued',
@@ -60,21 +54,6 @@ class ComplianceFileChecksController < ApplicationController
     dir
   end
 
-  def store_uploaded_file!(task_id)
-    uploaded = params[:data_file]
-    raise ArgumentError, 'No file provided' unless uploaded.respond_to?(:original_filename)
-
-    ext = File.extname(uploaded.original_filename.to_s).downcase
-    raise ArgumentError, 'File must be .loom or .h5ad' unless ALLOWED_EXTENSIONS.include?(ext)
-
-    size = uploaded.size.to_i
-    raise ArgumentError, "Invalid file size (max #{MAX_UPLOAD_SIZE / 1.gigabyte}GB)" if size <= 0 || size > MAX_UPLOAD_SIZE
-
-    path = File.join(temp_dir, "#{task_id}#{ext}")
-    File.open(path, 'wb') { |f| f.write(uploaded.read) }
-    path
-  end
-
   def download_remote_file!(task_id)
     url = params[:data_url].to_s.strip
     raise ArgumentError, 'No URL provided' if url.blank?
@@ -83,7 +62,7 @@ class ComplianceFileChecksController < ApplicationController
     raise ArgumentError, 'Only HTTP/HTTPS URLs are supported' unless uri.is_a?(URI::HTTP)
 
     ext = File.extname(uri.path.to_s).downcase
-    raise ArgumentError, 'URL must end with .loom or .h5ad' unless ALLOWED_EXTENSIONS.include?(ext)
+    raise ArgumentError, 'URL must end with .loom or .h5ad' unless ComplianceFileCheckQueueService::ALLOWED_EXTENSIONS.include?(ext)
 
     path = File.join(temp_dir, "#{task_id}#{ext}")
     total = 0
@@ -95,7 +74,8 @@ class ComplianceFileChecksController < ApplicationController
         File.open(path, 'wb') do |f|
           response.read_body do |chunk|
             total += chunk.bytesize
-            raise ArgumentError, 'Remote file is too large' if total > MAX_UPLOAD_SIZE
+            max_size = ComplianceFileCheckQueueService::MAX_UPLOAD_SIZE
+            raise ArgumentError, 'Remote file is too large' if total > max_size
             f.write(chunk)
           end
         end
@@ -106,4 +86,3 @@ class ComplianceFileChecksController < ApplicationController
     raise ArgumentError, 'Invalid URL'
   end
 end
-

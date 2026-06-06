@@ -6,8 +6,8 @@
      data-compliance-fix-project-id-value="<%= @project.id %>"
      data-compliance-fix-result-url-value="<%= project_path(@project, view: 'compliance') %>"
      data-compliance-fix-schema-constraints-value="<%= @schema_constraints.to_json %>"
-     data-compliance-fix-assay-suspension-map-value="<%= CxgSchemaRules::ASSAY_SUSPENSION_TYPE_MAP.to_json %>"
-     data-compliance-fix-assay-ancestor-terms-value="<%= CxgSchemaRules::ASSAY_ANCESTOR_TERMS.to_json %>"
+     data-compliance-fix-assay-suspension-map-value="<%= ScfairSchemaRules::ASSAY_SUSPENSION_TYPE_MAP.to_json %>"
+     data-compliance-fix-assay-ancestor-terms-value="<%= ScfairSchemaRules::ASSAY_ANCESTOR_TERMS.to_json %>"
      data-compliance-fix-organism-is-human-value="<%= @organism_info && @organism_info[:tax_id].to_s == '9606' %>"
      data-compliance-fix-current-trigger-values-value="<%= (@current_trigger_values || {}).to_json %>">
   <%

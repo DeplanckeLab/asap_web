@@ -2,13 +2,7 @@
 
 module Scfair
   class OrganismSpecificConstraintEvaluator
-    MAPPING = {
-      'NCBITaxon:9606' => 'HsapDv',
-      'NCBITaxon:10090' => 'MmusDv',
-      'NCBITaxon:6239' => 'WBls',
-      'NCBITaxon:7955' => 'ZFS',
-      'NCBITaxon:7227' => 'FBdv'
-    }.freeze
+    MAPPING = Rules.organism_dev_stage_mapping
 
     def initialize(field_values:, format:)
       @field_values = field_values || {}

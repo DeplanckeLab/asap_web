@@ -7,7 +7,7 @@ require 'shellwords'
 # Provides endpoints to validate cell metadata in loom files
 # and view validation results
 class ComplianceController < ApplicationController
-  include CxgSchemaRules
+  include ScfairSchemaRules
   include ComplianceHelpers
 
   before_action :set_project, only: %i[validate_project show_project_result fix_project apply_project_fix project_metadata_fields project_status]
@@ -94,7 +94,7 @@ class ComplianceController < ApplicationController
 
     # Run validation synchronously
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    validator = CxgLoomValidatorService.new(loom_path, project: @project, logger: Rails.logger)
+    validator = ScfairLoomValidatorService.new(loom_path, project: @project, logger: Rails.logger)
     result = validator.validate
     Rails.logger.info("[Compliance TIMING] Synchronous validation: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
     
@@ -186,7 +186,7 @@ class ComplianceController < ApplicationController
       return
     end
 
-    validator = CxgLoomValidatorService.new(file_path, logger: Rails.logger)
+    validator = ScfairLoomValidatorService.new(file_path, logger: Rails.logger)
     result = validator.validate
 
     render json: {
@@ -249,7 +249,7 @@ class ComplianceController < ApplicationController
     # Inject allowed_terms for fields with restricted ontology values
     @fixable_groups.each do |fg|
       if fg[:group][:id] == 'sex'
-        fg[:group][:allowed_terms] = CxgSchemaRules::VALID_SEX_TERMS.map { |id, name| { identifier: id, name: name } }
+        fg[:group][:allowed_terms] = ScfairSchemaRules::VALID_SEX_TERMS.map { |id, name| { identifier: id, name: name } }
       end
     end
 
@@ -524,7 +524,7 @@ class ComplianceController < ApplicationController
     })
 
     # Trigger async validation and respond immediately
-    CxgValidationJob.perform_later(@project.id)
+    ScfairValidationJob.perform_later(@project.id)
 
     respond_to do |format|
       format.json do
@@ -925,7 +925,7 @@ class ComplianceController < ApplicationController
     begin
       File.open(temp_path, 'wb') { |f| f.write(uploaded.read) }
       
-      validator = CxgLoomValidatorService.new(temp_path.to_s, logger: Rails.logger)
+      validator = ScfairLoomValidatorService.new(temp_path.to_s, logger: Rails.logger)
       result = validator.validate
 
       render json: {
@@ -961,7 +961,7 @@ class ComplianceController < ApplicationController
       return
     end
 
-    CxgValidationJob.perform_later(project.id)
+    ScfairValidationJob.perform_later(project.id)
     render json: { status: 'queued', project_id: project.id }
   end
 
@@ -984,7 +984,7 @@ class ComplianceController < ApplicationController
       return
     end
 
-    validator = CxgLoomValidatorService.new(file_path, logger: Rails.logger)
+    validator = ScfairLoomValidatorService.new(file_path, logger: Rails.logger)
     result = validator.validate
 
     render json: {
@@ -1168,7 +1168,7 @@ class ComplianceController < ApplicationController
     result = {}
 
     # Schema-allowed free-text values per field path (e.g. "unknown", "na").
-    allowed_specials = CxgLoomValidatorService::ALLOWED_SPECIAL_VALUES rescue {}
+    allowed_specials = ScfairLoomValidatorService::ALLOWED_SPECIAL_VALUES rescue {}
 
     groups.each do |g|
       valid_values = g[:term_valid_values]
@@ -1489,7 +1489,7 @@ class ComplianceController < ApplicationController
   end
 
   # ASSAY_SUSPENSION_TYPE_MAP, ASSAY_ANCESTOR_TERMS, and
-  # resolve_suspension_type_for_assay are provided by CxgSchemaRules.
+  # resolve_suspension_type_for_assay are provided by ScfairSchemaRules.
 
   # Filter ontology prefixes to only those applicable for the project's organism.
   # An ontology is applicable if its tax_ids is blank (universal) or contains

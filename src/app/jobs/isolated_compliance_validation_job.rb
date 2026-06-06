@@ -3,7 +3,7 @@
 class IsolatedComplianceValidationJob < ApplicationJob
   queue_as :default
 
-  def perform(task_id, file_path, schema_id, original_filename)
+  def perform(task_id, file_path, schema_id, original_filename, fu_id: nil)
     started_payload = {
       status: 'started',
       task_id: task_id,
@@ -14,7 +14,7 @@ class IsolatedComplianceValidationJob < ApplicationJob
     write_status(task_id, started_payload)
     broadcast(task_id, started_payload)
 
-    service = IsolatedFileComplianceService.new(file_path: file_path, schema_id: schema_id, logger: Rails.logger) do |evt|
+    service = ScfairComplianceService.new(file_path: file_path, schema_id: schema_id, logger: Rails.logger) do |evt|
       payload = {
         status: 'progress',
         task_id: task_id,
@@ -39,6 +39,7 @@ class IsolatedComplianceValidationJob < ApplicationJob
     }
     write_status(task_id, completed_payload)
     broadcast(task_id, completed_payload)
+    mark_fu_validated(fu_id)
   rescue StandardError => e
     failed_payload = {
       status: 'failed',
@@ -48,6 +49,7 @@ class IsolatedComplianceValidationJob < ApplicationJob
     }
     write_status(task_id, failed_payload)
     broadcast(task_id, failed_payload)
+    mark_fu_failed(fu_id, e.message)
     Rails.logger.error("[IsolatedComplianceValidationJob] #{e.class}: #{e.message}")
     Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
   ensure
@@ -55,6 +57,28 @@ class IsolatedComplianceValidationJob < ApplicationJob
   end
 
   private
+
+  def mark_fu_validated(fu_id)
+    return if fu_id.blank?
+
+    fu = Fu.find_by(id: fu_id)
+    return unless fu
+
+    fu.update!(status: 'validated')
+  rescue StandardError => e
+    Rails.logger.warn("[IsolatedComplianceValidationJob] Could not update Fu##{fu_id}: #{e.message}")
+  end
+
+  def mark_fu_failed(fu_id, _message)
+    return if fu_id.blank?
+
+    fu = Fu.find_by(id: fu_id)
+    return unless fu
+
+    fu.update!(status: 'validation_failed')
+  rescue StandardError => e
+    Rails.logger.warn("[IsolatedComplianceValidationJob] Could not update Fu##{fu_id}: #{e.message}")
+  end
 
   def broadcast(task_id, payload)
     ActionCable.server.broadcast("isolated_compliance_#{task_id}", payload)

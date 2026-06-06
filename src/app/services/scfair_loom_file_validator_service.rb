@@ -4,7 +4,7 @@ require 'open3'
 require 'json'
 require 'timeout'
 
-class StandaloneLoomValidatorService
+class ScfairLoomFileValidatorService
   Result = Struct.new(:valid?, :errors, :warnings, :info, :valid_checks, :schema_version, :validated_at, :field_values, keyword_init: true)
 
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
@@ -23,7 +23,8 @@ class StandaloneLoomValidatorService
       "/col_attrs/sex_ontology_term_id",
       "/col_attrs/tissue_ontology_term_id",
       "/col_attrs/self_reported_ethnicity_ontology_term_id",
-      "/attrs/organism_ontology_term_id"
+      "/attrs/organism_ontology_term_id",
+      "/attrs/schema_version"
     ]
 
     out = {}
@@ -80,7 +81,7 @@ class StandaloneLoomValidatorService
     return pre if pre
 
     base = Timeout.timeout(60) do
-      CxgLoomValidatorService.new(@loom_path, logger: @logger).validate
+      ScfairLoomValidatorService.new(@loom_path, logger: @logger).validate
     end
     field_values = extract_field_values
 
@@ -160,10 +161,10 @@ class StandaloneLoomValidatorService
     return {} unless status.success?
     JSON.parse(stdout)
   rescue JSON::ParserError => e
-    @logger.warn("[StandaloneLoomValidatorService] Could not parse field values: #{e.message}")
+    @logger.warn("[ScfairLoomFileValidatorService] Could not parse field values: #{e.message}")
     {}
   rescue StandardError => e
-    @logger.warn("[StandaloneLoomValidatorService] Could not extract field values: #{e.message}")
+    @logger.warn("[ScfairLoomFileValidatorService] Could not extract field values: #{e.message}")
     {}
   end
 

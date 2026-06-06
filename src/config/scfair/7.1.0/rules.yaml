@@ -1,0 +1,281 @@
+# scFAIR schema 7.1.0 compliance rules (single source of truth).
+# Reference: https://github.com/scFAIR/scFAIR/blob/main/schema/7.1.0/schema.md
+
+schema:
+  id: scfair_7_1_0
+  label: scFAIR 7.1.0
+  version: "7.1.0"
+  schema_version: 7.1.0_scfair
+  source_url: https://github.com/scFAIR/scFAIR/blob/main/schema/7.1.0/schema.md
+
+paths:
+  obs:
+    loom: /col_attrs
+    h5ad: obs
+  uns:
+    loom: /attrs
+    h5ad: uns
+
+required:
+  observation_fields:
+    - assay_ontology_term_id
+    - cell_type_ontology_term_id
+    - development_stage_ontology_term_id
+    - disease_ontology_term_id
+    - donor_id
+    - is_primary_data
+    - self_reported_ethnicity_ontology_term_id
+    - sex_ontology_term_id
+    - suspension_type
+    - tissue_ontology_term_id
+    - tissue_type
+  observation_labels:
+    - assay
+    - cell_type
+    - development_stage
+    - disease
+    - self_reported_ethnicity
+    - sex
+    - tissue
+  uns:
+    common:
+      - title
+      - organism_ontology_term_id
+      - schema_version
+    labels:
+      - organism
+    h5ad_only:
+      - ensembl_release
+      - ensembl_database
+      - schema_reference
+
+enum_fields:
+  tissue_type:
+    values:
+      - tissue
+      - organoid
+      - cell line
+      - primary cell culture
+  suspension_type:
+    values:
+      - cell
+      - nucleus
+      - na
+
+ontology_fields:
+  assay_ontology_term_id:
+    legacy_key: assay
+    prefixes: [EFO]
+    special_values: []
+  cell_type_ontology_term_id:
+    legacy_key: cell_type
+    prefixes: [CL, WBbt, ZFA, FBbt]
+    special_values: [unknown, na]
+  development_stage_ontology_term_id:
+    legacy_key: development_stage
+    prefixes: [HsapDv, MmusDv, WBls, ZFS, FBdv, UBERON]
+    special_values: [unknown, na]
+  disease_ontology_term_id:
+    legacy_key: disease
+    prefixes: [MONDO, PATO]
+    special_values: []
+  sex_ontology_term_id:
+    legacy_key: sex
+    prefixes: [PATO]
+    special_values: [unknown, na]
+  tissue_ontology_term_id:
+    legacy_key: tissue
+    prefixes: [UBERON, CVCL, WBbt, ZFA, FBbt]
+    special_values: []
+  self_reported_ethnicity_ontology_term_id:
+    legacy_key: ethnicity
+    prefixes: [HANCESTRO, AfPO]
+    special_values: [unknown, na, multiethnic]
+  organism_ontology_term_id:
+    legacy_key: organism
+    layer: uns
+    prefixes: [NCBITaxon]
+    special_values: []
+
+constants:
+  valid_sex_terms:
+    PATO:0000383: female
+    PATO:0000384: male
+    PATO:0001340: hermaphrodite
+    PATO:0001894: intersex
+  sex_special_values: [unknown, na]
+  banned_cell_type_terms:
+    - CL:0000003
+    - CL:0000255
+    - CL:0000548
+    - CL:0001035
+  visium_assay_terms:
+    - EFO:0010961
+    - EFO:0022857
+    - EFO:0022859
+    - EFO:0022860
+  slide_seq_assay: EFO:0030062
+
+semantic_rules:
+  assay_ontology_term_id:
+    any_roots: [EFO:0002772, EFO:0010183]
+    forbidden_exact: [EFO:0010961]
+  cell_type_ontology_term_id:
+    any_roots: [CL:0000000]
+    forbidden_branches: [WBbt:0006803]
+    forbidden_exact: banned_cell_type_terms
+    allowed_special_values: [na, unknown]
+  development_stage_ontology_term_id:
+    any_roots: [UBERON:0000105]
+    forbidden_branches: [UBERON:0000071]
+    allowed_special_values: [na, unknown]
+  tissue_ontology_term_id:
+    any_roots: [UBERON:0001062]
+  disease_ontology_term_id:
+    any_roots: [MONDO:0000001, MONDO:0021178]
+    allowed_exact: [PATO:0000461]
+  self_reported_ethnicity_ontology_term_id:
+    any_roots: [HANCESTRO:0601, HANCESTRO:0602]
+    sorted_multi: true
+    allowed_special_values: [na, unknown, multiethnic]
+  sex_ontology_term_id:
+    allowed_exact: valid_sex_terms
+    allowed_special_values: sex_special_values
+
+label_pairs:
+  assay_ontology_term_id: assay
+  cell_type_ontology_term_id: cell_type
+  development_stage_ontology_term_id: development_stage
+  disease_ontology_term_id: disease
+  self_reported_ethnicity_ontology_term_id: self_reported_ethnicity
+  sex_ontology_term_id: sex
+  tissue_ontology_term_id: tissue
+  organism_ontology_term_id: organism
+
+cross_field:
+  assay_ancestor_terms:
+    - EFO:0030080
+    - EFO:0007045
+    - EFO:0002761
+    - EFO:0008919
+    - EFO:0010184
+    - EFO:0008994
+  assay_suspension_type_map:
+    EFO:0700004: [cell]
+    EFO:0700003: [cell]
+    EFO:0010010: [cell, nucleus]
+    EFO:0008720: [nucleus]
+    EFO:0008722: [cell, nucleus]
+    EFO:0700011: [cell, nucleus]
+    EFO:0008780: [cell, nucleus]
+    EFO:0008796: [cell]
+    EFO:0030060: [cell, nucleus]
+    EFO:0008992: [na]
+    EFO:0030002: [cell]
+    EFO:0008853: [cell]
+    EFO:0022490: [cell, nucleus]
+    EFO:0030026: [nucleus]
+    EFO:0010550: [cell, nucleus]
+    EFO:0030028: [cell, nucleus]
+    EFO:0008953: [cell]
+    EFO:0700010: [cell, nucleus]
+    EFO:0009919: [cell, nucleus]
+    EFO:0009899: [cell, nucleus]
+    EFO:0009922: [cell, nucleus]
+    EFO:0022604: [cell, nucleus]
+    EFO:0011025: [cell, nucleus]
+    EFO:0009900: [cell, nucleus]
+    EFO:0022605: [cell, nucleus]
+    EFO:0030059: [cell, nucleus]
+    EFO:0008931: [cell, nucleus]
+    EFO:0010891: [nucleus]
+    EFO:0010961: [na]
+    EFO:0022857: [na]
+    EFO:0022859: [na]
+    EFO:0022860: [na]
+    EFO:0030062: [na]
+    EFO:0030080: [cell, nucleus]
+    EFO:0007045: [nucleus]
+    EFO:0002761: [nucleus]
+    EFO:0008919: [cell]
+    EFO:0010184: [cell, nucleus]
+    EFO:0008994: [na]
+  cell_line_forced_fields:
+    - field: self_reported_ethnicity_ontology_term_id
+      value: na
+      label_field: self_reported_ethnicity
+      label_value: na
+    - field: sex_ontology_term_id
+      value: na
+      label_field: sex
+      label_value: na
+    - field: development_stage_ontology_term_id
+      value: unknown
+      label_field: development_stage
+      label_value: unknown
+    - field: donor_id
+      value: na
+    - field: suspension_type
+      value: na
+  organism_dev_stage_mapping:
+    NCBITaxon:9606: HsapDv
+    NCBITaxon:10090: MmusDv
+    NCBITaxon:6239: WBls
+    NCBITaxon:7955: ZFS
+    NCBITaxon:7227: FBdv
+
+checks_catalog:
+  common:
+    - id: obs.required_presence
+      label: Required observation metadata fields
+      applies_to: [loom, h5ad]
+    - id: uns.required_presence
+      label: Required dataset metadata fields
+      applies_to: [loom, h5ad]
+    - id: schema.version
+      label: Schema version compatibility
+      applies_to: [loom, h5ad]
+    - id: ontology.format
+      label: Ontology identifier format checks
+      applies_to: [loom, h5ad]
+    - id: cross_field.constraints
+      label: Cross-field schema constraints
+      applies_to: [loom, h5ad]
+    - id: ontology.database_resolution
+      label: Ontology term resolution in ASAP DB
+      applies_to: [loom, h5ad]
+    - id: ontology.organism_dev_stage
+      label: Organism-specific development stage constraints
+      applies_to: [loom, h5ad]
+    - id: ontology.semantics
+      label: Ontology semantic constraints
+      applies_to: [loom, h5ad]
+  loom_only:
+    - id: loom.paths
+      label: Loom metadata path checks
+      applies_to: [loom]
+    - id: loom.mapping_manifest
+      label: anndata_mapping manifest checks
+      applies_to: [loom]
+  h5ad_only:
+    - id: h5ad.structure
+      label: AnnData structural integrity
+      applies_to: [h5ad]
+    - id: h5ad.embeddings
+      label: obsm/varm/obsp/varp checks
+      applies_to: [h5ad]
+    - id: h5ad.matrix_encoding
+      label: Matrix encoding and finite value checks
+      applies_to: [h5ad]
+    - id: extension.spatial
+      label: Spatial schema extension checks
+      applies_to: [h5ad]
+    - id: extension.perturb
+      label: Perturbation schema extension checks
+      applies_to: [h5ad]
+    - id: extension.atac
+      label: ATAC schema extension checks
+      applies_to: [h5ad]
+    - id: extension.analysis_json
+      label: analysis_json extension checks
+      applies_to: [h5ad]

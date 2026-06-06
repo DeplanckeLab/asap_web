@@ -4,10 +4,10 @@
 #
 # Used by both:
 # - ComplianceController (to auto-fill / force values in the fix form)
-# - CxgLoomValidatorService (to report errors/warnings during validation)
+# - ScfairLoomValidatorService (to report errors/warnings during validation)
 #
 # Reference: https://github.com/scFAIR/scFAIR/blob/main/schema/7.1.0/README.md
-module CxgSchemaRules
+module ScfairSchemaRules
   extend ActiveSupport::Concern
 
   # ── Assay -> suspension_type mapping ──────────────────────────────────
@@ -15,85 +15,11 @@ module CxgSchemaRules
   # Maps EFO assay terms to their allowed suspension_type values.
   # When a single value is allowed, suspension_type is fully determined.
   # When multiple values are allowed, the user must pick one.
-  # Source: scFAIR schema 7.1.0, suspension_type table.
-  ASSAY_SUSPENSION_TYPE_MAP = {
-    # Exact assay terms -> allowed suspension_type values
-    'EFO:0700004' => ['cell'],                    # BD Rhapsody Targeted mRNA
-    'EFO:0700003' => ['cell'],                    # BD Rhapsody Whole Transcriptome Analysis
-    'EFO:0010010' => ['cell', 'nucleus'],          # CEL-seq2
-    'EFO:0008720' => ['nucleus'],                  # DroNc-seq
-    'EFO:0008722' => ['cell', 'nucleus'],          # Drop-seq
-    'EFO:0700011' => ['cell', 'nucleus'],          # GEXSCOPE technology
-    'EFO:0008780' => ['cell', 'nucleus'],          # inDrop
-    'EFO:0008796' => ['cell'],                    # MARS-seq
-    'EFO:0030060' => ['cell', 'nucleus'],          # mCT-seq
-    'EFO:0008992' => ['na'],                      # MERFISH
-    'EFO:0030002' => ['cell'],                    # microwell-seq
-    'EFO:0008853' => ['cell'],                    # Patch-seq
-    'EFO:0022490' => ['cell', 'nucleus'],          # ScaleBio single cell RNA sequencing
-    'EFO:0030026' => ['nucleus'],                  # sci-Plex
-    'EFO:0010550' => ['cell', 'nucleus'],          # sci-RNA-seq
-    'EFO:0030028' => ['cell', 'nucleus'],          # sci-RNA-seq3
-    'EFO:0008953' => ['cell'],                    # STRT-seq
-    'EFO:0700010' => ['cell', 'nucleus'],          # TruDrop
-    'EFO:0009919' => ['cell', 'nucleus'],          # SPLiT-seq
-    # Common 10x assays (descendants of EFO:0030080)
-    'EFO:0009899' => ['cell', 'nucleus'],          # 10x 3' v2
-    'EFO:0009922' => ['cell', 'nucleus'],          # 10x 3' v3
-    'EFO:0022604' => ['cell', 'nucleus'],          # 10x 3' v4
-    'EFO:0011025' => ['cell', 'nucleus'],          # 10x 5' v1
-    'EFO:0009900' => ['cell', 'nucleus'],          # 10x 5' v2
-    'EFO:0022605' => ['cell', 'nucleus'],          # 10x 5' v3
-    'EFO:0030059' => ['cell', 'nucleus'],          # 10x multiome
-    # Smart-like descendants
-    'EFO:0008931' => ['cell', 'nucleus'],          # Smart-seq2
-    # ATAC-seq descendants
-    'EFO:0010891' => ['nucleus'],                  # scATAC-seq
-    # Spatial assays
-    'EFO:0010961' => ['na'],                      # Visium Spatial Gene Expression
-    'EFO:0022857' => ['na'],                      # Visium Spatial Gene Expression V1
-    'EFO:0022859' => ['na'],                      # Visium CytAssist 6.5mm
-    'EFO:0022860' => ['na'],                      # Visium CytAssist 11mm
-    'EFO:0030062' => ['na'],                      # Slide-seqV2
-    # Ancestor-based rules (used as fallback for unknown descendants):
-    'EFO:0030080' => ['cell', 'nucleus'],          # 10x transcription profiling
-    'EFO:0007045' => ['nucleus'],                  # ATAC-seq
-    'EFO:0002761' => ['nucleus'],                  # methylation profiling by HTS
-    'EFO:0008919' => ['cell'],                    # Seq-Well and descendants
-    'EFO:0010184' => ['cell', 'nucleus'],          # Smart-like and descendants
-    'EFO:0008994' => ['na'],                      # spatial transcriptomics and descendants
-  }.freeze
-
-  # Terms in ASSAY_SUSPENSION_TYPE_MAP that should match descendants too
-  ASSAY_ANCESTOR_TERMS = %w[
-    EFO:0030080 EFO:0007045 EFO:0002761 EFO:0008919 EFO:0010184 EFO:0008994
-  ].freeze
-
-  # ── Allowed sex_ontology_term_id values ──────────────────────────────
-  #
-  # The scFAIR schema restricts sex_ontology_term_id to
-  # exactly these three PATO terms (plus the special values "unknown"
-  # and "na" handled separately).
-  VALID_SEX_TERMS = {
-    'PATO:0000383' => 'female',
-    'PATO:0000384' => 'male',
-    'PATO:0001340' => 'hermaphrodite'
-  }.freeze
-
-  # ── tissue_type = "cell line" forced fields ───────────────────────────
-  #
-  # When tissue_type is "cell line", the following fields are forced.
-  # Each entry: { field:, value:, label_field: (optional), label_value: (optional) }
-  CELL_LINE_FORCED_FIELDS = [
-    { field: 'self_reported_ethnicity_ontology_term_id', value: 'na',
-      label_field: 'self_reported_ethnicity', label_value: 'na' },
-    { field: 'sex_ontology_term_id', value: 'na',
-      label_field: 'sex', label_value: 'na' },
-    { field: 'development_stage_ontology_term_id', value: 'unknown',
-      label_field: 'development_stage', label_value: 'unknown' },
-    { field: 'donor_id', value: 'na' },
-    { field: 'suspension_type', value: 'na' }
-  ].freeze
+  # Source: scFAIR schema 7.1.0, suspension_type table (config/scfair/7.1.0/rules.yaml).
+  ASSAY_SUSPENSION_TYPE_MAP = Scfair::Rules.assay_suspension_type_map
+  ASSAY_ANCESTOR_TERMS = Scfair::Rules.assay_ancestor_terms
+  VALID_SEX_TERMS = Scfair::Rules.valid_sex_terms
+  CELL_LINE_FORCED_FIELDS = Scfair::Rules.cell_line_forced_fields
 
   # ── Shared resolution method ──────────────────────────────────────────
 

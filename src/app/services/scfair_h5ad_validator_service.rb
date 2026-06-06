@@ -2,8 +2,9 @@
 
 require 'open3'
 require 'json'
+require 'base64'
 
-class StandaloneH5adValidatorService
+class ScfairH5adValidatorService
   class StreamingError < StandardError; end
 
   Result = Struct.new(:valid?, :errors, :warnings, :info, :valid_checks, :schema_version, :validated_at, :field_values, keyword_init: true)
@@ -12,7 +13,8 @@ class StandaloneH5adValidatorService
   PROGRESS_PREFIX = 'PROGRESS'
   RESULT_PREFIX = 'RESULT'
 
-  PYTHON_SCRIPT = <<~PYTHON
+  PYTHON_SCRIPT_TEMPLATE = <<~PYTHON
+    import base64
     import json
     import re
     import sys
@@ -24,53 +26,12 @@ class StandaloneH5adValidatorService
     PROGRESS_PREFIX = "#{PROGRESS_PREFIX}"
     RESULT_PREFIX = "#{RESULT_PREFIX}"
 
-    REQUIRED_OBS = [
-      "assay_ontology_term_id",
-      "cell_type_ontology_term_id",
-      "development_stage_ontology_term_id",
-      "disease_ontology_term_id",
-      "donor_id",
-      "is_primary_data",
-      "self_reported_ethnicity_ontology_term_id",
-      "sex_ontology_term_id",
-      "suspension_type",
-      "tissue_ontology_term_id",
-      "tissue_type",
-      "assay",
-      "cell_type",
-      "development_stage",
-      "disease",
-      "self_reported_ethnicity",
-      "sex",
-      "tissue"
-    ]
-    REQUIRED_UNS = [
-      "title",
-      "organism_ontology_term_id",
-      "organism",
-      "ensembl_release",
-      "ensembl_database",
-      "schema_reference",
-      "schema_version",
-    ]
-
-    ONTOLOGY_FIELDS = {
-      "obs/assay_ontology_term_id": ["EFO"],
-      "obs/cell_type_ontology_term_id": ["CL", "WBbt", "ZFA", "FBbt"],
-      "obs/development_stage_ontology_term_id": ["HsapDv", "MmusDv", "WBls", "ZFS", "FBdv", "UBERON"],
-      "obs/disease_ontology_term_id": ["MONDO", "PATO"],
-      "obs/sex_ontology_term_id": ["PATO"],
-      "obs/tissue_ontology_term_id": ["UBERON", "CVCL", "WBbt", "ZFA", "FBbt"],
-      "obs/self_reported_ethnicity_ontology_term_id": ["HANCESTRO", "AfPO"],
-      "uns/organism_ontology_term_id": ["NCBITaxon"]
-    }
-
-    SPECIAL_VALUES = {
-      "obs/cell_type_ontology_term_id": {"unknown", "na"},
-      "obs/development_stage_ontology_term_id": {"unknown", "na"},
-      "obs/sex_ontology_term_id": {"unknown", "na"},
-      "obs/self_reported_ethnicity_ontology_term_id": {"unknown", "na", "multiethnic"},
-    }
+    RULES = json.loads(base64.b64decode("__RULES_B64__").decode("utf-8"))
+    REQUIRED_OBS = RULES["required_obs"]
+    REQUIRED_UNS = RULES["required_uns"]
+    ONTOLOGY_FIELDS = RULES["ontology_fields"]
+    SPECIAL_VALUES = {k: set(v) for k, v in RULES["special_values"].items()}
+    ENUM_FIELDS = RULES.get("enum_fields", {})
 
     TOTAL_STEPS = 8 + len(REQUIRED_OBS) + len(REQUIRED_UNS) + len(ONTOLOGY_FIELDS)
 
@@ -203,6 +164,18 @@ class StandaloneH5adValidatorService
           if prefix not in prefixes:
             warnings.append({"field": field_path, "message": f"Unexpected ontology prefix '{prefix}' for {field_path}"})
 
+    def check_enum_values(field_path, values):
+      allowed = ENUM_FIELDS.get(field_path)
+      if not allowed:
+        return
+      valid = {v.lower() for v in allowed}
+      invalid = [v for v in values if v.lower() not in valid]
+      if invalid:
+        errors.append({
+          "field": field_path,
+          "message": f"Invalid value(s): {', '.join(invalid[:5])}. Allowed: {', '.join(allowed)}"
+        })
+
     def validate_from_h5py(root):
       emit_progress("matrix", "Checking matrix dimensions")
       n_obs, n_vars = matrix_shape_h5py(root)
@@ -245,7 +218,9 @@ class StandaloneH5adValidatorService
           if obs_group is not None:
             vals = read_obs_column_values(obs_group, field)
             if vals:
-              field_values[f"obs/{field}"] = vals[:200]
+              field_path = f"obs/{field}"
+              field_values[field_path] = vals[:200]
+              check_enum_values(field_path, vals)
         else:
           errors.append({"field": f"obs/{field}", "message": "Missing required observation field"})
 
@@ -258,7 +233,8 @@ class StandaloneH5adValidatorService
       for field in REQUIRED_UNS:
         emit_progress("uns", f"Checking uns/{field}")
         if field in uns_present:
-          valid_checks.append({"field": f"uns/{field}", "message": "Required field present"})
+          if field != "schema_version":
+            valid_checks.append({"field": f"uns/{field}", "message": "Required field present"})
           if uns_group is not None:
             vals = read_uns_value(uns_group, field)
             if vals:
@@ -326,7 +302,9 @@ class StandaloneH5adValidatorService
           valid_checks.append({"field": f"obs/{field}", "message": "Required field present"})
           values = [str(v) for v in adata.obs[field].dropna().astype(str).unique().tolist()]
           if values:
-            field_values[f"obs/{field}"] = values[:200]
+            field_path = f"obs/{field}"
+            field_values[field_path] = values[:200]
+            check_enum_values(field_path, values)
         else:
           errors.append({"field": f"obs/{field}", "message": "Missing required observation field"})
 
@@ -414,7 +392,7 @@ class StandaloneH5adValidatorService
       info: info,
       valid_checks: valid_checks,
       field_values: field_values,
-      schema_version: '7.1.0',
+      schema_version: Scfair::Rules.schema_version,
       validated_at: Time.current.iso8601
     )
   rescue StreamingError => e
@@ -425,7 +403,7 @@ class StandaloneH5adValidatorService
       info: [],
       valid_checks: [],
       field_values: {},
-      schema_version: '7.1.0',
+      schema_version: Scfair::Rules.schema_version,
       validated_at: Time.current.iso8601
     )
   rescue JSON::ParserError => e
@@ -436,7 +414,7 @@ class StandaloneH5adValidatorService
       info: [],
       valid_checks: [],
       field_values: {},
-      schema_version: '7.1.0',
+      schema_version: Scfair::Rules.schema_version,
       validated_at: Time.current.iso8601
     )
   end
@@ -449,7 +427,7 @@ class StandaloneH5adValidatorService
     stderr_text = +''
 
     Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
-      stdin.write(PYTHON_SCRIPT)
+      stdin.write(python_script)
       stdin.close
 
       stdout.each_line do |line|
@@ -461,7 +439,7 @@ class StandaloneH5adValidatorService
         elsif line.start_with?("#{RESULT_PREFIX}\t")
           result_payload = line.delete_prefix("#{RESULT_PREFIX}\t")
         else
-          @logger.warn("[StandaloneH5adValidatorService] Unexpected stdout: #{line[0, 200]}")
+          @logger.warn("[ScfairH5adValidatorService] Unexpected stdout: #{line[0, 200]}")
         end
       end
 
@@ -499,6 +477,13 @@ class StandaloneH5adValidatorService
       total: payload['total']
     )
   rescue JSON::ParserError => e
-    @logger.warn("[StandaloneH5adValidatorService] Invalid progress payload: #{e.message}")
+    @logger.warn("[ScfairH5adValidatorService] Invalid progress payload: #{e.message}")
+  end
+
+  def python_script
+    @python_script ||= begin
+      rules_b64 = Base64.strict_encode64(Scfair::Rules.h5ad_validator_config.to_json)
+      PYTHON_SCRIPT_TEMPLATE.gsub('__RULES_B64__', rules_b64)
+    end
   end
 end

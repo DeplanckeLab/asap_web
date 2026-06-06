@@ -148,7 +148,7 @@ module ComplianceHelpers
   def resolve_field_values(groups, raw_values)
     result = {}
 
-    allowed_specials = CxgLoomValidatorService::ALLOWED_SPECIAL_VALUES rescue {}
+    allowed_specials = ScfairLoomValidatorService::ALLOWED_SPECIAL_VALUES rescue {}
 
     groups.each do |g|
       valid_values = g[:term_valid_values]

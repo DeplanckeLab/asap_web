@@ -2,7 +2,7 @@
 
 # Background job to validate a loom file against the scFAIR schema
 # Runs asynchronously after parsing is finished
-class CxgValidationJob < ApplicationJob
+class ScfairValidationJob < ApplicationJob
   queue_as :default
 
   # Perform validation on a project's loom file
@@ -11,11 +11,11 @@ class CxgValidationJob < ApplicationJob
   #   - :schema_version [String] Schema version to validate against (default: '7.1.0')
   #   - :loom_path [String] Override path to loom file (optional)
   def perform(project_id, options = {})
-    Rails.logger.info("[CxgValidationJob] Starting validation for Project##{project_id}")
+    Rails.logger.info("[ScfairValidationJob] Starting validation for Project##{project_id}")
     
     project = Project.find_by(id: project_id)
     unless project
-      Rails.logger.error("[CxgValidationJob] Project##{project_id} not found")
+      Rails.logger.error("[ScfairValidationJob] Project##{project_id} not found")
       return
     end
 
@@ -30,19 +30,19 @@ class CxgValidationJob < ApplicationJob
       return
     end
 
-    Rails.logger.info("[CxgValidationJob] Validating loom file: #{loom_path}")
+    Rails.logger.info("[ScfairValidationJob] Validating loom file: #{loom_path}")
     broadcast(project_id, status: 'validating', message: "Validating #{File.basename(loom_path)}...")
 
     # Run validation
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    validator = CxgLoomValidatorService.new(loom_path, project: project, logger: Rails.logger)
+    validator = ScfairLoomValidatorService.new(loom_path, project: project, logger: Rails.logger)
     result = validator.validate
-    Rails.logger.info("[CxgValidationJob TIMING] Validation: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
+    Rails.logger.info("[ScfairValidationJob TIMING] Validation: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
 
     # Save results
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     save_validation_result(project, result, loom_path)
-    Rails.logger.info("[CxgValidationJob TIMING] Save result: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
+    Rails.logger.info("[ScfairValidationJob TIMING] Save result: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
 
     # Build redirect URL for the compliance view on the project page
     redirect_url = begin
@@ -75,9 +75,9 @@ class CxgValidationJob < ApplicationJob
       )
     end
 
-    Rails.logger.info("[CxgValidationJob] Validation complete for Project##{project_id}. Valid: #{result.valid?}, Errors: #{result.errors.count}, Warnings: #{result.warnings.count}")
+    Rails.logger.info("[ScfairValidationJob] Validation complete for Project##{project_id}. Valid: #{result.valid?}, Errors: #{result.errors.count}, Warnings: #{result.warnings.count}")
   rescue StandardError => e
-    Rails.logger.error("[CxgValidationJob] Error: #{e.class}: #{e.message}")
+    Rails.logger.error("[ScfairValidationJob] Error: #{e.class}: #{e.message}")
     Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
 
     broadcast(project_id, status: 'failed', message: "Validation error: #{e.message}")
@@ -102,7 +102,7 @@ class CxgValidationJob < ApplicationJob
       parsing_output = File.join(user_data_dir, project.user_id.to_s, project.key, 'parsing', 'output.loom')
       
       if File.exist?(parsing_output)
-        Rails.logger.info("[CxgValidationJob] Found loom file at: #{parsing_output}")
+        Rails.logger.info("[ScfairValidationJob] Found loom file at: #{parsing_output}")
         return parsing_output
       end
       
@@ -111,7 +111,7 @@ class CxgValidationJob < ApplicationJob
       if File.directory?(project_dir)
         loom_files = Dir.glob(File.join(project_dir, '**', '*.loom'))
         if loom_files.any?
-          Rails.logger.info("[CxgValidationJob] Found loom file at: #{loom_files.first}")
+          Rails.logger.info("[ScfairValidationJob] Found loom file at: #{loom_files.first}")
           return loom_files.first
         end
       end
@@ -168,7 +168,7 @@ class CxgValidationJob < ApplicationJob
     else
       {
         valid: false,
-        schema_version: CxgLoomValidatorService::SCHEMA_VERSION,
+        schema_version: ScfairLoomValidatorService::SCHEMA_VERSION,
         schema_name: schema_meta[:name],
         validated_at: Time.current.iso8601,
         error: error_or_path
@@ -195,13 +195,13 @@ class CxgValidationJob < ApplicationJob
         if cv.result_file_path
           FileUtils.mkdir_p(File.dirname(cv.result_file_path))
           File.write(cv.result_file_path, json_content)
-          Rails.logger.info("[CxgValidationJob] Saved validation result to: #{cv.result_file_path}")
+          Rails.logger.info("[ScfairValidationJob] Saved validation result to: #{cv.result_file_path}")
         end
       else
-        Rails.logger.info("[CxgValidationJob] Validation result unchanged (digest: #{digest}), skipping history entry")
+        Rails.logger.info("[ScfairValidationJob] Validation result unchanged (digest: #{digest}), skipping history entry")
       end
     rescue StandardError => e
-      Rails.logger.error("[CxgValidationJob] Could not record validation history: #{e.message}")
+      Rails.logger.error("[ScfairValidationJob] Could not record validation history: #{e.message}")
     end
 
     # Always overwrite the latest result file for backward compat
@@ -231,9 +231,9 @@ class CxgValidationJob < ApplicationJob
         begin
           FileUtils.mkdir_p(File.dirname(validation_path))
           File.write(validation_path, json_content)
-          Rails.logger.info("[CxgValidationJob] Saved latest result to: #{validation_path}")
+          Rails.logger.info("[ScfairValidationJob] Saved latest result to: #{validation_path}")
         rescue StandardError => e
-          Rails.logger.error("[CxgValidationJob] Could not save validation result: #{e.message}")
+          Rails.logger.error("[ScfairValidationJob] Could not save validation result: #{e.message}")
         end
       end
     end

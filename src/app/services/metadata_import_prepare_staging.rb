@@ -111,7 +111,7 @@ class MetadataImportPrepareStaging
       project_id: @project.id,
       project_key: @project.key,
       status: "new",
-      upload_type: 2,
+      upload_type: UploadType.id_for('metadata_clipboard'),
       upload_file_name: "clipboard.txt",
       upload_content_type: "text/plain",
       user_id: @user_id

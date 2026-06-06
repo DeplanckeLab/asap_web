@@ -2,7 +2,7 @@
 
 module Scfair
   class CrossFieldConstraintEvaluator
-    include CxgSchemaRules
+    include ScfairSchemaRules
 
     def initialize(field_values:, format:)
       @field_values = field_values || {}

@@ -141,15 +141,7 @@ module Scfair
     private
 
     def field_names
-      %w[
-        assay_ontology_term_id
-        cell_type_ontology_term_id
-        development_stage_ontology_term_id
-        disease_ontology_term_id
-        self_reported_ethnicity_ontology_term_id
-        sex_ontology_term_id
-        tissue_ontology_term_id
-      ]
+      Rules.semantic_field_names
     end
 
     def path_for(field_name)

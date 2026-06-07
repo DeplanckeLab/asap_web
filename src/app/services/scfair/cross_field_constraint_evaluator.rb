@@ -96,6 +96,7 @@ module Scfair
       errors.concat(cf8[:errors])
 
       rule_checks << cf9_visium_in_tissue_check(prefix, assays)
+      rule_checks << cf10_spatial_metadata_presence_check
 
       { errors: errors, warnings: warnings, valid_checks: rule_checks }
     end
@@ -181,6 +182,39 @@ module Scfair
         field: "cross-field.#{id}",
         status: failed ? 'failed' : 'passed',
         message: message
+      }
+    end
+
+    def cf10_spatial_metadata_presence_check
+      spatial_assay = SpatialAssayHelper.any_spatial_assay?(@field_values, @format, resolver: @resolver)
+      metadata_present = SpatialAssayHelper.spatial_metadata_present?(@field_values, @format)
+      spatial_root = @format == 'h5ad' ? 'uns/spatial' : '/attrs/spatial'
+      field = 'cross-field.CF-10-spatial-metadata-presence'
+
+      unless spatial_assay || metadata_present
+        return { field: field, status: 'skipped', message: 'Not applicable' }
+      end
+
+      if metadata_present && !spatial_assay
+        return {
+          field: field,
+          status: 'failed',
+          message: "#{spatial_root} must not be present unless assay is Visium or Slide-seqV2"
+        }
+      end
+
+      if spatial_assay && !metadata_present
+        return {
+          field: field,
+          status: 'failed',
+          message: "Missing #{spatial_root} metadata (required for spatial assays)"
+        }
+      end
+
+      {
+        field: field,
+        status: 'passed',
+        message: 'Spatial metadata presence consistent with assay'
       }
     end
 

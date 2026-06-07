@@ -71,7 +71,7 @@ class ScfairSpatialStructureValidatorTest < TestBaseWithoutFixtures
     assert result[:errors].any? { |entry| entry[:field] == 'extension.spatial.scalefactors.spot_diameter_fullres' }
   end
 
-  test 'rejects spatial metadata for non-spatial assays' do
+  test 'skips structure checks when spatial metadata is present for a non-spatial assay' do
     result = Scfair::SpatialStructureValidator.new(
       field_values: {
         'obs/assay_ontology_term_id' => ['EFO:0009899'],
@@ -80,7 +80,10 @@ class ScfairSpatialStructureValidatorTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    assert result[:errors].any? { |entry| entry[:message].include?('must not be present') }
+    structure = result[:valid_checks].find { |check| check[:field] == 'extension.spatial.structure' }
+    assert_equal 'skipped', structure[:status]
+    assert_match(/CF-10/, structure[:message])
+    assert_empty result[:errors]
   end
 
   test 'slide-seq requires is_single but not visium library metadata' do

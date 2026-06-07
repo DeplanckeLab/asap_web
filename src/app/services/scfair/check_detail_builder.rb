@@ -5,7 +5,12 @@ module Scfair
     CROSS_FIELD_RULES = {
       'cross-field.CF-1-assay-suspension' => {
         title: 'CF-1: Assay and suspension_type',
-        summary: 'suspension_type must be consistent with assay_ontology_term_id according to the schema assay map.'
+        summary: 'suspension_type must be consistent with assay_ontology_term_id according to the schema assay map.',
+        checks: [
+          'Looks up assay_ontology_term_id in the schema assay to suspension_type map',
+          'Falls back to ancestor assay terms when an exact map entry is missing',
+          'Fails when suspension_type is not one of the allowed values for the assay'
+        ]
       },
       'cross-field.CF-2a-cell-line-ethnicity' => {
         title: 'CF-2a: Cell line ethnicity',
@@ -41,11 +46,21 @@ module Scfair
       },
       'cross-field.CF-5-spatial-assay-uniformity' => {
         title: 'CF-5: Spatial assay uniformity',
-        summary: 'Spatial assay datasets (Visium, Slide-seq) must use a single assay value across all cells.'
+        summary: 'Spatial assay datasets (Visium, Slide-seq) must use a single assay value across all cells.',
+        checks: [
+          'Runs when assay_ontology_term_id is a Visium descendant (EFO:0010961) or Slide-seqV2 (EFO:0030062)',
+          'Collects all unique assay values in the dataset',
+          'Fails if more than one distinct assay value is present while a spatial assay is detected'
+        ]
       },
       'cross-field.CF-6-spatial-primary-data' => {
         title: 'CF-6: Spatial is_primary_data',
-        summary: 'When spatial.is_single is false, is_primary_data must be false.'
+        summary: 'When spatial.is_single is false, is_primary_data must be false.',
+        checks: [
+          'Reads spatial.is_single from uns/spatial (H5AD) or /attrs/spatial/is_single (Loom)',
+          'Compares against is_primary_data on each observation',
+          'Fails when is_single is false and is_primary_data is true'
+        ]
       },
       'cross-field.CF-7-cell-line-cell-type' => {
         title: 'CF-7: Cell line cell type',
@@ -53,7 +68,23 @@ module Scfair
       },
       'cross-field.CF-9-visium-in-tissue' => {
         title: 'CF-9: Visium in_tissue spots',
-        summary: 'When spatial.is_single is true, Visium spots with in_tissue=0 must use cell_type_ontology_term_id=unknown.'
+        summary: 'When spatial.is_single is true, Visium spots with in_tissue=0 must use cell_type_ontology_term_id=unknown.',
+        checks: [
+          'Applies to Visium assays when spatial.is_single is true',
+          'Requires in_tissue observation metadata to be present',
+          'When all spots are out of tissue (in_tissue=0 only), cell_type_ontology_term_id must be unknown',
+          'Skipped when in_tissue mixes 0 and 1 (per-spot pairing not available in metadata summary)'
+        ]
+      },
+      'cross-field.CF-10-spatial-metadata-presence' => {
+        title: 'CF-10: Spatial metadata presence',
+        summary: 'uns/spatial (or /attrs/spatial on Loom) must be present for Visium or Slide-seqV2 assays and absent otherwise.',
+        checks: [
+          'Reads assay_ontology_term_id and checks for Visium (EFO:0010961 descendants) or Slide-seqV2 (EFO:0030062)',
+          'Detects spatial metadata from keys under uns/spatial or /attrs/spatial',
+          'Fails when spatial metadata is present but the assay is not spatial',
+          'Fails when the assay is spatial but spatial metadata is missing'
+        ]
       }
     }.freeze
 
@@ -95,15 +126,192 @@ module Scfair
       'h5ad.embeddings' => 'Optional embedding matrices in obsm/varm/obsp/varp.',
       'h5ad.matrix_encoding' => 'Expression matrix encoding and finite numeric values.',
       'extension.spatial' => 'Spatial transcriptomics extension metadata under uns/spatial.',
-      'extension.spatial.structure' => 'uns/spatial dictionary structure (is_single, library images, scalefactors).',
+      'extension.spatial.structure' => 'uns/spatial dictionary layout (is_single, library identifiers, scalefactors).',
       'extension.spatial.library' => 'Visium library identifier block under uns/spatial when is_single is true.',
       'extension.spatial.obs' => 'Visium spot metadata columns (array_row, array_col, in_tissue).',
-      'extension.spatial.assets' => 'Spatial tissue images and obsm spatial coordinate embedding.',
+      'extension.spatial.assets' => 'Tissue image array content and obsm spatial coordinate embedding.',
       'extension.spatial.obsm' => 'obsm spatial embedding required when spatial.is_single is true.',
       'extension.spatial.images.hires' => 'Visium hires tissue image array (uint8, shape, pixel size).',
-      'extension.perturb' => 'Genetic perturbation extension metadata.',
+      'extension.perturb' => 'Genetic perturbation extension metadata (scFAIR schema_perturb.md).',
+      'extension.perturb.presence' => 'Conditional presence of genetic_perturbation_id, genetic_perturbation_strategy, and uns genetic_perturbations.',
+      'extension.perturb.obs.id' => 'obs genetic_perturbation_id values and references to uns genetic_perturbations.',
+      'extension.perturb.strategy' => 'obs genetic_perturbation_strategy enum values.',
+      'extension.perturb.uns' => 'uns genetic_perturbations dictionary structure and curator-required fields.',
+      'extension.perturb.organism' => 'Organism restriction for perturbation datasets.',
       'extension.atac' => 'ATAC-seq extension metadata.',
-      'extension.analysis_json' => 'analysis_json extension metadata.'
+      'extension.analysis_json' => 'analysis_json extension metadata.',
+      'metadata.other.reserved_prefix' => 'Metadata field names must not start with "__".',
+      'metadata.other.unique_names.obs' => 'Observation metadata field names must be unique.',
+      'metadata.other.unique_names.var' => 'Variable (gene) metadata field names must be unique.',
+      'metadata.other.deprecated' => 'Deprecated reserved names from prior schema versions must not be present.'
+    }.freeze
+
+    METADATA_OTHER_TITLES = {
+      'metadata.other.reserved_prefix' => 'Reserved name prefix',
+      'metadata.other.unique_names.obs' => 'Unique obs metadata names',
+      'metadata.other.unique_names.var' => 'Unique var metadata names',
+      'metadata.other.deprecated' => 'Deprecated reserved names'
+    }.freeze
+
+    CATEGORY_CHECKS = {
+      'obs.required_presence' => [
+        'Each required observation (obs / col_attrs) column from scFAIR 7.1.0 is present',
+        'Ontology term ID fields: assay, cell_type, disease, development_stage, sex, tissue, ethnicity',
+        'Human-readable label columns paired with each ontology term ID',
+        'Categorical fields: tissue_type, suspension_type, donor_id, is_primary_data'
+      ],
+      'uns.required_presence' => [
+        'Each required dataset metadata field is present in uns (H5AD) or /attrs (Loom)',
+        'Common fields: title, organism_ontology_term_id, organism label, schema_version',
+        'H5AD-only fields: ensembl_release, ensembl_database, schema_reference'
+      ],
+      'schema.version' => [
+        'Reads schema_version from uns/attrs',
+        'Compares major.minor version against the reference scFAIR release',
+        'Accepts compatible schema_version identifiers (e.g. 7.1.0_scfair)'
+      ],
+      'ontology.format' => [
+        'Validates OBO-style PREFIX:ID syntax for ontology term fields',
+        'Checks allowed ontology prefixes per field (EFO, CL, UBERON, MONDO, etc.)',
+        'Allows documented special placeholder values (na, unknown, multiethnic)',
+        'Accepts Cellosaurus CVCL_* identifiers where the schema permits them'
+      ],
+      'cross-field.constraints' => [
+        'CF-1: assay_ontology_term_id determines allowed suspension_type values',
+        'CF-2a-2f: tissue_type "cell line" forces ethnicity, sex, development_stage, donor_id, suspension_type, and tissue ID rules',
+        'CF-3: donor_id must not be "na" except for cell lines',
+        'CF-4: organoid tissue must not be embryo (UBERON:0000922)',
+        'CF-5 to CF-10: spatial assay uniformity, metadata presence, is_primary_data, and Visium in_tissue rules',
+        'CF-8: special ontology IDs (na/unknown) must match their label columns'
+      ],
+      'ontology.database_resolution' => [
+        'Each ontology term ID is looked up in the ASAP ontology database',
+        'Reports terms that cannot be resolved or mapped to a known ontology entry',
+        'Label columns are checked against authorised ontology names where applicable'
+      ],
+      'ontology.organism_specific' => [
+        'Uses organism_ontology_term_id to select taxon-specific ontology prefix rules',
+        'Development stage prefixes (HsapDv, MmusDv, WBls, ZFS, FBdv)',
+        'Cell type and tissue prefixes for model organisms (C. elegans, zebrafish, fly)',
+        'Ethnicity rules for human vs non-human datasets',
+        'C. elegans sex term restrictions'
+      ],
+      'ontology.semantics' => [
+        'Per-field semantic subchecks driven by rules.yaml semantic_rules',
+        'Descendant / root restrictions (any_roots)',
+        'Banned terms and forbidden branches',
+        'Allowed exact terms and special placeholder values',
+        'Multi-value ordering for ethnicity (sorted " || " lists)',
+        'Label must match ontology ID for special placeholder pairs'
+      ],
+      'loom.paths' => [
+        'Required Loom HDF5 paths exist for observation and dataset metadata',
+        'Col_attrs paths mirror AnnData obs fields',
+        'Global /attrs paths mirror AnnData uns fields'
+      ],
+      'loom.mapping_manifest' => [
+        'Checks for anndata_mapping manifest in /attrs',
+        'Recommended for deterministic Loom to H5AD conversion'
+      ],
+      'h5ad.structure' => [
+        'AnnData groups exist: obs, var, X',
+        'obs column-order metadata matches stored columns',
+        'Required obs and uns fields are present'
+      ],
+      'h5ad.embeddings' => [
+        'obsm/varm/obsp/varp embedding arrays are readable',
+        'Embeddings are 2D with at least two columns',
+        'Row counts match n_obs where applicable',
+        'No all-NaN or infinite values in embeddings'
+      ],
+      'h5ad.matrix_encoding' => [
+        'Expression matrix X has valid shape and encoding',
+        'Sparse matrices use supported CSR/CSC layouts',
+        'Numeric values are finite where required by the schema'
+      ],
+      'extension.perturb' => [
+        'Detects perturbation datasets from uns/genetic_perturbations or obs genetic_perturbation_id',
+        'Requires genetic_perturbation_strategy when genetic_perturbation_id is present',
+        'Validates perturbation extension structure per schema_perturb.md'
+      ],
+      'extension.atac' => [
+        'Detects ATAC or 10x multiome assays via ontology lineage',
+        'Warns that fragment file assets should be supplied separately'
+      ],
+      'extension.analysis_json' => [
+        'Looks for analysis_pipeline metadata (recommended analysis_json extension)',
+        'Warns when analysis pipeline metadata is absent'
+      ]
+    }.freeze
+
+    METADATA_OTHER_CHECKS = {
+      'metadata.other.reserved_prefix' => [
+        'Scans obs and var metadata column names',
+        'Fails when any name starts with the forbidden "__" prefix'
+      ],
+      'metadata.other.unique_names.obs' => [
+        'Collects all observation metadata column names',
+        'Fails when duplicate names are present in obs / col_attrs'
+      ],
+      'metadata.other.unique_names.var' => [
+        'Collects all variable metadata column names',
+        'Fails when duplicate names are present in var / row_attrs'
+      ],
+      'metadata.other.deprecated' => [
+        'Checks obs, var, and uns for reserved names deprecated in prior schema versions',
+        'Includes legacy fields such as obs/ethnicity and uns/version'
+      ]
+    }.freeze
+
+    SPATIAL_ROLLUP_CHECKS = [
+      'Detects spatial datasets from Visium/Slide-seq assays or uns/spatial metadata',
+      'extension.spatial.structure: uns/spatial dictionary layout',
+      'extension.spatial.obs: Visium spot columns when is_single is true',
+      'extension.spatial.assets: tissue image arrays and spatial embedding'
+    ].freeze
+
+    FIELD_CHECKS = {
+      'extension.spatial.structure' => [
+        'spatial.is_single must be a boolean',
+        'Spatial root may only contain is_single and library identifier keys',
+        'Visium + is_single=true: exactly one library identifier with images and scalefactors sections',
+        'Visium + is_single=false: library metadata must not be present',
+        'images section: hires key required, fullres optional; scalefactor scalars must be parseable floats'
+      ],
+      'extension.spatial.obs' => [
+        'Applies when assay is Visium and spatial.is_single is true',
+        'Requires obs/array_row, obs/array_col, and obs/in_tissue (col_attrs on Loom)',
+        'These fields must not be present for non-Visium or is_single=false datasets'
+      ],
+      'extension.spatial.assets' => [
+        'Tissue image (images/hires): uint8 3D array (height x width x channels)',
+        'Tissue image (images/hires): channel dimension must be 3 (RGB) or 4 (RGBA)',
+        'Tissue image (images/hires): largest dimension 2000 px (4000 px for CytAssist 11mm, EFO:0022860)',
+        'Tissue image (images/fullres): same uint8 3D RGB/RGBA rules when present',
+        'Spatial embedding (obsm/spatial or /col_attrs/spatial): required when is_single is true',
+        'Spatial embedding: 2D array with at least two columns and row count matching n_obs',
+        'Spatial embedding: dtype kind must be float, integer, or unsigned integer; no infinity or NaN'
+      ],
+      'extension.spatial.images.hires' => [
+        'images/hires must be present for Visium libraries when is_single is true',
+        'Image dtype must be uint8 with a 3D shape (height x width x channels)',
+        'Channel dimension must be 3 (RGB) or 4 (RGBA)',
+        'Largest image dimension must be 2000 px (4000 px for CytAssist 11mm, EFO:0022860)'
+      ],
+      'extension.spatial.images.fullres' => [
+        'Optional full-resolution tissue image when present',
+        'Same uint8 3D RGB/RGBA array requirements as hires'
+      ],
+      'extension.spatial.obsm' => [
+        'obsm/spatial (H5AD) or /col_attrs/spatial (Loom) required when spatial.is_single is true',
+        'Embedding must be 2D with at least two columns and row count matching n_obs',
+        'Dtype kind must be float, integer, or unsigned integer',
+        'Must not contain infinity or NaN values'
+      ],
+      'extension.spatial.library' => [
+        'Exactly one Visium library identifier under uns/spatial when is_single is true',
+        'Library dict may only contain images and scalefactors keys'
+      ]
     }.freeze
 
     SEMANTIC_CHECK_TITLES = {
@@ -191,6 +399,7 @@ module Scfair
         title: detail_title(field_name, category_id),
         summary: detail_summary(field_name, category_id),
         result_message: @message,
+        checks_performed: checks_performed(category_id),
         constraints: build_constraints(field_name, category_id),
         schema_url: Rules.schema_hash[:source_url],
         schema_version: Rules.schema_version
@@ -200,6 +409,7 @@ module Scfair
       if cross_field
         detail[:title] = cross_field[:title]
         detail[:summary] = cross_field[:summary]
+        detail[:checks_performed] = cross_field[:checks] if cross_field[:checks].present?
       end
 
       organism_rule = ORGANISM_SPECIFIC_RULES[@field]
@@ -216,10 +426,23 @@ module Scfair
         detail[:summary] = "When #{id_field} is a special value (na or unknown), the paired label field #{label_field} must match."
       end
 
+      if METADATA_OTHER_TITLES[@field]
+        detail[:title] = METADATA_OTHER_TITLES[@field]
+        detail[:summary] = CATEGORY_SUMMARIES[@field]
+      end
+
       detail
     end
 
     private
+
+    def checks_performed(category_id)
+      return SPATIAL_ROLLUP_CHECKS if @field == 'extension.spatial'
+      return METADATA_OTHER_CHECKS[@field] if METADATA_OTHER_CHECKS[@field].present?
+      return FIELD_CHECKS[@field] if FIELD_CHECKS[@field].present?
+
+      CATEGORY_CHECKS[category_id] || []
+    end
 
     def catalog_label(category_id)
       return nil if category_id.blank?
@@ -265,6 +488,8 @@ module Scfair
     def detail_summary(field_name, category_id)
       suffix = semantic_rule_suffix(@field)
       return SEMANTIC_CHECK_SUMMARIES[suffix] if suffix && SEMANTIC_CHECK_SUMMARIES[suffix].present?
+
+      return CATEGORY_SUMMARIES[@field] if CATEGORY_SUMMARIES[@field].present?
 
       return CATEGORY_SUMMARIES[category_id] if CATEGORY_SUMMARIES[category_id].present?
 
@@ -357,6 +582,9 @@ module Scfair
         rows << { label: 'Assay map entries', value: "#{Rules.assay_suspension_type_map.size} assay terms defined in schema" }
       end
 
+      append_spatial_extension_constraints(rows, category_id) if category_id.to_s.start_with?('extension.spatial')
+      append_metadata_other_constraints(rows) if @field.start_with?('metadata.other.')
+
       label_field = Rules.label_pairs[field_name]
       rows << { label: 'Paired label field', value: label_field } if label_field.present?
 
@@ -432,6 +660,80 @@ module Scfair
 
       prefixes = Array(ontology_cfg[:prefixes]).map(&:to_s)
       rows << { label: 'Allowed prefixes', value: prefixes.join(', ') } if prefixes.any?
+    end
+
+    def append_metadata_other_constraints(rows)
+      rules = Rules.metadata_rules
+
+      case @field
+      when 'metadata.other.reserved_prefix'
+        rows << { label: 'Forbidden name prefix', value: rules[:forbidden_name_prefix] }
+        layers = %w[obs var].map { |layer| Rules.path_prefix(@format, layer.to_sym) }.join(', ')
+        rows << { label: 'Checked layers', value: layers }
+      when 'metadata.other.unique_names.obs'
+        rows << { label: 'Layer', value: Rules.path_prefix(@format, :obs) }
+        rows << { label: 'Requirement', value: 'Metadata field names must be unique' }
+      when 'metadata.other.unique_names.var'
+        rows << { label: 'Layer', value: Rules.path_prefix(@format, :var) }
+        rows << { label: 'Requirement', value: 'Metadata field names must be unique' }
+      when 'metadata.other.deprecated'
+        deprecated = rules[:deprecated_names].map do |entry|
+          "#{Rules.path_prefix(@format, entry[:layer].to_sym)}/#{entry[:name]} (deprecated in #{entry[:deprecated_in]})"
+        end
+        rows << { label: 'Deprecated reserved names', value: deprecated.join('; ') }
+      end
+    end
+
+    def append_spatial_extension_constraints(rows, category_id)
+      rules = Rules.spatial_extension_rules
+      spatial_root = @format == 'h5ad' ? 'uns/spatial' : '/attrs/spatial'
+      obsm_key = @format == 'h5ad' ? rules.dig(:obsm_spatial, :h5ad_key) : rules.dig(:obsm_spatial, :loom_key)
+      image_rules = rules.dig(:images, :array) || {}
+      hires_dims = rules.dig(:images, :hires_max_dimension) || {}
+      spatial_category = spatial_detail_category(category_id)
+
+      case spatial_category
+      when 'extension.spatial'
+        rows << { label: 'Spatial metadata root', value: spatial_root }
+        rows << { label: 'Sub-checks', value: 'structure, obs, assets' }
+      when 'extension.spatial.structure', 'extension.spatial.library'
+        rows << { label: 'Spatial metadata root', value: spatial_root }
+        rows << { label: 'Library sections', value: Array(rules.dig(:library, :allowed_keys)).join(', ') }
+        rows << { label: 'Required when Visium is_single', value: Array(rules.dig(:library, :required_when_visium_is_single)).join(', ') }
+      when 'extension.spatial.images.hires', 'extension.spatial.images.fullres', 'extension.spatial.assets'
+        append_spatial_image_constraints(rows, image_rules, hires_dims, spatial_category)
+        append_spatial_obsm_constraints(rows, rules, obsm_key) if spatial_category == 'extension.spatial.assets'
+      when 'extension.spatial.obsm'
+        rows << { label: 'Spatial embedding path', value: obsm_key }
+        append_spatial_obsm_constraints(rows, rules, obsm_key)
+        rows << { label: 'Required when is_single', value: rules.dig(:obsm_spatial, :required_when_is_single) ? 'yes' : 'no' }
+      when 'extension.spatial.obs'
+        rows << { label: 'Required columns', value: 'array_row, array_col, in_tissue' }
+        rows << { label: 'Condition', value: 'Visium assay with spatial.is_single=true' }
+      end
+    end
+
+    def append_spatial_image_constraints(rows, image_rules, hires_dims, spatial_category)
+      rows << { label: 'Image dtype', value: image_rules[:dtype].to_s } if image_rules[:dtype].present?
+      rows << { label: 'Image dimensions', value: "#{image_rules[:ndim]}D array" } if image_rules[:ndim].present?
+      rows << { label: 'Channel sizes', value: Array(image_rules[:channel_sizes]).join(' or ') } if image_rules[:channel_sizes].present?
+      return unless spatial_category.include?('hires') || spatial_category == 'extension.spatial.assets'
+
+      default_dim = hires_dims[:default]
+      cytassist_dim = hires_dims.dig(:by_assay, 'EFO:0022860')
+      rows << { label: 'Hires max dimension', value: "#{default_dim} px (CytAssist 11mm EFO:0022860: #{cytassist_dim} px)" }
+    end
+
+    def append_spatial_obsm_constraints(rows, rules, obsm_key)
+      rows << { label: 'Spatial embedding path', value: obsm_key }
+      rows << { label: 'Minimum embedding columns', value: rules.dig(:obsm_spatial, :min_columns).to_s }
+      rows << { label: 'Embedding dtype kinds', value: Array(rules.dig(:obsm_spatial, :dtype_kinds)).join(', ') }
+    end
+
+    def spatial_detail_category(category_id)
+      return @field if @field.start_with?('extension.spatial.') && @field != 'extension.spatial'
+
+      category_id
     end
 
     def append_organism_specific_semantic_context(rows, field_name)

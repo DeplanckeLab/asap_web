@@ -7753,7 +7753,7 @@ class ProjectsController < ApplicationController
     end
 
     def authorize_requested_view_access!(view_type)
-      if view_type == 'access'
+      if view_type == 'access' || view_type == 'compliance'
         return true if admin?
 
         handle_project_unauthorized_access

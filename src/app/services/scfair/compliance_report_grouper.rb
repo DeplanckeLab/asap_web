@@ -45,7 +45,7 @@ module Scfair
       @checks_catalog.filter_map do |entry|
         id = entry[:id] || entry['id']
         label = entry[:label] || entry['label']
-        items = grouped_items[id].values.sort_by { |item| item[:field].to_s }
+        items = grouped_items[id].values.sort_by { |item| field_sort_key(item[:field]) }
         next if items.empty?
 
         { id: id, label: label, items: items }
@@ -68,6 +68,7 @@ module Scfair
       return 'extension.perturb' if field.start_with?('extension.perturb')
       return 'extension.atac' if field.start_with?('extension.atac')
       return 'extension.analysis_json' if field.start_with?('extension.analysis_json')
+      return 'metadata.other' if field.start_with?('metadata.other')
       return 'loom.mapping_manifest' if field.include?('anndata_mapping')
       return 'h5ad.embeddings' if field.start_with?('obsm')
       return 'h5ad.matrix_encoding' if field == 'X'
@@ -142,6 +143,14 @@ module Scfair
       development_stage_ontology_term_id tissue_ontology_term_id
       cell_type_ontology_term_id is_primary_data in_tissue
     ].freeze
+
+    def field_sort_key(field)
+      field = field.to_s
+      cross_field = field.match(/\Across-field\.CF-(\d+)([a-z]*)-/i)
+      return [0, cross_field[1].to_i, cross_field[2], field] if cross_field
+
+      [1, field]
+    end
 
     def cross_field_constraint_message?(field, message)
       return true if field.start_with?('cross-field')

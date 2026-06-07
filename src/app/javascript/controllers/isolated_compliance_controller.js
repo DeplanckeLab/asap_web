@@ -483,6 +483,13 @@ export default class extends Controller {
     if (detail.summary) {
       rows.push(`<div class="mt-3"><span class="font-medium text-gray-900">Rule:</span> ${this.escape(detail.summary)}</div>`)
     }
+
+    const checksPerformed = Array.isArray(detail.checks_performed) ? detail.checks_performed : []
+    if (checksPerformed.length > 0) {
+      const checkLines = checksPerformed.map((check) => `<li>${this.escape(check)}</li>`).join("")
+      rows.push(`<div class="mt-3"><div class="font-medium text-gray-900 mb-1">Checks performed</div><ul class="list-disc pl-5 space-y-1 text-sm">${checkLines}</ul></div>`)
+    }
+
     if (detail.result_message) {
       rows.push(`<div class="mt-3"><span class="font-medium text-gray-900">Result:</span> ${this.escape(detail.result_message)}</div>`)
     }

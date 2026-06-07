@@ -48,6 +48,46 @@ class ScfairCrossFieldConstraintEvaluatorSpatialTest < TestBaseWithoutFixtures
     assert_equal 'passed', cf9[:status]
   end
 
+  test 'CF-10 fails when spatial metadata is present for a non-spatial assay' do
+    result = Scfair::CrossFieldConstraintEvaluator.new(
+      field_values: {
+        'obs/assay_ontology_term_id' => ['EFO:0009899'],
+        'uns/spatial/is_single' => ['true']
+      },
+      format: 'h5ad'
+    ).call
+
+    cf10 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-10-spatial-metadata-presence' }
+    assert_equal 'failed', cf10[:status]
+    assert_match(/must not be present/, cf10[:message])
+  end
+
+  test 'CF-10 fails when a spatial assay is missing spatial metadata' do
+    result = Scfair::CrossFieldConstraintEvaluator.new(
+      field_values: {
+        'obs/assay_ontology_term_id' => ['EFO:0022857']
+      },
+      format: 'h5ad'
+    ).call
+
+    cf10 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-10-spatial-metadata-presence' }
+    assert_equal 'failed', cf10[:status]
+    assert_match(/Missing uns\/spatial/, cf10[:message])
+  end
+
+  test 'CF-10 passes when spatial assay and spatial metadata are both present' do
+    result = Scfair::CrossFieldConstraintEvaluator.new(
+      field_values: {
+        'obs/assay_ontology_term_id' => ['EFO:0022857'],
+        'uns/spatial/is_single' => ['true']
+      },
+      format: 'h5ad'
+    ).call
+
+    cf10 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-10-spatial-metadata-presence' }
+    assert_equal 'passed', cf10[:status]
+  end
+
   test 'CF-5 fails when spatial and non-spatial assays are mixed' do
     result = Scfair::CrossFieldConstraintEvaluator.new(
       field_values: {

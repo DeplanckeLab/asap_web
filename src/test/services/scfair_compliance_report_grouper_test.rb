@@ -109,4 +109,30 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
     assert_not_nil cross_field_group
     assert_equal 2, cross_field_group[:items].size
   end
+
+  test 'orders cross-field rule checks numerically so CF-10 follows CF-9' do
+    catalog = [{ id: 'cross-field.constraints', label: 'Cross-field schema constraints' }]
+    valid_checks = [
+      { field: 'cross-field.CF-10-spatial-metadata-presence', status: 'passed', message: 'Spatial metadata presence consistent with assay' },
+      { field: 'cross-field.CF-1-assay-suspension', status: 'passed', message: 'Assay/suspension_type consistency' },
+      { field: 'cross-field.CF-9-visium-in-tissue', status: 'passed', message: 'Visium in_tissue constraint OK' },
+      { field: 'cross-field.CF-2a-cell-line-ethnicity', status: 'skipped', message: 'Not applicable' }
+    ]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: [],
+      warnings: [],
+      format: 'h5ad'
+    )
+
+    fields = groups.first[:items].map { |item| item[:field] }
+    assert_equal [
+      'cross-field.CF-1-assay-suspension',
+      'cross-field.CF-2a-cell-line-ethnicity',
+      'cross-field.CF-9-visium-in-tissue',
+      'cross-field.CF-10-spatial-metadata-presence'
+    ], fields
+  end
 end

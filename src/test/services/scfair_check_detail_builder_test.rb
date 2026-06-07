@@ -39,6 +39,64 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
     assert_match(/donor_id must not be "na"/, detail[:summary])
   end
 
+  test 'extension.spatial rollup avoids duplicating structure and asset detail' do
+    detail = Scfair::CheckDetailBuilder.call(
+      field: 'extension.spatial',
+      message: 'Spatial schema checks passed',
+      format: 'h5ad'
+    )
+
+    refute detail[:checks_performed].any? { |check| check.include?('uint8') }
+    refute detail[:checks_performed].any? { |check| check.include?('spatial.is_single must be') }
+    assert detail[:checks_performed].any? { |check| check.include?('extension.spatial.structure') }
+    assert detail[:checks_performed].any? { |check| check.include?('extension.spatial.assets') }
+    assert detail[:constraints].any? { |row| row[:label] == 'Sub-checks' }
+    refute detail[:constraints].any? { |row| row[:label] == 'Hires max dimension' }
+  end
+
+  test 'lists full image and obsm checks for extension.spatial.assets' do
+    detail = Scfair::CheckDetailBuilder.call(
+      field: 'extension.spatial.assets',
+      message: 'Spatial image and embedding checks passed',
+      format: 'h5ad',
+      category_id: 'extension.spatial'
+    )
+
+    refute detail[:checks_performed].any? { |check| check.include?('See extension.spatial') }
+    refute detail[:checks_performed].any? { |check| check.include?('spatial.is_single must be') }
+    assert detail[:checks_performed].any? { |check| check.include?('images/hires') }
+    assert detail[:checks_performed].any? { |check| check.include?('obsm/spatial') }
+    assert detail[:constraints].any? { |row| row[:label] == 'Hires max dimension' }
+    assert detail[:constraints].any? { |row| row[:label] == 'Minimum embedding columns' }
+  end
+
+  test 'includes checks performed for spatial extension popups' do
+    detail = Scfair::CheckDetailBuilder.call(
+      field: 'extension.spatial.structure',
+      message: 'Spatial uns structure checks passed',
+      format: 'h5ad',
+      category_id: 'extension.spatial'
+    )
+
+    assert detail[:checks_performed].size >= 3
+    assert detail[:checks_performed].any? { |check| check.include?('is_single') }
+    refute detail[:checks_performed].any? { |check| check.include?('uint8') }
+    refute detail[:checks_performed].any? { |check| check.include?('obsm/spatial') }
+    assert detail[:constraints].any? { |row| row[:label] == 'Spatial metadata root' }
+    refute detail[:constraints].any? { |row| row[:label] == 'Hires max dimension' }
+  end
+
+  test 'includes checks performed for spatial cross-field rules' do
+    detail = Scfair::CheckDetailBuilder.call(
+      field: 'cross-field.CF-6-spatial-primary-data',
+      message: 'Spatial primary-data constraint OK',
+      format: 'h5ad'
+    )
+
+    assert detail[:checks_performed].any? { |check| check.include?('is_single') }
+    assert detail[:checks_performed].any? { |check| check.include?('is_primary_data') }
+  end
+
   test 'builds banned terms list for semantic banned_terms checks' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'ontology.semantics.cell_type_ontology_term_id.banned_terms',

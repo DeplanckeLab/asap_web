@@ -59,6 +59,7 @@ class ScfairLoomFileValidatorService
     with h5py.File(loom_path, "r") as f:
       paths = set(fields)
       paths.update(path for path in f.keys() if path.startswith("/attrs/spatial/"))
+      paths.update(path for path in f.keys() if path.startswith("/attrs/genetic_perturbations/"))
       paths.update(path for path in f.keys() if path == "/col_attrs/spatial")
       for path in sorted(paths):
         if path not in f:
@@ -68,6 +69,9 @@ class ScfairLoomFileValidatorService
         sh = f["/matrix"].shape
         if len(sh) >= 2:
           out["matrix/n_obs"] = [str(int(sh[1]))]
+      for layer, group_name in [("obs", "col_attrs"), ("var", "row_attrs"), ("uns", "attrs")]:
+        if group_name in f and isinstance(f[group_name], h5py.Group):
+          out[f"metadata/{layer}/columns"] = sorted(f[group_name].keys())
     print(json.dumps(out))
   PYTHON
 

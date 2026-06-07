@@ -2,9 +2,11 @@
 
 require_relative 'test_base_without_fixtures'
 require_relative 'spatial_test_helpers'
+require_relative 'perturb_test_helpers'
 
 class ScfairSchemaExtensionValidatorTest < TestBaseWithoutFixtures
   include SpatialTestHelpers
+  include PerturbTestHelpers
 
   test 'records extension warnings in warnings list and valid_checks' do
     field_values = {
@@ -31,7 +33,10 @@ class ScfairSchemaExtensionValidatorTest < TestBaseWithoutFixtures
 
   test 'requires spatial is_single for spatial assays' do
     result = Scfair::SchemaExtensionValidator.new(
-      field_values: { 'obs/assay_ontology_term_id' => ['EFO:0022857'] },
+      field_values: {
+        'obs/assay_ontology_term_id' => ['EFO:0022857'],
+        'uns/spatial/A1/images/hires' => ['__array__']
+      },
       format: 'h5ad'
     ).call
 
@@ -76,5 +81,64 @@ class ScfairSchemaExtensionValidatorTest < TestBaseWithoutFixtures
 
     spatial = result[:valid_checks].find { |entry| entry[:field] == 'extension.spatial' }
     assert_equal 'passed', spatial[:status]
+  end
+
+  test 'skips perturb extension when no perturb metadata is present' do
+    result = Scfair::SchemaExtensionValidator.new(
+      field_values: { 'obs/assay_ontology_term_id' => ['EFO:0009899'] },
+      format: 'h5ad'
+    ).call
+
+    perturb = result[:valid_checks].find { |entry| entry[:field] == 'extension.perturb' }
+    assert_equal 'skipped', perturb[:status]
+  end
+
+  test 'passes valid perturb extension metadata' do
+    result = Scfair::SchemaExtensionValidator.new(
+      field_values: perturb_field_values(format: 'h5ad'),
+      format: 'h5ad'
+    ).call
+
+    perturb = result[:valid_checks].find { |entry| entry[:field] == 'extension.perturb' }
+    assert_equal 'passed', perturb[:status]
+    assert result[:errors].empty?
+  end
+
+  test 'requires genetic_perturbation_strategy when genetic_perturbation_id is present' do
+    fields = perturb_field_values(format: 'h5ad')
+    fields.delete('obs/genetic_perturbation_strategy')
+
+    result = Scfair::SchemaExtensionValidator.new(field_values: fields, format: 'h5ad').call
+
+    assert result[:errors].any? { |entry| entry[:field] == 'extension.perturb.strategy' }
+    perturb = result[:valid_checks].find { |entry| entry[:field] == 'extension.perturb' }
+    assert_equal 'failed', perturb[:status]
+  end
+
+  test 'requires genetic_perturbation_id when uns genetic_perturbations is present' do
+    fields = perturb_field_values(format: 'loom')
+    fields.delete('/col_attrs/genetic_perturbation_id')
+    fields.delete('/col_attrs/genetic_perturbation_strategy')
+
+    result = Scfair::SchemaExtensionValidator.new(field_values: fields, format: 'loom').call
+
+    assert result[:errors].any? { |entry| entry[:field] == 'extension.perturb.obs.id' }
+  end
+
+  test 'validates protospacer sequence length and alphabet' do
+    fields = perturb_field_values(format: 'h5ad', protospacer: 'ACGT')
+
+    result = Scfair::SchemaExtensionValidator.new(field_values: fields, format: 'h5ad').call
+
+    assert result[:errors].any? { |entry| entry[:message].include?('protospacer_sequence') }
+  end
+
+  test 'rejects legacy target_genomic_regions key naming' do
+    fields = perturb_field_values(format: 'h5ad')
+    fields['uns/genetic_perturbations/guide_a/target_genomic_regions'] = ['1:100-200(+)']
+
+    result = Scfair::SchemaExtensionValidator.new(field_values: fields, format: 'h5ad').call
+
+    assert result[:errors].any? { |entry| entry[:message].include?('unexpected key target_genomic_regions') }
   end
 end

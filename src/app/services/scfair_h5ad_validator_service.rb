@@ -33,6 +33,7 @@ class ScfairH5adValidatorService
     SPECIAL_VALUES = {k: set(v) for k, v in RULES["special_values"].items()}
     ENUM_FIELDS = RULES.get("enum_fields", {})
     SPATIAL_OBS_FIELDS = ["array_row", "array_col", "in_tissue"]
+    PERTURB_OBS_FIELDS = ["genetic_perturbation_id", "genetic_perturbation_strategy"]
 
     TOTAL_STEPS = 8 + len(REQUIRED_OBS) + len(REQUIRED_UNS) + len(ONTOLOGY_FIELDS)
 
@@ -68,6 +69,14 @@ class ScfairH5adValidatorService
         k for k in obs_group.keys()
         if k not in skip and not k.startswith("_")
       }
+
+    def metadata_column_keys(group):
+      skip = {"_index", "index", "__categories"}
+      return sorted(k for k in group.keys() if k not in skip)
+
+    def store_metadata_columns(layer, names):
+      if names:
+        field_values[f"metadata/{layer}/columns"] = sorted(names)
 
     def obs_declared_columns(obs_group):
       co = obs_group.attrs.get("column-order")
@@ -169,6 +178,82 @@ class ScfairH5adValidatorService
             field_values[path] = ["__array__"]
         else:
           field_values[path] = [str(val)]
+
+    def flatten_perturb_h5py(group, prefix):
+      for key in group.keys():
+        path = f"{prefix}/{key}"
+        node = group[key]
+        if isinstance(node, h5py.Group):
+          flatten_perturb_h5py(node, path)
+        elif isinstance(node, h5py.Dataset):
+          if len(node.shape) == 0:
+            val = node[()]
+            if isinstance(val, bytes):
+              val = val.decode("utf-8", "replace")
+            field_values[path] = [str(val)]
+          else:
+            raw = node[()]
+            if isinstance(raw, np.ndarray):
+              items = raw.tolist()
+            elif isinstance(raw, (list, tuple)):
+              items = list(raw)
+            else:
+              items = [raw]
+            vals = []
+            for v in items:
+              if v is None:
+                continue
+              if isinstance(v, bytes):
+                v = v.decode("utf-8", "replace")
+              vals.append(str(v))
+            if vals:
+              field_values[path] = sorted(set(vals))[:200]
+
+    def flatten_perturb_dict(value, prefix):
+      if not isinstance(value, dict):
+        return
+      for key, val in value.items():
+        path = f"{prefix}/{key}"
+        if isinstance(val, dict):
+          flatten_perturb_dict(val, path)
+        elif isinstance(val, (list, tuple, np.ndarray)):
+          items = list(val) if not isinstance(val, np.ndarray) else val.tolist()
+          field_values[path] = [str(v) for v in items][:200]
+        else:
+          field_values[path] = [str(val)]
+
+    def extract_perturb_from_uns_h5py(uns_group):
+      if uns_group is None or "genetic_perturbations" not in uns_group:
+        return
+      node = uns_group["genetic_perturbations"]
+      if isinstance(node, h5py.Group):
+        flatten_perturb_h5py(node, "uns/genetic_perturbations")
+      elif isinstance(node, h5py.Dataset):
+        vals = read_uns_value(uns_group, "genetic_perturbations")
+        if vals:
+          field_values["uns/genetic_perturbations"] = vals[:200]
+
+    def extract_perturb_obs_h5py(obs_group, obs_present):
+      if obs_group is None:
+        return
+      for field in PERTURB_OBS_FIELDS:
+        if field not in obs_present:
+          continue
+        vals = read_obs_column_values(obs_group, field)
+        if vals:
+          field_values[f"obs/{field}"] = vals[:200]
+
+    def extract_perturb_from_adata(adata):
+      perturb = adata.uns.get("genetic_perturbations")
+      if isinstance(perturb, dict):
+        flatten_perturb_dict(perturb, "uns/genetic_perturbations")
+      elif perturb is not None:
+        field_values["uns/genetic_perturbations"] = [str(perturb)]
+      for field in PERTURB_OBS_FIELDS:
+        if field in adata.obs.columns:
+          values = [str(v) for v in adata.obs[field].dropna().astype(str).unique().tolist()]
+          if values:
+            field_values[f"obs/{field}"] = values[:200]
 
     def extract_spatial_from_uns_h5py(uns_group):
       if uns_group is None or "spatial" not in uns_group:
@@ -303,6 +388,14 @@ class ScfairH5adValidatorService
       else:
         errors.append({"field": "obs", "message": "Missing obs group"})
 
+      if obs_group is not None:
+        store_metadata_columns("obs", metadata_column_keys(obs_group))
+
+      var_group = None
+      if "var" in root and isinstance(root["var"], h5py.Group):
+        var_group = root["var"]
+        store_metadata_columns("var", metadata_column_keys(var_group))
+
       for field in REQUIRED_OBS:
         emit_progress("obs", f"Checking obs/{field}")
         if field in obs_present:
@@ -321,6 +414,7 @@ class ScfairH5adValidatorService
       if "uns" in root and isinstance(root["uns"], h5py.Group):
         uns_group = root["uns"]
         uns_present = set(uns_group.keys())
+        store_metadata_columns("uns", list(uns_present))
 
       for field in REQUIRED_UNS:
         emit_progress("uns", f"Checking uns/{field}")
@@ -336,6 +430,8 @@ class ScfairH5adValidatorService
 
       extract_spatial_from_uns_h5py(uns_group)
       extract_spatial_obs_h5py(obs_group, obs_present)
+      extract_perturb_from_uns_h5py(uns_group)
+      extract_perturb_obs_h5py(obs_group, obs_present)
 
       if obs_group is not None:
         for field_path in ONTOLOGY_FIELDS:
@@ -393,6 +489,10 @@ class ScfairH5adValidatorService
         field_values["matrix/n_obs"] = [str(adata.n_obs)]
         valid_checks.append({"field": "X", "message": f"Matrix shape OK ({adata.n_obs} cells x {adata.n_vars} genes)"})
 
+      store_metadata_columns("obs", list(adata.obs.columns))
+      store_metadata_columns("var", list(adata.var.columns))
+      store_metadata_columns("uns", list(adata.uns.keys()))
+
       emit_progress("obs", "Checking observation metadata columns")
       for field in REQUIRED_OBS:
         emit_progress("obs", f"Checking obs/{field}")
@@ -415,6 +515,7 @@ class ScfairH5adValidatorService
           errors.append({"field": f"uns/{field}", "message": "Missing required dataset metadata field"})
 
       extract_spatial_from_adata(adata)
+      extract_perturb_from_adata(adata)
 
       for field_path in ONTOLOGY_FIELDS:
         space, key = field_path.split("/", 1)

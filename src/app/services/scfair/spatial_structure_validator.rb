@@ -31,17 +31,15 @@ module Scfair
         }
       end
 
-      if @structure[:present] && !spatial_assay
-        errors << {
-          field: 'extension.spatial.structure',
-          message: "#{@spatial_prefix.chomp('/')} must not be present unless assay is Visium or Slide-seqV2"
-        }
-      end
-
-      if spatial_assay && !@structure[:present]
-        errors << {
-          field: 'extension.spatial.structure',
-          message: "Missing #{@spatial_prefix.chomp('/')} metadata (required for spatial assays)"
+      unless spatial_assay && @structure[:present]
+        return {
+          errors: errors,
+          valid_checks: [{
+            field: 'extension.spatial.structure',
+            status: 'skipped',
+            message: 'Spatial metadata presence validated under cross-field CF-10'
+          }],
+          structure: @structure
         }
       end
 

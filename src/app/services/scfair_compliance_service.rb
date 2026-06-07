@@ -37,10 +37,15 @@ class ScfairComplianceService
         field_values: base_result.field_values || {},
         format: format
       ).call
+      metadata_general = Scfair::MetadataGeneralValidator.new(
+        field_values: base_result.field_values || {},
+        format: format
+      ).call
       errors.concat(extensions[:errors])
+      errors.concat(metadata_general[:errors])
       warnings.concat(extensions[:warnings])
       valid_checks = reconcile_schema_version_checks(
-        base_result.valid_checks + cross_field[:valid_checks] + extensions[:valid_checks],
+        base_result.valid_checks + cross_field[:valid_checks] + extensions[:valid_checks] + metadata_general[:valid_checks],
         errors,
         warnings,
         format
@@ -55,11 +60,12 @@ class ScfairComplianceService
       cross_field = Scfair::CrossFieldConstraintEvaluator.new(field_values: base_result.field_values || {}, format: format).call
       organism_specific = Scfair::OrganismSpecificConstraintEvaluator.new(field_values: base_result.field_values || {}, format: format).call
       extensions = Scfair::SchemaExtensionValidator.new(field_values: base_result.field_values || {}, format: format).call
+      metadata_general = Scfair::MetadataGeneralValidator.new(field_values: base_result.field_values || {}, format: format).call
       schema_version_check = schema_version_evaluation(base_result.field_values || {}, format)
 
-      errors = (base_result.errors + ontology[:errors] + cross_field[:errors] + organism_specific[:errors] + extensions[:errors] + schema_version_check[:errors]).uniq
+      errors = (base_result.errors + ontology[:errors] + cross_field[:errors] + organism_specific[:errors] + extensions[:errors] + metadata_general[:errors] + schema_version_check[:errors]).uniq
       warnings = (base_result.warnings + ontology[:warnings] + cross_field[:warnings] + organism_specific[:warnings] + extensions[:warnings] + schema_version_check[:warnings]).uniq
-      valid_checks = (base_result.valid_checks + ontology[:valid_checks] + cross_field[:valid_checks] + organism_specific[:valid_checks] + extensions[:valid_checks] + schema_version_check[:valid_checks])
+      valid_checks = (base_result.valid_checks + ontology[:valid_checks] + cross_field[:valid_checks] + organism_specific[:valid_checks] + extensions[:valid_checks] + metadata_general[:valid_checks] + schema_version_check[:valid_checks])
       valid_checks = reconcile_schema_version_checks(valid_checks, errors, warnings, format)
     end
 

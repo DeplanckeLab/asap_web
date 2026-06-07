@@ -515,7 +515,7 @@
             <% end %>
             
             <!-- Compliance -->
-            <% if @project.compliance_schemas.any? %>
+            <% if admin? && @project.compliance_schemas.any? %>
               <%= link_to project_path(@project, view: 'compliance'), 
                   class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'compliance' ? 'bg-gray-100 font-medium' : ''}",
                   data: { guided_tour: "project-nav-compliance" } do %>
@@ -641,7 +641,7 @@
           <%= link_to project_path(@project, view: 'settings'),
               class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'settings' ? 'bg-gray-700' : ''}", title: "Settings", data: { guided_tour: "project-nav-settings" } do %><i class="fas fa-cog text-lg"></i><% end %>
         <% end %>
-        <% if @project.compliance_schemas.any? %>
+        <% if admin? && @project.compliance_schemas.any? %>
           <%= link_to project_path(@project, view: 'compliance'),
               class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'compliance' ? 'bg-gray-700' : ''}", title: "Compliance", data: { guided_tour: "project-nav-compliance" } do %><i class="fas fa-check-circle text-lg"></i><% end %>
         <% end %>

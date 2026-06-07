@@ -11,6 +11,7 @@ class ComplianceController < ApplicationController
   include ComplianceHelpers
 
   before_action :set_project, only: %i[validate_project show_project_result fix_project apply_project_fix project_metadata_fields project_status]
+  before_action :authorize_project_compliance!, only: %i[validate_project show_project_result fix_project apply_project_fix project_metadata_fields project_status]
   skip_before_action :authenticate_user!, only: %i[index schema_docs], raise: false
 
   # GET /compliance
@@ -1103,8 +1104,14 @@ class ComplianceController < ApplicationController
     project.user_id == current_user.id || project.shares.exists?(user_id: current_user.id)
   end
 
-  def admin?
-    current_user&.respond_to?(:admin?) && current_user.admin?
+  def authorize_project_compliance!
+    return if admin?
+
+    respond_to do |format|
+      format.html { redirect_to unauthorized_path }
+      format.json { render json: { error: 'Not authorized' }, status: :forbidden }
+      format.any { render plain: 'Not authorized', status: :forbidden }
+    end
   end
 
   def available_schema_versions

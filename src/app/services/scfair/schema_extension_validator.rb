@@ -18,12 +18,12 @@ module Scfair
       valid_checks.concat(spatial_result[:valid_checks])
 
       if perturb_enabled?
-        if present?(key('obs/genetic_perturbation_id')) && !present?(key('obs/genetic_perturbation_strategy'))
-          errors << { field: 'extension.perturb.strategy', message: 'genetic_perturbation_strategy is required when genetic_perturbation_id is present' }
-          valid_checks << { field: 'extension.perturb', status: 'failed', message: 'Perturb schema checks failed' }
-        else
-          valid_checks << { field: 'extension.perturb', status: 'passed', message: 'Perturb schema checks passed' }
-        end
+        perturb_result = PerturbExtensionValidator.new(
+          field_values: @field_values,
+          format: @format
+        ).call
+        errors.concat(perturb_result[:errors])
+        valid_checks.concat(perturb_result[:valid_checks])
       else
         valid_checks << { field: 'extension.perturb', status: 'skipped', message: 'No perturb extension detected' }
       end
@@ -116,7 +116,7 @@ module Scfair
     end
 
     def perturb_enabled?
-      present?(key('uns/genetic_perturbations')) || present?(key('obs/genetic_perturbation_id'))
+      PerturbAssayHelper.perturb_enabled?(@field_values, @format)
     end
 
     def atac_enabled?

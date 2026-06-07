@@ -190,6 +190,22 @@ module Scfair
       }.freeze
     end
 
+    def perturb_extension_rules
+      raw = data[:perturb_extension] || {}
+      entry_keys = raw[:perturbation_entry_keys] || {}
+      {
+        obs_fields: Array(raw[:obs_fields]).map(&:to_s).freeze,
+        uns_root_key: raw[:uns_root_key].to_s,
+        allowed_organisms: Array(raw[:allowed_organisms]).map(&:to_s).freeze,
+        strategy_values: Array(raw[:strategy_values]).map(&:to_s).freeze,
+        strategy_no_perturbations: raw[:strategy_no_perturbations].to_s,
+        role_values: Array(raw[:role_values]).map(&:to_s).freeze,
+        curator_required_keys: Array(entry_keys[:curator_required]).map(&:to_s).freeze,
+        optional_keys: Array(entry_keys[:optional]).map(&:to_s).freeze,
+        id_delimiter: raw[:id_delimiter].to_s
+      }.freeze
+    end
+
     def assay_suspension_type_map
       raw = data.dig(:cross_field, :assay_suspension_type_map) || {}
       raw.each_with_object({}) do |(term, values), out|
@@ -284,10 +300,31 @@ module Scfair
       (data[:semantic_rules] || {}).keys.map(&:to_s).freeze
     end
 
+    def metadata_rules
+      raw = data[:metadata_rules] || {}
+      {
+        forbidden_name_prefix: raw[:forbidden_name_prefix].to_s,
+        skip_column_names: Array(raw[:skip_column_names]).map(&:to_s).freeze,
+        unique_layers: Array(raw[:unique_layers]).map(&:to_s).freeze,
+        deprecated_names: Array(raw[:deprecated_names]).map do |entry|
+          {
+            name: entry[:name].to_s,
+            layer: entry[:layer].to_s,
+            deprecated_in: entry[:deprecated_in].to_s
+          }
+        end.freeze
+      }.freeze
+    end
+
+    def metadata_column_list_key(layer)
+      "metadata/#{layer}/columns"
+    end
+
     def compliance_field_value_paths(format)
       fmt = format.to_s
       spatial_obs = %w[in_tissue array_row array_col]
-      cross_field_obs = %w[tissue_type suspension_type donor_id is_primary_data] + spatial_obs
+      perturb_obs = perturb_extension_rules[:obs_fields]
+      cross_field_obs = %w[tissue_type suspension_type donor_id is_primary_data] + spatial_obs + perturb_obs
 
       if fmt == 'loom'
         (

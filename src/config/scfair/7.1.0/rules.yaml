@@ -12,9 +12,64 @@ paths:
   obs:
     loom: /col_attrs
     h5ad: obs
+  var:
+    loom: /row_attrs
+    h5ad: var
   uns:
     loom: /attrs
     h5ad: uns
+
+# General metadata naming rules (schema "General Requirements").
+metadata_rules:
+  forbidden_name_prefix: "__"
+  skip_column_names: [_index, index, __categories]
+  unique_layers: [obs, var]
+  deprecated_names:
+    - name: organism
+      layer: obs
+      deprecated_in: "6.0.0"
+    - name: organism_ontology_term_id
+      layer: obs
+      deprecated_in: "6.0.0"
+    - name: ethnicity
+      layer: obs
+      deprecated_in: "3.0.0"
+    - name: ethnicity_ontology_term_id
+      layer: obs
+      deprecated_in: "3.0.0"
+    - name: X_normalization
+      layer: uns
+      deprecated_in: "3.0.0"
+    - name: default_field
+      layer: uns
+      deprecated_in: "2.0.0"
+    - name: layer_descriptions
+      layer: uns
+      deprecated_in: "2.0.0"
+    - name: tags
+      layer: uns
+      deprecated_in: "2.0.0"
+    - name: version
+      layer: uns
+      deprecated_in: "2.0.0"
+    - name: contributors
+      layer: uns
+      deprecated_in: "1.1.0"
+    - name: preprint_doi
+      layer: uns
+      deprecated_in: "1.1.0"
+    - name: project_description
+      layer: uns
+      deprecated_in: "1.1.0"
+    - name: project_links
+      layer: uns
+      deprecated_in: "1.1.0"
+    - name: project_name
+      layer: uns
+      deprecated_in: "1.1.0"
+    - name: publication_doi
+      layer: uns
+      deprecated_in: "1.1.0"
 
 required:
   observation_fields:
@@ -140,6 +195,35 @@ spatial_extension:
   scalefactors:
     allowed_keys: [spot_diameter_fullres, tissue_hires_scalef]
     required_when_visium_is_single: [spot_diameter_fullres, tissue_hires_scalef]
+
+perturb_extension:
+  obs_fields:
+    - genetic_perturbation_id
+    - genetic_perturbation_strategy
+  uns_root_key: genetic_perturbations
+  allowed_organisms:
+    - NCBITaxon:7955
+    - NCBITaxon:9606
+    - NCBITaxon:10090
+  strategy_values:
+    - control
+    - CRISPR activation screen
+    - CRISPR interference screen
+    - CRISPR knockout mutant
+    - CRISPR knockout screen
+  strategy_no_perturbations: no perturbations
+  role_values:
+    - control
+    - targeting
+  perturbation_entry_keys:
+    curator_required:
+      - role
+      - protospacer_sequence
+      - protospacer_adjacent_motif
+    optional:
+      - derived_genomic_regions
+      - derived_features
+  id_delimiter: " || "
 
 semantic_rules:
   assay_ontology_term_id:
@@ -284,6 +368,10 @@ checks_catalog:
       label: Ontology semantic constraints
     - id: extension.spatial
       label: Spatial schema extension checks
+    - id: extension.perturb
+      label: Perturbation schema extension checks
+    - id: metadata.other
+      label: Other checks
   loom_only:
     - id: loom.paths
       label: Loom metadata path checks
@@ -296,8 +384,6 @@ checks_catalog:
       label: obsm/varm/obsp/varp checks
     - id: h5ad.matrix_encoding
       label: Matrix encoding and finite value checks
-    - id: extension.perturb
-      label: Perturbation schema extension checks
     - id: extension.atac
       label: ATAC schema extension checks
     - id: extension.analysis_json

@@ -394,21 +394,6 @@ class ScfairLoomValidatorService
         end
       end
     end
-
-    # Check for genetic perturbation fields
-    has_perturbations = get_global_attr('genetic_perturbations').present?
-    if has_perturbations
-      if col_attrs.include?('genetic_perturbation_id')
-        @valid_checks << { field: '/col_attrs/genetic_perturbation_id', message: 'Found /col_attrs/genetic_perturbation_id metadata', check_type: 'presence' }
-      else
-        @errors << { field: '/col_attrs/genetic_perturbation_id', message: 'Missing /col_attrs/genetic_perturbation_id metadata (required when genetic_perturbations is present)', check_type: 'presence' }
-      end
-      if col_attrs.include?('genetic_perturbation_strategy')
-        @valid_checks << { field: '/col_attrs/genetic_perturbation_strategy', message: 'Found /col_attrs/genetic_perturbation_strategy metadata', check_type: 'presence' }
-      else
-        @errors << { field: '/col_attrs/genetic_perturbation_strategy', message: 'Missing /col_attrs/genetic_perturbation_strategy metadata (required when genetic_perturbation_id is present)', check_type: 'presence' }
-      end
-    end
   end
 
   def validate_required_global_attributes

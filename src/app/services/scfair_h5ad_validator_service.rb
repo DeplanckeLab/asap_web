@@ -12,19 +12,23 @@ class ScfairH5adValidatorService
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
   PROGRESS_PREFIX = 'PROGRESS'
   RESULT_PREFIX = 'RESULT'
+  TIMING_PREFIX = 'TIMING'
 
   PYTHON_SCRIPT_TEMPLATE = <<~PYTHON
     import base64
     import json
     import re
     import sys
+    import time
     import numpy as np
     import h5py
-    import anndata as ad
 
     file_path = sys.argv[1]
     PROGRESS_PREFIX = "#{PROGRESS_PREFIX}"
     RESULT_PREFIX = "#{RESULT_PREFIX}"
+    TIMING_PREFIX = "#{TIMING_PREFIX}"
+    script_start = time.perf_counter()
+    timing_entries = []
 
     RULES = json.loads(base64.b64decode("__RULES_B64__").decode("utf-8"))
     REQUIRED_OBS = RULES["required_obs"]
@@ -32,6 +36,7 @@ class ScfairH5adValidatorService
     ONTOLOGY_FIELDS = RULES["ontology_fields"]
     SPECIAL_VALUES = {k: set(v) for k, v in RULES["special_values"].items()}
     ENUM_FIELDS = RULES.get("enum_fields", {})
+    LABEL_PAIRS = RULES.get("label_pairs", {})
     SPATIAL_OBS_FIELDS = ["array_row", "array_col", "in_tissue"]
     PERTURB_OBS_FIELDS = ["genetic_perturbation_id", "genetic_perturbation_strategy"]
 
@@ -43,6 +48,29 @@ class ScfairH5adValidatorService
     valid_checks = []
     field_values = {}
     step = 0
+
+    def emit_timing(label, started_at, detail=None):
+      elapsed_ms = round((time.perf_counter() - started_at) * 1000.0, 2)
+      payload = {"label": label, "duration_ms": elapsed_ms}
+      if detail:
+        payload["detail"] = detail
+      timing_entries.append(payload)
+      print(TIMING_PREFIX + "\\t" + json.dumps(payload), flush=True)
+      return elapsed_ms
+
+    class Timer:
+      def __init__(self, label, detail=None):
+        self.label = label
+        self.detail = detail
+        self.started_at = None
+
+      def __enter__(self):
+        self.started_at = time.perf_counter()
+        return self
+
+      def __exit__(self, exc_type, exc, tb):
+        emit_timing(self.label, self.started_at, self.detail)
+        return False
 
     def emit_progress(stage, message):
       global step
@@ -86,7 +114,31 @@ class ScfairH5adValidatorService
         co = co.tolist()
       return {decode_attr(v) for v in co}
 
-    def read_obs_column_values(obs_group, key):
+    def decode_obs_value(value):
+      if value is None:
+        return None
+      if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+      return str(value)
+
+    def read_h5py_category_values(categories_node):
+      if isinstance(categories_node, h5py.Dataset):
+        raw = categories_node[()]
+        if isinstance(raw, np.ndarray):
+          items = raw.tolist()
+        elif isinstance(raw, (list, tuple)):
+          items = list(raw)
+        else:
+          items = [raw]
+        return [decode_obs_value(v) for v in items]
+
+      if isinstance(categories_node, h5py.Group):
+        enc = decode_attr(categories_node.attrs.get("encoding-type", ""))
+        if enc in ("string-array", "ascii", "string") and "values" in categories_node:
+          return read_h5py_category_values(categories_node["values"])
+      return []
+
+    def read_obs_column_series(obs_group, key):
       if key not in obs_group:
         return []
       node = obs_group[key]
@@ -94,12 +146,18 @@ class ScfairH5adValidatorService
         raw = node[()]
       elif isinstance(node, h5py.Group):
         enc = decode_attr(node.attrs.get("encoding-type", ""))
-        if enc == "categorical" and "categories" in node:
+        if enc == "categorical" and "codes" in node and "categories" in node:
           codes = node["codes"][()]
-          cats = node["categories"][()]
-          raw = [cats[i] if 0 <= i < len(cats) else None for i in codes]
-        else:
-          return []
+          cats = read_h5py_category_values(node["categories"])
+          code_list = codes.tolist() if isinstance(codes, np.ndarray) else list(codes)
+          out = []
+          for code in code_list:
+            if code is None or code < 0 or code >= len(cats):
+              out.append(None)
+              continue
+            out.append(cats[code])
+          return out
+        return []
       else:
         return []
       if isinstance(raw, np.ndarray):
@@ -108,14 +166,57 @@ class ScfairH5adValidatorService
         items = list(raw)
       else:
         items = [raw]
-      out = []
-      for v in items:
-        if v is None:
-          continue
-        if isinstance(v, bytes):
-          v = v.decode("utf-8", "replace")
-        out.append(str(v))
+      return [decode_obs_value(v) for v in items]
+
+    def read_obs_column_values(obs_group, key):
+      if key not in obs_group:
+        return []
+      node = obs_group[key]
+      if isinstance(node, h5py.Group):
+        enc = decode_attr(node.attrs.get("encoding-type", ""))
+        if enc == "categorical" and "categories" in node:
+          cats = read_h5py_category_values(node["categories"])
+          out = [v for v in cats if v]
+          return sorted(set(out))
+
+      series = read_obs_column_series(obs_group, key)
+      out = [v for v in series if v]
       return sorted(set(out))
+
+    def store_obs_label_pairs(obs_group, obs_present):
+      if obs_group is None:
+        return
+      for id_field, label_field in LABEL_PAIRS.items():
+        if id_field == "organism_ontology_term_id":
+          continue
+        if id_field not in obs_present or label_field not in obs_present:
+          continue
+        ids = read_obs_column_series(obs_group, id_field)
+        labels = read_obs_column_series(obs_group, label_field)
+        if not ids or len(ids) != len(labels):
+          continue
+        pairs = []
+        seen = set()
+        for id_val, label_val in zip(ids, labels):
+          if not id_val or not label_val:
+            continue
+          token = f"{id_val} || {label_val}"
+          if token in seen:
+            continue
+          seen.add(token)
+          pairs.append(token)
+        if pairs:
+          field_values[f"obs/{id_field}#label_pairs"] = pairs[:200]
+
+    def store_uns_label_pairs(uns_group, uns_present):
+      id_field = "organism_ontology_term_id"
+      label_field = LABEL_PAIRS.get(id_field)
+      if not label_field or id_field not in uns_present or label_field not in uns_present:
+        return
+      id_vals = read_uns_value(uns_group, id_field)
+      label_vals = read_uns_value(uns_group, label_field)
+      if id_vals and label_vals:
+        field_values[f"uns/{id_field}#label_pairs"] = [f"{id_vals[0]} || {label_vals[0]}"]
 
     def read_uns_value(uns_group, key):
       if key not in uns_group:
@@ -164,21 +265,6 @@ class ScfairH5adValidatorService
           else:
             field_values[path] = ["__array__"]
 
-    def flatten_spatial_dict(value, prefix):
-      if not isinstance(value, dict):
-        return
-      for key, val in value.items():
-        path = f"{prefix}/{key}"
-        if isinstance(val, dict):
-          flatten_spatial_dict(val, path)
-        elif isinstance(val, np.ndarray):
-          if val.ndim >= 3:
-            store_array_metadata(path, val.shape, val.dtype)
-          else:
-            field_values[path] = ["__array__"]
-        else:
-          field_values[path] = [str(val)]
-
     def flatten_perturb_h5py(group, prefix):
       for key in group.keys():
         path = f"{prefix}/{key}"
@@ -209,19 +295,6 @@ class ScfairH5adValidatorService
             if vals:
               field_values[path] = sorted(set(vals))[:200]
 
-    def flatten_perturb_dict(value, prefix):
-      if not isinstance(value, dict):
-        return
-      for key, val in value.items():
-        path = f"{prefix}/{key}"
-        if isinstance(val, dict):
-          flatten_perturb_dict(val, path)
-        elif isinstance(val, (list, tuple, np.ndarray)):
-          items = list(val) if not isinstance(val, np.ndarray) else val.tolist()
-          field_values[path] = [str(v) for v in items][:200]
-        else:
-          field_values[path] = [str(val)]
-
     def extract_perturb_from_uns_h5py(uns_group):
       if uns_group is None or "genetic_perturbations" not in uns_group:
         return
@@ -243,18 +316,6 @@ class ScfairH5adValidatorService
         if vals:
           field_values[f"obs/{field}"] = vals[:200]
 
-    def extract_perturb_from_adata(adata):
-      perturb = adata.uns.get("genetic_perturbations")
-      if isinstance(perturb, dict):
-        flatten_perturb_dict(perturb, "uns/genetic_perturbations")
-      elif perturb is not None:
-        field_values["uns/genetic_perturbations"] = [str(perturb)]
-      for field in PERTURB_OBS_FIELDS:
-        if field in adata.obs.columns:
-          values = [str(v) for v in adata.obs[field].dropna().astype(str).unique().tolist()]
-          if values:
-            field_values[f"obs/{field}"] = values[:200]
-
     def extract_spatial_from_uns_h5py(uns_group):
       if uns_group is None or "spatial" not in uns_group:
         return
@@ -271,16 +332,6 @@ class ScfairH5adValidatorService
         vals = read_obs_column_values(obs_group, field)
         if vals:
           field_values[f"obs/{field}"] = vals[:200]
-
-    def extract_spatial_from_adata(adata):
-      spatial = adata.uns.get("spatial")
-      if isinstance(spatial, dict):
-        flatten_spatial_dict(spatial, "uns/spatial")
-      for field in SPATIAL_OBS_FIELDS:
-        if field in adata.obs.columns:
-          values = [str(v) for v in adata.obs[field].dropna().astype(str).unique().tolist()]
-          if values:
-            field_values[f"obs/{field}"] = values[:200]
 
     def matrix_shape_h5py(root):
       if "X" not in root:
@@ -353,8 +404,13 @@ class ScfairH5adValidatorService
         })
 
     def validate_from_h5py(root):
-      emit_progress("matrix", "Checking matrix dimensions")
-      n_obs, n_vars = matrix_shape_h5py(root)
+      with Timer("validate_from_h5py"):
+        validate_from_h5py_inner(root)
+
+    def validate_from_h5py_inner(root):
+      emit_progress("matrix", "Checking matrix dimensions (shape only)")
+      with Timer("h5py.matrix_shape"):
+        n_obs, n_vars = matrix_shape_h5py(root)
       if not n_obs or not n_vars or n_obs <= 0 or n_vars <= 0:
         errors.append({"field": "X", "message": "AnnData has invalid or unreadable matrix shape"})
       else:
@@ -364,6 +420,7 @@ class ScfairH5adValidatorService
       emit_progress("obs", "Checking observation metadata structure")
       obs_present = set()
       obs_group = None
+      obs_structure_started = time.perf_counter()
       if "obs" in root and isinstance(root["obs"], h5py.Group):
         obs_group = root["obs"]
         obs_present = obs_dataset_keys(obs_group)
@@ -387,6 +444,7 @@ class ScfairH5adValidatorService
           })
       else:
         errors.append({"field": "obs", "message": "Missing obs group"})
+      emit_timing("h5py.obs_structure", obs_structure_started, {"n_obs": n_obs, "n_vars": n_vars})
 
       if obs_group is not None:
         store_metadata_columns("obs", metadata_column_keys(obs_group))
@@ -396,8 +454,10 @@ class ScfairH5adValidatorService
         var_group = root["var"]
         store_metadata_columns("var", metadata_column_keys(var_group))
 
+      required_obs_started = time.perf_counter()
       for field in REQUIRED_OBS:
         emit_progress("obs", f"Checking obs/{field}")
+        field_started = time.perf_counter()
         if field in obs_present:
           valid_checks.append({"field": f"obs/{field}", "message": "Required field present"})
           if obs_group is not None:
@@ -408,9 +468,12 @@ class ScfairH5adValidatorService
               check_enum_values(field_path, vals)
         else:
           errors.append({"field": f"obs/{field}", "message": "Missing required observation field"})
+        emit_timing(f"h5py.obs/{field}", field_started, {"n_unique": len(field_values.get(f"obs/{field}", []))})
+      emit_timing("h5py.required_obs", required_obs_started, {"fields": len(REQUIRED_OBS)})
 
       uns_present = set()
       uns_group = None
+      uns_started = time.perf_counter()
       if "uns" in root and isinstance(root["uns"], h5py.Group):
         uns_group = root["uns"]
         uns_present = set(uns_group.keys())
@@ -427,12 +490,21 @@ class ScfairH5adValidatorService
               field_values[f"uns/{field}"] = vals[:200]
         else:
           errors.append({"field": f"uns/{field}", "message": "Missing required dataset metadata field"})
+      emit_timing("h5py.required_uns", uns_started, {"fields": len(REQUIRED_UNS)})
 
+      extensions_started = time.perf_counter()
       extract_spatial_from_uns_h5py(uns_group)
       extract_spatial_obs_h5py(obs_group, obs_present)
       extract_perturb_from_uns_h5py(uns_group)
       extract_perturb_obs_h5py(obs_group, obs_present)
+      emit_timing("h5py.extensions", extensions_started)
 
+      label_pairs_started = time.perf_counter()
+      store_obs_label_pairs(obs_group, obs_present)
+      store_uns_label_pairs(uns_group, uns_present)
+      emit_timing("h5py.label_pairs", label_pairs_started)
+
+      ontology_started = time.perf_counter()
       if obs_group is not None:
         for field_path in ONTOLOGY_FIELDS:
           if not field_path.startswith("obs/"):
@@ -441,9 +513,11 @@ class ScfairH5adValidatorService
           emit_progress("ontology", f"Checking {field_path} format")
           if key not in obs_present:
             continue
+          field_started = time.perf_counter()
           values = read_obs_column_values(obs_group, key)
           if values:
             check_ontology_values(field_path, values)
+          emit_timing(f"h5py.ontology/{field_path}", field_started, {"n_unique": len(values)})
 
       if uns_group is not None:
         for field_path in ONTOLOGY_FIELDS:
@@ -451,19 +525,26 @@ class ScfairH5adValidatorService
             continue
           key = field_path.split("/", 1)[1]
           emit_progress("ontology", f"Checking {field_path} format")
+          field_started = time.perf_counter()
           values = read_uns_value(uns_group, key)
           if values:
             check_ontology_values(field_path, values)
+          emit_timing(f"h5py.ontology/{field_path}", field_started, {"n_unique": len(values)})
+      emit_timing("h5py.ontology", ontology_started)
 
       emit_progress("obsm", "Checking embeddings (obsm)")
+      obsm_started = time.perf_counter()
       obsm_key_list = []
       if "obsm" in root and isinstance(root["obsm"], h5py.Group):
         obsm_group = root["obsm"]
         obsm_key_list = obsm_keys_h5py(root)
         for key in obsm_key_list:
+          key_started = time.perf_counter()
           arr = obsm_array_h5py(obsm_group, key)
+          detail = {"shape": list(arr.shape) if arr is not None else None}
           if arr is None:
             errors.append({"field": f"obsm/{key}", "message": "Could not read embedding array"})
+            emit_timing(f"h5py.obsm/{key}", key_started, detail)
             continue
           if key == "spatial":
             store_obsm_spatial_metadata(arr)
@@ -475,98 +556,32 @@ class ScfairH5adValidatorService
             errors.append({"field": f"obsm/{key}", "message": "Embedding contains infinity values"})
           if np.isnan(arr).all():
             errors.append({"field": f"obsm/{key}", "message": "Embedding contains only NaN values"})
+          emit_timing(f"h5py.obsm/{key}", key_started, detail)
 
       if len(obsm_key_list) == 0:
         warnings.append({"field": "obsm", "message": "No embeddings found"})
       else:
         valid_checks.append({"field": "obsm", "message": f"{len(obsm_key_list)} embedding(s) found"})
+      emit_timing("h5py.obsm", obsm_started, {"keys": len(obsm_key_list)})
 
-    def validate_from_adata(adata):
-      emit_progress("matrix", "Checking matrix dimensions")
-      if adata.n_obs <= 0 or adata.n_vars <= 0:
-        errors.append({"field": "X", "message": "AnnData has invalid shape"})
-      else:
-        field_values["matrix/n_obs"] = [str(adata.n_obs)]
-        valid_checks.append({"field": "X", "message": f"Matrix shape OK ({adata.n_obs} cells x {adata.n_vars} genes)"})
-
-      store_metadata_columns("obs", list(adata.obs.columns))
-      store_metadata_columns("var", list(adata.var.columns))
-      store_metadata_columns("uns", list(adata.uns.keys()))
-
-      emit_progress("obs", "Checking observation metadata columns")
-      for field in REQUIRED_OBS:
-        emit_progress("obs", f"Checking obs/{field}")
-        if field in adata.obs.columns:
-          valid_checks.append({"field": f"obs/{field}", "message": "Required field present"})
-          values = [str(v) for v in adata.obs[field].dropna().astype(str).unique().tolist()]
-          if values:
-            field_path = f"obs/{field}"
-            field_values[field_path] = values[:200]
-            check_enum_values(field_path, values)
-        else:
-          errors.append({"field": f"obs/{field}", "message": "Missing required observation field"})
-
-      for field in REQUIRED_UNS:
-        emit_progress("uns", f"Checking uns/{field}")
-        if field in adata.uns:
-          valid_checks.append({"field": f"uns/{field}", "message": "Required field present"})
-          field_values[f"uns/{field}"] = [str(adata.uns[field])][:200]
-        else:
-          errors.append({"field": f"uns/{field}", "message": "Missing required dataset metadata field"})
-
-      extract_spatial_from_adata(adata)
-      extract_perturb_from_adata(adata)
-
-      for field_path in ONTOLOGY_FIELDS:
-        space, key = field_path.split("/", 1)
-        emit_progress("ontology", f"Checking {field_path} format")
-        values = []
-        if space == "obs" and key in adata.obs.columns:
-          values = [str(v) for v in adata.obs[key].dropna().astype(str).unique().tolist()]
-        elif space == "uns" and key in adata.uns:
-          values = [str(adata.uns[key])]
-        if values:
-          check_ontology_values(field_path, values)
-
-      emit_progress("obsm", "Checking embeddings (obsm)")
-      for key in adata.obsm.keys():
-        arr = np.asarray(adata.obsm[key])
-        if key == "spatial":
-          store_obsm_spatial_metadata(arr)
-        if arr.shape[0] != adata.n_obs:
-          errors.append({"field": f"obsm/{key}", "message": "Embedding row count does not match n_obs"})
-        if arr.ndim != 2 or arr.shape[1] < 2:
-          errors.append({"field": f"obsm/{key}", "message": "Embedding must be 2D with at least 2 columns"})
-        if np.isinf(arr).any():
-          errors.append({"field": f"obsm/{key}", "message": "Embedding contains infinity values"})
-        if np.isnan(arr).all():
-          errors.append({"field": f"obsm/{key}", "message": "Embedding contains only NaN values"})
-
-      if len(adata.obsm.keys()) == 0:
-        warnings.append({"field": "obsm", "message": "No embeddings found"})
-      else:
-        valid_checks.append({"field": "obsm", "message": f"{len(adata.obsm.keys())} embedding(s) found"})
-
-    emit_progress("load", "Opening H5AD file")
-    try:
-      emit_progress("load", "Loading AnnData object")
-      adata = ad.read_h5ad(file_path)
-      validate_from_adata(adata)
-    except Exception as exc:
-      warnings.append({
-        "field": "h5ad",
-        "message": f"Could not load AnnData object ({type(exc).__name__}); running structural checks via HDF5"
-      })
-      emit_progress("load", "Using HDF5 fallback reader")
+    emit_progress("load", "Opening H5AD file (metadata only, matrix not loaded)")
+    with Timer("h5py.open"):
       with h5py.File(file_path, "r") as root:
         validate_from_h5py(root)
+
+    total_ms = round((time.perf_counter() - script_start) * 1000.0, 2)
+    emit_timing("total", script_start, {"path": file_path})
 
     payload = {
       "errors": errors,
       "warnings": warnings,
       "info": info,
       "valid_checks": valid_checks,
-      "field_values": field_values
+      "field_values": field_values,
+      "performance": {
+        "total_ms": total_ms,
+        "entries": timing_entries
+      }
     }
     print(RESULT_PREFIX + "\\t" + json.dumps(payload), flush=True)
   PYTHON
@@ -587,6 +602,7 @@ class ScfairH5adValidatorService
     info = parsed['info'] || []
     valid_checks = parsed['valid_checks'] || []
     field_values = parsed['field_values'] || {}
+    log_performance_summary(parsed['performance'], path: @h5ad_path)
 
     Result.new(
       valid?: errors.empty?,
@@ -639,6 +655,8 @@ class ScfairH5adValidatorService
 
         if line.start_with?("#{PROGRESS_PREFIX}\t")
           handle_progress_line(line.delete_prefix("#{PROGRESS_PREFIX}\t"))
+        elsif line.start_with?("#{TIMING_PREFIX}\t")
+          handle_timing_line(line.delete_prefix("#{TIMING_PREFIX}\t"))
         elsif line.start_with?("#{RESULT_PREFIX}\t")
           result_payload = line.delete_prefix("#{RESULT_PREFIX}\t")
         else
@@ -654,6 +672,39 @@ class ScfairH5adValidatorService
     raise StreamingError, 'No RESULT line received from H5AD validator' if result_payload.blank?
 
     JSON.parse(result_payload)
+  end
+
+  def handle_timing_line(json_str)
+    payload = JSON.parse(json_str)
+    label = payload['label']
+    duration_ms = payload['duration_ms']
+    detail = payload['detail']
+    detail_suffix = detail.present? ? " #{detail.to_json}" : ''
+    @logger.info("[ScfairH5adValidatorService][TIMING] #{label}: #{duration_ms}ms#{detail_suffix}")
+  rescue JSON::ParserError => e
+    @logger.warn("[ScfairH5adValidatorService] Invalid timing payload: #{e.message}")
+  end
+
+  def log_performance_summary(performance, path:)
+    return if performance.blank?
+
+    total_ms = performance['total_ms']
+    entries = Array(performance['entries'])
+    @logger.info(
+      "[ScfairH5adValidatorService][TIMING] summary for #{path}: total=#{total_ms}ms, stages=#{entries.size}"
+    )
+
+    entries
+      .reject { |entry| entry['label'].to_s == 'total' }
+      .sort_by { |entry| -entry['duration_ms'].to_f }
+      .first(15)
+      .each do |entry|
+        detail = entry['detail']
+        detail_suffix = detail.present? ? " #{detail.to_json}" : ''
+        @logger.info(
+          "[ScfairH5adValidatorService][TIMING]   #{entry['label']}: #{entry['duration_ms']}ms#{detail_suffix}"
+        )
+      end
   end
 
   def handle_progress_line(json_str)

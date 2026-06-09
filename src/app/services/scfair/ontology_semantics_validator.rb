@@ -169,6 +169,11 @@ module Scfair
       label_field = OntologySemanticRules.label_field_name(field_name)
       return {} if label_field.blank?
 
+      path = path_for(field_name)
+      pairs_key = "#{path}#label_pairs"
+      pair_entries = Array(@field_values[pairs_key]).map(&:to_s).map(&:strip).reject(&:blank?)
+      return check_extracted_label_pairs(field_name, pair_entries, allowed_specials) if pair_entries.any?
+
       label_path = path_for(label_field)
       labels = split_values(@field_values[label_path])
       return {} if labels.empty?
@@ -183,27 +188,8 @@ module Scfair
       end
 
       id_values.each_with_index do |identifier, idx|
-        label = labels[idx].to_s
-        if special_value?(identifier, allowed_specials)
-          next if label == identifier
-          return {
-            error: {
-              field: "ontology.semantics.#{field_name}.special_label_pair",
-              message: "Label must match special ontology id value -- expected #{identifier}, got #{label}"
-            }
-          }
-        end
-
-        term = CellOntologyTerm.find_by(identifier: identifier, original: true)
-        next if term && term.name.to_s == label
-
-        expected = term&.name || 'n/a'
-        return {
-          error: {
-            field: "ontology.semantics.#{field_name}.label_pair",
-            message: "ID/label mismatch for #{identifier}: expected '#{expected}', got '#{label}'"
-          }
-        }
+        pair_error = validate_label_for_identifier(field_name, identifier, labels[idx].to_s, allowed_specials)
+        return pair_error if pair_error
       end
 
       {
@@ -211,6 +197,48 @@ module Scfair
           field: "ontology.semantics.#{field_name}.label_pair",
           status: 'passed',
           message: 'ID/label pairs are coherent'
+        }
+      }
+    end
+
+    def check_extracted_label_pairs(field_name, pair_entries, allowed_specials)
+      pair_entries.each do |entry|
+        id_val, label_val = entry.to_s.split(' || ', 2).map(&:strip)
+        next if id_val.blank?
+
+        pair_error = validate_label_for_identifier(field_name, id_val, label_val.to_s, allowed_specials)
+        return pair_error if pair_error
+      end
+
+      {
+        check: {
+          field: "ontology.semantics.#{field_name}.label_pair",
+          status: 'passed',
+          message: 'ID/label pairs are coherent'
+        }
+      }
+    end
+
+    def validate_label_for_identifier(field_name, identifier, label, allowed_specials)
+      if special_value?(identifier, allowed_specials)
+        return nil if label == identifier
+
+        return {
+          error: {
+            field: "ontology.semantics.#{field_name}.special_label_pair",
+            message: "Label must match special ontology id value -- expected #{identifier}, got #{label}"
+          }
+        }
+      end
+
+      term = CellOntologyTerm.find_by(identifier: identifier, original: true)
+      return nil if term && term.name.to_s == label
+
+      expected = term&.name || 'n/a'
+      {
+        error: {
+          field: "ontology.semantics.#{field_name}.label_pair",
+          message: "ID/label mismatch for #{identifier}: expected '#{expected}', got '#{label}'"
         }
       }
     end

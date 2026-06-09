@@ -370,7 +370,8 @@ module Scfair
         'required_uns' => required_uns_fields(fmt),
         'ontology_fields' => ontology_paths(fmt),
         'special_values' => allowed_special_values(fmt),
-        'enum_fields' => enum_fields
+        'enum_fields' => enum_fields,
+        'label_pairs' => label_pairs
       }
     end
 

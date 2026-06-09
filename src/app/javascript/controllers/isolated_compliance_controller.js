@@ -569,11 +569,11 @@ export default class extends Controller {
     if (warningCount > 0) {
       parts.push(this.renderSummaryCountBadge(warningCount, "warning(s)", "bg-yellow-100 text-yellow-800"))
     }
-    const plain = []
-    if (checkCounts.passed > 0) plain.push(`${checkCounts.passed} passed`)
-    if (checkCounts.skipped > 0) plain.push(`${checkCounts.skipped} not applicable`)
-    if (plain.length > 0) {
-      parts.push(`<span class="text-gray-700">${plain.join(", ")}</span>`)
+    if (checkCounts.passed > 0) {
+      parts.push(this.renderSummaryCountBadge(checkCounts.passed, "passed", "bg-green-100 text-green-800"))
+    }
+    if (checkCounts.skipped > 0) {
+      parts.push(this.renderSummaryCountBadge(checkCounts.skipped, "not applicable", "bg-gray-100 text-gray-700"))
     }
     if (parts.length === 0) return ""
     return `<span class="inline-flex flex-wrap items-center gap-2">${parts.join("")}</span>`

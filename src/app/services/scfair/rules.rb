@@ -329,6 +329,7 @@ module Scfair
       if fmt == 'loom'
         (
           required_uns_fields('loom').map { |name| field_path('loom', :uns, name) } +
+          [field_path('loom', :uns, 'schema_reference')] +
           required_observation_fields.map { |name| field_path('loom', :obs, name) } +
           required_observation_labels.map { |name| field_path('loom', :obs, name) } +
           cross_field_obs.map { |name| field_path('loom', :obs, name) } +

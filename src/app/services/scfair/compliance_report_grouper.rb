@@ -61,6 +61,7 @@ module Scfair
       return nil if field.blank?
 
       return 'schema.version' if field.match?(/\A(uns\/schema_version|\/attrs\/schema_version)\z/)
+      return 'schema.reference' if field.match?(/\A(uns\/schema_reference|\/attrs\/schema_reference)\z/)
       return 'cross-field.constraints' if field.start_with?('cross-field')
       return 'ontology.semantics' if field.start_with?('ontology.semantics.')
       return 'ontology.organism_specific' if field.start_with?('ontology.organism_specific')

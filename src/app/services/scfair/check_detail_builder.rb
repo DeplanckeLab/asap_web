@@ -115,6 +115,7 @@ module Scfair
       'obs.required_presence' => 'Required per-cell observation metadata fields defined by scFAIR 7.1.0.',
       'uns.required_presence' => 'Required dataset-level metadata fields in uns/attrs.',
       'schema.version' => 'The file schema_version must be compatible with the reference schema version.',
+      'schema.reference' => 'The file schema_reference should match the canonical URL of the reference schema.',
       'ontology.format' => 'Ontology term identifiers must use valid OBO-style PREFIX:ID format and allowed prefixes.',
       'cross-field.constraints' => 'Metadata fields must satisfy cross-field consistency rules.',
       'ontology.database_resolution' => 'Ontology terms must resolve to known entries in the ASAP ontology database.',
@@ -169,6 +170,11 @@ module Scfair
         'Reads schema_version from uns/attrs',
         'Compares major.minor version against the reference scFAIR release',
         'Accepts compatible schema_version identifiers (e.g. 7.1.0_scfair)'
+      ],
+      'schema.reference' => [
+        'Reads schema_reference from uns (H5AD) or /attrs (Loom)',
+        'Compares against the canonical schema URL for this validator release',
+        'Warns when the URL does not match exactly'
       ],
       'ontology.format' => [
         'Validates OBO-style PREFIX:ID syntax for ontology term fields',
@@ -528,6 +534,10 @@ module Scfair
       if category_id == 'schema.version'
         rows << { label: 'Reference version', value: Rules.schema_version }
         rows << { label: 'Required identifier', value: Rules.schema_hash[:schema_version].to_s }
+      end
+
+      if category_id == 'schema.reference'
+        rows << { label: 'Reference schema URL', value: Rules.schema_hash[:source_url].to_s }
       end
 
       if enum_field?(field_name)

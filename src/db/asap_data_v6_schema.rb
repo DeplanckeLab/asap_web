@@ -10,10 +10,19 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_04_30_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_10_150000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
+
+  create_table "assemblies", id: :serial, force: :cascade do |t|
+    t.integer "first_ensembl_release"
+    t.integer "latest_ensembl_release"
+    t.text "name"
+    t.integer "organism_id", null: false
+    t.index ["organism_id", "name"], name: "index_assemblies_on_organism_id_and_name", unique: true
+    t.index ["organism_id"], name: "index_assemblies_on_organism_id"
+  end
 
   create_table "bla", id: false, force: :cascade do |t|
     t.integer "a"
@@ -103,6 +112,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_30_120000) do
     t.datetime "created_at", precision: nil
     t.text "description"
     t.text "ensembl_id"
+    t.integer "first_ensembl_release"
     t.text "function_description"
     t.integer "gene_length"
     t.integer "latest_ensembl_release"
@@ -165,6 +175,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_04_30_120000) do
     t.datetime "updated_at", precision: nil
   end
 
+  add_foreign_key "assemblies", "organisms", name: "assemblies_organism_id_fkey"
   add_foreign_key "compliance_term_replacements", "compliance_mappings"
   add_foreign_key "gene_names", "genes", name: "gene_names_gene_id_fkey2"
   add_foreign_key "gene_names", "organisms", name: "gene_names_organism_id_fkey2"

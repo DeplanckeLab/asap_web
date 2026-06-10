@@ -41,11 +41,13 @@ class ScfairComplianceService
         field_values: base_result.field_values || {},
         format: format
       ).call
+      schema_reference_check = schema_reference_evaluation(base_result.field_values || {}, format)
       errors.concat(extensions[:errors])
       errors.concat(metadata_general[:errors])
       warnings.concat(extensions[:warnings])
+      warnings.concat(schema_reference_check[:warnings])
       valid_checks = reconcile_schema_version_checks(
-        base_result.valid_checks + cross_field[:valid_checks] + extensions[:valid_checks] + metadata_general[:valid_checks],
+        base_result.valid_checks + cross_field[:valid_checks] + extensions[:valid_checks] + metadata_general[:valid_checks] + schema_reference_check[:valid_checks],
         errors,
         warnings,
         format
@@ -62,10 +64,11 @@ class ScfairComplianceService
       extensions = Scfair::SchemaExtensionValidator.new(field_values: base_result.field_values || {}, format: format).call
       metadata_general = Scfair::MetadataGeneralValidator.new(field_values: base_result.field_values || {}, format: format).call
       schema_version_check = schema_version_evaluation(base_result.field_values || {}, format)
+      schema_reference_check = schema_reference_evaluation(base_result.field_values || {}, format)
 
       errors = (base_result.errors + ontology[:errors] + cross_field[:errors] + organism_specific[:errors] + extensions[:errors] + metadata_general[:errors] + schema_version_check[:errors]).uniq
-      warnings = (base_result.warnings + ontology[:warnings] + cross_field[:warnings] + organism_specific[:warnings] + extensions[:warnings] + schema_version_check[:warnings]).uniq
-      valid_checks = (base_result.valid_checks + ontology[:valid_checks] + cross_field[:valid_checks] + organism_specific[:valid_checks] + extensions[:valid_checks] + metadata_general[:valid_checks] + schema_version_check[:valid_checks])
+      warnings = (base_result.warnings + ontology[:warnings] + cross_field[:warnings] + organism_specific[:warnings] + extensions[:warnings] + schema_version_check[:warnings] + schema_reference_check[:warnings]).uniq
+      valid_checks = (base_result.valid_checks + ontology[:valid_checks] + cross_field[:valid_checks] + organism_specific[:valid_checks] + extensions[:valid_checks] + metadata_general[:valid_checks] + schema_version_check[:valid_checks] + schema_reference_check[:valid_checks])
       valid_checks = reconcile_schema_version_checks(valid_checks, errors, warnings, format)
     end
 
@@ -222,6 +225,16 @@ class ScfairComplianceService
     Scfair::SchemaVersionEvaluator.call(
       file_version: file_version,
       reference_version: Scfair::Rules.schema_version,
+      format: format
+    )
+  end
+
+  def schema_reference_evaluation(field_values, format)
+    field = Scfair::Rules.field_path(format, :uns, 'schema_reference')
+    file_reference = Array(field_values[field] || field_values[field.to_sym]).first
+    Scfair::SchemaReferenceEvaluator.call(
+      file_reference: file_reference,
+      reference_url: Scfair::Rules.schema_hash[:source_url],
       format: format
     )
   end

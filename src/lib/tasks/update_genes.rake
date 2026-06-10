@@ -534,6 +534,7 @@ task update_genes: :environment do
                 
                 if ! h_db_genes[stable_id.downcase]
                   h_upd[:alt_names] = alt_names.map{|e| e.gsub(/\s+\(\s*\d+\s+of\s+\w+\s*\)/, '').strip}.join(",")
+                  h_upd[:first_ensembl_release] = release_num
                   tmp_gene = Gene.new(h_upd)
                   tmp_gene.save
                   j+=1
@@ -584,7 +585,8 @@ task update_genes: :environment do
             #    ensembl_ids = h_latest_ensembl_release[release_num]
             ensembl_ids = h_gene.keys
             ensembl_ids.each_slice(50000) do |chunk_ensembl_ids|
-              Gene.where(:ensembl_id => chunk_ensembl_ids).update_all({:latest_ensembl_release => release_num})
+              Gene.where(:organism_id => o.id, :ensembl_id => chunk_ensembl_ids).update_all({:latest_ensembl_release => release_num})
+              Gene.where(:organism_id => o.id, :ensembl_id => chunk_ensembl_ids).where(:first_ensembl_release => nil).update_all({:first_ensembl_release => release_num})
             end
             #   end
             

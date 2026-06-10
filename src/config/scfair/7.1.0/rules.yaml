@@ -356,6 +356,8 @@ checks_catalog:
       label: Required dataset metadata fields
     - id: schema.version
       label: Schema version compatibility
+    - id: schema.reference
+      label: Schema reference URL
     - id: ontology.format
       label: Ontology identifier format checks
     - id: cross-field.constraints

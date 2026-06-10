@@ -62,6 +62,10 @@ module Scfair
 
       return 'schema.version' if field.match?(/\A(uns\/schema_version|\/attrs\/schema_version)\z/)
       return 'schema.reference' if field.match?(/\A(uns\/schema_reference|\/attrs\/schema_reference)\z/)
+      return 'uns.ensembl' if field.start_with?('uns.ensembl') ||
+                              field.match?(/\A(uns\/ensembl_|\/attrs\/ensembl_)/)
+      return 'obs.experimental_condition' if field.start_with?('obs.experimental_condition')
+      return 'var.required' if field.start_with?('var.required') || field.start_with?('var/')
       return 'cross-field.constraints' if field.start_with?('cross-field')
       return 'ontology.semantics' if field.start_with?('ontology.semantics.')
       return 'ontology.organism_specific' if field.start_with?('ontology.organism_specific')

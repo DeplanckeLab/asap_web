@@ -97,12 +97,22 @@ required:
       - title
       - organism_ontology_term_id
       - schema_version
+      - ensembl_release
+      - ensembl_database
     labels:
       - organism
     h5ad_only:
-      - ensembl_release
-      - ensembl_database
       - schema_reference
+  optional:
+    - ensembl_assembly
+  var_fields:
+    - feature_is_filtered
+    - feature_biotype
+    - feature_length
+    - feature_name
+    - feature_reference
+    - feature_type
+    - feature_chromosome
 
 enum_fields:
   tissue_type:
@@ -116,6 +126,26 @@ enum_fields:
       - cell
       - nucleus
       - na
+  feature_biotype:
+    values:
+      - gene
+      - spike-in
+  perturbation_types:
+    values:
+      - chemical
+      - diet
+      - genetic
+      - protein
+      - temperature
+
+experimental_condition_rules:
+  id_field: experimental_condition_ontology_term_id
+  label_field: experimental_condition
+  perturbation_types_field: perturbation_types
+  genetic_perturbation_id_field: genetic_perturbation_id
+  na_value: na
+  no_perturbations_value: no perturbations
+  delimiter: " || "
 
 ontology_fields:
   assay_ontology_term_id:
@@ -170,6 +200,27 @@ constants:
     - EFO:0022859
     - EFO:0022860
   slide_seq_assay: EFO:0030062
+  ensembl_database_values:
+    - Ensembl
+    - EnsemblMetazoa
+    - EnsemblCOVID-19
+  feature_reference_taxa:
+    NCBITaxon:6293: Caenorhabditis elegans
+    NCBITaxon:9483: Callithrix jacchus
+    NCBITaxon:7955: Danio rerio
+    NCBITaxon:7227: Drosophila melanogaster
+    NCBITaxon:9595: Gorilla gorilla gorilla
+    NCBITaxon:9606: Homo sapiens
+    NCBITaxon:9541: Macaca fascicularis
+    NCBITaxon:9544: Macaca mulatta
+    NCBITaxon:30608: Microcebus murinus
+    NCBITaxon:10090: Mus musculus
+    NCBITaxon:9986: Oryctolagus cuniculus
+    NCBITaxon:9598: Pan troglodytes
+    NCBITaxon:10116: Rattus norvegicus
+    NCBITaxon:2697049: SARS-CoV-2
+    NCBITaxon:9823: Sus scrofa
+    NCBITaxon:32630: ERCC Spike-Ins
 
 spatial_extension:
   root_scalar_key: is_single
@@ -358,6 +409,12 @@ checks_catalog:
       label: Schema version compatibility
     - id: schema.reference
       label: Schema reference URL
+    - id: uns.ensembl
+      label: Ensembl gene annotation metadata
+    - id: obs.experimental_condition
+      label: Experimental condition metadata
+    - id: var.required
+      label: Gene (var) metadata fields
     - id: ontology.format
       label: Ontology identifier format checks
     - id: cross-field.constraints

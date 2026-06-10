@@ -37,8 +37,11 @@ class ScfairH5adValidatorService
     SPECIAL_VALUES = {k: set(v) for k, v in RULES["special_values"].items()}
     ENUM_FIELDS = RULES.get("enum_fields", {})
     LABEL_PAIRS = RULES.get("label_pairs", {})
+    OPTIONAL_UNS = RULES.get("optional_uns", [])
     SPATIAL_OBS_FIELDS = ["array_row", "array_col", "in_tissue"]
     PERTURB_OBS_FIELDS = ["genetic_perturbation_id", "genetic_perturbation_strategy"]
+    EXPERIMENTAL_OBS_FIELDS = RULES.get("experimental_obs", [])
+    REQUIRED_VAR = RULES.get("required_var", [])
 
     TOTAL_STEPS = 8 + len(REQUIRED_OBS) + len(REQUIRED_UNS) + len(ONTOLOGY_FIELDS)
 
@@ -333,6 +336,26 @@ class ScfairH5adValidatorService
         if vals:
           field_values[f"obs/{field}"] = vals[:200]
 
+    def extract_experimental_obs_h5py(obs_group, obs_present):
+      if obs_group is None:
+        return
+      for field in EXPERIMENTAL_OBS_FIELDS:
+        if field not in obs_present:
+          continue
+        vals = read_obs_column_values(obs_group, field)
+        if vals:
+          field_values[f"obs/{field}"] = vals[:200]
+
+    def extract_var_fields_h5py(var_group, var_present):
+      if var_group is None:
+        return
+      for field in REQUIRED_VAR:
+        if field not in var_present:
+          continue
+        vals = read_obs_column_values(var_group, field)
+        if vals:
+          field_values[f"var/{field}"] = vals[:200]
+
     def matrix_shape_h5py(root):
       if "X" not in root:
         return None, None
@@ -450,8 +473,10 @@ class ScfairH5adValidatorService
         store_metadata_columns("obs", metadata_column_keys(obs_group))
 
       var_group = None
+      var_present = set()
       if "var" in root and isinstance(root["var"], h5py.Group):
         var_group = root["var"]
+        var_present = obs_dataset_keys(var_group)
         store_metadata_columns("var", metadata_column_keys(var_group))
 
       required_obs_started = time.perf_counter()
@@ -492,11 +517,19 @@ class ScfairH5adValidatorService
           errors.append({"field": f"uns/{field}", "message": "Missing required dataset metadata field"})
       emit_timing("h5py.required_uns", uns_started, {"fields": len(REQUIRED_UNS)})
 
+      if uns_group is not None:
+        for field in OPTIONAL_UNS:
+          if field in uns_present:
+            vals = read_uns_value(uns_group, field)
+            field_values[f"uns/{field}"] = vals[:200] if vals else []
+
       extensions_started = time.perf_counter()
       extract_spatial_from_uns_h5py(uns_group)
       extract_spatial_obs_h5py(obs_group, obs_present)
       extract_perturb_from_uns_h5py(uns_group)
       extract_perturb_obs_h5py(obs_group, obs_present)
+      extract_experimental_obs_h5py(obs_group, obs_present)
+      extract_var_fields_h5py(var_group, var_present)
       emit_timing("h5py.extensions", extensions_started)
 
       label_pairs_started = time.perf_counter()

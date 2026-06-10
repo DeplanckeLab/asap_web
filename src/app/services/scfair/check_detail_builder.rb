@@ -116,6 +116,9 @@ module Scfair
       'uns.required_presence' => 'Required dataset-level metadata fields in uns/attrs.',
       'schema.version' => 'The file schema_version must be compatible with the reference schema version.',
       'schema.reference' => 'The file schema_reference should match the canonical URL of the reference schema.',
+      'uns.ensembl' => 'Ensembl release, database, and optional assembly used for gene annotation.',
+      'obs.experimental_condition' => 'Experimental condition ontology IDs, labels, and perturbation types.',
+      'var.required' => 'Required per-gene metadata columns in var / row_attrs.',
       'ontology.format' => 'Ontology term identifiers must use valid OBO-style PREFIX:ID format and allowed prefixes.',
       'cross-field.constraints' => 'Metadata fields must satisfy cross-field consistency rules.',
       'ontology.database_resolution' => 'Ontology terms must resolve to known entries in the ASAP ontology database.',
@@ -164,7 +167,7 @@ module Scfair
       'uns.required_presence' => [
         'Each required dataset metadata field is present in uns (H5AD) or /attrs (Loom)',
         'Common fields: title, organism_ontology_term_id, organism label, schema_version',
-        'H5AD-only fields: ensembl_release, ensembl_database, schema_reference'
+        'Common fields include ensembl_release and ensembl_database; H5AD-only: schema_reference'
       ],
       'schema.version' => [
         'Reads schema_version from uns/attrs',
@@ -175,6 +178,22 @@ module Scfair
         'Reads schema_reference from uns (H5AD) or /attrs (Loom)',
         'Compares against the canonical schema URL for this validator release',
         'Warns when the URL does not match exactly'
+      ],
+      'uns.ensembl' => [
+        'ensembl_release and ensembl_database presence use uns/ or /attrs/ field paths',
+        'Value checks use uns.ensembl.release, uns.ensembl.database, and uns.ensembl.assembly',
+        'ensembl_release must be a positive integer; ensembl_database must be Ensembl, EnsemblMetazoa, or EnsemblCOVID-19',
+        'ensembl_assembly is optional; when present it must be a non-empty string'
+      ],
+      'obs.experimental_condition' => [
+        'experimental_condition_ontology_term_id must be absent when all observations are na',
+        'experimental_condition label required when the ID column is present',
+        'perturbation_types required when experimental_condition or genetic_perturbation_id is present',
+        'Multi-values must be unique and sorted lexically with " || " delimiter'
+      ],
+      'var.required' => [
+        'Each required var / row_attrs column is validated individually',
+        'Open a specific field check for column presence and value constraints'
       ],
       'ontology.format' => [
         'Validates OBO-style PREFIX:ID syntax for ontology term fields',
@@ -208,7 +227,8 @@ module Scfair
         'Banned terms and forbidden branches',
         'Allowed exact terms and special placeholder values',
         'Multi-value ordering for ethnicity (sorted " || " lists)',
-        'Label must match ontology ID for special placeholder pairs'
+        'Label must match ontology ID for special placeholder pairs',
+        'organism_ontology_term_id and organism label must match the ASAP organisms table (NCBITaxon tax_id and name)'
       ],
       'loom.paths' => [
         'Required Loom HDF5 paths exist for observation and dataset metadata',
@@ -275,6 +295,37 @@ module Scfair
       'extension.spatial.obs: Visium spot columns when is_single is true',
       'extension.spatial.assets: tissue image arrays and spatial embedding'
     ].freeze
+
+    VAR_FIELD_CHECKS = {
+      'feature_is_filtered' => [
+        'Column must be present in var (H5AD) or row_attrs (Loom)',
+        'Values must be boolean true or false (true, false, True, or False)'
+      ],
+      'feature_biotype' => [
+        'Column must be present in var (H5AD) or row_attrs (Loom)',
+        'Values must be one of the schema biotype enum values'
+      ],
+      'feature_length' => [
+        'Column must be present in var (H5AD) or row_attrs (Loom)',
+        'Values must be a positive integer (gene length in base pairs)'
+      ],
+      'feature_name' => [
+        'Column must be present in var (H5AD) or row_attrs (Loom)',
+        'Values must be a non-empty string (gene symbol or spike-in name)'
+      ],
+      'feature_reference' => [
+        'Column must be present in var (H5AD) or row_attrs (Loom)',
+        'Values must be a schema NCBITaxon identifier for the reference genome or spike-in mix'
+      ],
+      'feature_type' => [
+        'Column must be present in var (H5AD) or row_attrs (Loom)',
+        'Values must be a non-empty string (e.g. protein_coding, synthetic)'
+      ],
+      'feature_chromosome' => [
+        'Column must be present in var (H5AD) or row_attrs (Loom)',
+        'Values must be a non-empty string (chromosome name or na for spike-ins)'
+      ]
+    }.freeze
 
     FIELD_CHECKS = {
       'extension.spatial.structure' => [
@@ -352,6 +403,7 @@ module Scfair
       Required\ field\ present |
       Missing\ required\ observation\ field |
       Missing\ required\ dataset\ metadata\ field |
+      Missing\ required\ variable\ metadata\ field |
       \AFound\ .+\ metadata\z |
       Missing\ .+\ metadata\ \(required\ by\ schema\) |
       Skipped\ \(pre-analysis\ dataset\)
@@ -447,6 +499,9 @@ module Scfair
       return METADATA_OTHER_CHECKS[@field] if METADATA_OTHER_CHECKS[@field].present?
       return FIELD_CHECKS[@field] if FIELD_CHECKS[@field].present?
 
+      var_field = var_metadata_field_name(@field)
+      return VAR_FIELD_CHECKS[var_field] if var_field.present?
+
       CATEGORY_CHECKS[category_id] || []
     end
 
@@ -497,6 +552,10 @@ module Scfair
 
       return CATEGORY_SUMMARIES[@field] if CATEGORY_SUMMARIES[@field].present?
 
+      if required_var_field?(field_name)
+        return var_field_summary(field_name)
+      end
+
       return CATEGORY_SUMMARIES[category_id] if CATEGORY_SUMMARIES[category_id].present?
 
       if required_observation_field?(field_name)
@@ -540,7 +599,15 @@ module Scfair
         rows << { label: 'Reference schema URL', value: Rules.schema_hash[:source_url].to_s }
       end
 
-      if enum_field?(field_name)
+      if category_id == 'uns.ensembl'
+        rows << { label: 'ensembl_release', value: 'Positive integer (e.g. 115)' }
+        rows << { label: 'ensembl_database', value: Rules.ensembl_database_values.join(', ') }
+        rows << { label: 'ensembl_assembly', value: 'Optional non-empty string (e.g. GRCh38.p14)' }
+      end
+
+      append_var_field_constraints(rows, field_name) if required_var_field?(field_name)
+
+      if enum_field?(field_name) && !required_var_field?(field_name)
         rows << { label: 'Allowed values', value: Rules.enum_field_values(field_name).join(', ') }
       end
 
@@ -1059,6 +1126,45 @@ module Scfair
     def required_uns_field?(field_name)
       Rules.required_uns_fields(@format).include?(field_name) ||
         Rules.required_uns_labels.include?(field_name)
+    end
+
+    def required_var_field?(field_name)
+      Rules.required_var_fields.include?(field_name)
+    end
+
+    def var_metadata_field_name(field)
+      return nil unless field.match?(/\A(var\/|\/row_attrs\/)/)
+
+      name = field.split('/').last.to_s
+      required_var_field?(name) ? name : nil
+    end
+
+    def var_field_summary(field_name)
+      summaries = {
+        'feature_is_filtered' => 'Per-gene filter flag indicating whether the feature was filtered out of the matrix.',
+        'feature_biotype' => 'Gene biotype: distinguishes annotated genes from ERCC spike-in controls.',
+        'feature_length' => 'Gene length in base pairs as a positive integer.',
+        'feature_name' => 'Gene symbol or spike-in control name (non-empty string).',
+        'feature_reference' => 'NCBITaxon identifier for the reference genome or spike-in mix used for this feature.',
+        'feature_type' => 'Feature type label such as protein_coding or synthetic (non-empty string).',
+        'feature_chromosome' => 'Chromosome name for the feature, or na for spike-ins (non-empty string).'
+      }
+      summaries[field_name] || "Required variable (gene) metadata field per scFAIR #{Rules.schema_version}."
+    end
+
+    def append_var_field_constraints(rows, field_name)
+      case field_name
+      when 'feature_is_filtered'
+        rows << { label: 'Allowed values', value: 'true, false, True, False' }
+      when 'feature_biotype'
+        rows << { label: 'Allowed values', value: Rules.enum_field_values('feature_biotype').join(', ') }
+      when 'feature_length'
+        rows << { label: 'Requirement', value: 'Positive integer (uint)' }
+      when 'feature_reference'
+        rows << { label: 'Allowed values', value: Rules.feature_reference_taxa.keys.join(', ') }
+      when 'feature_name', 'feature_type', 'feature_chromosome'
+        rows << { label: 'Requirement', value: 'Non-empty string per gene or feature' }
+      end
     end
 
     def enum_field?(field_name)

@@ -5,10 +5,10 @@ require_relative 'test_base_without_fixtures'
 class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
   test 'groups missing uns fields under uns.required_presence with failed status' do
     catalog = [{ id: 'uns.required_presence', label: 'Required dataset metadata fields' }]
-    errors = [{ field: 'uns/ensembl_release', message: 'Missing required dataset metadata field' }]
+    errors = [{ field: 'uns/title', message: 'Missing required dataset metadata field' }]
     valid_checks = [
-      { field: 'uns/title', message: 'Required field present', status: 'passed' },
-      { field: 'uns/ensembl_release', message: 'Missing required dataset metadata field', status: 'failed' }
+      { field: 'uns/organism_ontology_term_id', message: 'Required field present', status: 'passed' },
+      { field: 'uns/title', message: 'Missing required dataset metadata field', status: 'failed' }
     ]
 
     groups = Scfair::ComplianceReportGrouper.call(
@@ -20,9 +20,28 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
     )
 
     items = groups.first[:items]
-    ensembl = items.find { |item| item[:field] == 'uns/ensembl_release' }
-    assert_equal 'failed', ensembl[:status]
-    assert_equal 'passed', items.find { |item| item[:field] == 'uns/title' }[:status]
+    assert_equal 'failed', items.find { |item| item[:field] == 'uns/title' }[:status]
+    assert_equal 'passed', items.find { |item| item[:field] == 'uns/organism_ontology_term_id' }[:status]
+  end
+
+  test 'routes ensembl uns fields to uns.ensembl category' do
+    catalog = [{ id: 'uns.ensembl', label: 'Ensembl gene annotation metadata' }]
+    valid_checks = [
+      { field: 'uns/ensembl_release', status: 'failed', message: 'Missing required dataset metadata field' },
+      { field: 'uns.ensembl.database', status: 'failed', message: 'ensembl_database must be one of: Ensembl' }
+    ]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: [],
+      warnings: [],
+      format: 'h5ad'
+    )
+
+    assert_equal 1, groups.size
+    assert_equal 'uns.ensembl', groups.first[:id]
+    assert_equal 2, groups.first[:items].size
   end
 
   test 'routes schema version issues to schema.version category' do

@@ -225,6 +225,39 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
     assert_includes prefixes[:value], 'FBbt:*'
   end
 
+  test 'var field check shows field-specific checks not full column list' do
+    detail = Scfair::CheckDetailBuilder.call(
+      field: 'var/feature_biotype',
+      message: "feature_biotype must be one of: gene, spike-in (found: unknown)",
+      format: 'h5ad',
+      category_id: 'var.required'
+    )
+
+    assert_equal 'feature_biotype', detail[:title]
+    assert_match(/biotype/, detail[:summary])
+    refute detail[:checks_performed].any? { |check| check.include?('feature_chromosome') }
+    refute detail[:checks_performed].any? { |check| check.include?('feature_is_filtered') }
+    assert detail[:checks_performed].any? { |check| check.include?('biotype') }
+    allowed = detail[:constraints].find { |row| row[:label] == 'Allowed values' }
+    assert_includes allowed[:value], 'gene'
+    assert_includes allowed[:value], 'spike-in'
+  end
+
+  test 'var field presence check omits constraints and uses field-specific checks' do
+    detail = Scfair::CheckDetailBuilder.call(
+      field: 'var/feature_chromosome',
+      message: 'Missing required variable metadata field',
+      format: 'h5ad',
+      category_id: 'var.required'
+    )
+
+    assert_equal 'feature_chromosome', detail[:title]
+    assert_match(/Chromosome/i, detail[:summary])
+    assert_empty detail[:constraints]
+    refute detail[:checks_performed].any? { |check| check.include?('feature_biotype') }
+    assert detail[:checks_performed].any? { |check| check.include?('chromosome') }
+  end
+
   test 'shows organism-specific ethnicity context in semantic popup' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'ontology.semantics.self_reported_ethnicity_ontology_term_id.descendants',

@@ -89,6 +89,36 @@ module Scfair
       Array(data.dig(:required, :uns, :labels)).map(&:to_s).freeze
     end
 
+    def optional_uns_fields
+      Array(data.dig(:required, :uns, :optional)).map(&:to_s).freeze
+    end
+
+    def required_var_fields
+      Array(data.dig(:required, :var_fields)).map(&:to_s).freeze
+    end
+
+    def ensembl_database_values
+      Array(data.dig(:constants, :ensembl_database_values)).map(&:to_s).freeze
+    end
+
+    def feature_reference_taxa
+      raw = data.dig(:constants, :feature_reference_taxa) || {}
+      raw.each_with_object({}) { |(id, label), h| h[id.to_s] = label.to_s }.freeze
+    end
+
+    def experimental_condition_rules
+      raw = data[:experimental_condition_rules] || {}
+      {
+        id_field: raw[:id_field].to_s,
+        label_field: raw[:label_field].to_s,
+        perturbation_types_field: raw[:perturbation_types_field].to_s,
+        genetic_perturbation_id_field: raw[:genetic_perturbation_id_field].to_s,
+        na_value: raw[:na_value].to_s,
+        no_perturbations_value: raw[:no_perturbations_value].to_s,
+        delimiter: raw[:delimiter].to_s
+      }.freeze
+    end
+
     def enum_field_values(field_name)
       Array(data.dig(:enum_fields, field_name.to_sym, :values)).map(&:to_s).freeze
     end
@@ -324,20 +354,25 @@ module Scfair
       fmt = format.to_s
       spatial_obs = %w[in_tissue array_row array_col]
       perturb_obs = perturb_extension_rules[:obs_fields]
-      cross_field_obs = %w[tissue_type suspension_type donor_id is_primary_data] + spatial_obs + perturb_obs
+      experimental_obs = experimental_condition_obs_fields
+      cross_field_obs = %w[tissue_type suspension_type donor_id is_primary_data] + spatial_obs + perturb_obs + experimental_obs
+      var_fields = required_var_fields
 
       if fmt == 'loom'
         (
           required_uns_fields('loom').map { |name| field_path('loom', :uns, name) } +
           [field_path('loom', :uns, 'schema_reference')] +
+          optional_uns_fields.map { |name| field_path('loom', :uns, name) } +
           required_observation_fields.map { |name| field_path('loom', :obs, name) } +
           required_observation_labels.map { |name| field_path('loom', :obs, name) } +
           cross_field_obs.map { |name| field_path('loom', :obs, name) } +
+          var_fields.map { |name| field_path('loom', :var, name) } +
           [field_path('loom', :uns, 'spatial/is_single')]
         ).uniq
       elsif fmt == 'h5ad'
         (
           cross_field_obs.map { |name| field_path('h5ad', :obs, name) } +
+          var_fields.map { |name| field_path('h5ad', :var, name) } +
           [field_path('h5ad', :uns, 'spatial/is_single')]
         ).uniq
       else
@@ -361,18 +396,31 @@ module Scfair
       end.freeze
     end
 
+    def experimental_condition_obs_fields
+      rules = experimental_condition_rules
+      [
+        rules[:id_field],
+        rules[:label_field],
+        rules[:perturbation_types_field]
+      ].reject(&:blank?).freeze
+    end
+
     def h5ad_validator_config
       fmt = 'h5ad'
       enum_fields = (data[:enum_fields] || {}).each_with_object({}) do |(field_name, cfg), out|
-        out[field_path(fmt, :obs, field_name.to_s)] = Array(cfg[:values]).map(&:to_s)
+        layer = %w[feature_biotype].include?(field_name.to_s) ? :var : :obs
+        out[field_path(fmt, layer, field_name.to_s)] = Array(cfg[:values]).map(&:to_s)
       end
       {
         'required_obs' => (required_observation_fields + required_observation_labels),
         'required_uns' => required_uns_fields(fmt),
+        'required_var' => required_var_fields,
+        'experimental_obs' => experimental_condition_obs_fields,
         'ontology_fields' => ontology_paths(fmt),
         'special_values' => allowed_special_values(fmt),
         'enum_fields' => enum_fields,
-        'label_pairs' => label_pairs
+        'label_pairs' => label_pairs,
+        'optional_uns' => optional_uns_fields
       }
     end
 

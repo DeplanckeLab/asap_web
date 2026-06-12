@@ -201,7 +201,7 @@ Values MUST NOT have zero size when key is present — **No**
 | --- | --- |
 | `h5ad.anndata_spec` | Root `encoding-type` / `encoding-version`, `n_obs`/`n_var` alignment, optional full encoding walk |
 | `obs.strain` | optional strain fields |
-| `var.index` | Ensembl/ERCC format, version strip |
+| `var.index` | **Yes** — presence (`var/_index` or Loom `/row_attrs/feature_id` / `_index`), uniqueness, ERCC/Ensembl format; gene reference at release under `var.cross_field.index.release` |
 | `uns.optional` | batch_condition, default_embedding, etc. |
 | `h5ad.layers` | matrix alignment, CSR, raw vs normalized |
 | `ontology.obsolete` | obsolete term ban |

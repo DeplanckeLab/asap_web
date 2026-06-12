@@ -1,4 +1,22 @@
-# frozen_string_literal: true
+      if vals:
+        out[path] = sorted(list(set(vals)))[:200]
+
+    def read_col_series(col_group, key):
+      if key not in col_group:
+        return []
+      ds = col_group[key]
+      if not isinstance(ds, h5py.Dataset):
+        return []
+      raw = ds[()]
+      if isinstance(raw, np.ndarray):
+        items = raw.tolist()
+      elif isinstance(raw, (list, tuple)):
+        items = list(raw)
+      else:
+        items = [raw]
+      return [decode_obs_value(v) for v in items]
+
+    def capture_dataset(path, ds, out):# frozen_string_literal: true
 
 require 'open3'
 require 'json'
@@ -19,6 +37,29 @@ class ScfairLoomFileValidatorService
 
     loom_path = sys.argv[1]
     fields = %<fields>s
+    label_pairs = %<label_pairs>s
+
+    def decode_obs_value(value):
+      if value is None:
+        return None
+      if isinstance(value, bytes):
+        return value.decode("utf-8", "replace")
+      return str(value)
+
+    def read_col_series(col_group, key):
+      if key not in col_group:
+        return []
+      ds = col_group[key]
+      if not isinstance(ds, h5py.Dataset):
+        return []
+      raw = ds[()]
+      if isinstance(raw, np.ndarray):
+        items = raw.tolist()
+      elif isinstance(raw, (list, tuple)):
+        items = list(raw)
+      else:
+        items = [raw]
+      return [decode_obs_value(v) for v in items]
 
     def capture_dataset(path, ds, out):
       if len(ds.shape) == 0:
@@ -55,6 +96,34 @@ class ScfairLoomFileValidatorService
       if vals:
         out[path] = sorted(list(set(vals)))[:200]
 
+    def capture_series(path, ds, out):
+      if len(ds.shape) == 0:
+        val = ds[()]
+        if isinstance(val, bytes):
+          val = val.decode("utf-8", "replace")
+        out[f"{path}#series"] = [str(val)]
+        out[path] = [str(val)]
+        return
+
+      raw = ds[()]
+      try:
+        itr = raw.tolist()
+      except Exception:
+        itr = [raw]
+      if not isinstance(itr, list):
+        itr = [itr]
+      vals = []
+      for v in itr:
+        if isinstance(v, bytes):
+          vals.append(v.decode("utf-8", "replace"))
+        else:
+          vals.append(str(v))
+      vals = [v for v in vals if v and v != "None"]
+      if not vals:
+        return
+      out[f"{path}#series"] = vals[:500]
+      out[path] = sorted(list(set(vals)))[:200]
+
     out = {}
     with h5py.File(loom_path, "r") as f:
       paths = set(fields)
@@ -72,6 +141,93 @@ class ScfairLoomFileValidatorService
       for layer, group_name in [("obs", "col_attrs"), ("var", "row_attrs"), ("uns", "attrs")]:
         if group_name in f and isinstance(f[group_name], h5py.Group):
           out[f"metadata/{layer}/columns"] = sorted(f[group_name].keys())
+
+      var_series_fields = %<var_series_fields>s
+      if "row_attrs" in f and isinstance(f["row_attrs"], h5py.Group):
+        row_attrs = f["row_attrs"]
+        for field in var_series_fields:
+          if field not in row_attrs:
+            continue
+          ds = row_attrs[field]
+          if not isinstance(ds, h5py.Dataset) or len(ds.shape) != 1:
+            continue
+          raw = ds[()]
+          try:
+            itr = raw.tolist()
+          except Exception:
+            itr = [raw]
+          if not isinstance(itr, list):
+            itr = [itr]
+          vals = []
+          for v in itr[:500]:
+            if isinstance(v, bytes):
+              vals.append(v.decode("utf-8", "replace"))
+            else:
+              vals.append(str(v))
+          if vals:
+            out[f"/row_attrs/{field}#series"] = vals
+        var_index_keys = ["feature_id", "index", "_index"]
+        if "/attrs/anndata_mapping" in f:
+          try:
+            raw = f["/attrs/anndata_mapping"][()]
+            if isinstance(raw, bytes):
+              raw = raw.decode("utf-8", "replace")
+            mapping = json.loads(raw) if isinstance(raw, str) else {}
+            if isinstance(mapping, dict):
+              manifest_key = mapping.get("var_index_key")
+              if manifest_key and manifest_key not in var_index_keys:
+                var_index_keys.append(str(manifest_key))
+              if manifest_key:
+                out["/attrs/anndata_mapping#var_index_key"] = [str(manifest_key)]
+          except Exception:
+            pass
+        for index_key in var_index_keys:
+          if index_key not in row_attrs:
+            continue
+          ds = row_attrs[index_key]
+          if not isinstance(ds, h5py.Dataset) or len(ds.shape) != 1:
+            continue
+          raw = ds[()]
+          try:
+            itr = raw.tolist()
+          except Exception:
+            itr = [raw]
+          if not isinstance(itr, list):
+            itr = [itr]
+          vals = []
+          for v in itr[:500]:
+            if isinstance(v, bytes):
+              vals.append(v.decode("utf-8", "replace"))
+            else:
+              vals.append(str(v))
+          if vals:
+            out[f"/row_attrs/{index_key}#series"] = vals
+            out[f"/row_attrs/{index_key}"] = sorted(list(set(vals)))[:200]
+            break
+      if "col_attrs" in f and isinstance(f["col_attrs"], h5py.Group):
+        col = f["col_attrs"]
+        col_keys = set(col.keys())
+        for id_field, label_field in label_pairs.items():
+          if id_field == "organism_ontology_term_id":
+            continue
+          if id_field not in col_keys or label_field not in col_keys:
+            continue
+          ids = read_col_series(col, id_field)
+          labels = read_col_series(col, label_field)
+          if not ids or len(ids) != len(labels):
+            continue
+          pairs = []
+          seen = set()
+          for id_val, label_val in zip(ids, labels):
+            if not id_val or not label_val:
+              continue
+            token = f"{id_val} || {label_val}"
+            if token in seen:
+              continue
+            seen.add(token)
+            pairs.append(token)
+          if pairs:
+            out[f"/col_attrs/{id_field}#label_pairs"] = pairs[:200]
     print(json.dumps(out))
   PYTHON
 
@@ -177,7 +333,12 @@ class ScfairLoomFileValidatorService
   end
 
   def extract_field_values
-    py = format(FIELD_VALUES_PY_TEMPLATE, fields: LOOM_FIELD_VALUE_PATHS.to_json)
+    py = format(
+      FIELD_VALUES_PY_TEMPLATE,
+      fields: LOOM_FIELD_VALUE_PATHS.to_json,
+      var_series_fields: Scfair::Rules.required_var_fields.to_json,
+      label_pairs: Scfair::Rules.label_pairs.to_json
+    )
     cmd = ['docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-', @loom_path]
     stdout, stderr, status = Open3.capture3(*cmd, stdin_data: py)
     return {} unless status.success?

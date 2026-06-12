@@ -12,7 +12,7 @@ class ScfairExperimentalConditionValidatorTest < TestBaseWithoutFixtures
     ).call
 
     assert_empty result[:errors]
-    presence = result[:valid_checks].find { |entry| entry[:field] == 'obs.experimental_condition.presence' }
+    presence = result[:valid_checks].find { |entry| entry[:field] == 'obs/experimental_condition' }
     assert_equal 'passed', presence[:status]
   end
 
@@ -57,7 +57,7 @@ class ScfairExperimentalConditionValidatorTest < TestBaseWithoutFixtures
     ).call
 
     assert_empty result[:errors]
-    assert_equal 'passed', result[:valid_checks].find { |entry| entry[:field] == 'obs.experimental_condition.presence' }[:status]
+    assert_equal 'passed', result[:valid_checks].find { |entry| entry[:field] == 'obs/experimental_condition' }[:status]
   end
 
   test 'requires perturbation_types when genetic_perturbation_id is present' do

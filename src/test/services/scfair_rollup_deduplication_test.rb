@@ -25,6 +25,7 @@ class ScfairRollupDeduplicationTest < TestBaseWithoutFixtures
     assert_equal 1, cleaned_errors.size
     assert_equal 'obs.experimental_condition.label', cleaned_errors.first[:field]
     refute cleaned_checks.any? { |entry| entry[:field] == 'obs/experimental_condition' }
+    refute cleaned_errors.any? { |entry| entry[:field] == 'obs/experimental_condition' }
   end
 
   test 'mirror adds per-field var checks from errors when not already recorded' do

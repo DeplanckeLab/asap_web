@@ -62,10 +62,20 @@ module Scfair
 
       return 'schema.version' if field.match?(/\A(uns\/schema_version|\/attrs\/schema_version)\z/)
       return 'schema.reference' if field.match?(/\A(uns\/schema_reference|\/attrs\/schema_reference)\z/)
+      return 'uns.ensembl_assembly' if field.match?(/\A(uns\/ensembl_assembly|\/attrs\/ensembl_assembly)\z/)
+      return 'schema.reference' if field.match?(/\A(uns\/schema_reference|\/attrs\/schema_reference)\z/)
       return 'uns.ensembl' if field.start_with?('uns.ensembl') ||
                               field.match?(/\A(uns\/ensembl_|\/attrs\/ensembl_)/)
-      return 'obs.experimental_condition' if field.start_with?('obs.experimental_condition')
-      return 'var.required' if field.start_with?('var.required') || field.start_with?('var/')
+      return 'obs.experimental_condition' if field.start_with?('obs.experimental_condition') ||
+                                            experimental_condition_obs_path?(field) ||
+                                            experimental_condition_obs_path?(field)
+      return 'var.cross_field' if field.start_with?('var.cross_field')
+      return 'cross-field.uns_ensembl' if field.start_with?('cross-field.uns_ensembl')
+      return 'var.index' if field == Rules.var_index_schema_field ||
+                            field.start_with?('var.index') ||
+                            field.match?(/\A(var\/_index|var\/index|\/row_attrs\/(_index|index|feature_id))\z/)
+      return 'var.required' if field.start_with?('var.required') || field.start_with?('var/') || field.start_with?('/row_attrs/')
+      return 'obs.label_pairs' if field.start_with?('obs.label_pairs.')
       return 'cross-field.constraints' if field.start_with?('cross-field')
       return 'ontology.semantics' if field.start_with?('ontology.semantics.')
       return 'ontology.organism_specific' if field.start_with?('ontology.organism_specific')
@@ -124,6 +134,18 @@ module Scfair
       end
     end
 
+    def experimental_condition_obs_path?(field)
+      Rules.experimental_condition_obs_fields.any? do |name|
+        field == Rules.field_path(@format, :obs, name)
+      end
+    end
+
+    def experimental_condition_obs_path?(field)
+      Rules.experimental_condition_obs_fields.any? do |name|
+        field == Rules.field_path(@format, :obs, name)
+      end
+    end
+
     def ontology_term_field?(field)
       field.include?('_ontology_term_id') ||
         field.match?(/\A\/attrs\/organism\z/) ||
@@ -163,9 +185,7 @@ module Scfair
       field_name = field.split('/').last.to_s
       return false unless CROSS_FIELD_METADATA_FIELDS.include?(field_name)
 
-      message.match?(
-        /MUST|must not|must be|For assay|tissue_type is|Organism is|Organoid|Visium|C\. elegans|spatial\.is_single|Label must match special ontology id/i
-      )
+      message.match?(Rules.cross_field_grouper_message_pattern)
     end
   end
 end

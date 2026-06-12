@@ -11,6 +11,11 @@ class CellOntologyTerm < ApplicationRecord
       .joins(:cell_ontology)
       .where(cell_ontologies: { obsolete: false })
   }
+
+  # Active original term for compliance and metadata resolution (excludes obsolete terms and ontologies).
+  def self.active_original_by_identifier(identifier)
+    with_active_cell_ontology.find_by(identifier: identifier.to_s, original: true)
+  end
 end
 
 

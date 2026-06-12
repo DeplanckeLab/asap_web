@@ -8,7 +8,7 @@ module Scfair
 
     def register(identifier)
       return if identifier.blank? || @terms_by_identifier.key?(identifier)
-      @terms_by_identifier[identifier] = CellOntologyTerm.find_by(identifier: identifier, original: true)
+      @terms_by_identifier[identifier] = CellOntologyTerm.active_original_by_identifier(identifier)
     end
 
     def exists?(identifier)

@@ -1,6 +1,20 @@
 class ComplianceFileChecksController < ApplicationController
   skip_before_action :authenticate_user!, raise: false
 
+  def rules_snippet
+    path = params[:path].to_s.strip
+    result = Scfair::RulesSnippetExtractor.call(path)
+    if result[:error]
+      render json: result, status: :not_found
+    else
+      render json: result
+    end
+  end
+
+  def rules_yaml
+    render json: Scfair::RulesYamlDocument.call
+  end
+
   def index
     @available_schemas = [{ id: 'scfair_7_1_0', label: 'scFAIR 7.1.0' }]
     @default_schema_id = 'scfair_7_1_0'

@@ -108,7 +108,8 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
 
   test 'catalog id matches grouper category for cross-field rule checks' do
     catalog = Scfair::Rules.checks_for('h5ad')
-    cross_field_entry = catalog.find { |entry| entry[:id].to_s.include?('cross') }
+    cross_field_entry = catalog.find { |entry| entry[:id] == 'cross-field.constraints' }
+    assert_not_nil cross_field_entry
     assert_equal 'cross-field.constraints', cross_field_entry[:id]
 
     valid_checks = [
@@ -129,12 +130,12 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
     assert_equal 2, cross_field_group[:items].size
   end
 
-  test 'orders cross-field rule checks numerically so CF-10 follows CF-9' do
+  test 'orders cross-field rule checks numerically so CF-9 follows CF-8' do
     catalog = [{ id: 'cross-field.constraints', label: 'Cross-field schema constraints' }]
     valid_checks = [
-      { field: 'cross-field.CF-10-spatial-metadata-presence', status: 'passed', message: 'Spatial metadata presence consistent with assay' },
+      { field: 'cross-field.CF-9-spatial-metadata-presence', status: 'passed', message: 'Spatial metadata presence consistent with assay' },
       { field: 'cross-field.CF-1-assay-suspension', status: 'passed', message: 'Assay/suspension_type consistency' },
-      { field: 'cross-field.CF-9-visium-in-tissue', status: 'passed', message: 'Visium in_tissue constraint OK' },
+      { field: 'cross-field.CF-8-visium-in-tissue', status: 'passed', message: 'Visium in_tissue constraint OK' },
       { field: 'cross-field.CF-2a-cell-line-ethnicity', status: 'skipped', message: 'Not applicable' }
     ]
 
@@ -150,8 +151,84 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
     assert_equal [
       'cross-field.CF-1-assay-suspension',
       'cross-field.CF-2a-cell-line-ethnicity',
-      'cross-field.CF-9-visium-in-tissue',
-      'cross-field.CF-10-spatial-metadata-presence'
+      'cross-field.CF-8-visium-in-tissue',
+      'cross-field.CF-9-spatial-metadata-presence'
     ], fields
+  end
+
+  test 'routes obs label pair checks to obs.label_pairs category' do
+    catalog = [{ id: 'obs.label_pairs', label: 'Observation label / ontology ID pairs' }]
+    valid_checks = [
+      { field: 'obs.label_pairs.assay_ontology_term_id', status: 'passed', message: 'assay pair OK' },
+      { field: 'obs.label_pairs.cell_type_ontology_term_id', status: 'failed', message: 'cell type mismatch' }
+    ]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: [],
+      warnings: [],
+      format: 'h5ad'
+    )
+
+    assert_equal 'obs.label_pairs', groups.first[:id]
+    assert_equal 2, groups.first[:items].size
+  end
+
+  test 'routes var cross-field checks to var.cross_field category' do
+    catalog = [{ id: 'var.cross_field', label: 'Var metadata cross-field consistency' }]
+    valid_checks = [
+      { field: 'var.cross_field.feature_reference', status: 'passed', message: 'feature_reference OK' },
+      { field: 'var.cross_field.feature_name.index', status: 'failed', message: 'feature_name mismatch' }
+    ]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: [],
+      warnings: [],
+      format: 'h5ad'
+    )
+
+    assert_equal 'var.cross_field', groups.first[:id]
+    assert_equal 2, groups.first[:items].size
+  end
+
+  test 'routes var index checks to var.index category' do
+    catalog = [{ id: 'var.index', label: 'Var index (feature identifiers)' }]
+    valid_checks = [
+      { field: 'var.index', status: 'passed', message: 'Var index present' },
+      { field: 'var.index.uniqueness', status: 'passed', message: 'Unique' },
+      { field: '/row_attrs/feature_id', status: 'passed', message: 'Loom feature_id present' }
+    ]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: [],
+      warnings: [],
+      format: 'h5ad'
+    )
+
+    assert_equal 'var.index', groups.first[:id]
+    assert_equal 3, groups.first[:items].size
+  end
+
+  test 'routes uns ensembl cross-field checks to cross-field.uns_ensembl category' do
+    catalog = [{ id: 'cross-field.uns_ensembl', label: 'Ensembl release and assembly consistency' }]
+    valid_checks = [
+      { field: 'cross-field.uns_ensembl.release', status: 'passed', message: 'Release supported' },
+      { field: 'cross-field.uns_ensembl.assembly', status: 'skipped', message: 'Assembly absent' }
+    ]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: [],
+      warnings: [],
+      format: 'h5ad'
+    )
+
+    assert_equal 'cross-field.uns_ensembl', groups.first[:id]
   end
 end

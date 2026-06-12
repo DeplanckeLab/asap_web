@@ -33,6 +33,10 @@ class ScfairComplianceService
         field_values: base_result.field_values || {},
         format: format
       ).call
+      obs_label_pairs = Scfair::ObsLabelPairConstraintEvaluator.new(
+        field_values: base_result.field_values || {},
+        format: format
+      ).call
       extensions = Scfair::SchemaExtensionValidator.new(
         field_values: base_result.field_values || {},
         format: format
@@ -45,17 +49,24 @@ class ScfairComplianceService
       uns_ensembl_check = uns_ensembl_evaluation(base_result.field_values || {}, format)
       experimental_condition_check = experimental_condition_evaluation(base_result.field_values || {}, format)
       var_metadata_check = var_metadata_evaluation(base_result.field_values || {}, format)
+      var_index_check = var_index_evaluation(base_result.field_values || {}, format)
+      var_cross_field_check = var_cross_field_evaluation(base_result.field_values || {}, format)
+      uns_ensembl_cross_field_check = uns_ensembl_cross_field_evaluation(base_result.field_values || {}, format)
       organism_label_check = organism_label_pair_evaluation(base_result.field_values || {}, format)
       errors.concat(extensions[:errors])
       errors.concat(metadata_general[:errors])
       errors.concat(uns_ensembl_check[:errors])
       errors.concat(experimental_condition_check[:errors])
       errors.concat(var_metadata_check[:errors])
+      errors.concat(var_index_check[:errors])
+      errors.concat(var_cross_field_check[:errors])
+      errors.concat(uns_ensembl_cross_field_check[:errors])
+      errors.concat(obs_label_pairs[:errors])
       errors.concat(organism_label_check[:errors])
       warnings.concat(extensions[:warnings])
       warnings.concat(schema_reference_check[:warnings])
       valid_checks = reconcile_schema_version_checks(
-        base_result.valid_checks + cross_field[:valid_checks] + extensions[:valid_checks] + metadata_general[:valid_checks] + schema_reference_check[:valid_checks] + uns_ensembl_check[:valid_checks] + experimental_condition_check[:valid_checks] + var_metadata_check[:valid_checks] + organism_label_check[:valid_checks],
+        base_result.valid_checks + cross_field[:valid_checks] + obs_label_pairs[:valid_checks] + extensions[:valid_checks] + metadata_general[:valid_checks] + schema_reference_check[:valid_checks] + uns_ensembl_check[:valid_checks] + experimental_condition_check[:valid_checks] + var_metadata_check[:valid_checks] + var_index_check[:valid_checks] + var_cross_field_check[:valid_checks] + uns_ensembl_cross_field_check[:valid_checks] + organism_label_check[:valid_checks],
         errors,
         warnings,
         format
@@ -68,6 +79,7 @@ class ScfairComplianceService
         organism_term_id: first_organism(base_result.field_values, format)
       ).run
       cross_field = Scfair::CrossFieldConstraintEvaluator.new(field_values: base_result.field_values || {}, format: format).call
+      obs_label_pairs = Scfair::ObsLabelPairConstraintEvaluator.new(field_values: base_result.field_values || {}, format: format).call
       organism_specific = Scfair::OrganismSpecificConstraintEvaluator.new(field_values: base_result.field_values || {}, format: format).call
       extensions = Scfair::SchemaExtensionValidator.new(field_values: base_result.field_values || {}, format: format).call
       metadata_general = Scfair::MetadataGeneralValidator.new(field_values: base_result.field_values || {}, format: format).call
@@ -76,11 +88,14 @@ class ScfairComplianceService
       uns_ensembl_check = uns_ensembl_evaluation(base_result.field_values || {}, format)
       experimental_condition_check = experimental_condition_evaluation(base_result.field_values || {}, format)
       var_metadata_check = var_metadata_evaluation(base_result.field_values || {}, format)
+      var_index_check = var_index_evaluation(base_result.field_values || {}, format)
+      var_cross_field_check = var_cross_field_evaluation(base_result.field_values || {}, format)
+      uns_ensembl_cross_field_check = uns_ensembl_cross_field_evaluation(base_result.field_values || {}, format)
       organism_label_check = organism_label_pair_evaluation(base_result.field_values || {}, format)
 
-      errors = (base_result.errors + ontology[:errors] + cross_field[:errors] + organism_specific[:errors] + extensions[:errors] + metadata_general[:errors] + schema_version_check[:errors] + uns_ensembl_check[:errors] + experimental_condition_check[:errors] + var_metadata_check[:errors] + organism_label_check[:errors]).uniq
+      errors = (base_result.errors + ontology[:errors] + cross_field[:errors] + obs_label_pairs[:errors] + organism_specific[:errors] + extensions[:errors] + metadata_general[:errors] + schema_version_check[:errors] + uns_ensembl_check[:errors] + experimental_condition_check[:errors] + var_metadata_check[:errors] + var_index_check[:errors] + var_cross_field_check[:errors] + uns_ensembl_cross_field_check[:errors] + organism_label_check[:errors]).uniq
       warnings = (base_result.warnings + ontology[:warnings] + cross_field[:warnings] + organism_specific[:warnings] + extensions[:warnings] + schema_version_check[:warnings] + schema_reference_check[:warnings]).uniq
-      valid_checks = (base_result.valid_checks + ontology[:valid_checks] + cross_field[:valid_checks] + organism_specific[:valid_checks] + extensions[:valid_checks] + metadata_general[:valid_checks] + schema_version_check[:valid_checks] + schema_reference_check[:valid_checks] + uns_ensembl_check[:valid_checks] + experimental_condition_check[:valid_checks] + var_metadata_check[:valid_checks] + organism_label_check[:valid_checks])
+      valid_checks = (base_result.valid_checks + ontology[:valid_checks] + cross_field[:valid_checks] + obs_label_pairs[:valid_checks] + organism_specific[:valid_checks] + extensions[:valid_checks] + metadata_general[:valid_checks] + schema_version_check[:valid_checks] + schema_reference_check[:valid_checks] + uns_ensembl_check[:valid_checks] + experimental_condition_check[:valid_checks] + var_metadata_check[:valid_checks] + var_index_check[:valid_checks] + var_cross_field_check[:valid_checks] + uns_ensembl_cross_field_check[:valid_checks] + organism_label_check[:valid_checks])
       valid_checks = reconcile_schema_version_checks(valid_checks, errors, warnings, format)
     end
 
@@ -264,8 +279,58 @@ class ScfairComplianceService
     Scfair::VarMetadataValidator.new(field_values: field_values, format: format).call
   end
 
+  def var_index_evaluation(field_values, format)
+    Scfair::VarIndexValidator.new(field_values: field_values, format: format).call
+  end
+
   def organism_label_pair_evaluation(field_values, format)
     Scfair::OrganismLabelPairValidator.new(field_values: field_values, format: format).call
+  end
+
+  def var_cross_field_evaluation(field_values, format)
+    Scfair::VarCrossFieldValidator.new(field_values: field_values, format: format).call
+  end
+
+  def uns_ensembl_cross_field_evaluation(field_values, format)
+    Scfair::UnsEnsemblCrossFieldValidator.new(field_values: field_values, format: format).call
+  end
+
+  def schema_reference_evaluation(field_values, format)
+    field = Scfair::Rules.field_path(format, :uns, 'schema_reference')
+    file_reference = Array(field_values[field] || field_values[field.to_sym]).first
+    Scfair::SchemaReferenceEvaluator.call(
+      file_reference: file_reference,
+      reference_url: Scfair::Rules.schema_hash[:source_url],
+      format: format
+    )
+  end
+
+  def uns_ensembl_evaluation(field_values, format)
+    Scfair::UnsEnsemblValidator.new(field_values: field_values, format: format).call
+  end
+
+  def experimental_condition_evaluation(field_values, format)
+    Scfair::ExperimentalConditionValidator.new(field_values: field_values, format: format).call
+  end
+
+  def var_metadata_evaluation(field_values, format)
+    Scfair::VarMetadataValidator.new(field_values: field_values, format: format).call
+  end
+
+  def var_index_evaluation(field_values, format)
+    Scfair::VarIndexValidator.new(field_values: field_values, format: format).call
+  end
+
+  def organism_label_pair_evaluation(field_values, format)
+    Scfair::OrganismLabelPairValidator.new(field_values: field_values, format: format).call
+  end
+
+  def var_cross_field_evaluation(field_values, format)
+    Scfair::VarCrossFieldValidator.new(field_values: field_values, format: format).call
+  end
+
+  def uns_ensembl_cross_field_evaluation(field_values, format)
+    Scfair::UnsEnsemblCrossFieldValidator.new(field_values: field_values, format: format).call
   end
 
   def reconcile_rollup_metadata_checks(errors, valid_checks, warnings, format)
@@ -297,7 +362,69 @@ class ScfairComplianceService
     index = {}
     rules = Scfair::Rules.experimental_condition_rules
     {
-      rules[:id_field] => 'obs.experimental_condition.presence',
+      rules[:id_field] => Scfair::Rules.field_path(format, :obs, rules[:label_field]),
+      rules[:label_field] => 'obs.experimental_condition.label',
+      rules[:perturbation_types_field] => 'obs.experimental_condition.perturbation_types'
+    }.each do |obs_name, check_id|
+      index[Scfair::Rules.field_path(format, :obs, obs_name)] = check_id
+    end
+
+    index
+  end
+
+  def failed_rollup_check_fields(errors, valid_checks)
+    fields = Set.new
+    errors.each { |entry| fields << entry_field(entry) }
+    valid_checks.each do |entry|
+      next unless entry_status(entry) == 'failed'
+
+      fields << entry_field(entry)
+    end
+    fields
+  end
+
+  def entry_field(entry)
+    (entry[:field] || entry['field']).to_s
+  end
+
+  def entry_status(entry)
+    (entry[:status] || entry['status']).to_s.strip.downcase
+  end
+
+  def entry_message(entry)
+    (entry[:message] || entry['message']).to_s
+  end
+
+  def reconcile_rollup_metadata_checks(errors, valid_checks, warnings, format)
+    errors = Array(errors).dup
+    valid_checks = Array(valid_checks).dup
+    warnings = Array(warnings).dup
+    failed_rollups = failed_rollup_check_fields(errors, valid_checks)
+    rollup_index = rollup_metadata_path_index(format)
+
+    errors.reject! do |entry|
+      rollup_field = rollup_index[entry_field(entry)]
+      rollup_field.present? && failed_rollups.include?(rollup_field)
+    end
+
+    valid_checks.reject! do |entry|
+      rollup_field = rollup_index[entry_field(entry)]
+      rollup_field.present? && failed_rollups.include?(rollup_field)
+    end
+
+    warnings.reject! do |entry|
+      rollup_field = rollup_index[entry_field(entry)]
+      rollup_field.present? && failed_rollups.include?(rollup_field)
+    end
+
+    [errors, valid_checks, warnings]
+  end
+
+  def rollup_metadata_path_index(format)
+    index = {}
+    rules = Scfair::Rules.experimental_condition_rules
+    {
+      rules[:id_field] => Scfair::Rules.field_path(format, :obs, rules[:label_field]),
       rules[:label_field] => 'obs.experimental_condition.label',
       rules[:perturbation_types_field] => 'obs.experimental_condition.perturbation_types'
     }.each do |obs_name, check_id|

@@ -2,16 +2,11 @@
 
 module Scfair
   class OrganismSpecificConstraintEvaluator
-    CHECK_PREFIX = 'ontology.organism_specific'
-    DEV_STAGE_MAPPING = Rules.organism_dev_stage_mapping
-    HUMAN_ORGANISM = Rules.organism_ethnicity_human
-    CELL_TYPE_SPECIAL_VALUES = %w[unknown na].freeze
-    DEV_STAGE_SPECIAL_VALUES = %w[unknown na].freeze
-    SEX_SPECIAL_VALUES = %w[unknown na].freeze
-
     def initialize(field_values:, format:)
       @field_values = field_values || {}
       @format = format
+      @cfg = Rules.organism_specific_validation_config
+      @check_prefix = @cfg[:check_prefix]
     end
 
     def call
@@ -34,16 +29,19 @@ module Scfair
 
     def evaluate_development_stage
       organism = organism_term_id
-      expected_prefix = DEV_STAGE_MAPPING[organism]
-      return skipped_check('development_stage', 'No mapped development stage prefix for this organism') if expected_prefix.blank?
+      expected_prefix = Rules.organism_dev_stage_mapping[organism]
+      if expected_prefix.blank?
+        return skipped_check('development_stage', :no_mapping)
+      end
 
       dev_key = obs_path('development_stage_ontology_term_id')
-      return skipped_check('development_stage', 'development_stage_ontology_term_id not present') if split_values(@field_values[dev_key]).empty?
+      return skipped_check('development_stage', :field_missing) if split_values(@field_values[dev_key]).empty?
 
+      special_values = Rules.organism_specific_special_values('development_stage')
       invalid = invalid_prefix_values(
         @field_values[dev_key],
         allowed_prefixes: [expected_prefix],
-        special_values: DEV_STAGE_SPECIAL_VALUES
+        special_values: special_values
       )
       build_prefix_result(
         rule: 'development_stage',
@@ -51,22 +49,23 @@ module Scfair
         organism: organism,
         allowed_prefixes: [expected_prefix],
         invalid: invalid,
-        special_values: DEV_STAGE_SPECIAL_VALUES
+        special_values: special_values
       )
     end
 
     def evaluate_cell_type
       organism = organism_term_id
-      return skipped_check('cell_type', 'organism_ontology_term_id not set') if organism.blank?
+      return skipped_check('cell_type', :organism_missing) if organism.blank?
 
       cell_key = obs_path('cell_type_ontology_term_id')
-      return skipped_check('cell_type', 'cell_type_ontology_term_id not present') if split_values(@field_values[cell_key]).empty?
+      return skipped_check('cell_type', :field_missing) if split_values(@field_values[cell_key]).empty?
 
+      special_values = Rules.organism_specific_special_values('cell_type')
       allowed_prefixes = Rules.organism_cell_type_prefixes_for(organism)
       invalid = invalid_prefix_values(
         @field_values[cell_key],
         allowed_prefixes: allowed_prefixes,
-        special_values: CELL_TYPE_SPECIAL_VALUES
+        special_values: special_values
       )
       build_prefix_result(
         rule: 'cell_type',
@@ -74,7 +73,7 @@ module Scfair
         organism: organism,
         allowed_prefixes: allowed_prefixes,
         invalid: invalid,
-        special_values: CELL_TYPE_SPECIAL_VALUES
+        special_values: special_values
       )
     end
 
@@ -83,28 +82,29 @@ module Scfair
       tissue_type = first_value('tissue_type')
       tissue_key = obs_path('tissue_ontology_term_id')
       tissue_values = split_values(@field_values[tissue_key])
-      return skipped_check('tissue', 'tissue_ontology_term_id not present') if tissue_values.empty?
+      return skipped_check('tissue', :field_missing) if tissue_values.empty?
 
-      if tissue_type == 'cell line'
-        invalid = tissue_values.reject { |value| value.start_with?('CVCL_') }
+      if tissue_type == @cfg[:cell_line_tissue_type]
+        invalid = tissue_values.reject { |value| value.start_with?("#{@cfg[:cellosaurus_prefix]}_") }
         return build_custom_result(
           rule: 'tissue',
           label: 'tissue_ontology_term_id',
           passed: invalid.empty?,
-          pass_message: 'Cell line tissue_ontology_term_id uses Cellosaurus (CVCL_*) terms',
-          fail_message: "Cell line tissue_ontology_term_id must use Cellosaurus CVCL_* terms; invalid: #{invalid.join(', ')}",
+          pass_message: Rules.organism_specific_pass_message('cell_line_tissue'),
+          fail_message: Rules.organism_specific_fail_message('cell_line_tissue_template', invalid: invalid.join(', ')),
           invalid: invalid
         )
       end
 
-      if tissue_type == 'primary cell culture'
-        return skipped_check('tissue', 'Uses cell_type_ontology_term_id rules for primary cell culture (see cell type check)') if organism.blank?
+      if tissue_type == @cfg[:primary_cell_culture_tissue_type]
+        return skipped_check('tissue', :primary_cell_culture) if organism.blank?
 
+        special_values = Rules.organism_specific_special_values('cell_type')
         allowed_prefixes = Rules.organism_cell_type_prefixes_for(organism)
         invalid = invalid_prefix_values(
           tissue_values,
           allowed_prefixes: allowed_prefixes,
-          special_values: CELL_TYPE_SPECIAL_VALUES
+          special_values: special_values
         )
         return build_prefix_result(
           rule: 'tissue',
@@ -112,11 +112,11 @@ module Scfair
           organism: organism,
           allowed_prefixes: allowed_prefixes,
           invalid: invalid,
-          special_values: CELL_TYPE_SPECIAL_VALUES
+          special_values: special_values
         )
       end
 
-      return skipped_check('tissue', 'organism_ontology_term_id not set') if organism.blank?
+      return skipped_check('tissue', :organism_missing) if organism.blank?
 
       allowed_prefixes = Rules.organism_tissue_prefixes_for(organism)
       invalid = invalid_prefix_values(
@@ -140,9 +140,9 @@ module Scfair
       ethnicity_key = obs_path('self_reported_ethnicity_ontology_term_id')
       ethnicity_values = split_values(@field_values[ethnicity_key])
 
-      return skipped_check('ethnicity', 'self_reported_ethnicity_ontology_term_id not present') if ethnicity_values.empty?
-      return skipped_check('ethnicity', 'Cell line ethnicity is validated under cross-field rule CF-2a') if tissue_type == 'cell line'
-      return skipped_check('ethnicity', 'organism_ontology_term_id not set') if organism.blank?
+      return skipped_check('ethnicity', :field_missing) if ethnicity_values.empty?
+      return skipped_check('ethnicity', :cell_line) if tissue_type == @cfg[:cell_line_tissue_type]
+      return skipped_check('ethnicity', :organism_missing) if organism.blank?
 
       if human_organism?(organism)
         if ethnicity_values == ['na']
@@ -150,8 +150,8 @@ module Scfair
             rule: 'ethnicity',
             label: 'self_reported_ethnicity_ontology_term_id',
             passed: false,
-            pass_message: 'Human ethnicity constraints satisfied',
-            fail_message: 'Homo sapiens dataset: self_reported_ethnicity_ontology_term_id must not be "na" (use HANCESTRO/AfPO, "unknown", or "multiethnic")',
+            pass_message: Rules.organism_specific_pass_message('human_ethnicity'),
+            fail_message: Rules.organism_specific_fail_message('human_ethnicity_na'),
             invalid: ['na']
           )
         end
@@ -174,8 +174,8 @@ module Scfair
           rule: 'ethnicity',
           label: 'self_reported_ethnicity_ontology_term_id',
           passed: invalid.empty?,
-          pass_message: 'Non-human dataset: self_reported_ethnicity_ontology_term_id is "na"',
-          fail_message: "Non-human dataset: self_reported_ethnicity_ontology_term_id must be \"na\"; invalid: #{invalid.join(', ')}",
+          pass_message: Rules.organism_specific_pass_message('non_human_ethnicity'),
+          fail_message: Rules.organism_specific_fail_message('non_human_ethnicity_template', invalid: invalid.join(', ')),
           invalid: invalid
         )
       end
@@ -183,40 +183,53 @@ module Scfair
 
     def evaluate_sex
       organism = organism_term_id
-      return skipped_check('sex', 'organism_ontology_term_id not set') if organism.blank?
-      return skipped_check('sex', 'Not applicable (C. elegans sex constraint only)') unless organism == Rules.organism_celegans_sex_organism
+      return skipped_check('sex', :organism_missing) if organism.blank?
+      return skipped_check('sex', :not_celegans) unless organism == Rules.organism_celegans_sex_organism
 
       sex_key = obs_path('sex_ontology_term_id')
       sex_values = split_values(@field_values[sex_key])
-      return skipped_check('sex', 'sex_ontology_term_id not present') if sex_values.empty?
+      return skipped_check('sex', :field_missing) if sex_values.empty?
 
-      allowed = Rules.organism_celegans_sex_terms + SEX_SPECIAL_VALUES
+      special_values = Rules.organism_specific_special_values('sex')
+      allowed = Rules.organism_celegans_sex_terms + special_values
       invalid = sex_values.reject { |value| allowed.include?(value) }
       build_custom_result(
         rule: 'sex',
         label: 'sex_ontology_term_id',
         passed: invalid.empty?,
-        pass_message: 'C. elegans sex constraints satisfied',
-        fail_message: "C. elegans sex_ontology_term_id must be PATO:0000384 (male), PATO:0001340 (hermaphrodite), unknown, or na; invalid: #{invalid.join(', ')}",
+        pass_message: Rules.organism_specific_pass_message('celegans_sex'),
+        fail_message: Rules.organism_specific_fail_message('celegans_sex_template', invalid: invalid.join(', ')),
         invalid: invalid
       )
     end
 
     def build_prefix_result(rule:, label:, organism:, allowed_prefixes:, invalid:, special_values:)
-      prefix_list = allowed_prefixes.map { |prefix| "#{prefix}:*" }.join(' or ')
-      special_note = special_values.any? ? " (special values #{special_values.join(', ')} also allowed)" : ''
+      prefix_list = allowed_prefixes.map do |prefix|
+        format(@cfg[:prefix_list_entry], prefix: prefix)
+      end.join(@cfg[:prefix_list_joiner])
+      special_note = if special_values.any?
+                       format(@cfg[:special_note_template], values: special_values.join(', '))
+                     else
+                       ''
+                     end
       build_custom_result(
         rule: rule,
         label: label,
         passed: invalid.empty?,
-        pass_message: "#{label} organism-specific constraints satisfied",
-        fail_message: "Expected #{prefix_list} for organism #{organism}#{special_note}; invalid: #{invalid.join(', ')}",
+        pass_message: Rules.organism_specific_pass_message('prefix_satisfied', label: label),
+        fail_message: Rules.organism_specific_fail_message(
+          'prefix_invalid_template',
+          prefix_list: prefix_list,
+          organism: organism,
+          special_note: special_note,
+          invalid: invalid.join(', ')
+        ),
         invalid: invalid
       )
     end
 
     def build_custom_result(rule:, label:, passed:, pass_message:, fail_message:, invalid:)
-      field = "#{CHECK_PREFIX}.#{rule}"
+      field = "#{@check_prefix}.#{rule}"
       if passed
         {
           errors: [],
@@ -225,20 +238,20 @@ module Scfair
       else
         {
           errors: [{ field: field, message: fail_message }],
-          valid_checks: [{ field: field, status: 'failed', message: "#{label} organism-specific constraints failed" }]
+          valid_checks: [{ field: field, status: 'failed', message: Rules.organism_specific_fail_message('check_failed', label: label) }]
         }
       end
     end
 
-    def skipped_check(rule, message)
+    def skipped_check(rule, reason)
       {
         errors: [],
-        valid_checks: [{ field: "#{CHECK_PREFIX}.#{rule}", status: 'skipped', message: message }]
+        valid_checks: [{ field: "#{@check_prefix}.#{rule}", status: 'skipped', message: Rules.organism_specific_skip_message(rule, reason) }]
       }
     end
 
     def human_organism?(organism)
-      organism.to_s == HUMAN_ORGANISM
+      organism.to_s == Rules.organism_ethnicity_human
     end
 
     def organism_term_id

@@ -82,7 +82,7 @@ class ScfairSpatialStructureValidatorTest < TestBaseWithoutFixtures
 
     structure = result[:valid_checks].find { |check| check[:field] == 'extension.spatial.structure' }
     assert_equal 'skipped', structure[:status]
-    assert_match(/CF-10/, structure[:message])
+    assert_match(/CF-9/, structure[:message])
     assert_empty result[:errors]
   end
 

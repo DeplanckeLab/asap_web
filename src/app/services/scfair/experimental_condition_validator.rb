@@ -21,8 +21,8 @@ module Scfair
 
       obs_columns = column_names_for('obs')
       if obs_columns.empty?
-        valid_checks << skip_check('presence', 'Observation column list not available; check skipped')
-        valid_checks << skip_check('perturbation_types', 'Observation column list not available; check skipped')
+        valid_checks << skip_check(obs_path(@rules[:label_field]), 'Observation column list not available; check skipped')
+        valid_checks << skip_check(obs_path(@rules[:perturbation_types_field]), 'Observation column list not available; check skipped')
         return { errors: errors, valid_checks: valid_checks }
       end
 
@@ -64,7 +64,7 @@ module Scfair
     private
 
     def validate_id_presence(errors, valid_checks, id_present:, all_na:)
-      check_field = "#{CHECK_PREFIX}.presence"
+      check_field = obs_path(@rules[:label_field])
 
       if id_present && all_na
         message = "#{@rules[:id_field]} is present but all values are \"#{@na_value}\"; the column MUST NOT be present when every observation has no experimental condition"
@@ -215,8 +215,8 @@ module Scfair
       value.split(@delimiter).map(&:strip).reject(&:blank?)
     end
 
-    def skip_check(suffix, message)
-      { field: "#{CHECK_PREFIX}.#{suffix}", status: 'skipped', message: message }
+    def skip_check(field, message)
+      { field: field, status: 'skipped', message: message }
     end
 
     def record_failure(errors, valid_checks, check_field:, message:)

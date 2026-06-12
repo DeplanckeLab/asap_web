@@ -1,10 +1,136 @@
 desc '####################### load ontology terms'
 task load_ontologies: :environment do
+  require 'fileutils'
   require 'shellwords'
-  puts 'Executing...'
-  
-  now = Time.now
-  
+
+  class OntologyTermLoader
+    INSERT_BATCH_SIZE = 1_000
+    COMPARE_ATTRS = %i[
+      cell_ontology_id alt_identifiers identifier name description comment original obsolete tax_id
+    ].freeze
+
+    def self.verbose?
+      ENV['VERBOSE'].present?
+    end
+
+    def initialize(cell_ontology)
+      @co = cell_ontology
+      @existing = CellOntologyTerm.where(cell_ontology_id: @co.id).index_by(&:identifier)
+      @pending_inserts = []
+      @stats = { inserted: 0, updated: 0, unchanged: 0 }
+    end
+
+    def process_term(h_term)
+      return if h_term['id'].blank?
+
+      normalize_term!(h_term)
+      attrs = build_attrs(h_term)
+      identifier = attrs[:identifier]
+      cot = @existing[identifier]
+
+      if cot.nil?
+        queue_insert(attrs)
+        return
+      end
+
+      if term_unchanged?(cot, attrs)
+        @stats[:unchanged] += 1
+        return
+      end
+
+      cot.update!(attrs)
+      @stats[:updated] += 1
+    end
+
+    def finish!
+      flush_inserts!
+      puts "#{@co.tag}: inserted=#{@stats[:inserted]} updated=#{@stats[:updated]} unchanged=#{@stats[:unchanged]}"
+    end
+
+    private
+
+    def normalize_term!(h_term)
+      t = h_term['id'].split(':')
+      t = h_term['id'].split('_') if t.size == 1
+      original = t[0] == @co.tag
+
+      if !original && h_term['alt_id']
+        replace = nil
+        Array(h_term['alt_id']).each do |alt_id|
+          alt_id.split(':')
+          if t[0] == @co.tag
+            original = true
+            replace = alt_id
+            break
+          end
+        end
+        if replace
+          h_term['alt_id'] = Array(h_term['alt_id'])
+          index = h_term['alt_id'].index(replace)
+          h_term['alt_id'][index] = h_term['id']
+          h_term['id'] = replace
+          log_verbose("Replaced alt_id with #{replace} for #{@co.tag}")
+        end
+      end
+
+      if @co.tag == 'EFO' && (m = h_term['id'].match(/^efo:EFO_(.+)/i))
+        h_term['alt_id'] = [h_term['id']]
+        h_term['id'] = "EFO:#{m[1]}"
+        original = true
+      end
+
+      h_term['original'] = original
+    end
+
+    def build_attrs(h_term)
+      {
+        cell_ontology_id: @co.id,
+        alt_identifiers: h_term['alt_id'] ? Array(h_term['alt_id']).join(',') : nil,
+        identifier: h_term['id'],
+        name: h_term['name'],
+        description: extract_quoted_field(h_term['def']),
+        comment: extract_quoted_field(h_term['comment']),
+        content_json: h_term.to_json,
+        original: h_term['original'],
+        obsolete: h_term['is_obsolete'].to_s.strip.downcase == 'true',
+        tax_id: h_term['tax_id']
+      }
+    end
+
+    def extract_quoted_field(value)
+      return nil if value.blank?
+
+      value.gsub(/^"(.+?)".+/m, '\1')
+    end
+
+    def term_unchanged?(cot, attrs)
+      COMPARE_ATTRS.all? do |key|
+        cot.public_send(key) == attrs[key]
+      end
+    end
+
+    def queue_insert(attrs)
+      @pending_inserts << attrs.merge(latest_version: @co.latest_version)
+      flush_inserts! if @pending_inserts.size >= INSERT_BATCH_SIZE
+    end
+
+    def flush_inserts!
+      return if @pending_inserts.empty?
+
+      now = Time.current
+      rows = @pending_inserts.map { |attrs| attrs.merge(created_at: now, updated_at: now) }
+      CellOntologyTerm.insert_all(rows)
+      @stats[:inserted] += rows.size
+      @pending_inserts.clear
+    end
+
+    def log_verbose(message)
+      puts message if self.class.verbose?
+    end
+  end
+
+  puts 'Executing load_ontologies...'
+
   data_dir_value = if defined?(APP_CONFIG) && APP_CONFIG.respond_to?(:[])
                      APP_CONFIG[:data_dir]
                    end
@@ -12,9 +138,11 @@ task load_ontologies: :environment do
   data_dir_value = '/data/asap/' if data_dir_value.blank?
   data_dir = Pathname.new(data_dir_value)
   ontology_dir = data_dir + 'ontologies'
-  owl2obo_bin = "java -jar #{data_dir + "bin" + "owl2obo.jar"}"
+  FileUtils.mkdir_p(ontology_dir)
+  owl2obo_bin = "java -jar #{data_dir + 'bin' + 'owl2obo.jar'}"
 
   def fetch_ontology_file(file_path, url)
+    FileUtils.mkdir_p(File.dirname(file_path.to_s))
     escaped_file = Shellwords.escape(file_path.to_s)
     escaped_url = Shellwords.escape(url.to_s)
     use_conditional = File.exist?(file_path)
@@ -30,103 +158,29 @@ task load_ontologies: :environment do
 
     http_code == '200'
   end
-  
-  def load_ontology_term co, h_term
-
-    if h_term['id']
-
-      t = h_term['id'].split(":")
-      if t.size == 1
-        t =  h_term['id'].split("_")
-      end
-      original = (t[0] == co.tag) ? true : false
-
-      puts "alt_id => " + h_term['alt_id'].to_json
-      if original == false and h_term['alt_id']
-        replace = nil
-        h_term['alt_id'].each do |e|
-          t2 = e.split(":")
-          if t[0] == co.tag
-            original = true
-            replace = e
-            puts "replace ID with #{e}"
-            break
-          end
-        end
-        if replace
-          index = h_term['alt_id'].index(replace)
-          h_term['alt_id'][index] = h_term['id']
-          h_term['id'] = replace
-          puts "effectively replaced: #{h_term.to_json}"
-        end
-      end
-
-      if co.tag == 'EFO' and m = h_term['id'].match(/^efo\:EFO_(.+)/)
-        h_term['alt_id'] = [h_term['id']]
-        h_term['id'] = "EFO:" + m[1]
-        original = true
-      end
-      
-      #  h_term[]
-      h_co_term = {
-        :cell_ontology_id => co.id,
-        #        :latest_version => co.latest_version,
-        :alt_identifiers => (h_term['alt_id']) ? h_term['alt_id'].join(",") : nil,
-        :identifier => h_term['id'],
-        :name => h_term['name'],
-        :description => (h_term['def']) ? h_term['def'].gsub(/^\"(.+?)\".+/, '\1') : nil,
-        :comment =>  (h_term['comment']) ? h_term['comment'].gsub(/^\"(.+?)\".+/, '\1') : nil,
-        :content_json => h_term.to_json,
-        :original => original,
-        :tax_id => h_term['tax_id']
-        #  :related_term_ids => '' 
-      }
-      
-      cot = CellOntologyTerm.where(:cell_ontology_id => co.id, :identifier => h_term['id']).first
-      if !cot
-        h_co_term[:latest_version] = co.latest_version
-        puts "New #{h_co_term.to_json}"
-
-      #        exit
-        cot = CellOntologyTerm.new(h_co_term)
-        cot.save
-      else
-        h_existing_cot = {
-          :cell_ontology_id => cot.cell_ontology_id,
-          :alt_identifiers => cot.alt_identifiers,
-          :identifier => cot.identifier,
-          :name => cot.name,
-          :description => cot.description,
-          :comment => cot.comment,
-          :original => cot.original,
-          :tax_id => cot.tax_id
-        }
-        
-        if h_co_term != h_existing_cot
-          puts "Update with #{h_co_term.to_json}"
-          cot.update!(h_co_term)
-        else
-          puts "No need to update"
-        end
-      end
-    end 
-  end
 
   output_json = Pathname.new(data_dir_value) + 'tmp' + 'tool_versions.json'
-  
+  FileUtils.mkdir_p(output_json.dirname)
+
   h_tool_versions = Basic.safe_parse_json(output_json, {})
   h_new_tool_versions = {}
   h_tool_versions.each_key do |k|
     h_new_tool_versions[k] = h_tool_versions[k]
   end
-  
-  #  filename = Pathname.new(APP_CONFIG[:data_dir]) + "hcao" + "hcao.obo"
-  #  CellOntology.where(:tag => 'FBdv').all.each do |co|
-  CellOntology.where(:obsolete => false).order("id desc").all.each do |co|
-    ## download file
+
+  CellOntology.where(obsolete: false).order(id: :desc).find_each do |co|
+    if co.file_url.blank?
+      puts "Skipping #{co.tag} (id=#{co.id}): file_url is not set"
+      next
+    end
+    if co.format.blank?
+      puts "Skipping #{co.tag} (id=#{co.id}): format is not set"
+      next
+    end
+
     ori_file = ontology_dir + "#{co.id}.#{co.format}"
     source_changed = fetch_ontology_file(ori_file, co.file_url)
-    
+
     obo_file = ori_file
     if co.format == 'owl'
       obo_file = ontology_dir + "#{co.id}.obo"
@@ -138,84 +192,70 @@ task load_ontologies: :environment do
 
     terms_already_loaded = CellOntologyTerm.where(cell_ontology_id: co.id).exists?
     if !source_changed && File.exist?(obo_file) && terms_already_loaded
-      puts "No source changes for #{co.tag}; skipping parse/update."
+      puts "#{co.tag}: no source changes; skipped"
       next
     end
-    
-    h_term = {}
-#    h_new_tool_versions = {}
-    #relationship: develops_from FBbt:00000091 ! pole bud
-    #relationship: expresses http://flybase.org/reports/FBgn0283442 ! vasa
-    #relationship: part_of FBbt:00005311 ! stage 5 embryo
-    #relationship: part_of FBbt:00005317 ! gastrula embryo
-    #relationship: part_of FBbt:00005321 ! extended germ band embryo
-    #relationship: part_of FBbt:00005331 ! dorsal closure embryo
-    #relationship: part_of FBbt:00005333 ! late embryo
 
-    potential_date_fields = ['date', 'remark', 'data-version']
-    single_fields = ['id', 'name', 'def', 'namespace', 'comment']
-    multiple_fields = ['synonyms', 'alt_id', 'is_a', 'part_of', 'disjoint_from', 'xref', 'equivalent_to', 'consider', 'replaced_by']
+    loader = OntologyTermLoader.new(co)
+    h_term = {}
+    potential_date_fields = %w[date remark data-version]
+    single_fields = %w[id name def namespace comment is_obsolete]
+    multiple_fields = %w[synonyms alt_id is_a part_of disjoint_from xref equivalent_to consider replaced_by]
     flag_term = 0
-    
+
     File.open(obo_file) do |f|
-      while (l = f.gets) do
+      while (l = f.gets)
         l.chomp!
         t = l.split(/\: /)
-        if co.tag == 'CVCL' and m = l.match(/^name:(.+)/)
+        if co.tag == 'CVCL' && (m = l.match(/^name:(.+)/))
           t = ['name', m[1]]
         end
-    
-        if potential_date_fields.include?(t[0]) and !h_new_tool_versions[co.tag] and  m = t[1].match(/(\d+)[\:\-](\d+)[\:\-](\d+)/)
+
+        if potential_date_fields.include?(t[0]) && !h_new_tool_versions[co.tag] && (m = t[1].match(/(\d+)[\:\-](\d+)[\:\-](\d+)/))
           if m[3].to_i > 2000
-            h_new_tool_versions[co.tag] = "#{m[3]}-#{m[2]}-#{m[1]}" #t[1].gsub(/\d+\:\d+\:\d+(.+)/, '')
+            h_new_tool_versions[co.tag] = "#{m[3]}-#{m[2]}-#{m[1]}"
           elsif m[1].to_i > 2000
             h_new_tool_versions[co.tag] = "#{m[1]}-#{m[2]}-#{m[3]}"
-          else
+          elsif OntologyTermLoader.verbose?
             puts "ERROR! #{t[1]} is not recognized as a date"
           end
-          if h_new_tool_versions[co.tag]
-            co.update!(:latest_version => h_new_tool_versions[co.tag])
-          end
-        #          date: 26:03:2020  
-        elsif t[0] == 'data-version' and m = t[1].match(/(\d+)-(\d+)-(\d+)/) and m[1].to_i > 2000
+          co.update!(latest_version: h_new_tool_versions[co.tag]) if h_new_tool_versions[co.tag]
+        elsif t[0] == 'data-version' && (m = t[1].match(/(\d+)-(\d+)-(\d+)/)) && m[1].to_i > 2000
           h_tool_versions[co.tag] = "#{m[1]}-#{m[2]}-#{m[3]}"
-        elsif l == "" and h_term != {}
-          load_ontology_term(co, h_term)# if h_term['id'].match(/^efo/) 
+        elsif l == '' && h_term != {}
+          loader.process_term(h_term)
           h_term = {}
           flag_term = 0
         elsif l == '[Term]'
           flag_term = 1
-        elsif flag_term == 1		  
-          if single_fields.include? t[0]
-            h_term[t[0]] = (1 .. t.size-1).map{|i| t[i]}.join(": ")
-          elsif m = l.match(/^relationship: (.+?) (.+?) \!/)
-            h_term['relationship']||={}
-            h_term['relationship'][m[1]]||=[]
+        elsif flag_term == 1
+          if single_fields.include?(t[0])
+            h_term[t[0]] = (1..t.size - 1).map { |i| t[i] }.join(': ')
+          elsif (m = l.match(/^relationship: (.+?) (.+?) \!/))
+            h_term['relationship'] ||= {}
+            h_term['relationship'][m[1]] ||= []
             v = m[2]
-            v.gsub!(/http:\/\/flybase.org\/reports\//, '')
-            h_term['relationship'][m[1]].push v
-          elsif (m = l.match(/^(\w+)\: (.+?) \!/) or m = l.match(/^(\w+)\: (.+)/)) and multiple_fields.include? m[1]
-            h_term[m[1]]||=[]
+            v.gsub!(%r{http://flybase.org/reports/}, '')
+            h_term['relationship'][m[1]].push(v)
+          elsif ((m = l.match(/^(\w+): (.+?) \!/)) || (m = l.match(/^(\w+): (.+)/))) && multiple_fields.include?(m[1])
+            h_term[m[1]] ||= []
             h_term[m[1]].push(m[2].gsub(/ \!$/, ''))
-          elsif m = l.match(/NCBITaxon:(\d+)/)
+          elsif (m = l.match(/NCBITaxon:(\d+)/))
             h_term['tax_id'] = m[1]
-          end	
+          end
         end
       end
-      
-      load_ontology_term(co, h_term)
+
+      loader.process_term(h_term)
     end
-    
+
+    loader.finish!
   end
 
   h_new_tool_versions.each_key do |k|
-    h_tool_versions[k] =  h_new_tool_versions[k]
+    h_tool_versions[k] = h_new_tool_versions[k]
   end
-  
-  puts h_tool_versions.to_json
-  File.open(output_json, 'w') do |f|
-    f.write(h_tool_versions.to_json)
-  end
-  
-  
+
+  File.open(output_json, 'w') { |f| f.write(h_tool_versions.to_json) }
+  puts 'load_ontologies finished'
 end

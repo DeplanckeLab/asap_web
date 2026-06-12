@@ -24,6 +24,7 @@ metadata_rules:
   forbidden_name_prefix: "__"
   skip_column_names: [_index, index, __categories]
   unique_layers: [obs, var]
+  unique_names_requirement: 'Metadata field names must be unique'
   deprecated_names:
     - name: organism
       layer: obs
@@ -84,14 +85,7 @@ required:
     - suspension_type
     - tissue_ontology_term_id
     - tissue_type
-  observation_labels:
-    - assay
-    - cell_type
-    - development_stage
-    - disease
-    - self_reported_ethnicity
-    - sex
-    - tissue
+  observation_labels: []
   uns:
     common:
       - title
@@ -113,6 +107,35 @@ required:
     - feature_reference
     - feature_type
     - feature_chromosome
+
+# AnnData DataFrame indices (schema object model). @ separates layer from index attribute;
+# / in h5ad.path is the on-disk HDF5 location (not a metadata column).
+anndata_indices:
+  var:
+    schema: var.index
+    description: Feature identifiers (AnnData var_names); Ensembl gene_id or ERCC spike-in.
+    h5ad:
+      logical: var@_index
+      path: var/_index
+      storage_keys: [_index, index]
+    loom:
+      logical: /row_attrs@feature_id
+      path: /row_attrs/feature_id
+      storage_keys: [feature_id, index, _index]
+      manifest_key: var_index_key
+    validation:
+      ensembl_prefix: ENS
+      covid_organism_term: NCBITaxon:2697049
+  obs:
+    schema: obs.index
+    description: Cell observation identifiers (AnnData obs_names).
+    h5ad:
+      path: obs/_index
+      storage_keys: [_index, index]
+    loom:
+      path: /col_attrs/CellID
+      storage_keys: []
+      manifest_key: obs_index_key
 
 enum_fields:
   tissue_type:
@@ -138,6 +161,88 @@ enum_fields:
       - protein
       - temperature
 
+# Per-field constraint text for compliance check detail popups and validation hints.
+field_constraints:
+  uns:
+    ensembl_release:
+      - label: Requirement
+        value: 'Positive integer (e.g. 115)'
+    ensembl_assembly:
+      - label: Requirement
+        value: 'Optional non-empty string (e.g. GRCh38.p14)'
+    organism:
+      - label: Requirement
+        value: 'Label must match the canonical organism name for the NCBITaxon term'
+  var:
+    feature_is_filtered:
+      - label: Allowed values
+        values: [true, false, True, False]
+    feature_length:
+      - label: Requirement
+        value: 'Positive integer (uint)'
+    feature_name:
+      - label: Spike-in format
+        value: 'ERCC-<digits> (spike-in control)'
+      - label: Gene rule
+        value: 'gene_name from reference for var index, or var index when absent'
+    feature_type:
+      - label: Requirement
+        value: 'Non-empty string per gene or feature'
+    feature_chromosome:
+      - label: Requirement
+        value: 'Non-empty string per gene or feature'
+
+ontology_semantics_display:
+  allowed_terms:
+    constraints:
+      - label: Requirement
+        value: 'Each term must resolve as an active (non-obsolete) entry in the ontology database'
+      - label: Obsolete terms
+        value: 'Treated as not found (fail this check)'
+  special_values:
+    constraints:
+      - label: Requirement
+        value: 'Placeholder values allowed instead of a real ontology term.'
+  label_pair:
+    constraints:
+      - label: Requirement
+        value: 'Each label must match the canonical name of its ontology term ID'
+  sorted_multi:
+    constraints:
+      - label: Requirement
+        value: 'Values must be unique and sorted lexically, joined with " || "'
+  organism_specific:
+    self_reported_ethnicity_ontology_term_id:
+      _missing_organism:
+        - label: Organism-specific rules
+          context: not_applicable_no_organism
+      _default:
+        human:
+          - label: Organism-specific rules
+            context: applicable_human_ethnicity
+          - from_file: true
+          - label: Requirement
+            value: 'Must not be "na"; use HANCESTRO/AfPO terms or allowed special values'
+        non_human:
+          - label: Organism-specific rules
+            context: applicable_non_human_ethnicity
+          - from_file: true
+          - label: Requirement
+            value: 'self_reported_ethnicity_ontology_term_id must be "na"'
+      special_values:
+        human:
+          - label: Organism-specific rules
+            context: applicable_human_ethnicity
+          - from_file: true
+          - label: Requirement
+            value: '"na" is forbidden for Homo sapiens'
+        non_human:
+          - label: Organism-specific rules
+            context: applicable_non_human_ethnicity
+          - from_file: true
+          - label: Requirement
+            value: 'Only "na" is allowed for non-human datasets'
+
 experimental_condition_rules:
   id_field: experimental_condition_ontology_term_id
   label_field: experimental_condition
@@ -147,53 +252,57 @@ experimental_condition_rules:
   no_perturbations_value: no perturbations
   delimiter: " || "
 
+ontology_term_formats:
+  obo:
+    pattern: '^[A-Za-z]+:\d+$'
+    requirement: 'Terms must use OBO-style PREFIX:ID format (e.g. CL:0000540)'
+    example: 'CL:0000540'
+    invalid_message: "Invalid ontology term format: '%{term}'. Expected OBO format (PREFIX:ID) like '%{example}'"
+  cellosaurus:
+    identifier_prefix: CVCL_
+    requirement: 'CVCL_* with underscore separator (not PREFIX:ID)'
+    example: CVCL_1P02
+    disallowed_message: "Invalid ontology term format: '%{term}'. Cellosaurus CVCL_* terms are not allowed for this field."
+  combined_requirement: 'Terms must use OBO-style PREFIX:ID (e.g. CL:0000540), or Cellosaurus CVCL_* identifiers (e.g. CVCL_1P02)'
+
 ontology_fields:
   assay_ontology_term_id:
-    legacy_key: assay
     prefixes: [EFO]
     special_values: []
   cell_type_ontology_term_id:
-    legacy_key: cell_type
     prefixes: [CL, WBbt, ZFA, FBbt]
     special_values: [unknown, na]
+    banned_terms:
+      - CL:0000003
+      - CL:0000255
+      - CL:0000548
+      - CL:0001035
   development_stage_ontology_term_id:
-    legacy_key: development_stage
     prefixes: [HsapDv, MmusDv, WBls, ZFS, FBdv, UBERON]
     special_values: [unknown, na]
   disease_ontology_term_id:
-    legacy_key: disease
     prefixes: [MONDO, PATO]
     special_values: []
   sex_ontology_term_id:
-    legacy_key: sex
     prefixes: [PATO]
     special_values: [unknown, na]
+    valid_terms:
+      PATO:0000383: female
+      PATO:0000384: male
+      PATO:0001340: hermaphrodite
+      PATO:0001894: intersex
   tissue_ontology_term_id:
-    legacy_key: tissue
     prefixes: [UBERON, CVCL, WBbt, ZFA, FBbt]
     special_values: []
   self_reported_ethnicity_ontology_term_id:
-    legacy_key: ethnicity
     prefixes: [HANCESTRO, AfPO]
     special_values: [unknown, na, multiethnic]
   organism_ontology_term_id:
-    legacy_key: organism
     layer: uns
     prefixes: [NCBITaxon]
     special_values: []
 
 constants:
-  valid_sex_terms:
-    PATO:0000383: female
-    PATO:0000384: male
-    PATO:0001340: hermaphrodite
-    PATO:0001894: intersex
-  sex_special_values: [unknown, na]
-  banned_cell_type_terms:
-    - CL:0000003
-    - CL:0000255
-    - CL:0000548
-    - CL:0001035
   visium_assay_terms:
     - EFO:0010961
     - EFO:0022857
@@ -246,6 +355,12 @@ spatial_extension:
   scalefactors:
     allowed_keys: [spot_diameter_fullres, tissue_hires_scalef]
     required_when_visium_is_single: [spot_diameter_fullres, tissue_hires_scalef]
+  obs:
+    required_columns: [array_row, array_col, in_tissue]
+    condition: 'Visium assay with spatial.is_single=true'
+  display:
+    rollup_sub_checks: 'structure, obs, assets'
+    hires_max_dimension_template: '%{default} px (CytAssist 11mm %{assay}: %{cytassist} px)'
 
 perturb_extension:
   obs_fields:
@@ -283,7 +398,6 @@ semantic_rules:
   cell_type_ontology_term_id:
     any_roots: [CL:0000000]
     forbidden_branches: [WBbt:0006803]
-    forbidden_exact: banned_cell_type_terms
     allowed_special_values: [na, unknown]
   development_stage_ontology_term_id:
     any_roots: [UBERON:0000105]
@@ -298,9 +412,6 @@ semantic_rules:
     any_roots: [HANCESTRO:0601, HANCESTRO:0602]
     sorted_multi: true
     allowed_special_values: [na, unknown, multiethnic]
-  sex_ontology_term_id:
-    allowed_exact: valid_sex_terms
-    allowed_special_values: sex_special_values
 
 label_pairs:
   assay_ontology_term_id: assay
@@ -311,6 +422,22 @@ label_pairs:
   sex_ontology_term_id: sex
   tissue_ontology_term_id: tissue
   organism_ontology_term_id: organism
+
+label_pair_validation:
+  check_prefix: obs.label_pairs
+  organism_id_field: organism_ontology_term_id
+  messages:
+    pass: '%{id_field} and %{label_field} are consistent'
+    skipped: 'Not applicable (%{id_field} not present)'
+    fail_missing_label: 'Paired label column %{label_field} is required when %{id_field} is present'
+    fail_count_mismatch: '%{id_field} and %{label_field} must contain the same number of " || "-separated values'
+    fail_special_mismatch: 'Label must match special ontology id value -- expected %{id_val}, got %{label_val}'
+    fail_mismatch: "ID/label mismatch for %{id_val}: expected '%{expected}', got '%{label_val}'"
+  display:
+    category_label: 'Observation label / ontology ID pairs'
+    category_summary: 'Each obs ontology term ID field listed in label_pairs must have a consistent paired label column.'
+    pair_title_template: '%{label_field} / %{id_field}'
+    pair_summary_template: 'The %{label_field} label must be present and match %{id_field} (including special placeholder values).'
 
 cross_field:
   assay_ancestor_terms:
@@ -398,9 +525,718 @@ cross_field:
   organism_ethnicity_special_values: [unknown, na, multiethnic]
   organism_celegans_sex_organism: NCBITaxon:6239
   organism_celegans_sex_terms: [PATO:0000384, PATO:0001340]
+  validation:
+    not_applicable: 'Not applicable'
+    skip_not_cell_line_template: 'Not applicable (tissue_type is not "cell line"). For cell lines only: %{detail}'
+    organoid_embryo_term: UBERON:0000922
+    grouper_message_pattern: 'MUST|must not|must be|For assay|tissue_type is|Organism is|Organoid|Visium|C\. elegans|spatial\.is_single|Label must match special ontology id'
+    rules:
+      CF-1:
+        slug: assay-suspension
+        title: 'CF-1: Assay and suspension_type'
+        summary: 'suspension_type must be consistent with assay_ontology_term_id according to the schema assay map.'
+        checks:
+          - 'Looks up assay_ontology_term_id in the schema assay to suspension_type map'
+          - 'Falls back to ancestor assay terms when an exact map entry is missing'
+          - 'Fails when suspension_type is not one of the allowed values for the assay'
+        token: suspension_type
+        messages:
+          pass: 'Assay/suspension_type consistency'
+          fail: 'Assay/suspension_type consistency'
+        violation:
+          field: suspension_type
+          severity: error
+          template: 'For assay %{assay}, suspension_type MUST be one of: %{allowed}. Got "%{value}".'
+      CF-2a:
+        slug: cell-line-ethnicity
+        title: 'CF-2a: Cell line ethnicity'
+        summary: 'When tissue_type is "cell line", self_reported_ethnicity_ontology_term_id must be "na".'
+        token: self_reported_ethnicity_ontology_term_id
+        messages:
+          skip_detail: 'ethnicity must be "na" (cell lines have no donor ancestry)'
+          pass: 'self_reported_ethnicity_ontology_term_id is "na"'
+          fail: 'self_reported_ethnicity_ontology_term_id must be "na" for cell lines'
+        violation:
+          field: self_reported_ethnicity_ontology_term_id
+          severity: error
+          template: 'tissue_type is "cell line" -- self_reported_ethnicity_ontology_term_id MUST be "na", got "%{value}".'
+      CF-2b:
+        slug: cell-line-sex
+        title: 'CF-2b: Cell line sex'
+        summary: 'When tissue_type is "cell line", sex_ontology_term_id must be "na".'
+        token: sex_ontology_term_id
+        messages:
+          skip_detail: 'sex must be "na" (not applicable to a cultured line)'
+          pass: 'sex_ontology_term_id is "na"'
+          fail: 'sex_ontology_term_id must be "na" for cell lines'
+        violation:
+          field: sex_ontology_term_id
+          severity: error
+          template: 'tissue_type is "cell line" -- sex_ontology_term_id MUST be "na", got "%{value}".'
+      CF-2c:
+        slug: cell-line-development-stage
+        title: 'CF-2c: Cell line development stage'
+        summary: 'When tissue_type is "cell line", development_stage_ontology_term_id must be "unknown".'
+        token: development_stage_ontology_term_id
+        messages:
+          skip_detail: 'development_stage must be "unknown" (no in vivo stage for a line)'
+          pass: 'development_stage_ontology_term_id is "unknown"'
+          fail: 'development_stage_ontology_term_id must be "unknown" for cell lines'
+        violation:
+          field: development_stage_ontology_term_id
+          severity: error
+          template: 'tissue_type is "cell line" -- development_stage_ontology_term_id MUST be "unknown", got "%{value}".'
+      CF-2d:
+        slug: cell-line-donor-id
+        title: 'CF-2d: Cell line donor_id'
+        summary: 'When tissue_type is "cell line", donor_id must be "na".'
+        token: donor_id
+        messages:
+          skip_detail: 'donor_id must be "na" (line identity is not a donor ID)'
+          pass: 'donor_id is "na"'
+          fail: 'donor_id must be "na" for cell lines'
+        violation:
+          field: donor_id
+          severity: error
+          template: 'tissue_type is "cell line" -- donor_id MUST be "na", got "%{value}".'
+      CF-2e:
+        slug: cell-line-suspension
+        title: 'CF-2e: Cell line suspension_type'
+        summary: 'When tissue_type is "cell line", suspension_type must be "na".'
+        token: suspension_type
+        messages:
+          skip_detail: 'suspension_type must be "na" (not used for cell line profiles)'
+          pass: 'suspension_type is "na"'
+          fail: 'suspension_type must be "na" for cell lines'
+        violation:
+          field: suspension_type
+          severity: error
+          template: 'tissue_type is "cell line" -- suspension_type MUST be "na", got "%{value}".'
+      CF-2f:
+        slug: cell-line-tissue-id
+        title: 'CF-2f: Cell line tissue identifier'
+        summary: 'When tissue_type is "cell line", tissue_ontology_term_id should be a Cellosaurus term (CVCL_*).'
+        token: tissue_ontology_term_id
+        messages:
+          skip_detail: 'tissue_ontology_term_id should be a Cellosaurus ID (CVCL_*) naming the line'
+          pass: 'tissue_ontology_term_id is a Cellosaurus term (CVCL_*)'
+          fail: 'tissue_ontology_term_id should be a Cellosaurus term (CVCL_*) for cell lines'
+        violation:
+          field: tissue_ontology_term_id
+          severity: warning
+          template: 'tissue_type is "cell line" -- tissue_ontology_term_id SHOULD be a Cellosaurus term (CVCL_*), got "%{value}".'
+      CF-3:
+        slug: donor-id
+        title: 'CF-3: donor_id consistency'
+        summary: 'donor_id must not be "na" unless tissue_type is "cell line".'
+        checks:
+          - 'Reads tissue_type and donor_id from observation metadata'
+          - 'Fails when donor_id is "na" and tissue_type is not "cell line"'
+          - 'When tissue_type is "cell line", donor_id is validated under CF-2d instead'
+        messages:
+          pass: 'donor_id consistency OK'
+          fail: 'donor_id must not be "na" unless tissue_type is "cell line"'
+      CF-4:
+        slug: organoid-tissue
+        title: 'CF-4: Organoid tissue constraint'
+        summary: 'When tissue_type is "organoid", tissue_ontology_term_id must not be embryo (UBERON:0000922).'
+        checks:
+          - 'Applies only when tissue_type is "organoid"'
+          - 'Fails when tissue_ontology_term_id is embryo (UBERON:0000922)'
+        messages:
+          pass: 'Organoid tissue constraints OK'
+          fail: 'Organoid tissue must not be embryo (UBERON:0000922)'
+      CF-5:
+        slug: spatial-assay-uniformity
+        title: 'CF-5: Spatial assay uniformity'
+        summary: 'Spatial assay datasets (Visium, Slide-seq) must use a single assay value across all cells.'
+        checks:
+          - 'Runs when assay_ontology_term_id is a Visium descendant (EFO:0010961) or Slide-seqV2 (EFO:0030062)'
+          - 'Collects all unique assay values in the dataset'
+          - 'Fails if more than one distinct assay value is present while a spatial assay is detected'
+        messages:
+          pass: 'Spatial assay uniformity OK'
+          fail: 'Spatial assay datasets must use a single assay value'
+      CF-6:
+        slug: spatial-primary-data
+        title: 'CF-6: Spatial is_primary_data'
+        summary: 'When spatial.is_single is false, is_primary_data must be false.'
+        checks:
+          - 'Reads spatial.is_single from uns/spatial (H5AD) or /attrs/spatial/is_single (Loom)'
+          - 'Compares against is_primary_data on each observation'
+          - 'Fails when is_single is false and is_primary_data is true'
+        messages:
+          pass: 'Spatial primary-data constraint OK'
+          fail: 'is_primary_data must be false when spatial.is_single is false'
+      CF-7:
+        slug: cell-line-cell-type
+        title: 'CF-7: Cell line cell type'
+        summary: 'When tissue_type is "cell line", cell_type_ontology_term_id should be "na" or "unknown".'
+        checks:
+          - 'Applies only when tissue_type is "cell line"'
+          - 'Fails when cell_type_ontology_term_id is a real ontology term other than na or unknown'
+        messages:
+          pass: 'Cell line cell_type constraint OK'
+          fail: 'cell_type_ontology_term_id should be na/unknown for cell lines'
+      CF-8:
+        slug: visium-in-tissue
+        title: 'CF-8: Visium in_tissue spots'
+        summary: 'When spatial.is_single is true, Visium spots with in_tissue=0 must use cell_type_ontology_term_id=unknown.'
+        checks:
+          - 'Applies to Visium assays when spatial.is_single is true'
+          - 'Requires in_tissue observation metadata to be present'
+          - 'When all spots are out of tissue (in_tissue=0 only), cell_type_ontology_term_id must be unknown'
+          - 'Skipped when in_tissue mixes 0 and 1 (per-spot pairing not available in metadata summary)'
+        messages:
+          skipped_not_visium: 'Not applicable'
+          skipped_not_single: 'Not applicable (requires spatial.is_single=true)'
+          skipped_no_in_tissue: 'Not applicable (in_tissue not present)'
+          skipped_mixed_in_tissue: 'Per-spot in_tissue/cell_type pairing not available in metadata summary'
+          pass: 'Visium in_tissue constraint OK'
+          fail: 'Visium spots with in_tissue=0 must use cell_type_ontology_term_id=unknown'
+      CF-9:
+        slug: spatial-metadata-presence
+        title: 'CF-9: Spatial metadata presence'
+        summary: 'uns/spatial (or /attrs/spatial on Loom) must be present for Visium or Slide-seqV2 assays and absent otherwise.'
+        checks:
+          - 'Reads assay_ontology_term_id and checks for Visium (EFO:0010961 descendants) or Slide-seqV2 (EFO:0030062)'
+          - 'Detects spatial metadata from keys under uns/spatial or /attrs/spatial'
+          - 'Fails when spatial metadata is present but the assay is not spatial'
+          - 'Fails when the assay is spatial but spatial metadata is missing'
+        messages:
+          fail_metadata_without_spatial_assay: '%{spatial_root} must not be present unless assay is Visium or Slide-seqV2'
+          fail_missing_metadata: 'Missing %{spatial_root} metadata (required for spatial assays)'
+          pass: 'Spatial metadata presence consistent with assay'
+
+organism_specific_validation:
+  check_prefix: ontology.organism_specific
+  special_values:
+    cell_type: [unknown, na]
+    development_stage: [unknown, na]
+    sex: [unknown, na]
+  skip_messages:
+    development_stage:
+      no_mapping: 'No mapped development stage prefix for this organism'
+      field_missing: 'development_stage_ontology_term_id not present'
+    cell_type:
+      organism_missing: 'organism_ontology_term_id not set'
+      field_missing: 'cell_type_ontology_term_id not present'
+    tissue:
+      field_missing: 'tissue_ontology_term_id not present'
+      organism_missing: 'organism_ontology_term_id not set'
+      primary_cell_culture: 'Uses cell_type_ontology_term_id rules for primary cell culture (see cell type check)'
+    ethnicity:
+      field_missing: 'self_reported_ethnicity_ontology_term_id not present'
+      cell_line: 'Cell line ethnicity is validated under cross-field rule CF-2a'
+      organism_missing: 'organism_ontology_term_id not set'
+    sex:
+      organism_missing: 'organism_ontology_term_id not set'
+      not_celegans: 'Not applicable (C. elegans sex constraint only)'
+      field_missing: 'sex_ontology_term_id not present'
+  pass_messages:
+    prefix_satisfied: '%{label} organism-specific constraints satisfied'
+    cell_line_tissue: 'Cell line tissue_ontology_term_id uses Cellosaurus (CVCL_*) terms'
+    non_human_ethnicity: 'Non-human dataset: self_reported_ethnicity_ontology_term_id is "na"'
+    human_ethnicity: 'Human ethnicity constraints satisfied'
+    celegans_sex: 'C. elegans sex constraints satisfied'
+  fail_messages:
+    check_failed: '%{label} organism-specific constraints failed'
+    prefix_invalid_template: 'Expected %{prefix_list} for organism %{organism}%{special_note}; invalid: %{invalid}'
+    cell_line_tissue_template: 'Cell line tissue_ontology_term_id must use Cellosaurus CVCL_* terms; invalid: %{invalid}'
+    human_ethnicity_na: 'Homo sapiens dataset: self_reported_ethnicity_ontology_term_id must not be "na" (use HANCESTRO/AfPO, "unknown", or "multiethnic")'
+    non_human_ethnicity_template: 'Non-human dataset: self_reported_ethnicity_ontology_term_id must be "na"; invalid: %{invalid}'
+    celegans_sex_template: 'C. elegans sex_ontology_term_id must be PATO:0000384 (male), PATO:0001340 (hermaphrodite), unknown, or na; invalid: %{invalid}'
+  prefix_list_entry: '%{prefix}:*'
+  prefix_list_joiner: ' or '
+  special_note_template: ' (special values %{values} also allowed)'
+  cell_line_tissue_type: 'cell line'
+  primary_cell_culture_tissue_type: 'primary cell culture'
+  cellosaurus_prefix: CVCL_
+
+organism_specific_display:
+  file_organism:
+    label: File organism
+    source: 'Defined as the value of organism and organism_ontology_term_id'
+  constraints:
+    cell_line_tissue: 'Must use Cellosaurus CVCL_* terms'
+    primary_cell_culture: 'Follows cell_type_ontology_term_id prefix rules'
+    non_human_ethnicity: 'self_reported_ethnicity_ontology_term_id must be "na"'
+    required_tissue_format: 'CVCL_* (Cellosaurus)'
+  semantic_context:
+    applicable_under_category: 'Applicable — validated under "Organism-specific constraints"'
+    not_applicable_no_organism: 'Not applicable — organism_ontology_term_id is not set in this file'
+    not_applicable_no_dev_stage_mapping: 'Not applicable — %{organism} has no mapped development stage prefix in scFAIR %{schema_version}'
+    applicable_cell_line_tissue: 'Applicable — cell line tissue must use Cellosaurus CVCL_* terms'
+    applicable_human_ethnicity: 'Applicable — Homo sapiens ethnicity constraints'
+    applicable_non_human_ethnicity: 'Applicable — non-human ethnicity must be "na"'
+    disease_not_applicable: 'Not applicable — disease_ontology_term_id uses the same MONDO and PATO:0000461 requirements for all organisms'
+    required_dev_stage_prefix_template: '%{prefix}:* (special values unknown and na are also allowed)'
+    allowed_prefixes_template: '%{prefixes} (special values unknown and na are also allowed)'
+    allowed_tissue_prefixes_primary_cell_suffix: ' (primary cell culture follows cell type rules)'
+    interaction_semantic_dev_stage: 'Prefix requirements apply in addition to the semantic constraints above; both must pass for real ontology terms'
+    interaction_semantic_cell_type: 'Prefix requirements apply in addition to descendant, banned-term, and other semantic constraints above'
+    schema_note_cell_type: 'For this organism, scFAIR expects CL terms or taxon-neutral descendants of CL:0000000'
+    prefix_status_dev_stage_unexpected: 'Not satisfied — unexpected terms: %{terms}'
+    prefix_status_dev_stage_satisfied: 'Satisfied by current development_stage_ontology_term_id values'
+    prefix_status_cell_type_unexpected: 'Not satisfied — unexpected terms: %{terms}'
+    prefix_status_cell_type_satisfied: 'Satisfied by current cell_type_ontology_term_id values'
+    prefix_status_tissue_unexpected: 'Not satisfied — unexpected terms: %{terms}'
+    prefix_status_tissue_satisfied: 'Satisfied by current tissue_ontology_term_id values'
+
+check_details:
+  message_patterns:
+    presence:
+      - 'Required field present'
+      - 'Missing required observation field'
+      - 'Missing required dataset metadata field'
+      - 'Missing required variable metadata field'
+      - '\AFound .+ metadata\z'
+      - 'Missing .+ metadata \(required by schema\)'
+      - 'Skipped \(pre-analysis dataset\)'
+    ontology_format:
+      - 'Ontology terms in .+ have valid format'
+      - 'Invalid ontology term format'
+      - 'Invalid ontology format'
+      - 'Unexpected ontology prefix'
+      - 'Ontology prefix .+ may not be valid'
+  by_field:
+    var.index.presence:
+      title: var.index
+      summary: 'AnnData var.index (var_names): unique string feature identifiers per gene row — Ensembl gene_id or ERCC spike-in. This is the DataFrame index, not a var metadata column.'
+      checks:
+        - 'AnnData schema: var.index (feature identifiers / var_names)'
+        - 'H5AD file translation: var/_index (HDF5 encoding of the pandas DataFrame index)'
+        - 'Loom file translation: /row_attrs/feature_id (typical ASAP), or anndata_mapping var_index_key'
+        - 'Identifiers must be non-empty across all features'
+    var.index.uniqueness:
+      title: var index uniqueness
+      summary: 'Each feature identifier in var index must appear exactly once.'
+      checks:
+        - 'Detects duplicate var index values'
+        - 'Reports duplicate identifiers with occurrence counts'
+    var.index.format:
+      title: var index format
+      summary: 'Feature identifiers must follow schema rules: ERCC spike-in IDs or Ensembl gene_id without version suffix.'
+      checks:
+        - 'Spike-in rows (or ERCC-prefixed IDs): ERCC-\d+ pattern (e.g. ERCC-0003)'
+        - 'Ensembl gene IDs: must not include a version suffix when prefixed with ENS'
+        - 'Gene reference membership at ensembl_release is checked separately under var.cross_field.index.release'
+    var.cross_field.feature_reference:
+      title: feature_reference
+      summary: 'Each feature must declare the schema NCBITaxon reference organism for its annotation (pinned gene references table).'
+      checks:
+        - 'Spike-in rows must use NCBITaxon:32630'
+        - 'Gene rows must use a schema-allowed reference taxon'
+        - 'Gene rows must match organism_ontology_term_id for the dataset'
+    var.cross_field.feature_name.index:
+      title: feature_name vs var index
+      summary: 'feature_name must follow the gene reference for each var index: gene_name when assigned, otherwise the index identifier; spike-ins use ERCC-ID (spike-in control).'
+      checks:
+        - 'Pairs feature_biotype, feature_reference, feature_name, and var index per row'
+        - 'Spike-in feature_name must be "{ERCC-ID} (spike-in control)" matching var index'
+        - 'Gene feature_name must match gene_name from the reference for the index, or default to the index when gene_name is absent'
+    var.cross_field.index.release:
+      title: var index vs ensembl_release
+      summary: 'Gene identifiers in var index must resolve in ASAP genes for the organism at the declared ensembl_release.'
+      checks:
+        - 'Fails when required uns/ensembl_release is missing'
+        - 'Strips Ensembl version suffixes before lookup'
+        - 'Skips ERCC spike-in identifiers'
+    cross-field.uns_ensembl.release:
+      title: ensembl_release vs organism
+      summary: 'The declared ensembl_release must fall within the release range of at least one ASAP assembly for the dataset organism.'
+      checks:
+        - 'Looks up assemblies for organism_ontology_term_id in the ASAP reference database'
+        - 'Compares ensembl_release against first_ensembl_release and latest_ensembl_release on each assembly'
+    cross-field.uns_ensembl.assembly:
+      title: ensembl_assembly vs organism and release
+      summary: 'When present, ensembl_assembly must match a known assembly for the organism and be valid for ensembl_release.'
+      checks:
+        - 'Matches assembly names with tolerant prefix comparison (e.g. GRCh38 vs GRCh38.p14)'
+        - 'Skipped when ensembl_assembly is absent'
+    ontology.organism_specific.development_stage:
+      title: Development stage ontology prefix
+      summary: 'development_stage_ontology_term_id must use the taxon-specific stage ontology prefix for the organism (e.g. HsapDv for human).'
+      checks:
+        - 'Reads organism_ontology_term_id from uns metadata'
+        - 'Maps the organism to a required development stage ontology prefix (HsapDv, MmusDv, WBls, ZFS, FBdv, or UBERON)'
+        - 'Each development_stage_ontology_term_id value must use the mapped prefix (or special values unknown, na)'
+    ontology.organism_specific.cell_type:
+      title: Cell type ontology prefix
+      summary: 'cell_type_ontology_term_id must use CL or the taxon-specific cell ontology prefix for model organisms.'
+      checks:
+        - 'Reads organism_ontology_term_id from uns metadata'
+        - 'Each cell_type_ontology_term_id value must use an allowed ontology prefix for that organism'
+        - 'Default allowed prefixes: CL (plus special values unknown and na)'
+        - 'Model organisms may require taxon-specific prefixes (WBbt, ZFA, FBbt) per rules.yaml organism_cell_type_mapping'
+    ontology.organism_specific.tissue:
+      title: Tissue ontology prefix
+      summary: 'tissue_ontology_term_id must use UBERON, Cellosaurus (cell lines), or taxon-specific anatomy prefixes for model organisms.'
+      checks:
+        - 'Reads organism_ontology_term_id and tissue_type from metadata'
+        - 'Cell line tissue_type requires Cellosaurus CVCL_* terms'
+        - 'Primary cell culture follows cell_type_ontology_term_id prefix rules'
+        - 'Other tissue types use UBERON by default or taxon-specific anatomy prefixes for model organisms'
+    ontology.organism_specific.ethnicity:
+      title: Ethnicity vs organism
+      summary: 'Non-human datasets must use ethnicity "na"; Homo sapiens must use HANCESTRO/AfPO terms (not "na").'
+      checks:
+        - 'Reads organism_ontology_term_id from uns metadata'
+        - 'Homo sapiens datasets must use HANCESTRO or AfPO ethnicity terms (not na)'
+        - 'Non-human datasets must use self_reported_ethnicity_ontology_term_id "na"'
+    ontology.organism_specific.sex:
+      title: C. elegans sex terms
+      summary: 'For Caenorhabditis elegans, sex_ontology_term_id must be male, hermaphrodite, unknown, or na.'
+      checks:
+        - 'Applies only when organism_ontology_term_id is Caenorhabditis elegans (NCBITaxon:6239)'
+        - 'Each sex_ontology_term_id value must be PATO male, hermaphrodite, unknown, or na'
+  categories:
+    summaries:
+      obs.required_presence: 'Required per-cell observation metadata fields defined by scFAIR 7.1.0.'
+      obs.label_pairs: 'Observation ontology term IDs must have consistent paired label columns (from label_pairs).'
+      uns.required_presence: 'Required dataset-level metadata fields in uns/attrs.'
+      schema.version: 'The file schema_version must be compatible with the reference schema version.'
+      schema.reference: 'The file schema_reference should match the canonical URL of the reference schema.'
+      uns.ensembl: 'Ensembl release, database, and optional assembly used for gene annotation.'
+      obs.experimental_condition: 'Experimental condition ontology IDs, labels, and perturbation types.'
+      var.required: 'Required per-gene metadata columns in var / row_attrs.'
+      var.index: 'Var pandas.DataFrame index: unique feature identifiers (Ensembl gene_id or ERCC spike-in).'
+      var.cross_field: 'Var metadata must be consistent with uns organism and ensembl_release.'
+      cross-field.uns_ensembl: 'Ensembl release and assembly must match the dataset organism in ASAP reference data.'
+      ontology.format: 'Ontology term identifiers must use valid OBO-style PREFIX:ID format and allowed prefixes.'
+      cross-field.constraints: 'Metadata fields must satisfy cross-field consistency rules.'
+      ontology.database_resolution: 'Ontology terms must resolve to known entries in the ASAP ontology database.'
+      ontology.organism_specific: 'Metadata fields whose allowed ontology terms depend on the dataset organism.'
+      ontology.semantics: 'Ontology terms must satisfy semantic constraints (roots, forbidden branches, allowed values).'
+      loom.paths: 'Required Loom HDF5 paths for observation and dataset metadata.'
+      loom.mapping_manifest: 'The anndata_mapping manifest documents Loom to AnnData path mapping.'
+      h5ad.structure: 'AnnData object structure (obs, var, layers) integrity checks.'
+      h5ad.embeddings: 'Optional embedding matrices in obsm/varm/obsp/varp.'
+      h5ad.matrix_encoding: 'Expression matrix encoding and finite numeric values.'
+      extension.spatial: 'Spatial transcriptomics extension metadata under uns/spatial.'
+      extension.spatial.structure: 'uns/spatial dictionary layout (is_single, library identifiers, scalefactors).'
+      extension.spatial.library: 'Visium library identifier block under uns/spatial when is_single is true.'
+      extension.spatial.obs: 'Visium spot metadata columns (array_row, array_col, in_tissue).'
+      extension.spatial.assets: 'Tissue image array content and obsm spatial coordinate embedding.'
+      extension.spatial.obsm: 'obsm spatial embedding required when spatial.is_single is true.'
+      extension.spatial.images.hires: 'Visium hires tissue image array (uint8, shape, pixel size).'
+      extension.perturb: 'Genetic perturbation extension metadata (scFAIR schema_perturb.md).'
+      extension.perturb.presence: 'Conditional presence of genetic_perturbation_id, genetic_perturbation_strategy, and uns genetic_perturbations.'
+      extension.perturb.obs.id: 'obs genetic_perturbation_id values and references to uns genetic_perturbations.'
+      extension.perturb.strategy: 'obs genetic_perturbation_strategy enum values.'
+      extension.perturb.uns: 'uns genetic_perturbations dictionary structure and curator-required fields.'
+      extension.perturb.organism: 'Organism restriction for perturbation datasets.'
+      extension.atac: 'ATAC-seq extension metadata.'
+      extension.analysis_json: 'analysis_json extension metadata.'
+      metadata.other.reserved_prefix: 'Metadata field names must not start with "__".'
+      metadata.other.unique_names.obs: 'Observation metadata field names must be unique.'
+      metadata.other.unique_names.var: 'Variable (gene) metadata field names must be unique.'
+      metadata.other.deprecated: 'Deprecated reserved names from prior schema versions must not be present.'
+    checks:
+      obs.required_presence:
+        - 'Each required observation (obs / col_attrs) column from scFAIR 7.1.0 is present'
+        - 'Ontology term ID fields: assay, cell_type, disease, development_stage, sex, tissue, ethnicity'
+        - 'Categorical fields: tissue_type, suspension_type, donor_id, is_primary_data'
+        - 'Paired label columns are validated under obs.label_pairs (derived from label_pairs)'
+      obs.label_pairs:
+        - 'One check per obs entry in label_pairs (except organism, validated separately in uns)'
+        - 'Paired label column must be present when the ontology ID column is present'
+        - 'Special placeholder IDs must match the label exactly'
+        - 'Real ontology terms must match the authorised label from the ontology database'
+        - 'Multi-value fields use row-aligned obs/{id}#label_pairs extraction when available'
+      uns.required_presence:
+        - 'Each required dataset metadata field is validated individually'
+        - 'Open a specific field check for presence requirements'
+      schema.version:
+        - 'Reads schema_version from uns/attrs'
+        - 'Compares major.minor version against the reference scFAIR release'
+        - 'Accepts compatible schema_version identifiers (e.g. 7.1.0_scfair)'
+      schema.reference:
+        - 'Reads schema_reference from uns (H5AD) or /attrs (Loom)'
+        - 'Compares against the canonical schema URL for this validator release'
+        - 'Warns when the URL does not match exactly'
+      uns.ensembl:
+        - 'Each Ensembl metadata field is validated individually'
+        - 'Open a specific field check for presence and value constraints'
+      obs.experimental_condition:
+        - 'experimental_condition_ontology_term_id must be absent when all observations are na'
+        - 'experimental_condition label required when the ID column is present'
+        - 'perturbation_types required when experimental_condition or genetic_perturbation_id is present'
+        - 'Multi-values must be unique and sorted lexically with " || " delimiter'
+      var.required:
+        - 'Each required var / row_attrs column is validated individually'
+        - 'Open a specific field check for column presence and value constraints'
+      var.index:
+        - 'AnnData var.index must be present (H5AD var/_index; Loom /row_attrs/feature_id or manifest var_index_key)'
+        - 'Identifiers must be unique across all features'
+        - 'ERCC spike-in and Ensembl gene_id format rules (version suffix stripped for ENS IDs)'
+      var.cross_field:
+        - 'feature_reference must use schema NCBITaxon reference taxa per feature biotype'
+        - 'feature_name must match var index per gene reference rules (gene_name or index; ERCC for spike-ins)'
+        - 'var index gene identifiers must exist for the organism at ensembl_release'
+      cross-field.uns_ensembl:
+        - 'ensembl_release must be supported by at least one ASAP assembly for the organism'
+        - 'ensembl_assembly must match a known assembly for the organism and release when present'
+      ontology.format:
+        - 'Validates OBO-style PREFIX:ID syntax for ontology term fields'
+        - 'Checks allowed ontology prefixes per field (EFO, CL, UBERON, MONDO, etc.)'
+        - 'Allows documented special placeholder values (na, unknown, multiethnic)'
+        - 'Accepts Cellosaurus CVCL_* identifiers where the schema permits them'
+      cross-field.constraints:
+        - 'CF-1: assay_ontology_term_id determines allowed suspension_type values'
+        - 'CF-2a-2f: tissue_type "cell line" forces ethnicity, sex, development_stage, donor_id, suspension_type, and tissue ID rules'
+        - 'CF-3: donor_id must not be "na" except for cell lines'
+        - 'CF-4: organoid tissue must not be embryo (UBERON:0000922)'
+        - 'CF-5 to CF-9: spatial assay uniformity, metadata presence, is_primary_data, and Visium in_tissue rules'
+        - 'obs.label_pairs: ontology ID / label consistency (auto-generated from label_pairs)'
+      ontology.database_resolution:
+        - 'Each ontology term ID is looked up in the ASAP ontology database'
+        - 'Reports terms that cannot be resolved or mapped to a known ontology entry'
+        - 'Label columns are checked against authorised ontology names where applicable'
+      ontology.organism_specific:
+        - 'Uses organism_ontology_term_id to select taxon-specific ontology prefix rules'
+        - 'Development stage prefixes (HsapDv, MmusDv, WBls, ZFS, FBdv)'
+        - 'Cell type and tissue prefixes for model organisms (C. elegans, zebrafish, fly)'
+        - 'Ethnicity rules for human vs non-human datasets'
+        - 'C. elegans sex term restrictions'
+      ontology.semantics:
+        - 'Per-field semantic subchecks driven by rules.yaml semantic_rules'
+        - 'Descendant / root restrictions (any_roots)'
+        - 'Banned terms and forbidden branches'
+        - 'Allowed exact terms and special placeholder values'
+        - 'Multi-value ordering for ethnicity (sorted " || " lists)'
+        - 'Label must match ontology ID for special placeholder pairs'
+        - 'organism_ontology_term_id and organism label must match the ASAP organisms table (NCBITaxon tax_id and name)'
+      loom.paths:
+        - 'Required Loom HDF5 paths exist for observation and dataset metadata'
+        - 'Col_attrs paths mirror AnnData obs fields'
+        - 'Global /attrs paths mirror AnnData uns fields'
+      loom.mapping_manifest:
+        - 'Checks for anndata_mapping manifest in /attrs'
+        - 'Recommended for deterministic Loom to H5AD conversion'
+      h5ad.structure:
+        - 'AnnData groups exist: obs, var, X'
+        - 'obs column-order metadata matches stored columns'
+        - 'Required obs and uns fields are present'
+      h5ad.embeddings:
+        - 'obsm/varm/obsp/varp embedding arrays are readable'
+        - 'Embeddings are 2D with at least two columns'
+        - 'Row counts match n_obs where applicable'
+        - 'No all-NaN or infinite values in embeddings'
+      h5ad.matrix_encoding:
+        - 'Expression matrix X has valid shape and encoding'
+        - 'Sparse matrices use supported CSR/CSC layouts'
+        - 'Numeric values are finite where required by the schema'
+      extension.perturb:
+        - 'Detects perturbation datasets from uns/genetic_perturbations or obs genetic_perturbation_id'
+        - 'Requires genetic_perturbation_strategy when genetic_perturbation_id is present'
+        - 'Validates perturbation extension structure per schema_perturb.md'
+      extension.atac:
+        - 'Detects ATAC or 10x multiome assays via ontology lineage'
+        - 'Warns that fragment file assets should be supplied separately'
+      extension.analysis_json:
+        - 'Looks for analysis_pipeline metadata (recommended analysis_json extension)'
+        - 'Warns when analysis pipeline metadata is absent'
+  metadata_other:
+    metadata.other.reserved_prefix:
+      title: Reserved name prefix
+      summary: 'Metadata field names must not start with "__".'
+      checks:
+        - 'Scans obs and var metadata column names'
+        - 'Fails when any name starts with the forbidden "__" prefix'
+    metadata.other.unique_names.obs:
+      title: Unique obs metadata names
+      summary: 'Observation metadata field names must be unique.'
+      checks:
+        - 'Collects all observation metadata column names'
+        - 'Fails when duplicate names are present in obs / col_attrs'
+    metadata.other.unique_names.var:
+      title: Unique var metadata names
+      summary: 'Variable (gene) metadata field names must be unique.'
+      checks:
+        - 'Collects all variable metadata column names'
+        - 'Fails when duplicate names are present in var / row_attrs'
+    metadata.other.deprecated:
+      title: Deprecated reserved names
+      summary: 'Deprecated reserved names from prior schema versions must not be present.'
+      checks:
+        - 'Checks obs, var, and uns for reserved names deprecated in prior schema versions'
+        - 'Includes legacy fields such as obs/ethnicity and uns/version'
+  spatial_rollup_checks:
+    - 'Detects spatial datasets from Visium/Slide-seq assays or uns/spatial metadata'
+    - 'extension.spatial.structure: uns/spatial dictionary layout'
+    - 'extension.spatial.obs: Visium spot columns when is_single is true'
+    - 'extension.spatial.assets: tissue image arrays and spatial embedding'
+  layer_field_checks:
+    obs:
+      _templates:
+        column_presence: 'Verifies required observation column %{path} is present'
+        enum_values: 'Values must be one of: %{allowed_values}'
+      assay_ontology_term_id:
+        - column_presence
+      cell_type_ontology_term_id:
+        - column_presence
+      development_stage_ontology_term_id:
+        - column_presence
+      disease_ontology_term_id:
+        - column_presence
+      self_reported_ethnicity_ontology_term_id:
+        - column_presence
+      sex_ontology_term_id:
+        - column_presence
+      tissue_ontology_term_id:
+        - column_presence
+      donor_id:
+        - column_presence
+      is_primary_data:
+        - column_presence
+      suspension_type:
+        - column_presence
+        - enum_values
+      tissue_type:
+        - column_presence
+        - enum_values
+    uns:
+      title:
+        - 'Field must be present in uns (H5AD) or /attrs (Loom)'
+        - 'Short human-readable dataset title required by scFAIR'
+      organism_ontology_term_id:
+        - 'Field must be present in uns (H5AD) or /attrs (Loom)'
+        - 'Must use NCBITaxon:tax_id format for the dataset species'
+        - 'Validated for ontology format and semantic constraints when values are present'
+      organism:
+        - 'Field must be present in uns (H5AD) or /attrs (Loom)'
+        - 'Human-readable organism label paired with organism_ontology_term_id'
+        - 'Label must match the organism name for the declared NCBITaxon term'
+      schema_version:
+        - 'Field must be present in uns (H5AD) or /attrs (Loom)'
+        - 'Must be compatible with the reference scFAIR schema version'
+      schema_reference:
+        - 'Field must be present in uns (H5AD only)'
+        - 'Must match the canonical schema URL for this validator release'
+      ensembl_release:
+        - 'Field must be present in uns (H5AD) or /attrs (Loom)'
+        - 'Must be a positive integer Ensembl release number'
+      ensembl_database:
+        - 'Field must be present in uns (H5AD) or /attrs (Loom)'
+        - 'Must be one of the schema Ensembl database enum values'
+      ensembl_assembly:
+        - 'Optional field; skipped when not annotated'
+        - 'When present, must be a non-empty assembly name string'
+    var:
+      feature_is_filtered:
+        - 'Column must be present in var (H5AD) or row_attrs (Loom)'
+        - 'Values must be boolean true or false (true, false, True, or False)'
+      feature_biotype:
+        - 'Column must be present in var (H5AD) or row_attrs (Loom)'
+        - 'Values must be one of the schema biotype enum values'
+      feature_length:
+        - 'Column must be present in var (H5AD) or row_attrs (Loom)'
+        - 'Values must be a positive integer (gene length in base pairs)'
+      feature_name:
+        - 'Column must be present in var (H5AD) or row_attrs (Loom)'
+        - 'Spike-in: "{ERCC-ID} (spike-in control)" matching var index'
+        - 'Gene: gene_name from the reference for var index, or var index when gene_name is absent'
+      feature_reference:
+        - 'Column must be present in var (H5AD) or row_attrs (Loom)'
+        - 'Must be the schema NCBITaxon reference organism for the feature (pinned gene annotations table)'
+      feature_type:
+        - 'Column must be present in var (H5AD) or row_attrs (Loom)'
+        - 'Values must be a non-empty string (e.g. protein_coding, synthetic)'
+      feature_chromosome:
+        - 'Column must be present in var (H5AD) or row_attrs (Loom)'
+        - 'Values must be a non-empty string (chromosome name or na for spike-ins)'
+  extension_field_checks:
+    extension.spatial.structure:
+      - 'spatial.is_single must be a boolean'
+      - 'Spatial root may only contain is_single and library identifier keys'
+      - 'Visium + is_single=true: exactly one library identifier with images and scalefactors sections'
+      - 'Visium + is_single=false: library metadata must not be present'
+      - 'images section: hires key required, fullres optional; scalefactor scalars must be parseable floats'
+    extension.spatial.obs:
+      - 'Applies when assay is Visium and spatial.is_single is true'
+      - 'Requires obs/array_row, obs/array_col, and obs/in_tissue (col_attrs on Loom)'
+      - 'These fields must not be present for non-Visium or is_single=false datasets'
+    extension.spatial.assets:
+      - 'Tissue image (images/hires): uint8 3D array (height x width x channels)'
+      - 'Tissue image (images/hires): channel dimension must be 3 (RGB) or 4 (RGBA)'
+      - 'Tissue image (images/hires): largest dimension 2000 px (4000 px for CytAssist 11mm, EFO:0022860)'
+      - 'Tissue image (images/fullres): same uint8 3D RGB/RGBA rules when present'
+      - 'Spatial embedding (obsm/spatial or /col_attrs/spatial): required when is_single is true'
+      - 'Spatial embedding: 2D array with at least two columns and row count matching n_obs'
+      - 'Spatial embedding: dtype kind must be float, integer, or unsigned integer; no infinity or NaN'
+    extension.spatial.images.hires:
+      - 'images/hires must be present for Visium libraries when is_single is true'
+      - 'Image dtype must be uint8 with a 3D shape (height x width x channels)'
+      - 'Channel dimension must be 3 (RGB) or 4 (RGBA)'
+      - 'Largest image dimension must be 2000 px (4000 px for CytAssist 11mm, EFO:0022860)'
+    extension.spatial.images.fullres:
+      - 'Optional full-resolution tissue image when present'
+      - 'Same uint8 3D RGB/RGBA array requirements as hires'
+    extension.spatial.obsm:
+      - 'obsm/spatial (H5AD) or /col_attrs/spatial (Loom) required when spatial.is_single is true'
+      - 'Embedding must be 2D with at least two columns and row count matching n_obs'
+      - 'Dtype kind must be float, integer, or unsigned integer'
+      - 'Must not contain infinity or NaN values'
+    extension.spatial.library:
+      - 'Exactly one Visium library identifier under uns/spatial when is_single is true'
+      - 'Library dict may only contain images and scalefactors keys'
+  semantic:
+    titles:
+      allowed_terms: 'Allowed / known terms'
+      existence: 'Ontology term existence'
+      banned_terms: 'Banned terms'
+      forbidden: 'Banned term'
+      descendants: 'Descendant / root restrictions'
+      lineage: 'Lineage restrictions'
+      sorted_multi: 'Multi-value ordering'
+      ordering: 'Multi-value ordering'
+      special_values: 'Special placeholder values'
+      label_pair: 'ID / label pairs'
+      special_label_pair: 'Special ID / label pairs'
+    summaries:
+      allowed_terms: 'Each term must resolve as an active (non-obsolete) entry in the ontology database and match any allowed exact values.'
+      existence: 'The term must exist as an active (non-obsolete) entry in the ontology database.'
+      banned_terms: 'Terms must not match a banned identifier or fall under a banned branch.'
+      forbidden: 'This term is explicitly banned for the field.'
+      descendants: 'Each term must descend from one of the required ontology roots.'
+      lineage: 'The term must satisfy the required lineage constraints for this field.'
+      sorted_multi: 'Multiple values must be unique and sorted lexically, separated by " || ".'
+      ordering: 'Multiple values must be unique and sorted lexically, separated by " || ".'
+      special_values: 'Placeholder values allowed instead of a real ontology term.'
+      label_pair: 'Human-readable labels must match their ontology term identifiers.'
+      special_label_pair: 'When a special placeholder ID is used, the label must match exactly.'
+  field_summaries:
+    uns:
+      title: 'Short human-readable dataset title required in uns metadata.'
+      organism_ontology_term_id: 'Species ontology term (NCBITaxon:tax_id) identifying the dataset organism.'
+      organism: 'Human-readable organism name label paired with organism_ontology_term_id.'
+      schema_version: 'Schema version identifier; must be compatible with scFAIR %{schema_version}.'
+      schema_reference: 'Canonical URL of the scFAIR schema this file claims to follow (H5AD only).'
+      ensembl_release: 'Ensembl release number used for gene annotation (positive integer).'
+      ensembl_database: 'Ensembl database source used for gene annotation (Ensembl, EnsemblMetazoa, or EnsemblCOVID-19).'
+      ensembl_assembly: 'Optional genome assembly name for the Ensembl annotation (non-empty when present).'
+    var:
+      feature_is_filtered: 'Per-gene filter flag indicating whether the feature was filtered out of the matrix.'
+      feature_biotype: 'Gene biotype: distinguishes annotated genes from ERCC spike-in controls.'
+      feature_length: 'Gene length in base pairs as a positive integer.'
+      feature_name: 'Display name from the gene reference: gene_name when assigned to var index, otherwise the index identifier; spike-ins use ERCC-ID (spike-in control).'
+      feature_reference: 'NCBITaxon term for the reference organism of the feature from the schema pinned gene annotations table.'
+      feature_type: 'Feature type label such as protein_coding or synthetic (non-empty string).'
+      feature_chromosome: 'Chromosome name for the feature, or na for spike-ins (non-empty string).'
+  defaults:
+    required_observation: 'Required observation metadata field per scFAIR %{schema_version}.'
+    required_uns: 'Required dataset metadata field per scFAIR %{schema_version}.'
+    required_var: 'Required variable (gene) metadata field per scFAIR %{schema_version}.'
+    required_observation_label: 'Human-readable label paired with an ontology term field.'
+    enum_field: 'Categorical field with a fixed set of allowed values.'
+    ontology_term_field: 'Ontology term identifier field validated for format, semantics, and database resolution.'
+    compliance_fallback: 'Compliance check against the scFAIR schema.'
 
 checks_catalog:
   common:
+    - id: obs.label_pairs
+      label: Observation label / ontology ID pairs
     - id: obs.required_presence
       label: Required observation metadata fields
     - id: uns.required_presence
@@ -409,12 +1245,22 @@ checks_catalog:
       label: Schema version compatibility
     - id: schema.reference
       label: Schema reference URL
+    - id: uns.ensembl_assembly
+      label: Ensembl assembly metadata
+    - id: schema.reference
+      label: Schema reference URL
     - id: uns.ensembl
       label: Ensembl gene annotation metadata
     - id: obs.experimental_condition
       label: Experimental condition metadata
     - id: var.required
       label: Gene (var) metadata fields
+    - id: var.index
+      label: Var index (feature identifiers)
+    - id: var.cross_field
+      label: Var metadata cross-field consistency
+    - id: cross-field.uns_ensembl
+      label: Ensembl release and assembly consistency
     - id: ontology.format
       label: Ontology identifier format checks
     - id: cross-field.constraints

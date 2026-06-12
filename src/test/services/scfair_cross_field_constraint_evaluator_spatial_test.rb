@@ -17,7 +17,7 @@ class ScfairCrossFieldConstraintEvaluatorSpatialTest < TestBaseWithoutFixtures
     assert_equal 'failed', cf6[:status]
   end
 
-  test 'CF-9 is skipped unless spatial is_single is true' do
+  test 'CF-8 is skipped unless spatial is_single is true' do
     result = Scfair::CrossFieldConstraintEvaluator.new(
       field_values: {
         'obs/assay_ontology_term_id' => ['EFO:0022857'],
@@ -28,12 +28,12 @@ class ScfairCrossFieldConstraintEvaluatorSpatialTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    cf9 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-9-visium-in-tissue' }
-    assert_equal 'skipped', cf9[:status]
-    assert_match(/spatial\.is_single=true/, cf9[:message])
+    cf8 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-8-visium-in-tissue' }
+    assert_equal 'skipped', cf8[:status]
+    assert_match(/spatial\.is_single=true/, cf8[:message])
   end
 
-  test 'CF-9 passes when all spots are out of tissue and cell type is unknown' do
+  test 'CF-8 passes when all spots are out of tissue and cell type is unknown' do
     result = Scfair::CrossFieldConstraintEvaluator.new(
       field_values: {
         'obs/assay_ontology_term_id' => ['EFO:0022857'],
@@ -44,11 +44,11 @@ class ScfairCrossFieldConstraintEvaluatorSpatialTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    cf9 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-9-visium-in-tissue' }
-    assert_equal 'passed', cf9[:status]
+    cf8 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-8-visium-in-tissue' }
+    assert_equal 'passed', cf8[:status]
   end
 
-  test 'CF-10 fails when spatial metadata is present for a non-spatial assay' do
+  test 'CF-9 fails when spatial metadata is present for a non-spatial assay' do
     result = Scfair::CrossFieldConstraintEvaluator.new(
       field_values: {
         'obs/assay_ontology_term_id' => ['EFO:0009899'],
@@ -57,12 +57,12 @@ class ScfairCrossFieldConstraintEvaluatorSpatialTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    cf10 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-10-spatial-metadata-presence' }
-    assert_equal 'failed', cf10[:status]
-    assert_match(/must not be present/, cf10[:message])
+    cf9 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-9-spatial-metadata-presence' }
+    assert_equal 'failed', cf9[:status]
+    assert_match(/must not be present/, cf9[:message])
   end
 
-  test 'CF-10 fails when a spatial assay is missing spatial metadata' do
+  test 'CF-9 fails when a spatial assay is missing spatial metadata' do
     result = Scfair::CrossFieldConstraintEvaluator.new(
       field_values: {
         'obs/assay_ontology_term_id' => ['EFO:0022857']
@@ -70,12 +70,12 @@ class ScfairCrossFieldConstraintEvaluatorSpatialTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    cf10 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-10-spatial-metadata-presence' }
-    assert_equal 'failed', cf10[:status]
-    assert_match(/Missing uns\/spatial/, cf10[:message])
+    cf9 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-9-spatial-metadata-presence' }
+    assert_equal 'failed', cf9[:status]
+    assert_match(/Missing uns\/spatial/, cf9[:message])
   end
 
-  test 'CF-10 passes when spatial assay and spatial metadata are both present' do
+  test 'CF-9 passes when spatial assay and spatial metadata are both present' do
     result = Scfair::CrossFieldConstraintEvaluator.new(
       field_values: {
         'obs/assay_ontology_term_id' => ['EFO:0022857'],
@@ -84,8 +84,8 @@ class ScfairCrossFieldConstraintEvaluatorSpatialTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    cf10 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-10-spatial-metadata-presence' }
-    assert_equal 'passed', cf10[:status]
+    cf9 = result[:valid_checks].find { |check| check[:field] == 'cross-field.CF-9-spatial-metadata-presence' }
+    assert_equal 'passed', cf9[:status]
   end
 
   test 'CF-5 fails when spatial and non-spatial assays are mixed' do

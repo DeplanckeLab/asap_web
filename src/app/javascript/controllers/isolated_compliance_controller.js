@@ -21,13 +21,21 @@ export default class extends Controller {
     "resultWrap",
     "resultBody",
     "detailModal",
+    "detailDialog",
+    "detailSplit",
     "detailTitle",
-    "detailBody"
+    "detailStatusBadge",
+    "detailBody",
+    "detailYamlPanel",
+    "detailYamlContent",
+    "detailYamlHighlight"
   ]
 
   static values = {
     chunkSize: { type: Number, default: 5 * 1024 * 1024 },
-    uploadTypeName: String
+    uploadTypeName: String,
+    rulesSnippetUrl: String,
+    rulesYamlUrl: String
   }
 
   connect() {
@@ -38,6 +46,10 @@ export default class extends Controller {
     this.fuId = null
     this.currentProgress = 0
     this.checkDetails = []
+    this.rulesYamlLines = null
+    this.rulesYamlLoadPromise = null
+    this.rulesYamlHighlight = null
+    this.rulesYamlPanelOpen = false
     this.setupDropzone()
     this.applySourceMode()
   }
@@ -422,10 +434,11 @@ export default class extends Controller {
     return `<span class="text-gray-600"> — ${this.escape(preview)} (+${values.length - limit} more)</span>`
   }
 
-  registerCheckDetail(detail) {
+  registerCheckDetail(detail, sourceItem, resolveOptions = {}) {
     if (!detail || typeof detail !== "object") return null
+    const status = this.resolveCheckStatus(sourceItem || {}, resolveOptions)
     const index = this.checkDetails.length
-    this.checkDetails.push(detail)
+    this.checkDetails.push({ ...detail, status })
     return index
   }
 
@@ -442,8 +455,10 @@ export default class extends Controller {
     const detail = this.checkDetails[index]
     if (!detail || !this.hasDetailModalTarget) return
 
-    this.detailTitleTarget.textContent = detail.title || detail.field || "Rule details"
+    this.updateDetailHeader(detail)
     this.detailBodyTarget.innerHTML = this.renderCheckDetailBody(detail)
+    this.foldRulesYamlPanel()
+    this.bindRulesYamlInteractions(detail)
     this.detailModalTarget.classList.remove("hidden")
     document.body.classList.add("overflow-hidden")
   }
@@ -453,6 +468,38 @@ export default class extends Controller {
     if (!this.hasDetailModalTarget) return
     this.detailModalTarget.classList.add("hidden")
     document.body.classList.remove("overflow-hidden")
+    this.clearDetailHeader()
+    this.foldRulesYamlPanel()
+    this.rulesYamlHighlight = null
+  }
+
+  checkStatusPalette() {
+    return {
+      passed: { badge: "bg-green-100 text-green-800", label: "Passed", code: "bg-green-100" },
+      warning: { badge: "bg-yellow-100 text-yellow-800", label: "Warning", code: "bg-yellow-100" },
+      failed: { badge: "bg-red-100 text-red-800", label: "Error", code: "bg-red-100" },
+      skipped: { badge: "bg-gray-100 text-gray-700", label: "Not applicable", code: "bg-gray-100" }
+    }
+  }
+
+  renderCheckStatusBadge(statusKey) {
+    const st = this.checkStatusPalette()[statusKey] || this.checkStatusPalette().passed
+    return `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${st.badge}">${st.label}</span>`
+  }
+
+  updateDetailHeader(detail) {
+    this.detailTitleTarget.textContent = detail.title || detail.field || "Rule details"
+    if (!this.hasDetailStatusBadgeTarget) return
+
+    const statusKey = this.resolveCheckStatus(detail, {})
+    this.detailStatusBadgeTarget.innerHTML = this.renderCheckStatusBadge(statusKey)
+    this.detailStatusBadgeTarget.classList.remove("hidden")
+  }
+
+  clearDetailHeader() {
+    if (!this.hasDetailStatusBadgeTarget) return
+    this.detailStatusBadgeTarget.innerHTML = ""
+    this.detailStatusBadgeTarget.classList.add("hidden")
   }
 
   closeCheckDetailOnBackdrop(event) {
@@ -473,6 +520,7 @@ export default class extends Controller {
 
   renderCheckDetailBody(detail) {
     const rows = []
+    const showRulesBadge = this.detailHasRulesYaml(detail)
 
     if (detail.category_label) {
       rows.push(`<div><span class="font-medium text-gray-900">Category:</span> ${this.escape(detail.category_label)}</div>`)
@@ -484,24 +532,32 @@ export default class extends Controller {
       rows.push(`<div class="mt-3"><span class="font-medium text-gray-900">Rule:</span> ${this.escape(detail.summary)}</div>`)
     }
 
-    const checksPerformed = Array.isArray(detail.checks_performed) ? detail.checks_performed : []
-    if (checksPerformed.length > 0) {
-      const checkLines = checksPerformed.map((check) => `<li>${this.escape(check)}</li>`).join("")
-      rows.push(`<div class="mt-3"><div class="font-medium text-gray-900 mb-1">Checks performed</div><ul class="list-disc pl-5 space-y-1 text-sm">${checkLines}</ul></div>`)
+    const constraints = Array.isArray(detail.constraints) ? detail.constraints : []
+    const checksPerformed = this.normalizeChecksPerformed(detail.checks_performed)
+    const rulesBadge = showRulesBadge ? this.rulesYamlBadgeHtml() : ""
+
+    if (checksPerformed.length > 0 && constraints.length === 0) {
+      const checkLines = checksPerformed.map((check) => this.renderCheckLine(check)).join("")
+      rows.push(
+        `<div class="mt-3">` +
+        `<div class="font-medium text-gray-900 mb-1 flex items-center gap-2">Checks performed${rulesBadge}</div>` +
+        `<ul class="list-disc pl-5 space-y-1 text-sm">${checkLines}</ul>` +
+        `</div>`
+      )
+    }
+
+    if (constraints.length > 0) {
+      const constraintLines = constraints.map((row) => this.renderConstraintLine(row)).join("")
+      rows.push(
+        `<div class="mt-3">` +
+        `<div class="font-medium text-gray-900 mb-1 flex items-center gap-2">Constraints${rulesBadge}</div>` +
+        `<ul class="list-disc pl-5 space-y-1">${constraintLines}</ul>` +
+        `</div>`
+      )
     }
 
     if (detail.result_message) {
       rows.push(`<div class="mt-3"><span class="font-medium text-gray-900">Result:</span> ${this.escape(detail.result_message)}</div>`)
-    }
-
-    const constraints = Array.isArray(detail.constraints) ? detail.constraints : []
-    if (constraints.length > 0) {
-      const constraintLines = constraints.map((row) => {
-        const label = this.escape(row.label || row["label"] || "")
-        const value = this.escape(row.value || row["value"] || "")
-        return `<li><span class="font-medium">${label}:</span> ${value}</li>`
-      }).join("")
-      rows.push(`<div class="mt-3"><div class="font-medium text-gray-900 mb-1">Constraints</div><ul class="list-disc pl-5 space-y-1">${constraintLines}</ul></div>`)
     }
 
     if (detail.schema_version) {
@@ -514,6 +570,240 @@ export default class extends Controller {
     }
 
     return rows.join("")
+  }
+
+  detailHasRulesYaml(detail) {
+    const constraints = Array.isArray(detail.constraints) ? detail.constraints : []
+    if (constraints.some((row) => row.from_rules === true || row["from_rules"] === true)) return true
+
+    return this.normalizeChecksPerformed(detail.checks_performed).some((check) => check.rules_path)
+  }
+
+  normalizeChecksPerformed(checks) {
+    return (Array.isArray(checks) ? checks : []).map((check) => {
+      if (typeof check === "string") {
+        return { text: check, rules_path: null }
+      }
+      return {
+        text: (check.text || check["text"] || "").toString(),
+        rules_path: check.rules_path || check["rules_path"] || null
+      }
+    })
+  }
+
+  rulesYamlBadgeHtml() {
+    return (
+      `<button type="button" data-rules-yaml-badge ` +
+      `class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 cursor-pointer" ` +
+      `title="Show rules.yaml">rules.yaml</button>`
+    )
+  }
+
+  renderCheckLine(check) {
+    const text = this.escape(check.text)
+    if (!check.rules_path) {
+      return `<li>${text}</li>`
+    }
+    return (
+      `<li class="cursor-pointer hover:bg-emerald-50 rounded -mx-1 px-1" data-rules-path="${this.escape(check.rules_path)}" ` +
+      `title="Highlight in rules.yaml: ${this.escape(check.rules_path)}">${text}</li>`
+    )
+  }
+
+  renderConstraintLine(row) {
+    const label = this.escape(row.label || row["label"] || "")
+    const value = this.escape(row.value || row["value"] || "")
+    const rulesPath = row.rules_path || row["rules_path"] || ""
+    const fromRules = (row.from_rules === true || row["from_rules"] === true) && rulesPath
+    const fromFile = row.from_file === true || row["from_file"] === true
+    if (fromFile) {
+      const docClick = rulesPath
+        ? ` class="cursor-pointer hover:bg-slate-50 rounded -mx-1 px-1" data-rules-path="${this.escape(rulesPath)}" title="Documentation in rules.yaml: ${this.escape(rulesPath)}"`
+        : ""
+      return (
+        `<li${docClick}>` +
+        `<span class="font-medium">${label}:</span> ${value}` +
+        `<span class="text-xs text-gray-500 ml-1">(from this file)</span>` +
+        `</li>`
+      )
+    }
+    if (!fromRules) {
+      return `<li><span class="font-medium">${label}:</span> ${value}</li>`
+    }
+    return (
+      `<li class="cursor-pointer hover:bg-emerald-50 rounded -mx-1 px-1" data-rules-path="${this.escape(rulesPath)}" ` +
+      `title="Highlight in rules.yaml: ${this.escape(rulesPath)}">` +
+      `<span class="font-medium">${label}:</span> ${value}</li>`
+    )
+  }
+
+  bindRulesYamlInteractions(detail) {
+    this.detailBodyTarget.querySelectorAll("[data-rules-yaml-badge]").forEach((badge) => {
+      badge.addEventListener("click", (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        this.unfoldRulesYamlPanel()
+      })
+    })
+
+    this.detailBodyTarget.querySelectorAll("[data-rules-path]").forEach((row) => {
+      row.addEventListener("click", (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        this.highlightRulesPath(row.dataset.rulesPath)
+      })
+    })
+  }
+
+  foldRulesYamlPanel() {
+    this.setRulesYamlPanelOpen(false)
+    if (this.hasDetailYamlHighlightTarget) {
+      this.detailYamlHighlightTarget.classList.add("hidden")
+      this.detailYamlHighlightTarget.textContent = ""
+    }
+    this.rulesYamlHighlight = null
+    this.renderRulesYamlPanel()
+  }
+
+  async unfoldRulesYamlPanel() {
+    if (!this.hasDetailYamlPanelTarget) return
+    this.setRulesYamlPanelOpen(true)
+    this.renderRulesYamlPanel()
+    await this.ensureRulesYamlLoaded()
+    this.renderRulesYamlPanel()
+  }
+
+  setRulesYamlPanelOpen(open) {
+    this.rulesYamlPanelOpen = open
+    if (this.hasDetailDialogTarget) {
+      this.detailDialogTarget.classList.toggle("is-yaml-open", open)
+    }
+    if (this.hasDetailSplitTarget) {
+      this.detailSplitTarget.classList.toggle("is-yaml-open", open)
+    }
+    if (this.hasDetailYamlPanelTarget) {
+      this.detailYamlPanelTarget.setAttribute("aria-hidden", open ? "false" : "true")
+    }
+  }
+
+  afterRulesYamlPanelTransition(callback) {
+    const node = this.hasDetailSplitTarget ? this.detailSplitTarget : this.detailYamlPanelTarget
+    if (!node) {
+      callback()
+      return
+    }
+    let completed = false
+    const finish = () => {
+      if (completed) return
+      completed = true
+      node.removeEventListener("transitionend", onTransitionEnd)
+      callback()
+    }
+    const onTransitionEnd = (event) => {
+      if (event.target === node && event.propertyName === "grid-template-columns") finish()
+    }
+    node.addEventListener("transitionend", onTransitionEnd)
+    window.setTimeout(finish, 320)
+  }
+
+  async highlightRulesPath(path) {
+    if (!path) return
+    await this.unfoldRulesYamlPanel()
+
+    try {
+      const payload = await this.fetchRulesSnippet(path)
+      this.rulesYamlHighlight = {
+        path: payload.path || path,
+        start: payload.highlight_start,
+        end: payload.highlight_end
+      }
+      if (this.hasDetailYamlHighlightTarget) {
+        this.detailYamlHighlightTarget.textContent = `Highlighted: ${this.rulesYamlHighlight.path}`
+        this.detailYamlHighlightTarget.classList.remove("hidden")
+      }
+      this.renderRulesYamlPanel()
+      this.afterRulesYamlPanelTransition(() => this.scrollRulesYamlToHighlight())
+    } catch (error) {
+      if (this.hasDetailYamlHighlightTarget) {
+        this.detailYamlHighlightTarget.textContent = error.message || "Unable to locate rules.yaml path"
+        this.detailYamlHighlightTarget.classList.remove("hidden")
+      }
+    }
+  }
+
+  async ensureRulesYamlLoaded() {
+    if (this.rulesYamlLines) return this.rulesYamlLines
+    if (this.rulesYamlLoadPromise) return this.rulesYamlLoadPromise
+
+    this.rulesYamlLoadPromise = this.fetchRulesYaml().then((payload) => {
+      this.rulesYamlLines = Array.isArray(payload.lines) ? payload.lines : []
+      return this.rulesYamlLines
+    }).finally(() => {
+      this.rulesYamlLoadPromise = null
+    })
+
+    return this.rulesYamlLoadPromise
+  }
+
+  async fetchRulesYaml() {
+    const baseUrl = this.rulesYamlUrlValue || "/compliance/rules_yaml"
+    const response = await fetch(baseUrl, { headers: { Accept: "application/json" } })
+    const payload = await response.json()
+    if (!response.ok) {
+      throw new Error(payload.error || "Unable to load rules.yaml")
+    }
+    return payload
+  }
+
+  async fetchRulesSnippet(path) {
+    const baseUrl = this.rulesSnippetUrlValue || "/compliance/rules_snippet"
+    const url = `${baseUrl}?path=${encodeURIComponent(path)}`
+    const response = await fetch(url, { headers: { Accept: "application/json" } })
+    const payload = await response.json()
+    if (!response.ok) {
+      throw new Error(payload.error || "Snippet not found")
+    }
+    return payload
+  }
+
+  renderRulesYamlPanel() {
+    if (!this.hasDetailYamlContentTarget) return
+
+    if (!this.rulesYamlLines) {
+      this.detailYamlContentTarget.innerHTML = `<div class="text-gray-500 p-2">Loading rules.yaml...</div>`
+      return
+    }
+
+    const highlight = this.rulesYamlHighlight
+    const lineRows = this.rulesYamlLines.map((line) => {
+      const lineNumber = line.number
+      const text = this.escape(line.text || "")
+      const isHighlight = highlight &&
+        lineNumber >= highlight.start &&
+        lineNumber <= highlight.end
+      const rowClass = isHighlight
+        ? "bg-emerald-100 border-l-2 border-emerald-500"
+        : "border-l-2 border-transparent"
+      const dimClass = highlight && !isHighlight ? " text-gray-400" : ""
+      return (
+        `<div class="flex ${rowClass}${dimClass}" data-rules-yaml-line="${lineNumber}">` +
+        `<span class="select-none shrink-0 w-10 pr-2 text-right text-gray-400">${lineNumber}</span>` +
+        `<code class="flex-1 whitespace-pre-wrap break-all">${text}</code>` +
+        `</div>`
+      )
+    }).join("")
+
+    this.detailYamlContentTarget.innerHTML = lineRows
+  }
+
+  scrollRulesYamlToHighlight() {
+    if (!this.hasDetailYamlContentTarget || !this.rulesYamlHighlight) return
+    const firstLine = this.detailYamlContentTarget.querySelector(
+      `[data-rules-yaml-line="${this.rulesYamlHighlight.start}"]`
+    )
+    if (firstLine) {
+      firstLine.scrollIntoView({ block: "center" })
+    }
   }
 
   promoteCheckIssues(checks, baseWarnings = [], baseErrors = []) {
@@ -598,12 +888,7 @@ export default class extends Controller {
       green: { code: "bg-green-100", box: "border-green-200 bg-green-50" },
       detail: { code: "bg-slate-100", box: "border-slate-200 bg-slate-50" }
     }
-    const statusPalette = {
-      passed: { code: "bg-green-100", badge: "bg-green-100 text-green-800", label: "Passed" },
-      warning: { code: "bg-yellow-100", badge: "bg-yellow-100 text-yellow-800", label: "Warning" },
-      failed: { code: "bg-red-100", badge: "bg-red-100 text-red-800", label: "Failed" },
-      skipped: { code: "bg-gray-100", badge: "bg-gray-100 text-gray-700", label: "Not applicable" }
-    }
+    const statusPalette = this.checkStatusPalette()
     const style = palette[color] || palette.detail
     const failedCount = items.filter((it) => this.resolveCheckStatus(it, resolveOptions) === "failed").length
     const warningCount = items.filter((it) => this.resolveCheckStatus(it, resolveOptions) === "warning").length
@@ -618,8 +903,9 @@ export default class extends Controller {
       const statusKey = this.resolveCheckStatus(it, resolveOptions)
       const st = statusPalette[statusKey] || statusPalette.passed
       const codeClass = st.code
-      const badge = `<span class="ml-2 px-1.5 py-0.5 rounded text-xs ${st.badge}">${st.label}</span>`
-      const detailIndex = this.registerCheckDetail(it.detail)
+      const listLabel = statusKey === "failed" ? "Failed" : st.label
+      const badge = `<span class="ml-2 px-1.5 py-0.5 rounded text-xs ${st.badge}">${listLabel}</span>`
+      const detailIndex = this.registerCheckDetail(it.detail, it, resolveOptions)
       const clickable = detailIndex !== null ? " cursor-pointer hover:bg-white/70 rounded px-1 -mx-1" : ""
       const detailAttr = detailIndex !== null
         ? ` data-check-detail-index="${detailIndex}" title="Show rule details"`

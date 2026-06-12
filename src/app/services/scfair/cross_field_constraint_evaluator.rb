@@ -7,6 +7,7 @@ module Scfair
     def initialize(field_values:, format:)
       @field_values = field_values || {}
       @format = format
+      @validation = Rules.cross_field_validation
     end
 
     def call
@@ -24,6 +25,7 @@ module Scfair
       tissue = first(@field_values["#{prefix}tissue_ontology_term_id"])
 
       violations = check_cross_field_constraints(
+        format: @format,
         organism_tax_id: organism,
         assay_term_id: assay,
         tissue_type: tissue_type,
@@ -44,31 +46,38 @@ module Scfair
       end
 
       violated_fields = (errors + warnings).map { |x| x[:field].to_s }.join(' ')
-      add_rule_check(rule_checks, 'CF-1-assay-suspension', violated_fields, '/suspension_type',
-                     'Assay/suspension_type consistency')
+      cf1 = Rules.cross_field_rule_by_key('CF-1')
+      add_rule_check(
+        rule_checks,
+        cf1[:id],
+        violated_fields,
+        cf1[:token],
+        Rules.cross_field_rule_message_for_key('CF-1', :pass)
+      )
       add_cell_line_checks(rule_checks, tissue_type: tissue_type, violated_fields: violated_fields)
 
       donor_bad = tissue_type != 'cell line' && donor == 'na'
       rule_checks << {
-        field: 'cross-field.CF-3-donor-id',
+        field: Rules.cross_field_rule_field('CF-3'),
         status: donor_bad ? 'failed' : 'passed',
-        message: donor_bad ? 'donor_id must not be "na" unless tissue_type is "cell line"' : 'donor_id consistency OK'
+        message: Rules.cross_field_rule_message_for_key('CF-3', donor_bad ? :fail : :pass)
       }
 
-      organoid_bad = tissue_type == 'organoid' && tissue == 'UBERON:0000922'
+      organoid_embryo = Rules.cross_field_organoid_embryo_term
+      organoid_bad = tissue_type == 'organoid' && tissue == organoid_embryo
       rule_checks << {
-        field: 'cross-field.CF-4-organoid-tissue',
+        field: Rules.cross_field_rule_field('CF-4'),
         status: organoid_bad ? 'failed' : (tissue_type == 'organoid' ? 'passed' : 'skipped'),
-        message: tissue_type == 'organoid' ? (organoid_bad ? 'Organoid tissue must not be embryo (UBERON:0000922)' : 'Organoid tissue constraints OK') : 'Not applicable'
+        message: tissue_type == 'organoid' ? Rules.cross_field_rule_message_for_key('CF-4', organoid_bad ? :fail : :pass) : Rules.cross_field_not_applicable_message
       }
 
       assays = SpatialAssayHelper.assay_terms(@field_values, @format)
       spatial_assays = assays.select { |term| SpatialAssayHelper.spatial_assay?(term, resolver: @resolver) }
       mixed_spatial = spatial_assays.any? && assays.size > 1
       rule_checks << {
-        field: 'cross-field.CF-5-spatial-assay-uniformity',
+        field: Rules.cross_field_rule_field('CF-5'),
         status: mixed_spatial ? 'failed' : (spatial_assays.any? ? 'passed' : 'skipped'),
-        message: spatial_assays.any? ? (mixed_spatial ? 'Spatial assay datasets must use a single assay value' : 'Spatial assay uniformity OK') : 'Not applicable'
+        message: spatial_assays.any? ? Rules.cross_field_rule_message_for_key('CF-5', mixed_spatial ? :fail : :pass) : Rules.cross_field_not_applicable_message
       }
 
       is_primary = first(@field_values["#{prefix}is_primary_data"])
@@ -78,25 +87,21 @@ module Scfair
       is_single_false = is_single_present && !SpatialAssayHelper.spatial_is_single?(@field_values, @format)
       cf6_bad = is_single_false && is_primary == 'true'
       rule_checks << {
-        field: 'cross-field.CF-6-spatial-primary-data',
+        field: Rules.cross_field_rule_field('CF-6'),
         status: is_single_present ? (cf6_bad ? 'failed' : 'passed') : 'skipped',
-        message: is_single_present ? (cf6_bad ? 'is_primary_data must be false when spatial.is_single is false' : 'Spatial primary-data constraint OK') : 'Not applicable'
+        message: is_single_present ? Rules.cross_field_rule_message_for_key('CF-6', cf6_bad ? :fail : :pass) : Rules.cross_field_not_applicable_message
       }
 
       cell_type = first(@field_values["#{prefix}cell_type_ontology_term_id"])
       cf7_bad = tissue_type == 'cell line' && !%w[na unknown].include?(cell_type) && cell_type.present?
       rule_checks << {
-        field: 'cross-field.CF-7-cell-line-cell-type',
+        field: Rules.cross_field_rule_field('CF-7'),
         status: tissue_type == 'cell line' ? (cf7_bad ? 'failed' : 'passed') : 'skipped',
-        message: tissue_type == 'cell line' ? (cf7_bad ? 'cell_type_ontology_term_id should be na/unknown for cell lines' : 'Cell line cell_type constraint OK') : 'Not applicable'
+        message: tissue_type == 'cell line' ? Rules.cross_field_rule_message_for_key('CF-7', cf7_bad ? :fail : :pass) : Rules.cross_field_not_applicable_message
       }
 
-      cf8 = cf8_label_id_checks(prefix)
-      rule_checks.concat(cf8[:checks])
-      errors.concat(cf8[:errors])
-
-      rule_checks << cf9_visium_in_tissue_check(prefix, assays)
-      rule_checks << cf10_spatial_metadata_presence_check
+      rule_checks << cf8_visium_in_tissue_check(prefix, assays)
+      rule_checks << cf9_spatial_metadata_presence_check
 
       { errors: errors, warnings: warnings, valid_checks: rule_checks }
     end
@@ -107,71 +112,26 @@ module Scfair
       Array(v).first.to_s
     end
 
-    CELL_LINE_RULES = [
-      {
-        id: 'CF-2a-cell-line-ethnicity',
-        token: 'self_reported_ethnicity_ontology_term_id',
-        skip_detail: 'ethnicity must be "na" (cell lines have no donor ancestry)',
-        pass_detail: 'self_reported_ethnicity_ontology_term_id is "na"',
-        fail_detail: 'self_reported_ethnicity_ontology_term_id must be "na" for cell lines'
-      },
-      {
-        id: 'CF-2b-cell-line-sex',
-        token: 'sex_ontology_term_id',
-        skip_detail: 'sex must be "na" (not applicable to a cultured line)',
-        pass_detail: 'sex_ontology_term_id is "na"',
-        fail_detail: 'sex_ontology_term_id must be "na" for cell lines'
-      },
-      {
-        id: 'CF-2c-cell-line-development-stage',
-        token: 'development_stage_ontology_term_id',
-        skip_detail: 'development_stage must be "unknown" (no in vivo stage for a line)',
-        pass_detail: 'development_stage_ontology_term_id is "unknown"',
-        fail_detail: 'development_stage_ontology_term_id must be "unknown" for cell lines'
-      },
-      {
-        id: 'CF-2d-cell-line-donor-id',
-        token: 'donor_id',
-        skip_detail: 'donor_id must be "na" (line identity is not a donor ID)',
-        pass_detail: 'donor_id is "na"',
-        fail_detail: 'donor_id must be "na" for cell lines'
-      },
-      {
-        id: 'CF-2e-cell-line-suspension',
-        token: 'suspension_type',
-        skip_detail: 'suspension_type must be "na" (not used for cell line profiles)',
-        pass_detail: 'suspension_type is "na"',
-        fail_detail: 'suspension_type must be "na" for cell lines'
-      },
-      {
-        id: 'CF-2f-cell-line-tissue-id',
-        token: 'tissue_ontology_term_id',
-        skip_detail: 'tissue_ontology_term_id should be a Cellosaurus ID (CVCL_*) naming the line',
-        pass_detail: 'tissue_ontology_term_id is a Cellosaurus term (CVCL_*)',
-        fail_detail: 'tissue_ontology_term_id should be a Cellosaurus term (CVCL_*) for cell lines'
-      }
-    ].freeze
-
     def add_cell_line_checks(rule_checks, tissue_type:, violated_fields:)
       cell_line = tissue_type == 'cell line'
 
-      CELL_LINE_RULES.each do |rule|
-        field = "cross-field.#{rule[:id]}"
+      Rules.cross_field_cell_line_checks.each do |rule|
+        field = Rules.cross_field_rule_field(rule[:key])
 
         unless cell_line
           rule_checks << {
             field: field,
             status: 'skipped',
-            message: "Not applicable (tissue_type is not \"cell line\"). For cell lines only: #{rule[:skip_detail]}"
+            message: Rules.cross_field_skip_not_cell_line_message(detail: rule[:skip_detail])
           }
           next
         end
 
-        failed = violated_fields.include?(rule[:token])
+        failed = violated_fields.include?(rule[:token].to_s)
         rule_checks << {
           field: field,
           status: failed ? 'failed' : 'passed',
-          message: failed ? rule[:fail_detail] : rule[:pass_detail]
+          message: failed ? rule[:fail].to_s : rule[:pass].to_s
         }
       end
     end
@@ -185,21 +145,21 @@ module Scfair
       }
     end
 
-    def cf10_spatial_metadata_presence_check
+    def cf9_spatial_metadata_presence_check
       spatial_assay = SpatialAssayHelper.any_spatial_assay?(@field_values, @format, resolver: @resolver)
       metadata_present = SpatialAssayHelper.spatial_metadata_present?(@field_values, @format)
       spatial_root = @format == 'h5ad' ? 'uns/spatial' : '/attrs/spatial'
-      field = 'cross-field.CF-10-spatial-metadata-presence'
+      field = Rules.cross_field_rule_field(Rules::CF9_RULE_KEY)
 
       unless spatial_assay || metadata_present
-        return { field: field, status: 'skipped', message: 'Not applicable' }
+        return { field: field, status: 'skipped', message: Rules.cross_field_not_applicable_message }
       end
 
       if metadata_present && !spatial_assay
         return {
           field: field,
           status: 'failed',
-          message: "#{spatial_root} must not be present unless assay is Visium or Slide-seqV2"
+          message: Rules.cross_field_cf9_message('fail_metadata_without_spatial_assay', spatial_root: spatial_root)
         }
       end
 
@@ -207,32 +167,33 @@ module Scfair
         return {
           field: field,
           status: 'failed',
-          message: "Missing #{spatial_root} metadata (required for spatial assays)"
+          message: Rules.cross_field_cf9_message('fail_missing_metadata', spatial_root: spatial_root)
         }
       end
 
       {
         field: field,
         status: 'passed',
-        message: 'Spatial metadata presence consistent with assay'
+        message: Rules.cross_field_cf9_message('pass')
       }
     end
 
-    def cf9_visium_in_tissue_check(prefix, assays)
+    def cf8_visium_in_tissue_check(prefix, assays)
+      field = Rules.cross_field_rule_field(Rules::CF8_RULE_KEY)
       visium = assays.any? { |term| SpatialAssayHelper.visium_assay?(term, resolver: @resolver) }
       unless visium
         return {
-          field: 'cross-field.CF-9-visium-in-tissue',
+          field: field,
           status: 'skipped',
-          message: 'Not applicable'
+          message: Rules.cross_field_cf8_message('skipped_not_visium')
         }
       end
 
       unless SpatialAssayHelper.spatial_is_single?(@field_values, @format)
         return {
-          field: 'cross-field.CF-9-visium-in-tissue',
+          field: field,
           status: 'skipped',
-          message: 'Not applicable (requires spatial.is_single=true)'
+          message: Rules.cross_field_cf8_message('skipped_not_single')
         }
       end
 
@@ -241,63 +202,34 @@ module Scfair
 
       if in_tissue_vals.blank?
         return {
-          field: 'cross-field.CF-9-visium-in-tissue',
+          field: field,
           status: 'skipped',
-          message: 'Not applicable (in_tissue not present)'
+          message: Rules.cross_field_cf8_message('skipped_no_in_tissue')
         }
       end
 
       unless in_tissue_vals.include?('0')
         return {
-          field: 'cross-field.CF-9-visium-in-tissue',
+          field: field,
           status: 'passed',
-          message: 'Visium in_tissue constraint OK'
+          message: Rules.cross_field_cf8_message('pass')
         }
       end
 
       if in_tissue_vals != ['0']
         return {
-          field: 'cross-field.CF-9-visium-in-tissue',
+          field: field,
           status: 'skipped',
-          message: 'Per-spot in_tissue/cell_type pairing not available in metadata summary'
+          message: Rules.cross_field_cf8_message('skipped_mixed_in_tissue')
         }
       end
 
-      cf9_bad = cell_type_vals.any? { |value| value != 'unknown' }
+      cf8_bad = cell_type_vals.any? { |value| value != 'unknown' }
       {
-        field: 'cross-field.CF-9-visium-in-tissue',
-        status: cf9_bad ? 'failed' : 'passed',
-        message: cf9_bad ? 'Visium spots with in_tissue=0 must use cell_type_ontology_term_id=unknown' : 'Visium in_tissue constraint OK'
+        field: field,
+        status: cf8_bad ? 'failed' : 'passed',
+        message: Rules.cross_field_cf8_message(cf8_bad ? 'fail' : 'pass')
       }
-    end
-
-    def cf8_label_id_checks(prefix)
-      pairs = [
-        ['cell_type_ontology_term_id', 'cell_type'],
-        ['development_stage_ontology_term_id', 'development_stage'],
-        ['sex_ontology_term_id', 'sex']
-      ]
-      errors = []
-      checks = []
-      pairs.each do |id_field, label_field|
-        id_val = first(@field_values["#{prefix}#{id_field}"])
-        label_val = first(@field_values["#{prefix}#{label_field}"])
-        specials = %w[na unknown]
-        next unless specials.include?(id_val)
-        ok = label_val == id_val
-        unless ok
-          errors << {
-            field: "cross-field.CF-8-#{id_field}",
-            message: "Label must match special ontology id value -- expected #{id_val}, got #{label_val}"
-          }
-        end
-        checks << {
-          field: "cross-field.CF-8-#{id_field}",
-          status: ok ? 'passed' : 'failed',
-          message: ok ? 'Label must match special ontology id value -- Special label/id pairs OK' : "Label must match special ontology id value -- expected #{id_val}, got #{label_val}"
-        }
-      end
-      { checks: checks, errors: errors }
     end
   end
 end

@@ -60,6 +60,12 @@ module Scfair
               @errors << { field: "ontology.semantics.#{field_name}.lineage", message: "#{identifier}: must be under #{rules[:any_roots].join(' or ')}" }
               lineage_check_failed = true
             end
+          elsif rules[:allowed_exact].present?
+            @errors << {
+              field: "ontology.semantics.#{field_name}.allowed_terms",
+              message: "#{identifier}: not an allowed term for #{field_name}"
+            }
+            allowed_check_failed = true
           end
 
           if rules[:forbidden_branches].present?
@@ -166,6 +172,7 @@ module Scfair
     end
 
     def check_label_id_pair(field_name, id_values, allowed_specials = [])
+      return {} if Rules.obs_label_pair_fields.key?(field_name.to_s)
       label_field = OntologySemanticRules.label_field_name(field_name)
       return {} if label_field.blank?
 
@@ -231,7 +238,7 @@ module Scfair
         }
       end
 
-      term = CellOntologyTerm.find_by(identifier: identifier, original: true)
+      term = CellOntologyTerm.active_original_by_identifier(identifier)
       return nil if term && term.name.to_s == label
 
       expected = term&.name || 'n/a'

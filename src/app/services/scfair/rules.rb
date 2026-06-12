@@ -7,6 +7,8 @@ module Scfair
   module Rules
     RULES_PATH = Rails.root.join('config/scfair/7.1.0/rules.yaml').freeze
     DEFAULT_SCHEMA_ID = 'scfair_7_1_0'
+    CF8_RULE_KEY = 'CF-8'
+    CF9_RULE_KEY = 'CF-9'
 
     module_function
 
@@ -90,11 +92,83 @@ module Scfair
     end
 
     def optional_uns_fields
-      Array(data.dig(:required, :uns, :optional)).map(&:to_s).freeze
+      Array(data.dig(:required, :optional)).map(&:to_s).freeze
     end
 
     def required_var_fields
       Array(data.dig(:required, :var_fields)).map(&:to_s).freeze
+    end
+
+    def anndata_index(layer)
+      raw = (data[:anndata_indices] || {})[layer.to_sym] || {}
+      fmt_h5ad = raw[:h5ad] || {}
+      fmt_loom = raw[:loom] || {}
+      validation = raw[:validation] || {}
+      {
+        schema: raw[:schema].to_s,
+        description: raw[:description].to_s,
+        h5ad: {
+          logical: fmt_h5ad[:logical].to_s.presence || fmt_h5ad[:path].to_s,
+          path: fmt_h5ad[:path].to_s,
+          storage_keys: Array(fmt_h5ad[:storage_keys]).map(&:to_s).freeze
+        },
+        loom: {
+          logical: fmt_loom[:logical].to_s.presence || fmt_loom[:path].to_s,
+          path: fmt_loom[:path].to_s,
+          storage_keys: Array(fmt_loom[:storage_keys]).map(&:to_s).freeze,
+          manifest_key: fmt_loom[:manifest_key].to_s
+        },
+        validation: validation.each_with_object({}) { |(k, v), h| h[k.to_s] = v.to_s }.freeze
+      }.freeze
+    end
+
+    def var_index_config
+      anndata_index(:var)
+    end
+
+    def var_index_schema_field
+      var_index_config[:schema].presence || 'var.index'
+    end
+
+    def var_index_logical_path(format)
+      cfg = var_index_config
+      fmt = format.to_s == 'loom' ? cfg[:loom] : cfg[:h5ad]
+      fmt[:logical].presence || fmt[:path]
+    end
+
+    def var_index_file_path(format)
+      cfg = var_index_config
+      format.to_s == 'loom' ? cfg[:loom][:path] : cfg[:h5ad][:path]
+    end
+
+    def var_index_column_keys(format)
+      cfg = var_index_config
+      fmt = format.to_s == 'loom' ? cfg[:loom] : cfg[:h5ad]
+      Array(fmt[:storage_keys]).map(&:to_s).freeze
+    end
+
+    def var_index_presence_path(format)
+      cfg = var_index_config
+      path = format.to_s == 'loom' ? cfg[:loom][:path] : cfg[:h5ad][:path]
+      path.presence || field_path(format, :var, '_index')
+    end
+
+    def var_index_manifest_key
+      var_index_config.dig(:loom, :manifest_key).to_s
+    end
+
+    def var_index_ensembl_prefix
+      var_index_config.dig(:validation, 'ensembl_prefix').to_s.presence || 'ENS'
+    end
+
+    def var_index_covid_organism_term
+      var_index_config.dig(:validation, 'covid_organism_term').to_s
+    end
+
+    def var_index_field?(field)
+      field.to_s == var_index_schema_field ||
+        field.to_s.start_with?('var.index') ||
+        field.to_s.match?(/\A(var\/_index|var\/index|var@_index|\/row_attrs\/(_index|index|feature_id))\z/)
     end
 
     def ensembl_database_values
@@ -131,15 +205,67 @@ module Scfair
       ontology_fields[field_name.to_sym] || {}
     end
 
-    def ontology_prefixes(field_name)
-      Array(ontology_field(field_name)[:prefixes]).map(&:to_s).freeze
+    def ontology_term_format_config
+      raw = data[:ontology_term_formats] || {}
+      obo = raw[:obo] || {}
+      cellosaurus = raw[:cellosaurus] || {}
+      {
+        obo_pattern: Regexp.new(obo[:pattern].to_s),
+        obo_requirement: obo[:requirement].to_s,
+        obo_example: obo[:example].to_s,
+        obo_invalid_message: obo[:invalid_message].to_s,
+        cellosaurus_prefix: cellosaurus[:identifier_prefix].to_s,
+        cellosaurus_requirement: cellosaurus[:requirement].to_s,
+        cellosaurus_example: cellosaurus[:example].to_s,
+        cellosaurus_disallowed_message: cellosaurus[:disallowed_message].to_s,
+        combined_requirement: raw[:combined_requirement].to_s
+      }.freeze
     end
 
-    def ontology_prefixes_legacy_hash
-      ontology_fields.each_with_object({}) do |(field_name, cfg), out|
-        key = (cfg[:legacy_key] || field_name.to_s.sub(/_ontology_term_id\z/, '')).to_sym
-        out[key] = Array(cfg[:prefixes]).map(&:to_s)
-      end.freeze
+    def ontology_allows_cellosaurus_format?(field_name)
+      ontology_prefixes(field_name).include?('CVCL')
+    end
+
+    def ontology_format_requirement_text(field_name)
+      cfg = ontology_term_format_config
+      ontology_allows_cellosaurus_format?(field_name) ? cfg[:combined_requirement] : cfg[:obo_requirement]
+    end
+
+    def ontology_format_requirement_rules_path(field_name)
+      ontology_allows_cellosaurus_format?(field_name) ? 'ontology_term_formats.combined_requirement' : 'ontology_term_formats.obo.requirement'
+    end
+
+    def cellosaurus_ontology_term?(term)
+      term.to_s.start_with?(ontology_term_format_config[:cellosaurus_prefix])
+    end
+
+    def obo_ontology_term_format?(term)
+      ontology_term_format_config[:obo_pattern].match?(term.to_s)
+    end
+
+    def valid_ontology_term_identifier_format?(term, field_name)
+      term = term.to_s.strip
+      return ontology_allows_cellosaurus_format?(field_name) if cellosaurus_ontology_term?(term)
+
+      obo_ontology_term_format?(term)
+    end
+
+    def ontology_format_error_message(term, field_name)
+      cfg = ontology_term_format_config
+      term = term.to_s.strip
+      if cellosaurus_ontology_term?(term)
+        return format(cfg[:cellosaurus_disallowed_message], term: term) unless ontology_allows_cellosaurus_format?(field_name)
+
+        return nil
+      end
+
+      return nil if obo_ontology_term_format?(term)
+
+      format(cfg[:obo_invalid_message], term: term, example: cfg[:obo_example])
+    end
+
+    def ontology_prefixes(field_name)
+      Array(ontology_field(field_name)[:prefixes]).map(&:to_s).freeze
     end
 
     def special_values_for_field(format, field_name)
@@ -165,8 +291,7 @@ module Scfair
     end
 
     def valid_sex_terms
-      raw = data.dig(:constants, :valid_sex_terms) || {}
-      raw.each_with_object({}) { |(id, name), h| h[id.to_s] = name.to_s }.freeze
+      ontology_valid_terms('sex_ontology_term_id')
     end
 
     def valid_sex_term_ids
@@ -174,11 +299,20 @@ module Scfair
     end
 
     def sex_special_values
-      Array(data.dig(:constants, :sex_special_values)).map(&:to_s).freeze
+      special_values_for_field('h5ad', 'sex_ontology_term_id')
+    end
+
+    def ontology_valid_terms(field_name)
+      raw = ontology_field(field_name)[:valid_terms] || {}
+      raw.each_with_object({}) { |(id, name), h| h[id.to_s] = name.to_s }.freeze
     end
 
     def banned_cell_type_terms
-      resolve_constant_ref(data.dig(:constants, :banned_cell_type_terms)).freeze
+      ontology_banned_terms('cell_type_ontology_term_id')
+    end
+
+    def ontology_banned_terms(field_name)
+      Array(ontology_field(field_name)[:banned_terms]).map(&:to_s).freeze
     end
 
     def visium_assay_terms
@@ -216,7 +350,9 @@ module Scfair
           dtype_kinds: Array(obsm_raw[:dtype_kinds]).map(&:to_s),
           required_when_is_single: obsm_raw[:required_when_is_single] == true
         },
-        scalefactors: symbolize_spatial_section(raw[:scalefactors])
+        scalefactors: symbolize_spatial_section(raw[:scalefactors]),
+        obs: spatial_extension_obs_rules,
+        display: spatial_extension_display_rules
       }.freeze
     end
 
@@ -237,20 +373,34 @@ module Scfair
     end
 
     def assay_suspension_type_map
-      raw = data.dig(:cross_field, :assay_suspension_type_map) || {}
+      raw = cross_field_rule_by_key('CF-1')&.dig(:mapping, :suspension_by_assay_ontology_term_id) || {}
       raw.each_with_object({}) do |(term, values), out|
         out[term.to_s] = Array(values).map(&:to_s)
       end.freeze
     end
 
     def assay_ancestor_terms
-      Array(data.dig(:cross_field, :assay_ancestor_terms)).map(&:to_s).freeze
+      Array(cross_field_rule_by_key('CF-1')&.dig(:mapping, :accept_descendants_of_assay_ontology_term_id)).map(&:to_s).freeze
     end
 
     def cell_line_forced_fields
-      Array(data.dig(:cross_field, :cell_line_forced_fields)).map do |entry|
+      cross_field_cell_line_forced_rule_keys.filter_map do |key|
+        rule = cross_field_rule_by_key(key)
+        mapping = rule&.dig(:mapping) || {}
+        field = mapping[:field].presence || rule[:token].presence
+        next if field.blank? || mapping[:required_value].blank?
+
+        entry = { field: field.to_s, value: mapping[:required_value].to_s }
+        if mapping[:label_field].present?
+          entry[:label_field] = mapping[:label_field].to_s
+          entry[:label_value] = mapping[:label_value].to_s
+        end
         entry.deep_symbolize_keys
       end.freeze
+    end
+
+    def cross_field_cell_line_forced_rule_keys
+      %w[CF-2a CF-2b CF-2c CF-2d CF-2e].freeze
     end
 
     def organism_dev_stage_mapping
@@ -308,16 +458,79 @@ module Scfair
       Array(data.dig(:cross_field, :organism_celegans_sex_terms) || %w[PATO:0000384 PATO:0001340]).map(&:to_s).freeze
     end
 
+    def organism_specific_mappings_yaml_path(*parts)
+      ['cross_field', *parts.map(&:to_s)].join('.')
+    end
+
     def label_pairs
       raw = data[:label_pairs] || {}
       raw.each_with_object({}) { |(term, label), h| h[term.to_s] = label.to_s }.freeze
     end
 
-    def semantic_rules_for(field_name)
-      raw = (data[:semantic_rules] || {})[field_name.to_sym]
-      return nil if raw.blank?
+    def label_pair_validation_config
+      raw = data[:label_pair_validation] || {}
+      {
+        check_prefix: raw[:check_prefix].to_s,
+        organism_id_field: raw[:organism_id_field].to_s,
+        messages: (raw[:messages] || {}).each_with_object({}) { |(k, v), out| out[k.to_s] = v.to_s }.freeze,
+        display: (raw[:display] || {}).each_with_object({}) { |(k, v), out| out[k.to_s] = v.to_s }.freeze
+      }.freeze
+    end
 
-      resolved = raw.deep_dup
+    def obs_label_pair_fields
+      organism_field = label_pair_validation_config[:organism_id_field]
+      label_pairs.reject { |id_field, _| id_field == organism_field }.freeze
+    end
+
+    def obs_label_pair_check_field(id_field)
+      "#{label_pair_validation_config[:check_prefix]}.#{id_field}"
+    end
+
+    def label_pair_message(key, **kwargs)
+      template = label_pair_validation_config.dig(:messages, key.to_s).to_s
+      kwargs.empty? ? template : format(template, **kwargs)
+    end
+
+    def label_pair_pass_message(id_field, label_field)
+      label_pair_message(:pass, id_field: id_field, label_field: label_field)
+    end
+
+    def label_pair_skip_message(id_field)
+      label_pair_message(:skipped, id_field: id_field)
+    end
+
+    def label_pair_missing_label_message(id_field, label_field)
+      label_pair_message(:fail_missing_label, id_field: id_field, label_field: label_field)
+    end
+
+    def label_pair_count_mismatch_message(id_field, label_field)
+      label_pair_message(:fail_count_mismatch, id_field: id_field, label_field: label_field)
+    end
+
+    def label_pair_special_mismatch_message(id_val, label_val)
+      label_pair_message(:fail_special_mismatch, id_val: id_val, label_val: label_val)
+    end
+
+    def label_pair_mismatch_message(id_val, expected, label_val)
+      label_pair_message(:fail_mismatch, id_val: id_val, expected: expected, label_val: label_val)
+    end
+
+    def label_pair_check_detail(id_field)
+      label_field = label_pairs[id_field].to_s
+      display = label_pair_validation_config[:display]
+      {
+        title: format(display['pair_title_template'], id_field: id_field, label_field: label_field),
+        summary: format(display['pair_summary_template'], id_field: id_field, label_field: label_field)
+      }.freeze
+    end
+
+    def semantic_rules_for(field_name)
+      field_cfg = ontology_field(field_name)
+      raw = (data[:semantic_rules] || {})[field_name.to_sym]
+      resolved = raw ? raw.deep_dup : {}
+      apply_ontology_field_semantic_defaults!(resolved, field_cfg)
+      return nil if resolved.blank?
+
       resolved[:allowed_exact] = resolve_rule_ref(resolved[:allowed_exact]) if resolved.key?(:allowed_exact)
       resolved[:forbidden_exact] = resolve_rule_ref(resolved[:forbidden_exact]) if resolved.key?(:forbidden_exact)
       resolved[:allowed_special_values] = resolve_rule_ref(resolved[:allowed_special_values]) if resolved.key?(:allowed_special_values)
@@ -327,7 +540,380 @@ module Scfair
     end
 
     def semantic_field_names
-      (data[:semantic_rules] || {}).keys.map(&:to_s).freeze
+      explicit = (data[:semantic_rules] || {}).keys.map(&:to_s)
+      from_valid_terms = ontology_fields.select { |_, cfg| cfg[:valid_terms].present? }.keys.map(&:to_s)
+      (explicit + from_valid_terms).uniq.freeze
+    end
+
+    def check_detail_for_field(field_id)
+      label_pair = obs_label_pair_check_detail(field_id)
+      return label_pair if label_pair.present?
+
+      cross = cross_field_check_detail(field_id)
+      return cross if cross.present?
+
+      raw = data.dig(:check_details, :by_field, field_id.to_sym)
+      return nil if raw.blank?
+
+      {
+        title: raw[:title].to_s,
+        summary: raw[:summary].to_s,
+        checks: Array(raw[:checks]).map(&:to_s).freeze
+      }.freeze
+    end
+
+    def obs_label_pair_check_detail(field_id)
+      prefix = label_pair_validation_config[:check_prefix]
+      return nil unless field_id.to_s.start_with?("#{prefix}.")
+
+      id_field = field_id.to_s.delete_prefix("#{prefix}.")
+      return nil unless obs_label_pair_fields.key?(id_field)
+
+      detail = label_pair_check_detail(id_field)
+      {
+        title: detail[:title],
+        summary: detail[:summary],
+        checks: category_checks_list(prefix)
+      }.freeze
+    end
+
+    def cross_field_check_detail(field_id)
+      field_id = field_id.to_s
+      return nil unless field_id.start_with?('cross-field.')
+
+      rule_id = field_id.delete_prefix('cross-field.')
+      rule = cross_field_rule_by_id(rule_id)
+      return nil if rule.blank?
+
+      {
+        title: rule[:title],
+        summary: rule[:summary].presence || format(rule[:summary_template].to_s, id_field: rule.dig(:mapping, :id_field), label_field: rule.dig(:mapping, :label_field)),
+        checks: rule[:checks]
+      }.freeze
+    end
+
+    def category_summary(key)
+      data.dig(:check_details, :categories, :summaries, key.to_sym).to_s.presence
+    end
+
+    def category_summary?(key)
+      category_summary(key).present?
+    end
+
+    def category_checks_list(category_id)
+      Array(data.dig(:check_details, :categories, :checks, category_id.to_sym)).map(&:to_s).freeze
+    end
+
+    def metadata_other_detail(field)
+      raw = data.dig(:check_details, :metadata_other, field.to_sym)
+      return nil if raw.blank?
+
+      {
+        title: raw[:title].to_s,
+        summary: raw[:summary].to_s,
+        checks: Array(raw[:checks]).map(&:to_s).freeze
+      }.freeze
+    end
+
+    def spatial_rollup_checks
+      Array(data.dig(:check_details, :spatial_rollup_checks)).map(&:to_s).freeze
+    end
+
+    def layer_field_checks(layer, field_name, format: 'h5ad')
+      field_entries = Array(data.dig(:check_details, :layer_field_checks, layer.to_sym, field_name.to_sym))
+      return [] if field_entries.empty?
+
+      templates = data.dig(:check_details, :layer_field_checks, layer.to_sym, :_templates) || {}
+      field_entries.map do |entry|
+        key = entry.is_a?(Symbol) ? entry : entry.to_sym
+        text = templates[key].presence || entry.to_s
+        interpolate_layer_field_check(text, layer, field_name, format)
+      end.freeze
+    end
+
+    def interpolate_layer_field_check(text, layer, field_name, format)
+      return text unless text.include?('%{')
+
+      path = field_path(format, layer, field_name)
+      label_field = label_pairs[field_name]
+      label_path = label_field.present? ? field_path(format, layer, label_field) : ''
+      allowed_values = enum_field_values(field_name).join(', ')
+      format(text, path: path, label_path: label_path, allowed_values: allowed_values)
+    end
+
+    def extension_field_checks(field)
+      Array(data.dig(:check_details, :extension_field_checks, field.to_sym)).map(&:to_s).freeze
+    end
+
+    def semantic_check_title(suffix)
+      return nil if suffix.blank?
+
+      data.dig(:check_details, :semantic, :titles, suffix.to_sym).to_s.presence
+    end
+
+    def semantic_check_summary(suffix)
+      return nil if suffix.blank?
+
+      data.dig(:check_details, :semantic, :summaries, suffix.to_sym).to_s.presence
+    end
+
+    def field_summary_text(layer, field_name)
+      template = data.dig(:check_details, :field_summaries, layer.to_sym, field_name.to_sym).to_s
+      return nil if template.blank?
+
+      format(template, schema_version: schema_version)
+    end
+
+    def default_summary_text(key)
+      template = data.dig(:check_details, :defaults, key.to_sym).to_s
+      return nil if template.blank?
+
+      format(template, schema_version: schema_version)
+    end
+
+    def cross_field_validation
+      raw = data.dig(:cross_field, :validation) || {}
+      rules = (raw[:rules] || {}).each_with_object({}) do |(key, cfg), out|
+        out[key.to_s] = normalize_cross_field_rule(key.to_s, cfg.deep_symbolize_keys)
+      end.freeze
+      id_to_key = rules.each_with_object({}) { |(_key, rule), hash| hash[rule[:id]] = rule[:key] }.freeze
+
+      {
+        not_applicable: raw[:not_applicable].to_s,
+        skip_not_cell_line_template: raw[:skip_not_cell_line_template].to_s,
+        grouper_message_pattern: raw[:grouper_message_pattern].to_s,
+        rules: rules,
+        id_to_key: id_to_key
+      }.freeze
+    end
+
+    def cross_field_rule_keys
+      cross_field_validation[:rules].keys.freeze
+    end
+
+    def cross_field_rule_by_key(key)
+      cross_field_validation[:rules][key.to_s]
+    end
+
+    def cross_field_rule_by_id(rule_id)
+      key = cross_field_validation[:id_to_key][rule_id.to_s]
+      key.present? ? cross_field_rule_by_key(key) : nil
+    end
+
+    def cross_field_rule_id(key)
+      cross_field_rule_by_key(key)&.dig(:id).to_s
+    end
+
+    def cross_field_rule_field(key)
+      cross_field_rule_by_key(key)&.dig(:field).to_s
+    end
+
+    def cross_field_rules_yaml_path(key, *parts)
+      ['cross_field', 'validation', 'rules', key.to_s, *parts.map(&:to_s)].join('.')
+    end
+
+    def cross_field_cell_line_checks
+      cross_field_validation[:rules].values
+                                    .select { |rule| rule[:key].start_with?('CF-2') }
+                                    .map do |rule|
+        {
+          key: rule[:key],
+          id: rule[:id],
+          token: rule[:token],
+          skip_detail: rule[:messages]['skip_detail'],
+          pass: rule[:messages]['pass'],
+          fail: rule[:messages]['fail']
+        }
+      end.freeze
+    end
+
+    def cross_field_rule_check_messages(rule_id)
+      rule = cross_field_rule_by_id(rule_id)
+      return {} if rule.blank?
+
+      rule[:messages].transform_keys(&:to_sym)
+    end
+
+    def cross_field_rule_message(rule_id, status, **kwargs)
+      cross_field_rule_message_for_key(cross_field_validation[:id_to_key][rule_id.to_s], status, **kwargs)
+    end
+
+    def cross_field_rule_message_for_key(key, status, **kwargs)
+      rule = cross_field_rule_by_key(key)
+      template = rule&.dig(:messages, status.to_s).to_s
+      kwargs.empty? ? template : format(template, **kwargs)
+    end
+
+    def cross_field_rule_config(rule_id)
+      cross_field_rule_by_id(rule_id) || {}
+    end
+
+    def cross_field_cf8_message(key, **kwargs)
+      cross_field_rule_message_for_key(CF8_RULE_KEY, key, **kwargs)
+    end
+
+    def cross_field_cf9_message(key, **kwargs)
+      cross_field_rule_message_for_key(CF9_RULE_KEY, key, **kwargs)
+    end
+
+    def cross_field_not_applicable_message
+      cross_field_validation[:not_applicable]
+    end
+
+    def cross_field_skip_not_cell_line_message(detail:)
+      format(cross_field_validation[:skip_not_cell_line_template], detail: detail)
+    end
+
+    def cross_field_organoid_embryo_term
+      cross_field_rule_by_key('CF-4')&.dig(:mapping, :forbidden_term).to_s
+    end
+
+    def cross_field_grouper_message_pattern
+      Regexp.new(cross_field_validation[:grouper_message_pattern], Regexp::IGNORECASE)
+    end
+
+    def cross_field_violation_message(rule_key, format:, **kwargs)
+      violation = cross_field_rule_by_key(rule_key)&.dig(:violation)
+      return {} if violation.blank?
+
+      template = violation[:template].to_s
+      field_name = violation[:field].to_s
+      obs_path = field_path(format, :obs, field_name)
+      message = kwargs.empty? ? template : format(template, **kwargs)
+      severity = violation[:severity].to_s == 'warning' ? :warning : :error
+      { field: obs_path, severity: severity, message: message }
+    end
+
+    def organism_specific_validation_config
+      raw = data[:organism_specific_validation] || {}
+      {
+        check_prefix: raw[:check_prefix].to_s,
+        special_values: (raw[:special_values] || {}).each_with_object({}) do |(rule, values), out|
+          out[rule.to_s] = Array(values).map(&:to_s).freeze
+        end.freeze,
+        skip_messages: (raw[:skip_messages] || {}).each_with_object({}) do |(rule, messages), out|
+          out[rule.to_s] = messages.each_with_object({}) { |(key, value), hash| hash[key.to_s] = value.to_s }.freeze
+        end.freeze,
+        pass_messages: (raw[:pass_messages] || {}).each_with_object({}) { |(key, value), out| out[key.to_s] = value.to_s }.freeze,
+        fail_messages: (raw[:fail_messages] || {}).each_with_object({}) { |(key, value), out| out[key.to_s] = value.to_s }.freeze,
+        prefix_list_entry: raw[:prefix_list_entry].to_s,
+        prefix_list_joiner: raw[:prefix_list_joiner].to_s,
+        special_note_template: raw[:special_note_template].to_s,
+        cell_line_tissue_type: raw[:cell_line_tissue_type].to_s,
+        primary_cell_culture_tissue_type: raw[:primary_cell_culture_tissue_type].to_s,
+        cellosaurus_prefix: raw[:cellosaurus_prefix].to_s
+      }.freeze
+    end
+
+    def organism_specific_skip_message(rule, reason)
+      organism_specific_validation_config.dig(:skip_messages, rule.to_s, reason.to_s).to_s
+    end
+
+    def organism_specific_pass_message(key, **kwargs)
+      template = organism_specific_validation_config.dig(:pass_messages, key.to_s).to_s
+      kwargs.empty? ? template : format(template, **kwargs)
+    end
+
+    def organism_specific_fail_message(key, **kwargs)
+      template = organism_specific_validation_config.dig(:fail_messages, key.to_s).to_s
+      kwargs.empty? ? template : format(template, **kwargs)
+    end
+
+    def organism_specific_special_values(rule)
+      Array(organism_specific_validation_config.dig(:special_values, rule.to_s)).map(&:to_s).freeze
+    end
+
+    def message_pattern_regexes(category)
+      Array(data.dig(:check_details, :message_patterns, category.to_sym)).map do |raw|
+        source = raw.to_s
+        if source.include?('.+') || source.include?('\(') || source.start_with?('\A')
+          Regexp.new(source)
+        else
+          /#{Regexp.escape(source)}/
+        end
+      end.freeze
+    end
+
+    def message_matches_pattern?(category, message)
+      message_pattern_regexes(category).any? { |pattern| message.to_s.match?(pattern) }
+    end
+
+    def ontology_semantics_display_constraints(suffix)
+      rows = Array(data.dig(:ontology_semantics_display, suffix.to_sym, :constraints))
+      rows.each_with_index.map do |row, idx|
+        {
+          label: row[:label].to_s,
+          value: row[:value].to_s,
+          rules_path: "ontology_semantics_display.#{suffix}.constraints.#{idx}"
+        }
+      end.freeze
+    end
+
+    def ontology_semantics_organism_specific_check_key(field_name, check_suffix)
+      base = data.dig(:ontology_semantics_display, :organism_specific, field_name.to_sym) || {}
+      check_suffix = check_suffix.to_s
+      return check_suffix if base.key?(check_suffix.to_sym)
+
+      '_default'
+    end
+
+    def ontology_semantics_organism_specific_entries(field_name, check_suffix, variant:)
+      base = data.dig(:ontology_semantics_display, :organism_specific, field_name.to_sym)
+      return [] if base.blank?
+
+      if variant == :missing_organism
+        return Array(base[:_missing_organism])
+      end
+
+      check_key = ontology_semantics_organism_specific_check_key(field_name, check_suffix)
+      check_block = base[check_key.to_sym] || base[:_default]
+      return [] if check_block.blank?
+
+      Array(check_block[variant.to_sym])
+    end
+
+    def field_constraint_entries(layer, field_name)
+      Array(data.dig(:field_constraints, layer.to_sym, field_name.to_sym)).freeze
+    end
+
+    def field_constraint_display_value(entry)
+      return Array(entry[:values]).map(&:to_s).join(', ') if entry[:values].present?
+
+      entry[:value].to_s
+    end
+
+    def organism_specific_display_constraint(key)
+      data.dig(:organism_specific_display, :constraints, key.to_sym).to_s
+    end
+
+    def organism_specific_file_organism_label
+      data.dig(:organism_specific_display, :file_organism, :label).to_s.presence || 'File organism'
+    end
+
+    def organism_specific_file_organism_source
+      data.dig(:organism_specific_display, :file_organism, :source).to_s
+    end
+
+    def organism_specific_context_text(key, **kwargs)
+      template = data.dig(:organism_specific_display, :semantic_context, key.to_sym).to_s
+      kwargs.empty? ? template : format(template, **kwargs)
+    end
+
+    def spatial_extension_obs_rules
+      raw = data.dig(:spatial_extension, :obs) || {}
+      {
+        required_columns: Array(raw[:required_columns]).map(&:to_s).join(', '),
+        condition: raw[:condition].to_s
+      }.freeze
+    end
+
+    def spatial_extension_display_rules
+      raw = data.dig(:spatial_extension, :display) || {}
+      {
+        rollup_sub_checks: raw[:rollup_sub_checks].to_s,
+        hires_max_dimension_template: raw[:hires_max_dimension_template].to_s,
+        cytassist_assay: 'EFO:0022860'
+      }.freeze
     end
 
     def metadata_rules
@@ -336,6 +922,7 @@ module Scfair
         forbidden_name_prefix: raw[:forbidden_name_prefix].to_s,
         skip_column_names: Array(raw[:skip_column_names]).map(&:to_s).freeze,
         unique_layers: Array(raw[:unique_layers]).map(&:to_s).freeze,
+        unique_names_requirement: raw[:unique_names_requirement].to_s,
         deprecated_names: Array(raw[:deprecated_names]).map do |entry|
           {
             name: entry[:name].to_s,
@@ -361,6 +948,8 @@ module Scfair
       if fmt == 'loom'
         (
           required_uns_fields('loom').map { |name| field_path('loom', :uns, name) } +
+          [field_path('loom', :uns, 'schema_reference')] +
+          optional_uns_fields.map { |name| field_path('loom', :uns, name) } +
           [field_path('loom', :uns, 'schema_reference')] +
           optional_uns_fields.map { |name| field_path('loom', :uns, name) } +
           required_observation_fields.map { |name| field_path('loom', :obs, name) } +
@@ -412,7 +1001,7 @@ module Scfair
         out[field_path(fmt, layer, field_name.to_s)] = Array(cfg[:values]).map(&:to_s)
       end
       {
-        'required_obs' => (required_observation_fields + required_observation_labels),
+        'required_obs' => required_observation_fields,
         'required_uns' => required_uns_fields(fmt),
         'required_var' => required_var_fields,
         'experimental_obs' => experimental_condition_obs_fields,
@@ -420,19 +1009,21 @@ module Scfair
         'special_values' => allowed_special_values(fmt),
         'enum_fields' => enum_fields,
         'label_pairs' => label_pairs,
-        'optional_uns' => optional_uns_fields
+        'optional_uns' => optional_uns_fields,
+        'ontology_term_formats' => {
+          'obo_pattern' => data.dig(:ontology_term_formats, :obo, :pattern).to_s,
+          'cellosaurus_prefix' => ontology_term_format_config[:cellosaurus_prefix],
+          'obo_invalid_message' => ontology_term_format_config[:obo_invalid_message],
+          'cellosaurus_disallowed_message' => ontology_term_format_config[:cellosaurus_disallowed_message],
+          'obo_example' => ontology_term_format_config[:obo_example]
+        }
       }
     end
 
     def resolve_constant_ref(value)
       case value
       when String
-        case value
-        when 'valid_sex_terms' then valid_sex_term_ids
-        when 'sex_special_values' then sex_special_values
-        when 'banned_cell_type_terms' then banned_cell_type_terms
-        else Array(value)
-        end
+        Array(value)
       when Array
         value.flat_map { |item| resolve_constant_ref(item) }
       else
@@ -446,10 +1037,72 @@ module Scfair
         resolve_constant_ref(value)
       when Array
         value.flat_map { |item| resolve_rule_ref(item) }
+      when Hash
+        value.each_with_object({}) { |(k, v), h| h[k.to_s] = v.to_s }
       else
         Array(value)
       end
     end
+
+    def apply_ontology_field_semantic_defaults!(resolved, field_cfg)
+      if !resolved.key?(:allowed_exact) && field_cfg[:valid_terms].present?
+        raw = field_cfg[:valid_terms]
+        resolved[:allowed_exact] = raw.each_with_object({}) { |(id, name), h| h[id.to_s] = name.to_s }
+      end
+      if !resolved.key?(:forbidden_exact) && field_cfg[:banned_terms].present?
+        resolved[:forbidden_exact] = Array(field_cfg[:banned_terms]).map(&:to_s)
+      end
+      return if resolved.key?(:allowed_special_values)
+      return if field_cfg[:special_values].blank?
+
+      resolved[:allowed_special_values] = Array(field_cfg[:special_values]).map(&:to_s)
+    end
+
+    def normalize_cross_field_rule(key, cfg)
+      slug = cfg[:slug].to_s
+      id = "#{key}-#{slug}"
+      messages = (cfg[:messages] || {}).each_with_object({}) { |(msg_key, value), out| out[msg_key.to_s] = value.to_s }.freeze
+      mapping = normalize_cross_field_mapping(cfg[:mapping])
+      {
+        key: key,
+        id: id,
+        field: "cross-field.#{id}",
+        slug: slug,
+        title: cfg[:title].to_s,
+        summary: cfg[:summary].to_s,
+        summary_template: cfg[:summary_template].to_s,
+        checks: Array(cfg[:checks]).map(&:to_s).freeze,
+        token: cfg[:token].to_s,
+        per_field: cfg[:per_field] == true,
+        mapping: mapping,
+        messages: messages,
+        violation: cfg[:violation]&.deep_symbolize_keys
+      }.freeze
+    end
+
+    def normalize_cross_field_mapping(raw)
+      raw = raw&.deep_symbolize_keys || {}
+      normalized = {
+        applies_when: (raw[:applies_when] || {}).each_with_object({}) { |(k, v), out| out[k.to_s] = v.to_s }.freeze,
+        field: raw[:field].to_s,
+        id_field: raw[:id_field].to_s,
+        label_field: raw[:label_field].to_s,
+        required_value: raw[:required_value].to_s,
+        label_value: raw[:label_value].to_s,
+        forbidden_term: raw[:forbidden_term].to_s,
+        required_prefix: raw[:required_prefix].to_s,
+        allowed_values: Array(raw[:allowed_values]).map(&:to_s).freeze,
+        special_id_values: Array(raw[:special_id_values]).map(&:to_s).freeze,
+        pairs: Array(raw[:pairs]).map { |pair| Array(pair).map(&:to_s) }.freeze,
+        suspension_by_assay_ontology_term_id: (raw[:suspension_by_assay_ontology_term_id] || {}).each_with_object({}) do |(term, values), out|
+          out[term.to_s] = Array(values).map(&:to_s)
+        end.freeze,
+        accept_descendants_of_assay_ontology_term_id: Array(raw[:accept_descendants_of_assay_ontology_term_id]).map(&:to_s).freeze
+      }
+      normalized.each_with_object({}) { |(k, v), out| out[k] = v unless v.blank? && !v.is_a?(Hash) && !v.is_a?(Array) }.freeze
+    end
+    private_class_method :normalize_cross_field_rule, :normalize_cross_field_mapping
+
     def symbolize_spatial_section(section)
       section ||= {}
       {

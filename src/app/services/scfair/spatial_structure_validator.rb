@@ -37,7 +37,7 @@ module Scfair
           valid_checks: [{
             field: 'extension.spatial.structure',
             status: 'skipped',
-            message: 'Spatial metadata presence validated under cross-field CF-10'
+            message: 'Spatial metadata presence validated under cross-field CF-9'
           }],
           structure: @structure
         }

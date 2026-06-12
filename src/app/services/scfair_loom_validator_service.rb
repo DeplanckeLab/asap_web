@@ -34,7 +34,6 @@ class ScfairLoomValidatorService
   SCHEMA_VERSION = Scfair::Rules.schema_version
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
 
-  VALID_ONTOLOGY_PREFIXES = Scfair::Rules.ontology_prefixes_legacy_hash
   VALID_TISSUE_TYPES = Scfair::Rules.enum_field_values('tissue_type')
   VALID_SUSPENSION_TYPES = Scfair::Rules.enum_field_values('suspension_type')
   ALLOWED_SPECIAL_VALUES = Scfair::Rules.allowed_special_values('loom')
@@ -349,22 +348,7 @@ class ScfairLoomValidatorService
       end
     end
 
-    # Check for ontology label fields (required alongside their _ontology_term_id counterpart)
-    ONTOLOGY_LABEL_CELL_METADATA.each do |field|
-      if col_attrs.include?(field)
-        @valid_checks << { field: "/col_attrs/#{field}", message: "Found /col_attrs/#{field} metadata", check_type: 'presence' }
-        next
-      end
-
-      # cell_type follows the same conditional rule as cell_type_ontology_term_id
-      if field == 'cell_type'
-        is_pre_analysis = get_global_attr('is_pre_analysis')
-        next if is_pre_analysis == true || is_pre_analysis == 'true'
-      end
-
-      @errors << { field: "/col_attrs/#{field}", message: "Missing /col_attrs/#{field} metadata (required by schema)", check_type: 'presence' }
-    end
-
+    # Label/id pair consistency is validated under obs.label_pairs (derived from label_pairs).
     # Validate tissue_type values if present
     if col_attrs.include?('tissue_type')
       validate_categorical_values('tissue_type', VALID_TISSUE_TYPES, '/col_attrs')
@@ -422,7 +406,9 @@ class ScfairLoomValidatorService
     # Validate organism_ontology_term_id format
     organism = get_global_attr('organism_ontology_term_id')
     if organism
-      validate_ontology_term_format(organism, '/attrs/organism_ontology_term_id', VALID_ONTOLOGY_PREFIXES[:organism])
+      organism_path = Scfair::Rules.field_path('loom', :uns, 'organism_ontology_term_id')
+      prefixes = Scfair::Rules.ontology_prefixes('organism_ontology_term_id')
+      validate_ontology_term_format(organism, organism_path, prefixes)
     end
   end
 
@@ -438,28 +424,12 @@ class ScfairLoomValidatorService
   end
 
   def validate_ontology_terms
-    # All cell metadata ontology fields are in /col_attrs/ in ASAP (cells are columns)
-    
-    # Validate assay_ontology_term_id format
-    validate_ontology_field('/col_attrs/assay_ontology_term_id', VALID_ONTOLOGY_PREFIXES[:assay])
-    
-    # Validate cell_type_ontology_term_id format (allows "unknown")
-    validate_ontology_field('/col_attrs/cell_type_ontology_term_id', VALID_ONTOLOGY_PREFIXES[:cell_type], allow_special: %w[unknown na])
-    
-    # Validate disease_ontology_term_id format (allows PATO for healthy)
-    validate_ontology_field('/col_attrs/disease_ontology_term_id', VALID_ONTOLOGY_PREFIXES[:disease])
-    
-    # Validate sex_ontology_term_id format (allows "unknown", "na")
-    validate_ontology_field('/col_attrs/sex_ontology_term_id', VALID_ONTOLOGY_PREFIXES[:sex], allow_special: %w[unknown na])
-    
-    # Validate development_stage_ontology_term_id (allows "unknown", "na")
-    validate_ontology_field('/col_attrs/development_stage_ontology_term_id', VALID_ONTOLOGY_PREFIXES[:development_stage], allow_special: %w[unknown na])
-    
-    # Validate tissue_ontology_term_id
-    validate_ontology_field('/col_attrs/tissue_ontology_term_id', VALID_ONTOLOGY_PREFIXES[:tissue])
-    
-    # Validate self_reported_ethnicity_ontology_term_id (allows "unknown", "na")
-    validate_ontology_field('/col_attrs/self_reported_ethnicity_ontology_term_id', VALID_ONTOLOGY_PREFIXES[:ethnicity], allow_special: %w[unknown na])
+    Scfair::Rules.ontology_paths('loom').each do |path, prefixes|
+      next if path.start_with?('/attrs/')
+
+      allow_special = ALLOWED_SPECIAL_VALUES.fetch(path, [])
+      validate_ontology_field(path, prefixes, allow_special: allow_special)
+    end
   end
 
   def validate_ontology_field(path, valid_prefixes, allow_special: [])
@@ -487,23 +457,14 @@ class ScfairLoomValidatorService
   end
 
   def validate_ontology_term_format(term, field, valid_prefixes)
-    # OBO format: PREFIX:ID (e.g., "CL:0000540")
-    # Cellosaurus uses underscore: CVCL_XXXX
-
-    if term.start_with?('CVCL_')
-      unless valid_prefixes.include?('CVCL')
-        @errors << {
-          field: field,
-          message: "Invalid ontology term format: '#{term}'. Cellosaurus CVCL_* terms are not allowed for this field."
-        }
-      end
+    field_name = field.split('/').last.to_s
+    format_error = Scfair::Rules.ontology_format_error_message(term, field_name)
+    if format_error.present?
+      @errors << { field: field, message: format_error }
       return
     end
 
-    unless term.match?(/^[A-Za-z]+:\d+$/)
-      @errors << { field: field, message: "Invalid ontology term format: '#{term}'. Expected OBO format (PREFIX:ID) like 'CL:0000540'" }
-      return
-    end
+    return if Scfair::Rules.cellosaurus_ontology_term?(term)
 
     prefix = term.split(':').first
     unless valid_prefixes.include?(prefix)
@@ -701,7 +662,7 @@ class ScfairLoomValidatorService
       # Ontology-based fields: skip if no ontology config
       next if valid_co_ids.empty?
 
-      scope = CellOntologyTerm.where(original: true, cell_ontology_id: valid_co_ids)
+      scope = CellOntologyTerm.with_active_cell_ontology.where(original: true, cell_ontology_id: valid_co_ids)
       valid_tags = valid_co_ids.filter_map { |cid| ontologies[cid]&.tag }
 
       # --- Resolve term path (identifiers) ---

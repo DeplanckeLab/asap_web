@@ -34,12 +34,17 @@ class ScfairH5adValidatorService
     REQUIRED_OBS = RULES["required_obs"]
     REQUIRED_UNS = RULES["required_uns"]
     ONTOLOGY_FIELDS = RULES["ontology_fields"]
+    ONTOLOGY_TERM_FORMATS = RULES.get("ontology_term_formats", {})
+    OBO_ONTOLOGY_PATTERN = re.compile(ONTOLOGY_TERM_FORMATS.get("obo_pattern", r"^[A-Za-z]+:\\d+$"))
+    CELLOSAURUS_PREFIX = ONTOLOGY_TERM_FORMATS.get("cellosaurus_prefix", "CVCL_")
     SPECIAL_VALUES = {k: set(v) for k, v in RULES["special_values"].items()}
     ENUM_FIELDS = RULES.get("enum_fields", {})
     LABEL_PAIRS = RULES.get("label_pairs", {})
     OPTIONAL_UNS = RULES.get("optional_uns", [])
     SPATIAL_OBS_FIELDS = ["array_row", "array_col", "in_tissue"]
     PERTURB_OBS_FIELDS = ["genetic_perturbation_id", "genetic_perturbation_strategy"]
+    EXPERIMENTAL_OBS_FIELDS = RULES.get("experimental_obs", [])
+    REQUIRED_VAR = RULES.get("required_var", [])
     EXPERIMENTAL_OBS_FIELDS = RULES.get("experimental_obs", [])
     REQUIRED_VAR = RULES.get("required_var", [])
 
@@ -109,6 +114,14 @@ class ScfairH5adValidatorService
       if names:
         field_values[f"metadata/{layer}/columns"] = sorted(names)
 
+    def metadata_column_keys(group):
+      skip = {"_index", "index", "__categories"}
+      return sorted(k for k in group.keys() if k not in skip)
+
+    def store_metadata_columns(layer, names):
+      if names:
+        field_values[f"metadata/{layer}/columns"] = sorted(names)
+
     def obs_declared_columns(obs_group):
       co = obs_group.attrs.get("column-order")
       if co is None:
@@ -124,6 +137,42 @@ class ScfairH5adValidatorService
         return value.decode("utf-8", "replace")
       return str(value)
 
+    STRING_ARRAY_ENCODINGS = ("string-array", "ascii", "string", "nullable-string-array")
+
+    def read_h5py_raw_items(node):
+      if isinstance(node, h5py.Dataset):
+        raw = node[()]
+      elif isinstance(node, h5py.Group):
+        enc = decode_attr(node.attrs.get("encoding-type", ""))
+        if enc in STRING_ARRAY_ENCODINGS and "values" in node:
+          return read_h5py_raw_items(node["values"])
+        return None
+      else:
+        return None
+      if isinstance(raw, np.ndarray):
+        return raw.tolist()
+      if isinstance(raw, (list, tuple)):
+        return list(raw)
+      return [raw]
+
+    def read_h5py_encoded_string_series(node, encoding):
+      if "values" not in node:
+        return []
+      items = read_h5py_raw_items(node["values"])
+      if items is None:
+        return []
+      if encoding == "nullable-string-array" and "mask" in node:
+        mask = node["mask"][()]
+        mask_list = mask.tolist() if isinstance(mask, np.ndarray) else list(mask)
+        out = []
+        for idx, item in enumerate(items):
+          if idx < len(mask_list) and mask_list[idx]:
+            out.append(None)
+            continue
+          out.append(decode_obs_value(item))
+        return out
+      return [decode_obs_value(v) for v in items]
+
     def read_h5py_category_values(categories_node):
       if isinstance(categories_node, h5py.Dataset):
         raw = categories_node[()]
@@ -137,8 +186,8 @@ class ScfairH5adValidatorService
 
       if isinstance(categories_node, h5py.Group):
         enc = decode_attr(categories_node.attrs.get("encoding-type", ""))
-        if enc in ("string-array", "ascii", "string") and "values" in categories_node:
-          return read_h5py_category_values(categories_node["values"])
+        if enc in STRING_ARRAY_ENCODINGS and "values" in categories_node:
+          return read_h5py_encoded_string_series(categories_node, enc)
       return []
 
     def read_obs_column_series(obs_group, key):
@@ -160,6 +209,8 @@ class ScfairH5adValidatorService
               continue
             out.append(cats[code])
           return out
+        if enc in STRING_ARRAY_ENCODINGS and "values" in node:
+          return read_h5py_encoded_string_series(node, enc)
         return []
       else:
         return []
@@ -210,6 +261,9 @@ class ScfairH5adValidatorService
           pairs.append(token)
         if pairs:
           field_values[f"obs/{id_field}#label_pairs"] = pairs[:200]
+          label_vals = read_obs_column_values(obs_group, label_field)
+          if label_vals:
+            field_values[f"obs/{label_field}"] = label_vals[:200]
 
     def store_uns_label_pairs(uns_group, uns_present):
       id_field = "organism_ontology_term_id"
@@ -346,15 +400,76 @@ class ScfairH5adValidatorService
         if vals:
           field_values[f"obs/{field}"] = vals[:200]
 
+    def extract_var_series_h5py(var_group, field):
+      if field not in var_group:
+        return []
+      series = read_obs_column_series(var_group, field)
+      if not series:
+        return []
+      return [decode_obs_value(v) or "" for v in series[:500]]
+
+    def extract_var_series_h5py(var_group, field):
+      if field not in var_group:
+        return []
+      series = read_obs_column_series(var_group, field)
+      if not series:
+        return []
+      return [decode_obs_value(v) or "" for v in series[:500]]
+
+    def extract_var_series_h5py(var_group, field):
+      if field not in var_group:
+        return []
+      series = read_obs_column_series(var_group, field)
+      if not series:
+        return []
+      return [decode_obs_value(v) or "" for v in series[:500]]
+
     def extract_var_fields_h5py(var_group, var_present):
       if var_group is None:
         return
+      logical_index_path = "var@_index"
       for field in REQUIRED_VAR:
         if field not in var_present:
           continue
         vals = read_obs_column_values(var_group, field)
         if vals:
           field_values[f"var/{field}"] = vals[:200]
+        series = extract_var_series_h5py(var_group, field)
+        if series:
+          field_values[f"var/{field}#series"] = series
+      for index_key in ("_index", "index"):
+        if index_key not in var_group:
+          continue
+        series = extract_var_series_h5py(var_group, index_key)
+        if not series:
+          continue
+        field_values[f"{logical_index_path}#series"] = series
+        field_values[logical_index_path] = sorted({v for v in series if v})[:200]
+        break
+        series = extract_var_series_h5py(var_group, field)
+        if series:
+          field_values[f"var/{field}#series"] = series
+      for index_key in ("_index", "index"):
+        if index_key not in var_group:
+          continue
+        series = extract_var_series_h5py(var_group, index_key)
+        if not series:
+          continue
+        storage_path = "var/_index"
+        field_values[f"{storage_path}#series"] = series
+        field_values[storage_path] = sorted({v for v in series if v})[:200]
+        break
+        series = extract_var_series_h5py(var_group, field)
+        if series:
+          field_values[f"var/{field}#series"] = series
+      for index_key in ("_index", "index"):
+        if index_key not in var_group:
+          continue
+        series = extract_var_series_h5py(var_group, index_key)
+        if series:
+          field_values["var/_index#series"] = series
+          field_values["var/_index"] = sorted({v for v in series if v})[:200]
+        break
 
     def matrix_shape_h5py(root):
       if "X" not in root:
@@ -385,6 +500,12 @@ class ScfairH5adValidatorService
           return np.asarray(node["data"][()])
       return None
 
+    def ontology_format_message(template, **kwargs):
+        message = template
+        for key, value in kwargs.items():
+            message = message.replace("%{" + key + "}", str(value))
+        return message
+
     def check_ontology_values(field_path, values):
       prefixes = ONTOLOGY_FIELDS[field_path]
       specials = SPECIAL_VALUES.get(field_path, set())
@@ -394,16 +515,26 @@ class ScfairH5adValidatorService
         for term in [t.strip() for t in value.split(" || ")]:
           if term in specials:
             continue
-          if term.startswith("CVCL_"):
+          if term.startswith(CELLOSAURUS_PREFIX):
             if "CVCL" not in prefixes:
               errors.append({
                 "field": field_path,
-                "message": f"Invalid ontology format: {term}. Cellosaurus CVCL_* terms are not allowed for this field."
+                "message": ontology_format_message(
+                  ONTOLOGY_TERM_FORMATS["cellosaurus_disallowed_message"],
+                  term=term
+                )
               })
               issues += 1
             continue
-          if not re.match(r"^[A-Za-z]+:\\d+$", term):
-            errors.append({"field": field_path, "message": f"Invalid ontology format: {term}"})
+          if not OBO_ONTOLOGY_PATTERN.match(term):
+            errors.append({
+              "field": field_path,
+              "message": ontology_format_message(
+                ONTOLOGY_TERM_FORMATS["obo_invalid_message"],
+                term=term,
+                example=ONTOLOGY_TERM_FORMATS["obo_example"]
+              )
+            })
             issues += 1
             continue
           prefix = term.split(":")[0]

@@ -85,7 +85,9 @@ module Scfair
       return 'extension.analysis_json' if field.start_with?('extension.analysis_json')
       return 'metadata.other' if field.start_with?('metadata.other')
       return 'loom.mapping_manifest' if field.include?('anndata_mapping')
+      return 'loom.embeddings' if @format == 'loom' && loom_embedding_field?(field)
       return 'h5ad.embeddings' if field.start_with?('obsm')
+      return 'loom.matrix_encoding' if @format == 'loom' && loom_matrix_encoding_field?(field, message)
       return 'h5ad.matrix_encoding' if field == 'X'
       return 'h5ad.structure' if field == 'obs'
 
@@ -96,9 +98,9 @@ module Scfair
 
       return 'cross-field.constraints' if cross_field_constraint_message?(field, message)
 
-      return 'uns.required_presence' if field.start_with?('uns/')
-      return 'obs.required_presence' if field.start_with?('obs/')
-      return 'loom.paths' if field.start_with?('/col_attrs/') || field.start_with?('/attrs/') || field.in?(%w[file dimensions])
+      return 'loom.structure' if @format == 'loom' && loom_structure_field?(field)
+      return 'uns.required_presence' if field.start_with?('uns/') || field.start_with?('/attrs/')
+      return 'obs.required_presence' if field.start_with?('obs/') || field.start_with?('/col_attrs/')
 
       nil
     end
@@ -145,10 +147,18 @@ module Scfair
       end
     end
 
-    def experimental_condition_obs_path?(field)
-      Rules.experimental_condition_obs_fields.any? do |name|
-        field == Rules.field_path(@format, :obs, name)
-      end
+    def loom_structure_field?(field)
+      field.in?(%w[file file_info validation]) ||
+        field == '/col_attrs/CellID'
+    end
+
+    def loom_matrix_encoding_field?(field, message)
+      field.in?(%w[dimensions /matrix]) ||
+        (field == 'loom' && message.match?(/matrix/i))
+    end
+
+    def loom_embedding_field?(field)
+      field == '/col_attrs/spatial' || field.start_with?('/col_attrs/spatial#')
     end
 
     def ontology_term_field?(field)

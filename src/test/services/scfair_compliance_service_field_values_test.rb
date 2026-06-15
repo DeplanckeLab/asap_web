@@ -7,7 +7,7 @@ class ScfairComplianceServiceFieldValuesTest < TestBaseWithoutFixtures
     service = ScfairComplianceService.allocate
     item = {
       field: 'uns/organism_ontology_term_id',
-      message: 'Required field present',
+      message: 'Found uns/organism_ontology_term_id metadata',
       status: 'passed'
     }
     field_values = {
@@ -24,7 +24,7 @@ class ScfairComplianceServiceFieldValuesTest < TestBaseWithoutFixtures
     service = ScfairComplianceService.allocate
     item = {
       field: 'uns/ensembl_release',
-      message: 'Missing required dataset metadata field',
+      message: 'Missing uns/ensembl_release metadata (required by schema)',
       status: 'failed'
     }
 
@@ -42,7 +42,7 @@ class ScfairComplianceServiceFieldValuesTest < TestBaseWithoutFixtures
     }
     field_values = { '/attrs/title' => ['My dataset title'] }
 
-    enriched = service.send(:attach_field_values, item, field_values, 'loom.paths')
+    enriched = service.send(:attach_field_values, item, field_values, 'uns.required_presence')
 
     assert_equal ['My dataset title'], enriched[:values]
   end

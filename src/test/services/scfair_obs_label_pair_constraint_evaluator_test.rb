@@ -82,6 +82,6 @@ class ScfairObsLabelPairConstraintEvaluatorTest < TestBaseWithoutFixtures
     ).call
 
     assert result[:errors].any? { |entry| entry[:field] == 'obs.label_pairs.assay_ontology_term_id' }
-    assert_match(/Paired label column assay/, result[:errors].first[:message])
+    assert_match(/Paired label column obs\/assay is required when obs\/assay_ontology_term_id is present/, result[:errors].first[:message])
   end
 end

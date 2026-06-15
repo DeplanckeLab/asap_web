@@ -3,13 +3,10 @@
 module Scfair
   class CheckDetailBuilder
     PRESENCE_CHECK = /
-      Required\ field\ present |
-      Missing\ required\ observation\ field |
-      Missing\ required\ dataset\ metadata\ field |
-      Missing\ required\ variable\ metadata\ field |
-      Missing\ required\ variable\ metadata\ field |
       \AFound\ .+\ metadata\z |
       Missing\ .+\ metadata\ \(required\ by\ schema\) |
+      Missing\ .+\ metadata\ \(unique\ cell\ identifiers\ required\) |
+      Missing\ .+\ metadata\ \(required\ for\ Visium\ spatial\ data\ with\ is_single=true\) |
       Skipped\ \(pre-analysis\ dataset\)
     /x
 

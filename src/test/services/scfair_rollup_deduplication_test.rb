@@ -30,7 +30,7 @@ class ScfairRollupDeduplicationTest < TestBaseWithoutFixtures
 
   test 'mirror adds per-field var checks from errors when not already recorded' do
     service = ScfairComplianceService.allocate
-    errors = [{ field: 'var/feature_chromosome', message: 'Missing required variable metadata field' }]
+    errors = [{ field: 'var/feature_chromosome', message: 'Missing var/feature_chromosome metadata (required by schema)' }]
     valid_checks = []
 
     mirrored = service.send(:mirror_metadata_field_checks, valid_checks, errors, [], 'h5ad')

@@ -590,7 +590,7 @@ class ScfairH5adValidatorService
           "check_id": ONTOLOGY_FORMAT_CHECK_ID,
           "status": "passed",
           "code": "valid",
-          "message": check_message(ONTOLOGY_FORMAT_CHECK_ID, "valid", field_name=field_name)
+          "message": check_message(ONTOLOGY_FORMAT_CHECK_ID, "valid", path=field_path)
         })
 
     def check_enum_values(field_path, values):

@@ -30,7 +30,7 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
 
     check = result[:valid_checks].find { |entry| entry[:field] == 'uns/ensembl_release' }
     assert_equal 'failed', check[:status]
-    assert_equal 'Missing required dataset metadata field', check[:message]
+    assert_equal 'Missing uns/ensembl_release metadata (required by schema)', check[:message]
     refute result[:valid_checks].any? { |entry| entry[:field] == 'uns.ensembl.release' }
   end
 

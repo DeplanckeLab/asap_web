@@ -488,10 +488,10 @@ label_pair_validation:
   check_prefix: obs.label_pairs
   organism_id_field: organism_ontology_term_id
   messages:
-    pass: '%{id_field} and %{label_field} are consistent'
-    skipped: 'Not applicable (%{id_field} not present)'
-    fail_missing_label: 'Paired label column %{label_field} is required when %{id_field} is present'
-    fail_count_mismatch: '%{id_field} and %{label_field} must contain the same number of " || "-separated values'
+    pass: '%{id_path} and %{label_path} are consistent'
+    skipped: 'Not applicable (%{id_path} not present)'
+    fail_missing_label: 'Paired label column %{label_path} is required when %{id_path} is present'
+    fail_count_mismatch: '%{id_path} and %{label_path} must contain the same number of " || "-separated values'
     fail_special_mismatch: 'Label must match special ontology id value -- expected %{id_val}, got %{label_val}'
     fail_mismatch: "ID/label mismatch for %{id_val}: expected '%{expected}', got '%{label_val}'"
   display:
@@ -903,7 +903,9 @@ checks:
     - extension.analysis_json
     - metadata.other
     loom_only:
-    - loom.paths
+    - loom.structure
+    - loom.embeddings
+    - loom.matrix_encoding
     - loom.mapping_manifest
     h5ad_only:
     - h5ad.structure
@@ -924,12 +926,8 @@ checks:
     label: Required observation metadata fields
     summary: Required per-cell observation metadata fields defined by scFAIR 7.1.0.
     messages:
-      found:
-        h5ad: Required field present
-        loom: Found %{path} metadata
-      missing:
-        h5ad: Missing required observation field
-        loom: Missing %{path} metadata (required by schema)
+      found: Found %{path} metadata
+      missing: Missing %{path} metadata (required by schema)
       missing_cell_id: Missing %{path} metadata (unique cell identifiers required)
       skipped_pre_analysis: Skipped (pre-analysis dataset)
       missing_visium: Missing %{path} metadata (required for Visium spatial data with
@@ -1003,12 +1001,8 @@ checks:
     label: Required dataset metadata fields
     summary: Required dataset-level metadata fields in uns/attrs.
     messages:
-      found:
-        h5ad: Required field present
-        loom: Found %{path} metadata
-      missing:
-        h5ad: Missing required dataset metadata field
-        loom: Missing %{path} metadata (required by schema)
+      found: Found %{path} metadata
+      missing: Missing %{path} metadata (required by schema)
     rollup:
     - Each required dataset metadata field is validated individually
     - 'Fields: title, organism_ontology_term_id, organism, schema_version, schema_reference,
@@ -1117,8 +1111,8 @@ checks:
     label: Gene (var) metadata fields
     summary: Required per-gene metadata columns in var / row_attrs.
     messages:
-      found: Required field present
-      missing: Missing required variable metadata field
+      found: Found %{path} metadata
+      missing: Missing %{path} metadata (required by schema)
     rollup:
     - Each required var / row_attrs column is validated individually
     - Open a specific field check for column presence and value constraints
@@ -1286,7 +1280,7 @@ checks:
     summary: Ontology term identifiers must use valid OBO-style PREFIX:ID format and
       allowed prefixes.
     messages:
-      valid: Ontology terms in '%{field_name}' have valid format
+      valid: Ontology terms in %{path} have valid format
     rollup:
     - Validates OBO-style PREFIX:ID syntax for ontology term fields
     - Checks allowed ontology prefixes per field (EFO, CL, UBERON, MONDO, etc.)
@@ -1429,15 +1423,34 @@ checks:
     - Validates perturbation extension structure per schema_perturb.md
   metadata.other:
     label: Other checks
-  loom.paths:
-    label: Loom metadata path checks
+  loom.structure:
+    label: Loom structural integrity
     formats:
     - loom
-    summary: Required Loom HDF5 paths for observation and dataset metadata.
+    summary: Loom HDF5 file structure checks.
     rollup:
-    - Required Loom HDF5 paths exist for observation and dataset metadata
-    - Col_attrs paths mirror AnnData obs fields
-    - Global /attrs paths mirror AnnData uns fields
+    - File readable
+    - CellID (or equivalent) present for observation identifiers
+    - col_attrs, row_attrs, and attrs HDF5 groups accessible
+  loom.embeddings:
+    label: Loom embedding / coordinate checks
+    formats:
+    - loom
+    summary: Optional numeric col_attrs used as embeddings (e.g. spatial coordinates).
+    rollup:
+    - /col_attrs/spatial coordinate embedding when present
+    - Embedding arrays are 2D with at least two columns
+    - Row counts match n_cells where applicable
+    - No infinity or NaN values in embeddings
+  loom.matrix_encoding:
+    label: Matrix encoding and dimension checks
+    formats:
+    - loom
+    summary: Expression matrix /matrix dataset shape and readability.
+    rollup:
+    - /matrix dataset exists with valid genes x cells shape
+    - Matrix dimensions (n_cells, n_genes) are reported
+    - Matrix values are readable where checked
   loom.mapping_manifest:
     label: anndata_mapping manifest checks
     formats:

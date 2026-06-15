@@ -125,9 +125,11 @@ class ScfairRulesValidationMessagesTest < TestBaseWithoutFixtures
     assert_equal 'uns.required_presence', Scfair::Rules.presence_check_id_for_field('uns/title')
     assert_equal 'var.required', Scfair::Rules.presence_check_id_for_field('var/feature_name')
 
-    assert_equal 'Required field present',
-                 Scfair::Rules.check_message('obs.required_presence', 'found', format: 'h5ad')
+    assert_equal 'Found obs/assay metadata',
+                 Scfair::Rules.check_message('obs.required_presence', 'found', format: 'h5ad', path: 'obs/assay')
     assert_equal 'Found /col_attrs/assay metadata',
                  Scfair::Rules.check_message('obs.required_presence', 'found', format: 'loom', path: '/col_attrs/assay')
+    assert_equal 'Missing uns/title metadata (required by schema)',
+                 Scfair::Rules.check_message('uns.required_presence', 'missing', format: 'h5ad', path: 'uns/title')
   end
 end

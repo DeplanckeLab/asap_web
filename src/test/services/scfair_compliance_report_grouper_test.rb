@@ -231,4 +231,94 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
 
     assert_equal 'cross-field.uns_ensembl', groups.first[:id]
   end
+
+  test 'routes loom obs metadata paths to obs.required_presence' do
+    catalog = [{ id: 'obs.required_presence', label: 'Required observation metadata fields' }]
+    valid_checks = [{ field: '/col_attrs/assay', message: 'Found /col_attrs/assay metadata', status: 'passed' }]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: [],
+      warnings: [],
+      format: 'loom'
+    )
+
+    assert_equal 'obs.required_presence', groups.first[:id]
+  end
+
+  test 'routes loom uns metadata paths to uns.required_presence' do
+    catalog = [{ id: 'uns.required_presence', label: 'Required dataset metadata fields' }]
+    valid_checks = [{ field: '/attrs/title', message: 'Found /attrs/title metadata', status: 'passed' }]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: [],
+      warnings: [],
+      format: 'loom'
+    )
+
+    assert_equal 'uns.required_presence', groups.first[:id]
+  end
+
+  test 'routes loom file and cell id checks to loom.structure' do
+    catalog = [{ id: 'loom.structure', label: 'Loom structural integrity' }]
+    valid_checks = [
+      { field: 'file', message: 'File readable', status: 'passed' },
+      { field: '/col_attrs/CellID', message: 'Found /col_attrs/CellID metadata', status: 'passed' }
+    ]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: [],
+      warnings: [],
+      format: 'loom'
+    )
+
+    assert_equal 'loom.structure', groups.first[:id]
+    assert_equal 2, groups.first[:items].size
+  end
+
+  test 'routes loom matrix dimension checks to loom.matrix_encoding' do
+    catalog = [{ id: 'loom.matrix_encoding', label: 'Matrix encoding and dimension checks' }]
+    valid_checks = [
+      { field: 'dimensions', message: 'Matrix dimensions: 10 cells x 5 genes', status: 'passed' }
+    ]
+    errors = [
+      { field: 'loom', message: 'Loom file missing /matrix dataset' }
+    ]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: errors,
+      warnings: [],
+      format: 'loom'
+    )
+
+    assert_equal 'loom.matrix_encoding', groups.first[:id]
+    assert_equal 2, groups.first[:items].size
+    assert_equal 'failed', groups.first[:items].find { |item| item[:field] == 'loom' }[:status]
+  end
+
+  test 'routes loom spatial embedding col_attrs to loom.embeddings' do
+    catalog = [{ id: 'loom.embeddings', label: 'Loom embedding / coordinate checks' }]
+    valid_checks = [
+      { field: '/col_attrs/spatial', message: 'Spatial embedding present', status: 'passed' },
+      { field: '/col_attrs/spatial#shape', message: '2D shape', status: 'passed' }
+    ]
+
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: valid_checks,
+      errors: [],
+      warnings: [],
+      format: 'loom'
+    )
+
+    assert_equal 'loom.embeddings', groups.first[:id]
+    assert_equal 2, groups.first[:items].size
+  end
 end

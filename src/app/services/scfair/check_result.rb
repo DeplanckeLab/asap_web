@@ -45,6 +45,7 @@ module Scfair
         format: format,
         message: message,
         field_name: field.to_s.split('/').last,
+        path: field,
         **message_kwargs
       )
     end

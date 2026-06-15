@@ -19,7 +19,7 @@ module Scfair
       unless id_present
         return result(
           status: 'skipped',
-          message: Rules.label_pair_skip_message(@id_field),
+          message: Rules.label_pair_skip_message(@id_field, format: @format),
           errors: []
         )
       end
@@ -29,19 +29,19 @@ module Scfair
       return validate_extracted_pairs(pair_entries) if pair_entries.any?
 
       unless @field_values.key?(label_path)
-        message = Rules.label_pair_missing_label_message(@id_field, @label_field)
+        message = Rules.label_pair_missing_label_message(@id_field, @label_field, format: @format)
         return result(status: 'failed', message: message, errors: [{ field: @check_field, message: message }])
       end
 
       id_values = split_values(@field_values[id_path])
       labels = split_values(@field_values[label_path])
       if labels.empty?
-        message = Rules.label_pair_missing_label_message(@id_field, @label_field)
+        message = Rules.label_pair_missing_label_message(@id_field, @label_field, format: @format)
         return result(status: 'failed', message: message, errors: [{ field: @check_field, message: message }])
       end
 
       if labels.size != id_values.size
-        message = Rules.label_pair_count_mismatch_message(@id_field, @label_field)
+        message = Rules.label_pair_count_mismatch_message(@id_field, @label_field, format: @format)
         return result(status: 'failed', message: message, errors: [{ field: @check_field, message: message }])
       end
 
@@ -52,7 +52,7 @@ module Scfair
 
       result(
         status: 'passed',
-        message: Rules.label_pair_pass_message(@id_field, @label_field),
+        message: Rules.label_pair_pass_message(@id_field, @label_field, format: @format),
         errors: []
       )
     end
@@ -82,7 +82,7 @@ module Scfair
 
       result(
         status: 'passed',
-        message: Rules.label_pair_pass_message(@id_field, @label_field),
+        message: Rules.label_pair_pass_message(@id_field, @label_field, format: @format),
         errors: []
       )
     end

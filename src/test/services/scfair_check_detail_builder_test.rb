@@ -181,7 +181,7 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
   test 'shows only format constraints for ontology format checks' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'obs/assay_ontology_term_id',
-      message: "Ontology terms in 'assay_ontology_term_id' have valid format",
+      message: "Ontology terms in obs/assay_ontology_term_id have valid format",
       format: 'h5ad',
       category_id: 'ontology.format'
     )
@@ -219,7 +219,7 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
   test 'documents cellosaurus format for tissue ontology format checks' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'obs/tissue_ontology_term_id',
-      message: "Ontology terms in 'tissue_ontology_term_id' have valid format",
+      message: "Ontology terms in obs/tissue_ontology_term_id have valid format",
       format: 'h5ad',
       category_id: 'ontology.format'
     )
@@ -235,7 +235,7 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
   test 'ethnicity ontology format checks_performed lists only ethnicity prefixes and specials' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'obs/self_reported_ethnicity_ontology_term_id',
-      message: "Ontology terms in 'self_reported_ethnicity_ontology_term_id' have valid format",
+      message: "Ontology terms in obs/self_reported_ethnicity_ontology_term_id have valid format",
       format: 'h5ad',
       category_id: 'ontology.format'
     )
@@ -248,7 +248,7 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
   test 'obs presence checks_performed are field-specific' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'obs/assay_ontology_term_id',
-      message: 'Required field present',
+      message: 'Found obs/assay_ontology_term_id metadata',
       format: 'h5ad',
       category_id: 'obs.required_presence'
     )
@@ -273,7 +273,7 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
   test 'omits constraints for required field presence checks' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'obs/sex_ontology_term_id',
-      message: 'Required field present',
+      message: 'Found obs/sex_ontology_term_id metadata',
       format: 'h5ad',
       category_id: 'obs.required_presence'
     )
@@ -285,7 +285,7 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
   test 'uns field check shows field-specific checks not full uns field list' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'uns/organism',
-      message: 'Missing required dataset metadata field',
+      message: 'Missing uns/organism metadata (required by schema)',
       format: 'h5ad',
       category_id: 'uns.required_presence'
     )
@@ -328,7 +328,7 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
   test 'category summary for ontology.format loads from rules.yaml' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'obs/assay_ontology_term_id',
-      message: "Ontology terms in 'assay_ontology_term_id' have valid format",
+      message: "Ontology terms in obs/assay_ontology_term_id have valid format",
       format: 'h5ad',
       category_id: 'ontology.format'
     )
@@ -395,7 +395,7 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
 
   test 'enrich_item attaches detail hash' do
     item = Scfair::CheckDetailBuilder.enrich_item(
-      { field: 'uns/ensembl_release', message: 'Missing required dataset metadata field', status: 'failed' },
+      { field: 'uns/ensembl_release', message: 'Missing uns/ensembl_release metadata (required by schema)', status: 'failed' },
       format: 'h5ad',
       category_id: 'uns.required_presence'
     )
@@ -460,7 +460,7 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
   test 'var field presence check omits constraints and uses field-specific checks' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'var/feature_chromosome',
-      message: 'Missing required variable metadata field',
+      message: 'Missing var/feature_chromosome metadata (required by schema)',
       format: 'h5ad',
       category_id: 'var.required'
     )

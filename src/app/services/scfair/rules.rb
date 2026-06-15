@@ -475,20 +475,27 @@ module Scfair
       kwargs.empty? ? template : format(template, **kwargs)
     end
 
-    def label_pair_pass_message(id_field, label_field)
-      label_pair_message(:pass, id_field: id_field, label_field: label_field)
+    def label_pair_pass_message(id_field, label_field, format: 'h5ad')
+      label_pair_message(:pass, **label_pair_paths(id_field, label_field, format))
     end
 
-    def label_pair_skip_message(id_field)
-      label_pair_message(:skipped, id_field: id_field)
+    def label_pair_skip_message(id_field, format: 'h5ad')
+      label_pair_message(:skipped, id_path: field_path(format, :obs, id_field))
     end
 
-    def label_pair_missing_label_message(id_field, label_field)
-      label_pair_message(:fail_missing_label, id_field: id_field, label_field: label_field)
+    def label_pair_missing_label_message(id_field, label_field, format: 'h5ad')
+      label_pair_message(:fail_missing_label, **label_pair_paths(id_field, label_field, format))
     end
 
-    def label_pair_count_mismatch_message(id_field, label_field)
-      label_pair_message(:fail_count_mismatch, id_field: id_field, label_field: label_field)
+    def label_pair_count_mismatch_message(id_field, label_field, format: 'h5ad')
+      label_pair_message(:fail_count_mismatch, **label_pair_paths(id_field, label_field, format))
+    end
+
+    def label_pair_paths(id_field, label_field, format)
+      {
+        id_path: field_path(format, :obs, id_field),
+        label_path: field_path(format, :obs, label_field)
+      }
     end
 
     def label_pair_special_mismatch_message(id_val, label_val)

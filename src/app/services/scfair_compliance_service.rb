@@ -178,7 +178,7 @@ class ScfairComplianceService
 
   def show_field_values?(item, category_id)
     id = category_id.to_s
-    return false unless PRESENCE_VALUE_CATEGORIES.include?(id) || dataset_metadata_loom_path?(item, id)
+    return false unless PRESENCE_VALUE_CATEGORIES.include?(id)
 
     status = (item[:status] || item['status']).to_s
     return false if status == 'failed'
@@ -187,13 +187,6 @@ class ScfairComplianceService
     return Scfair::Rules.presence_check_id?(check_id) if check_id.present?
 
     Scfair::CheckDetailBuilder.presence_check_message?(item[:message] || item['message'])
-  end
-
-  def dataset_metadata_loom_path?(item, category_id)
-    return false unless category_id == 'loom.paths'
-
-    field = (item[:field] || item['field']).to_s
-    field.start_with?('/attrs/')
   end
 
   def lookup_field_values(field_values, field)
@@ -470,7 +463,7 @@ class ScfairComplianceService
       check_message = (check[:message] || check['message']).to_s
       next false unless check_field == field
 
-      has_version_issue && check_message.match?(/Required field present|Found .* metadata/i)
+      has_version_issue && check_message.match?(/Found .* metadata/i)
     end
 
     cleaned.uniq

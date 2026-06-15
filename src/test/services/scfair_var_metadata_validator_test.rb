@@ -23,7 +23,7 @@ class ScfairVarMetadataValidatorTest < TestBaseWithoutFixtures
 
     chromosome = result[:valid_checks].find { |entry| entry[:field] == 'var/feature_chromosome' }
     assert_equal 'failed', chromosome[:status]
-    assert_equal 'Missing required variable metadata field', chromosome[:message]
+    assert_equal 'Missing var/feature_chromosome metadata (required by schema)', chromosome[:message]
 
     feature_name = result[:valid_checks].find { |entry| entry[:field] == 'var/feature_name' }
     assert_equal 'passed', feature_name[:status]

@@ -113,6 +113,18 @@ module ScfairSchemaRules
       end
     end
 
+    if tissue_type == 'organoid' && tissue_term_id.present?
+      forbidden = Scfair::Rules.cross_field_organoid_embryo_term
+      if forbidden.present? && tissue_term_id == forbidden
+        violations << Scfair::Rules.cross_field_violation_message(
+          'CF-4',
+          format: format,
+          forbidden_term: forbidden,
+          value: tissue_term_id
+        )
+      end
+    end
+
     violations
   end
 end

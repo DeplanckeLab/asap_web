@@ -65,6 +65,22 @@ class ScfairRulesValidationMessagesTest < TestBaseWithoutFixtures
     assert_includes violation[:message], 'cell, nucleus'
   end
 
+  test 'CF-4 organoid embryo term loads from rule mapping' do
+    assert_equal 'UBERON:0000922', Scfair::Rules.cross_field_organoid_embryo_term
+
+    violation = Scfair::Rules.cross_field_violation_message(
+      'CF-4',
+      format: 'h5ad',
+      forbidden_term: 'UBERON:0000922',
+      value: 'UBERON:0000922'
+    )
+
+    assert_equal 'obs/tissue_ontology_term_id', violation[:field]
+    assert_includes violation[:message], 'UBERON:0000922'
+    assert_includes violation[:message], 'embryo'
+    assert_equal :error, violation[:severity]
+  end
+
   test 'organism-specific skip messages load from rules.yaml' do
     message = Scfair::Rules.organism_specific_skip_message('sex', :not_celegans)
     assert_includes message, 'C. elegans'

@@ -654,10 +654,6 @@ module Scfair
         return "Required dataset metadata field per scFAIR #{Rules.schema_version}."
       end
 
-      if required_observation_label?(field_name)
-        return "Human-readable label paired with an ontology term field."
-      end
-
       if enum_field?(field_name)
         return "Categorical field with a fixed set of allowed values."
       end
@@ -1913,16 +1909,11 @@ module Scfair
     end
 
     def required_observation_field?(field_name)
-      Rules.required_observation_fields.include?(field_name)
-    end
-
-    def required_observation_label?(field_name)
-      Rules.required_observation_labels.include?(field_name)
+      Rules.required_obs_fields.include?(field_name)
     end
 
     def required_uns_field?(field_name)
-      Rules.required_uns_fields(@format).include?(field_name) ||
-        Rules.required_uns_labels.include?(field_name)
+      Rules.required_uns_fields.include?(field_name)
     end
 
     def ensembl_uns_field?(field_name)

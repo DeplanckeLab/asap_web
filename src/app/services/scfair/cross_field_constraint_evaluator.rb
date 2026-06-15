@@ -63,11 +63,11 @@ module Scfair
         message: Rules.cross_field_rule_message_for_key('CF-3', donor_bad ? :fail : :pass)
       }
 
-      organoid_embryo = Rules.cross_field_organoid_embryo_term
-      organoid_bad = tissue_type == 'organoid' && tissue == organoid_embryo
+      cf4 = Rules.cross_field_rule_by_key('CF-4')
+      organoid_bad = violated_fields.include?(cf4[:token].to_s)
       rule_checks << {
         field: Rules.cross_field_rule_field('CF-4'),
-        status: organoid_bad ? 'failed' : (tissue_type == 'organoid' ? 'passed' : 'skipped'),
+        status: tissue_type == 'organoid' ? (organoid_bad ? 'failed' : 'passed') : 'skipped',
         message: tissue_type == 'organoid' ? Rules.cross_field_rule_message_for_key('CF-4', organoid_bad ? :fail : :pass) : Rules.cross_field_not_applicable_message
       }
 

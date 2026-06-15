@@ -66,37 +66,20 @@ module Scfair
       end
     end
 
-    def required_observation_fields
-      Array(data.dig(:required, :observation_fields)).map(&:to_s).freeze
+    def required_obs_fields
+      Array(data.dig(:required, :obs)).map(&:to_s).freeze
     end
 
-    def required_observation_labels
-      Array(data.dig(:required, :observation_labels)).map(&:to_s).freeze
-    end
-
-    def required_uns_fields(format)
-      common = Array(data.dig(:required, :uns, :common)).map(&:to_s)
-      labels = Array(data.dig(:required, :uns, :labels)).map(&:to_s)
-      extra = format.to_s == 'h5ad' ? Array(data.dig(:required, :uns, :h5ad_only)).map(&:to_s) : []
-      (common + labels + extra).freeze
-    end
-
-    def required_uns_term_fields(format)
-      common = Array(data.dig(:required, :uns, :common)).map(&:to_s)
-      extra = format.to_s == 'h5ad' ? Array(data.dig(:required, :uns, :h5ad_only)).map(&:to_s) : []
-      (common + extra).freeze
-    end
-
-    def required_uns_labels
-      Array(data.dig(:required, :uns, :labels)).map(&:to_s).freeze
+    def required_uns_fields(_format = nil)
+      Array(data.dig(:required, :uns)).map(&:to_s).freeze
     end
 
     def optional_uns_fields
-      Array(data.dig(:required, :optional)).map(&:to_s).freeze
+      Array(data.dig(:optional, :uns)).map(&:to_s).freeze
     end
 
     def required_var_fields
-      Array(data.dig(:required, :var_fields)).map(&:to_s).freeze
+      Array(data.dig(:required, :var)).map(&:to_s).freeze
     end
 
     def anndata_index(layer)
@@ -947,13 +930,9 @@ module Scfair
 
       if fmt == 'loom'
         (
-          required_uns_fields('loom').map { |name| field_path('loom', :uns, name) } +
-          [field_path('loom', :uns, 'schema_reference')] +
+          required_uns_fields.map { |name| field_path('loom', :uns, name) } +
           optional_uns_fields.map { |name| field_path('loom', :uns, name) } +
-          [field_path('loom', :uns, 'schema_reference')] +
-          optional_uns_fields.map { |name| field_path('loom', :uns, name) } +
-          required_observation_fields.map { |name| field_path('loom', :obs, name) } +
-          required_observation_labels.map { |name| field_path('loom', :obs, name) } +
+          required_obs_fields.map { |name| field_path('loom', :obs, name) } +
           cross_field_obs.map { |name| field_path('loom', :obs, name) } +
           var_fields.map { |name| field_path('loom', :var, name) } +
           [field_path('loom', :uns, 'spatial/is_single')]
@@ -1001,8 +980,8 @@ module Scfair
         out[field_path(fmt, layer, field_name.to_s)] = Array(cfg[:values]).map(&:to_s)
       end
       {
-        'required_obs' => required_observation_fields,
-        'required_uns' => required_uns_fields(fmt),
+        'required_obs' => required_obs_fields,
+        'required_uns' => required_uns_fields,
         'required_var' => required_var_fields,
         'experimental_obs' => experimental_condition_obs_fields,
         'ontology_fields' => ontology_paths(fmt),

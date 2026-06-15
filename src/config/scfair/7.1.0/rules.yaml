@@ -1,6 +1,26 @@
 # scFAIR schema 7.1.0 compliance rules (single source of truth).
 # Reference: https://github.com/scFAIR/scFAIR/blob/main/schema/7.1.0/schema.md
+#
+# This file drives ASAP scFAIR validators (H5AD + Loom), the compliance report UI,
+# and check-detail popups. Ruby code loads it via Scfair::Rules (rules.rb).
+#
+# Top-level sections (read order for newcomers):
+#   schema, paths           - release identity and AnnData <-> Loom path mapping
+#   metadata_rules          - general naming / deprecated field rules
+#   required, optional      - which metadata columns must exist (obs / uns / var)
+#   anndata_indices         - DataFrame index locations (not metadata columns)
+#   enum_fields             - closed string value sets per named metadata column
+#   field_constraints       - short constraint text for UI popups
+#   ontology_*              - format, prefixes, semantics, label pairs
+#   constants               - shared lookup tables (not column enums)
+#   spatial_extension, perturb_extension - optional schema extensions
+#   cross_field             - rules that depend on multiple fields (CF-1 .. CF-9)
+#   organism_specific_*     - taxon-dependent ontology prefix rules
+#   check_details           - compliance report UI copy and message classifiers
+#   checks_catalog          - report category ids and labels
 
+# Release metadata. schema_version is what files must declare; source_url is the
+# canonical schema_reference target for schema.reference checks.
 schema:
   id: scfair_7_1_0
   label: scFAIR 7.1.0
@@ -8,6 +28,9 @@ schema:
   schema_version: 7.1.0_scfair
   source_url: https://github.com/scFAIR/scFAIR/blob/main/schema/7.1.0/schema.md
 
+# Logical AnnData layers and their on-disk paths per file format.
+# Used by Rules.field_path(format, layer, name) to build check field ids
+# (e.g. obs/assay_ontology_term_id vs /col_attrs/assay_ontology_term_id).
 paths:
   obs:
     loom: /col_attrs
@@ -20,6 +43,7 @@ paths:
     h5ad: uns
 
 # General metadata naming rules (schema "General Requirements").
+# Enforced by metadata.other.* checks and MetadataGeneralValidator.
 metadata_rules:
   forbidden_name_prefix: "__"
   skip_column_names: [_index, index, __categories]
@@ -72,34 +96,42 @@ metadata_rules:
       layer: uns
       deprecated_in: "1.1.0"
 
+# Columns that must be present in each AnnData layer.
+# obs: per-cell metadata (ontology IDs listed together with their paired label columns).
+# uns: dataset-level metadata in uns (H5AD) or /attrs (Loom).
+# var: per-gene metadata in var (H5AD) or /row_attrs (Loom).
+# Presence is checked under obs.required_presence, uns.required_presence, var.required.
 required:
-  observation_fields:
+  obs:
+    # Ontology term ID + human-readable label pairs (label consistency: label_pairs).
     - assay_ontology_term_id
+    - assay
     - cell_type_ontology_term_id
+    - cell_type
     - development_stage_ontology_term_id
+    - development_stage
     - disease_ontology_term_id
+    - disease
+    - self_reported_ethnicity_ontology_term_id
+    - self_reported_ethnicity
+    - sex_ontology_term_id
+    - sex
+    - tissue_ontology_term_id
+    - tissue
+    # Non-ontology categorical / identifier fields.
     - donor_id
     - is_primary_data
-    - self_reported_ethnicity_ontology_term_id
-    - sex_ontology_term_id
     - suspension_type
-    - tissue_ontology_term_id
     - tissue_type
-  observation_labels: []
   uns:
-    common:
-      - title
-      - organism_ontology_term_id
-      - schema_version
-      - ensembl_release
-      - ensembl_database
-    labels:
-      - organism
-    h5ad_only:
-      - schema_reference
-  optional:
-    - ensembl_assembly
-  var_fields:
+    - title
+    - organism_ontology_term_id
+    - organism
+    - schema_version
+    - schema_reference
+    - ensembl_release
+    - ensembl_database
+  var:
     - feature_is_filtered
     - feature_biotype
     - feature_length
@@ -108,8 +140,14 @@ required:
     - feature_type
     - feature_chromosome
 
+# Optional uns fields: validated only when present (must be non-empty if annotated).
+optional:
+  uns:
+    - ensembl_assembly
+
 # AnnData DataFrame indices (schema object model). @ separates layer from index attribute;
 # / in h5ad.path is the on-disk HDF5 location (not a metadata column).
+# Validated under var.index / obs index checks, separate from var.required columns.
 anndata_indices:
   var:
     schema: var.index
@@ -137,6 +175,9 @@ anndata_indices:
       storage_keys: []
       manifest_key: obs_index_key
 
+# Closed value sets for named metadata columns.
+# Each key is a column name; values must be one of the listed strings.
+# Used by enum validators and check_detail_builder (not the same as constants:).
 enum_fields:
   tissue_type:
     values:
@@ -161,7 +202,8 @@ enum_fields:
       - protein
       - temperature
 
-# Per-field constraint text for compliance check detail popups and validation hints.
+# Per-field constraint rows shown in compliance check detail popups
+# (label + value/values pairs). Complements field_summaries and layer_field_checks.
 field_constraints:
   uns:
     ensembl_release:
@@ -192,6 +234,7 @@ field_constraints:
       - label: Requirement
         value: 'Non-empty string per gene or feature'
 
+# UI constraint text for ontology.semantics.* subcheck types in check detail popups.
 ontology_semantics_display:
   allowed_terms:
     constraints:
@@ -243,6 +286,8 @@ ontology_semantics_display:
           - label: Requirement
             value: 'Only "na" is allowed for non-human datasets'
 
+# Experimental condition extension (obs columns + perturbation_types enum).
+# Validated by ExperimentalConditionValidator.
 experimental_condition_rules:
   id_field: experimental_condition_ontology_term_id
   label_field: experimental_condition
@@ -252,6 +297,8 @@ experimental_condition_rules:
   no_perturbations_value: no perturbations
   delimiter: " || "
 
+# Ontology term string format (PREFIX:ID vs Cellosaurus CVCL_*).
+# Used by ontology.format checks before database resolution.
 ontology_term_formats:
   obo:
     pattern: '^[A-Za-z]+:\d+$'
@@ -265,6 +312,8 @@ ontology_term_formats:
     disallowed_message: "Invalid ontology term format: '%{term}'. Cellosaurus CVCL_* terms are not allowed for this field."
   combined_requirement: 'Terms must use OBO-style PREFIX:ID (e.g. CL:0000540), or Cellosaurus CVCL_* identifiers (e.g. CVCL_1P02)'
 
+# Per-field ontology configuration: allowed ID prefixes, special placeholders,
+# banned terms, and fixed valid_terms maps. layer defaults to obs; uns for organism.
 ontology_fields:
   assay_ontology_term_id:
     prefixes: [EFO]
@@ -302,7 +351,12 @@ ontology_fields:
     prefixes: [NCBITaxon]
     special_values: []
 
+# Shared reference data for validators (not keyed as "column X allowed values").
+# visium_assay_terms / slide_seq_assay: spatial assay detection (SpatialAssayHelper).
+# ensembl_database_values: allowed uns/ensembl_database strings.
+# feature_reference_taxa: pinned NCBITaxon IDs for var/feature_reference.
 constants:
+  # Known Visium EFO assay terms (fast path; descendants of EFO:0010961 also match).
   visium_assay_terms:
     - EFO:0010961
     - EFO:0022857
@@ -331,6 +385,8 @@ constants:
     NCBITaxon:9823: Sus scrofa
     NCBITaxon:32630: ERCC Spike-Ins
 
+# Spatial transcriptomics extension (uns/spatial, Visium obs columns, image assets).
+# Validated under extension.spatial.* categories.
 spatial_extension:
   root_scalar_key: is_single
   library:
@@ -362,6 +418,7 @@ spatial_extension:
     rollup_sub_checks: 'structure, obs, assets'
     hires_max_dimension_template: '%{default} px (CytAssist 11mm %{assay}: %{cytassist} px)'
 
+# Genetic perturbation extension (schema_perturb.md). Validated under extension.perturb.*.
 perturb_extension:
   obs_fields:
     - genetic_perturbation_id
@@ -391,6 +448,8 @@ perturb_extension:
       - derived_features
   id_delimiter: " || "
 
+# Per-field ontology semantic constraints (roots, forbidden branches, allowed_exact).
+# Drives ontology.semantics.* checks; complements ontology_fields prefixes/format.
 semantic_rules:
   assay_ontology_term_id:
     any_roots: [EFO:0002772, EFO:0010183]
@@ -413,6 +472,8 @@ semantic_rules:
     sorted_multi: true
     allowed_special_values: [na, unknown, multiethnic]
 
+# Maps each *_ontology_term_id column to its human-readable label column.
+# ID/label consistency is validated under obs.label_pairs (and uns for organism).
 label_pairs:
   assay_ontology_term_id: assay
   cell_type_ontology_term_id: cell_type
@@ -423,6 +484,7 @@ label_pairs:
   tissue_ontology_term_id: tissue
   organism_ontology_term_id: organism
 
+# Messages and display metadata for ObsLabelPairConstraintEvaluator.
 label_pair_validation:
   check_prefix: obs.label_pairs
   organism_id_field: organism_ontology_term_id
@@ -439,7 +501,11 @@ label_pair_validation:
     pair_title_template: '%{label_field} / %{id_field}'
     pair_summary_template: 'The %{label_field} label must be present and match %{id_field} (including special placeholder values).'
 
+# Cross-field rules: constraints that depend on values in two or more metadata fields.
+# Reference data (maps, organism prefixes) lives here; executable rule definitions
+# are under validation.rules (CF-1 .. CF-9).
 cross_field:
+  # EFO assay terms used to resolve suspension_type when exact map key is missing.
   assay_ancestor_terms:
     - EFO:0030080
     - EFO:0007045
@@ -447,6 +513,7 @@ cross_field:
     - EFO:0008919
     - EFO:0010184
     - EFO:0008994
+  # CF-1: assay_ontology_term_id -> allowed suspension_type values.
   assay_suspension_type_map:
     EFO:0700004: [cell]
     EFO:0700003: [cell]
@@ -487,6 +554,7 @@ cross_field:
     EFO:0008919: [cell]
     EFO:0010184: [cell, nucleus]
     EFO:0008994: [na]
+  # Values forced when tissue_type is "cell line" (compliance fix form + CF-2a-2f).
   cell_line_forced_fields:
     - field: self_reported_ethnicity_ontology_term_id
       value: na
@@ -504,6 +572,7 @@ cross_field:
       value: na
     - field: suspension_type
       value: na
+  # Organism -> development stage ontology prefix (ontology.organism_specific.development_stage).
   organism_dev_stage_mapping:
     NCBITaxon:9606: HsapDv
     NCBITaxon:10090: MmusDv
@@ -525,10 +594,16 @@ cross_field:
   organism_ethnicity_special_values: [unknown, na, multiethnic]
   organism_celegans_sex_organism: NCBITaxon:6239
   organism_celegans_sex_terms: [PATO:0000384, PATO:0001340]
+  # Cross-field rule engine: shared messages, report grouper regex, and CF-* definitions.
+  # Each CF rule may define: token, mapping, violation (template), messages, checks.
+  # Violations are emitted by ScfairSchemaRules#check_cross_field_constraints;
+  # CrossFieldConstraintEvaluator turns them into report items and rule_checks.
   validation:
+    # Shown when a conditional CF rule does not apply (e.g. CF-4 when not organoid).
     not_applicable: 'Not applicable'
+    # Template for CF-2a-2f when tissue_type is not "cell line"; %{detail} from skip_detail.
     skip_not_cell_line_template: 'Not applicable (tissue_type is not "cell line"). For cell lines only: %{detail}'
-    organoid_embryo_term: UBERON:0000922
+    # Regex: routes obs/var field messages to cross-field.constraints in ComplianceReportGrouper.
     grouper_message_pattern: 'MUST|must not|must be|For assay|tissue_type is|Organism is|Organoid|Visium|C\. elegans|spatial\.is_single|Label must match special ontology id'
     rules:
       CF-1:
@@ -637,15 +712,27 @@ cross_field:
           pass: 'donor_id consistency OK'
           fail: 'donor_id must not be "na" unless tissue_type is "cell line"'
       CF-4:
+        # Organoid: tissue_ontology_term_id must not be UBERON:0000922 (embryo).
+        # forbidden_term in mapping is read by Rules.cross_field_organoid_embryo_term.
         slug: organoid-tissue
         title: 'CF-4: Organoid tissue constraint'
         summary: 'When tissue_type is "organoid", tissue_ontology_term_id must not be embryo (UBERON:0000922).'
+        token: tissue_ontology_term_id
         checks:
           - 'Applies only when tissue_type is "organoid"'
           - 'Fails when tissue_ontology_term_id is embryo (UBERON:0000922)'
+        mapping:
+          applies_when:
+            tissue_type: organoid
+          field: tissue_ontology_term_id
+          forbidden_term: UBERON:0000922
         messages:
           pass: 'Organoid tissue constraints OK'
           fail: 'Organoid tissue must not be embryo (UBERON:0000922)'
+        violation:
+          field: tissue_ontology_term_id
+          severity: error
+          template: 'tissue_type is "organoid" -- tissue_ontology_term_id MUST NOT be %{forbidden_term} (embryo), got "%{value}".'
       CF-5:
         slug: spatial-assay-uniformity
         title: 'CF-5: Spatial assay uniformity'
@@ -708,6 +795,8 @@ cross_field:
           fail_missing_metadata: 'Missing %{spatial_root} metadata (required for spatial assays)'
           pass: 'Spatial metadata presence consistent with assay'
 
+# Organism-specific ontology prefix rules (depends on uns/organism_ontology_term_id).
+# Evaluated by OrganismSpecificConstraintEvaluator; UI text in organism_specific_display.
 organism_specific_validation:
   check_prefix: ontology.organism_specific
   special_values:
@@ -753,6 +842,7 @@ organism_specific_validation:
   primary_cell_culture_tissue_type: 'primary cell culture'
   cellosaurus_prefix: CVCL_
 
+# Display strings for organism-specific constraint rows in check detail popups.
 organism_specific_display:
   file_organism:
     label: File organism
@@ -783,15 +873,25 @@ organism_specific_display:
     prefix_status_tissue_unexpected: 'Not satisfied — unexpected terms: %{terms}'
     prefix_status_tissue_satisfied: 'Satisfied by current tissue_ontology_term_id values'
 
+# Compliance report UI configuration: how to classify validator messages and what
+# to show in check detail popups (constraints, checks performed, summaries).
 check_details:
+  # Message classifiers: if a check message matches a pattern here, the UI treats
+  # it as that check type (simpler popup, skip rich constraint panels).
+  # presence: "field exists / missing" messages from H5AD and Loom validators.
+  # ontology_format: PREFIX:ID format and prefix allowlist messages.
   message_patterns:
     presence:
+      # Literal strings from H5AD validators:
       - 'Required field present'
       - 'Missing required observation field'
       - 'Missing required dataset metadata field'
       - 'Missing required variable metadata field'
+      # Regex: Loom pass messages like "Found /col_attrs/assay metadata":
       - '\AFound .+ metadata\z'
+      # Regex: Loom fail messages like "Missing /attrs/title metadata (required by schema)":
       - 'Missing .+ metadata \(required by schema\)'
+      # cell_type_ontology_term_id skipped for pre-analysis datasets:
       - 'Skipped \(pre-analysis dataset\)'
     ontology_format:
       - 'Ontology terms in .+ have valid format'
@@ -799,6 +899,7 @@ check_details:
       - 'Invalid ontology format'
       - 'Unexpected ontology prefix'
       - 'Ontology prefix .+ may not be valid'
+  # Per-check-id or per-field detail overrides (title, summary, checks performed list).
   by_field:
     var.index.presence:
       title: var.index
@@ -891,6 +992,7 @@ check_details:
         - 'Applies only when organism_ontology_term_id is Caenorhabditis elegans (NCBITaxon:6239)'
         - 'Each sex_ontology_term_id value must be PATO male, hermaphrodite, unknown, or na'
   categories:
+    # One-line summary per compliance report category id (ComplianceReportGrouper).
     summaries:
       obs.required_presence: 'Required per-cell observation metadata fields defined by scFAIR 7.1.0.'
       obs.label_pairs: 'Observation ontology term IDs must have consistent paired label columns (from label_pairs).'
@@ -932,12 +1034,13 @@ check_details:
       metadata.other.unique_names.obs: 'Observation metadata field names must be unique.'
       metadata.other.unique_names.var: 'Variable (gene) metadata field names must be unique.'
       metadata.other.deprecated: 'Deprecated reserved names from prior schema versions must not be present.'
+    # Bullet lists shown as "checks performed" when no by_field override exists.
     checks:
       obs.required_presence:
         - 'Each required observation (obs / col_attrs) column from scFAIR 7.1.0 is present'
-        - 'Ontology term ID fields: assay, cell_type, disease, development_stage, sex, tissue, ethnicity'
+        - 'Ontology term ID and paired label fields: assay, cell_type, disease, development_stage, sex, tissue, ethnicity'
         - 'Categorical fields: tissue_type, suspension_type, donor_id, is_primary_data'
-        - 'Paired label columns are validated under obs.label_pairs (derived from label_pairs)'
+        - 'ID/label consistency for ontology fields is validated under obs.label_pairs (derived from label_pairs)'
       obs.label_pairs:
         - 'One check per obs entry in label_pairs (except organism, validated separately in uns)'
         - 'Paired label column must be present when the ontology ID column is present'
@@ -946,6 +1049,7 @@ check_details:
         - 'Multi-value fields use row-aligned obs/{id}#label_pairs extraction when available'
       uns.required_presence:
         - 'Each required dataset metadata field is validated individually'
+        - 'Fields: title, organism_ontology_term_id, organism, schema_version, schema_reference, ensembl_release, ensembl_database'
         - 'Open a specific field check for presence requirements'
       schema.version:
         - 'Reads schema_version from uns/attrs'
@@ -1037,6 +1141,7 @@ check_details:
       extension.analysis_json:
         - 'Looks for analysis_pipeline metadata (recommended analysis_json extension)'
         - 'Warns when analysis pipeline metadata is absent'
+  # Detail blocks for metadata.other.* categories.
   metadata_other:
     metadata.other.reserved_prefix:
       title: Reserved name prefix
@@ -1062,11 +1167,14 @@ check_details:
       checks:
         - 'Checks obs, var, and uns for reserved names deprecated in prior schema versions'
         - 'Includes legacy fields such as obs/ethnicity and uns/version'
+  # Rollup text for extension.spatial parent category in the report.
   spatial_rollup_checks:
     - 'Detects spatial datasets from Visium/Slide-seq assays or uns/spatial metadata'
     - 'extension.spatial.structure: uns/spatial dictionary layout'
     - 'extension.spatial.obs: Visium spot columns when is_single is true'
     - 'extension.spatial.assets: tissue image arrays and spatial embedding'
+  # Per-field "checks performed" templates for presence / enum popups (by layer).
+  # Keys reference required.obs / enum_fields; _templates defines %{path} patterns.
   layer_field_checks:
     obs:
       _templates:
@@ -1112,7 +1220,7 @@ check_details:
         - 'Field must be present in uns (H5AD) or /attrs (Loom)'
         - 'Must be compatible with the reference scFAIR schema version'
       schema_reference:
-        - 'Field must be present in uns (H5AD only)'
+        - 'Field must be present in uns (H5AD) or /attrs (Loom)'
         - 'Must match the canonical schema URL for this validator release'
       ensembl_release:
         - 'Field must be present in uns (H5AD) or /attrs (Loom)'
@@ -1146,6 +1254,7 @@ check_details:
       feature_chromosome:
         - 'Column must be present in var (H5AD) or row_attrs (Loom)'
         - 'Values must be a non-empty string (chromosome name or na for spike-ins)'
+  # Checks performed lists for extension.* subcategories.
   extension_field_checks:
     extension.spatial.structure:
       - 'spatial.is_single must be a boolean'
@@ -1181,6 +1290,7 @@ check_details:
     extension.spatial.library:
       - 'Exactly one Visium library identifier under uns/spatial when is_single is true'
       - 'Library dict may only contain images and scalefactors keys'
+  # Titles and summaries for ontology.semantics.* subcheck suffixes in the UI.
   semantic:
     titles:
       allowed_terms: 'Allowed / known terms'
@@ -1206,13 +1316,14 @@ check_details:
       special_values: 'Placeholder values allowed instead of a real ontology term.'
       label_pair: 'Human-readable labels must match their ontology term identifiers.'
       special_label_pair: 'When a special placeholder ID is used, the label must match exactly.'
+  # Default one-line field descriptions in check detail popups (by uns/var field name).
   field_summaries:
     uns:
       title: 'Short human-readable dataset title required in uns metadata.'
       organism_ontology_term_id: 'Species ontology term (NCBITaxon:tax_id) identifying the dataset organism.'
       organism: 'Human-readable organism name label paired with organism_ontology_term_id.'
       schema_version: 'Schema version identifier; must be compatible with scFAIR %{schema_version}.'
-      schema_reference: 'Canonical URL of the scFAIR schema this file claims to follow (H5AD only).'
+      schema_reference: 'Canonical URL of the scFAIR schema this file claims to follow.'
       ensembl_release: 'Ensembl release number used for gene annotation (positive integer).'
       ensembl_database: 'Ensembl database source used for gene annotation (Ensembl, EnsemblMetazoa, or EnsemblCOVID-19).'
       ensembl_assembly: 'Optional genome assembly name for the Ensembl annotation (non-empty when present).'
@@ -1224,15 +1335,17 @@ check_details:
       feature_reference: 'NCBITaxon term for the reference organism of the feature from the schema pinned gene annotations table.'
       feature_type: 'Feature type label such as protein_coding or synthetic (non-empty string).'
       feature_chromosome: 'Chromosome name for the feature, or na for spike-ins (non-empty string).'
+  # Fallback summary templates when field_summaries has no entry for a field.
   defaults:
     required_observation: 'Required observation metadata field per scFAIR %{schema_version}.'
     required_uns: 'Required dataset metadata field per scFAIR %{schema_version}.'
     required_var: 'Required variable (gene) metadata field per scFAIR %{schema_version}.'
-    required_observation_label: 'Human-readable label paired with an ontology term field.'
     enum_field: 'Categorical field with a fixed set of allowed values.'
     ontology_term_field: 'Ontology term identifier field validated for format, semantics, and database resolution.'
     compliance_fallback: 'Compliance check against the scFAIR schema.'
 
+# Compliance report sidebar / grouping: category ids and human-readable labels.
+# common: both formats; loom_only / h5ad_only: format-specific sections.
 checks_catalog:
   common:
     - id: obs.label_pairs
@@ -1277,11 +1390,13 @@ checks_catalog:
       label: Perturbation schema extension checks
     - id: metadata.other
       label: Other checks
+  # Categories only shown for Loom compliance reports.
   loom_only:
     - id: loom.paths
       label: Loom metadata path checks
     - id: loom.mapping_manifest
       label: anndata_mapping manifest checks
+  # Categories only shown for H5AD compliance reports.
   h5ad_only:
     - id: h5ad.structure
       label: AnnData structural integrity

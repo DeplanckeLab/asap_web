@@ -37,10 +37,8 @@ class ScfairLoomValidatorService
   VALID_TISSUE_TYPES = Scfair::Rules.enum_field_values('tissue_type')
   VALID_SUSPENSION_TYPES = Scfair::Rules.enum_field_values('suspension_type')
   ALLOWED_SPECIAL_VALUES = Scfair::Rules.allowed_special_values('loom')
-  REQUIRED_CELL_METADATA = Scfair::Rules.required_observation_fields
-  REQUIRED_GLOBAL_ATTRS = Scfair::Rules.required_uns_term_fields('loom')
-  ONTOLOGY_LABEL_CELL_METADATA = Scfair::Rules.required_observation_labels
-  ONTOLOGY_LABEL_GLOBAL_ATTRS = Scfair::Rules.required_uns_labels
+  REQUIRED_CELL_METADATA = Scfair::Rules.required_obs_fields
+  REQUIRED_GLOBAL_ATTRS = Scfair::Rules.required_uns_fields
 
   Result = Struct.new(:valid?, :errors, :warnings, :info, :valid_checks, :schema_version, :validated_at, :field_resolutions, keyword_init: true)
 
@@ -389,15 +387,6 @@ class ScfairLoomValidatorService
         unless attr == 'schema_version'
           @valid_checks << { field: "/attrs/#{attr}", message: "Found /attrs/#{attr} metadata", check_type: 'presence' }
         end
-      else
-        @errors << { field: "/attrs/#{attr}", message: "Missing /attrs/#{attr} metadata (required by schema)", check_type: 'presence' }
-      end
-    end
-
-    # Check for ontology label global attributes (required alongside their _ontology_term_id)
-    ONTOLOGY_LABEL_GLOBAL_ATTRS.each do |attr|
-      if global_attrs.include?(attr)
-        @valid_checks << { field: "/attrs/#{attr}", message: "Found /attrs/#{attr} metadata", check_type: 'presence' }
       else
         @errors << { field: "/attrs/#{attr}", message: "Missing /attrs/#{attr} metadata (required by schema)", check_type: 'presence' }
       end

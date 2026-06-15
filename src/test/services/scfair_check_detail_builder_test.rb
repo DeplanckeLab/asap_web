@@ -365,7 +365,7 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
     assert detail[:checks_performed].any? { |check| check_text(check).include?('label_pairs') }
   end
 
-  test 'cross-field CF-1 detail loads from rules.yaml check_details' do
+  test 'cross-field CF-1 detail loads from rules.yaml checks' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'cross-field.CF-1-assay-suspension',
       message: 'Assay/suspension_type consistency',

@@ -2,34 +2,6 @@
 
 module Scfair
   class CheckDetailBuilder
-    SEMANTIC_CHECK_TITLES = {
-      'allowed_terms' => 'Allowed / known terms',
-      'existence' => 'Ontology term existence',
-      'banned_terms' => 'Banned terms',
-      'forbidden' => 'Banned term',
-      'descendants' => 'Descendant / root restrictions',
-      'lineage' => 'Lineage restrictions',
-      'sorted_multi' => 'Multi-value ordering',
-      'ordering' => 'Multi-value ordering',
-      'special_values' => 'Special placeholder values',
-      'label_pair' => 'ID / label pairs',
-      'special_label_pair' => 'Special ID / label pairs'
-    }.freeze
-
-    SEMANTIC_CHECK_SUMMARIES = {
-      'allowed_terms' => 'Each term must resolve as an active (non-obsolete) entry in the ontology database and match any allowed exact values.',
-      'existence' => 'The term must exist as an active (non-obsolete) entry in the ontology database.',
-      'banned_terms' => 'Terms must not match a banned identifier or fall under a banned branch.',
-      'forbidden' => 'This term is explicitly banned for the field.',
-      'descendants' => 'Each term must descend from one of the required ontology roots.',
-      'lineage' => 'The term must satisfy the required lineage constraints for this field.',
-      'sorted_multi' => 'Multiple values must be unique and sorted lexically, separated by " || ".',
-      'ordering' => 'Multiple values must be unique and sorted lexically, separated by " || ".',
-      'special_values' => 'Placeholder values allowed instead of a real ontology term.',
-      'label_pair' => 'Human-readable labels must match their ontology term identifiers.',
-      'special_label_pair' => 'When a special placeholder ID is used, the label must match exactly.'
-    }.freeze
-
     PRESENCE_CHECK = /
       Required\ field\ present |
       Missing\ required\ observation\ field |
@@ -110,7 +82,7 @@ module Scfair
         detail[:summary] = detail_rule[:summary]
         detail[:checks_performed] = yaml_checks_with_paths(
           detail_rule[:checks],
-          "checks.#{yaml_check_detail_field_key}.checks_performed"
+          Rules.check_yaml_path(yaml_check_detail_field_key) || "checks.#{yaml_check_detail_field_key}.checks_performed"
         )
       end
 
@@ -127,7 +99,7 @@ module Scfair
         if metadata_other[:checks].present?
           detail[:checks_performed] = yaml_checks_with_paths(
             metadata_other[:checks],
-            "checks.#{@field}.checks_performed"
+            Rules.check_yaml_path(@field) || "checks.#{@field}.rollup"
           )
         end
       end
@@ -275,7 +247,7 @@ module Scfair
 
     def detail_summary(field_name, category_id)
       suffix = semantic_rule_suffix(@field)
-      return SEMANTIC_CHECK_SUMMARIES[suffix] if suffix && SEMANTIC_CHECK_SUMMARIES[suffix].present?
+      return Rules.semantic_check_summary(suffix) if suffix && Rules.semantic_check_summary(suffix).present?
 
       if required_var_field?(field_name)
         summary = var_field_summary(field_name)
@@ -348,50 +320,31 @@ module Scfair
     end
 
     def checks_rules_path_prefix(category_id)
-      return 'check_details.spatial_rollup_checks' if @field == 'extension.spatial'
+      return 'checks.extension.spatial.rollup' if @field == 'extension.spatial'
+
+      yaml_path = Rules.check_yaml_path(@field)
+      return yaml_path if yaml_path.present?
 
       %i[uns obs var].each do |layer|
         field_name = send("#{layer}_metadata_field_name", @field)
         next if field_name.blank?
 
         entry = Rules.field_check_entry(layer, field_name)
-        return "checks.#{entry[:id]}.checks_performed" if entry
+        next if entry.blank?
+
+        path = Rules.check_yaml_path(entry[:id])
+        return path if path.present?
       end
 
       if Rules.extension_field_checks(@field).any?
-        return "checks.#{@field}.checks_performed"
+        return Rules.check_yaml_path(@field) || "checks.#{@field}.rollup"
       end
 
       if category_id.present? && Rules.category_checks_list(category_id).any?
-        return "checks.#{category_id}.checks_performed"
+        return "checks.#{category_id}.rollup"
       end
 
       nil
-    end
-
-    def yaml_check_detail_for_field
-      if var_index_storage_path?(@field)
-        Rules.check_detail_for_field('var.index.presence')
-      else
-        Rules.check_detail_for_field(@field)
-      end
-    end
-
-    def append_field_constraint_rows(rows, layer, field_name)
-      Rules.field_constraint_entries(layer, field_name).each_with_index do |entry, idx|
-        rows << constraint_row(
-          entry[:label],
-          Rules.field_constraint_display_value(entry),
-          from_rules: true,
-          rules_path: "field_constraints.#{layer}.#{field_name}.#{idx}"
-        )
-      end
-    end
-
-    def append_ontology_semantics_constraint_rows(rows, suffix)
-      Rules.ontology_semantics_display_constraints(suffix).each do |entry|
-        rows << constraint_row(entry[:label], entry[:value], from_rules: true, rules_path: entry[:rules_path])
-      end
     end
 
     def yaml_check_detail_for_field
@@ -1638,120 +1591,6 @@ module Scfair
 
     def var_field_summary(field_name)
       Rules.field_summary_text(:var, field_name) || Rules.default_summary_text(:required_var)
-    end
-
-    def append_var_field_constraints(rows, field_name)
-      append_field_constraint_rows(rows, :var, field_name)
-      case field_name
-      when 'feature_biotype'
-        rows << constraint_row(
-          'Allowed values',
-          Rules.enum_field_values('feature_biotype').join(', '),
-          from_rules: true,
-          rules_path: 'enum_fields.feature_biotype.values'
-        )
-      when 'feature_reference'
-        rows << constraint_row(
-          'Allowed values',
-          Rules.feature_reference_taxa.keys.join(', '),
-          from_rules: true,
-          rules_path: 'constants.feature_reference_taxa'
-        )
-      end
-    end
-
-    def ensembl_uns_field?(field_name)
-      %w[ensembl_release ensembl_database ensembl_assembly].include?(field_name)
-    end
-
-    def uns_metadata_field_name(field)
-      return nil unless field.match?(/\A(uns\/|\/attrs\/)/)
-
-      name = field.split('/').last.to_s
-      return name if required_uns_field?(name) || ensembl_uns_field?(name)
-
-      nil
-    end
-
-    def uns_field_summary(field_name)
-      case field_name
-      when 'title'
-        'Short human-readable dataset title required in uns metadata.'
-      when 'organism_ontology_term_id'
-        'Species ontology term (NCBITaxon:tax_id) identifying the dataset organism.'
-      when 'organism'
-        'Human-readable organism name label paired with organism_ontology_term_id.'
-      when 'schema_version'
-        "Schema version identifier; must be compatible with scFAIR #{Rules.schema_version}."
-      when 'schema_reference'
-        'Canonical URL of the scFAIR schema this file claims to follow (H5AD only).'
-      when 'ensembl_release'
-        'Ensembl release number used for gene annotation (positive integer).'
-      when 'ensembl_database'
-        'Ensembl database source used for gene annotation (Ensembl, EnsemblMetazoa, or EnsemblCOVID-19).'
-      when 'ensembl_assembly'
-        'Optional genome assembly name for the Ensembl annotation (non-empty when present).'
-      else
-        "Required dataset metadata field per scFAIR #{Rules.schema_version}."
-      end
-    end
-
-    def append_uns_field_constraints(rows, field_name)
-      case field_name
-      when 'organism_ontology_term_id'
-        ontology_cfg = Rules.ontology_field(field_name)
-        append_prefix_rows(rows, ontology_cfg, field_name: field_name)
-      when 'organism'
-        rows << constraint_row('Paired term field', 'organism_ontology_term_id', from_rules: true, rules_path: 'label_pairs.organism_ontology_term_id')
-        append_field_constraint_rows(rows, :uns, field_name)
-      when 'schema_version'
-        rows << constraint_row('Reference version', Rules.schema_version, from_rules: true, rules_path: 'schema.version')
-        rows << constraint_row('Required identifier', Rules.schema_hash[:schema_version].to_s, from_rules: true, rules_path: 'schema.schema_version')
-      when 'schema_reference'
-        rows << constraint_row('Reference schema URL', Rules.schema_hash[:source_url].to_s, from_rules: true, rules_path: 'schema.source_url')
-      end
-    end
-
-    def append_ensembl_uns_constraints(rows, field_name)
-      case field_name
-      when 'ensembl_database'
-        rows << constraint_row(
-          'Allowed values',
-          Rules.ensembl_database_values.join(', '),
-          from_rules: true,
-          rules_path: 'constants.ensembl_database_values'
-        )
-      else
-        append_field_constraint_rows(rows, :uns, field_name) if Rules.field_constraint_entries(:uns, field_name).any?
-      end
-    end
-
-    def required_var_field?(field_name)
-      Rules.required_var_fields.include?(field_name)
-    end
-
-    def var_metadata_field_name(field)
-      return nil unless field.match?(/\A(var\/|\/row_attrs\/)/)
-
-      name = field.split('/').last.to_s
-      required_var_field?(name) ? name : nil
-    end
-
-    def var_index_storage_path?(field)
-      field.to_s.match?(/\A(var\/_index|var\/index|\/row_attrs\/(_index|index|feature_id))\z/)
-    end
-
-    def var_field_summary(field_name)
-      summaries = {
-        'feature_is_filtered' => 'Per-gene filter flag indicating whether the feature was filtered out of the matrix.',
-        'feature_biotype' => 'Gene biotype: distinguishes annotated genes from ERCC spike-in controls.',
-        'feature_length' => 'Gene length in base pairs as a positive integer.',
-        'feature_name' => 'Display name from the gene reference: gene_name when assigned to var index, otherwise the index identifier; spike-ins use ERCC-ID (spike-in control).',
-        'feature_reference' => 'NCBITaxon term for the reference organism of the feature from the schema pinned gene annotations table.',
-        'feature_type' => 'Feature type label such as protein_coding or synthetic (non-empty string).',
-        'feature_chromosome' => 'Chromosome name for the feature, or na for spike-ins (non-empty string).'
-      }
-      summaries[field_name] || "Required variable (gene) metadata field per scFAIR #{Rules.schema_version}."
     end
 
     def append_var_field_constraints(rows, field_name)

@@ -9,6 +9,7 @@ module Scfair
     DEFAULT_SCHEMA_ID = 'scfair_7_1_0'
     CF8_RULE_KEY = 'CF-8'
     CF9_RULE_KEY = 'CF-9'
+    DEFAULT_CHECK_FORMATS = %w[h5ad loom].freeze
 
     module_function
 
@@ -632,29 +633,93 @@ module Scfair
 
     def build_checks_registry
       registry = {}
-      (data[:checks] || {}).each do |check_id, cfg|
+      raw = data[:checks] || {}
+      category_ids = raw.each_key.map(&:to_s).reject { |k| k == 'catalog' }.to_set
+
+      raw.each do |key, cfg|
+        next if key.to_s.in?(%w[catalog _defaults])
         next unless cfg.is_a?(Hash)
 
-        id = check_id.to_s
-        registry[id] = normalize_check_entry(id, cfg)
+        cat_id = key.to_s
+        registry[cat_id] = normalize_category_entry(cat_id, cfg)
+
+        child_checks = cfg[:checks]
+        next unless child_checks.is_a?(Hash)
+
+        child_checks.each do |check_key, check_cfg|
+          next unless check_cfg.is_a?(Hash)
+
+          nested_key = check_key.to_s
+          full_id = flatten_child_check_id(cat_id, nested_key, check_cfg, category_ids)
+          registry[full_id] = normalize_check_entry(full_id, check_cfg, category: cat_id, nested_key: nested_key)
+        end
       end
+
       registry
     end
 
-    def normalize_check_entry(id, cfg)
+    def flatten_child_check_id(category_id, key, cfg, category_ids)
+      layer = cfg[:layer].to_s
+      field = cfg[:field].to_s
+      if layer.present? && field.present?
+        base = "#{layer}.#{field}"
+        return "#{base}.field" if category_ids.include?(base)
+        return base
+      end
+
+      "#{category_id}.#{key}"
+    end
+
+    def normalize_check_formats(formats)
+      listed = Array(formats).map(&:to_s).reject(&:blank?)
+      listed.presence || DEFAULT_CHECK_FORMATS
+    end
+
+    def normalize_category_entry(id, cfg)
+      semantic = cfg[:semantic_labels] || {}
       {
         id: id,
-        kind: cfg[:kind].to_s.presence || 'category',
+        kind: 'category',
+        label: cfg[:label].to_s.presence || id.tr('.', ' '),
+        formats: normalize_check_formats(cfg[:formats]),
+        summary: cfg[:summary].to_s,
+        checks: Array(cfg[:rollup] || cfg[:checks_performed]).map(&:to_s),
+        messages: normalize_messages(cfg[:messages] || {}),
+        semantic_titles: (semantic[:titles] || {}).each_with_object({}) { |(k, v), h| h[k.to_s] = v.to_s },
+        semantic_summaries: (semantic[:summaries] || {}).each_with_object({}) { |(k, v), h| h[k.to_s] = v.to_s }
+      }
+    end
+
+    def normalize_check_entry(id, cfg, category:, nested_key: nil)
+      {
+        id: id,
+        kind: 'check',
         label: cfg[:label].to_s.presence || cfg[:title].to_s.presence || id.tr('.', ' '),
         title: cfg[:title].to_s,
-        category: cfg[:category].to_s,
-        formats: Array(cfg[:formats]).map(&:to_s),
+        category: category.to_s,
+        nested_key: nested_key.to_s,
+        formats: [],
         summary: cfg[:summary].to_s,
-        checks: Array(cfg[:checks_performed] || cfg[:checks]).map(&:to_s),
+        checks: Array(cfg[:checks_performed]).map(&:to_s),
         messages: normalize_messages(cfg[:messages] || {}),
         layer: cfg[:layer].to_s,
         field: cfg[:field].to_s
       }
+    end
+
+    def check_yaml_path(check_id)
+      entry = check_entry(check_id)
+      return nil if entry.blank?
+
+      if entry[:kind] == 'category'
+        return "checks.#{check_id}.rollup" if entry[:checks].present?
+
+        return nil
+      end
+
+      cat = entry[:category]
+      key = entry[:nested_key].presence || entry[:field].presence || check_id.to_s.delete_prefix("#{cat}.")
+      "checks.#{cat}.checks.#{key}.checks_performed"
     end
 
     def normalize_messages(messages)
@@ -669,11 +734,17 @@ module Scfair
 
     def checks_for(format)
       fmt = format.to_s
-      checks_registry.values
-        .select { |entry| entry[:kind] == 'category' && Array(entry[:formats]).include?(fmt) }
-        .map { |entry| { id: entry[:id], label: entry[:label] } }
-        .uniq { |entry| entry[:id] }
-        .freeze
+      catalog = data.dig(:checks, :catalog) || {}
+      ids = Array(catalog[:common]).map(&:to_s)
+      ids.concat(Array(catalog[:loom_only]).map(&:to_s)) if fmt == 'loom'
+      ids.concat(Array(catalog[:h5ad_only]).map(&:to_s)) if fmt == 'h5ad'
+
+      ids.filter_map do |id|
+        entry = check_entry(id)
+        next unless entry&.dig(:kind) == 'category'
+
+        { id: id, label: entry[:label] }
+      end.freeze
     end
 
     def field_check_entry(layer, field_name)
@@ -699,7 +770,7 @@ module Scfair
     end
 
     def spatial_rollup_checks
-      Array(data.dig(:check_details, :spatial_rollup_checks)).map(&:to_s).freeze
+      Array(check_entry('extension.spatial')&.dig(:checks)).map(&:to_s).freeze
     end
 
     def layer_field_checks(layer, field_name, format: 'h5ad')
@@ -729,24 +800,24 @@ module Scfair
     def semantic_check_title(suffix)
       return nil if suffix.blank?
 
-      data.dig(:check_details, :semantic, :titles, suffix.to_sym).to_s.presence
+      check_entry('ontology.semantics')&.dig(:semantic_titles, suffix.to_s).to_s.presence
     end
 
     def semantic_check_summary(suffix)
       return nil if suffix.blank?
 
-      data.dig(:check_details, :semantic, :summaries, suffix.to_sym).to_s.presence
+      check_entry('ontology.semantics')&.dig(:semantic_summaries, suffix.to_s).to_s.presence
     end
 
     def field_summary_text(layer, field_name)
-      template = data.dig(:check_details, :field_summaries, layer.to_sym, field_name.to_sym).to_s
-      return nil if template.blank?
+      summary = field_check_entry(layer, field_name)&.dig(:summary).to_s
+      return nil if summary.blank?
 
-      format(template, schema_version: schema_version)
+      summary.include?('%{') ? format(summary, schema_version: schema_version) : summary
     end
 
     def default_summary_text(key)
-      template = data.dig(:check_details, :defaults, key.to_sym).to_s
+      template = data.dig(:checks, :_defaults, key.to_sym).to_s
       return nil if template.blank?
 
       format(template, schema_version: schema_version)

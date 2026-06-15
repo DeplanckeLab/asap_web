@@ -16,8 +16,7 @@
 #   spatial_extension, perturb_extension - optional schema extensions
 #   cross_field             - rules that depend on multiple fields (CF-1 .. CF-9)
 #   organism_specific_*     - taxon-dependent ontology prefix rules
-#   checks                  - unified registry: one entry per category and per check
-#   check_details           - UI helpers (field summaries, semantic labels, spatial rollup)
+#   checks                  - compliance report categories, nested checks, defaults, semantic labels
 
 # Release metadata. schema_version is what files must declare; source_url is the
 # canonical schema_reference target for schema.reference checks.
@@ -873,19 +872,48 @@ organism_specific_display:
     prefix_status_tissue_unexpected: 'Not satisfied — unexpected terms: %{terms}'
     prefix_status_tissue_satisfied: 'Satisfied by current tissue_ontology_term_id values'
 
-# Unified compliance check registry: one entry per report category and per individual check.
-# kind: category  - sidebar group (label, formats, summary, checks_performed, messages)
-# kind: check     - field- or rule-specific check (category, title, summary, layer, field)
+# Unified compliance check registry: categories as shown in the compliance report UI.
+# Each category has metadata (label, summary, rollup, messages) and optional nested checks.
+# Omit formats to apply to both h5ad and loom; set formats only for format-specific categories.
+# checks.catalog lists sidebar category ids per file format.
+# checks._defaults provides fallback popup summary templates.
 checks:
+  catalog:
+    common:
+    - obs.label_pairs
+    - obs.required_presence
+    - uns.required_presence
+    - schema.version
+    - schema.reference
+    - uns.ensembl_assembly
+    - uns.ensembl
+    - obs.experimental_condition
+    - var.required
+    - var.index
+    - var.cross_field
+    - cross-field.uns_ensembl
+    - ontology.format
+    - cross-field.constraints
+    - ontology.database_resolution
+    - ontology.organism_specific
+    - ontology.semantics
+    - extension.spatial
+    - extension.perturb
+    - metadata.other
+    loom_only:
+    - loom.paths
+    - loom.mapping_manifest
+    h5ad_only:
+    - h5ad.structure
+    - h5ad.embeddings
+    - h5ad.matrix_encoding
+    - extension.atac
+    - extension.analysis_json
   obs.label_pairs:
-    kind: category
     label: Observation label / ontology ID pairs
-    formats:
-    - h5ad
-    - loom
     summary: Observation ontology term IDs must have consistent paired label columns
       (from label_pairs).
-    checks_performed:
+    rollup:
     - One check per obs entry in label_pairs (except organism, validated separately
       in uns)
     - Paired label column must be present when the ontology ID column is present
@@ -893,19 +921,8 @@ checks:
     - Real ontology terms must match the authorised label from the ontology database
     - Multi-value fields use row-aligned obs/{id}#label_pairs extraction when available
   obs.required_presence:
-    kind: category
     label: Required observation metadata fields
-    formats:
-    - h5ad
-    - loom
     summary: Required per-cell observation metadata fields defined by scFAIR 7.1.0.
-    checks_performed:
-    - Each required observation (obs / col_attrs) column from scFAIR 7.1.0 is present
-    - 'Ontology term ID and paired label fields: assay, cell_type, disease, development_stage,
-      sex, tissue, ethnicity'
-    - 'Categorical fields: tissue_type, suspension_type, donor_id, is_primary_data'
-    - ID/label consistency for ontology fields is validated under obs.label_pairs
-      (derived from label_pairs)
     messages:
       found:
         h5ad: Required field present
@@ -917,18 +934,74 @@ checks:
       skipped_pre_analysis: Skipped (pre-analysis dataset)
       missing_visium: Missing %{path} metadata (required for Visium spatial data with
         is_single=true)
+    rollup:
+    - Each required observation (obs / col_attrs) column from scFAIR 7.1.0 is present
+    - 'Ontology term ID and paired label fields: assay, cell_type, disease, development_stage,
+      sex, tissue, ethnicity'
+    - 'Categorical fields: tissue_type, suspension_type, donor_id, is_primary_data'
+    - ID/label consistency for ontology fields is validated under obs.label_pairs
+      (derived from label_pairs)
+    checks:
+      assay_ontology_term_id:
+        layer: obs
+        field: assay_ontology_term_id
+        checks_performed:
+        - Verifies required observation column %{path} is present
+      cell_type_ontology_term_id:
+        layer: obs
+        field: cell_type_ontology_term_id
+        checks_performed:
+        - Verifies required observation column %{path} is present
+      development_stage_ontology_term_id:
+        layer: obs
+        field: development_stage_ontology_term_id
+        checks_performed:
+        - Verifies required observation column %{path} is present
+      disease_ontology_term_id:
+        layer: obs
+        field: disease_ontology_term_id
+        checks_performed:
+        - Verifies required observation column %{path} is present
+      self_reported_ethnicity_ontology_term_id:
+        layer: obs
+        field: self_reported_ethnicity_ontology_term_id
+        checks_performed:
+        - Verifies required observation column %{path} is present
+      sex_ontology_term_id:
+        layer: obs
+        field: sex_ontology_term_id
+        checks_performed:
+        - Verifies required observation column %{path} is present
+      tissue_ontology_term_id:
+        layer: obs
+        field: tissue_ontology_term_id
+        checks_performed:
+        - Verifies required observation column %{path} is present
+      donor_id:
+        layer: obs
+        field: donor_id
+        checks_performed:
+        - Verifies required observation column %{path} is present
+      is_primary_data:
+        layer: obs
+        field: is_primary_data
+        checks_performed:
+        - Verifies required observation column %{path} is present
+      suspension_type:
+        layer: obs
+        field: suspension_type
+        checks_performed:
+        - Verifies required observation column %{path} is present
+        - 'Values must be one of: %{allowed_values}'
+      tissue_type:
+        layer: obs
+        field: tissue_type
+        checks_performed:
+        - Verifies required observation column %{path} is present
+        - 'Values must be one of: %{allowed_values}'
   uns.required_presence:
-    kind: category
     label: Required dataset metadata fields
-    formats:
-    - h5ad
-    - loom
     summary: Required dataset-level metadata fields in uns/attrs.
-    checks_performed:
-    - Each required dataset metadata field is validated individually
-    - 'Fields: title, organism_ontology_term_id, organism, schema_version, schema_reference,
-      ensembl_release, ensembl_database'
-    - Open a specific field check for presence requirements
     messages:
       found:
         h5ad: Required field present
@@ -936,54 +1009,104 @@ checks:
       missing:
         h5ad: Missing required dataset metadata field
         loom: Missing %{path} metadata (required by schema)
+    rollup:
+    - Each required dataset metadata field is validated individually
+    - 'Fields: title, organism_ontology_term_id, organism, schema_version, schema_reference,
+      ensembl_release, ensembl_database'
+    - Open a specific field check for presence requirements
+    checks:
+      title:
+        layer: uns
+        field: title
+        checks_performed:
+        - Field must be present in uns (H5AD) or /attrs (Loom)
+        - Short human-readable dataset title required by scFAIR
+        summary: Short human-readable dataset title required in uns metadata.
+      organism_ontology_term_id:
+        layer: uns
+        field: organism_ontology_term_id
+        checks_performed:
+        - Field must be present in uns (H5AD) or /attrs (Loom)
+        - Must use NCBITaxon:tax_id format for the dataset species
+        - Validated for ontology format and semantic constraints when values are present
+        summary: Species ontology term (NCBITaxon:tax_id) identifying the dataset
+          organism.
+      organism:
+        layer: uns
+        field: organism
+        checks_performed:
+        - Field must be present in uns (H5AD) or /attrs (Loom)
+        - Human-readable organism label paired with organism_ontology_term_id
+        - Label must match the organism name for the declared NCBITaxon term
+        summary: Human-readable organism name label paired with organism_ontology_term_id.
+      schema_version:
+        layer: uns
+        field: schema_version
+        checks_performed:
+        - Field must be present in uns (H5AD) or /attrs (Loom)
+        - Must be compatible with the reference scFAIR schema version
+        summary: Schema version identifier; must be compatible with scFAIR %{schema_version}.
+      schema_reference:
+        layer: uns
+        field: schema_reference
+        checks_performed:
+        - Field must be present in uns (H5AD) or /attrs (Loom)
+        - Must match the canonical schema URL for this validator release
+        summary: Canonical URL of the scFAIR schema this file claims to follow.
+      ensembl_release:
+        layer: uns
+        field: ensembl_release
+        checks_performed:
+        - Field must be present in uns (H5AD) or /attrs (Loom)
+        - Must be a positive integer Ensembl release number
+        summary: Ensembl release number used for gene annotation (positive integer).
+      ensembl_database:
+        layer: uns
+        field: ensembl_database
+        checks_performed:
+        - Field must be present in uns (H5AD) or /attrs (Loom)
+        - Must be one of the schema Ensembl database enum values
+        summary: Ensembl database source used for gene annotation (Ensembl, EnsemblMetazoa,
+          or EnsemblCOVID-19).
+      ensembl_assembly.optional:
+        layer: uns
+        field: ensembl_assembly
+        checks_performed:
+        - Optional field; skipped when not annotated
+        - When present, must be a non-empty assembly name string
+      ensembl_assembly:
+        summary: Optional genome assembly name for the Ensembl annotation (non-empty
+          when present).
+        layer: uns
+        field: ensembl_assembly
   schema.version:
-    kind: category
     label: Schema version compatibility
-    formats:
-    - h5ad
-    - loom
     summary: The file schema_version must be compatible with the reference schema
       version.
-    checks_performed:
+    rollup:
     - Reads schema_version from uns/attrs
     - Compares major.minor version against the reference scFAIR release
     - Accepts compatible schema_version identifiers (e.g. 7.1.0_scfair)
   schema.reference:
-    kind: category
     label: Schema reference URL
-    formats:
-    - h5ad
-    - loom
     summary: The file schema_reference should match the canonical URL of the reference
       schema.
-    checks_performed:
+    rollup:
     - Reads schema_reference from uns (H5AD) or /attrs (Loom)
     - Compares against the canonical schema URL for this validator release
     - Warns when the URL does not match exactly
   uns.ensembl_assembly:
-    kind: category
     label: Ensembl assembly metadata
-    formats:
-    - h5ad
-    - loom
   uns.ensembl:
-    kind: category
     label: Ensembl gene annotation metadata
-    formats:
-    - h5ad
-    - loom
     summary: Ensembl release, database, and optional assembly used for gene annotation.
-    checks_performed:
+    rollup:
     - Each Ensembl metadata field is validated individually
     - Open a specific field check for presence and value constraints
   obs.experimental_condition:
-    kind: category
     label: Experimental condition metadata
-    formats:
-    - h5ad
-    - loom
     summary: Experimental condition ontology IDs, labels, and perturbation types.
-    checks_performed:
+    rollup:
     - experimental_condition_ontology_term_id must be absent when all observations
       are na
     - experimental_condition label required when the ID column is present
@@ -991,79 +1114,188 @@ checks:
       is present
     - Multi-values must be unique and sorted lexically with " || " delimiter
   var.required:
-    kind: category
     label: Gene (var) metadata fields
-    formats:
-    - h5ad
-    - loom
     summary: Required per-gene metadata columns in var / row_attrs.
-    checks_performed:
-    - Each required var / row_attrs column is validated individually
-    - Open a specific field check for column presence and value constraints
     messages:
       found: Required field present
       missing: Missing required variable metadata field
+    rollup:
+    - Each required var / row_attrs column is validated individually
+    - Open a specific field check for column presence and value constraints
+    checks:
+      feature_is_filtered:
+        layer: var
+        field: feature_is_filtered
+        checks_performed:
+        - Column must be present in var (H5AD) or row_attrs (Loom)
+        - Values must be boolean true or false (true, false, True, or False)
+        summary: Per-gene filter flag indicating whether the feature was filtered
+          out of the matrix.
+      feature_biotype:
+        layer: var
+        field: feature_biotype
+        checks_performed:
+        - Column must be present in var (H5AD) or row_attrs (Loom)
+        - Values must be one of the schema biotype enum values
+        summary: 'Gene biotype: distinguishes annotated genes from ERCC spike-in controls.'
+      feature_length:
+        layer: var
+        field: feature_length
+        checks_performed:
+        - Column must be present in var (H5AD) or row_attrs (Loom)
+        - Values must be a positive integer (gene length in base pairs)
+        summary: Gene length in base pairs as a positive integer.
+      feature_name:
+        layer: var
+        field: feature_name
+        checks_performed:
+        - Column must be present in var (H5AD) or row_attrs (Loom)
+        - 'Spike-in: "{ERCC-ID} (spike-in control)" matching var index'
+        - 'Gene: gene_name from the reference for var index, or var index when gene_name
+          is absent'
+        summary: 'Display name from the gene reference: gene_name when assigned to
+          var index, otherwise the index identifier; spike-ins use ERCC-ID (spike-in
+          control).'
+      feature_reference:
+        layer: var
+        field: feature_reference
+        checks_performed:
+        - Column must be present in var (H5AD) or row_attrs (Loom)
+        - Must be the schema NCBITaxon reference organism for the feature (pinned
+          gene annotations table)
+        summary: NCBITaxon term for the reference organism of the feature from the
+          schema pinned gene annotations table.
+      feature_type:
+        layer: var
+        field: feature_type
+        checks_performed:
+        - Column must be present in var (H5AD) or row_attrs (Loom)
+        - Values must be a non-empty string (e.g. protein_coding, synthetic)
+        summary: Feature type label such as protein_coding or synthetic (non-empty
+          string).
+      feature_chromosome:
+        layer: var
+        field: feature_chromosome
+        checks_performed:
+        - Column must be present in var (H5AD) or row_attrs (Loom)
+        - Values must be a non-empty string (chromosome name or na for spike-ins)
+        summary: Chromosome name for the feature, or na for spike-ins (non-empty string).
   var.index:
-    kind: category
     label: Var index (feature identifiers)
-    formats:
-    - h5ad
-    - loom
     summary: 'Var pandas.DataFrame index: unique feature identifiers (Ensembl gene_id
       or ERCC spike-in).'
-    checks_performed:
+    rollup:
     - AnnData var.index must be present (H5AD var/_index; Loom /row_attrs/feature_id
       or manifest var_index_key)
     - Identifiers must be unique across all features
     - ERCC spike-in and Ensembl gene_id format rules (version suffix stripped for
       ENS IDs)
+    checks:
+      presence:
+        title: var.index
+        summary: 'AnnData var.index (var_names): unique string feature identifiers
+          per gene row — Ensembl gene_id or ERCC spike-in. This is the DataFrame index,
+          not a var metadata column.'
+        checks_performed:
+        - 'AnnData schema: var.index (feature identifiers / var_names)'
+        - 'H5AD file translation: var/_index (HDF5 encoding of the pandas DataFrame
+          index)'
+        - 'Loom file translation: /row_attrs/feature_id (typical ASAP), or anndata_mapping
+          var_index_key'
+        - Identifiers must be non-empty across all features
+      uniqueness:
+        title: var index uniqueness
+        summary: Each feature identifier in var index must appear exactly once.
+        checks_performed:
+        - Detects duplicate var index values
+        - Reports duplicate identifiers with occurrence counts
+      format:
+        title: var index format
+        summary: 'Feature identifiers must follow schema rules: ERCC spike-in IDs
+          or Ensembl gene_id without version suffix.'
+        checks_performed:
+        - 'Spike-in rows (or ERCC-prefixed IDs): ERCC-\d+ pattern (e.g. ERCC-0003)'
+        - 'Ensembl gene IDs: must not include a version suffix when prefixed with
+          ENS'
+        - Gene reference membership at ensembl_release is checked separately under
+          var.cross_field.index.release
   var.cross_field:
-    kind: category
     label: Var metadata cross-field consistency
-    formats:
-    - h5ad
-    - loom
     summary: Var metadata must be consistent with uns organism and ensembl_release.
-    checks_performed:
+    rollup:
     - feature_reference must use schema NCBITaxon reference taxa per feature biotype
     - feature_name must match var index per gene reference rules (gene_name or index;
       ERCC for spike-ins)
     - var index gene identifiers must exist for the organism at ensembl_release
+    checks:
+      feature_reference:
+        title: feature_reference
+        summary: Each feature must declare the schema NCBITaxon reference organism
+          for its annotation (pinned gene references table).
+        checks_performed:
+        - Spike-in rows must use NCBITaxon:32630
+        - Gene rows must use a schema-allowed reference taxon
+        - Gene rows must match organism_ontology_term_id for the dataset
+      feature_name.index:
+        title: feature_name vs var index
+        summary: 'feature_name must follow the gene reference for each var index:
+          gene_name when assigned, otherwise the index identifier; spike-ins use ERCC-ID
+          (spike-in control).'
+        checks_performed:
+        - Pairs feature_biotype, feature_reference, feature_name, and var index per
+          row
+        - Spike-in feature_name must be "{ERCC-ID} (spike-in control)" matching var
+          index
+        - Gene feature_name must match gene_name from the reference for the index,
+          or default to the index when gene_name is absent
+      index.release:
+        title: var index vs ensembl_release
+        summary: Gene identifiers in var index must resolve in ASAP genes for the
+          organism at the declared ensembl_release.
+        checks_performed:
+        - Fails when required uns/ensembl_release is missing
+        - Strips Ensembl version suffixes before lookup
+        - Skips ERCC spike-in identifiers
   cross-field.uns_ensembl:
-    kind: category
     label: Ensembl release and assembly consistency
-    formats:
-    - h5ad
-    - loom
     summary: Ensembl release and assembly must match the dataset organism in ASAP
       reference data.
-    checks_performed:
+    rollup:
     - ensembl_release must be supported by at least one ASAP assembly for the organism
     - ensembl_assembly must match a known assembly for the organism and release when
       present
+    checks:
+      release:
+        title: ensembl_release vs organism
+        summary: The declared ensembl_release must fall within the release range of
+          at least one ASAP assembly for the dataset organism.
+        checks_performed:
+        - Looks up assemblies for organism_ontology_term_id in the ASAP reference
+          database
+        - Compares ensembl_release against first_ensembl_release and latest_ensembl_release
+          on each assembly
+      assembly:
+        title: ensembl_assembly vs organism and release
+        summary: When present, ensembl_assembly must match a known assembly for the
+          organism and be valid for ensembl_release.
+        checks_performed:
+        - Matches assembly names with tolerant prefix comparison (e.g. GRCh38 vs GRCh38.p14)
+        - Skipped when ensembl_assembly is absent
   ontology.format:
-    kind: category
     label: Ontology identifier format checks
-    formats:
-    - h5ad
-    - loom
     summary: Ontology term identifiers must use valid OBO-style PREFIX:ID format and
       allowed prefixes.
-    checks_performed:
+    messages:
+      valid: Ontology terms in '%{field_name}' have valid format
+    rollup:
     - Validates OBO-style PREFIX:ID syntax for ontology term fields
     - Checks allowed ontology prefixes per field (EFO, CL, UBERON, MONDO, etc.)
     - Allows documented special placeholder values (na, unknown, multiethnic)
     - Accepts Cellosaurus CVCL_* identifiers where the schema permits them
-    messages:
-      valid: Ontology terms in '%{field_name}' have valid format
   cross-field.constraints:
-    kind: category
     label: Cross-field schema constraints
-    formats:
-    - h5ad
-    - loom
     summary: Metadata fields must satisfy cross-field consistency rules.
-    checks_performed:
+    rollup:
     - 'CF-1: assay_ontology_term_id determines allowed suspension_type values'
     - 'CF-2a-2f: tissue_type "cell line" forces ethnicity, sex, development_stage,
       donor_id, suspension_type, and tissue ID rules'
@@ -1073,38 +1305,74 @@ checks:
       and Visium in_tissue rules'
     - 'obs.label_pairs: ontology ID / label consistency (auto-generated from label_pairs)'
   ontology.database_resolution:
-    kind: category
     label: Ontology term resolution in ASAP DB
-    formats:
-    - h5ad
-    - loom
     summary: Ontology terms must resolve to known entries in the ASAP ontology database.
-    checks_performed:
+    rollup:
     - Each ontology term ID is looked up in the ASAP ontology database
     - Reports terms that cannot be resolved or mapped to a known ontology entry
     - Label columns are checked against authorised ontology names where applicable
   ontology.organism_specific:
-    kind: category
     label: Organism-specific constraints
-    formats:
-    - h5ad
-    - loom
     summary: Metadata fields whose allowed ontology terms depend on the dataset organism.
-    checks_performed:
+    rollup:
     - Uses organism_ontology_term_id to select taxon-specific ontology prefix rules
     - Development stage prefixes (HsapDv, MmusDv, WBls, ZFS, FBdv)
     - Cell type and tissue prefixes for model organisms (C. elegans, zebrafish, fly)
     - Ethnicity rules for human vs non-human datasets
     - C. elegans sex term restrictions
+    checks:
+      development_stage:
+        title: Development stage ontology prefix
+        summary: development_stage_ontology_term_id must use the taxon-specific stage
+          ontology prefix for the organism (e.g. HsapDv for human).
+        checks_performed:
+        - Reads organism_ontology_term_id from uns metadata
+        - Maps the organism to a required development stage ontology prefix (HsapDv,
+          MmusDv, WBls, ZFS, FBdv, or UBERON)
+        - Each development_stage_ontology_term_id value must use the mapped prefix
+          (or special values unknown, na)
+      cell_type:
+        title: Cell type ontology prefix
+        summary: cell_type_ontology_term_id must use CL or the taxon-specific cell
+          ontology prefix for model organisms.
+        checks_performed:
+        - Reads organism_ontology_term_id from uns metadata
+        - Each cell_type_ontology_term_id value must use an allowed ontology prefix
+          for that organism
+        - 'Default allowed prefixes: CL (plus special values unknown and na)'
+        - Model organisms may require taxon-specific prefixes (WBbt, ZFA, FBbt) per
+          rules.yaml organism_cell_type_mapping
+      tissue:
+        title: Tissue ontology prefix
+        summary: tissue_ontology_term_id must use UBERON, Cellosaurus (cell lines),
+          or taxon-specific anatomy prefixes for model organisms.
+        checks_performed:
+        - Reads organism_ontology_term_id and tissue_type from metadata
+        - Cell line tissue_type requires Cellosaurus CVCL_* terms
+        - Primary cell culture follows cell_type_ontology_term_id prefix rules
+        - Other tissue types use UBERON by default or taxon-specific anatomy prefixes
+          for model organisms
+      ethnicity:
+        title: Ethnicity vs organism
+        summary: Non-human datasets must use ethnicity "na"; Homo sapiens must use
+          HANCESTRO/AfPO terms (not "na").
+        checks_performed:
+        - Reads organism_ontology_term_id from uns metadata
+        - Homo sapiens datasets must use HANCESTRO or AfPO ethnicity terms (not na)
+        - Non-human datasets must use self_reported_ethnicity_ontology_term_id "na"
+      sex:
+        title: C. elegans sex terms
+        summary: For Caenorhabditis elegans, sex_ontology_term_id must be male, hermaphrodite,
+          unknown, or na.
+        checks_performed:
+        - Applies only when organism_ontology_term_id is Caenorhabditis elegans (NCBITaxon:6239)
+        - Each sex_ontology_term_id value must be PATO male, hermaphrodite, unknown,
+          or na
   ontology.semantics:
-    kind: category
     label: Ontology semantic constraints
-    formats:
-    - h5ad
-    - loom
     summary: Ontology terms must satisfy semantic constraints (roots, forbidden branches,
       allowed values).
-    checks_performed:
+    rollup:
     - Per-field semantic subchecks driven by rules.yaml semantic_rules
     - Descendant / root restrictions (any_roots)
     - Banned terms and forbidden branches
@@ -1113,102 +1381,118 @@ checks:
     - Label must match ontology ID for special placeholder pairs
     - organism_ontology_term_id and organism label must match the ASAP organisms table
       (NCBITaxon tax_id and name)
+    semantic_labels:
+      titles:
+        allowed_terms: Allowed / known terms
+        existence: Ontology term existence
+        banned_terms: Banned terms
+        forbidden: Banned term
+        descendants: Descendant / root restrictions
+        lineage: Lineage restrictions
+        sorted_multi: Multi-value ordering
+        ordering: Multi-value ordering
+        special_values: Special placeholder values
+        label_pair: ID / label pairs
+        special_label_pair: Special ID / label pairs
+      summaries:
+        allowed_terms: Each term must resolve as an active (non-obsolete) entry in
+          the ontology database and match any allowed exact values.
+        existence: The term must exist as an active (non-obsolete) entry in the ontology
+          database.
+        banned_terms: Terms must not match a banned identifier or fall under a banned
+          branch.
+        forbidden: This term is explicitly banned for the field.
+        descendants: Each term must descend from one of the required ontology roots.
+        lineage: The term must satisfy the required lineage constraints for this field.
+        sorted_multi: Multiple values must be unique and sorted lexically, separated
+          by " || ".
+        ordering: Multiple values must be unique and sorted lexically, separated by
+          " || ".
+        special_values: Placeholder values allowed instead of a real ontology term.
+        label_pair: Human-readable labels must match their ontology term identifiers.
+        special_label_pair: When a special placeholder ID is used, the label must
+          match exactly.
   extension.spatial:
-    kind: category
     label: Spatial schema extension checks
-    formats:
-    - h5ad
-    - loom
     summary: Spatial transcriptomics extension metadata under uns/spatial.
+    rollup:
+    - Detects spatial datasets from Visium/Slide-seq assays or uns/spatial metadata
+    - 'extension.spatial.structure: uns/spatial dictionary layout'
+    - 'extension.spatial.obs: Visium spot columns when is_single is true'
+    - 'extension.spatial.assets: tissue image arrays and spatial embedding'
   extension.perturb:
-    kind: category
     label: Perturbation schema extension checks
-    formats:
-    - h5ad
-    - loom
     summary: Genetic perturbation extension metadata (scFAIR schema_perturb.md).
-    checks_performed:
+    rollup:
     - Detects perturbation datasets from uns/genetic_perturbations or obs genetic_perturbation_id
     - Requires genetic_perturbation_strategy when genetic_perturbation_id is present
     - Validates perturbation extension structure per schema_perturb.md
   metadata.other:
-    kind: category
     label: Other checks
-    formats:
-    - h5ad
-    - loom
   loom.paths:
-    kind: category
     label: Loom metadata path checks
     formats:
     - loom
     summary: Required Loom HDF5 paths for observation and dataset metadata.
-    checks_performed:
+    rollup:
     - Required Loom HDF5 paths exist for observation and dataset metadata
     - Col_attrs paths mirror AnnData obs fields
     - Global /attrs paths mirror AnnData uns fields
   loom.mapping_manifest:
-    kind: category
     label: anndata_mapping manifest checks
     formats:
     - loom
     summary: The anndata_mapping manifest documents Loom to AnnData path mapping.
-    checks_performed:
+    rollup:
     - Checks for anndata_mapping manifest in /attrs
     - Recommended for deterministic Loom to H5AD conversion
   h5ad.structure:
-    kind: category
     label: AnnData structural integrity
     formats:
     - h5ad
     summary: AnnData object structure (obs, var, layers) integrity checks.
-    checks_performed:
+    rollup:
     - 'AnnData groups exist: obs, var, X'
     - obs column-order metadata matches stored columns
     - Required obs and uns fields are present
   h5ad.embeddings:
-    kind: category
     label: obsm/varm/obsp/varp checks
     formats:
     - h5ad
     summary: Optional embedding matrices in obsm/varm/obsp/varp.
-    checks_performed:
+    rollup:
     - obsm/varm/obsp/varp embedding arrays are readable
     - Embeddings are 2D with at least two columns
     - Row counts match n_obs where applicable
     - No all-NaN or infinite values in embeddings
   h5ad.matrix_encoding:
-    kind: category
     label: Matrix encoding and finite value checks
     formats:
     - h5ad
     summary: Expression matrix encoding and finite numeric values.
-    checks_performed:
+    rollup:
     - Expression matrix X has valid shape and encoding
     - Sparse matrices use supported CSR/CSC layouts
     - Numeric values are finite where required by the schema
   extension.atac:
-    kind: category
     label: ATAC schema extension checks
     formats:
     - h5ad
     summary: ATAC-seq extension metadata.
-    checks_performed:
+    rollup:
     - Detects ATAC or 10x multiome assays via ontology lineage
     - Warns that fragment file assets should be supplied separately
   extension.analysis_json:
-    kind: category
     label: analysis_json extension checks
     formats:
     - h5ad
     summary: analysis_json extension metadata.
-    checks_performed:
+    rollup:
     - Looks for analysis_pipeline metadata (recommended analysis_json extension)
     - Warns when analysis pipeline metadata is absent
   extension.spatial.structure:
-    kind: category
     summary: uns/spatial dictionary layout (is_single, library identifiers, scalefactors).
-    checks_performed:
+    rollup:
     - spatial.is_single must be a boolean
     - Spatial root may only contain is_single and library identifier keys
     - 'Visium + is_single=true: exactly one library identifier with images and scalefactors
@@ -1217,22 +1501,19 @@ checks:
     - 'images section: hires key required, fullres optional; scalefactor scalars must
       be parseable floats'
   extension.spatial.library:
-    kind: category
     summary: Visium library identifier block under uns/spatial when is_single is true.
-    checks_performed:
+    rollup:
     - Exactly one Visium library identifier under uns/spatial when is_single is true
     - Library dict may only contain images and scalefactors keys
   extension.spatial.obs:
-    kind: category
     summary: Visium spot metadata columns (array_row, array_col, in_tissue).
-    checks_performed:
+    rollup:
     - Applies when assay is Visium and spatial.is_single is true
     - Requires obs/array_row, obs/array_col, and obs/in_tissue (col_attrs on Loom)
     - These fields must not be present for non-Visium or is_single=false datasets
   extension.spatial.assets:
-    kind: category
     summary: Tissue image array content and obsm spatial coordinate embedding.
-    checks_performed:
+    rollup:
     - 'Tissue image (images/hires): uint8 3D array (height x width x channels)'
     - 'Tissue image (images/hires): channel dimension must be 3 (RGB) or 4 (RGBA)'
     - 'Tissue image (images/hires): largest dimension 2000 px (4000 px for CytAssist
@@ -1245,483 +1526,61 @@ checks:
     - 'Spatial embedding: dtype kind must be float, integer, or unsigned integer;
       no infinity or NaN'
   extension.spatial.obsm:
-    kind: category
     summary: obsm spatial embedding required when spatial.is_single is true.
-    checks_performed:
+    rollup:
     - obsm/spatial (H5AD) or /col_attrs/spatial (Loom) required when spatial.is_single
       is true
     - Embedding must be 2D with at least two columns and row count matching n_obs
     - Dtype kind must be float, integer, or unsigned integer
     - Must not contain infinity or NaN values
   extension.spatial.images.hires:
-    kind: category
     summary: Visium hires tissue image array (uint8, shape, pixel size).
-    checks_performed:
+    rollup:
     - images/hires must be present for Visium libraries when is_single is true
     - Image dtype must be uint8 with a 3D shape (height x width x channels)
     - Channel dimension must be 3 (RGB) or 4 (RGBA)
     - Largest image dimension must be 2000 px (4000 px for CytAssist 11mm, EFO:0022860)
   extension.perturb.presence:
-    kind: category
     summary: Conditional presence of genetic_perturbation_id, genetic_perturbation_strategy,
       and uns genetic_perturbations.
   extension.perturb.obs.id:
-    kind: category
     summary: obs genetic_perturbation_id values and references to uns genetic_perturbations.
   extension.perturb.strategy:
-    kind: category
     summary: obs genetic_perturbation_strategy enum values.
   extension.perturb.uns:
-    kind: category
     summary: uns genetic_perturbations dictionary structure and curator-required fields.
   extension.perturb.organism:
-    kind: category
     summary: Organism restriction for perturbation datasets.
   metadata.other.reserved_prefix:
-    kind: category
     label: Reserved name prefix
     summary: Metadata field names must not start with "__".
-    checks_performed:
+    rollup:
     - Scans obs and var metadata column names
     - Fails when any name starts with the forbidden "__" prefix
   metadata.other.unique_names.obs:
-    kind: category
     label: Unique obs metadata names
     summary: Observation metadata field names must be unique.
-    checks_performed:
+    rollup:
     - Collects all observation metadata column names
     - Fails when duplicate names are present in obs / col_attrs
   metadata.other.unique_names.var:
-    kind: category
     label: Unique var metadata names
     summary: Variable (gene) metadata field names must be unique.
-    checks_performed:
+    rollup:
     - Collects all variable metadata column names
     - Fails when duplicate names are present in var / row_attrs
   metadata.other.deprecated:
-    kind: category
     label: Deprecated reserved names
     summary: Deprecated reserved names from prior schema versions must not be present.
-    checks_performed:
+    rollup:
     - Checks obs, var, and uns for reserved names deprecated in prior schema versions
     - Includes legacy fields such as obs/ethnicity and uns/version
-  var.index.presence:
-    kind: check
-    category: var.index
-    title: var.index
-    summary: 'AnnData var.index (var_names): unique string feature identifiers per
-      gene row — Ensembl gene_id or ERCC spike-in. This is the DataFrame index, not
-      a var metadata column.'
-    checks_performed:
-    - 'AnnData schema: var.index (feature identifiers / var_names)'
-    - 'H5AD file translation: var/_index (HDF5 encoding of the pandas DataFrame index)'
-    - 'Loom file translation: /row_attrs/feature_id (typical ASAP), or anndata_mapping
-      var_index_key'
-    - Identifiers must be non-empty across all features
-  var.index.uniqueness:
-    kind: check
-    category: var.index
-    title: var index uniqueness
-    summary: Each feature identifier in var index must appear exactly once.
-    checks_performed:
-    - Detects duplicate var index values
-    - Reports duplicate identifiers with occurrence counts
-  var.index.format:
-    kind: check
-    category: var.index
-    title: var index format
-    summary: 'Feature identifiers must follow schema rules: ERCC spike-in IDs or Ensembl
-      gene_id without version suffix.'
-    checks_performed:
-    - 'Spike-in rows (or ERCC-prefixed IDs): ERCC-\d+ pattern (e.g. ERCC-0003)'
-    - 'Ensembl gene IDs: must not include a version suffix when prefixed with ENS'
-    - Gene reference membership at ensembl_release is checked separately under var.cross_field.index.release
-  var.cross_field.feature_reference:
-    kind: check
-    category: var.cross_field
-    title: feature_reference
-    summary: Each feature must declare the schema NCBITaxon reference organism for
-      its annotation (pinned gene references table).
-    checks_performed:
-    - Spike-in rows must use NCBITaxon:32630
-    - Gene rows must use a schema-allowed reference taxon
-    - Gene rows must match organism_ontology_term_id for the dataset
-  var.cross_field.feature_name.index:
-    kind: check
-    category: var.cross_field
-    title: feature_name vs var index
-    summary: 'feature_name must follow the gene reference for each var index: gene_name
-      when assigned, otherwise the index identifier; spike-ins use ERCC-ID (spike-in
-      control).'
-    checks_performed:
-    - Pairs feature_biotype, feature_reference, feature_name, and var index per row
-    - Spike-in feature_name must be "{ERCC-ID} (spike-in control)" matching var index
-    - Gene feature_name must match gene_name from the reference for the index, or
-      default to the index when gene_name is absent
-  var.cross_field.index.release:
-    kind: check
-    category: var.cross_field
-    title: var index vs ensembl_release
-    summary: Gene identifiers in var index must resolve in ASAP genes for the organism
-      at the declared ensembl_release.
-    checks_performed:
-    - Fails when required uns/ensembl_release is missing
-    - Strips Ensembl version suffixes before lookup
-    - Skips ERCC spike-in identifiers
-  cross-field.uns_ensembl.release:
-    kind: check
-    category: cross-field.uns_ensembl
-    title: ensembl_release vs organism
-    summary: The declared ensembl_release must fall within the release range of at
-      least one ASAP assembly for the dataset organism.
-    checks_performed:
-    - Looks up assemblies for organism_ontology_term_id in the ASAP reference database
-    - Compares ensembl_release against first_ensembl_release and latest_ensembl_release
-      on each assembly
-  cross-field.uns_ensembl.assembly:
-    kind: check
-    category: cross-field.uns_ensembl
-    title: ensembl_assembly vs organism and release
-    summary: When present, ensembl_assembly must match a known assembly for the organism
-      and be valid for ensembl_release.
-    checks_performed:
-    - Matches assembly names with tolerant prefix comparison (e.g. GRCh38 vs GRCh38.p14)
-    - Skipped when ensembl_assembly is absent
-  ontology.organism_specific.development_stage:
-    kind: check
-    category: ontology.organism_specific
-    title: Development stage ontology prefix
-    summary: development_stage_ontology_term_id must use the taxon-specific stage
-      ontology prefix for the organism (e.g. HsapDv for human).
-    checks_performed:
-    - Reads organism_ontology_term_id from uns metadata
-    - Maps the organism to a required development stage ontology prefix (HsapDv, MmusDv,
-      WBls, ZFS, FBdv, or UBERON)
-    - Each development_stage_ontology_term_id value must use the mapped prefix (or
-      special values unknown, na)
-  ontology.organism_specific.cell_type:
-    kind: check
-    category: ontology.organism_specific
-    title: Cell type ontology prefix
-    summary: cell_type_ontology_term_id must use CL or the taxon-specific cell ontology
-      prefix for model organisms.
-    checks_performed:
-    - Reads organism_ontology_term_id from uns metadata
-    - Each cell_type_ontology_term_id value must use an allowed ontology prefix for
-      that organism
-    - 'Default allowed prefixes: CL (plus special values unknown and na)'
-    - Model organisms may require taxon-specific prefixes (WBbt, ZFA, FBbt) per rules.yaml
-      organism_cell_type_mapping
-  ontology.organism_specific.tissue:
-    kind: check
-    category: ontology.organism_specific
-    title: Tissue ontology prefix
-    summary: tissue_ontology_term_id must use UBERON, Cellosaurus (cell lines), or
-      taxon-specific anatomy prefixes for model organisms.
-    checks_performed:
-    - Reads organism_ontology_term_id and tissue_type from metadata
-    - Cell line tissue_type requires Cellosaurus CVCL_* terms
-    - Primary cell culture follows cell_type_ontology_term_id prefix rules
-    - Other tissue types use UBERON by default or taxon-specific anatomy prefixes
-      for model organisms
-  ontology.organism_specific.ethnicity:
-    kind: check
-    category: ontology.organism_specific
-    title: Ethnicity vs organism
-    summary: Non-human datasets must use ethnicity "na"; Homo sapiens must use HANCESTRO/AfPO
-      terms (not "na").
-    checks_performed:
-    - Reads organism_ontology_term_id from uns metadata
-    - Homo sapiens datasets must use HANCESTRO or AfPO ethnicity terms (not na)
-    - Non-human datasets must use self_reported_ethnicity_ontology_term_id "na"
-  ontology.organism_specific.sex:
-    kind: check
-    category: ontology.organism_specific
-    title: C. elegans sex terms
-    summary: For Caenorhabditis elegans, sex_ontology_term_id must be male, hermaphrodite,
-      unknown, or na.
-    checks_performed:
-    - Applies only when organism_ontology_term_id is Caenorhabditis elegans (NCBITaxon:6239)
-    - Each sex_ontology_term_id value must be PATO male, hermaphrodite, unknown, or
-      na
   extension.spatial.images.fullres:
-    kind: category
-    summary:
-    checks_performed:
+    summary: Optional full-resolution tissue image when present.
+    rollup:
     - Optional full-resolution tissue image when present
     - Same uint8 3D RGB/RGBA array requirements as hires
-  obs.assay_ontology_term_id:
-    kind: check
-    category: obs.required_presence
-    layer: obs
-    field: assay_ontology_term_id
-    checks_performed:
-    - Verifies required observation column %{path} is present
-  obs.cell_type_ontology_term_id:
-    kind: check
-    category: obs.required_presence
-    layer: obs
-    field: cell_type_ontology_term_id
-    checks_performed:
-    - Verifies required observation column %{path} is present
-  obs.development_stage_ontology_term_id:
-    kind: check
-    category: obs.required_presence
-    layer: obs
-    field: development_stage_ontology_term_id
-    checks_performed:
-    - Verifies required observation column %{path} is present
-  obs.disease_ontology_term_id:
-    kind: check
-    category: obs.required_presence
-    layer: obs
-    field: disease_ontology_term_id
-    checks_performed:
-    - Verifies required observation column %{path} is present
-  obs.self_reported_ethnicity_ontology_term_id:
-    kind: check
-    category: obs.required_presence
-    layer: obs
-    field: self_reported_ethnicity_ontology_term_id
-    checks_performed:
-    - Verifies required observation column %{path} is present
-  obs.sex_ontology_term_id:
-    kind: check
-    category: obs.required_presence
-    layer: obs
-    field: sex_ontology_term_id
-    checks_performed:
-    - Verifies required observation column %{path} is present
-  obs.tissue_ontology_term_id:
-    kind: check
-    category: obs.required_presence
-    layer: obs
-    field: tissue_ontology_term_id
-    checks_performed:
-    - Verifies required observation column %{path} is present
-  obs.donor_id:
-    kind: check
-    category: obs.required_presence
-    layer: obs
-    field: donor_id
-    checks_performed:
-    - Verifies required observation column %{path} is present
-  obs.is_primary_data:
-    kind: check
-    category: obs.required_presence
-    layer: obs
-    field: is_primary_data
-    checks_performed:
-    - Verifies required observation column %{path} is present
-  obs.suspension_type:
-    kind: check
-    category: obs.required_presence
-    layer: obs
-    field: suspension_type
-    checks_performed:
-    - Verifies required observation column %{path} is present
-    - 'Values must be one of: %{allowed_values}'
-  obs.tissue_type:
-    kind: check
-    category: obs.required_presence
-    layer: obs
-    field: tissue_type
-    checks_performed:
-    - Verifies required observation column %{path} is present
-    - 'Values must be one of: %{allowed_values}'
-  uns.title:
-    kind: check
-    category: uns.required_presence
-    layer: uns
-    field: title
-    checks_performed:
-    - Field must be present in uns (H5AD) or /attrs (Loom)
-    - Short human-readable dataset title required by scFAIR
-  uns.organism_ontology_term_id:
-    kind: check
-    category: uns.required_presence
-    layer: uns
-    field: organism_ontology_term_id
-    checks_performed:
-    - Field must be present in uns (H5AD) or /attrs (Loom)
-    - Must use NCBITaxon:tax_id format for the dataset species
-    - Validated for ontology format and semantic constraints when values are present
-  uns.organism:
-    kind: check
-    category: uns.required_presence
-    layer: uns
-    field: organism
-    checks_performed:
-    - Field must be present in uns (H5AD) or /attrs (Loom)
-    - Human-readable organism label paired with organism_ontology_term_id
-    - Label must match the organism name for the declared NCBITaxon term
-  uns.schema_version:
-    kind: check
-    category: uns.required_presence
-    layer: uns
-    field: schema_version
-    checks_performed:
-    - Field must be present in uns (H5AD) or /attrs (Loom)
-    - Must be compatible with the reference scFAIR schema version
-  uns.schema_reference:
-    kind: check
-    category: uns.required_presence
-    layer: uns
-    field: schema_reference
-    checks_performed:
-    - Field must be present in uns (H5AD) or /attrs (Loom)
-    - Must match the canonical schema URL for this validator release
-  uns.ensembl_release:
-    kind: check
-    category: uns.required_presence
-    layer: uns
-    field: ensembl_release
-    checks_performed:
-    - Field must be present in uns (H5AD) or /attrs (Loom)
-    - Must be a positive integer Ensembl release number
-  uns.ensembl_database:
-    kind: check
-    category: uns.required_presence
-    layer: uns
-    field: ensembl_database
-    checks_performed:
-    - Field must be present in uns (H5AD) or /attrs (Loom)
-    - Must be one of the schema Ensembl database enum values
-  uns.ensembl_assembly.field:
-    kind: check
-    category: uns.required_presence
-    layer: uns
-    field: ensembl_assembly
-    checks_performed:
-    - Optional field; skipped when not annotated
-    - When present, must be a non-empty assembly name string
-  var.feature_is_filtered:
-    kind: check
-    category: var.required
-    layer: var
-    field: feature_is_filtered
-    checks_performed:
-    - Column must be present in var (H5AD) or row_attrs (Loom)
-    - Values must be boolean true or false (true, false, True, or False)
-  var.feature_biotype:
-    kind: check
-    category: var.required
-    layer: var
-    field: feature_biotype
-    checks_performed:
-    - Column must be present in var (H5AD) or row_attrs (Loom)
-    - Values must be one of the schema biotype enum values
-  var.feature_length:
-    kind: check
-    category: var.required
-    layer: var
-    field: feature_length
-    checks_performed:
-    - Column must be present in var (H5AD) or row_attrs (Loom)
-    - Values must be a positive integer (gene length in base pairs)
-  var.feature_name:
-    kind: check
-    category: var.required
-    layer: var
-    field: feature_name
-    checks_performed:
-    - Column must be present in var (H5AD) or row_attrs (Loom)
-    - 'Spike-in: "{ERCC-ID} (spike-in control)" matching var index'
-    - 'Gene: gene_name from the reference for var index, or var index when gene_name
-      is absent'
-  var.feature_reference:
-    kind: check
-    category: var.required
-    layer: var
-    field: feature_reference
-    checks_performed:
-    - Column must be present in var (H5AD) or row_attrs (Loom)
-    - Must be the schema NCBITaxon reference organism for the feature (pinned gene
-      annotations table)
-  var.feature_type:
-    kind: check
-    category: var.required
-    layer: var
-    field: feature_type
-    checks_performed:
-    - Column must be present in var (H5AD) or row_attrs (Loom)
-    - Values must be a non-empty string (e.g. protein_coding, synthetic)
-  var.feature_chromosome:
-    kind: check
-    category: var.required
-    layer: var
-    field: feature_chromosome
-    checks_performed:
-    - Column must be present in var (H5AD) or row_attrs (Loom)
-    - Values must be a non-empty string (chromosome name or na for spike-ins)
-
-# UI helpers for check detail popups (field summaries, semantic subcheck labels, spatial rollup).
-check_details:
-  spatial_rollup_checks:
-  - Detects spatial datasets from Visium/Slide-seq assays or uns/spatial metadata
-  - 'extension.spatial.structure: uns/spatial dictionary layout'
-  - 'extension.spatial.obs: Visium spot columns when is_single is true'
-  - 'extension.spatial.assets: tissue image arrays and spatial embedding'
-  semantic:
-    titles:
-      allowed_terms: Allowed / known terms
-      existence: Ontology term existence
-      banned_terms: Banned terms
-      forbidden: Banned term
-      descendants: Descendant / root restrictions
-      lineage: Lineage restrictions
-      sorted_multi: Multi-value ordering
-      ordering: Multi-value ordering
-      special_values: Special placeholder values
-      label_pair: ID / label pairs
-      special_label_pair: Special ID / label pairs
-    summaries:
-      allowed_terms: Each term must resolve as an active (non-obsolete) entry in the
-        ontology database and match any allowed exact values.
-      existence: The term must exist as an active (non-obsolete) entry in the ontology
-        database.
-      banned_terms: Terms must not match a banned identifier or fall under a banned
-        branch.
-      forbidden: This term is explicitly banned for the field.
-      descendants: Each term must descend from one of the required ontology roots.
-      lineage: The term must satisfy the required lineage constraints for this field.
-      sorted_multi: Multiple values must be unique and sorted lexically, separated
-        by " || ".
-      ordering: Multiple values must be unique and sorted lexically, separated by
-        " || ".
-      special_values: Placeholder values allowed instead of a real ontology term.
-      label_pair: Human-readable labels must match their ontology term identifiers.
-      special_label_pair: When a special placeholder ID is used, the label must match
-        exactly.
-  field_summaries:
-    uns:
-      title: Short human-readable dataset title required in uns metadata.
-      organism_ontology_term_id: Species ontology term (NCBITaxon:tax_id) identifying
-        the dataset organism.
-      organism: Human-readable organism name label paired with organism_ontology_term_id.
-      schema_version: Schema version identifier; must be compatible with scFAIR %{schema_version}.
-      schema_reference: Canonical URL of the scFAIR schema this file claims to follow.
-      ensembl_release: Ensembl release number used for gene annotation (positive integer).
-      ensembl_database: Ensembl database source used for gene annotation (Ensembl,
-        EnsemblMetazoa, or EnsemblCOVID-19).
-      ensembl_assembly: Optional genome assembly name for the Ensembl annotation (non-empty
-        when present).
-    var:
-      feature_is_filtered: Per-gene filter flag indicating whether the feature was
-        filtered out of the matrix.
-      feature_biotype: 'Gene biotype: distinguishes annotated genes from ERCC spike-in
-        controls.'
-      feature_length: Gene length in base pairs as a positive integer.
-      feature_name: 'Display name from the gene reference: gene_name when assigned
-        to var index, otherwise the index identifier; spike-ins use ERCC-ID (spike-in
-        control).'
-      feature_reference: NCBITaxon term for the reference organism of the feature
-        from the schema pinned gene annotations table.
-      feature_type: Feature type label such as protein_coding or synthetic (non-empty
-        string).
-      feature_chromosome: Chromosome name for the feature, or na for spike-ins (non-empty
-        string).
-  defaults:
+  _defaults:
     required_observation: Required observation metadata field per scFAIR %{schema_version}.
     required_uns: Required dataset metadata field per scFAIR %{schema_version}.
     required_var: Required variable (gene) metadata field per scFAIR %{schema_version}.

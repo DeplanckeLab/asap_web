@@ -45,8 +45,9 @@ class ScfairH5adValidatorService
     PERTURB_OBS_FIELDS = ["genetic_perturbation_id", "genetic_perturbation_strategy"]
     EXPERIMENTAL_OBS_FIELDS = RULES.get("experimental_obs", [])
     REQUIRED_VAR = RULES.get("required_var", [])
-    EXPERIMENTAL_OBS_FIELDS = RULES.get("experimental_obs", [])
-    REQUIRED_VAR = RULES.get("required_var", [])
+
+    CHECK_MESSAGES = RULES.get("check_messages", {})
+    ONTOLOGY_FORMAT_CHECK_ID = "ontology.format"
 
     TOTAL_STEPS = 8 + len(REQUIRED_OBS) + len(REQUIRED_UNS) + len(ONTOLOGY_FIELDS)
 
@@ -506,6 +507,35 @@ class ScfairH5adValidatorService
             message = message.replace("%{" + key + "}", str(value))
         return message
 
+    def presence_check_id_for_field(field):
+      if field.startswith("var/"):
+        return "var.required"
+      if field.startswith("uns/"):
+        return "uns.required_presence"
+      return "obs.required_presence"
+
+    def check_message(check_id, code, **kwargs):
+      messages = CHECK_MESSAGES.get(check_id, {})
+      raw = messages.get(code, "")
+      if isinstance(raw, dict):
+        template = raw.get("h5ad") or raw.get("default") or ""
+      else:
+        template = raw or ""
+      message = template
+      for key, value in kwargs.items():
+        message = message.replace("%{" + key + "}", str(value))
+      return message
+
+    def presence_entry(field, status, code, **kwargs):
+      check_id = presence_check_id_for_field(field)
+      return {
+        "field": field,
+        "check_id": check_id,
+        "status": status,
+        "code": code,
+        "message": check_message(check_id, code, path=field, **kwargs),
+      }
+
     def check_ontology_values(field_path, values):
       prefixes = ONTOLOGY_FIELDS[field_path]
       specials = SPECIAL_VALUES.get(field_path, set())
@@ -519,6 +549,9 @@ class ScfairH5adValidatorService
             if "CVCL" not in prefixes:
               errors.append({
                 "field": field_path,
+                "check_id": ONTOLOGY_FORMAT_CHECK_ID,
+                "status": "failed",
+                "code": "cellosaurus_disallowed",
                 "message": ontology_format_message(
                   ONTOLOGY_TERM_FORMATS["cellosaurus_disallowed_message"],
                   term=term
@@ -529,6 +562,9 @@ class ScfairH5adValidatorService
           if not OBO_ONTOLOGY_PATTERN.match(term):
             errors.append({
               "field": field_path,
+              "check_id": ONTOLOGY_FORMAT_CHECK_ID,
+              "status": "failed",
+              "code": "invalid_obo",
               "message": ontology_format_message(
                 ONTOLOGY_TERM_FORMATS["obo_invalid_message"],
                 term=term,
@@ -539,11 +575,23 @@ class ScfairH5adValidatorService
             continue
           prefix = term.split(":")[0]
           if prefix not in prefixes:
-            warnings.append({"field": field_path, "message": f"Unexpected ontology prefix '{prefix}' for {field_path}"})
+            warnings.append({
+              "field": field_path,
+              "check_id": ONTOLOGY_FORMAT_CHECK_ID,
+              "status": "warning",
+              "code": "unexpected_prefix",
+              "message": f"Unexpected ontology prefix '{prefix}' for {field_path}"
+            })
             issues += 1
       if issues == 0:
         field_name = field_path.split("/")[-1]
-        valid_checks.append({"field": field_path, "message": f"Ontology terms in '{field_name}' have valid format"})
+        valid_checks.append({
+          "field": field_path,
+          "check_id": ONTOLOGY_FORMAT_CHECK_ID,
+          "status": "passed",
+          "code": "valid",
+          "message": check_message(ONTOLOGY_FORMAT_CHECK_ID, "valid", field_name=field_name)
+        })
 
     def check_enum_values(field_path, values):
       allowed = ENUM_FIELDS.get(field_path)
@@ -615,7 +663,7 @@ class ScfairH5adValidatorService
         emit_progress("obs", f"Checking obs/{field}")
         field_started = time.perf_counter()
         if field in obs_present:
-          valid_checks.append({"field": f"obs/{field}", "message": "Required field present"})
+          valid_checks.append(presence_entry(f"obs/{field}", "passed", "found"))
           if obs_group is not None:
             vals = read_obs_column_values(obs_group, field)
             if vals:
@@ -623,7 +671,7 @@ class ScfairH5adValidatorService
               field_values[field_path] = vals[:200]
               check_enum_values(field_path, vals)
         else:
-          errors.append({"field": f"obs/{field}", "message": "Missing required observation field"})
+          errors.append(presence_entry(f"obs/{field}", "failed", "missing"))
         emit_timing(f"h5py.obs/{field}", field_started, {"n_unique": len(field_values.get(f"obs/{field}", []))})
       emit_timing("h5py.required_obs", required_obs_started, {"fields": len(REQUIRED_OBS)})
 
@@ -639,13 +687,13 @@ class ScfairH5adValidatorService
         emit_progress("uns", f"Checking uns/{field}")
         if field in uns_present:
           if field != "schema_version":
-            valid_checks.append({"field": f"uns/{field}", "message": "Required field present"})
+            valid_checks.append(presence_entry(f"uns/{field}", "passed", "found"))
           if uns_group is not None:
             vals = read_uns_value(uns_group, field)
             if vals:
               field_values[f"uns/{field}"] = vals[:200]
         else:
-          errors.append({"field": f"uns/{field}", "message": "Missing required dataset metadata field"})
+          errors.append(presence_entry(f"uns/{field}", "failed", "missing"))
       emit_timing("h5py.required_uns", uns_started, {"fields": len(REQUIRED_UNS)})
 
       if uns_group is not None:

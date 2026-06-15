@@ -183,6 +183,9 @@ class ScfairComplianceService
     status = (item[:status] || item['status']).to_s
     return false if status == 'failed'
 
+    check_id = (item[:check_id] || item['check_id']).to_s
+    return Scfair::Rules.presence_check_id?(check_id) if check_id.present?
+
     Scfair::CheckDetailBuilder.presence_check_message?(item[:message] || item['message'])
   end
 

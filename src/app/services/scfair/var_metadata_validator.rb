@@ -40,11 +40,11 @@ module Scfair
       @required_fields.each do |field_name|
         field = var_path(field_name)
         if var_columns.include?(field_name)
-          valid_checks << { field: field, status: 'passed', message: 'Required field present' }
+          valid_checks << Scfair::CheckResult.presence(field: field, format: @format, status: 'passed', code: 'found')
         else
-          message = 'Missing required variable metadata field'
-          errors << { field: field, message: message }
-          valid_checks << { field: field, status: 'failed', message: message }
+          entry = Scfair::CheckResult.presence(field: field, format: @format, status: 'failed', code: 'missing')
+          errors << entry
+          valid_checks << entry.merge(status: 'failed')
         end
       end
     end

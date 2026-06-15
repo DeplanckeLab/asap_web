@@ -120,7 +120,12 @@ module Scfair
                  'passed'
                end
 
-      { field: field, message: message, status: status }
+      item = { field: field, message: message, status: status }
+      check_id = (entry[:check_id] || entry['check_id']).to_s.presence
+      code = (entry[:code] || entry['code']).to_s.presence
+      item[:check_id] = check_id if check_id.present?
+      item[:code] = code if code.present?
+      item
     end
 
     def merge_item!(bucket, item)

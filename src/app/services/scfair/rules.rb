@@ -535,13 +535,13 @@ module Scfair
       cross = cross_field_check_detail(field_id)
       return cross if cross.present?
 
-      raw = data.dig(:check_details, :by_field, field_id.to_sym)
-      return nil if raw.blank?
+      entry = check_entry(field_id.to_s)
+      return nil unless entry&.dig(:kind) == 'check'
 
       {
-        title: raw[:title].to_s,
-        summary: raw[:summary].to_s,
-        checks: Array(raw[:checks]).map(&:to_s).freeze
+        title: entry[:title].presence || entry[:label],
+        summary: entry[:summary],
+        checks: entry[:checks]
       }.freeze
     end
 
@@ -576,7 +576,7 @@ module Scfair
     end
 
     def category_summary(key)
-      data.dig(:check_details, :categories, :summaries, key.to_sym).to_s.presence
+      check_entry(key)&.dig(:summary).to_s.presence
     end
 
     def category_summary?(key)
@@ -584,17 +584,117 @@ module Scfair
     end
 
     def category_checks_list(category_id)
-      Array(data.dig(:check_details, :categories, :checks, category_id.to_sym)).map(&:to_s).freeze
+      Array(check_entry(category_id)&.dig(:checks)).map(&:to_s).freeze
+    end
+
+    PRESENCE_CHECK_IDS = %w[obs.required_presence uns.required_presence var.required].freeze
+    ONTOLOGY_FORMAT_CHECK_ID = 'ontology.format'
+
+    def checks_registry
+      @checks_registry ||= build_checks_registry.freeze
+    end
+
+    def check_entry(check_id)
+      checks_registry[check_id.to_s]
+    end
+
+    def check_message(check_id, code, format: 'h5ad', **kwargs)
+      messages = check_entry(check_id)&.dig(:messages) || {}
+      raw = messages[code.to_s]
+      template = case raw
+                 when Hash
+                   raw[format.to_s].presence || raw['default'].to_s
+                 else
+                   raw.to_s
+                 end
+      return kwargs[:default].to_s if template.blank?
+
+      kwargs.empty? ? template : format(template, **kwargs)
+    rescue KeyError
+      template.to_s
+    end
+
+    def presence_check_id_for_field(field, _format = 'h5ad')
+      path = field.to_s
+      return 'var.required' if path.start_with?('var/') || path.start_with?('/row_attrs/')
+      return 'uns.required_presence' if path.start_with?('uns/') || path.start_with?('/attrs/')
+
+      'obs.required_presence'
+    end
+
+    def presence_check_id?(check_id)
+      PRESENCE_CHECK_IDS.include?(check_id.to_s)
+    end
+
+    def ontology_format_check_id?(check_id)
+      check_id.to_s == ONTOLOGY_FORMAT_CHECK_ID
+    end
+
+    def build_checks_registry
+      registry = {}
+      (data[:checks] || {}).each do |check_id, cfg|
+        next unless cfg.is_a?(Hash)
+
+        id = check_id.to_s
+        registry[id] = normalize_check_entry(id, cfg)
+      end
+      registry
+    end
+
+    def normalize_check_entry(id, cfg)
+      {
+        id: id,
+        kind: cfg[:kind].to_s.presence || 'category',
+        label: cfg[:label].to_s.presence || cfg[:title].to_s.presence || id.tr('.', ' '),
+        title: cfg[:title].to_s,
+        category: cfg[:category].to_s,
+        formats: Array(cfg[:formats]).map(&:to_s),
+        summary: cfg[:summary].to_s,
+        checks: Array(cfg[:checks_performed] || cfg[:checks]).map(&:to_s),
+        messages: normalize_messages(cfg[:messages] || {}),
+        layer: cfg[:layer].to_s,
+        field: cfg[:field].to_s
+      }
+    end
+
+    def normalize_messages(messages)
+      messages.each_with_object({}) do |(code, template), out|
+        out[code.to_s] = if template.is_a?(Hash)
+                           template.each_with_object({}) { |(fmt, text), h| h[fmt.to_s] = text.to_s }
+                         else
+                           template.to_s
+                         end
+      end
+    end
+
+    def checks_for(format)
+      fmt = format.to_s
+      checks_registry.values
+        .select { |entry| entry[:kind] == 'category' && Array(entry[:formats]).include?(fmt) }
+        .map { |entry| { id: entry[:id], label: entry[:label] } }
+        .uniq { |entry| entry[:id] }
+        .freeze
+    end
+
+    def field_check_entry(layer, field_name)
+      id = "#{layer}.#{field_name}"
+      entry = check_entry(id)
+      return entry if entry&.dig(:kind) == 'check'
+
+      check_entry("#{id}.field")
     end
 
     def metadata_other_detail(field)
-      raw = data.dig(:check_details, :metadata_other, field.to_sym)
-      return nil if raw.blank?
+      field = field.to_s
+      return nil unless field.start_with?('metadata.other.')
+
+      entry = check_entry(field)
+      return nil unless entry&.dig(:kind) == 'category'
 
       {
-        title: raw[:title].to_s,
-        summary: raw[:summary].to_s,
-        checks: Array(raw[:checks]).map(&:to_s).freeze
+        title: entry[:label],
+        summary: entry[:summary],
+        checks: entry[:checks]
       }.freeze
     end
 
@@ -603,15 +703,10 @@ module Scfair
     end
 
     def layer_field_checks(layer, field_name, format: 'h5ad')
-      field_entries = Array(data.dig(:check_details, :layer_field_checks, layer.to_sym, field_name.to_sym))
-      return [] if field_entries.empty?
+      entry = field_check_entry(layer, field_name)
+      return [] if entry.blank? || entry[:checks].blank?
 
-      templates = data.dig(:check_details, :layer_field_checks, layer.to_sym, :_templates) || {}
-      field_entries.map do |entry|
-        key = entry.is_a?(Symbol) ? entry : entry.to_sym
-        text = templates[key].presence || entry.to_s
-        interpolate_layer_field_check(text, layer, field_name, format)
-      end.freeze
+      entry[:checks].map { |text| interpolate_layer_field_check(text, layer, field_name, format) }.freeze
     end
 
     def interpolate_layer_field_check(text, layer, field_name, format)
@@ -625,7 +720,10 @@ module Scfair
     end
 
     def extension_field_checks(field)
-      Array(data.dig(:check_details, :extension_field_checks, field.to_sym)).map(&:to_s).freeze
+      entry = check_entry(field.to_s)
+      return [] unless entry
+
+      Array(entry[:checks]).map(&:to_s).freeze
     end
 
     def semantic_check_title(suffix)
@@ -806,21 +904,6 @@ module Scfair
       Array(organism_specific_validation_config.dig(:special_values, rule.to_s)).map(&:to_s).freeze
     end
 
-    def message_pattern_regexes(category)
-      Array(data.dig(:check_details, :message_patterns, category.to_sym)).map do |raw|
-        source = raw.to_s
-        if source.include?('.+') || source.include?('\(') || source.start_with?('\A')
-          Regexp.new(source)
-        else
-          /#{Regexp.escape(source)}/
-        end
-      end.freeze
-    end
-
-    def message_matches_pattern?(category, message)
-      message_pattern_regexes(category).any? { |pattern| message.to_s.match?(pattern) }
-    end
-
     def ontology_semantics_display_constraints(suffix)
       rows = Array(data.dig(:ontology_semantics_display, suffix.to_sym, :constraints))
       rows.each_with_index.map do |row, idx|
@@ -948,22 +1031,6 @@ module Scfair
       end
     end
 
-    def checks_for(format)
-      checks = checks_catalog(:common).dup
-      checks.concat(checks_catalog(:loom_only)) if format.to_s == 'loom'
-      checks.concat(checks_catalog(:h5ad_only)) if format.to_s == 'h5ad'
-      checks
-    end
-
-    def checks_catalog(section)
-      Array(data.dig(:checks_catalog, section)).map do |entry|
-        {
-          id: entry[:id],
-          label: entry[:label]
-        }
-      end.freeze
-    end
-
     def experimental_condition_obs_fields
       rules = experimental_condition_rules
       [
@@ -995,8 +1062,17 @@ module Scfair
           'obo_invalid_message' => ontology_term_format_config[:obo_invalid_message],
           'cellosaurus_disallowed_message' => ontology_term_format_config[:cellosaurus_disallowed_message],
           'obo_example' => ontology_term_format_config[:obo_example]
-        }
+        },
+        'check_messages' => validator_check_messages
       }
+    end
+
+    def validator_check_messages
+      checks_registry.values.each_with_object({}) do |entry, out|
+        next if entry[:messages].blank?
+
+        out[entry[:id]] = entry[:messages]
+      end
     end
 
     def resolve_constant_ref(value)

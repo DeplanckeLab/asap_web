@@ -36,7 +36,7 @@ module Scfair
       if raw.blank?
         return if defer_presence_to_base_validator?('ensembl_release')
 
-        record_presence_failure(errors, valid_checks, field:, message: presence_message('ensembl_release'))
+        record_presence_failure(errors, valid_checks, field:)
         return
       end
 
@@ -68,7 +68,7 @@ module Scfair
       if raw.blank?
         return if defer_presence_to_base_validator?('ensembl_database')
 
-        record_presence_failure(errors, valid_checks, field:, message: presence_message('ensembl_database'))
+        record_presence_failure(errors, valid_checks, field:)
         return
       end
 
@@ -117,8 +117,8 @@ module Scfair
       columns.any? && !columns.include?(name)
     end
 
-    def presence_message(name)
-      'Missing required dataset metadata field'
+    def presence_message(_name)
+      nil
     end
 
     def uns_path(name)
@@ -148,9 +148,16 @@ module Scfair
       Array(@field_values[field] || @field_values[field.to_sym]).first.to_s.strip
     end
 
-    def record_presence_failure(errors, valid_checks, field:, message:)
-      errors << { field: field, message: message }
-      valid_checks << { field: field, status: 'failed', message: message }
+    def record_presence_failure(errors, valid_checks, field:, message: nil)
+      entry = Scfair::CheckResult.presence(
+        field: field,
+        format: @format,
+        status: 'failed',
+        code: 'missing',
+        message: message
+      )
+      errors << entry
+      valid_checks << entry.merge(status: 'failed')
     end
 
     def record_value_failure(errors, valid_checks, value_check:, message:)

@@ -115,9 +115,19 @@ class ScfairRulesValidationMessagesTest < TestBaseWithoutFixtures
     assert_includes loom_checks.last, 'tissue, organoid, cell line, primary cell culture'
   end
 
-  test 'presence message patterns match required field messages' do
-    assert Scfair::Rules.message_matches_pattern?(:presence, 'Required field present')
-    assert Scfair::Rules.message_matches_pattern?(:presence, 'Missing required dataset metadata field')
-    assert Scfair::Rules.message_matches_pattern?(:ontology_format, 'Invalid ontology term format')
+  test 'presence check ids classify required field messages' do
+    assert Scfair::Rules.presence_check_id?('obs.required_presence')
+    assert Scfair::Rules.presence_check_id?('uns.required_presence')
+    assert Scfair::Rules.presence_check_id?('var.required')
+    assert Scfair::Rules.ontology_format_check_id?('ontology.format')
+
+    assert_equal 'obs.required_presence', Scfair::Rules.presence_check_id_for_field('obs/assay')
+    assert_equal 'uns.required_presence', Scfair::Rules.presence_check_id_for_field('uns/title')
+    assert_equal 'var.required', Scfair::Rules.presence_check_id_for_field('var/feature_name')
+
+    assert_equal 'Required field present',
+                 Scfair::Rules.check_message('obs.required_presence', 'found', format: 'h5ad')
+    assert_equal 'Found /col_attrs/assay metadata',
+                 Scfair::Rules.check_message('obs.required_presence', 'found', format: 'loom', path: '/col_attrs/assay')
   end
 end

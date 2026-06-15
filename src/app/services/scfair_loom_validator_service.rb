@@ -324,25 +324,26 @@ class ScfairLoomValidatorService
 
     # Check for CellID (required unique identifier)
     if col_attrs.include?('CellID') || col_attrs.include?('cell_id') || col_attrs.include?('obs_names')
-      @valid_checks << { field: '/col_attrs/CellID', message: 'Found /col_attrs/CellID metadata', check_type: 'presence' }
+      @valid_checks << presence_check('/col_attrs/CellID', 'passed', 'found')
     else
-      @errors << { field: '/col_attrs/CellID', message: 'Missing /col_attrs/CellID metadata (unique cell identifiers required)', check_type: 'presence' }
+      @errors << presence_check('/col_attrs/CellID', 'failed', 'missing_cell_id')
     end
 
     # Check required cell metadata fields
     REQUIRED_CELL_METADATA.each do |field|
+      path = "/col_attrs/#{field}"
       if col_attrs.include?(field)
-        @valid_checks << { field: "/col_attrs/#{field}", message: "Found /col_attrs/#{field} metadata", check_type: 'presence' }
+        @valid_checks << presence_check(path, 'passed', 'found')
       else
         # cell_type_ontology_term_id is conditionally required
         if field == 'cell_type_ontology_term_id'
           is_pre_analysis = get_global_attr('is_pre_analysis')
           if is_pre_analysis == true || is_pre_analysis == 'true'
-            @valid_checks << { field: "/col_attrs/#{field}", message: 'Skipped (pre-analysis dataset)', check_type: 'presence' }
+            @valid_checks << presence_check(path, 'skipped', 'skipped_pre_analysis')
             next
           end
         end
-        @errors << { field: "/col_attrs/#{field}", message: "Missing /col_attrs/#{field} metadata (required by schema)", check_type: 'presence' }
+        @errors << presence_check(path, 'failed', 'missing')
       end
     end
 
@@ -368,10 +369,11 @@ class ScfairLoomValidatorService
       is_single = get_global_attr('spatial/is_single') || get_global_attr('spatial_is_single')
       if is_single == true || is_single == 'true'
         %w[array_row array_col in_tissue].each do |field|
+          path = "/col_attrs/#{field}"
           if col_attrs.include?(field)
-            @valid_checks << { field: "/col_attrs/#{field}", message: "Found /col_attrs/#{field} metadata", check_type: 'presence' }
+            @valid_checks << presence_check(path, 'passed', 'found')
           else
-            @errors << { field: "/col_attrs/#{field}", message: "Missing /col_attrs/#{field} metadata (required for Visium spatial data with is_single=true)", check_type: 'presence' }
+            @errors << presence_check(path, 'failed', 'missing_visium')
           end
         end
       end
@@ -383,12 +385,13 @@ class ScfairLoomValidatorService
 
     # Check required global attributes
     REQUIRED_GLOBAL_ATTRS.each do |attr|
+      path = "/attrs/#{attr}"
       if global_attrs.include?(attr)
         unless attr == 'schema_version'
-          @valid_checks << { field: "/attrs/#{attr}", message: "Found /attrs/#{attr} metadata", check_type: 'presence' }
+          @valid_checks << presence_check(path, 'passed', 'found')
         end
       else
-        @errors << { field: "/attrs/#{attr}", message: "Missing /attrs/#{attr} metadata (required by schema)", check_type: 'presence' }
+        @errors << presence_check(path, 'failed', 'missing')
       end
     end
 
@@ -441,7 +444,14 @@ class ScfairLoomValidatorService
     errors_after = @errors.size + @warnings.size
     if errors_after == errors_before
       field_name = path.split('/').last
-      @valid_checks << { field: path, message: "Ontology terms in '#{field_name}' have valid format" }
+      @valid_checks << Scfair::CheckResult.build(
+        check_id: Scfair::Rules::ONTOLOGY_FORMAT_CHECK_ID,
+        field: path,
+        status: 'passed',
+        code: 'valid',
+        format: 'loom',
+        field_name: field_name
+      )
     end
   end
 
@@ -449,7 +459,14 @@ class ScfairLoomValidatorService
     field_name = field.split('/').last.to_s
     format_error = Scfair::Rules.ontology_format_error_message(term, field_name)
     if format_error.present?
-      @errors << { field: field, message: format_error }
+      @errors << Scfair::CheckResult.build(
+        check_id: Scfair::Rules::ONTOLOGY_FORMAT_CHECK_ID,
+        field: field,
+        status: 'failed',
+        code: 'invalid_obo',
+        format: 'loom',
+        message: format_error
+      )
       return
     end
 
@@ -457,7 +474,14 @@ class ScfairLoomValidatorService
 
     prefix = term.split(':').first
     unless valid_prefixes.include?(prefix)
-      @warnings << { field: field, message: "Ontology prefix '#{prefix}' in '#{term}' may not be valid for this field. Expected: #{valid_prefixes.join(', ')}" }
+      @warnings << Scfair::CheckResult.build(
+        check_id: Scfair::Rules::ONTOLOGY_FORMAT_CHECK_ID,
+        field: field,
+        status: 'warning',
+        code: 'unexpected_prefix',
+        format: 'loom',
+        message: "Ontology prefix '#{prefix}' in '#{term}' may not be valid for this field. Expected: #{valid_prefixes.join(', ')}"
+      )
     end
   end
 
@@ -904,6 +928,16 @@ class ScfairLoomValidatorService
 
   def asap_command(*args)
     ['docker', 'exec', ASAP_RUN_CONTAINER, 'java', '-jar', '/srv/ASAP.jar'] + args
+  end
+
+  def presence_check(field, status, code)
+    Scfair::CheckResult.presence(
+      field: field,
+      format: 'loom',
+      status: status,
+      code: code,
+      path: field
+    )
   end
 
   def format_size(bytes)

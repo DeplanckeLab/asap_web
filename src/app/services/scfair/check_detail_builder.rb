@@ -2,358 +2,6 @@
 
 module Scfair
   class CheckDetailBuilder
-    CATEGORY_SUMMARIES = {
-      'obs.required_presence' => 'Required per-cell observation metadata fields defined by scFAIR 7.1.0.',
-      'uns.required_presence' => 'Required dataset-level metadata fields in uns/attrs.',
-      'schema.version' => 'The file schema_version must be compatible with the reference schema version.',
-      'schema.reference' => 'The file schema_reference should match the canonical URL of the reference schema.',
-      'uns.ensembl' => 'Ensembl release, database, and optional assembly used for gene annotation.',
-      'obs.experimental_condition' => 'Experimental condition ontology IDs, labels, and perturbation types.',
-      'var.required' => 'Required per-gene metadata columns in var / row_attrs.',
-      'var.index' => 'Var pandas.DataFrame index: unique feature identifiers (Ensembl gene_id or ERCC spike-in).',
-      'var.cross_field' => 'Var metadata must be consistent with uns organism and ensembl_release.',
-      'cross-field.uns_ensembl' => 'Ensembl release and assembly must match the dataset organism in ASAP reference data.',
-      'schema.reference' => 'The file schema_reference should match the canonical URL of the reference schema.',
-      'uns.ensembl' => 'Ensembl release, database, and optional assembly used for gene annotation.',
-      'obs.experimental_condition' => 'Experimental condition ontology IDs, labels, and perturbation types.',
-      'var.required' => 'Required per-gene metadata columns in var / row_attrs.',
-      'var.index' => 'Var pandas.DataFrame index: unique feature identifiers (Ensembl gene_id or ERCC spike-in).',
-      'var.cross_field' => 'Var metadata must be consistent with uns organism and ensembl_release.',
-      'cross-field.uns_ensembl' => 'Ensembl release and assembly must match the dataset organism in ASAP reference data.',
-      'ontology.format' => 'Ontology term identifiers must use valid OBO-style PREFIX:ID format and allowed prefixes.',
-      'cross-field.constraints' => 'Metadata fields must satisfy cross-field consistency rules.',
-      'ontology.database_resolution' => 'Ontology terms must resolve to known entries in the ASAP ontology database.',
-      'ontology.organism_specific' => 'Metadata fields whose allowed ontology terms depend on the dataset organism.',
-      'ontology.semantics' => 'Ontology terms must satisfy semantic constraints (roots, forbidden branches, allowed values).',
-      'loom.paths' => 'Required Loom HDF5 paths for observation and dataset metadata.',
-      'loom.mapping_manifest' => 'The anndata_mapping manifest documents Loom to AnnData path mapping.',
-      'h5ad.structure' => 'AnnData object structure (obs, var, layers) integrity checks.',
-      'h5ad.embeddings' => 'Optional embedding matrices in obsm/varm/obsp/varp.',
-      'h5ad.matrix_encoding' => 'Expression matrix encoding and finite numeric values.',
-      'extension.spatial' => 'Spatial transcriptomics extension metadata under uns/spatial.',
-      'extension.spatial.structure' => 'uns/spatial dictionary layout (is_single, library identifiers, scalefactors).',
-      'extension.spatial.library' => 'Visium library identifier block under uns/spatial when is_single is true.',
-      'extension.spatial.obs' => 'Visium spot metadata columns (array_row, array_col, in_tissue).',
-      'extension.spatial.assets' => 'Tissue image array content and obsm spatial coordinate embedding.',
-      'extension.spatial.obsm' => 'obsm spatial embedding required when spatial.is_single is true.',
-      'extension.spatial.images.hires' => 'Visium hires tissue image array (uint8, shape, pixel size).',
-      'extension.perturb' => 'Genetic perturbation extension metadata (scFAIR schema_perturb.md).',
-      'extension.perturb.presence' => 'Conditional presence of genetic_perturbation_id, genetic_perturbation_strategy, and uns genetic_perturbations.',
-      'extension.perturb.obs.id' => 'obs genetic_perturbation_id values and references to uns genetic_perturbations.',
-      'extension.perturb.strategy' => 'obs genetic_perturbation_strategy enum values.',
-      'extension.perturb.uns' => 'uns genetic_perturbations dictionary structure and curator-required fields.',
-      'extension.perturb.organism' => 'Organism restriction for perturbation datasets.',
-      'extension.atac' => 'ATAC-seq extension metadata.',
-      'extension.analysis_json' => 'analysis_json extension metadata.',
-      'metadata.other.reserved_prefix' => 'Metadata field names must not start with "__".',
-      'metadata.other.unique_names.obs' => 'Observation metadata field names must be unique.',
-      'metadata.other.unique_names.var' => 'Variable (gene) metadata field names must be unique.',
-      'metadata.other.deprecated' => 'Deprecated reserved names from prior schema versions must not be present.'
-    }.freeze
-
-    METADATA_OTHER_TITLES = {
-      'metadata.other.reserved_prefix' => 'Reserved name prefix',
-      'metadata.other.unique_names.obs' => 'Unique obs metadata names',
-      'metadata.other.unique_names.var' => 'Unique var metadata names',
-      'metadata.other.deprecated' => 'Deprecated reserved names'
-    }.freeze
-
-    CATEGORY_CHECKS = {
-      'obs.required_presence' => [
-        'Each required observation (obs / col_attrs) column from scFAIR 7.1.0 is present',
-        'Ontology term ID fields: assay, cell_type, disease, development_stage, sex, tissue, ethnicity',
-        'Human-readable label columns paired with each ontology term ID',
-        'Categorical fields: tissue_type, suspension_type, donor_id, is_primary_data'
-      ],
-      'uns.required_presence' => [
-        'Each required dataset metadata field is validated individually',
-        'Open a specific field check for presence requirements'
-      ],
-      'schema.version' => [
-        'Reads schema_version from uns/attrs',
-        'Compares major.minor version against the reference scFAIR release',
-        'Accepts compatible schema_version identifiers (e.g. 7.1.0_scfair)'
-      ],
-      'schema.reference' => [
-        'Reads schema_reference from uns (H5AD) or /attrs (Loom)',
-        'Compares against the canonical schema URL for this validator release',
-        'Warns when the URL does not match exactly'
-      ],
-      'uns.ensembl' => [
-        'Each Ensembl metadata field is validated individually',
-        'Open a specific field check for presence and value constraints'
-      ],
-      'obs.experimental_condition' => [
-        'experimental_condition_ontology_term_id must be absent when all observations are na',
-        'experimental_condition label required when the ID column is present',
-        'perturbation_types required when experimental_condition or genetic_perturbation_id is present',
-        'Multi-values must be unique and sorted lexically with " || " delimiter'
-      ],
-      'var.required' => [
-        'Each required var / row_attrs column is validated individually',
-        'Open a specific field check for column presence and value constraints'
-      ],
-      'var.index' => [
-        'Var index must be present (H5AD var/_index; Loom /row_attrs/feature_id or _index)',
-        'Identifiers must be unique across all features',
-        'ERCC spike-in and Ensembl gene_id format rules (version suffix stripped for ENS IDs)'
-      ],
-      'var.cross_field' => [
-        'feature_reference must use schema NCBITaxon reference taxa per feature biotype',
-        'feature_name must match var index per gene reference rules (gene_name or index; ERCC for spike-ins)',
-        'var index gene identifiers must exist for the organism at ensembl_release'
-      ],
-      'cross-field.uns_ensembl' => [
-        'ensembl_release must be supported by at least one ASAP assembly for the organism',
-        'ensembl_assembly must match a known assembly for the organism and release when present'
-      ],
-      'schema.reference' => [
-        'Reads schema_reference from uns (H5AD) or /attrs (Loom)',
-        'Compares against the canonical schema URL for this validator release',
-        'Warns when the URL does not match exactly'
-      ],
-      'uns.ensembl' => [
-        'Each Ensembl metadata field is validated individually',
-        'Open a specific field check for presence and value constraints'
-      ],
-      'obs.experimental_condition' => [
-        'experimental_condition_ontology_term_id must be absent when all observations are na',
-        'experimental_condition label required when the ID column is present',
-        'perturbation_types required when experimental_condition or genetic_perturbation_id is present',
-        'Multi-values must be unique and sorted lexically with " || " delimiter'
-      ],
-      'var.required' => [
-        'Each required var / row_attrs column is validated individually',
-        'Open a specific field check for column presence and value constraints'
-      ],
-      'var.index' => [
-        'Var index must be present (H5AD var/_index; Loom /row_attrs/feature_id or _index)',
-        'Identifiers must be unique across all features',
-        'ERCC spike-in and Ensembl gene_id format rules (version suffix stripped for ENS IDs)'
-      ],
-      'var.cross_field' => [
-        'feature_reference must use schema NCBITaxon reference taxa per feature biotype',
-        'feature_name must match var index per gene reference rules (gene_name or index; ERCC for spike-ins)',
-        'var index gene identifiers must exist for the organism at ensembl_release'
-      ],
-      'cross-field.uns_ensembl' => [
-        'ensembl_release must be supported by at least one ASAP assembly for the organism',
-        'ensembl_assembly must match a known assembly for the organism and release when present'
-      ],
-      'ontology.format' => [
-        'Validates OBO-style PREFIX:ID syntax for ontology term fields',
-        'Checks allowed ontology prefixes per field (EFO, CL, UBERON, MONDO, etc.)',
-        'Allows documented special placeholder values (na, unknown, multiethnic)',
-        'Accepts Cellosaurus CVCL_* identifiers where the schema permits them'
-      ],
-      'cross-field.constraints' => [
-        'CF-1: assay_ontology_term_id determines allowed suspension_type values',
-        'CF-2a-2f: tissue_type "cell line" forces ethnicity, sex, development_stage, donor_id, suspension_type, and tissue ID rules',
-        'CF-3: donor_id must not be "na" except for cell lines',
-        'CF-4: organoid tissue must not be embryo (UBERON:0000922)',
-        'CF-5 to CF-10: spatial assay uniformity, metadata presence, is_primary_data, and Visium in_tissue rules',
-        'CF-8: special ontology IDs (na/unknown) must match their label columns'
-      ],
-      'ontology.database_resolution' => [
-        'Each ontology term ID is looked up in the ASAP ontology database',
-        'Reports terms that cannot be resolved or mapped to a known ontology entry',
-        'Label columns are checked against authorised ontology names where applicable'
-      ],
-      'ontology.organism_specific' => [
-        'Uses organism_ontology_term_id to select taxon-specific ontology prefix rules',
-        'Development stage prefixes (HsapDv, MmusDv, WBls, ZFS, FBdv)',
-        'Cell type and tissue prefixes for model organisms (C. elegans, zebrafish, fly)',
-        'Ethnicity rules for human vs non-human datasets',
-        'C. elegans sex term restrictions'
-      ],
-      'ontology.semantics' => [
-        'Per-field semantic subchecks driven by rules.yaml semantic_rules',
-        'Descendant / root restrictions (any_roots)',
-        'Banned terms and forbidden branches',
-        'Allowed exact terms and special placeholder values',
-        'Multi-value ordering for ethnicity (sorted " || " lists)',
-        'Label must match ontology ID for special placeholder pairs',
-        'organism_ontology_term_id and organism label must match the ASAP organisms table (NCBITaxon tax_id and name)'
-      ],
-      'loom.paths' => [
-        'Required Loom HDF5 paths exist for observation and dataset metadata',
-        'Col_attrs paths mirror AnnData obs fields',
-        'Global /attrs paths mirror AnnData uns fields'
-      ],
-      'loom.mapping_manifest' => [
-        'Checks for anndata_mapping manifest in /attrs',
-        'Recommended for deterministic Loom to H5AD conversion'
-      ],
-      'h5ad.structure' => [
-        'AnnData groups exist: obs, var, X',
-        'obs column-order metadata matches stored columns',
-        'Required obs and uns fields are present'
-      ],
-      'h5ad.embeddings' => [
-        'obsm/varm/obsp/varp embedding arrays are readable',
-        'Embeddings are 2D with at least two columns',
-        'Row counts match n_obs where applicable',
-        'No all-NaN or infinite values in embeddings'
-      ],
-      'h5ad.matrix_encoding' => [
-        'Expression matrix X has valid shape and encoding',
-        'Sparse matrices use supported CSR/CSC layouts',
-        'Numeric values are finite where required by the schema'
-      ],
-      'extension.perturb' => [
-        'Detects perturbation datasets from uns/genetic_perturbations or obs genetic_perturbation_id',
-        'Requires genetic_perturbation_strategy when genetic_perturbation_id is present',
-        'Validates perturbation extension structure per schema_perturb.md'
-      ],
-      'extension.atac' => [
-        'Detects ATAC or 10x multiome assays via ontology lineage',
-        'Warns that fragment file assets should be supplied separately'
-      ],
-      'extension.analysis_json' => [
-        'Looks for analysis_pipeline metadata (recommended analysis_json extension)',
-        'Warns when analysis pipeline metadata is absent'
-      ]
-    }.freeze
-
-    METADATA_OTHER_CHECKS = {
-      'metadata.other.reserved_prefix' => [
-        'Scans obs and var metadata column names',
-        'Fails when any name starts with the forbidden "__" prefix'
-      ],
-      'metadata.other.unique_names.obs' => [
-        'Collects all observation metadata column names',
-        'Fails when duplicate names are present in obs / col_attrs'
-      ],
-      'metadata.other.unique_names.var' => [
-        'Collects all variable metadata column names',
-        'Fails when duplicate names are present in var / row_attrs'
-      ],
-      'metadata.other.deprecated' => [
-        'Checks obs, var, and uns for reserved names deprecated in prior schema versions',
-        'Includes legacy fields such as obs/ethnicity and uns/version'
-      ]
-    }.freeze
-
-    SPATIAL_ROLLUP_CHECKS = [
-      'Detects spatial datasets from Visium/Slide-seq assays or uns/spatial metadata',
-      'extension.spatial.structure: uns/spatial dictionary layout',
-      'extension.spatial.obs: Visium spot columns when is_single is true',
-      'extension.spatial.assets: tissue image arrays and spatial embedding'
-    ].freeze
-
-    UNS_FIELD_CHECKS = {
-      'title' => [
-        'Field must be present in uns (H5AD) or /attrs (Loom)',
-        'Short human-readable dataset title required by scFAIR'
-      ],
-      'organism_ontology_term_id' => [
-        'Field must be present in uns (H5AD) or /attrs (Loom)',
-        'Must use NCBITaxon:tax_id format for the dataset species',
-        'Validated for ontology format and semantic constraints when values are present'
-      ],
-      'organism' => [
-        'Field must be present in uns (H5AD) or /attrs (Loom)',
-        'Human-readable organism label paired with organism_ontology_term_id',
-        'Label must match the organism name for the declared NCBITaxon term'
-      ],
-      'schema_version' => [
-        'Field must be present in uns (H5AD) or /attrs (Loom)',
-        'Must be compatible with the reference scFAIR schema version'
-      ],
-      'schema_reference' => [
-        'Field must be present in uns (H5AD only)',
-        'Must match the canonical schema URL for this validator release'
-      ],
-      'ensembl_release' => [
-        'Field must be present in uns (H5AD) or /attrs (Loom)',
-        'Must be a positive integer Ensembl release number'
-      ],
-      'ensembl_database' => [
-        'Field must be present in uns (H5AD) or /attrs (Loom)',
-        'Must be one of the schema Ensembl database enum values'
-      ],
-      'ensembl_assembly' => [
-        'Optional field; skipped when not annotated',
-        'When present, must be a non-empty assembly name string'
-      ]
-    }.freeze
-
-    VAR_FIELD_CHECKS = {
-      'feature_is_filtered' => [
-        'Column must be present in var (H5AD) or row_attrs (Loom)',
-        'Values must be boolean true or false (true, false, True, or False)'
-      ],
-      'feature_biotype' => [
-        'Column must be present in var (H5AD) or row_attrs (Loom)',
-        'Values must be one of the schema biotype enum values'
-      ],
-      'feature_length' => [
-        'Column must be present in var (H5AD) or row_attrs (Loom)',
-        'Values must be a positive integer (gene length in base pairs)'
-      ],
-      'feature_name' => [
-        'Column must be present in var (H5AD) or row_attrs (Loom)',
-        'Spike-in: "{ERCC-ID} (spike-in control)" matching var index',
-        'Gene: gene_name from the reference for var index, or var index when gene_name is absent'
-      ],
-      'feature_reference' => [
-        'Column must be present in var (H5AD) or row_attrs (Loom)',
-        'Must be the schema NCBITaxon reference organism for the feature (pinned gene annotations table)'
-      ],
-      'feature_type' => [
-        'Column must be present in var (H5AD) or row_attrs (Loom)',
-        'Values must be a non-empty string (e.g. protein_coding, synthetic)'
-      ],
-      'feature_chromosome' => [
-        'Column must be present in var (H5AD) or row_attrs (Loom)',
-        'Values must be a non-empty string (chromosome name or na for spike-ins)'
-      ]
-    }.freeze
-
-    FIELD_CHECKS = {
-      'extension.spatial.structure' => [
-        'spatial.is_single must be a boolean',
-        'Spatial root may only contain is_single and library identifier keys',
-        'Visium + is_single=true: exactly one library identifier with images and scalefactors sections',
-        'Visium + is_single=false: library metadata must not be present',
-        'images section: hires key required, fullres optional; scalefactor scalars must be parseable floats'
-      ],
-      'extension.spatial.obs' => [
-        'Applies when assay is Visium and spatial.is_single is true',
-        'Requires obs/array_row, obs/array_col, and obs/in_tissue (col_attrs on Loom)',
-        'These fields must not be present for non-Visium or is_single=false datasets'
-      ],
-      'extension.spatial.assets' => [
-        'Tissue image (images/hires): uint8 3D array (height x width x channels)',
-        'Tissue image (images/hires): channel dimension must be 3 (RGB) or 4 (RGBA)',
-        'Tissue image (images/hires): largest dimension 2000 px (4000 px for CytAssist 11mm, EFO:0022860)',
-        'Tissue image (images/fullres): same uint8 3D RGB/RGBA rules when present',
-        'Spatial embedding (obsm/spatial or /col_attrs/spatial): required when is_single is true',
-        'Spatial embedding: 2D array with at least two columns and row count matching n_obs',
-        'Spatial embedding: dtype kind must be float, integer, or unsigned integer; no infinity or NaN'
-      ],
-      'extension.spatial.images.hires' => [
-        'images/hires must be present for Visium libraries when is_single is true',
-        'Image dtype must be uint8 with a 3D shape (height x width x channels)',
-        'Channel dimension must be 3 (RGB) or 4 (RGBA)',
-        'Largest image dimension must be 2000 px (4000 px for CytAssist 11mm, EFO:0022860)'
-      ],
-      'extension.spatial.images.fullres' => [
-        'Optional full-resolution tissue image when present',
-        'Same uint8 3D RGB/RGBA array requirements as hires'
-      ],
-      'extension.spatial.obsm' => [
-        'obsm/spatial (H5AD) or /col_attrs/spatial (Loom) required when spatial.is_single is true',
-        'Embedding must be 2D with at least two columns and row count matching n_obs',
-        'Dtype kind must be float, integer, or unsigned integer',
-        'Must not contain infinity or NaN values'
-      ],
-      'extension.spatial.library' => [
-        'Exactly one Visium library identifier under uns/spatial when is_single is true',
-        'Library dict may only contain images and scalefactors keys'
-      ]
-    }.freeze
-
     SEMANTIC_CHECK_TITLES = {
       'allowed_terms' => 'Allowed / known terms',
       'existence' => 'Ontology term existence',
@@ -405,32 +53,39 @@ module Scfair
       message.to_s.match?(PRESENCE_CHECK)
     end
 
-    def self.call(field:, message:, format:, category_id: nil, field_values: nil)
-      new(field: field, message: message, format: format, category_id: category_id, field_values: field_values).call
+    def self.ontology_format_check_message?(message)
+      message.to_s.match?(ONTOLOGY_FORMAT_CHECK)
     end
 
     def self.enrich_item(item, format:, category_id: nil, field_values: nil)
       field = (item[:field] || item['field']).to_s
       message = (item[:message] || item['message']).to_s
-      detail = call(field: field, message: message, format: format, category_id: category_id, field_values: field_values)
+      check_id = (item[:check_id] || item['check_id']).to_s.presence
+      detail = call(field: field, message: message, format: format, category_id: category_id, field_values: field_values, check_id: check_id)
       status = (item[:status] || item['status']).to_s.strip.downcase.presence
       detail[:status] = status if status.present?
       item.merge(detail: detail)
     end
 
-    def initialize(field:, message:, format:, category_id: nil, field_values: nil)
+    def self.call(field:, message:, format:, category_id: nil, field_values: nil, check_id: nil)
+      new(field: field, message: message, format: format, category_id: category_id, field_values: field_values, check_id: check_id).call
+    end
+
+    def initialize(field:, message:, format:, category_id: nil, field_values: nil, check_id: nil)
       @field = field.to_s
       @message = message.to_s
       @format = format.to_s
       @category_id = category_id.to_s.presence
       @field_values = field_values || {}
+      @check_id = check_id.to_s.presence
     end
 
     def call
-      category_id = @category_id || Scfair::ComplianceReportGrouper.category_for(
+      category_id = @category_id.presence || @check_id.presence || Scfair::ComplianceReportGrouper.category_for(
         field: @field,
         message: @message,
-        format: @format
+        format: @format,
+        check_id: @check_id
       )
 
       category_label = catalog_label(category_id)
@@ -455,7 +110,7 @@ module Scfair
         detail[:summary] = detail_rule[:summary]
         detail[:checks_performed] = yaml_checks_with_paths(
           detail_rule[:checks],
-          "check_details.by_field.#{yaml_check_detail_field_key}"
+          "checks.#{yaml_check_detail_field_key}.checks_performed"
         )
       end
 
@@ -472,7 +127,7 @@ module Scfair
         if metadata_other[:checks].present?
           detail[:checks_performed] = yaml_checks_with_paths(
             metadata_other[:checks],
-            "check_details.metadata_other.#{@field}"
+            "checks.#{@field}.checks_performed"
           )
         end
       end
@@ -622,47 +277,42 @@ module Scfair
       suffix = semantic_rule_suffix(@field)
       return SEMANTIC_CHECK_SUMMARIES[suffix] if suffix && SEMANTIC_CHECK_SUMMARIES[suffix].present?
 
-      return CATEGORY_SUMMARIES[@field] if CATEGORY_SUMMARIES[@field].present?
-
       if required_var_field?(field_name)
-        return var_field_summary(field_name)
+        summary = var_field_summary(field_name)
+        return summary if summary.present?
       end
 
       uns_field = uns_metadata_field_name(@field)
       if uns_field.present?
-        return uns_field_summary(uns_field)
+        summary = uns_field_summary(uns_field)
+        return summary if summary.present?
       end
 
-      return CATEGORY_SUMMARIES[@field] if CATEGORY_SUMMARIES[@field].present?
-
-      if required_var_field?(field_name)
-        return var_field_summary(field_name)
-      end
-
-      uns_field = uns_metadata_field_name(@field)
-      if uns_field.present?
-        return uns_field_summary(uns_field)
-      end
-
-      return CATEGORY_SUMMARIES[category_id] if CATEGORY_SUMMARIES[category_id].present?
+      summary = Rules.category_summary(@field).presence || Rules.category_summary(category_id).presence
+      return summary if summary.present?
 
       if required_observation_field?(field_name)
-        return "Required observation metadata field per scFAIR #{Rules.schema_version}."
+        return Rules.default_summary_text(:required_observation) ||
+               "Required observation metadata field per scFAIR #{Rules.schema_version}."
       end
 
       if required_uns_field?(field_name)
-        return "Required dataset metadata field per scFAIR #{Rules.schema_version}."
+        return Rules.default_summary_text(:required_uns) ||
+               "Required dataset metadata field per scFAIR #{Rules.schema_version}."
       end
 
       if enum_field?(field_name)
-        return "Categorical field with a fixed set of allowed values."
+        return Rules.default_summary_text(:enum_field) ||
+               'Categorical field with a fixed set of allowed values.'
       end
 
       if ontology_term_field?(field_name)
-        return 'Ontology term identifier field validated for format, semantics, and database resolution.'
+        return Rules.default_summary_text(:ontology_term_field) ||
+               'Ontology term identifier field validated for format, semantics, and database resolution.'
       end
 
-      'Compliance check against the scFAIR schema.'
+      Rules.default_summary_text(:compliance_fallback) ||
+        'Compliance check against the scFAIR schema.'
     end
 
     def yaml_check_detail_field_key
@@ -700,25 +350,20 @@ module Scfair
     def checks_rules_path_prefix(category_id)
       return 'check_details.spatial_rollup_checks' if @field == 'extension.spatial'
 
-      if (uns = uns_metadata_field_name(@field)) && Rules.layer_field_checks(:uns, uns, format: @format).any?
-        return "check_details.layer_field_checks.uns.#{uns}"
-      end
+      %i[uns obs var].each do |layer|
+        field_name = send("#{layer}_metadata_field_name", @field)
+        next if field_name.blank?
 
-      if (obs = obs_metadata_field_name(@field)) && obs_presence_check?(category_id) &&
-         Rules.layer_field_checks(:obs, obs, format: @format).any?
-        return "check_details.layer_field_checks.obs.#{obs}"
-      end
-
-      if (var = var_metadata_field_name(@field)) && Rules.layer_field_checks(:var, var, format: @format).any?
-        return "check_details.layer_field_checks.var.#{var}"
+        entry = Rules.field_check_entry(layer, field_name)
+        return "checks.#{entry[:id]}.checks_performed" if entry
       end
 
       if Rules.extension_field_checks(@field).any?
-        return "check_details.extension_field_checks.#{@field}"
+        return "checks.#{@field}.checks_performed"
       end
 
       if category_id.present? && Rules.category_checks_list(category_id).any?
-        return "check_details.categories.checks.#{category_id}"
+        return "checks.#{category_id}.checks_performed"
       end
 
       nil
@@ -1867,7 +1512,9 @@ module Scfair
     end
 
     def presence_check?
-      Rules.message_matches_pattern?(:presence, @message)
+      return true if Rules.presence_check_id?(@check_id)
+
+      self.class.presence_check_message?(@message)
     end
 
     def obs_presence_check?(category_id)
@@ -1875,7 +1522,9 @@ module Scfair
     end
 
     def ontology_format_check?
-      Rules.message_matches_pattern?(:ontology_format, @message)
+      return true if Rules.ontology_format_check_id?(@check_id)
+
+      self.class.ontology_format_check_message?(@message)
     end
 
     def format_check_constraints(field_name)

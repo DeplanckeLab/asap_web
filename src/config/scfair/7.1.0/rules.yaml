@@ -899,6 +899,8 @@ checks:
     - ontology.semantics
     - extension.spatial
     - extension.perturb
+    - extension.atac
+    - extension.analysis_json
     - metadata.other
     loom_only:
     - loom.paths
@@ -907,8 +909,6 @@ checks:
     - h5ad.structure
     - h5ad.embeddings
     - h5ad.matrix_encoding
-    - extension.atac
-    - extension.analysis_json
   obs.label_pairs:
     label: Observation label / ontology ID pairs
     summary: Observation ontology term IDs must have consistent paired label columns
@@ -1476,16 +1476,12 @@ checks:
     - Numeric values are finite where required by the schema
   extension.atac:
     label: ATAC schema extension checks
-    formats:
-    - h5ad
     summary: ATAC-seq extension metadata.
     rollup:
     - Detects ATAC or 10x multiome assays via ontology lineage
     - Warns that fragment file assets should be supplied separately
   extension.analysis_json:
     label: analysis_json extension checks
-    formats:
-    - h5ad
     summary: analysis_json extension metadata.
     rollup:
     - Looks for analysis_pipeline metadata (recommended analysis_json extension)

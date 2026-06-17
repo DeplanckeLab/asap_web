@@ -67,7 +67,7 @@ module Scfair
     def validate_assembly_organism_release(errors, valid_checks, organism_term, release, assembly)
       check_id = "#{CHECK_PREFIX}.assembly"
       if assembly.blank?
-        record_skip(valid_checks, check_id, 'ensembl_assembly not present')
+        record_skip(valid_checks, check_id, 'ensembl_assembly not set; cannot verify organism compatibility')
         return
       end
 

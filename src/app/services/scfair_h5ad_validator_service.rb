@@ -35,6 +35,8 @@ class ScfairH5adValidatorService
     REQUIRED_UNS = RULES["required_uns"]
     ONTOLOGY_FIELDS = RULES["ontology_fields"]
     ONTOLOGY_TERM_FORMATS = RULES.get("ontology_term_formats", {})
+    ONTOLOGY_FORMAT_EXAMPLES = RULES.get("ontology_format_examples", {})
+    DEFAULT_OBO_EXAMPLE = ONTOLOGY_TERM_FORMATS.get("obo_example", "CL:0000540")
     OBO_ONTOLOGY_PATTERN = re.compile(ONTOLOGY_TERM_FORMATS.get("obo_pattern", r"^[A-Za-z]+:\\d+$"))
     CELLOSAURUS_PREFIX = ONTOLOGY_TERM_FORMATS.get("cellosaurus_prefix", "CVCL_")
     SPECIAL_VALUES = {k: set(v) for k, v in RULES["special_values"].items()}
@@ -507,6 +509,10 @@ class ScfairH5adValidatorService
             message = message.replace("%{" + key + "}", str(value))
         return message
 
+    def obo_format_example_for_field(field_path):
+        field_name = field_path.split("/")[-1]
+        return ONTOLOGY_FORMAT_EXAMPLES.get(field_name, DEFAULT_OBO_EXAMPLE)
+
     def presence_check_id_for_field(field):
       if field.startswith("var/"):
         return "var.required"
@@ -568,7 +574,7 @@ class ScfairH5adValidatorService
               "message": ontology_format_message(
                 ONTOLOGY_TERM_FORMATS["obo_invalid_message"],
                 term=term,
-                example=ONTOLOGY_TERM_FORMATS["obo_example"]
+                example=obo_format_example_for_field(field_path)
               )
             })
             issues += 1

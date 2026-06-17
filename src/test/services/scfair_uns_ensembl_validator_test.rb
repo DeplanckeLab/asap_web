@@ -7,7 +7,8 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
     result = Scfair::UnsEnsemblValidator.new(
       field_values: {
         'uns/ensembl_release' => ['115'],
-        'uns/ensembl_database' => ['Ensembl']
+        'uns/ensembl_database' => ['Ensembl'],
+        'uns/ensembl_assembly' => ['GRCh38.p14']
       },
       format: 'h5ad'
     ).call
@@ -50,7 +51,8 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
     result = Scfair::UnsEnsemblValidator.new(
       field_values: {
         'uns/ensembl_release' => ['r115'],
-        'uns/ensembl_database' => ['Ensembl']
+        'uns/ensembl_database' => ['Ensembl'],
+        'uns/ensembl_assembly' => ['GRCh38.p14']
       },
       format: 'h5ad'
     ).call
@@ -63,7 +65,8 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
     result = Scfair::UnsEnsemblValidator.new(
       field_values: {
         'uns/ensembl_release' => ['110'],
-        'uns/ensembl_database' => ['OtherDB']
+        'uns/ensembl_database' => ['OtherDB'],
+        'uns/ensembl_assembly' => ['GRCh38.p14']
       },
       format: 'h5ad'
     ).call
@@ -71,9 +74,10 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
     assert result[:errors].any? { |entry| entry[:message].include?('ensembl_database') }
   end
 
-  test 'skips assembly when not present' do
+  test 'fails when ensembl_assembly is missing' do
     result = Scfair::UnsEnsemblValidator.new(
       field_values: {
+        'metadata/uns/columns' => %w[ensembl_release ensembl_database ensembl_assembly],
         'uns/ensembl_release' => ['110'],
         'uns/ensembl_database' => ['EnsemblMetazoa']
       },
@@ -81,7 +85,35 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
     ).call
 
     assembly = result[:valid_checks].find { |entry| entry[:field] == 'uns/ensembl_assembly' }
-    assert_equal 'skipped', assembly[:status]
+    assert_equal 'failed', assembly[:status]
+    assert_equal 'Missing uns/ensembl_assembly metadata (required by schema)', assembly[:message]
+  end
+
+  test 'defers missing ensembl_assembly to base validator when column absent' do
+    result = Scfair::UnsEnsemblValidator.new(
+      field_values: {
+        'metadata/uns/columns' => %w[ensembl_release ensembl_database],
+        'uns/ensembl_release' => ['110'],
+        'uns/ensembl_database' => ['Ensembl']
+      },
+      format: 'h5ad'
+    ).call
+
+    refute result[:valid_checks].any? { |entry| entry[:field] == 'uns/ensembl_assembly' }
+  end
+
+  test 'passes when ensembl_assembly is present' do
+    result = Scfair::UnsEnsemblValidator.new(
+      field_values: {
+        'uns/ensembl_release' => ['110'],
+        'uns/ensembl_database' => ['EnsemblMetazoa'],
+        'uns/ensembl_assembly' => ['GRCh38.p14']
+      },
+      format: 'h5ad'
+    ).call
+
+    assembly = result[:valid_checks].find { |entry| entry[:field] == 'uns.ensembl.assembly' }
+    assert_equal 'passed', assembly[:status]
   end
 
   test 'fails when ensembl_assembly is present but empty' do
@@ -102,7 +134,8 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
     result = Scfair::UnsEnsemblValidator.new(
       field_values: {
         '/attrs/ensembl_release' => ['99'],
-        '/attrs/ensembl_database' => ['EnsemblCOVID-19']
+        '/attrs/ensembl_database' => ['EnsemblCOVID-19'],
+        '/attrs/ensembl_assembly' => ['ASM985889v3']
       },
       format: 'loom'
     ).call

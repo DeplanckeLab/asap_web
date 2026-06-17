@@ -210,9 +210,17 @@ module Scfair
       ontology_prefixes(field_name).include?('CVCL')
     end
 
+    def ontology_format_example(field_name)
+      example = ontology_field(field_name)[:format_example]
+      return example.to_s if example.present?
+
+      ontology_term_format_config[:obo_example]
+    end
+
     def ontology_format_requirement_text(field_name)
       cfg = ontology_term_format_config
-      ontology_allows_cellosaurus_format?(field_name) ? cfg[:combined_requirement] : cfg[:obo_requirement]
+      template = ontology_allows_cellosaurus_format?(field_name) ? cfg[:combined_requirement] : cfg[:obo_requirement]
+      format(template, example: ontology_format_example(field_name))
     end
 
     def ontology_format_requirement_rules_path(field_name)
@@ -245,7 +253,7 @@ module Scfair
 
       return nil if obo_ontology_term_format?(term)
 
-      format(cfg[:obo_invalid_message], term: term, example: cfg[:obo_example])
+      format(cfg[:obo_invalid_message], term: term, example: ontology_format_example(field_name))
     end
 
     def ontology_prefixes(field_name)
@@ -1141,6 +1149,9 @@ module Scfair
           'cellosaurus_disallowed_message' => ontology_term_format_config[:cellosaurus_disallowed_message],
           'obo_example' => ontology_term_format_config[:obo_example]
         },
+        'ontology_format_examples' => ontology_fields.each_with_object({}) do |(field_name, _cfg), out|
+          out[field_name.to_s] = ontology_format_example(field_name.to_s)
+        end,
         'check_messages' => validator_check_messages
       }
     end

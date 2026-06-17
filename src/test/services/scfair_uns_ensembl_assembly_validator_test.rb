@@ -3,14 +3,15 @@
 require_relative 'test_base_without_fixtures'
 
 class ScfairUnsEnsemblAssemblyValidatorTest < TestBaseWithoutFixtures
-  test 'skips when ensembl_assembly is not present' do
+  test 'fails when ensembl_assembly is not present' do
     result = Scfair::UnsEnsemblAssemblyValidator.new(
       field_values: { 'metadata/uns/columns' => %w[title schema_version] },
       format: 'h5ad'
     ).call
 
-    assert_empty result[:errors]
-    assert_equal 'skipped', result[:valid_checks].first[:status]
+    assert_equal 1, result[:errors].size
+    assert_equal 'failed', result[:valid_checks].first[:status]
+    assert_equal 'Missing uns/ensembl_assembly metadata (required by schema)', result[:errors].first[:message]
   end
 
   test 'passes when ensembl_assembly has a non-empty value' do
@@ -38,7 +39,7 @@ class ScfairUnsEnsemblAssemblyValidatorTest < TestBaseWithoutFixtures
 
     assert_equal 1, result[:errors].size
     assert_equal 'failed', result[:valid_checks].first[:status]
-    assert_match(/must not be empty/, result[:errors].first[:message])
+    assert_match(/required by schema/, result[:errors].first[:message])
   end
 
   test 'uses loom field path' do

@@ -1303,6 +1303,26 @@ module Basic
       val == true || val == 1 || val.to_s.strip.casecmp('true').zero?
     end
 
+    # Bulk pipeline: gene filtering is single-run per loom; resolve its row filter flag path from
+    # the selected input_matrix run lineage (same loom filepath). Used by clustering.bulk.v8.R --filter_meta.
+    def filter_mdata_from_lineage(project_id, lineage_run_ids, loom_filepath)
+      loom_filepath = loom_filepath.to_s.strip
+      return nil if loom_filepath.blank?
+
+      ids = Array(lineage_run_ids).map(&:to_i).reject { |id| id <= 0 }.uniq
+      return nil if ids.empty?
+
+      Annot.joins(:step).where(
+        project_id: project_id,
+        run_id: ids,
+        steps: { name: 'gene_filtering' },
+        filepath: loom_filepath,
+        dim: 2
+      ).where("annots.name LIKE ?", "/row_attrs/_gene_filter_%")
+       .order(id: :desc)
+       .pick(:name)
+    end
+
     # std_method attrs_json (per attr): optional "dropdown_placeholder" (or "placeholder") on
     # input_data widgets sets the closed dropdown label instead of "-- Select <label> --".
     #
@@ -4256,6 +4276,16 @@ module Basic
                   h_var['norm_matrix_dataset'] = norm_dataset.name
                 elsif linked_run.step&.name == 'normalization' && dt['output_dataset'].present?
                   h_var['norm_matrix_dataset'] = dt['output_dataset']
+                end
+
+                filter_mdata = filter_mdata_from_lineage(
+                  h_p[:project].id,
+                  lineage_run_ids,
+                  dt['output_filename']
+                )
+                if filter_mdata.present?
+                  h_var['filter_mdata'] = filter_mdata
+                  logger.debug("filter_mdata from gene_filtering lineage: #{filter_mdata}")
                 end
               end
 

@@ -7,7 +7,7 @@
 # Top-level sections (read order for newcomers):
 #   schema, paths           - release identity and AnnData <-> Loom path mapping
 #   metadata_rules          - general naming / deprecated field rules
-#   required, optional      - which metadata columns must exist (obs / uns / var)
+#   required                - which metadata columns must exist (obs / uns / var)
 #   anndata_indices         - DataFrame index locations (not metadata columns)
 #   enum_fields             - closed string value sets per named metadata column
 #   field_constraints       - short constraint text for UI popups
@@ -130,6 +130,7 @@ required:
     - schema_reference
     - ensembl_release
     - ensembl_database
+    - ensembl_assembly
   var:
     - feature_is_filtered
     - feature_biotype
@@ -138,11 +139,6 @@ required:
     - feature_reference
     - feature_type
     - feature_chromosome
-
-# Optional uns fields: validated only when present (must be non-empty if annotated).
-optional:
-  uns:
-    - ensembl_assembly
 
 # AnnData DataFrame indices (schema object model). @ separates layer from index attribute;
 # / in h5ad.path is the on-disk HDF5 location (not a metadata column).
@@ -210,7 +206,7 @@ field_constraints:
         value: 'Positive integer (e.g. 115)'
     ensembl_assembly:
       - label: Requirement
-        value: 'Optional non-empty string (e.g. GRCh38.p14)'
+        value: 'Non-empty assembly name string (e.g. GRCh38.p14)'
     organism:
       - label: Requirement
         value: 'Label must match the canonical organism name for the NCBITaxon term'
@@ -301,7 +297,7 @@ experimental_condition_rules:
 ontology_term_formats:
   obo:
     pattern: '^[A-Za-z]+:\d+$'
-    requirement: 'Terms must use OBO-style PREFIX:ID format (e.g. CL:0000540)'
+    requirement: 'Terms must use OBO-style PREFIX:ID format (e.g. %{example})'
     example: 'CL:0000540'
     invalid_message: "Invalid ontology term format: '%{term}'. Expected OBO format (PREFIX:ID) like '%{example}'"
   cellosaurus:
@@ -309,7 +305,7 @@ ontology_term_formats:
     requirement: 'CVCL_* with underscore separator (not PREFIX:ID)'
     example: CVCL_1P02
     disallowed_message: "Invalid ontology term format: '%{term}'. Cellosaurus CVCL_* terms are not allowed for this field."
-  combined_requirement: 'Terms must use OBO-style PREFIX:ID (e.g. CL:0000540), or Cellosaurus CVCL_* identifiers (e.g. CVCL_1P02)'
+  combined_requirement: 'Terms must use OBO-style PREFIX:ID (e.g. %{example}), or Cellosaurus CVCL_* identifiers (e.g. CVCL_1P02)'
 
 # Per-field ontology configuration: allowed ID prefixes, special placeholders,
 # banned terms, and fixed valid_terms maps. layer defaults to obs; uns for organism.
@@ -317,9 +313,11 @@ ontology_fields:
   assay_ontology_term_id:
     prefixes: [EFO]
     special_values: []
+    format_example: EFO:0009899
   cell_type_ontology_term_id:
     prefixes: [CL, WBbt, ZFA, FBbt]
     special_values: [unknown, na]
+    format_example: CL:0000540
     banned_terms:
       - CL:0000003
       - CL:0000255
@@ -328,12 +326,15 @@ ontology_fields:
   development_stage_ontology_term_id:
     prefixes: [HsapDv, MmusDv, WBls, ZFS, FBdv, UBERON]
     special_values: [unknown, na]
+    format_example: HsapDv:0000095
   disease_ontology_term_id:
     prefixes: [MONDO, PATO]
     special_values: []
+    format_example: MONDO:0000001
   sex_ontology_term_id:
     prefixes: [PATO]
     special_values: [unknown, na]
+    format_example: PATO:0000384
     valid_terms:
       PATO:0000383: female
       PATO:0000384: male
@@ -342,13 +343,16 @@ ontology_fields:
   tissue_ontology_term_id:
     prefixes: [UBERON, CVCL, WBbt, ZFA, FBbt]
     special_values: []
+    format_example: UBERON:0002048
   self_reported_ethnicity_ontology_term_id:
     prefixes: [HANCESTRO, AfPO]
     special_values: [unknown, na, multiethnic]
+    format_example: HANCESTRO:0005
   organism_ontology_term_id:
     layer: uns
     prefixes: [NCBITaxon]
     special_values: []
+    format_example: NCBITaxon:9606
 
 # Shared reference data for validators (not keyed as "column X allowed values").
 # visium_assay_terms / slide_seq_assay: spatial assay detection (SpatialAssayHelper).
@@ -1006,7 +1010,7 @@ checks:
     rollup:
     - Each required dataset metadata field is validated individually
     - 'Fields: title, organism_ontology_term_id, organism, schema_version, schema_reference,
-      ensembl_release, ensembl_database'
+      ensembl_release, ensembl_database, ensembl_assembly'
     - Open a specific field check for presence requirements
     checks:
       title:
@@ -1062,17 +1066,13 @@ checks:
         - Must be one of the schema Ensembl database enum values
         summary: Ensembl database source used for gene annotation (Ensembl, EnsemblMetazoa,
           or EnsemblCOVID-19).
-      ensembl_assembly.optional:
+      ensembl_assembly:
         layer: uns
         field: ensembl_assembly
         checks_performed:
-        - Optional field; skipped when not annotated
-        - When present, must be a non-empty assembly name string
-      ensembl_assembly:
-        summary: Optional genome assembly name for the Ensembl annotation (non-empty
-          when present).
-        layer: uns
-        field: ensembl_assembly
+        - Field must be present in uns (H5AD) or /attrs (Loom)
+        - Must be a non-empty assembly name string
+        summary: Genome assembly name for the Ensembl annotation (e.g. GRCh38.p14).
   schema.version:
     label: Schema version compatibility
     summary: The file schema_version must be compatible with the reference schema
@@ -1093,7 +1093,7 @@ checks:
     label: Ensembl assembly metadata
   uns.ensembl:
     label: Ensembl gene annotation metadata
-    summary: Ensembl release, database, and optional assembly used for gene annotation.
+    summary: Ensembl release, database, and assembly used for gene annotation.
     rollup:
     - Each Ensembl metadata field is validated individually
     - Open a specific field check for presence and value constraints
@@ -1256,8 +1256,7 @@ checks:
       reference data.
     rollup:
     - ensembl_release must be supported by at least one ASAP assembly for the organism
-    - ensembl_assembly must match a known assembly for the organism and release when
-      present
+    - ensembl_assembly must match a known assembly for the organism and release
     checks:
       release:
         title: ensembl_release vs organism
@@ -1270,11 +1269,11 @@ checks:
           on each assembly
       assembly:
         title: ensembl_assembly vs organism and release
-        summary: When present, ensembl_assembly must match a known assembly for the
-          organism and be valid for ensembl_release.
+        summary: ensembl_assembly must match a known assembly for the organism and
+          be valid for ensembl_release.
         checks_performed:
         - Matches assembly names with tolerant prefix comparison (e.g. GRCh38 vs GRCh38.p14)
-        - Skipped when ensembl_assembly is absent
+        - Skipped when ensembl_assembly or ensembl_release is not set
   ontology.format:
     label: Ontology identifier format checks
     summary: Ontology term identifiers must use valid OBO-style PREFIX:ID format and

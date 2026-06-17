@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Scfair
-  # Validates optional uns/ensembl_assembly (Loom: /attrs/ensembl_assembly).
+  # Validates required uns/ensembl_assembly (Loom: /attrs/ensembl_assembly).
   class UnsEnsemblAssemblyValidator
     FIELD_NAME = 'ensembl_assembly'
 
@@ -12,15 +12,26 @@ module Scfair
     end
 
     def call
-      return skipped_result unless field_present?
+      unless field_present?
+        return {
+          errors: [presence_error],
+          warnings: [],
+          valid_checks: [presence_error.merge(status: 'failed')]
+        }
+      end
 
       value = field_value
       if value.blank?
-        message = 'ensembl_assembly is present but empty; optional uns fields must not be empty when annotated'
+        entry = Scfair::CheckResult.presence(
+          field: @field,
+          format: @format,
+          status: 'failed',
+          code: 'missing'
+        )
         return {
-          errors: [{ field: @field, message: message }],
+          errors: [entry],
           warnings: [],
-          valid_checks: [{ field: @field, status: 'failed', message: message }]
+          valid_checks: [entry.merge(status: 'failed')]
         }
       end
 
@@ -51,16 +62,13 @@ module Scfair
       Array(@field_values[@field] || @field_values[@field.to_sym]).first.to_s.strip
     end
 
-    def skipped_result
-      {
-        errors: [],
-        warnings: [],
-        valid_checks: [{
-          field: @field,
-          status: 'skipped',
-          message: 'ensembl_assembly not present (optional)'
-        }]
-      }
+    def presence_error
+      Scfair::CheckResult.presence(
+        field: @field,
+        format: @format,
+        status: 'failed',
+        code: 'missing'
+      )
     end
   end
 end

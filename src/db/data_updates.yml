@@ -43,3 +43,26 @@
   updates:
     docker_image_id: 3
 
+# Bulk gene filtering methods had malformed command_json (missing comma after --output_meta).
+- model: StdMethod
+  find_by: { id: 307, name: "min_counts" }
+  updates:
+    command_json: '{"program":"Rscript --vanilla filtering.bulk.v8.R","opts":[{"opt":"-f","param_key":"input_matrix_filename"},{"opt":"--input_meta","param_key":"input_matrix_dataset"},{"opt":"--output_meta","value":"/row_attrs/_gene_filter_#{run_num}_#{std_method_name}"},{"opt":"-o","param_key":"output_dir"},{"opt":"--method","value":"min_counts"},{"opt":"--min_counts","param_key":"min_counts"},{"opt":"--min_samples","param_key":"min_samples"}],"predict_params":["nber_cols","nber_rows","std_method_name"]}'
+
+- model: StdMethod
+  find_by: { id: 308, name: "cpm" }
+  updates:
+    command_json: '{"program":"Rscript --vanilla filtering.bulk.v8.R","opts":[{"opt":"-f","param_key":"input_matrix_filename"},{"opt":"--input_meta","param_key":"input_matrix_dataset"},{"opt":"--output_meta","value":"/row_attrs/_gene_filter_#{run_num}_#{std_method_name}"},{"opt":"-o","param_key":"output_dir"},{"opt":"--method","value":"cpm"},{"opt":"--min_cpm","param_key":"min_cpm"},{"opt":"--min_samples","param_key":"min_samples"}],"predict_params":["nber_cols","nber_rows","std_method_name"]}'
+    attrs_json: '{"input_matrix":{"valid_types":[["dataset"],["int_matrix","num_matrix"]]},"min_cpm":{"widget":"textfield","description":"Minimum CPM for a gene to be called \"expressed\".","label":"Min CPM","type":"int","min_val":0,"max_val":null,"default":1},"min_samples":{"widget":"textfield","description":"Minimum number of samples a gene must be expressed in. Genes not called expressed in a sufficient number of cells will be removed.","label":"Min Detected","type":"int","min_val":0,"max_val":null,"default":4}}'
+
+# Bulk clustering: --filter_meta is auto-filled from gene_filtering lineage (see Basic.filter_mdata_from_lineage).
+- model: StdMethod
+  find_by: { id: 301, name: "kmeans" }
+  updates:
+    command_json: '{"program":"Rscript --vanilla clustering.bulk.v8.R","opts":[{"opt":"-f","param_key":"input_matrix_filename"},{"opt":"-o","param_key":"output_dir"},{"opt":"--method","param_key":"std_method_name"},{"opt":"--input_meta","param_key":"input_matrix_dataset"},{"opt":"--output_meta","param_key":"output_mdata","value":"/col_attrs/_#{step_tag}_#{std_method_name}"},{"opt":"-k","param_key":"nb_clust"},{"opt":"--nstart","param_key":"nstart"},{"opt":"--filter_meta","param_key":"filter_mdata","omit_when_null":true}],"predict_params":["nber_cols","nber_rows","std_method_name","nb_clust"]}'
+
+- model: StdMethod
+  find_by: { id: 302, name: "hclust" }
+  updates:
+    command_json: '{"program":"Rscript --vanilla clustering.bulk.v8.R","opts":[{"opt":"-f","param_key":"input_matrix_filename"},{"opt":"-o","param_key":"output_dir"},{"opt":"--method","param_key":"std_method_name"},{"opt":"--input_meta","param_key":"input_matrix_dataset"},{"opt":"--output_meta","param_key":"output_mdata","value":"/col_attrs/_#{step_tag}_#{std_method_name}"},{"opt":"-k","param_key":"nb_clust"},{"opt":"--filter_meta","param_key":"filter_mdata","omit_when_null":true}],"predict_params":["nber_cols","nber_rows","std_method_name","nb_clust"]}'
+

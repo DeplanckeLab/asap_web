@@ -11340,17 +11340,7 @@ class ProjectsController < ApplicationController
         @project_steps_hash[ps.step_id] = ps
       end
       
-      # Filter to pretreatment group steps (steps with group_name 'pretreatment' or blank/null)
-      # Sort by rank to ensure proper order
-      # If no pretreatment steps found, show all steps (fallback)
-      @pretreatment_steps = @all_project_steps.select { |s| s.group_name == 'pretreatment' || s.group_name.blank? || s.group_name.nil? }
-                                             .sort_by { |s| [s.rank || 9999, s.name] }
-      
-      # Fallback: if no pretreatment steps found, use all steps
-      if @pretreatment_steps.empty?
-        Rails.logger.warn("[ProjectsController] No pretreatment steps found, using all steps")
-        @pretreatment_steps = @all_project_steps.sort_by { |s| [s.rank || 9999, s.name] }
-      end
+      @pretreatment_steps = @all_project_steps.sort_by { |s| [s.rank || 9999, s.name] }
       
       # Filter steps based on project type
       # Steps can have a project_types array in attrs_json that specifies which project types they apply to

@@ -28,9 +28,26 @@ class ScfairOntologyTermFormatTest < TestBaseWithoutFixtures
   test 'ontology_format_error_message uses rules.yaml templates' do
     assay_error = Scfair::Rules.ontology_format_error_message('not-a-term', 'assay_ontology_term_id')
     assert_includes assay_error, 'not-a-term'
-    assert_includes assay_error, 'CL:0000540'
+    assert_includes assay_error, 'EFO:0009899'
+    refute_includes assay_error, 'CL:'
+
+    organism_error = Scfair::Rules.ontology_format_error_message('not-a-term', 'organism_ontology_term_id')
+    assert_includes organism_error, 'not-a-term'
+    assert_includes organism_error, 'NCBITaxon:9606'
+    refute_includes organism_error, 'CL:'
 
     tissue_error = Scfair::Rules.ontology_format_error_message('CVCL_1P02', 'assay_ontology_term_id')
     assert_includes tissue_error, 'Cellosaurus'
+  end
+
+  test 'ontology_format_requirement_text uses field-specific examples' do
+    assert_includes Scfair::Rules.ontology_format_requirement_text('assay_ontology_term_id'), 'EFO:0009899'
+    assert_includes Scfair::Rules.ontology_format_requirement_text('cell_type_ontology_term_id'), 'CL:0000540'
+    assert_includes Scfair::Rules.ontology_format_requirement_text('development_stage_ontology_term_id'), 'HsapDv:0000095'
+    assert_includes Scfair::Rules.ontology_format_requirement_text('disease_ontology_term_id'), 'MONDO:0000001'
+    assert_includes Scfair::Rules.ontology_format_requirement_text('sex_ontology_term_id'), 'PATO:0000384'
+    assert_includes Scfair::Rules.ontology_format_requirement_text('tissue_ontology_term_id'), 'UBERON:0002048'
+    assert_includes Scfair::Rules.ontology_format_requirement_text('self_reported_ethnicity_ontology_term_id'), 'HANCESTRO:0005'
+    assert_includes Scfair::Rules.ontology_format_requirement_text('organism_ontology_term_id'), 'NCBITaxon:9606'
   end
 end

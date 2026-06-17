@@ -2,7 +2,7 @@
 
 module Scfair
   # Validates required uns Ensembl metadata: ensembl_release (int), ensembl_database (enum),
-  # and optional ensembl_assembly (non-empty when present).
+  # and ensembl_assembly (non-empty string).
   #
   # Check naming: metadata paths (uns/ensembl_release) for presence; dot ids (uns.ensembl.release)
   # for value-specific validation.
@@ -88,27 +88,19 @@ module Scfair
     def validate_assembly(errors, valid_checks)
       field = uns_path('ensembl_assembly')
       value_check = value_check_id('assembly')
+      raw = first_value(field)
 
-      unless optional_field_present?('ensembl_assembly')
-        valid_checks << {
-          field: field,
-          status: 'skipped',
-          message: 'ensembl_assembly not present (optional)'
-        }
-        return
-      end
+      if raw.blank?
+        return if defer_presence_to_base_validator?('ensembl_assembly')
 
-      value = first_value(field)
-      if value.blank?
-        message = 'ensembl_assembly is present but empty; optional uns fields must not be empty when annotated'
-        record_value_failure(errors, valid_checks, value_check:, message:)
+        record_presence_failure(errors, valid_checks, field:)
         return
       end
 
       valid_checks << {
         field: value_check,
         status: 'passed',
-        message: "ensembl_assembly is present (#{value})"
+        message: "ensembl_assembly is present (#{raw})"
       }
     end
 
@@ -134,14 +126,6 @@ module Scfair
         @field_values[Rules.metadata_column_list_key('uns')] ||
         @field_values[Rules.metadata_column_list_key('uns').to_sym]
       ).map(&:to_s)
-    end
-
-    def optional_field_present?(name)
-      columns = uns_column_names
-      return columns.include?(name) if columns.any?
-
-      field = uns_path(name)
-      @field_values.key?(field) || @field_values.key?(field.to_sym)
     end
 
     def first_value(field)

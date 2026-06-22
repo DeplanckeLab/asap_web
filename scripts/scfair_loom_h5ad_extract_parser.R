@@ -149,7 +149,7 @@ read_obsm_array_meta <- function(file, key, n_obs) {
   if (!is.na(enc) && enc %in% c("array", "dense_array") && h5_exists(file, file.path(path, "data"))) {
     d <- rhdf5::h5read(file, file.path(path, "data"))
     sh <- dim(d)
-    return(array_meta(sh, as.character(typeof(d)), any(is.infinite(d)), all(is.nan(d))))
+    return(array_meta(sh, as.character(typeof(d)), any(is.infinite(d)), any(is.nan(d))))
   }
 
   if (h5_exists(file, path)) {
@@ -157,26 +157,68 @@ read_obsm_array_meta <- function(file, key, n_obs) {
     row <- info[info$group == "/obsm" & info$name == key, , drop = FALSE]
     if (nrow(row) > 0L && row$otype[[1]] == "H5I_DATASET") {
       d <- rhdf5::h5read(file, path)
-      return(array_meta(dim(d), as.character(typeof(d)), any(is.infinite(d)), all(is.nan(d))))
+      return(array_meta(dim(d), as.character(typeof(d)), any(is.infinite(d)), any(is.nan(d))))
     }
   }
   NULL
 }
 
+read_h5_leaf_value <- function(file, path) {
+  path <- sub("^/+", "", path)
+  if (!h5_exists(file, path)) return(NULL)
+  val <- rhdf5::h5read(file, path)
+  if (is.raw(val)) return(h5_attr_string(val))
+  if (length(val) != 1L) return(NULL)
+  val
+}
+
 flatten_uns_paths <- function(file, prefix = "uns") {
-  if (!h5_exists(file, prefix)) return(list())
+  prefix_norm <- sub("^/+", "", prefix)
+  if (!h5_exists(file, prefix_norm)) return(list())
   info <- rhdf5::h5ls(file)
-  base_len <- nchar(prefix) + 2L
-  paths <- info[grepl(paste0("^", prefix, "(/|$)"), info$group) | info$group == prefix, ]
-  datasets <- paths[paths$otype == "H5I_DATASET", ]
+  pattern <- paste0("^/?", gsub("/", "\\\\/", prefix_norm), "(/|$)")
+  datasets <- info[grepl(pattern, info$group) & info$otype == "H5I_DATASET", ]
   out <- list()
   for (i in seq_len(nrow(datasets))) {
     rel <- paste(datasets$group[i], datasets$name[i], sep = "/")
-    rel <- sub(paste0("^", prefix, "/"), "", rel)
+    rel <- sub("^/+", "", rel)
+    rel <- sub(paste0("^", prefix_norm, "/?"), "", rel)
     if (!nzchar(rel)) next
-    val <- read_h5_dataset_scalar(file, paste(prefix, rel, sep = "/"))
-    if (!is.na(val)) out[[rel]] <- val
+    val <- read_h5_leaf_value(file, file.path(prefix_norm, rel))
+    if (!is.null(val)) out[[rel]] <- val
   }
+  out
+}
+
+parse_h5ls_dim <- function(dimstr) {
+  if (is.na(dimstr) || !nzchar(dimstr) || !grepl(" x ", dimstr, fixed = TRUE)) return(integer())
+  as.integer(strsplit(trimws(dimstr), " x ", fixed = TRUE)[[1]])
+}
+
+build_spatial_extension_h5ad <- function(file_path) {
+  prefix_norm <- "uns/spatial"
+  if (!h5_exists(file_path, prefix_norm)) return(NULL)
+  info <- rhdf5::h5ls(file_path)
+  rows <- info[grepl("^/uns/spatial(/|$)", info$group) & info$otype == "H5I_DATASET", ]
+  scalars <- list()
+  arrays <- list()
+  for (i in seq_len(nrow(rows))) {
+    rel <- sub("^/uns/spatial/?", "", paste(rows$group[i], rows$name[i], sep = "/"))
+    if (!nzchar(rel)) next
+    parts <- parse_h5ls_dim(rows$dim[i])
+    if (length(parts) > 0L) {
+      if (length(parts) == 3L) parts <- rev(parts)
+      dtype <- if ("dclass" %in% names(rows)) rows$dclass[i] else "unknown"
+      arrays[[rel]] <- array_meta(parts, as.character(dtype), FALSE, FALSE)
+      next
+    }
+    val <- read_h5_leaf_value(file_path, file.path(prefix_norm, rel))
+    if (!is.null(val)) scalars[[rel]] <- uns_scalar(val)
+  }
+  if (length(scalars) == 0L && length(arrays) == 0L) return(NULL)
+  out <- list(type = "nested")
+  if (length(scalars) > 0L) out$scalars <- scalars
+  if (length(arrays) > 0L) out$arrays <- arrays
   out
 }
 
@@ -214,21 +256,17 @@ parse_h5ad <- function(file_path, opts = default_parser_options()) {
 
   var_columns <- list()
   var_series <- list()
-  max_series <- opts$max_var_series
   for (col in var_cols) {
     series <- read_h5_string_series(file_path, file.path("var", col))
-    if (length(series) == 0L) next
-    if (!is.null(max_series)) series <- series[seq_len(min(length(series), max_series))]
-    var_series[[col]] <- series
-    var_columns[[col]] <- var_column(series)
+    if (length(series) > 0L) var_series[[col]] <- series
   }
+  var_columns <- build_var_columns(var_series, var_cols, opts)
 
   var_index <- NULL
   for (idx_key in c("_index", "index")) {
     if (!h5_exists(file_path, file.path("var", idx_key))) next
     series <- read_h5_string_series(file_path, file.path("var", idx_key))
     if (length(series) == 0L) next
-    if (!is.null(max_series)) series <- series[seq_len(min(length(series), max_series))]
     var_index <- var_column(series)
     break
   }
@@ -241,12 +279,8 @@ parse_h5ad <- function(file_path, opts = default_parser_options()) {
   }
 
   extensions <- list()
-  if (h5_exists(file_path, "uns/spatial")) {
-    flat <- flatten_uns_paths(file_path, "uns/spatial")
-    if (length(flat) > 0L) {
-      extensions$spatial <- list(type = "nested", scalars = lapply(flat, function(v) uns_scalar(v)))
-    }
-  }
+  spatial <- build_spatial_extension_h5ad(file_path)
+  if (!is.null(spatial)) extensions$spatial <- spatial
 
   list(
     source_url = normalizePath(file_path, mustWork = TRUE),
@@ -310,21 +344,18 @@ parse_loom <- function(file_path, opts = default_parser_options()) {
   uns_scalars <- setNames(lapply(uns, function(u) u$value), names(uns))
   paired_uns <- build_paired_uns(uns_scalars)
 
-  var_columns <- list()
-  max_series <- opts$max_var_series
+  var_series <- list()
   for (col in row_attrs) {
     series <- read_h5_string_series(file_path, file.path("/row_attrs", col))
-    if (length(series) == 0L) next
-    if (!is.null(max_series)) series <- series[seq_len(min(length(series), max_series))]
-    var_columns[[col]] <- var_column(series)
+    if (length(series) > 0L) var_series[[col]] <- series
   }
+  var_columns <- build_var_columns(var_series, row_attrs, opts)
 
   var_index <- NULL
   for (idx_key in c("feature_id", "index", "_index")) {
     if (!idx_key %in% row_attrs) next
     series <- read_h5_string_series(file_path, file.path("/row_attrs", idx_key))
     if (length(series) == 0L) next
-    if (!is.null(max_series)) series <- series[seq_len(min(length(series), max_series))]
     var_index <- var_column(series)
     break
   }

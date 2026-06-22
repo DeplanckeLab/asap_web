@@ -1002,7 +1002,6 @@ export class DataManager {
   performCellFilteringUpdate(shouldUpdateColors = false) {
     // Use incremental filtering for better performance
     const filteredIndices = this.getIncrementalFilteredIndices()
-    // console.log('Filtered indices result:', filteredIndices ? `${filteredIndices.length} cells` : 'null (no filtering)')
     const previousVisibleCells = this.controller.currentVisibleCells
     const hadFilterBefore = Array.isArray(previousVisibleCells)
     const hasFilterNow = Array.isArray(filteredIndices)
@@ -1400,20 +1399,18 @@ export class DataManager {
         }
       }
       
-      // If no filters are active and we are not forcing a color update,
+      // If no filters are active, we are not forcing a color update,
+      // AND the filter mode didn't just change (e.g. from filtered to unfiltered),
       // skip the visibility pipeline entirely.
-      if (!hasFilterNow && !shouldUpdateColors) {
+      if (!hasFilterNow && !shouldUpdateColors && !filterModeChanged) {
         return
       }
 
       // If we need to update colors (e.g., color range adapted), render colors first
       if (shouldUpdateColors && this.controller.currentMetadataVector) {
-        // console.log('🎨 [FILTER] Updating colors via renderPointsWithCurrentColoring') */
         this.controller.renderPointsWithCurrentColoring()
       } else {
-        // Otherwise just update visibility
-          // console.log('🎨 [FILTER] Updating visibility via updatePointVisibility, filteredIndices:', filteredIndices ? `${filteredIndices.length} cells` : 'null (all visible)') */
-          await this.controller.updatePointVisibility(filteredIndices)
+        await this.controller.updatePointVisibility(filteredIndices)
       }
       
       // Re-render category labels after filtering (ReGL mode only)

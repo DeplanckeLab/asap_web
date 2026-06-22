@@ -19076,15 +19076,12 @@ export default class extends Controller {
     const isFilterEnabled = filterSwitch && filterSwitch.dataset.filterEnabled === 'true'
     
     if (!isFilterEnabled) {
-      // console.log(`🔄 Select all/none blocked - filtering is disabled`)
       return
     }
     
     // Determine current state based on checkmark visibility
     const icon = checkbox.querySelector('i')
     const hasCheckmark = icon && icon.style.display !== 'none'
-    
-    // console.log(`🔄 Toggle select all categories for metadata ${metadataId}, current state: ${hasCheckmark ? 'checked' : 'unchecked'}`)
     
     if (hasCheckmark) {
       // Deselect all categories
@@ -19096,7 +19093,7 @@ export default class extends Controller {
       }
     } else {
       // Select all categories
-      this.selectAllCategoriesForMetadata(metadataId)
+      await this.selectAllCategoriesForMetadata(metadataId)
       checkbox.style.backgroundColor = 'white'
       checkbox.style.borderColor = '#d1d5db'
       if (icon) {
@@ -19690,22 +19687,11 @@ export default class extends Controller {
   }
 
   async selectAllCategoriesForMetadata(metadataId) {
-    // console.log(`🔍 [SELECT ALL] Selecting all categories for metadata ${metadataId}`)
-    
-    // Debug: Check what's in memory
-    // console.log(`🔍 [SELECT ALL] currentMetadataId:`, this.currentMetadataId)
-    // console.log(`🔍 [SELECT ALL] currentMetadataVector exists:`, !!this.currentMetadataVector)
-    // console.log(`🔍 [SELECT ALL] loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors || {}))
-    // console.log(`🔍 [SELECT ALL] loadedMetadataVectors[${metadataId}] exists:`, !!this.loadedMetadataVectors?.[metadataId])
-    
     // Get the metadata vector to access ALL categories
     let metadataVector = this.dataManager.getMetadataVectorById(metadataId)
-    // console.log(`🔍 [SELECT ALL] getMetadataVectorById returned:`, !!metadataVector)
-    // console.log(`🔍 [SELECT ALL] metadataVector.values exists:`, !!metadataVector?.values)
     
     // If metadata exists but values are not decompressed, decompress it manually
     if (metadataVector && !metadataVector.values && metadataVector.compression_info) {
-      // console.log(`🔍 [SELECT ALL] Metadata exists but not decompressed, decompressing...`)
       const compressionInfo = metadataVector.compression_info
       
       // Handle single_category compression (all cells have the same value)
@@ -19713,16 +19699,14 @@ export default class extends Controller {
         const category = compressionInfo.categories[compressionInfo.category_index]
         const length = compressionInfo.length
         metadataVector.values = new Array(length).fill(category)
-        // console.log(`🔍 [SELECT ALL] Decompressed single_category: ${category} (${length} cells)`)
       } else {
-        console.error(`🔍 [SELECT ALL] Unknown compression format:`, compressionInfo)
+        console.error(`[SELECT ALL] Unknown compression format:`, compressionInfo)
         return
       }
     }
     
     // If not in memory at all, load it first
     if (!metadataVector) {
-      // console.log(`🔍 [SELECT ALL] Metadata not in memory, loading...`)
       try {
         metadataVector = await this.loadMetadataVectorFromDisk(metadataId)
         if (!metadataVector) {
@@ -19731,14 +19715,13 @@ export default class extends Controller {
           metadataVector = this.dataManager.getMetadataVectorById(metadataId)
         }
       } catch (error) {
-        console.error(`🔍 [SELECT ALL] Failed to load metadata ${metadataId}:`, error)
+        console.error(`[SELECT ALL] Failed to load metadata ${metadataId}:`, error)
         return
       }
     }
     
     if (!metadataVector || !metadataVector.values) {
-      console.error(`🔍 [SELECT ALL] No metadata vector values found for ${metadataId}`)
-      console.error(`🔍 [SELECT ALL] metadataVector:`, metadataVector)
+      console.error(`[SELECT ALL] No metadata vector values found for ${metadataId}`)
       return
     }
     
@@ -19755,8 +19738,6 @@ export default class extends Controller {
     allCategories.forEach(category => {
       this.selectedCategories[metadataId].add(category)
     })
-    
-    // console.log(`🔍 [SELECT ALL] Selected ${this.selectedCategories[metadataId].size} categories`)
     
     // Update the visual state of category checkboxes in the HTML
     const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)

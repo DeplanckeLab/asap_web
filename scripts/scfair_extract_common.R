@@ -3,6 +3,7 @@
 
 SPEC_FILE <- "scfair_minimal_extract_spec.json"
 
+# ID -> label column pairs for paired_fields.obs (must match paired_field_definitions.obs in SPEC_FILE).
 LABEL_PAIRS_OBS <- c(
   "assay_ontology_term_id" = "assay",
   "cell_type_ontology_term_id" = "cell_type",
@@ -13,12 +14,42 @@ LABEL_PAIRS_OBS <- c(
   "tissue_ontology_term_id" = "tissue"
 )
 
+# scFAIR schema 7.1.0 obs/var column names (core + spatial + perturb). Must match
+# schema_fields in scfair_minimal_extract_spec.json.
+SCHEMA_OBS_FIELDS <- c(
+  "assay_ontology_term_id", "assay",
+  "tissue_type",
+  "tissue_ontology_term_id", "tissue",
+  "cell_type_ontology_term_id", "cell_type",
+  "development_stage_ontology_term_id", "development_stage",
+  "sex_ontology_term_id", "sex",
+  "self_reported_ethnicity_ontology_term_id", "self_reported_ethnicity",
+  "strain_or_genetic_background_term_id", "strain_or_genetic_background",
+  "disease_ontology_term_id", "disease",
+  "experimental_condition_ontology_term_id", "experimental_condition",
+  "perturbation_types",
+  "donor_id",
+  "is_primary_data",
+  "suspension_type",
+  "array_row", "array_col", "in_tissue",
+  "genetic_perturbation_id", "genetic_perturbation_strategy"
+)
+
+SCHEMA_VAR_FIELDS <- c(
+  "feature_is_filtered",
+  "feature_biotype",
+  "feature_length",
+  "feature_name",
+  "feature_reference",
+  "feature_type",
+  "feature_chromosome"
+)
+
 SEURAT_UNS_SLOT <- "scfair_uns"
 
 default_parser_options <- function() {
   list(
-    max_distinct = 200L,
-    max_var_series = 500L
+    max_distinct = 200L
   )
 }
 
@@ -49,7 +80,7 @@ paired_block <- function(label_field, pairs) {
 array_meta <- function(shape, dtype, has_inf = FALSE, has_nan = FALSE) {
   list(
     type = "array",
-    shape = paste(shape, collapse = ","),
+    shape = as.integer(shape),
     dtype = dtype,
     has_inf = isTRUE(has_inf),
     has_nan = isTRUE(has_nan)
@@ -93,12 +124,24 @@ build_obs_columns <- function(obs_series, obs_cols, opts, paired_obs = NULL) {
   obs_columns <- list()
   for (col in obs_cols) {
     if (col %in% skip) next
+    if (!col %in% SCHEMA_OBS_FIELDS) next
     series <- obs_series[[col]]
     if (length(series) == 0L) next
     distinct <- truncate_unique(series, opts$max_distinct)
     obs_columns[[col]] <- obs_column(distinct)
   }
   obs_columns
+}
+
+build_var_columns <- function(var_series, var_cols, opts) {
+  var_columns <- list()
+  for (col in var_cols) {
+    if (!col %in% SCHEMA_VAR_FIELDS) next
+    series <- var_series[[col]]
+    if (is.null(series) || length(series) == 0L) next
+    var_columns[[col]] <- var_column(series)
+  }
+  var_columns
 }
 
 build_paired_obs <- function(obs_series, obs_cols, opts) {
@@ -113,6 +156,7 @@ build_paired_obs <- function(obs_series, obs_cols, opts) {
 }
 
 build_paired_uns <- function(uns_scalars) {
+  # organism pair must match paired_field_definitions.uns in SPEC_FILE.
   paired_uns <- list()
   if ("organism_ontology_term_id" %in% names(uns_scalars) && "organism" %in% names(uns_scalars)) {
     paired_uns$organism_ontology_term_id <- paired_block(

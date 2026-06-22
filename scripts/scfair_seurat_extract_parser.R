@@ -98,22 +98,18 @@ parse_seurat <- function(file_path, opts = default_parser_options()) {
 
   var_df <- seurat_var_dataframe(obj)
   var_cols <- if (!is.null(var_df)) colnames(var_df) else character()
-  max_series <- opts$max_var_series
-  var_columns <- list()
+  var_series <- list()
   if (!is.null(var_df)) {
     for (col in var_cols) {
-      series <- as.character(var_df[[col]])
-      if (length(series) == 0L) next
-      if (!is.null(max_series)) series <- series[seq_len(min(length(series), max_series))]
-      var_columns[[col]] <- var_column(series)
+      var_series[[col]] <- as.character(var_df[[col]])
     }
   }
+  var_columns <- build_var_columns(var_series, var_cols, opts)
 
   var_index <- NULL
   if (!is.null(counts)) {
     series <- rownames(counts)
     if (length(series) > 0L) {
-      if (!is.null(max_series)) series <- series[seq_len(min(length(series), max_series))]
       var_index <- var_column(series)
     }
   }

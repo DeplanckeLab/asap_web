@@ -38,6 +38,7 @@ src/public/data/asap-old/input_examples
 */node_modules
 .env.prod
 .env.dev
+tmp/
 src/Gemfile.lock
 src/package-lock.json
 
@@ -63,6 +64,7 @@ src/package-lock.json
 /private/
 
 # Site-specific copies of SLURM/docs (redacted templates committed as *.example).
+/docs
 /docs/DEPLOYMENT_PERMISSIONS.md
 /docs/RESTART_DOCKER_AND_SLURM.md
 /docs/SLURM_SETUP.md

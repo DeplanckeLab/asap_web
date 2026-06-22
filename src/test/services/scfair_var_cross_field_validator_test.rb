@@ -49,7 +49,7 @@ class ScfairVarCrossFieldValidatorTest < TestBaseWithoutFixtures
       (genes_by_reference_index || {})[[feature_reference, index_id]]
     end
 
-    def expected_feature_name(feature_reference:, index_id:, biotype:)
+    def expected_feature_name(feature_reference:, index_id:, biotype:, release: nil)
       index = index_id.to_s.strip
       return nil if index.blank?
 
@@ -75,6 +75,10 @@ class ScfairVarCrossFieldValidatorTest < TestBaseWithoutFixtures
 
     def normalize_ensembl_id(value)
       value.to_s.sub(/\.\d+\z/, '')
+    end
+
+    def preload_release_gene_names(**)
+      nil
     end
   end
 
@@ -125,6 +129,7 @@ class ScfairVarCrossFieldValidatorTest < TestBaseWithoutFixtures
     )
     result = Scfair::VarCrossFieldValidator.new(
       field_values: {
+        'uns/ensembl_release' => ['114'],
         'var/feature_biotype#series' => %w[gene spike-in],
         'var/feature_reference#series' => ['NCBITaxon:9606', 'NCBITaxon:32630'],
         'var/feature_name#series' => ['TP53', 'ERCC-00003 (spike-in control)'],
@@ -142,6 +147,7 @@ class ScfairVarCrossFieldValidatorTest < TestBaseWithoutFixtures
     lookup = LookupStub.new(remote_available: true, remote_organism: Struct.new(:id).new(1), gene_statuses: {}, genes_by_reference_index: {})
     result = Scfair::VarCrossFieldValidator.new(
       field_values: {
+        'uns/ensembl_release' => ['114'],
         'var/feature_biotype#series' => %w[gene],
         'var/feature_reference#series' => ['NCBITaxon:9606'],
         'var/feature_name#series' => %w[ENSG00000141510],
@@ -166,6 +172,7 @@ class ScfairVarCrossFieldValidatorTest < TestBaseWithoutFixtures
     )
     result = Scfair::VarCrossFieldValidator.new(
       field_values: {
+        'uns/ensembl_release' => ['114'],
         'var/feature_biotype#series' => %w[gene],
         'var/feature_reference#series' => ['NCBITaxon:9606'],
         'var/feature_name#series' => %w[BRCA1],
@@ -184,6 +191,7 @@ class ScfairVarCrossFieldValidatorTest < TestBaseWithoutFixtures
     lookup = LookupStub.new(remote_available: false, remote_organism: nil, gene_statuses: {})
     result = Scfair::VarCrossFieldValidator.new(
       field_values: {
+        'uns/ensembl_release' => ['114'],
         'var/feature_biotype#series' => %w[spike-in],
         'var/feature_reference#series' => ['NCBITaxon:32630'],
         'var/feature_name#series' => %w[ERCC-00003],
@@ -197,7 +205,7 @@ class ScfairVarCrossFieldValidatorTest < TestBaseWithoutFixtures
     assert_match(/1 of 1 feature failed/, error[:message])
   end
 
-  test 'fails when ensembl_release is missing' do
+  test 'skips ensembl-dependent checks when ensembl_release is missing' do
     lookup = LookupStub.new(
       remote_available: true,
       remote_organism: Struct.new(:id).new(1),
@@ -206,6 +214,9 @@ class ScfairVarCrossFieldValidatorTest < TestBaseWithoutFixtures
     result = Scfair::VarCrossFieldValidator.new(
       field_values: {
         'uns/organism_ontology_term_id' => ['NCBITaxon:9606'],
+        'var/feature_biotype#series' => %w[gene],
+        'var/feature_reference#series' => ['NCBITaxon:9606'],
+        'var/feature_name#series' => %w[TP53],
         'var/_index#series' => %w[ENSG00000141510]
       },
       format: 'h5ad',
@@ -213,9 +224,48 @@ class ScfairVarCrossFieldValidatorTest < TestBaseWithoutFixtures
     ).call
 
     index_check = result[:valid_checks].find { |entry| entry[:field] == 'var.cross_field.index.release' }
-    assert_equal 'failed', index_check[:status]
-    assert_match(/ensembl_release is required/, index_check[:message])
-    refute result[:valid_checks].any? { |entry| entry[:field] == 'var.cross_field.feature_name.release' }
+    assert_equal 'skipped', index_check[:status]
+    assert_match(/ensembl_release not set/, index_check[:message])
+
+    feature_name_check = result[:valid_checks].find { |entry| entry[:field] == 'var.cross_field.feature_name.index' }
+    assert_equal 'skipped', feature_name_check[:status]
+    assert_match(/ensembl_release not set/, feature_name_check[:message])
+    refute result[:errors].any? { |entry| entry[:field] == 'var.cross_field.feature_name.index' }
+  end
+
+  test 'uses declared ensembl_release for feature_name validation' do
+    lookup = Class.new do
+      def preload_release_gene_names(**)
+        nil
+      end
+
+      def expected_feature_name(feature_reference:, index_id:, biotype:, release: nil)
+        release == 114 ? 'NCMAP-DT' : 'RCAN3AS'
+      end
+
+      def allowed_feature_reference?(reference, biotype:)
+        true
+      end
+
+      def spike_in_feature_name_for_index(index_id)
+        "#{index_id} (spike-in control)"
+      end
+    end.new
+
+    result = Scfair::VarCrossFieldValidator.new(
+      field_values: {
+        'uns/ensembl_release' => ['114'],
+        'var/feature_biotype#series' => %w[gene],
+        'var/feature_reference#series' => ['NCBITaxon:9606'],
+        'var/feature_name#series' => ['NCMAP-DT'],
+        'var/_index#series' => %w[ENSG00000286061]
+      },
+      format: 'h5ad',
+      lookup: lookup
+    ).call
+
+    check = result[:valid_checks].find { |entry| entry[:field] == 'var.cross_field.feature_name.index' }
+    assert_equal 'passed', check[:status]
   end
 
   test 'validates var index against ensembl release' do

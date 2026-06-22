@@ -35,11 +35,13 @@ export default class extends Controller {
     chunkSize: { type: Number, default: 5 * 1024 * 1024 },
     uploadTypeName: String,
     rulesSnippetUrl: String,
-    rulesYamlUrl: String
+    rulesYamlUrl: String,
+    statusUrlTemplate: { type: String, default: "/compliance/file-check/__TASK_ID__/status" }
   }
 
   connect() {
     this.subscription = null
+    this.statusPollInterval = null
     this.file = null
     this.urlValue = ""
     this.taskId = null
@@ -55,6 +57,7 @@ export default class extends Controller {
   }
 
   disconnect() {
+    this.stopStatusPoll()
     if (this.subscription) this.subscription.unsubscribe()
   }
 
@@ -290,6 +293,50 @@ export default class extends Controller {
         received: (data) => this.handleUpdate(data)
       }
     )
+    this.checkTaskStatus(taskId)
+    this.startStatusPoll(taskId)
+  }
+
+  statusUrl(taskId) {
+    return this.statusUrlTemplateValue.replace("__TASK_ID__", encodeURIComponent(taskId))
+  }
+
+  async checkTaskStatus(taskId) {
+    if (!taskId || taskId !== this.taskId) return
+
+    try {
+      const token = document.querySelector("[name='csrf-token']")?.content
+      const response = await fetch(this.statusUrl(taskId), {
+        method: "GET",
+        headers: {
+          "X-CSRF-Token": token,
+          Accept: "application/json"
+        }
+      })
+      if (!response.ok) return
+
+      const data = await response.json()
+      this.handleUpdate(data)
+    } catch (_error) {
+      // Polling will retry.
+    }
+  }
+
+  startStatusPoll(taskId) {
+    this.stopStatusPoll()
+    this.statusPollInterval = setInterval(() => {
+      if (taskId !== this.taskId) {
+        this.stopStatusPoll()
+        return
+      }
+      this.checkTaskStatus(taskId)
+    }, 2000)
+  }
+
+  stopStatusPoll() {
+    if (!this.statusPollInterval) return
+    clearInterval(this.statusPollInterval)
+    this.statusPollInterval = null
   }
 
   handleUpdate(data) {
@@ -300,6 +347,7 @@ export default class extends Controller {
       return
     }
     if (data.status === "completed") {
+      this.stopStatusPoll()
       const valid = data.result?.valid
       const title = valid
         ? "Validation complete: Compliant"
@@ -311,6 +359,7 @@ export default class extends Controller {
       return
     }
     if (data.status === "failed") {
+      this.stopStatusPoll()
       this.finishProgress(data.message || "Validation failed", "error")
       this.restoreStatusText()
       this.runButtonTarget.disabled = false

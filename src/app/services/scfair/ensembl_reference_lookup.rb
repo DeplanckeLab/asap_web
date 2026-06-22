@@ -5,8 +5,9 @@ module Scfair
   class EnsemblReferenceLookup
     SPIKE_IN_TAXON = 'NCBITaxon:32630'
 
-    def initialize(remote_db: nil)
+    def initialize(remote_db: nil, release_gene_names: nil)
       @remote_db = remote_db.presence || default_remote_db
+      @release_gene_names = release_gene_names || EnsemblReleaseGeneNameResolver.new
     end
 
     def remote_available?
@@ -129,12 +130,35 @@ module Scfair
       organism = remote_organism_for_tax_id(tax_id)
       return nil unless organism
 
-      lookup_gene(organism_id: organism.id, ensembl_id: normalize_ensembl_id(index_id))
+      lookup_gene(organism_id: organism.id, symbol: nil, ensembl_id: normalize_ensembl_id(index_id))
     rescue StandardError
       nil
     end
 
-    def expected_feature_name(feature_reference:, index_id:, biotype:)
+    def preload_release_gene_names(feature_reference:, release:, ensembl_ids:)
+      return unless remote_available?
+      return unless @release_gene_names.available?
+
+      tax_id = extract_tax_id(feature_reference)
+      return unless tax_id
+
+      organism = remote_organism_for_tax_id(tax_id)
+      return unless organism
+
+      db_type = ensembl_subdomain_for_organism(organism)
+      return unless db_type
+
+      @release_gene_names.preload!(
+        db_type: db_type,
+        ensembl_db_name: organism.ensembl_db_name,
+        release: release,
+        ensembl_ids: ensembl_ids
+      )
+    rescue StandardError
+      nil
+    end
+
+    def expected_feature_name(feature_reference:, index_id:, biotype:, release: nil)
       index = index_id.to_s.strip
       return nil if index.blank?
 
@@ -143,6 +167,13 @@ module Scfair
         spike_in_feature_name_for_index(index)
       when 'gene'
         normalized_index = normalize_ensembl_id(index)
+        release_name = release_gene_name(
+          feature_reference: feature_reference,
+          ensembl_id: normalized_index,
+          release: release
+        )
+        return release_name if release_name.present?
+
         return normalized_index unless remote_available?
 
         gene = gene_for_reference_and_index(feature_reference, index)
@@ -177,6 +208,85 @@ module Scfair
       match[1].to_i
     end
 
+    def latest_release_for_assembly(feature_reference:, assembly_name: nil)
+      resolve_release_for_gene_reference(
+        feature_reference: feature_reference,
+        ensembl_assembly: assembly_name
+      )
+    end
+
+    def resolve_release_for_gene_reference(feature_reference:, ensembl_release: nil, ensembl_assembly: nil)
+      release = parse_release_value(ensembl_release)
+      return release if release
+
+      tax_id = extract_tax_id(feature_reference)
+      return nil unless tax_id
+
+      if ensembl_assembly.present?
+        return latest_release_for_assembly_name(tax_id, ensembl_assembly)
+      end
+
+      latest_local_release_for_organism(tax_id) || latest_release_from_assemblies(tax_id)
+    rescue StandardError
+      nil
+    end
+
+    def assembly_for_gene_reference(feature_reference:, ensembl_release: nil, ensembl_assembly: nil)
+      return ensembl_assembly.to_s.strip.presence if ensembl_assembly.present?
+
+      release = resolve_release_for_gene_reference(
+        feature_reference: feature_reference,
+        ensembl_release: ensembl_release,
+        ensembl_assembly: ensembl_assembly
+      )
+      return nil unless release
+
+      tax_id = extract_tax_id(feature_reference)
+      return nil unless tax_id
+
+      assembly_name_at_release(tax_id, release)
+    rescue StandardError
+      nil
+    end
+
+    def release_gene_name(feature_reference:, ensembl_id:, release:)
+      return nil if release.blank?
+      return nil unless remote_available?
+      return nil unless @release_gene_names.available?
+
+      tax_id = extract_tax_id(feature_reference)
+      return nil unless tax_id
+
+      organism = remote_organism_for_tax_id(tax_id)
+      return nil unless organism
+
+      db_type = ensembl_subdomain_for_organism(organism)
+      return nil unless db_type
+
+      @release_gene_names.gene_name_for(
+        ensembl_id,
+        db_type: db_type,
+        ensembl_db_name: organism.ensembl_db_name,
+        release: release
+      )
+    rescue StandardError
+      nil
+    end
+
+    def ensembl_subdomain_for_organism(organism)
+      subdomain_id = organism.ensembl_subdomain_id.to_i
+      return nil unless subdomain_id.positive?
+
+      RemoteOrganism.with_remote(@remote_db) do
+        row = RemoteOrganism.connection.select_one(<<~SQL.squish)
+          SELECT name FROM ensembl_subdomains WHERE id = #{subdomain_id} LIMIT 1
+        SQL
+        row&.[]('name')&.to_sym
+      end
+    rescue StandardError
+      nil
+    end
+
     private
 
     def default_remote_db
@@ -185,7 +295,7 @@ module Scfair
       nil
     end
 
-    def lookup_gene(organism_id:, symbol:, ensembl_id:)
+    def lookup_gene(organism_id:, symbol: nil, ensembl_id: nil)
       if ensembl_id.present?
         return RemoteGene.find_by_organism_and_ensembl(organism_id, ensembl_id, version: @remote_db)
       end
@@ -197,6 +307,71 @@ module Scfair
 
     def normalize_assembly_name(value)
       value.to_s.strip.downcase.gsub(/[^a-z0-9]+/, '')
+    end
+
+    def parse_release_value(value)
+      raw = value.to_s.strip
+      return nil if raw.blank? || !raw.match?(/\A\d+\z/)
+
+      release = raw.to_i
+      release.positive? ? release : nil
+    end
+
+    def latest_release_for_assembly_name(tax_id, assembly_name)
+      assemblies = assemblies_for_tax_id_any_version(tax_id)
+      matched = matching_assemblies(assemblies, assembly_name)
+      return nil if matched.empty?
+
+      matched.map { |a| a.latest_ensembl_release.to_i }.select(&:positive?).max
+    end
+
+    def latest_release_from_assemblies(tax_id)
+      assemblies = assemblies_for_tax_id_any_version(tax_id)
+      return nil if assemblies.empty?
+
+      assemblies.map { |a| a.latest_ensembl_release.to_i }.select(&:positive?).max
+    end
+
+    def assembly_name_at_release(tax_id, release)
+      assemblies = assemblies_for_tax_id_any_version(tax_id)
+      matched = assemblies.select { |assembly| assembly_supports_release?(assembly, release) }
+      return nil if matched.empty?
+
+      matched.max_by { |assembly| assembly.latest_ensembl_release.to_i }&.name
+    end
+
+    def latest_local_release_for_organism(tax_id)
+      return nil unless @release_gene_names.available?
+
+      organism = remote_organism_for_tax_id(tax_id)
+      return nil unless organism
+
+      db_type = ensembl_subdomain_for_organism(organism)
+      return nil unless db_type
+
+      base_dirs = AsapData::EnsemblAssembliesLoader.all_ensembl_base_dirs
+      releases = AsapData::EnsemblAssembliesLoader.available_release_numbers(base_dirs, db_type)
+      organism_releases = releases.select do |rel|
+        release_dir = AsapData::EnsemblAssembliesLoader.resolve_release_dir(base_dirs, db_type, rel)
+        release_dir &&
+          AsapData::EnsemblAssembliesLoader.organism_present_in_release?(release_dir, organism.ensembl_db_name)
+      end
+      organism_releases.last
+    end
+
+    def assemblies_for_tax_id_any_version(tax_id)
+      RemoteOrganism.remote_versions.reverse_each do |version|
+        result = RemoteAssembly.with_remote(version) do
+          organism = RemoteOrganism.find_by(tax_id: tax_id.to_i)
+          next [] unless organism
+
+          RemoteAssembly.where(organism_id: organism.id).order(:name).to_a
+        end
+        return result if result.present?
+      end
+      []
+    rescue StandardError
+      []
     end
   end
 end

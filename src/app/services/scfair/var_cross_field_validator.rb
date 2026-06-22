@@ -109,7 +109,15 @@ module Scfair
         return
       end
 
-      issues = rows.filter_map { |row| feature_name_index_issue(row) }
+      release = parse_ensembl_release
+      if release.blank?
+        record_skip(valid_checks, check_id, 'ensembl_release not set; cannot verify feature_name against gene reference')
+        return
+      end
+
+      preload_release_gene_names(rows, release)
+
+      issues = rows.filter_map { |row| feature_name_index_issue(row, release:) }
 
       if issues.any?
         message = build_failure_message(
@@ -125,7 +133,7 @@ module Scfair
       record_pass(valid_checks, check_id, "feature_name values match var index per schema (#{rows.size} features checked)")
     end
 
-    def feature_name_index_issue(row)
+    def feature_name_index_issue(row, release: nil)
       biotype = row['feature_biotype'].to_s
       reference = row['feature_reference'].to_s
       name = row['feature_name'].to_s
@@ -148,7 +156,8 @@ module Scfair
         expected = @lookup.expected_feature_name(
           feature_reference: reference,
           index_id: index_id,
-          biotype: biotype
+          biotype: biotype,
+          release: release
         )
         return "#{index_id}: feature_name must be #{expected.inspect} (got #{name.inspect})" unless name == expected
 
@@ -160,16 +169,32 @@ module Scfair
       end
     end
 
+    def preload_release_gene_names(rows, release)
+      return if release.blank?
+
+      gene_ids = rows.filter_map do |row|
+        next unless row['feature_biotype'].to_s == GENE_BIOTYPE
+
+        row[INDEX_FIELD].to_s.presence
+      end
+      return if gene_ids.empty?
+
+      reference = rows.map { |row| row['feature_reference'].to_s }.find(&:present?)
+      reference ||= first_uns_value('organism_ontology_term_id')
+      return if reference.blank?
+
+      @lookup.preload_release_gene_names(
+        feature_reference: reference,
+        release: release,
+        ensembl_ids: gene_ids
+      )
+    end
+
     def validate_var_index_release(errors, valid_checks, organism_term, release)
       check_id = "#{CHECK_PREFIX}.index.release"
 
       if release.blank?
-        record_failure(
-          errors,
-          valid_checks,
-          check_id:,
-          message: 'ensembl_release is required in uns metadata but is not set; cannot verify var index gene identifiers against the annotation release'
-        )
+        record_skip(valid_checks, check_id, 'ensembl_release not set; cannot verify var index gene identifiers against the annotation release')
         return
       end
 

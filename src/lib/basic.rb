@@ -650,7 +650,7 @@ module Basic
       if run_network.blank?
         raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq (for example: ASAP_RUN_DOCKER_NETWORK=asap2_test_default), then restart those services.'
       end
-      "docker run --network=#{run_network} -e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm #{user_data_docker_volume_mount_arg} -v /srv/asap_run/srv:/srv #{ENV.fetch('ASAP_DOCKER_NAME', 'fabdavid/asap_run')}:#{image_tag} -c"
+      "docker run --network=#{run_network} -e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm #{user_data_docker_volume_mount_arg} #{ENV.fetch('ASAP_DOCKER_NAME', 'fabdavid/asap_run')}:#{image_tag} -c"
     end
 
     # Yield an IO positioned at the start of the Matrix Market body (plain or gzip-compressed).
@@ -4669,6 +4669,10 @@ module Basic
           host_option = "-H #{h_cmd['host_name']}"
         end
         h_cmd['docker_call'].gsub!(/\#host_option/, host_option)
+
+        # Legacy env_json mounts /srv/asap_run/srv over /srv, which hides ASAP.jar and
+        # other tools baked into the asap_run image when that host directory is empty.
+        h_cmd['docker_call'].gsub!(/\s*-v \/srv\/asap_run\/srv:\/srv\s*/, ' ')
         
         # Replace relative .env_asap_run path with absolute path
         # The docker command runs on the host, so we need an absolute path

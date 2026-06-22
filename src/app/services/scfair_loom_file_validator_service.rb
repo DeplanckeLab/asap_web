@@ -1,22 +1,4 @@
-      if vals:
-        out[path] = sorted(list(set(vals)))[:200]
-
-    def read_col_series(col_group, key):
-      if key not in col_group:
-        return []
-      ds = col_group[key]
-      if not isinstance(ds, h5py.Dataset):
-        return []
-      raw = ds[()]
-      if isinstance(raw, np.ndarray):
-        items = raw.tolist()
-      elif isinstance(raw, (list, tuple)):
-        items = list(raw)
-      else:
-        items = [raw]
-      return [decode_obs_value(v) for v in items]
-
-    def capture_dataset(path, ds, out):# frozen_string_literal: true
+# frozen_string_literal: true
 
 require 'open3'
 require 'json'

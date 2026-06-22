@@ -1056,6 +1056,7 @@ class ProjectsController < ApplicationController
         user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
         project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
         FileUtils.mkdir_p(project_dir)
+        clear_stale_sandbox_parsing_output!(project_dir) if @project.sandbox?
         
         begin
           ProjectInputFinalizerService.call(
@@ -7651,6 +7652,14 @@ class ProjectsController < ApplicationController
       return nil unless s.match?(/\A-?\d+(\.\d+)?([eE][+-]?\d+)?\z/)
 
       s.to_f.to_i
+    end
+
+    def clear_stale_sandbox_parsing_output!(project_dir)
+      output_json = project_dir + 'parsing' + 'output.json'
+      return unless output_json.file?
+
+      FileUtils.rm_f(output_json.to_s)
+      Rails.logger.info("[ProjectsController#create] Removed stale sandbox parsing output at #{output_json}")
     end
 
     def set_sandbox_self_destruct_at!

@@ -39,6 +39,7 @@ src/public/data/asap-old/input_examples
 .env.prod
 .env.dev
 tmp/
+tmp/*
 src/Gemfile.lock
 src/package-lock.json
 

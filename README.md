@@ -223,9 +223,7 @@ The running application also serves a [Citing ASAP](https://asap.epfl.ch/home/ci
 | Resource | URL |
 |----------|-----|
 | Production portal | https://asap.epfl.ch |
-| Tutorials & file formats | In-app under `/home/tutorial`, `/home/file_format` |
 | asap_run Docker image | https://hub.docker.com/r/fabdavid/asap_run |
-| Human Cell Atlas | https://www.humancellatlas.org |
 
 ---
 
@@ -233,4 +231,5 @@ The running application also serves a [Citing ASAP](https://asap.epfl.ch/home/ci
 
 Questions and feedback: use the in-app contact form or reach the team at **bioinfo.epfl@gmail.com**.
 
-Maintainer (Docker image label): Fabrice David — fabrice.david@epfl.ch
+asap_web maintainer: Fabrice David — fabrice.david@epfl.ch
+asap_run maintainer: Vincent Gardeux - vincent.gardeux@epfl.ch

@@ -339,6 +339,61 @@ namespace :versions do
     puts "  Total:   #{Version.count}"
   end
 
+  desc "Normalize env_json docker_images.asap_run.call to canonical placeholders (DRY_RUN=1). " \
+       "Same template on dev and prod; deployment values come from ENV at runtime."
+  task normalize_docker_calls: :environment do
+    dry_run = ENV['DRY_RUN'].to_s.strip == '1'
+    updated_count = 0
+    skipped_count = 0
+    error_count = 0
+
+    puts "Normalizing versions.env_json docker_images.asap_run.call (dry_run=#{dry_run})"
+    puts "  canonical template uses #run_network, #user_data_mount, optional #env_file_option"
+    puts ""
+
+    Version.find_each do |version|
+      begin
+        env_data = Basic.safe_parse_json(version.env_json, {})
+        docker_images = env_data['docker_images']
+        unless docker_images.is_a?(Hash) && docker_images['asap_run'].is_a?(Hash)
+          puts "  Version ##{version.id}: no docker_images.asap_run, skipping"
+          skipped_count += 1
+          next
+        end
+
+        current_call = docker_images['asap_run']['call'].to_s
+        include_env_file = version.id >= 8 || current_call.match?(/(?:^|\s)--env-file\s+/)
+        canonical_call = Basic.canonical_asap_run_docker_call(include_env_file: include_env_file)
+
+        if current_call == canonical_call
+          puts "  Version ##{version.id}: already canonical, skipping"
+          skipped_count += 1
+          next
+        end
+
+        puts "  Version ##{version.id}:"
+        puts "    was:  #{current_call}"
+        puts "    now:  #{canonical_call}"
+        updated_count += 1
+        next if dry_run
+
+        docker_images['asap_run']['call'] = canonical_call
+        version.update!(env_json: JSON.generate(env_data))
+      rescue StandardError => e
+        puts "  Version ##{version.id}: ERROR - #{e.message}"
+        error_count += 1
+      end
+    end
+
+    puts ""
+    puts "Summary:"
+    puts "  Updated: #{updated_count}"
+    puts "  Skipped: #{skipped_count}"
+    puts "  Errors:  #{error_count}"
+    puts "  Total:   #{Version.count}"
+    puts "  (dry-run, no writes)" if dry_run
+  end
+
   desc "Migrate env_json to new compliance structure"
   task migrate_compliance_structure: :environment do
     puts "Migrating env_json to new compliance structure..."

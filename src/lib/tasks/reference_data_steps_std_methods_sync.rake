@@ -170,7 +170,9 @@ namespace :reference_data do
       build_temp_snapshot_from_rows!(rows, label: "production_legacy")
     end
 
-    desc "Sync Step and StdMethod from SNAPSHOT=export.json (DRY_RUN=1, VERBOSE=1). Export with MODELS=Step,StdMethod,DockerImage,Version,Speed as needed."
+    desc "Sync Step, StdMethod, and Version from SNAPSHOT=export.json (DRY_RUN=1, VERBOSE=1). " \
+         "Version rows include env_json, tools_json, docker_json, and activated status. " \
+         "Export with MODELS=Step,StdMethod,DockerImage,Version,Speed as needed."
     task sync: :environment do
       path = ENV["SNAPSHOT"].to_s.strip
       generated_snapshot = nil
@@ -203,8 +205,9 @@ namespace :reference_data do
       generated_snapshot&.close!
     end
 
-    desc "Apply Step and StdMethod from development to the current DB (production). " \
-         "Match by primary key id; version_id < MAX_VERSION_ID (default 9, includes v8). " \
+    desc "Apply Step, StdMethod, and Version from development to the current DB (production). " \
+         "Match by primary key id; version id < MAX_VERSION_ID (default 9, includes v8). " \
+         "Version sync includes env_json and activated status. " \
          "Hidden steps included; obsolete std_methods excluded. " \
          "Set DEV_POSTGRES_DB (and DEV_DB_HOST/DEV_DB_PORT). DRY_RUN=1, VERBOSE=1"
     task sync_from_dev: :environment do
@@ -230,7 +233,7 @@ namespace :reference_data do
         exit 1
       end
 
-      puts "Applying development Step/StdMethod (version_id < #{max_version_id}, including hidden steps) to production"
+      puts "Applying development Step/StdMethod/Version (id < #{max_version_id}, including hidden steps) to production"
       puts "  dry_run=#{dry}  match_by=id"
 
       ReferenceDataStepsStdMethodsSync.new(

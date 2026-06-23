@@ -34,7 +34,7 @@ class Req < ApplicationRecord
       h_res = Basic.set_run(Rails.logger, h_p)
 
       if h_res[:error]
-        Basic.upd_run(project, run, { status_id: 4 }, true)
+        Basic.upd_run(project, run, { status_id: 4, error: h_res[:error] }, true)
       else
         # Always call exec_run - it will handle both sync and async cases
         # For async runs, this will enqueue RunExecutionJob which submits to SLURM

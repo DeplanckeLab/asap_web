@@ -636,6 +636,26 @@ module Basic
       "-v #{user_data_root}:#{user_data_root}"
     end
 
+    # Host path to .env_asap_run (sibling of USER_DATA_DIR users/ and fus/ dirs).
+    def asap_run_env_file_path
+      Pathname.new(ENV.fetch('USER_DATA_DIR')).parent.join('.env_asap_run').to_s
+    end
+
+    # Optional docker --env-file fragment for v8+ asap_run containers.
+    def asap_run_env_file_docker_option
+      "--env-file #{asap_run_env_file_path} "
+    end
+
+    # Canonical docker run prefix stored in versions.env_json (same on dev and prod).
+    # Deployment-specific values (#run_network, #user_data_mount, #env_file_option) are
+    # filled at runtime from ENV in build_docker_cmd.
+    def canonical_asap_run_docker_call(include_env_file: false)
+      env_file_option = include_env_file ? '#env_file_option' : ''
+      "docker run #host_option --name #container_name --network=#run_network " \
+        "-e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm " \
+        "#user_data_mount #{env_file_option}#image_name -c"
+    end
+
     # Prefix for ad-hoc `docker run` invocations that execute an R script inside
     # the asap_run container (used by legacy format conversions like
     # MTX->H5 and RDS->Loom). The ENV DOCKER_CALL template is tailored for the
@@ -643,7 +663,6 @@ module Basic
     # we build a dedicated prefix that:
     #   - targets the deployment-specific compose network (ASAP_RUN_DOCKER_NETWORK)
     #   - mounts the user data root so project paths are reachable
-    #   - mounts /srv/asap_run/srv so the R scripts are available at /srv/
     #   - appends `-c` so the caller can pass a single quoted shell command
     def asap_run_docker_cmd_prefix(image_tag)
       run_network = ENV['ASAP_RUN_DOCKER_NETWORK']
@@ -4653,63 +4672,69 @@ module Basic
 
     def build_docker_cmd h_cmd, core_cmd
       cmd = core_cmd
-      
+
       # Rails commands should run in the website container, not in asap_run container
       # SLURM will wrap them in docker exec asap2_test-website-1
       if h_cmd['program'] && h_cmd['program'].start_with?('rails')
         return cmd
       end
-      
-      if h_cmd['docker_call']
-     #   puts ">#{h_cmd['container_name']}-#{h_cmd['docker_call']}"
-        h_cmd['docker_call'] = h_cmd['docker_call'].dup if h_cmd['docker_call'].frozen?
-        h_cmd['docker_call'].gsub!(/\#container_name/, h_cmd['container_name'] || '')
-        host_option = ""
-        if h_cmd['host_name'] != 'localhost'
-          host_option = "-H #{h_cmd['host_name']}"
-        end
-        h_cmd['docker_call'].gsub!(/\#host_option/, host_option)
 
-        # Legacy env_json mounts /srv/asap_run/srv over /srv, which hides ASAP.jar and
-        # other tools baked into the asap_run image when that host directory is empty.
-        h_cmd['docker_call'].gsub!(/\s*-v \/srv\/asap_run\/srv:\/srv\s*/, ' ')
-        
-        # Replace relative .env_asap_run path with absolute path
-        # The docker command runs on the host, so we need an absolute path
-        # that's accessible from the host filesystem
-        # Use /data/asap2_test/.env_asap_run which is accessible from both container and host
-        env_file_path = '/data/asap/.env_asap_run'
-        h_cmd['docker_call'].gsub!(/--env-file\s+\.env_asap_run/, "--env-file #{env_file_path}")
-        
-        # Keep docker network configurable from env to avoid hardcoded stack names.
-        # This must point to the same compose network as the website/postgres services.
-        # Always replace legacy network names; they are deployment-specific and brittle.
-        run_network = ENV['ASAP_RUN_DOCKER_NETWORK']
-        has_network_flag = h_cmd['docker_call'].match?(/--network(?:=|\s+)\S+/)
-        uses_legacy_network = h_cmd['docker_call'].match?(/--network(?:=|\s+)asap2_asap_network(?:\s|$)/)
+      if h_cmd['docker_call']
+        docker_call = h_cmd['docker_call'].dup
+        docker_call = docker_call.dup if docker_call.frozen?
+        normalize_legacy_docker_call!(docker_call)
+        docker_call = substitute_docker_call_placeholders!(docker_call, h_cmd, core_cmd)
+        cmd = docker_call + " \"" + core_cmd + "\""
+      end
+      cmd
+    end
+
+    # Strip deployment-specific fragments from legacy env_json templates before placeholder substitution.
+    def normalize_legacy_docker_call!(docker_call)
+      docker_call.gsub!(/\s*-v \/srv\/asap_run\/srv:\/srv\s*/, ' ')
+      docker_call.gsub!(/\s*-v \/data\/asap2?:\/data\/asap2?\s*/, ' ')
+      docker_call.gsub!(/\s*--env-file\s+\.env_asap_run\s*/, ' ')
+      docker_call.gsub!(/\s*--env-file\s+\/data\/asap[^ ]*\.env_asap_run\s*/, ' ')
+    end
+    private :normalize_legacy_docker_call!
+
+    def substitute_docker_call_placeholders!(docker_call, h_cmd, core_cmd)
+      host_option = h_cmd['host_name'] != 'localhost' ? "-H #{h_cmd['host_name']}" : ''
+      run_network = ENV['ASAP_RUN_DOCKER_NETWORK'].to_s.strip
+      required_mount = user_data_docker_volume_mount_arg
+      env_file_option = docker_call.include?('#env_file_option') ? asap_run_env_file_docker_option : ''
+
+      docker_call = docker_call.dup
+      docker_call.gsub!(/\#container_name/, h_cmd['container_name'] || '')
+      docker_call.gsub!(/\#host_option/, host_option)
+      docker_call.gsub!(/\#user_data_mount/, required_mount)
+      docker_call.gsub!(/\#env_file_option/, env_file_option)
+
+      if docker_call.include?('#run_network')
+        raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq, then restart those services.' if run_network.blank?
+
+        docker_call.gsub!(/\#run_network/, run_network)
+      else
+        has_network_flag = docker_call.match?(/--network(?:=|\s+)\S+/)
+        uses_legacy_network = docker_call.match?(/--network(?:=|\s+)asap2_asap_network(?:\s|$)/)
         if run_network.present? && has_network_flag
-          h_cmd['docker_call'].gsub!(/--network(?:=|\s+)\S+/, "--network=#{run_network}")
+          docker_call.gsub!(/--network(?:=|\s+)\S+/, "--network=#{run_network}")
         elsif uses_legacy_network
           raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq (for example: ASAP_RUN_DOCKER_NETWORK=asap2_test_default), then restart those services.'
         end
-        
-        # Ensure the host root that contains USER_DATA_DIR is mounted so parser
-        # containers can read/write project paths like /data/asap2_test/users/...
-        required_mount = user_data_docker_volume_mount_arg
-        if !h_cmd['docker_call'].include?(required_mount)
-          h_cmd['docker_call'].sub!(/^docker run\s+/, "docker run #{required_mount} ")
-        end
-
-        # On Linux Docker, host.docker.internal is not always available by default.
-        # Add an explicit host-gateway mapping when commands target that hostname.
-        if core_cmd.include?('host.docker.internal') && !h_cmd['docker_call'].include?('host.docker.internal:host-gateway')
-          h_cmd['docker_call'].sub!(/^docker run\s+/, 'docker run --add-host=host.docker.internal:host-gateway ')
-        end
-
-        cmd = h_cmd['docker_call'] + " \"" + core_cmd + "\""
       end
-      return cmd
+
+      if !docker_call.include?(required_mount)
+        docker_call.sub!(/^docker run\s+/, "docker run #{required_mount} ")
+      end
+
+      if core_cmd.include?('host.docker.internal') && !docker_call.include?('host.docker.internal:host-gateway')
+        docker_call.sub!(/^docker run\s+/, 'docker run --add-host=host.docker.internal:host-gateway ')
+      end
+
+      docker_call
     end
+    private :substitute_docker_call_placeholders!
 
     def command_json_opt_shell_fragment(entry)
       opt = entry['opt']

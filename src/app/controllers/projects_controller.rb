@@ -17,9 +17,9 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results filter_ge_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
@@ -2179,6 +2179,59 @@ class ProjectsController < ApplicationController
       format.html { render partial: 'projects/views/ge_results_table', layout: false }
       format.json { render json: { h_stats: @h_stats } }
     end
+  end
+
+  # POST /projects/1/filter_doublet_results
+  # Re-runs doublet.calling.v8.py on saved scores (dynamic threshold on the result page).
+  def filter_doublet_results
+    unless editable?(@project) && analyzable?(@project)
+      return render json: { error: "You need edit and analysis rights to apply doublet calling filters." }, status: :forbidden
+    end
+
+    run_id = params.dig(:filter, :run_id).to_i
+    method_name = params.dig(:filter, :method).to_s.presence || "auto"
+    allowed_methods = %w[auto valley threshold top_n top_pct]
+    unless allowed_methods.include?(method_name)
+      return render json: { error: "Invalid calling method: #{method_name}" }, status: :unprocessable_entity
+    end
+
+    asap_docker_image = Basic.get_asap_docker(@project.version)
+    @step = Step.where(docker_image_id: asap_docker_image.id, name: "doublet_calling").first
+    unless @step
+      return render json: { error: "Doublet calling step is not configured for this project version." }, status: :unprocessable_entity
+    end
+
+    run = apply_publication_snapshot_to_runs(@project.runs.where(id: run_id, step_id: @step.id)).first
+    unless run && run.status_id == 3
+      return render json: { error: "Completed doublet calling run not found." }, status: :not_found
+    end
+
+    ctx = DoubletCallingFilterService.context_for_run(@project, run, @step)
+    filter_params = {
+      loom_path: ctx[:loom_path],
+      input_score_meta: ctx[:input_score_meta],
+      output_call_meta: ctx[:output_call_meta],
+      method: method_name,
+      output_dir: ctx[:filter_output_dir]
+    }
+    if method_name == "threshold"
+      filter_params[:threshold] = params.dig(:filter, :threshold)
+    elsif method_name == "top_n"
+      filter_params[:n_doublets] = params.dig(:filter, :n_doublets)
+    elsif method_name == "top_pct"
+      filter_params[:doublet_rate] = params.dig(:filter, :doublet_rate)
+    end
+
+    result = DoubletCallingFilterService.run!(**filter_params)
+    DoubletCallingFilterService.reload_call_annot!(@project, run, ctx, result)
+    render json: result
+  rescue DoubletCallingFilterService::FilterError => e
+    Rails.logger.warn("[filter_doublet_results] #{e.class}: #{e.message}")
+    render json: { error: e.message }, status: :unprocessable_entity
+  rescue StandardError => e
+    Rails.logger.error("[filter_doublet_results] #{e.class}: #{e.message}")
+    Rails.logger.error(e.backtrace&.first(8)&.join("\n"))
+    render json: { error: "Doublet calling filter failed." }, status: :internal_server_error
   end
 
   # GET /projects/1/search_gene
@@ -6108,6 +6161,28 @@ class ProjectsController < ApplicationController
           @h_annots = {}
         end
       end
+
+      if @step.name == "doublet_calling"
+        begin
+          prepare_doublet_calling_data
+        rescue => e
+          Rails.logger.error("[step_results] Error preparing doublet calling data: #{e.class} - #{e.message}")
+          Rails.logger.error("[step_results] Backtrace: #{e.backtrace.first(10).join("\n")}")
+          @doublet_loom_path = nil
+          @doublet_score_path = nil
+          @doublet_call_path = nil
+          @doublet_score_histogram = {}
+          @doublet_scores = []
+          @std_method = nil
+          @h_run_attrs = {}
+          @h_std_method_attrs = {}
+          @h_annots_for_params = {}
+          @h_ori_runs_for_params = {}
+          @h_steps_for_params = {}
+          @doublet_method_attrs = {}
+          @doublet_param_sections = []
+        end
+      end
       
       # Prepare data for standard dashboard and view
       # Skip for parsing step as it has its own special handling
@@ -6418,7 +6493,9 @@ class ProjectsController < ApplicationController
       # Check if step has multiple_runs = false and status is complete or failed
       @project_step = ProjectStep.find_by(project_id: @project.id, step_id: step_id)
       
-      unless @project_step && !@step.multiple_runs && (@project_step.status_id == 3 || @project_step.status_id == 4)
+      # Single-run steps can be reset when complete, failed, queued, or running.
+      restartable_statuses = [1, 2, 3, 4, 6]
+      unless @project_step && !@step.multiple_runs && restartable_statuses.include?(@project_step.status_id)
         redirect_to project_path(@project, view: 'analysis', step_id: step_id), alert: 'Step cannot be restarted.'
         return
       end
@@ -11063,6 +11140,19 @@ class ProjectsController < ApplicationController
            .all
     end
     
+    # Input-data attrs marked optional (or min_nber_items 0) do not gate step/method availability.
+    def optional_std_method_input_attr?(attr_config)
+      return false unless attr_config.is_a?(Hash)
+
+      if ActiveModel::Type::Boolean.new.cast(attr_config['optional'])
+        return true
+      end
+
+      attr_config['widget'].to_s == 'input_data' &&
+        attr_config.key?('min_nber_items') &&
+        attr_config['min_nber_items'].to_i.zero?
+    end
+
     # Check if a std_method has all required parameters satisfied
     def std_method_has_all_requirements?(step, std_method, available_annots)
       # Use Basic.get_std_method_attrs to get properly combined attributes
@@ -11106,6 +11196,7 @@ class ProjectsController < ApplicationController
       combined_attrs.each do |attr_name, attr_config|
         next unless attr_config.is_a?(Hash)
         next unless attr_config['source_steps'].present? && attr_config['valid_types'].present?
+        next if optional_std_method_input_attr?(attr_config)
         
         source_steps = attr_config['source_steps']
         valid_types = attr_config['valid_types']
@@ -11231,6 +11322,7 @@ class ProjectsController < ApplicationController
         
         # Check for source_steps - if present, this parameter requires input from another step
         next unless attr_config['source_steps'].present?
+        next if optional_std_method_input_attr?(attr_config)
         
         source_steps = attr_config['source_steps']
         valid_types = attr_config['valid_types'] || []
@@ -12656,23 +12748,112 @@ class ProjectsController < ApplicationController
         { name: "mito", attr_name: 'mito_content', type: :greater, threshold: 20, label: "% mitochondrial genes" },
         { name: "ribo", attr_name: 'ribo_content', type: :greater, threshold: 40, label: "% ribosomal genes" }
       ]
-      
+
       @h_p = {}
       @list_p.each do |e|
         @h_p[e[:type]] ||= {}
         @h_p[e[:type]][e[:name]] = { threshold: e[:threshold] }
       end
-      
+
       # Get standard method details if needed (optional for now)
       @std_method = nil
       @h_method_details = nil
       if @step
         @std_method = StdMethod.where(step_id: @step.id, obsolete: false).first
-        # @h_method_details = get_attr(@step, @std_method) if @std_method
-        # For now, we'll work without method details
       end
     end
-    
+
+    def prepare_doublet_calling_data
+      run = @run || @current_run || @runs&.first
+      unless run
+        @doublet_loom_path = nil
+        @doublet_score_path = nil
+        @doublet_call_path = nil
+        @doublet_score_histogram = {}
+        @doublet_scores = []
+        @std_method = nil
+        @h_run_attrs = {}
+        @h_std_method_attrs = {}
+        @h_annots_for_params = {}
+        @h_ori_runs_for_params = {}
+        @h_steps_for_params = {}
+        @doublet_method_attrs = {}
+        @doublet_param_sections = []
+        return
+      end
+
+      project_dir = Pathname.new(ENV.fetch("USER_DATA_DIR")) + @project.user_id.to_s + @project.key
+      step_dir = project_dir + @step.name.to_s
+      output_dir = @step.multiple_runs ? (step_dir + run.id.to_s) : step_dir
+      output_json_path = output_dir + "output.json"
+      @h_res = File.file?(output_json_path) ? Basic.safe_parse_json(File.read(output_json_path), {}) : (@h_res || {})
+
+      ctx = DoubletCallingFilterService.context_for_run(@project, run, @step)
+      @doublet_loom_path = ctx[:loom_path]
+      @doublet_score_path = ctx[:input_score_meta]
+      @doublet_call_path = ctx[:output_call_meta]
+
+      @std_method = run.std_method
+      @h_run_attrs = Basic.safe_parse_json(run.attrs_json, {})
+      @doublet_method_attrs = {}
+      @doublet_param_sections = []
+      if @std_method
+        sm_attrs = Basic.get_std_method_attrs(@std_method, @step)
+        @h_std_method_attrs = { @std_method.id => sm_attrs[:h_attrs] }
+        @doublet_method_attrs = sm_attrs[:h_attrs] || {}
+        layout = Basic.safe_parse_json(@std_method.attr_layout_json, [])
+        layout.each do |block|
+          (block["horiz_elements"] || []).each do |el|
+            keys = Array(el["attr_list"]).map(&:to_s).reject(&:blank?)
+            next if keys.empty?
+
+            header = el["card-header"].presence || el["card_header"].presence
+            @doublet_param_sections << { header: header, keys: keys }
+          end
+        end
+      else
+        @h_std_method_attrs = {}
+      end
+
+      annot_ids = []
+      run_ids = []
+      @h_run_attrs.each_value do |v|
+        if v.is_a?(Hash)
+          annot_ids << v["annot_id"] if v["annot_id"].present?
+          run_ids << v["run_id"] if v["run_id"].present?
+        elsif v.is_a?(Array)
+          v.each do |item|
+            next unless item.is_a?(Hash)
+            annot_ids << item["annot_id"] if item["annot_id"].present?
+            run_ids << item["run_id"] if item["run_id"].present?
+          end
+        end
+      end
+      @h_annots_for_params = annot_ids.any? ? Annot.where(id: annot_ids.uniq).index_by(&:id) : {}
+      @h_ori_runs_for_params = run_ids.any? ? Run.where(id: run_ids.uniq).index_by(&:id) : {}
+      step_ids = @h_ori_runs_for_params.values.map(&:step_id).compact.uniq
+      @h_steps_for_params = step_ids.any? ? Step.where(id: step_ids).index_by(&:id) : {}
+
+      raw_scores = H5DataService.get_metadata_vector(@doublet_loom_path, @doublet_score_path)
+      @doublet_score_histogram = DoubletCallingFilterService.score_histogram(raw_scores)
+      @doublet_scores = Array(raw_scores).map { |v| (Float(v) rescue nil) }.compact
+    rescue DoubletCallingFilterService::FilterError => e
+      Rails.logger.warn("[prepare_doublet_calling_data] #{e.message}")
+      @doublet_loom_path = nil
+      @doublet_score_path = nil
+      @doublet_call_path = nil
+      @doublet_score_histogram = {}
+      @doublet_scores = []
+      @std_method = nil
+      @h_run_attrs = {}
+      @h_std_method_attrs = {}
+      @h_annots_for_params = {}
+      @h_ori_runs_for_params = {}
+      @h_steps_for_params = {}
+      @doublet_method_attrs = {}
+      @doublet_param_sections = []
+    end
+
     # Prepare data for standard dashboard and view
     def prepare_std_step_data
       # Get docker image and steps
@@ -12903,6 +13084,7 @@ class ProjectsController < ApplicationController
         combined_attrs.each do |attr_name, attr_config|
           next unless attr_config.is_a?(Hash)
           next unless attr_config['source_steps'].present? && attr_config['valid_types'].present?
+          next if optional_std_method_input_attr?(attr_config)
           
           source_steps = attr_config['source_steps']
           valid_types = attr_config['valid_types']

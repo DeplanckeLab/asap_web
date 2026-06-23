@@ -371,6 +371,38 @@ module ApplicationHelper
     "#{key}: #{parts.join(' ')}"
   end
 
+  def form_param_label(key, h_method_attrs)
+    sma = h_method_attrs.is_a?(Hash) ? h_method_attrs[key.to_s] : nil
+    return key.to_s.humanize unless sma.is_a?(Hash)
+    sma['label'].presence || key.to_s.humanize
+  end
+
+  def form_param_empty?(value)
+    value.nil? ||
+      value == "" ||
+      (value.is_a?(Array) && value.empty?) ||
+      (value.is_a?(Hash) && value.except("default").empty?)
+  end
+
+  def display_form_param_value(run, key, value, h_std_method_attrs, context = {})
+    method_map = std_method_attrs_map_for_run_display(run, h_std_method_attrs)
+    if form_param_empty?(value)
+      return "-"
+    end
+    if value.is_a?(Hash) || (value.is_a?(Array) && value.first.is_a?(Hash))
+      badge = render_run_param_badge(
+        run: run,
+        key: key,
+        value: value,
+        h_method_attrs: method_map,
+        context: context,
+        clickable: true
+      )
+      return badge if badge.present?
+    end
+    ERB::Util.html_escape(value.to_s)
+  end
+
   def param_badge_palette(attr_key)
     key = attr_key.to_s
     is_input_data = key.start_with?('input_matrix', 'input_de')

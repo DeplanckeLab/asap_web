@@ -3,14 +3,16 @@
 require "json"
 require "set"
 
-# Applies Step and StdMethod rows from a JSON snapshot produced by
+# Applies Step, StdMethod, and Version rows from a JSON snapshot produced by
 # ReferenceDataCompare / bin/rake reference_data:export.
 #
-# Matching: Step by +name+ for full sync; Step and StdMethod by +id+ when +max_version_id+
-# is set (legacy prod/dev alignment). StdMethod names must be unique per snapshot +step_id+
-# for full sync only.
+# Matching: Step by +name+ for full sync; Step, StdMethod, and Version by +id+ when
+# +max_version_id+ is set (legacy prod/dev alignment). StdMethod names must be unique
+# per snapshot +step_id+ for full sync only.
 # Foreign keys +docker_image_id+, +version_id+, +speed_id+ are remapped for the
 # target database using snapshot side tables when ids differ.
+# Version rows (env_json, tools_json, docker_json, activated, ...) are applied by id
+# when present in the snapshot.
 class ReferenceDataStepsStdMethodsSync
   SyncError = Class.new(StandardError)
 
@@ -21,10 +23,12 @@ class ReferenceDataStepsStdMethodsSync
     ],
     "StdMethod" => %w[
       attr_layout_json attrs_json command_json obj_attrs_json output_json
-    ]
+    ],
+    "Version" => %w[env_json tools_json docker_json]
   }.freeze
 
-  TIMESTAMP_COLUMNS = %w[created_at updated_at].freeze
+  TIMESTAMP_COLUMNS = %w[created_at updated_at activated_at].freeze
+  BOOLEAN_COLUMNS = %w[activated beta hidden obsolete].freeze
 
   def initialize(snapshot_path:, dry_run: false, verbose: false, max_version_id: nil)
     @snapshot_path = snapshot_path
@@ -36,6 +40,7 @@ class ReferenceDataStepsStdMethodsSync
 
   def run
     @snapshot = load_snapshot!(@snapshot_path)
+    versions_in = filter_legacy_version_ids!(fetch_optional_records!("Version"))
     steps_in = filter_legacy_version!(fetch_records!("Step"))
     methods_in = filter_legacy_version!(fetch_records!("StdMethod"))
 
@@ -52,6 +57,9 @@ class ReferenceDataStepsStdMethodsSync
     snapshot_step_id_lookup = build_step_id_lookup(steps_in)
 
     summary = {
+      versions_created: 0,
+      versions_updated: 0,
+      versions_unchanged: 0,
       steps_created: 0,
       steps_updated: 0,
       steps_unchanged: 0,
@@ -62,6 +70,7 @@ class ReferenceDataStepsStdMethodsSync
     }
 
     ActiveRecord::Base.transaction(requires_new: true) do
+      apply_versions!(versions_in, summary)
       apply_steps!(steps_in, docker_remap, version_remap, summary)
       apply_std_methods!(
         steps_in,
@@ -76,7 +85,7 @@ class ReferenceDataStepsStdMethodsSync
       raise ActiveRecord::Rollback if @dry_run
     end
 
-    print_summary(summary, steps_in)
+    print_summary(summary, versions_in, steps_in)
     summary
   end
 
@@ -99,6 +108,12 @@ class ReferenceDataStepsStdMethodsSync
     end
   end
 
+  def filter_legacy_version_ids!(rows)
+    return rows if @max_version_id.nil?
+
+    rows.select { |row| row["id"].to_i < @max_version_id }
+  end
+
   def load_snapshot!(path)
     raw = File.read(path)
     JSON.parse(raw)
@@ -111,6 +126,14 @@ class ReferenceDataStepsStdMethodsSync
   def fetch_records!(model_name)
     list = @snapshot["records"] && @snapshot["records"][model_name]
     raise SyncError, "Snapshot missing records[#{model_name}]" if list.nil?
+    raise SyncError, "records[#{model_name}] must be an array" unless list.is_a?(Array)
+
+    list
+  end
+
+  def fetch_optional_records!(model_name)
+    list = @snapshot["records"] && @snapshot["records"][model_name]
+    return [] if list.nil?
     raise SyncError, "records[#{model_name}] must be an array" unless list.is_a?(Array)
 
     list
@@ -321,6 +344,45 @@ class ReferenceDataStepsStdMethodsSync
     end
     encode_json_columns!(model_class.name, attrs)
     attrs
+  end
+
+  def prepare_version_row(row)
+    attrs = row.except("id")
+    encode_json_columns!("Version", attrs)
+    attrs
+  end
+
+  def apply_versions!(versions_in, summary)
+    return if versions_in.empty?
+
+    versions_in.sort_by { |row| row["id"].to_i }.each do |src|
+      src_id = src["id"]
+      raise SyncError, "Version row without id: #{src.inspect}" if src_id.nil?
+
+      prepared = prepare_version_row(src)
+      record = Version.find_by(id: src_id)
+
+      if record.nil?
+        puts "[#{mode_label}] create Version id=#{src_id}"
+        summary[:versions_created] += 1
+        next if @dry_run
+
+        Version.create!(prepared.merge("id" => src_id))
+        next
+      end
+
+      if record_attributes_match?(record, prepared)
+        summary[:versions_unchanged] += 1
+        next
+      end
+
+      puts "[#{mode_label}] update Version id=#{src_id}"
+      log_verbose_diff!(record, prepared)
+      summary[:versions_updated] += 1
+      next if @dry_run
+
+      record.update!(prepared)
+    end
   end
 
   def encode_json_columns!(model_name, attrs)
@@ -583,6 +645,7 @@ class ReferenceDataStepsStdMethodsSync
   end
 
   def comparable_value(column, value)
+    return ActiveModel::Type::Boolean.new.cast(value) if BOOLEAN_COLUMNS.include?(column)
     return timestamp_epoch_seconds(value) if TIMESTAMP_COLUMNS.include?(column)
 
     v = value
@@ -651,14 +714,18 @@ class ReferenceDataStepsStdMethodsSync
     @dry_run ? "dry-run" : "apply"
   end
 
-  def print_summary(summary, steps_in)
+  def print_summary(summary, versions_in, steps_in)
     puts ""
     puts "Summary (#{mode_label})"
+    if versions_in.any?
+      puts "  versions: created=#{summary[:versions_created]} updated=#{summary[:versions_updated]} unchanged=#{summary[:versions_unchanged]}"
+      puts "  snapshot versions: #{versions_in.size}"
+    end
     puts "  steps: created=#{summary[:steps_created]} updated=#{summary[:steps_updated]} unchanged=#{summary[:steps_unchanged]}"
     puts "  std_methods: created=#{summary[:std_methods_created]} updated=#{summary[:std_methods_updated]} unchanged=#{summary[:std_methods_unchanged]}"
     puts "  snapshot steps: #{steps_in.size}"
     puts "  match key: #{match_by_id? ? 'id' : (match_by_version? ? 'name + version_id' : 'name')}"
-    puts "  version filter: version_id < #{@max_version_id}" if @max_version_id
+    puts "  version filter: id/version_id < #{@max_version_id}" if @max_version_id
     puts "  rolled back (dry-run)" if @dry_run
   end
 end

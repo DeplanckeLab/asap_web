@@ -207,6 +207,10 @@ import TableRowFilterController from "controllers/table_row_filter_controller"
 application.register("table-row-filter", TableRowFilterController)
 console.log('Table row filter controller registered')
 
+import DoubletCallingController from "controllers/doublet_calling_controller"
+application.register("doublet-calling", DoubletCallingController)
+console.log('Doublet calling controller registered')
+
 import ConfirmDeleteController from "controllers/confirm_delete_controller"
 application.register("confirm-delete", ConfirmDeleteController)
 console.log('Confirm delete controller registered')

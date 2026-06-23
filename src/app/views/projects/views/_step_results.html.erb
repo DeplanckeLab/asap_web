@@ -4,8 +4,10 @@
        @run || @current_run || (@runs.respond_to?(:first) ? @runs.first : nil)
      end %>
   <% single_run_status_id = single_run_status_run&.status_id.to_i if single_run_status_run %>
-  <% show_single_run_intermediate = @step.name != 'parsing' && single_run_status_run && [1, 2, 6].include?(single_run_status_id) %>
-  <% show_single_run_failed_summary = @step.name != 'parsing' && single_run_status_run && single_run_status_id == 4 && !show_form_requested %>
+  <% custom_step_view_partial = "projects/views/#{@step.name}_view" %>
+  <% has_custom_step_view = !@step.has_std_view && lookup_context.template_exists?(custom_step_view_partial, [], true) %>
+  <% show_single_run_intermediate = @step.name != 'parsing' && single_run_status_run && [1, 2, 6].include?(single_run_status_id) && !has_custom_step_view %>
+  <% show_single_run_failed_summary = @step.name != 'parsing' && single_run_status_run && single_run_status_id == 4 && !show_form_requested && !has_custom_step_view %>
   <%# Parsing always uses the dedicated _parsing partial (never std_step / std_run_view). %>
   <% if @step.name == 'parsing' %>
     <%= render partial: 'projects/views/parsing' %>
@@ -14,13 +16,8 @@
     <%= render partial: 'projects/views/run_metadata', locals: { run: single_run_status_run, results: @h_res, queue_position: @queue_position, slurm_queue_hover: @slurm_queue_hover } %>
   <% elsif show_single_run_failed_summary %>
     <%= render partial: 'projects/views/single_run_failed_summary', locals: { run: single_run_status_run } %>
-  <% elsif !@step.multiple_runs && !@step.has_std_view && single_run_status_run %>
-    <% specific_view_partial = "projects/views/#{@step.name}_view" %>
-    <% if lookup_context.template_exists?(specific_view_partial, [], true) %>
-      <%= render partial: specific_view_partial %>
-    <% else %>
-      <%= render 'projects/views/std_step' %>
-    <% end %>
+  <% elsif !@step.multiple_runs && !@step.has_std_view && single_run_status_run && has_custom_step_view %>
+    <%= render partial: custom_step_view_partial %>
   <% elsif @show_dashboard || @show_view || @show_form || @show_custom_form %>
     <%= render 'projects/views/std_step' %>
   <% else %>

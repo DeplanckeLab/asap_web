@@ -58,6 +58,7 @@ Rails.application.routes.draw do
       post :cluster_comparison
       post :filter_de_results
       post :filter_ge_results
+      post :filter_doublet_results
       get :get_annot_info
       get :get_annot_evidences
       get :search_visualization_metadata

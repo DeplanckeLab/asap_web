@@ -178,8 +178,6 @@ docker compose -f docker-compose.test.yml exec website bundle exec rails test
 docker compose -f docker-compose.test.yml exec website bundle exec rails tailwindcss:build
 ```
 
-Example public datasets for preparsing tests can be wired with [`script/setup_public_asap_old_data.sh`](script/setup_public_asap_old_data.sh) (see [`src/public/data/README.md`](src/public/data/README.md)).
-
 ---
 
 ## REST API

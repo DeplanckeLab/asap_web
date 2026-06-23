@@ -1,4 +1,4 @@
-# ASAP 2 — Automated Single-cell Analysis Pipeline
+# ASAP — Automated Single-cell Analysis Pipeline
 
 [ASAP](https://asap.epfl.ch) is a collaborative web platform for analyzing and visualizing single-cell RNA-seq (and related omics) data. It is developed at EPFL and listed among [SIB resources](https://www.sib.swiss/sib-resources).
 
@@ -19,7 +19,7 @@ ASAP guides users through a modular analysis pipeline on large single-cell datas
 - Interactive UMAP/t-SNE visualization with metadata overlays
 - Export of Loom result files and reproduction scripts for local re-runs
 
-Each step exposes multiple standard methods; users can reorder or skip steps when appropriate. Registered users keep projects long-term; anonymous trial sessions use a sandbox that expires when the browser session ends.
+Each step exposes multiple methods; users are guided along the selected pipeline (single-cell transcriptomics or bulk transcriptomics) and can skip steps when appropriate. Registered users keep projects long-term; anonymous trial sessions use a sandbox that expires when the browser session ends.
 
 ---
 
@@ -49,7 +49,6 @@ flowchart LR
   website --> elasticsearch[(Elasticsearch)]
   website --> slurm[SLURM on host]
   slurm --> asap_run["asap_run (Docker)"]
-  asap_run --> data["/data/asap2*"]
 ```
 
 **Docker Compose services** (`docker-compose.test.yml`):
@@ -191,9 +190,9 @@ Set `OPENAPI_SERVER_URL` in `.env` so the served spec points at your environment
 
 ---
 
-## scFAIR / CELLxGENE compliance
+## scFAIR compliance
 
-The codebase includes validators and compliance reporting for [scFAIR](https://github.com/chanzuckerberg/scFAIR_schema) / CELLxGENE-style metadata (H5AD and Loom). Rules are driven from YAML under `src/config/scfair/`. Services under `src/app/services/scfair/` power the compliance UI and file checks.
+The codebase includes validators and compliance reporting for [scFAIR](https://github.com/scFAIR/scFAIR_schema/blob/main/schema/7.1.0/README.md) (H5AD and Loom). Rules are driven from YAML under `src/config/scfair/`. Services under `src/app/services/scfair/` power the compliance UI and file checks.
 
 ---
 

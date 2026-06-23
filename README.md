@@ -89,10 +89,7 @@ Host bind mounts (paths vary by environment) provide user data, example datasets
 Notable in-app documentation:
 
 - [`src/SLURM_SCHEDULER.md`](src/SLURM_SCHEDULER.md) — job submission, monitoring, rake tasks
-- [`src/public/data/README.md`](src/public/data/README.md) — serving example input files
 - [`src/public/swagger/openapi.yaml`](src/public/swagger/openapi.yaml) — REST API (also at `/api_documentation` when running)
-
-Operational notes with real host paths, credentials, and Fail2ban layouts are kept **out of Git**: use `docs/*.md.example`, `slurm/*.example`, a local `private/` directory, or a separate ops repository.
 
 ---
 

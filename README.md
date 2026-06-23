@@ -189,6 +189,13 @@ Set `OPENAPI_SERVER_URL` in `.env` so the served spec points at your environment
 
 The codebase includes validators and compliance reporting for [scFAIR](https://github.com/scFAIR/scFAIR_schema/blob/main/schema/7.1.0/README.md) (H5AD and Loom). Rules are driven from YAML under `src/config/scfair/`. Services under `src/app/services/scfair/` power the compliance UI and file checks.
 
+Standalone file check (`/compliance/file-check`) uses a two-step pipeline:
+
+1. **Extraction** — `ScfairMinimalExtractService` runs the Python parser (`scripts/scfair_loom_h5ad_extract_parser.py`) to produce JSON matching `src/config/scfair/minimal_extract_spec.json` (extraction only, no checks).
+2. **Checks** — `Scfair::ExtractComplianceChecker` and the existing `scfair/*` validators run on the adapted `field_values` hash (`Scfair::FieldValuesFromExtract`).
+
+Example extracts live under `tmp/` (see the spec file for ATAC and Visium examples).
+
 ---
 
 ## Testing

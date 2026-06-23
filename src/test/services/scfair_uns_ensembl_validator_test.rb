@@ -29,13 +29,13 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    check = result[:valid_checks].find { |entry| entry[:field] == 'uns/ensembl_release' }
+    check = result[:valid_checks].find { |entry| entry[:field] == 'uns.ensembl.release' }
     assert_equal 'failed', check[:status]
     assert_equal 'Missing uns/ensembl_release metadata (required by schema)', check[:message]
-    refute result[:valid_checks].any? { |entry| entry[:field] == 'uns.ensembl.release' }
+    assert_equal 'uns.ensembl', check[:check_id]
   end
 
-  test 'defers missing ensembl_release to base validator when column absent' do
+  test 'fails when ensembl_release column is absent from declared uns metadata' do
     result = Scfair::UnsEnsemblValidator.new(
       field_values: {
         'metadata/uns/columns' => %w[title schema_version]
@@ -43,8 +43,9 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    assert_empty result[:errors]
-    refute result[:valid_checks].any? { |entry| entry[:field] == 'uns/ensembl_release' }
+    check = result[:valid_checks].find { |entry| entry[:field] == 'uns.ensembl.release' }
+    assert_equal 'failed', check[:status]
+    assert_equal 'Missing uns/ensembl_release metadata (required by schema)', check[:message]
   end
 
   test 'fails when ensembl_release is not an integer' do
@@ -84,12 +85,12 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    assembly = result[:valid_checks].find { |entry| entry[:field] == 'uns/ensembl_assembly' }
+    assembly = result[:valid_checks].find { |entry| entry[:field] == 'uns.ensembl.assembly' }
     assert_equal 'failed', assembly[:status]
     assert_equal 'Missing uns/ensembl_assembly metadata (required by schema)', assembly[:message]
   end
 
-  test 'defers missing ensembl_assembly to base validator when column absent' do
+  test 'fails when ensembl_assembly column is absent from declared uns metadata' do
     result = Scfair::UnsEnsemblValidator.new(
       field_values: {
         'metadata/uns/columns' => %w[ensembl_release ensembl_database],
@@ -99,7 +100,8 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    refute result[:valid_checks].any? { |entry| entry[:field] == 'uns/ensembl_assembly' }
+    assembly = result[:valid_checks].find { |entry| entry[:field] == 'uns.ensembl.assembly' }
+    assert_equal 'failed', assembly[:status]
   end
 
   test 'passes when ensembl_assembly is present' do

@@ -1,6 +1,9 @@
 #!/usr/bin/env Rscript
+# DEPRECATED for H5AD/Loom: use scripts/scfair_loom_h5ad_extract_parser.py instead.
+# This R script remains for reference; Seurat extraction uses scfair_seurat_extract_parser.R.
+#
 # Parse a Loom or H5AD file into the minimal extract JSON described in
-# tmp/scfair_minimal_extract_spec.json. Extraction only — no compliance checks.
+# src/config/scfair/minimal_extract_spec.json. Extraction only — no compliance checks.
 #
 # Usage:
 #   Rscript scripts/scfair_loom_h5ad_extract_parser.R path/to/file.h5ad
@@ -116,12 +119,16 @@ list_group_columns <- function(file, group_path) {
 read_matrix_dims_h5ad <- function(file) {
   n_obs <- NA_integer_
   n_vars <- NA_integer_
-  if (!h5_exists(file, "X")) return(list(n_obs = n_obs, n_vars = n_vars))
+  encoding <- NA_character_
+  if (!h5_exists(file, "X")) return(list(n_obs = n_obs, n_vars = n_vars, encoding = encoding))
 
   attrs <- rhdf5::h5readAttributes(file, "X")
+  if (!is.null(attrs[["encoding-type"]])) {
+    encoding <- h5_attr_string(attrs[["encoding-type"]])
+  }
   if (!is.null(attrs$shape)) {
     sh <- as.integer(attrs$shape)
-    if (length(sh) >= 2L) return(list(n_obs = sh[1], n_vars = sh[2]))
+    if (length(sh) >= 2L) return(list(n_obs = sh[1], n_vars = sh[2], encoding = encoding))
   }
 
   info <- rhdf5::h5ls(file)
@@ -130,10 +137,67 @@ read_matrix_dims_h5ad <- function(file) {
     d <- rhdf5::h5dump(file, readOnly = TRUE)$X
     if (!is.null(d$dim)) {
       sh <- as.integer(d$dim)
-      if (length(sh) >= 2L) return(list(n_obs = sh[1], n_vars = sh[2]))
+      if (length(sh) >= 2L) return(list(n_obs = sh[1], n_vars = sh[2], encoding = encoding))
     }
   }
-  list(n_obs = n_obs, n_vars = n_vars)
+  list(n_obs = n_obs, n_vars = n_vars, encoding = encoding)
+}
+
+read_obs_declared_columns <- function(file) {
+  if (!h5_exists(file, "obs")) return(character())
+  attrs <- tryCatch(rhdf5::h5readAttributes(file, "obs"), error = function(e) NULL)
+  if (is.null(attrs)) return(character())
+  co <- attrs[["column-order"]]
+  if (is.null(co)) return(character())
+  if (is.raw(co)) return(h5_attr_string(co))
+  as.character(co)
+}
+
+top_level_groups <- function(file, candidates) {
+  info <- rhdf5::h5ls(file)
+  roots <- unique(sub("^/(.*)$", "\\1", info$group[info$group != "/"]))
+  present <- intersect(candidates, roots)
+  sort(present)
+}
+
+build_nested_extension <- function(file, prefix_norm) {
+  if (!h5_exists(file, prefix_norm)) return(NULL)
+  info <- rhdf5::h5ls(file)
+  pattern <- paste0("^/?", gsub("/", "\\\\/", prefix_norm), "(/|$)")
+  rows <- info[grepl(pattern, info$group) & info$otype == "H5I_DATASET", ]
+  scalars <- list()
+  arrays <- list()
+  for (i in seq_len(nrow(rows))) {
+    rel <- sub(paste0("^/?", prefix_norm, "/?"), "", paste(rows$group[i], rows$name[i], sep = "/"))
+    if (!nzchar(rel)) next
+    parts <- parse_h5ls_dim(rows$dim[i])
+    if (length(parts) > 0L) {
+      if (length(parts) == 3L) parts <- rev(parts)
+      dtype <- if ("dclass" %in% names(rows)) rows$dclass[i] else "unknown"
+      arrays[[rel]] <- array_meta(parts, as.character(dtype), FALSE, FALSE)
+      next
+    }
+    val <- read_h5_leaf_value(file, file.path(prefix_norm, rel))
+    if (!is.null(val)) scalars[[rel]] <- uns_scalar(val)
+  }
+  if (length(scalars) == 0L && length(arrays) == 0L) return(NULL)
+  out <- list(type = "nested")
+  if (length(scalars) > 0L) out$scalars <- scalars
+  if (length(arrays) > 0L) out$arrays <- arrays
+  out
+}
+
+read_col_embedding_meta <- function(file, path) {
+  if (!h5_exists(file, path)) return(NULL)
+  info <- rhdf5::h5ls(file)
+  parts <- h5_path_parts(path)
+  row <- info[info$group == parts$group & info$name == parts$name, , drop = FALSE]
+  if (nrow(row) == 0L || row$otype[[1]] != "H5I_DATASET") return(NULL)
+  d <- tryCatch(rhdf5::h5read(file, sub("^/+", "", path)), error = function(e) NULL)
+  if (is.null(d)) return(NULL)
+  sh <- dim(d)
+  if (is.null(sh)) return(NULL)
+  array_meta(as.integer(sh), as.character(typeof(d)), any(is.infinite(d)), any(is.nan(d)))
 }
 
 read_obsm_keys <- function(file) {
@@ -196,30 +260,11 @@ parse_h5ls_dim <- function(dimstr) {
 }
 
 build_spatial_extension_h5ad <- function(file_path) {
-  prefix_norm <- "uns/spatial"
-  if (!h5_exists(file_path, prefix_norm)) return(NULL)
-  info <- rhdf5::h5ls(file_path)
-  rows <- info[grepl("^/uns/spatial(/|$)", info$group) & info$otype == "H5I_DATASET", ]
-  scalars <- list()
-  arrays <- list()
-  for (i in seq_len(nrow(rows))) {
-    rel <- sub("^/uns/spatial/?", "", paste(rows$group[i], rows$name[i], sep = "/"))
-    if (!nzchar(rel)) next
-    parts <- parse_h5ls_dim(rows$dim[i])
-    if (length(parts) > 0L) {
-      if (length(parts) == 3L) parts <- rev(parts)
-      dtype <- if ("dclass" %in% names(rows)) rows$dclass[i] else "unknown"
-      arrays[[rel]] <- array_meta(parts, as.character(dtype), FALSE, FALSE)
-      next
-    }
-    val <- read_h5_leaf_value(file_path, file.path(prefix_norm, rel))
-    if (!is.null(val)) scalars[[rel]] <- uns_scalar(val)
-  }
-  if (length(scalars) == 0L && length(arrays) == 0L) return(NULL)
-  out <- list(type = "nested")
-  if (length(scalars) > 0L) out$scalars <- scalars
-  if (length(arrays) > 0L) out$arrays <- arrays
-  out
+  build_nested_extension(file_path, "uns/spatial")
+}
+
+build_perturb_extension_h5ad <- function(file_path) {
+  build_nested_extension(file_path, "uns/genetic_perturbations")
 }
 
 # -----------------------------------------------------------------------------
@@ -236,6 +281,9 @@ parse_h5ad <- function(file_path, opts = default_parser_options()) {
   dims <- read_matrix_dims_h5ad(file_path)
   n_obs <- dims$n_obs
   n_vars <- dims$n_vars
+  matrix_encoding <- dims$encoding
+  declared_obs <- read_obs_declared_columns(file_path)
+  groups_present <- top_level_groups(file_path, c("obs", "var", "X", "uns", "obsm"))
 
   obs_series <- list()
   for (col in obs_cols) {
@@ -281,13 +329,26 @@ parse_h5ad <- function(file_path, opts = default_parser_options()) {
   extensions <- list()
   spatial <- build_spatial_extension_h5ad(file_path)
   if (!is.null(spatial)) extensions$spatial <- spatial
+  perturb <- build_perturb_extension_h5ad(file_path)
+  if (!is.null(perturb)) extensions$genetic_perturbations <- perturb
+
+  matrix_inventory <- list(n_obs = n_obs, n_vars = n_vars)
+  if (!is.na(matrix_encoding) && nzchar(matrix_encoding)) {
+    matrix_inventory$encoding <- matrix_encoding
+  }
+
+  obs_inventory <- list(column_names = obs_cols)
+  if (length(declared_obs) > 0L) {
+    obs_inventory$declared_column_names <- declared_obs
+  }
 
   list(
     source_url = normalizePath(file_path, mustWork = TRUE),
     format = "h5ad",
     file_inventory = list(
-      matrix = list(n_obs = n_obs, n_vars = n_vars),
-      obs = list(column_names = obs_cols),
+      matrix = matrix_inventory,
+      structure = list(groups_present = groups_present),
+      obs = obs_inventory,
       var = list(column_names = var_cols),
       uns = list(top_level_keys = uns_keys),
       obsm = list(keys = obsm_keys)
@@ -344,6 +405,20 @@ parse_loom <- function(file_path, opts = default_parser_options()) {
   uns_scalars <- setNames(lapply(uns, function(u) u$value), names(uns))
   paired_uns <- build_paired_uns(uns_scalars)
 
+  loom_groups <- c("matrix", "col_attrs", "row_attrs", "attrs")
+  groups_present <- top_level_groups(file_path, loom_groups)
+  anndata_mapping_present <- any(info$group == "/attrs" & info$name == "anndata_mapping")
+
+  col_embeddings <- list()
+  spatial_emb <- read_col_embedding_meta(file_path, "/col_attrs/spatial")
+  if (!is.null(spatial_emb)) col_embeddings[["/col_attrs/spatial"]] <- spatial_emb
+
+  extensions <- list()
+  spatial_ext <- build_nested_extension(file_path, "attrs/spatial")
+  if (!is.null(spatial_ext)) extensions$spatial <- spatial_ext
+  perturb_ext <- build_nested_extension(file_path, "attrs/genetic_perturbations")
+  if (!is.null(perturb_ext)) extensions$genetic_perturbations <- perturb_ext
+
   var_series <- list()
   for (col in row_attrs) {
     series <- read_h5_string_series(file_path, file.path("/row_attrs", col))
@@ -365,6 +440,10 @@ parse_loom <- function(file_path, opts = default_parser_options()) {
     format = "loom",
     file_inventory = list(
       matrix = list(n_obs = n_obs, n_vars = n_vars),
+      structure = list(
+        groups_present = groups_present,
+        anndata_mapping_present = isTRUE(anndata_mapping_present)
+      ),
       obs = list(column_names = col_attrs),
       var = list(column_names = row_attrs),
       uns = list(top_level_keys = global_attrs),
@@ -377,8 +456,9 @@ parse_loom <- function(file_path, opts = default_parser_options()) {
       if (!is.null(var_index)) list(index = var_index) else list(),
       list(columns = var_columns)
     ),
-    extensions = NULL,
-    obsm = NULL
+    extensions = if (length(extensions) > 0L) extensions else NULL,
+    obsm = NULL,
+    col_embeddings = if (length(col_embeddings) > 0L) col_embeddings else NULL
   )
 }
 

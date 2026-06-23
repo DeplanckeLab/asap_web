@@ -92,7 +92,13 @@ module Scfair
 
         match = line.match(/^(\s*)#{Regexp.escape(key)}:(?:\s|$)/)
         next unless match
-        next unless match[1].length > parent_indent
+
+        key_indent = match[1].length
+        if parent_indent.negative?
+          next unless key_indent.zero?
+        else
+          next unless key_indent > parent_indent
+        end
 
         return i
       end
@@ -102,16 +108,23 @@ module Scfair
     def find_array_item(from_idx, parent_indent, index)
       count = 0
       (from_idx...@lines.size).each do |i|
+        line = @lines[i]
+        next if line.strip.empty?
+
         indent = line_indent(i)
+        match = line.match(/^(\s*)- /)
+        if match
+          item_indent = match[1].length
+          # Block-style sequences (key on one line, "- item" on the next at the same indent).
+          if item_indent >= parent_indent
+            return i if count == index
+
+            count += 1
+            next
+          end
+        end
+
         break if indent <= parent_indent && i > from_idx
-
-        match = @lines[i].match(/^(\s*)- /)
-        next unless match
-        next unless match[1].length > parent_indent
-
-        return i if count == index
-
-        count += 1
       end
       nil
     end

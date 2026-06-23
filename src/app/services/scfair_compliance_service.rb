@@ -14,17 +14,14 @@ class ScfairComplianceService
     tick('starting', 'Starting file validation', 5, format: format)
     tick('catalog', "Preparing checks for #{format.upcase}", 10, format: format)
 
-    base_result = if format == 'loom'
-                    tick('loom', 'Running Loom validation checks', 30, format: format)
-                    ScfairLoomFileValidatorService.new(@file_path, logger: @logger).validate
-                  else
-                    tick('h5ad', 'Starting H5AD validation checks', 15, format: format)
-                    ScfairH5adValidatorService.new(
-                      @file_path,
-                      logger: @logger,
-                      progress_cb: method(:relay_h5ad_progress)
-                    ).validate
-                  end
+    tick('extract', 'Extracting metadata from file', 15, format: format)
+    extract = ScfairMinimalExtractService.new(file_path: @file_path, logger: @logger).extract
+
+    base_result = Scfair::ExtractComplianceChecker.new(
+      extract: extract,
+      format: format,
+      progress_cb: method(:relay_extract_progress)
+    ).call
 
     if format == 'loom'
       errors = base_result.errors
@@ -214,14 +211,12 @@ class ScfairComplianceService
     )
   end
 
-  def relay_h5ad_progress(evt)
+  def relay_extract_progress(evt)
     tick(
-      evt[:stage] || 'h5ad',
-      evt[:message] || 'Running H5AD checks',
-      evt[:progress] || 15,
-      format: 'h5ad',
-      current: evt[:current],
-      total: evt[:total]
+      evt[:stage] || 'checks',
+      evt[:message] || 'Running compliance checks',
+      evt[:progress] || 20,
+      format: evt[:format] || detect_format(@file_path)
     )
   end
 
@@ -291,44 +286,6 @@ class ScfairComplianceService
     Scfair::UnsEnsemblCrossFieldValidator.new(field_values: field_values, format: format).call
   end
 
-  def schema_reference_evaluation(field_values, format)
-    field = Scfair::Rules.field_path(format, :uns, 'schema_reference')
-    file_reference = Array(field_values[field] || field_values[field.to_sym]).first
-    Scfair::SchemaReferenceEvaluator.call(
-      file_reference: file_reference,
-      reference_url: Scfair::Rules.schema_hash[:source_url],
-      format: format
-    )
-  end
-
-  def uns_ensembl_evaluation(field_values, format)
-    Scfair::UnsEnsemblValidator.new(field_values: field_values, format: format).call
-  end
-
-  def experimental_condition_evaluation(field_values, format)
-    Scfair::ExperimentalConditionValidator.new(field_values: field_values, format: format).call
-  end
-
-  def var_metadata_evaluation(field_values, format)
-    Scfair::VarMetadataValidator.new(field_values: field_values, format: format).call
-  end
-
-  def var_index_evaluation(field_values, format)
-    Scfair::VarIndexValidator.new(field_values: field_values, format: format).call
-  end
-
-  def organism_label_pair_evaluation(field_values, format)
-    Scfair::OrganismLabelPairValidator.new(field_values: field_values, format: format).call
-  end
-
-  def var_cross_field_evaluation(field_values, format)
-    Scfair::VarCrossFieldValidator.new(field_values: field_values, format: format).call
-  end
-
-  def uns_ensembl_cross_field_evaluation(field_values, format)
-    Scfair::UnsEnsemblCrossFieldValidator.new(field_values: field_values, format: format).call
-  end
-
   def reconcile_rollup_metadata_checks(errors, valid_checks, warnings, format)
     errors = Array(errors).dup
     valid_checks = Array(valid_checks).dup
@@ -385,72 +342,6 @@ class ScfairComplianceService
 
   def entry_status(entry)
     (entry[:status] || entry['status']).to_s.strip.downcase
-  end
-
-  def entry_message(entry)
-    (entry[:message] || entry['message']).to_s
-  end
-
-  def reconcile_rollup_metadata_checks(errors, valid_checks, warnings, format)
-    errors = Array(errors).dup
-    valid_checks = Array(valid_checks).dup
-    warnings = Array(warnings).dup
-    failed_rollups = failed_rollup_check_fields(errors, valid_checks)
-    rollup_index = rollup_metadata_path_index(format)
-
-    errors.reject! do |entry|
-      rollup_field = rollup_index[entry_field(entry)]
-      rollup_field.present? && failed_rollups.include?(rollup_field)
-    end
-
-    valid_checks.reject! do |entry|
-      rollup_field = rollup_index[entry_field(entry)]
-      rollup_field.present? && failed_rollups.include?(rollup_field)
-    end
-
-    warnings.reject! do |entry|
-      rollup_field = rollup_index[entry_field(entry)]
-      rollup_field.present? && failed_rollups.include?(rollup_field)
-    end
-
-    [errors, valid_checks, warnings]
-  end
-
-  def rollup_metadata_path_index(format)
-    index = {}
-    rules = Scfair::Rules.experimental_condition_rules
-    {
-      rules[:id_field] => Scfair::Rules.field_path(format, :obs, rules[:label_field]),
-      rules[:label_field] => 'obs.experimental_condition.label',
-      rules[:perturbation_types_field] => 'obs.experimental_condition.perturbation_types'
-    }.each do |obs_name, check_id|
-      index[Scfair::Rules.field_path(format, :obs, obs_name)] = check_id
-    end
-
-    index
-  end
-
-  def failed_rollup_check_fields(errors, valid_checks)
-    fields = Set.new
-    errors.each { |entry| fields << entry_field(entry) }
-    valid_checks.each do |entry|
-      next unless entry_status(entry) == 'failed'
-
-      fields << entry_field(entry)
-    end
-    fields
-  end
-
-  def entry_field(entry)
-    (entry[:field] || entry['field']).to_s
-  end
-
-  def entry_status(entry)
-    (entry[:status] || entry['status']).to_s.strip.downcase
-  end
-
-  def entry_message(entry)
-    (entry[:message] || entry['message']).to_s
   end
 
   def reconcile_schema_version_checks(valid_checks, errors, warnings, format)

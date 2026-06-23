@@ -15,14 +15,15 @@ class ScfairH5adVarIndexExtractionTest < TestBaseWithoutFixtures
     FileUtils.mkdir_p(File.dirname(SHARED_PATH))
     FileUtils.cp(FIXTURE, SHARED_PATH)
 
-    result = ScfairH5adValidatorService.new(SHARED_PATH).validate
-    series = Array(result.field_values['var/_index#series'])
+    extract = ScfairMinimalExtractService.new(file_path: SHARED_PATH).extract
+    field_values = Scfair::FieldValuesFromExtract.call(extract, format: 'h5ad')
+    series = Array(field_values['var/_index#series'])
 
     assert series.any?, 'expected var/_index#series to be populated'
     assert_includes series, 'ENSG00000186092'
     assert_includes series, 'ERCC-00003'
 
-    index_result = Scfair::VarIndexValidator.new(field_values: result.field_values, format: 'h5ad').call
+    index_result = Scfair::VarIndexValidator.new(field_values: field_values, format: 'h5ad').call
     assert_empty index_result[:errors]
     assert index_result[:valid_checks].any? { |c| c[:field] == SCHEMA_FIELD && c[:status] == 'passed' }
   end

@@ -27,8 +27,8 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
   test 'routes ensembl uns fields to uns.ensembl category' do
     catalog = [{ id: 'uns.ensembl', label: 'Ensembl gene annotation metadata' }]
     valid_checks = [
-      { field: 'uns/ensembl_release', status: 'failed', message: 'Missing required dataset metadata field' },
-      { field: 'uns.ensembl.database', status: 'failed', message: 'ensembl_database must be one of: Ensembl' }
+      { field: 'uns.ensembl.release', check_id: 'uns.ensembl', status: 'failed', message: 'Missing uns/ensembl_release metadata (required by schema)' },
+      { field: 'uns.ensembl.database', check_id: 'uns.ensembl', status: 'failed', message: 'ensembl_database must be one of: Ensembl' }
     ]
 
     groups = Scfair::ComplianceReportGrouper.call(
@@ -42,6 +42,32 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
     assert_equal 1, groups.size
     assert_equal 'uns.ensembl', groups.first[:id]
     assert_equal 2, groups.first[:items].size
+  end
+
+  test 'ensembl fields are not duplicated across uns.required_presence and uns.ensembl' do
+    field_values = {
+      'uns/ensembl_release' => ['115'],
+      'uns/ensembl_database' => ['Ensembl'],
+      'uns/ensembl_assembly' => ['GRCh38.p14']
+    }
+    presence = Scfair::ExtractPresenceValidator.new(field_values: field_values, format: 'h5ad').call
+    ensembl = Scfair::UnsEnsemblValidator.new(field_values: field_values, format: 'h5ad').call
+    catalog = Scfair::CheckCatalog.checks_for('h5ad')
+    groups = Scfair::ComplianceReportGrouper.call(
+      checks_catalog: catalog,
+      valid_checks: presence[:valid_checks] + ensembl[:valid_checks],
+      errors: presence[:errors] + ensembl[:errors],
+      warnings: [],
+      format: 'h5ad'
+    )
+
+    required = groups.find { |group| group[:id] == 'uns.required_presence' }
+    ensembl_group = groups.find { |group| group[:id] == 'uns.ensembl' }
+    required_fields = Array(required&.dig(:items)).map { |item| item[:field] }
+    ensembl_fields = Array(ensembl_group&.dig(:items)).map { |item| item[:field] }
+
+    refute required_fields.any? { |field| field.match?(/ensembl/) }
+    assert_equal %w[uns.ensembl.assembly uns.ensembl.database uns.ensembl.release], ensembl_fields.sort
   end
 
   test 'routes schema version issues to schema.version category' do

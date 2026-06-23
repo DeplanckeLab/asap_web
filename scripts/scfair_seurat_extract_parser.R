@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # Parse a Seurat .rds object into the minimal extract JSON described in
-# tmp/scfair_minimal_extract_spec.json. Extraction only — no compliance checks.
+# src/config/scfair/minimal_extract_spec.json. Extraction only — no compliance checks.
 #
 # Usage:
 #   Rscript scripts/scfair_seurat_extract_parser.R path/to/object.rds

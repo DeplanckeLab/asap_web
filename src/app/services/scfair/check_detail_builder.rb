@@ -210,6 +210,7 @@ module Scfair
     def extract_field_name(field)
       return field.sub(/\Across-field\.[^.]+\z/, '') if field.start_with?('cross-field.')
       return semantic_ontology_field_name(field) if field.start_with?('ontology.semantics.')
+      return uns_ensembl_metadata_name(field) if field.start_with?('uns.ensembl.')
 
       segment = field.split('/').last.to_s
       segment.presence || field
@@ -295,7 +296,7 @@ module Scfair
         {
           text: check.to_s,
           from_rules: true,
-          rules_path: "#{prefix}.checks.#{idx}"
+          rules_path: "#{prefix}.#{idx}"
         }
       end
     end
@@ -1520,12 +1521,25 @@ module Scfair
     end
 
     def uns_metadata_field_name(field)
+      mapped = uns_ensembl_metadata_name(field)
+      return mapped if mapped.present?
+
       return nil unless field.match?(/\A(uns\/|\/attrs\/)/)
 
       name = field.split('/').last.to_s
       return name if required_uns_field?(name) || ensembl_uns_field?(name)
 
       nil
+    end
+
+    def uns_ensembl_metadata_name(field)
+      return nil unless field.start_with?('uns.ensembl.')
+
+      {
+        'release' => 'ensembl_release',
+        'database' => 'ensembl_database',
+        'assembly' => 'ensembl_assembly'
+      }[field.delete_prefix('uns.ensembl.')]
     end
 
     def obs_metadata_field_name(field)

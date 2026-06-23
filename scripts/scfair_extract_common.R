@@ -1,7 +1,8 @@
 # Shared helpers for scFAIR minimal extract parsers (H5AD, Loom, Seurat).
 # Sourced by scfair_loom_h5ad_extract_parser.R and scfair_seurat_extract_parser.R.
 
-SPEC_FILE <- "scfair_minimal_extract_spec.json"
+SPEC_FILE <- "minimal_extract_spec.json"
+SPEC_REFERENCE <- "src/config/scfair/minimal_extract_spec.json"
 
 # ID -> label column pairs for paired_fields.obs (must match paired_field_definitions.obs in SPEC_FILE).
 LABEL_PAIRS_OBS <- c(
@@ -187,7 +188,7 @@ flatten_list_scalars <- function(x, prefix = character()) {
 assemble_extract <- function(parsed) {
   c(
     list(
-      specification = SPEC_FILE,
+      specification = SPEC_REFERENCE,
       source_url = parsed$source_url,
       format = parsed$format,
       extracted_at = format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")

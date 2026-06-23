@@ -4,10 +4,15 @@ module Scfair
   # Validates required uns Ensembl metadata: ensembl_release (int), ensembl_database (enum),
   # and ensembl_assembly (non-empty string).
   #
-  # Check naming: metadata paths (uns/ensembl_release) for presence; dot ids (uns.ensembl.release)
-  # for value-specific validation.
+  # Each attribute is reported once under uns.ensembl using stable check ids
+  # (uns.ensembl.release, uns.ensembl.database, uns.ensembl.assembly).
   class UnsEnsemblValidator
     CHECK_PREFIX = 'uns.ensembl'
+    VALUE_CHECK_SUFFIXES = {
+      'ensembl_release' => 'release',
+      'ensembl_database' => 'database',
+      'ensembl_assembly' => 'assembly'
+    }.freeze
 
     def initialize(field_values:, format:)
       @field_values = field_values || {}
@@ -29,14 +34,13 @@ module Scfair
     private
 
     def validate_release(errors, valid_checks)
-      field = uns_path('ensembl_release')
-      value_check = value_check_id('release')
+      metadata_name = 'ensembl_release'
+      field = uns_path(metadata_name)
+      value_check = value_check_id(metadata_name)
       raw = first_value(field)
 
       if raw.blank?
-        return if defer_presence_to_base_validator?('ensembl_release')
-
-        record_presence_failure(errors, valid_checks, field:)
+        record_presence_failure(errors, valid_checks, value_check:, metadata_path: field)
         return
       end
 
@@ -53,22 +57,17 @@ module Scfair
         return
       end
 
-      valid_checks << {
-        field: value_check,
-        status: 'passed',
-        message: "ensembl_release is a valid integer (#{release})"
-      }
+      record_pass(valid_checks, value_check:, message: "ensembl_release is a valid integer (#{release})")
     end
 
     def validate_database(errors, valid_checks)
-      field = uns_path('ensembl_database')
-      value_check = value_check_id('database')
+      metadata_name = 'ensembl_database'
+      field = uns_path(metadata_name)
+      value_check = value_check_id(metadata_name)
       raw = first_value(field)
 
       if raw.blank?
-        return if defer_presence_to_base_validator?('ensembl_database')
-
-        record_presence_failure(errors, valid_checks, field:)
+        record_presence_failure(errors, valid_checks, value_check:, metadata_path: field)
         return
       end
 
@@ -78,75 +77,67 @@ module Scfair
         return
       end
 
-      valid_checks << {
-        field: value_check,
-        status: 'passed',
-        message: "ensembl_database is valid (#{raw})"
-      }
+      record_pass(valid_checks, value_check:, message: "ensembl_database is valid (#{raw})")
     end
 
     def validate_assembly(errors, valid_checks)
-      field = uns_path('ensembl_assembly')
-      value_check = value_check_id('assembly')
+      metadata_name = 'ensembl_assembly'
+      field = uns_path(metadata_name)
+      value_check = value_check_id(metadata_name)
       raw = first_value(field)
 
       if raw.blank?
-        return if defer_presence_to_base_validator?('ensembl_assembly')
-
-        record_presence_failure(errors, valid_checks, field:)
+        record_presence_failure(errors, valid_checks, value_check:, metadata_path: field)
         return
       end
 
-      valid_checks << {
-        field: value_check,
-        status: 'passed',
-        message: "ensembl_assembly is present (#{raw})"
-      }
-    end
-
-    def defer_presence_to_base_validator?(name)
-      columns = uns_column_names
-      columns.any? && !columns.include?(name)
-    end
-
-    def presence_message(_name)
-      nil
+      record_pass(valid_checks, value_check:, message: "ensembl_assembly is present (#{raw})")
     end
 
     def uns_path(name)
       Rules.field_path(@format, :uns, name)
     end
 
-    def value_check_id(suffix)
-      "#{CHECK_PREFIX}.#{suffix}"
-    end
-
-    def uns_column_names
-      Array(
-        @field_values[Rules.metadata_column_list_key('uns')] ||
-        @field_values[Rules.metadata_column_list_key('uns').to_sym]
-      ).map(&:to_s)
+    def value_check_id(metadata_name)
+      "#{CHECK_PREFIX}.#{VALUE_CHECK_SUFFIXES.fetch(metadata_name)}"
     end
 
     def first_value(field)
       Array(@field_values[field] || @field_values[field.to_sym]).first.to_s.strip
     end
 
-    def record_presence_failure(errors, valid_checks, field:, message: nil)
-      entry = Scfair::CheckResult.presence(
-        field: field,
+    def record_presence_failure(errors, valid_checks, value_check:, metadata_path:)
+      message = Rules.check_message(
+        'uns.required_presence',
+        'missing',
         format: @format,
-        status: 'failed',
-        code: 'missing',
-        message: message
+        field: metadata_path,
+        path: metadata_path
       )
-      errors << entry
-      valid_checks << entry.merge(status: 'failed')
+      entry = check_entry(value_check:, status: 'failed', code: 'missing', message: message)
+      errors << { field: value_check, message: message }
+      valid_checks << entry
     end
 
     def record_value_failure(errors, valid_checks, value_check:, message:)
+      entry = check_entry(value_check:, status: 'failed', message: message)
       errors << { field: value_check, message: message }
-      valid_checks << { field: value_check, status: 'failed', message: message }
+      valid_checks << entry
+    end
+
+    def record_pass(valid_checks, value_check:, message:)
+      valid_checks << check_entry(value_check:, status: 'passed', message: message)
+    end
+
+    def check_entry(value_check:, status:, message:, code: nil)
+      entry = {
+        field: value_check,
+        check_id: CHECK_PREFIX,
+        status: status.to_s,
+        message: message
+      }
+      entry[:code] = code.to_s if code.present?
+      entry
     end
   end
 end

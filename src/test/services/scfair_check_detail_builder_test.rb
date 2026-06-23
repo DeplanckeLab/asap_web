@@ -405,6 +405,21 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
     assert_equal item[:message], item[:detail][:result_message]
   end
 
+  test 'uns required presence checks_performed link to rules.yaml lines' do
+    detail = Scfair::CheckDetailBuilder.call(
+      field: 'uns/ensembl_release',
+      message: 'Missing uns/ensembl_release metadata (required by schema)',
+      format: 'h5ad',
+      category_id: 'uns.required_presence'
+    )
+
+    second_check = detail[:checks_performed][1]
+    assert_equal 'checks.uns.required_presence.checks.ensembl_release.checks_performed.1', second_check[:rules_path]
+    snippet = Scfair::RulesSnippetExtractor.call(second_check[:rules_path])
+    assert_nil snippet[:error]
+    assert snippet[:lines].any? { |line| line[:highlight] && line[:text].include?('positive integer') }
+  end
+
   test 'shows organism-specific applicability for development stage semantic checks' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'ontology.semantics.development_stage_ontology_term_id.descendants',

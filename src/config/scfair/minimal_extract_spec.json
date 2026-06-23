@@ -1,0 +1,215 @@
+{
+  "_comment": "Specification for minimal metadata extract JSON. Keys named _comment are documentation only and are not emitted in extract output.",
+
+  "title": "Minimal single-cell metadata extract",
+  "description": "Format-agnostic snapshot of dataset metadata extracted from a source file (H5AD, Loom, Seurat, etc.). Extraction reads and serializes what is present; it does not run compliance checks. Expression matrix values are not included.",
+  "schema_reference": "https://github.com/scFAIR/scFAIR_schema/blob/main/schema/7.1.0/schema.md",
+  "version": "1.0.0",
+
+  "document": {
+    "fields": {
+      "specification": "string — path or name of this spec file",
+      "source_url": "string — absolute path or URL of the parsed source file",
+      "format": "string — source format identifier (e.g. h5ad, loom, seurat)",
+      "extracted_at": "string — UTC timestamp when the extract was produced (ISO 8601)"
+    },
+    "order": ["specification", "source_url", "format", "extracted_at"]
+  },
+
+  "paired_field_definitions": {
+    "_comment": "ID columns mapped to their human-readable label column. Parsers deduplicate {id, label} pairs into paired_fields and omit both columns from obs.columns (or from uns when listed here).",
+    "obs": {
+      "assay_ontology_term_id": "assay",
+      "cell_type_ontology_term_id": "cell_type",
+      "development_stage_ontology_term_id": "development_stage",
+      "disease_ontology_term_id": "disease",
+      "self_reported_ethnicity_ontology_term_id": "self_reported_ethnicity",
+      "sex_ontology_term_id": "sex",
+      "tissue_ontology_term_id": "tissue"
+    },
+    "uns": {
+      "organism_ontology_term_id": "organism"
+    }
+  },
+
+  "schema_fields": {
+    "_comment": "scFAIR schema 7.1.0 column names (core schema.md plus spatial and perturb extensions). Parsers emit obs.columns and var.columns only for fields in this list that are present in the source file. obs excludes columns covered by paired_field_definitions.",
+    "obs": [
+      "assay_ontology_term_id", "assay",
+      "tissue_type",
+      "tissue_ontology_term_id", "tissue",
+      "cell_type_ontology_term_id", "cell_type",
+      "development_stage_ontology_term_id", "development_stage",
+      "sex_ontology_term_id", "sex",
+      "self_reported_ethnicity_ontology_term_id", "self_reported_ethnicity",
+      "strain_or_genetic_background_term_id", "strain_or_genetic_background",
+      "disease_ontology_term_id", "disease",
+      "experimental_condition_ontology_term_id", "experimental_condition",
+      "perturbation_types",
+      "donor_id",
+      "is_primary_data",
+      "suspension_type",
+      "array_row", "array_col", "in_tissue",
+      "genetic_perturbation_id", "genetic_perturbation_strategy"
+    ],
+    "var": [
+      "feature_is_filtered",
+      "feature_biotype",
+      "feature_length",
+      "feature_name",
+      "feature_reference",
+      "feature_type",
+      "feature_chromosome"
+    ]
+  },
+
+  "sections": {
+    "file_inventory": {
+      "description": "Structural inventory of what exists in the source file.",
+      "shape": {
+        "matrix": {
+          "n_obs": "integer — number of cells/observations",
+          "n_vars": "integer — number of genes/features",
+          "encoding": "string optional — h5ad X encoding-type attribute (e.g. csr_matrix, dense)"
+        },
+        "structure": {
+          "groups_present": "string[] — top-level HDF5 groups present (h5ad: obs, var, X, uns, obsm; loom: matrix, col_attrs, row_attrs, attrs)",
+          "anndata_mapping_present": "boolean optional — loom /attrs/anndata_mapping dataset exists"
+        },
+        "obs": {
+          "column_names": "string[] — all observation metadata column names",
+          "declared_column_names": "string[] optional — h5ad obs column-order attribute when present"
+        },
+        "var": {
+          "column_names": "string[] — all feature metadata column names"
+        },
+        "uns": {
+          "top_level_keys": "string[] — all dataset-level metadata keys"
+        },
+        "obsm": {
+          "keys": "string[] — embedding or coordinate array keys under obsm (values not stored)"
+        }
+      }
+    },
+
+    "uns": {
+      "description": "Dataset-level metadata — one scalar per key present in the file.",
+      "shape": {
+        "field_name": {
+          "type": "string | integer | boolean",
+          "value": "scalar value"
+        }
+      }
+    },
+
+    "paired_fields": {
+      "description": "Deduplicated ID/label pairs for columns listed in paired_field_definitions.",
+      "shape": {
+        "obs|uns": {
+          "id_field_name": {
+            "label_field": "string — paired label column name",
+            "pairs": [
+              {
+                "id": "string",
+                "label": "string"
+              }
+            ]
+          }
+        }
+      }
+    },
+
+    "obs": {
+      "description": "scFAIR schema obs columns not covered by paired_fields — distinct values only. Only fields listed in schema_fields.obs are emitted.",
+      "shape": {
+        "columns": {
+          "field_name": {
+            "distinct_values": "string[] — unique non-empty values across all cells"
+          }
+        }
+      }
+    },
+
+    "var": {
+      "description": "scFAIR schema var columns — one value per feature row for every feature (length n_vars), row-aligned with the source var index. Only fields listed in schema_fields.var are emitted. var.index is included when present in the source file.",
+      "shape": {
+        "index": {
+          "per_feature_values": "string[] — feature identifiers (var names / index)"
+        },
+        "columns": {
+          "field_name": {
+            "per_feature_values": "string[] — one value per feature row"
+          }
+        }
+      }
+    },
+
+    "obsm": {
+      "description": "Embedding or coordinate arrays under obsm — metadata only, not matrix values. Every key includes shape, dtype, has_inf, has_nan.",
+      "shape": {
+        "embedding_key": {
+          "type": "array",
+          "shape": "integer[] — array dimensions (row-major, same order as NumPy/HDF5)",
+          "dtype": "string",
+          "has_inf": "boolean — true if any +Inf/-Inf value is present",
+          "has_nan": "boolean — true if any NaN value is present"
+        }
+      }
+    },
+
+    "col_embeddings": {
+      "description": "Loom coordinate arrays stored in col_attrs (e.g. /col_attrs/spatial). Keys are dataset paths. Same metadata fields as obsm.",
+      "shape": {
+        "/col_attrs/spatial": {
+          "type": "array",
+          "shape": "integer[]",
+          "dtype": "string",
+          "has_inf": "boolean",
+          "has_nan": "boolean"
+        }
+      }
+    },
+
+    "extensions": {
+      "description": "Optional nested dataset metadata (e.g. uns/spatial, uns/genetic_perturbations for h5ad; /attrs/spatial, /attrs/genetic_perturbations for loom). Omitted when absent.",
+      "shape": {
+        "extension_name": {
+          "type": "nested",
+          "scalars": {
+            "dotted/path": {
+              "type": "string | integer | boolean",
+              "value": "scalar value"
+            }
+          },
+          "arrays": {
+            "dotted/path": {
+              "type": "array",
+              "shape": "integer[] — array dimensions (row-major, same order as NumPy/HDF5)",
+              "dtype": "string",
+              "has_inf": "boolean — true if any +Inf/-Inf value is present",
+              "has_nan": "boolean — true if any NaN value is present"
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "examples": {
+    "_snippet_note": "snippet_file copies are derived from extract_file with row-aligned vectors truncated (var.index, var.columns per_feature_values, and long obs.distinct_values lists) to the first 500 elements for readability.",
+    "atac_unpaired": {
+      "description": "Unpaired scATAC-seq dataset (gene activity matrix in X, no AnnData.raw). Per scFAIR schema_atac.md the modality is identified from assay metadata and matrix rules; fragment file assets live outside the h5ad. This file has no nested uns extension block, so extensions is omitted.",
+      "schema_modality": "https://github.com/scFAIR/scFAIR_schema/blob/main/schema/7.1.0/schema_atac.md",
+      "source_h5ad": "https://datasets.cellxgene.cziscience.com/7886efbf-66b4-422c-9f34-9d4b002e0fdd.h5ad",
+      "extract_file": "scfair_minimal_extract_atac_example.json",
+      "snippet_file": "scfair_minimal_extract_atac_example_snippet.json"
+    },
+    "visium": {
+      "description": "Visium Spatial Gene Expression dataset. Per scFAIR schema_spatial.md, spatial metadata lives under uns/spatial (scalars and image array metadata), obs includes array_row/array_col/in_tissue, and obsm includes spatial coordinates.",
+      "schema_modality": "https://github.com/scFAIR/scFAIR_schema/blob/main/schema/7.1.0/schema_spatial.md",
+      "source_h5ad": "https://datasets.cellxgene.cziscience.com/c7aa20ed-5838-4b24-9fcc-69851e705975.h5ad",
+      "extract_file": "scfair_minimal_extract_visium_example.json",
+      "snippet_file": "scfair_minimal_extract_visium_example_snippet.json"
+    }
+  }
+}

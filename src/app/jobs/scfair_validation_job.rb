@@ -35,8 +35,7 @@ class ScfairValidationJob < ApplicationJob
 
     # Run validation
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    validator = ScfairLoomValidatorService.new(loom_path, project: project, logger: Rails.logger)
-    result = validator.validate
+    result = CompliancePipeline.validate_project_loom(loom_path, project, logger: Rails.logger)
     Rails.logger.info("[ScfairValidationJob TIMING] Validation: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
 
     # Save results
@@ -144,7 +143,7 @@ class ScfairValidationJob < ApplicationJob
     schema_meta = cs ? cs.to_config_hash.transform_keys(&:to_sym) : {}
 
     validation_data = if result
-      {
+      data = {
         valid: result.valid?,
         schema_version: result.schema_version,
         schema_name: schema_meta[:name],
@@ -159,16 +158,27 @@ class ScfairValidationJob < ApplicationJob
         errors: result.errors,
         warnings: result.warnings,
         info: result.info,
-        valid_checks: result.valid_checks,
+        valid_checks: CompliancePipeline.displayable_valid_checks(result.valid_checks),
         errors_count: result.errors.count,
         warnings_count: result.warnings.count,
-        valid_checks_count: result.valid_checks.count,
-        field_resolutions: result.field_resolutions || {}
-      }.compact
+        valid_checks_count: CompliancePipeline.displayable_valid_checks(result.valid_checks).count,
+        report_format: 'file_check',
+        schema_id: result.respond_to?(:schema_id) ? result.schema_id : Scfair::Rules::DEFAULT_SCHEMA_ID
+      }
+      if result.respond_to?(:field_values) && result.field_values.present?
+        data[:field_values] = result.field_values
+      end
+      if result.respond_to?(:check_groups) && result.check_groups.present?
+        data[:check_groups] = result.check_groups
+      end
+      if result.respond_to?(:format) && result.format.present?
+        data[:format] = result.format
+      end
+      data.compact
     else
       {
         valid: false,
-        schema_version: ScfairLoomValidatorService::SCHEMA_VERSION,
+        schema_version: Scfair::Rules.schema_version,
         schema_name: schema_meta[:name],
         validated_at: Time.current.iso8601,
         error: error_or_path

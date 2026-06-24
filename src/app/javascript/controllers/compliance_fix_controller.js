@@ -22,10 +22,7 @@ export default class extends Controller {
     resolveUrl: String,
     projectId: Number,
     resultUrl: String,
-    schemaConstraints: Object,
-    assaySuspensionMap: Object,
-    assayAncestorTerms: Array,
-    organismIsHuman: Boolean,
+    crossFieldConfig: Object,
     currentTriggerValues: Object
   }
 
@@ -159,6 +156,58 @@ export default class extends Controller {
 
   // ── Cross-field schema constraints ──
 
+  get multiValueConfig() {
+    return this.crossFieldConfigValue?.multi_value || {}
+  }
+
+  get multiValueDelimiter() {
+    return this.multiValueConfig.delimiter
+  }
+
+  isMultiValueGroup(groupId) {
+    const row = this.fieldRowTargets.find(el => el.dataset.groupId === groupId)
+    if (row?.dataset.multiValue === 'true') return true
+    return Boolean(this.multiValueConfig.by_group_id?.[groupId])
+  }
+
+  isSortedMultiValueGroup(groupId) {
+    const row = this.fieldRowTargets.find(el => el.dataset.groupId === groupId)
+    if (row?.dataset.multiValueSorted === 'true') return true
+    const cfg = this.multiValueConfig.by_group_id?.[groupId]
+    return cfg?.sorted !== false
+  }
+
+  sortMultiValuePairs(terms, labels) {
+    const pairs = terms.map((term, index) => ({ term, label: labels[index] || '' }))
+    pairs.sort((a, b) => a.term.localeCompare(b.term))
+    return {
+      terms: pairs.map(pair => pair.term),
+      labels: pairs.map(pair => pair.label)
+    }
+  }
+
+  appendMultiValueTerms(termInput, labelInput, identifier, name, sorted) {
+    let terms = termInput?.value ? this.splitMultiValue(termInput.value) : []
+    let labels = labelInput?.value ? this.splitMultiValue(labelInput.value) : []
+    terms.push(identifier)
+    labels.push(name)
+    if (sorted) {
+      const ordered = this.sortMultiValuePairs(terms, labels)
+      terms = ordered.terms
+      labels = ordered.labels
+    }
+    if (termInput) termInput.value = this.joinMultiValue(terms)
+    if (labelInput) labelInput.value = this.joinMultiValue(labels)
+  }
+
+  splitMultiValue(raw) {
+    return raw.toString().split(this.multiValueDelimiter).map((part) => part.trim()).filter(Boolean)
+  }
+
+  joinMultiValue(values) {
+    return values.map((v) => v.toString()).filter(Boolean).join(this.multiValueDelimiter)
+  }
+
   // Get the current unique LOOM values for a field path.
   // Returns an array of unique values, or null if unknown.
   getCurrentFieldValues(fieldPath) {
@@ -284,13 +333,16 @@ export default class extends Controller {
     }
     if (triggers.tissue_type) {
       this.onTissueTypeChanged(triggers.tissue_type)
+    } else {
+      this.applyTissuePrefixConstraint(null)
     }
   }
 
   // Compute the union of allowed suspension types for a set of assay term IDs
   // using the frontend exact-match map. Used when backend didn't resolve.
   computeAndApplySuspensionFromAssays(assayIds) {
-    const map = this.assaySuspensionMapValue || {}
+    const suspCfg = this.crossFieldConfigValue?.assay_suspension || {}
+    const map = suspCfg.map || {}
     const unionSet = new Set()
     assayIds.forEach(id => {
       const perAssay = map[id]
@@ -303,14 +355,16 @@ export default class extends Controller {
   }
 
   onAssayChanged(assayTermId) {
+    const suspCfg = this.crossFieldConfigValue?.assay_suspension || {}
+    const groupId = suspCfg.group_id || 'suspension_type'
+
     if (!assayTermId) {
       this.activeAssaySuspension = null
-      this.unlockField('suspension_type')
+      this.unlockField(groupId)
       return
     }
 
-    // Clear any previous suspension_type constraint
-    this.unlockField('suspension_type')
+    this.unlockField(groupId)
 
     // Get all assay term IDs from the current LOOM values and combine with
     // the newly selected one, then compute the union.
@@ -321,19 +375,22 @@ export default class extends Controller {
   }
 
   applySuspensionConstraint(assayLabel, allowed) {
-    this.activeAssaySuspension = { assayLabel, allowed }
-    const suspRow = this.fieldRowTargets.find(el => el.dataset.groupId === 'suspension_type')
+    const suspCfg = this.crossFieldConfigValue?.assay_suspension || {}
+    const groupId = suspCfg.group_id || 'suspension_type'
+    const termPath = suspCfg.term_path || '/col_attrs/suspension_type'
+    this.activeAssaySuspension = { assayLabel, allowed, groupId, termPath }
+    const suspRow = this.fieldRowTargets.find(el => el.dataset.groupId === groupId)
     if (!suspRow) return
 
     if (allowed.length === 1) {
-      this.lockField('suspension_type', `suspension_type is determined by assay (${assayLabel}).`, {
-        termPath: '/col_attrs/suspension_type',
+      this.lockField(groupId, this.formatTemplate(suspCfg.lock_reason_template, { assay: assayLabel }), {
+        termPath,
         termValue: allowed[0]
       })
     } else {
       // Multiple allowed values: do NOT lock the field -- the user must choose.
       // Just restrict dropdown options and show an informational message.
-      const selectEl = suspRow.querySelector('select[name="fixes[/col_attrs/suspension_type][value]"]')
+      const selectEl = suspRow.querySelector(`select[name="fixes[${termPath}][value]"]`)
       if (selectEl) {
         Array.from(selectEl.options).forEach(opt => {
           if (opt.value === '') return
@@ -344,60 +401,91 @@ export default class extends Controller {
         }
       }
 
-      const dynMsg = suspRow.querySelector('[data-constraint-dynamic="suspension_type"]')
-      const msgEl = suspRow.querySelector('[data-constraint-message="suspension_type"]')
-      const detailEl = suspRow.querySelector('[data-constraint-detail="suspension_type"]')
+      const dynMsg = suspRow.querySelector(`[data-constraint-dynamic="${groupId}"]`)
+      const msgEl = suspRow.querySelector(`[data-constraint-message="${groupId}"]`)
+      const detailEl = suspRow.querySelector(`[data-constraint-detail="${groupId}"]`)
       if (dynMsg && msgEl && detailEl) {
-        msgEl.textContent = `Schema constraint: suspension_type is restricted by assay (${assayLabel}).`
-        detailEl.textContent = `Allowed values: ${allowed.join(', ')}. Please select one.`
+        msgEl.textContent = this.formatTemplate(suspCfg.restrict_message_template, { assay: assayLabel })
+        detailEl.textContent = this.formatTemplate(suspCfg.restrict_detail_template, { allowed: allowed.join(', ') })
         dynMsg.classList.remove('hidden')
       }
     }
   }
 
   onTissueTypeChanged(value) {
+    this.applyTissuePrefixConstraint(value)
     if (!value) return
-    const isCellLine = (value === 'cell line')
+    const cfg = this.crossFieldConfigValue?.cell_line
+    if (!cfg) return
 
-    // Fields to force when tissue_type = "cell line"
-    const cellLineForcedFields = [
-      { groupId: 'self_reported_ethnicity', termPath: '/col_attrs/self_reported_ethnicity_ontology_term_id', termValue: 'na', labelPath: '/col_attrs/self_reported_ethnicity', labelValue: 'na' },
-      { groupId: 'sex', termPath: '/col_attrs/sex_ontology_term_id', termValue: 'na', labelPath: '/col_attrs/sex', labelValue: 'na' },
-      { groupId: 'development_stage', termPath: '/col_attrs/development_stage_ontology_term_id', termValue: 'unknown', labelPath: '/col_attrs/development_stage', labelValue: 'unknown' },
-      { groupId: 'donor_id', termPath: '/col_attrs/donor_id', termValue: 'na' },
-      { groupId: 'suspension_type', termPath: '/col_attrs/suspension_type', termValue: 'na' }
-    ]
-
-    const affectedGroups = ['self_reported_ethnicity', 'sex', 'development_stage', 'donor_id', 'suspension_type', 'tissue']
+    const isCellLine = value === cfg.trigger_value
+    const forcedFields = cfg.forced_fields || []
+    const affectedGroups = cfg.affected_group_ids || []
 
     if (isCellLine) {
-      cellLineForcedFields.forEach(field => {
-        this.lockField(field.groupId, 'tissue_type is "cell line".', field)
+      forcedFields.forEach(field => {
+        const lockFields = {
+          termPath: field.term_path,
+          termValue: field.term_value
+        }
+        if (field.label_path) {
+          lockFields.labelPath = field.label_path
+          lockFields.labelValue = field.label_value
+        }
+        this.lockField(field.group_id, cfg.reason, lockFields)
       })
 
-      // Informational message for tissue_ontology_term_id (not locked, just a note)
-      const tissueRow = this.fieldRowTargets.find(el => el.dataset.groupId === 'tissue')
-      if (tissueRow) {
-        const dynMsg = tissueRow.querySelector('[data-constraint-dynamic="tissue"]')
-        const msgEl = tissueRow.querySelector('[data-constraint-message="tissue"]')
-        const detailEl = tissueRow.querySelector('[data-constraint-detail="tissue"]')
-        if (dynMsg && msgEl && detailEl) {
-          msgEl.textContent = 'Note: tissue_type is "cell line".'
-          detailEl.textContent = 'tissue_ontology_term_id MUST be a Cellosaurus (CVCL_) term.'
-          dynMsg.classList.remove('hidden')
+      const note = cfg.tissue_note
+      if (note) {
+        const tissueRow = this.fieldRowTargets.find(el => el.dataset.groupId === note.group_id)
+        if (tissueRow) {
+          const dynMsg = tissueRow.querySelector(`[data-constraint-dynamic="${note.group_id}"]`)
+          const msgEl = tissueRow.querySelector(`[data-constraint-message="${note.group_id}"]`)
+          const detailEl = tissueRow.querySelector(`[data-constraint-detail="${note.group_id}"]`)
+          if (dynMsg && msgEl && detailEl) {
+            msgEl.textContent = note.message
+            detailEl.textContent = note.detail
+            dynMsg.classList.remove('hidden')
+          }
         }
       }
     } else {
-      // Unlock all fields that were constrained by cell line
       affectedGroups.forEach(gid => {
         this.unlockField(gid)
       })
-      // Re-apply assay-based suspension_type constraint if one was active
-      // (the cell line unlock above would have cleared it)
       if (this.activeAssaySuspension) {
-        this.applySuspensionConstraint(this.activeAssaySuspension.assayLabel, this.activeAssaySuspension.allowed)
+        const { assayLabel, allowed } = this.activeAssaySuspension
+        this.applySuspensionConstraint(assayLabel, allowed)
       }
     }
+  }
+
+  applyTissuePrefixConstraint(tissueType) {
+    const cfg = this.crossFieldConfigValue?.tissue_type_tissue
+    if (!cfg) return
+
+    const groupId = cfg.group_id
+    const row = this.fieldRowTargets.find(el => el.dataset.groupId === groupId)
+    if (!row) return
+
+    let prefixes
+    if (tissueType === cfg.cell_line_value) {
+      prefixes = cfg.cell_line_prefixes
+    } else if (tissueType === cfg.primary_cell_culture_value) {
+      prefixes = cfg.cell_type_prefixes
+    } else {
+      prefixes = cfg.tissue_prefixes
+    }
+
+    const prefixStr = (prefixes || []).join(',')
+    row.querySelectorAll('[data-prefixes]').forEach(el => {
+      el.dataset.prefixes = prefixStr
+    })
+  }
+
+  formatTemplate(template, vars) {
+    if (!template) return ''
+    return template.replace(/%\{(\w+)\}/g, (_, key) => (vars[key] != null ? vars[key] : ''))
   }
 
   // Force a field group to a specific value: switch to set_value, fill the value input.
@@ -1171,8 +1259,8 @@ export default class extends Controller {
     if (state && state.resolved[originalValue]) {
       const existingResolved = state.resolved[originalValue]
       const existingSource = state.sourceRenames[originalValue] || ''
-      const resolvedParts = existingResolved.split(' || ')
-      const sourceParts = existingSource.split(' || ')
+      const resolvedParts = this.splitMultiValue(existingResolved)
+      const sourceParts = this.splitMultiValue(existingSource)
       resolvedParts.forEach((part, idx) => {
         const srcPart = sourceParts[idx] || ''
         if (state.selectedRole === 'term') {
@@ -1214,7 +1302,13 @@ export default class extends Controller {
     }
 
     this.debounceTimers[timerKey] = setTimeout(() => {
-      this.fetchMapFixAutocomplete(groupId, query, input.dataset.prefixes, input.dataset.allowedTerms)
+      this.fetchMapFixAutocomplete(
+        groupId,
+        query,
+        input.dataset.prefixes,
+        input.dataset.allowedTerms,
+        input.dataset.excludedTerms
+      )
     }, 250)
   }
 
@@ -1253,9 +1347,10 @@ export default class extends Controller {
     }
   }
 
-  async fetchMapFixAutocomplete(groupId, query, prefixes, allowedTerms) {
+  async fetchMapFixAutocomplete(groupId, query, prefixes, allowedTerms, excludedTerms) {
     let url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes)}&project_id=${this.projectIdValue}`
     if (allowedTerms) url += `&allowed_terms=${encodeURIComponent(allowedTerms)}`
+    if (excludedTerms) url += `&excluded_terms=${encodeURIComponent(excludedTerms)}`
     try {
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } })
       if (!response.ok) return
@@ -1360,7 +1455,7 @@ export default class extends Controller {
     if (confirmBtn) {
       if (terms.length > 0) {
         confirmBtn.classList.remove('hidden')
-        confirmBtn.textContent = terms.length === 1 ? 'Confirm' : `Confirm (${terms.length} terms, joined with ||)`
+        confirmBtn.textContent = terms.length === 1 ? 'Confirm' : `Confirm (${terms.length} terms, joined with ${this.multiValueDelimiter.trim()})`
       } else {
         confirmBtn.classList.add('hidden')
       }
@@ -1382,9 +1477,15 @@ export default class extends Controller {
     if (!fixPanel) return
     const originalValue = fixPanel.dataset.fixingValue
 
-    // Join multiple terms with || separator
-    const joinedIdentifiers = terms.map(t => t.identifier).join(' || ')
-    const joinedNames = terms.map(t => t.name).join(' || ')
+    let idTerms = terms.map(t => t.identifier)
+    let nameTerms = terms.map(t => t.name)
+    if (this.isSortedMultiValueGroup(groupId)) {
+      const ordered = this.sortMultiValuePairs(idTerms, nameTerms)
+      idTerms = ordered.terms
+      nameTerms = ordered.labels
+    }
+    const joinedIdentifiers = this.joinMultiValue(idTerms)
+    const joinedNames = this.joinMultiValue(nameTerms)
 
     // Update both maps: the paired resolve map AND the source-side rename map
     if (state.selectedRole === 'term') {
@@ -1425,7 +1526,13 @@ export default class extends Controller {
     }
 
     this.debounceTimers[groupId] = setTimeout(() => {
-      this.fetchAutocomplete(groupId, query, input.dataset.prefixes)
+      this.fetchAutocomplete(
+        groupId,
+        query,
+        input.dataset.prefixes,
+        input.dataset.allowedTerms,
+        input.dataset.excludedTerms
+      )
     }, 250)
   }
 
@@ -1464,8 +1571,10 @@ export default class extends Controller {
     }
   }
 
-  async fetchAutocomplete(groupId, query, prefixes) {
-    const url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes)}&project_id=${this.projectIdValue}`
+  async fetchAutocomplete(groupId, query, prefixes, allowedTerms, excludedTerms) {
+    let url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes)}&project_id=${this.projectIdValue}`
+    if (allowedTerms) url += `&allowed_terms=${encodeURIComponent(allowedTerms)}`
+    if (excludedTerms) url += `&excluded_terms=${encodeURIComponent(excludedTerms)}`
     try {
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } })
       if (!response.ok) return
@@ -1528,25 +1637,20 @@ export default class extends Controller {
 
     // Check if this group supports multi-value
     const input = this.autocompleteInputTargets.find(el => el.dataset.groupId === groupId)
-    const fieldRow = item.closest('[data-compliance-fix-target="fieldRow"]')
-    const isMulti = fieldRow && fieldRow.querySelector('[class*="bg-purple-100"]')
+    const isMulti = this.isMultiValueGroup(groupId)
 
     // Get current values
     const termInput = this.termValueTargets.find(el => el.dataset.groupId === groupId)
     const labelInput = this.labelValueTargets.find(el => el.dataset.groupId === groupId)
 
     if (isMulti) {
-      // Multi-value: append with || separator
-      const currentTerm = termInput?.value || ''
-      const currentLabel = labelInput?.value || ''
-      const sep = ' || '
-
-      if (termInput) {
-        termInput.value = currentTerm ? `${currentTerm}${sep}${identifier}` : identifier
-      }
-      if (labelInput) {
-        labelInput.value = currentLabel ? `${currentLabel}${sep}${name}` : name
-      }
+      this.appendMultiValueTerms(
+        termInput,
+        labelInput,
+        identifier,
+        name,
+        this.isSortedMultiValueGroup(groupId)
+      )
     } else {
       // Single-value: replace
       if (termInput) termInput.value = identifier
@@ -1588,19 +1692,22 @@ export default class extends Controller {
     const groupId = btn.dataset.groupId
     const identifier = btn.dataset.identifier
     const name = btn.dataset.name
-    const sep = ' || '
-
-    // Remove from hidden inputs
     const termInput = this.termValueTargets.find(el => el.dataset.groupId === groupId)
     const labelInput = this.labelValueTargets.find(el => el.dataset.groupId === groupId)
 
     if (termInput) {
-      const terms = termInput.value.split(sep).filter(t => t.trim() !== identifier)
-      termInput.value = terms.join(sep)
-    }
-    if (labelInput) {
-      const labels = labelInput.value.split(sep).filter(l => l.trim() !== name)
-      labelInput.value = labels.join(sep)
+      let terms = this.splitMultiValue(termInput.value).filter(t => t !== identifier)
+      let labels = labelInput ? this.splitMultiValue(labelInput.value).filter(l => l !== name) : []
+      if (this.isSortedMultiValueGroup(groupId)) {
+        const ordered = this.sortMultiValuePairs(terms, labels)
+        terms = ordered.terms
+        labels = ordered.labels
+      }
+      termInput.value = this.joinMultiValue(terms)
+      if (labelInput) labelInput.value = this.joinMultiValue(labels)
+    } else if (labelInput) {
+      const labels = this.splitMultiValue(labelInput.value).filter(l => l !== name)
+      labelInput.value = this.joinMultiValue(labels)
     }
 
     // Remove badge element

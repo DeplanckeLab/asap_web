@@ -727,8 +727,8 @@ class ScfairLoomValidatorService
         # Exact match (case-insensitive)
         lower_map = {}
         ontology_names.each { |n| lower_map[n.downcase] = n }
-        scope.where('LOWER(name) IN (?)', lower_map.keys)
-             .pluck(:name).each { |n| exact_names << lower_map[n.downcase] if lower_map[n.downcase] }
+        scope.where('LOWER(cell_ontology_terms.name) IN (?)', lower_map.keys)
+             .pluck('cell_ontology_terms.name').each { |n| exact_names << lower_map[n.downcase] if lower_map[n.downcase] }
 
         # Retry unresolved with underscores replaced by spaces
         remaining = ontology_names.reject { |n| exact_names.include?(n) }
@@ -736,8 +736,8 @@ class ScfairLoomValidatorService
           space_map = {}
           remaining.select { |n| n.include?('_') }.each { |n| space_map[n.tr('_', ' ').downcase] = n }
           if space_map.any?
-            scope.where('LOWER(name) IN (?)', space_map.keys)
-                 .pluck(:name).each { |n| mappable_names << space_map[n.downcase] if space_map[n.downcase] }
+            scope.where('LOWER(cell_ontology_terms.name) IN (?)', space_map.keys)
+                 .pluck('cell_ontology_terms.name').each { |n| mappable_names << space_map[n.downcase] if space_map[n.downcase] }
           end
         end
       end

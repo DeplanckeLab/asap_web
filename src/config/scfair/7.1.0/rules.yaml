@@ -26,6 +26,66 @@ schema:
   schema_version: 7.1.0_scfair
   source_url: https://github.com/scFAIR/scFAIR/blob/main/schema/7.1.0/schema.md
 
+# Delimiter for multi-valued metadata strings (sorted lexically per schema).
+multi_value_delimiter: &multi_value_delimiter " || "
+
+# obs columns that may contain multiple values joined by multi_value_delimiter.
+# Per scFAIR schema 7.1.0 (schema.md): values must be unique and in ascending
+# lexical order with no duplicate identifiers. Paired label columns mirror the
+# ontology ID column (see label_pairs).
+multi_value_fields:
+  requirement: 'Values must be unique and sorted lexically, joined with "%{delimiter}".'
+  fields:
+    cell_type_ontology_term_id:
+      layer: obs
+      paired_label: cell_type
+      sorted: true
+    cell_type:
+      layer: obs
+      paired_id: cell_type_ontology_term_id
+      sorted: true
+    tissue_ontology_term_id:
+      layer: obs
+      paired_label: tissue
+      sorted: true
+    tissue:
+      layer: obs
+      paired_id: tissue_ontology_term_id
+      sorted: true
+    disease_ontology_term_id:
+      layer: obs
+      paired_label: disease
+      sorted: true
+    disease:
+      layer: obs
+      paired_id: disease_ontology_term_id
+      sorted: true
+    experimental_condition_ontology_term_id:
+      layer: obs
+      paired_label: experimental_condition
+      sorted: true
+    experimental_condition:
+      layer: obs
+      paired_id: experimental_condition_ontology_term_id
+      sorted: true
+    self_reported_ethnicity_ontology_term_id:
+      layer: obs
+      paired_label: self_reported_ethnicity
+      sorted: true
+    self_reported_ethnicity:
+      layer: obs
+      paired_id: self_reported_ethnicity_ontology_term_id
+      sorted: true
+    genetic_perturbation_id:
+      layer: obs
+      extension: perturb
+      sorted: true
+    perturbation_types:
+      layer: obs
+      extension: experimental_condition
+      sorted: true
+      value_set: perturbation_types
+
 # Logical AnnData layers and their on-disk paths per file format.
 # Used by Rules.field_path(format, layer, name) to build check field ids
 # (e.g. obs/assay_ontology_term_id vs /col_attrs/assay_ontology_term_id).
@@ -289,7 +349,7 @@ experimental_condition_rules:
   genetic_perturbation_id_field: genetic_perturbation_id
   na_value: na
   no_perturbations_value: no perturbations
-  delimiter: " || "
+  delimiter: *multi_value_delimiter
 
 # Ontology term string format (PREFIX:ID vs Cellosaurus CVCL_*).
 # Used by ontology.format checks before database resolution.
@@ -358,6 +418,7 @@ ontology_fields:
 # ensembl_database_values: allowed uns/ensembl_database strings.
 # feature_reference_taxa: pinned NCBITaxon IDs for var/feature_reference.
 constants:
+  multi_value_delimiter: *multi_value_delimiter
   # Known Visium EFO assay terms (fast path; descendants of EFO:0010961 also match).
   visium_assay_terms:
     - EFO:0010961
@@ -448,7 +509,7 @@ perturb_extension:
     optional:
       - derived_genomic_regions
       - derived_features
-  id_delimiter: " || "
+  id_delimiter: *multi_value_delimiter
 
 # Per-field ontology semantic constraints (roots, forbidden branches, allowed_exact).
 # Drives ontology.semantics.* checks; complements ontology_fields prefixes/format.
@@ -460,15 +521,18 @@ semantic_rules:
     any_roots: [CL:0000000]
     forbidden_branches: [WBbt:0006803]
     allowed_special_values: [na, unknown]
+    sorted_multi: true
   development_stage_ontology_term_id:
     any_roots: [UBERON:0000105]
     forbidden_branches: [UBERON:0000071]
     allowed_special_values: [na, unknown]
   tissue_ontology_term_id:
     any_roots: [UBERON:0001062]
+    sorted_multi: true
   disease_ontology_term_id:
     any_roots: [MONDO:0000001, MONDO:0021178]
     allowed_exact: [PATO:0000461]
+    sorted_multi: true
   self_reported_ethnicity_ontology_term_id:
     any_roots: [HANCESTRO:0601, HANCESTRO:0602]
     sorted_multi: true
@@ -574,6 +638,11 @@ cross_field:
       value: na
     - field: suspension_type
       value: na
+  # Compliance fix form UI strings for cross-field constraints (CF-1, CF-2).
+  fix_form:
+    assay_suspension_lock_reason: 'suspension_type is determined by assay (%{assay}).'
+    assay_suspension_restrict_message: 'Schema constraint: suspension_type is restricted by assay (%{assay}).'
+    assay_suspension_restrict_detail: 'Allowed values: %{allowed}. Please select one.'
   # Organism -> development stage ontology prefix (ontology.organism_specific.development_stage).
   organism_dev_stage_mapping:
     NCBITaxon:9606: HsapDv

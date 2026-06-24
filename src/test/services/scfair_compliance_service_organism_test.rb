@@ -4,7 +4,7 @@ require_relative 'test_base_without_fixtures'
 
 class ScfairComplianceServiceOrganismTest < TestBaseWithoutFixtures
   test 'file_organism reads h5ad organism term and label' do
-    service = ScfairComplianceService.allocate
+    service = Scfair::ComplianceValidationCore.allocate
     field_values = {
       'uns/organism_ontology_term_id' => ['NCBITaxon:9606'],
       'uns/organism' => ['Homo sapiens']
@@ -18,7 +18,7 @@ class ScfairComplianceServiceOrganismTest < TestBaseWithoutFixtures
   end
 
   test 'file_organism reads loom organism term and label' do
-    service = ScfairComplianceService.allocate
+    service = Scfair::ComplianceValidationCore.allocate
     field_values = {
       '/attrs/organism_ontology_term_id' => ['NCBITaxon:10090'],
       '/attrs/organism' => ['Mus musculus']
@@ -32,7 +32,7 @@ class ScfairComplianceServiceOrganismTest < TestBaseWithoutFixtures
   end
 
   test 'file_organism marks missing organism' do
-    service = ScfairComplianceService.allocate
+    service = Scfair::ComplianceValidationCore.allocate
 
     organism = service.send(:file_organism, {}, 'h5ad')
 

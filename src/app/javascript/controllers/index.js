@@ -169,6 +169,9 @@ console.log('Compliance fix controller registered')
 
 import IsolatedComplianceController from "controllers/isolated_compliance_controller"
 application.register("isolated-compliance", IsolatedComplianceController)
+
+import ComplianceCheckReportController from "controllers/compliance_check_report_controller"
+application.register("compliance-check-report", ComplianceCheckReportController)
 console.log('Isolated compliance controller registered')
 
 import CloneOverlayController from "controllers/clone_overlay_controller"

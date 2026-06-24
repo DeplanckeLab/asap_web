@@ -5,10 +5,7 @@
      data-compliance-fix-resolve-url-value="<%= compliance_resolve_ontology_terms_path %>"
      data-compliance-fix-project-id-value="<%= @project.id %>"
      data-compliance-fix-result-url-value="<%= project_path(@project, view: 'compliance') %>"
-     data-compliance-fix-schema-constraints-value="<%= @schema_constraints.to_json %>"
-     data-compliance-fix-assay-suspension-map-value="<%= ScfairSchemaRules::ASSAY_SUSPENSION_TYPE_MAP.to_json %>"
-     data-compliance-fix-assay-ancestor-terms-value="<%= ScfairSchemaRules::ASSAY_ANCESTOR_TERMS.to_json %>"
-     data-compliance-fix-organism-is-human-value="<%= @organism_info && @organism_info[:tax_id].to_s == '9606' %>"
+     data-compliance-fix-cross-field-config-value="<%= @fix_form_cross_field.to_json %>"
      data-compliance-fix-current-trigger-values-value="<%= (@current_trigger_values || {}).to_json %>">
   <%
     c_name = @schema_config&.dig('name') || @validation_result&.dig(:schema_name)
@@ -69,7 +66,8 @@
                 prefill: @prefill_data[fg[:group][:id]],
                 compliant_field_values: @compliant_field_values,
                 compliant_field_resolved: @compliant_field_resolved,
-                schema_constraints: @schema_constraints
+                schema_constraints: @schema_constraints,
+                fix_form_config: @fix_form_cross_field
               } %>
             <% end %>
           </div>
@@ -95,7 +93,8 @@
                 prefill: @prefill_data[fg[:group][:id]],
                 compliant_field_values: @compliant_field_values,
                 compliant_field_resolved: @compliant_field_resolved,
-                schema_constraints: @schema_constraints
+                schema_constraints: @schema_constraints,
+                fix_form_config: @fix_form_cross_field
               } %>
             <% end %>
           </div>

@@ -33,7 +33,7 @@ module Scfair
           if normalized != sorted || normalized.uniq.size != normalized.size
             @errors << {
               field: "ontology.semantics.#{field_name}.ordering",
-              message: "#{field_name} values must be unique and sorted lexically with ' || ' separator"
+              message: "#{field_name} values must be unique and sorted lexically with '#{Rules.multi_value_delimiter}' separator"
             }
             ordering_check_failed = true
           end
@@ -158,7 +158,7 @@ module Scfair
     end
 
     def split_values(raw)
-      Array(raw).flat_map { |v| v.to_s.split(' || ') }.map(&:strip).reject(&:blank?)
+      Array(raw).flat_map { |v| Rules.split_multi_value(v) }
     end
 
     def special_value?(v, allowed_specials = nil)

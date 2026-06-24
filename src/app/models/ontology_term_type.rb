@@ -51,6 +51,7 @@ class OntologyTermType < ApplicationRecord
   # Convert this record to the field group hash used by ComplianceController.
   # co_id_to_tag: pre-loaded { cell_ontology_id => tag } map for performance.
   def to_field_group(co_id_to_tag = nil)
+    obs_field = Scfair::Rules.obs_field_name_from_path(term_path)
     h = {
       id: field_group_id,
       ontology_term_type_id: self.id,
@@ -59,12 +60,17 @@ class OntologyTermType < ApplicationRecord
       type: field_type&.to_sym || :col_attr,
       term_path: term_path,
       label_path: label_path.presence,
-      multi_value: multi_value || false
+      multi_value: Scfair::Rules.multi_value_field?(obs_field)
     }
 
     # Auto-fill configuration
     if auto_from_project.present?
-      h[:auto_from_project] = (auto_from_project == 'title') ? :title : true
+      h[:auto_from_project] = case auto_from_project.to_s
+                              when 'title' then :title
+                              when 'schema_version' then :schema_version
+                              when 'schema_reference' then :schema_reference
+                              else true
+                              end
     end
 
     # Ontology prefixes (derived from cell_ontology_ids)

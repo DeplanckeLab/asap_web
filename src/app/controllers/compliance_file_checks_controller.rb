@@ -3,7 +3,7 @@ class ComplianceFileChecksController < ApplicationController
 
   def rules_snippet
     path = params[:path].to_s.strip
-    result = Scfair::RulesSnippetExtractor.call(path)
+    result = Scfair::RulesSnippetExtractor.call(path, schema_id: params[:schema_id])
     if result[:error]
       render json: result, status: :not_found
     else
@@ -12,16 +12,16 @@ class ComplianceFileChecksController < ApplicationController
   end
 
   def rules_yaml
-    render json: Scfair::RulesYamlDocument.call
+    render json: Scfair::RulesYamlDocument.call(schema_id: params[:schema_id])
   end
 
   def index
-    @available_schemas = [{ id: 'scfair_7_1_0', label: 'scFAIR 7.1.0' }]
-    @default_schema_id = 'scfair_7_1_0'
+    @available_schemas = Scfair::CheckCatalog.available_schemas
+    @default_schema_id = Scfair::Rules::DEFAULT_SCHEMA_ID
   end
 
   def create
-    schema_id = params[:schema_id].presence || 'scfair_7_1_0'
+    schema_id = params[:schema_id].presence || Scfair::Rules::DEFAULT_SCHEMA_ID
     source = params[:source].to_s
     raise ArgumentError, 'Browser uploads use chunked upload via /fus/upload_chunk' if source.blank? || source == 'upload'
 

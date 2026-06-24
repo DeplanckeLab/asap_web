@@ -4,7 +4,7 @@ require_relative 'test_base_without_fixtures'
 
 class ScfairRollupDeduplicationTest < TestBaseWithoutFixtures
   test 'reconcile removes metadata path errors when experimental condition rollup already failed' do
-    service = ScfairComplianceService.allocate
+    service = Scfair::ComplianceValidationCore.allocate
     message = 'experimental_condition is required when experimental_condition_ontology_term_id is present'
     errors = [
       { field: 'obs/experimental_condition', message: message },
@@ -29,7 +29,7 @@ class ScfairRollupDeduplicationTest < TestBaseWithoutFixtures
   end
 
   test 'mirror adds per-field var checks from errors when not already recorded' do
-    service = ScfairComplianceService.allocate
+    service = Scfair::ComplianceValidationCore.allocate
     errors = [{ field: 'var/feature_chromosome', message: 'Missing var/feature_chromosome metadata (required by schema)' }]
     valid_checks = []
 

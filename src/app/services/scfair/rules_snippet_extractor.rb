@@ -6,13 +6,14 @@ module Scfair
   class RulesSnippetExtractor
     CONTEXT_LINES = 2
 
-    def self.call(rules_path)
-      new(rules_path).call
+    def self.call(rules_path, schema_id: nil)
+      new(rules_path, schema_id: schema_id).call
     end
 
-    def initialize(rules_path)
+    def initialize(rules_path, schema_id: nil)
       @parts = rules_path.to_s.split('.')
-      @lines = File.readlines(Rules::RULES_PATH, chomp: false)
+      @bundle = Rules.for(schema_id)
+      @lines = File.readlines(@bundle.rules_path.to_s, chomp: false)
     end
 
     def call
@@ -27,7 +28,8 @@ module Scfair
 
       {
         path: @parts.join('.'),
-        file: 'config/scfair/7.1.0/rules.yaml',
+        file: @bundle.rules_relative_path,
+        schema_id: @bundle.registry_schema_id,
         highlight_start: highlight_start,
         highlight_end: highlight_end,
         lines: (context_start..context_end).map do |line_number|

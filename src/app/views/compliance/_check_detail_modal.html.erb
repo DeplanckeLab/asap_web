@@ -1,0 +1,127 @@
+<%
+  ctrl = local_assigns.fetch(:stimulus_controller, 'compliance-check-report')
+  target_prefix = ctrl
+  rules_yaml_path = local_assigns.fetch(:rules_yaml_path, 'config/scfair/7.1.0/rules.yaml')
+%>
+
+<style>
+  .compliance-detail-dialog {
+    max-width: 42rem;
+    transition: max-width 300ms ease-in-out;
+  }
+
+  .compliance-detail-dialog.is-yaml-open {
+    max-width: 72rem;
+  }
+
+  .compliance-detail-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0fr);
+    transition: grid-template-columns 300ms ease-in-out;
+  }
+
+  .compliance-detail-split.is-yaml-open {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 1fr);
+  }
+
+  .compliance-detail-yaml-panel {
+    min-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    border-left-width: 0;
+    pointer-events: none;
+    transition:
+      opacity 250ms ease-in-out,
+      border-color 300ms ease-in-out;
+  }
+
+  .compliance-detail-split.is-yaml-open .compliance-detail-yaml-panel {
+    opacity: 1;
+    border-left-width: 1px;
+    pointer-events: auto;
+  }
+
+  .compliance-detail-yaml-inner {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-width: 280px;
+    width: 100%;
+    transform: translateX(100%);
+    transition: transform 300ms ease-in-out;
+  }
+
+  .compliance-detail-split.is-yaml-open .compliance-detail-yaml-inner {
+    transform: translateX(0);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .compliance-detail-dialog,
+    .compliance-detail-split,
+    .compliance-detail-yaml-panel,
+    .compliance-detail-yaml-inner {
+      transition: none;
+    }
+  }
+</style>
+
+<div data-<%= target_prefix %>-target="detailModal"
+     class="hidden fixed inset-0 z-50"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="compliance-check-detail-title"
+     data-action="click-><%= ctrl %>#closeCheckDetailOnBackdrop keydown@window-><%= ctrl %>#closeCheckDetailOnEscape">
+  <div class="absolute inset-0 bg-black/50"></div>
+  <div class="absolute inset-0 overflow-y-auto pointer-events-none">
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="compliance-detail-dialog bg-white rounded-lg shadow-xl w-full max-h-[85vh] overflow-hidden flex flex-col border border-gray-200 pointer-events-auto"
+           data-<%= target_prefix %>-target="detailDialog"
+           data-action="click-><%= ctrl %>#stopCheckDetailPanelClick">
+        <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between gap-3 shrink-0">
+          <div class="flex items-center gap-2 min-w-0 flex-1">
+            <h2 id="compliance-check-detail-title"
+                data-<%= target_prefix %>-target="detailTitle"
+                class="text-base font-semibold text-gray-900 m-0 truncate">
+              Rule details
+            </h2>
+            <span data-<%= target_prefix %>-target="detailStatusBadge"
+                  class="shrink-0 hidden"
+                  aria-live="polite"></span>
+          </div>
+          <button type="button"
+                  class="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  data-action="click-><%= ctrl %>#closeCheckDetail"
+                  aria-label="Close">
+            Close
+          </button>
+        </div>
+        <div data-<%= target_prefix %>-target="detailSplit"
+             class="compliance-detail-split flex-1 min-h-0 overflow-hidden">
+          <div data-<%= target_prefix %>-target="detailBody"
+               class="min-w-0 px-5 py-4 overflow-y-auto text-sm text-gray-700">
+          </div>
+          <div data-<%= target_prefix %>-target="detailYamlPanel"
+               class="compliance-detail-yaml-panel flex flex-col bg-slate-50 border-l border-gray-200">
+            <div class="compliance-detail-yaml-inner">
+              <div class="px-3 py-2 border-b border-gray-200 flex items-center justify-between gap-2 shrink-0">
+                <span class="text-xs font-medium text-gray-700 truncate"><%= rules_yaml_path %></span>
+                <button type="button"
+                        class="shrink-0 px-2 py-1 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-100"
+                        data-action="click-><%= ctrl %>#foldRulesYamlPanel"
+                        aria-label="Hide rules.yaml panel">
+                  Hide
+                </button>
+              </div>
+              <div data-<%= target_prefix %>-target="detailYamlHighlight"
+                   class="hidden px-3 py-1.5 text-xs text-emerald-800 bg-emerald-50 border-b border-emerald-100 shrink-0">
+              </div>
+              <div data-<%= target_prefix %>-target="detailYamlContent"
+                   class="flex-1 overflow-auto text-xs font-mono p-2">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

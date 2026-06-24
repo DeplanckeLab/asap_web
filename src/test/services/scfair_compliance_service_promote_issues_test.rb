@@ -4,7 +4,7 @@ require_relative 'test_base_without_fixtures'
 
 class ScfairComplianceServicePromoteIssuesTest < TestBaseWithoutFixtures
   test 'promote_valid_check_issues copies warning status checks into warnings' do
-    service = ScfairComplianceService.allocate
+    service = Scfair::ComplianceValidationCore.allocate
     valid_checks = [
       { field: 'extension.atac', status: 'warning', message: 'ATAC extension detected' },
       { field: 'extension.analysis_json', status: 'warning', message: 'analysis_json metadata not found (recommended)' },

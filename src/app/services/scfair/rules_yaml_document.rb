@@ -2,13 +2,15 @@
 
 module Scfair
   class RulesYamlDocument
-    def self.call
-      lines = File.readlines(Rules::RULES_PATH).map.with_index(1) do |line, number|
+    def self.call(schema_id: nil)
+      bundle = Rules.for(schema_id)
+      lines = File.readlines(bundle.rules_path.to_s).map.with_index(1) do |line, number|
         { number: number, text: line.rstrip }
       end
 
       {
-        file: 'config/scfair/7.1.0/rules.yaml',
+        file: bundle.rules_relative_path,
+        schema_id: bundle.registry_schema_id,
         lines: lines
       }
     end

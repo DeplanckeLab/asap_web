@@ -36,7 +36,7 @@ class StandaloneOntologyComplianceChecker
 
   def allowed_free_text_values(ott, term_path)
     set = Set.new
-    schema_special = ScfairLoomValidatorService::ALLOWED_SPECIAL_VALUES[term_path] rescue nil
+    schema_special = Scfair::Rules.allowed_special_values(@format)[term_path] rescue nil
     set.merge(schema_special) if schema_special
     set.merge(ott.free_text_entries.map { |e| e.is_a?(Hash) ? e['value'].to_s : e.to_s })
     set

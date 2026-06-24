@@ -12,6 +12,7 @@ class ComplianceController < ApplicationController
 
   before_action :set_project, only: %i[validate_project show_project_result fix_project apply_project_fix project_metadata_fields project_status]
   before_action :authorize_project_compliance!, only: %i[validate_project show_project_result fix_project apply_project_fix project_metadata_fields project_status]
+  around_action :with_project_compliance_rules_bundle, only: %i[fix_project apply_project_fix]
   skip_before_action :authenticate_user!, only: %i[index schema_docs], raise: false
 
   # GET /compliance
@@ -95,33 +96,10 @@ class ComplianceController < ApplicationController
 
     # Run validation synchronously
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    validator = ScfairLoomValidatorService.new(loom_path, project: @project, logger: Rails.logger)
-    result = validator.validate
+    result = run_project_compliance_validation(loom_path, @project, logger: Rails.logger)
     Rails.logger.info("[Compliance TIMING] Synchronous validation: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
-    
-    # Save result with schema metadata from compliance config
-    validation_data = {
-      valid: result.valid?,
-      schema_version: result.schema_version,
-      schema_name: schema_config['name'],
-      source_url: schema_config['source_url'],
-      source_schema_name: schema_config['source_schema_name'],
-      description: schema_config['description'],
-      url: schema_config['url'],
-      compliant_icon: schema_config['compliant_icon'],
-      not_compliant_icon: schema_config['not_compliant_icon'],
-      validated_at: result.validated_at,
-      loom_path: loom_path,
-      errors: result.errors,
-      warnings: result.warnings,
-      info: result.info,
-      valid_checks: result.valid_checks,
-      errors_count: result.errors.count,
-      warnings_count: result.warnings.count,
-      info_count: result.info.count,
-      valid_checks_count: result.valid_checks.count,
-      field_resolutions: result.field_resolutions || {}
-    }
+
+    validation_data = project_validation_payload(@project, result, loom_path, schema_config)
     save_validation_result(@project, validation_data)
 
     respond_to do |format|
@@ -187,8 +165,7 @@ class ComplianceController < ApplicationController
       return
     end
 
-    validator = ScfairLoomValidatorService.new(file_path, logger: Rails.logger)
-    result = validator.validate
+    result = loom_compliance_result(file_path, logger: Rails.logger)
 
     render json: {
       valid: result.valid?,
@@ -247,15 +224,15 @@ class ComplianceController < ApplicationController
       g[:term_ontology_prefixes] = filter_prefixes_for_organism(g[:term_ontology_prefixes], @project)
     end
 
-    # Inject allowed_terms for fields with restricted ontology values
-    @fixable_groups.each do |fg|
-      if fg[:group][:id] == 'sex'
-        fg[:group][:allowed_terms] = ScfairSchemaRules::VALID_SEX_TERMS.map { |id, name| { identifier: id, name: name } }
-      end
-    end
+    # Apply rules.yaml term whitelists/blacklists for ontology autocomplete.
+    Scfair::FixFieldGroupRulesEnricher.call(@fixable_groups)
 
-    # Compute CXG schema constraints (e.g. non-human -> ethnicity = "na")
-    @schema_constraints = compute_schema_constraints(@project, @fixable_groups)
+    # Cross-field constraints for the fix form (rules.yaml is the source of truth).
+    @fix_form_cross_field = Scfair::FixFormCrossFieldConstraints.build(
+      project: @project,
+      fixable_groups: @fixable_groups
+    )
+    @schema_constraints = @fix_form_cross_field['static'].transform_values(&:symbolize_keys)
 
     # Load existing OtProject records for prefilling the form
     @prefill_data = build_prefill_data(@project)
@@ -301,29 +278,29 @@ class ComplianceController < ApplicationController
         paired_paths << [g[:term_path], g[:label_path]]
       end
     end
-    raw_values = all_paths.any? ? batch_read_field_values(@loom_path, all_paths, paired_paths: paired_paths) : {}
+    raw_values = if all_paths.any?
+                   fix_ui_values_from_validation_or_loom(
+                     @validation_result,
+                     @loom_path,
+                     all_paths,
+                     paired_paths: paired_paths
+                   )
+                 else
+                   {}
+                 end
 
     @compliant_field_values = raw_values
     @compliant_field_resolved = resolve_field_values(all_groups, raw_values)
 
-    # Merge cached field_resolutions from the validation result so that any
-    # path/value not covered by resolve_compliant_field_values still gets
-    # correct resolution data (e.g. the validator already knows "mix" is
-    # invalid for sex even if the fresh resolution skipped that group).
-    # Keys are converted to strings because the cached JSON is loaded with
-    # symbolize_names while resolve_compliant_field_values uses string keys.
-    cached_fr = @validation_result[:field_resolutions] || @validation_result['field_resolutions']
-    if cached_fr.is_a?(Hash)
-      cached_fr.each do |path, vals|
-        next unless vals.is_a?(Hash)
-        path_s = path.to_s
-        @compliant_field_resolved[path_s] ||= {}
-        vals.each do |v, status|
-          v_s = v.to_s
-          @compliant_field_resolved[path_s][v_s] = status unless @compliant_field_resolved[path_s].key?(v_s)
-        end
-      end
+    format = (@validation_result[:format] || @validation_result['format'] || 'loom').to_s
+    field_values = (@validation_result[:field_values] || @validation_result['field_values'] || {}).deep_dup
+    raw_values.each do |path, vals|
+      field_values[path] = vals
+      field_values[path.to_s] = vals
+      field_values[path.to_sym] = vals
     end
+    fix_resolutions = project_fix_field_resolutions(@project, field_values, format: format)
+    merge_field_resolutions!(@compliant_field_resolved, fix_resolutions)
 
     # Extract current values of fields that have cross-field impact so the
     # frontend can evaluate constraints at page load (not only on change).
@@ -363,7 +340,7 @@ class ComplianceController < ApplicationController
     ]
     missing_paths = constraint_target_paths - raw_values.keys
     if missing_paths.any? && @loom_path.present?
-      extra_values = batch_read_field_values(@loom_path, missing_paths)
+      extra_values = fix_ui_values_from_validation_or_loom(@validation_result, @loom_path, missing_paths)
       raw_values.merge!(extra_values)
     end
     field_values = {}
@@ -569,12 +546,7 @@ class ComplianceController < ApplicationController
     end
 
     scope = CellOntologyTerm.where(original: true, cell_ontology_id: ontology_ids)
-
-    # Restrict to specific allowed terms when provided (e.g. sex field)
-    if params[:allowed_terms].present?
-      allowed_ids = params[:allowed_terms].split(',').map(&:strip).reject(&:blank?)
-      scope = scope.where(identifier: allowed_ids)
-    end
+    scope = apply_ontology_term_filters(scope)
 
     # Search by identifier or name
     search_pattern = "%#{query}%"
@@ -650,6 +622,7 @@ class ComplianceController < ApplicationController
     # Track canonical names when source values don't match exactly
     canonical_names = {}
     scope = CellOntologyTerm.where(original: true, cell_ontology_id: ontology_ids)
+    scope = apply_ontology_term_filters(scope)
 
     # Separate plain values from array-formatted values like "['FBbt:00003733', 'FBbt:00003737']"
     plain_values = []
@@ -680,9 +653,9 @@ class ComplianceController < ApplicationController
       array_values.each do |av|
         resolved_items = av[:items].map { |ident| terms_by_ident[ident] }
         if resolved_items.all?
-          # All items resolved: map original string to ||-joined identifiers and names
-          resolved[av[:original]] = resolved_items.join(' || ')
-          multi_term_map[av[:original]] = av[:items].join(' || ')
+          # All items resolved: map original string to delimiter-joined identifiers and names
+          resolved[av[:original]] = Scfair::Rules.join_multi_value(resolved_items)
+          multi_term_map[av[:original]] = Scfair::Rules.join_multi_value(av[:items])
         end
         # If not all resolved, leave it unresolved so the user can fix it manually
       end
@@ -708,10 +681,10 @@ class ComplianceController < ApplicationController
       array_values.each do |av|
         resolved_items = av[:items].map { |name| name_to_term[name.strip] }
         if resolved_items.all?
-          resolved[av[:original]] = resolved_items.map { |m| m[:identifier] }.join(' || ')
-          multi_term_map[av[:original]] = av[:items].join(' || ')
-          canonical = resolved_items.map { |m| m[:name] }.join(' || ')
-          original_joined = av[:items].join(' || ')
+          resolved[av[:original]] = Scfair::Rules.join_multi_value(resolved_items.map { |m| m[:identifier] })
+          multi_term_map[av[:original]] = Scfair::Rules.join_multi_value(av[:items])
+          canonical = Scfair::Rules.join_multi_value(resolved_items.map { |m| m[:name] })
+          original_joined = Scfair::Rules.join_multi_value(av[:items])
           canonical_names[av[:original]] = canonical if canonical != original_joined
         end
       end
@@ -742,7 +715,30 @@ class ComplianceController < ApplicationController
     render json: { field: field_path, values: values }
   end
 
+  def with_project_compliance_rules_bundle
+    validation = @project ? load_validation_result(@project) : nil
+    schema_id = if @project
+                  resolve_project_schema_id(@project, validation_result: validation)
+                else
+                  Scfair::Rules::DEFAULT_SCHEMA_ID
+                end
+    Scfair::Rules.with_bundle(schema_id) { yield }
+  end
+
   private
+
+  def apply_ontology_term_filters(scope)
+    filtered = scope
+    if params[:allowed_terms].present?
+      allowed_ids = params[:allowed_terms].to_s.split(',').map(&:strip).reject(&:blank?)
+      filtered = filtered.where(identifier: allowed_ids) if allowed_ids.any?
+    end
+    if params[:excluded_terms].present?
+      excluded_ids = params[:excluded_terms].to_s.split(',').map(&:strip).reject(&:blank?)
+      filtered = filtered.where.not(identifier: excluded_ids) if excluded_ids.any?
+    end
+    filtered
+  end
 
   # Batch-resolve many names at once using two queries (exact match + underscore-to-space).
   # Returns a hash { name => { identifier:, name: } } for found terms.
@@ -756,8 +752,8 @@ class ComplianceController < ApplicationController
     lower_map = {}
     names.each { |n| lower_map[n.downcase] = n }
 
-    scope.where('LOWER(name) IN (?)', lower_map.keys)
-         .pluck(:name, :identifier).each do |db_name, identifier|
+    scope.where('LOWER(cell_ontology_terms.name) IN (?)', lower_map.keys)
+         .pluck('cell_ontology_terms.name', :identifier).each do |db_name, identifier|
       original = lower_map[db_name.downcase]
       next unless original && !result.key?(original)
       result[original] = { identifier: identifier, name: db_name }
@@ -772,8 +768,8 @@ class ComplianceController < ApplicationController
       spaced_map = {}
       underscore_names.each { |n| spaced_map[n.tr('_', ' ').downcase] = n }
 
-      scope.where('LOWER(name) IN (?)', spaced_map.keys)
-           .pluck(:name, :identifier).each do |db_name, identifier|
+      scope.where('LOWER(cell_ontology_terms.name) IN (?)', spaced_map.keys)
+           .pluck('cell_ontology_terms.name', :identifier).each do |db_name, identifier|
         original = spaced_map[db_name.downcase]
         next unless original && !result.key?(original)
         result[original] = { identifier: identifier, name: db_name }
@@ -926,8 +922,7 @@ class ComplianceController < ApplicationController
     begin
       File.open(temp_path, 'wb') { |f| f.write(uploaded.read) }
       
-      validator = ScfairLoomValidatorService.new(temp_path.to_s, logger: Rails.logger)
-      result = validator.validate
+      result = loom_compliance_result(temp_path.to_s, logger: Rails.logger)
 
       render json: {
         valid: result.valid?,
@@ -985,8 +980,7 @@ class ComplianceController < ApplicationController
       return
     end
 
-    validator = ScfairLoomValidatorService.new(file_path, logger: Rails.logger)
-    result = validator.validate
+    result = loom_compliance_result(file_path, logger: Rails.logger)
 
     render json: {
       valid: result.valid?,
@@ -1168,177 +1162,6 @@ class ComplianceController < ApplicationController
     end
   end
 
-  # For each compliant field, check whether each value resolves to a known
-  # ontology term or matches a valid value list.
-  # Returns { field_path => { value => bool } }.
-  def resolve_compliant_field_values(groups, raw_values)
-    result = {}
-
-    # Schema-allowed free-text values per field path (e.g. "unknown", "na").
-    allowed_specials = ScfairLoomValidatorService::ALLOWED_SPECIAL_VALUES rescue {}
-
-    groups.each do |g|
-      valid_values = g[:term_valid_values]
-      prefixes = g[:term_ontology_prefixes]
-
-      # Fields with a fixed valid-values list (e.g. tissue_type, suspension_type)
-      if valid_values.present?
-        term_vals = raw_values[g[:term_path]] || []
-        if term_vals.any?
-          valid_set = valid_values.map(&:downcase).to_set
-          result[g[:term_path]] = term_vals.index_with { |v| valid_set.include?(v.downcase) }
-        end
-        next
-      end
-
-      # Ontology-based fields
-      next if prefixes.blank?
-
-      ontology_ids = CellOntology.where(tag: prefixes).pluck(:id)
-      next if ontology_ids.empty?
-
-      scope = CellOntologyTerm.where(original: true, cell_ontology_id: ontology_ids)
-
-      # Build a set of allowed free-text values for this field (from schema
-      # constants and from the OntologyTermType free_text_json config).
-      free_text_set = Set.new
-      specials = allowed_specials[g[:term_path]]
-      free_text_set.merge(specials) if specials
-      if g[:id].present?
-        ott = OntologyTermType.find_by(field_group_id: g[:id])
-        free_text_set.merge(ott.free_text_entries.map { |e| e.is_a?(Hash) ? e['value'].to_s : e.to_s }) if ott
-      end
-
-      # Check the term path (identifiers like PATO:0000383 or multi-values
-      # like "CL:0000540 || CL:0000127").
-      term_vals = raw_values[g[:term_path]] || []
-      if term_vals.any?
-        # Expand multi-value entries into individual sub-terms for batch lookup
-        all_sub_terms = Set.new
-        term_vals.each do |v|
-          v.to_s.split(' || ').each { |t| all_sub_terms << t.strip }
-        end
-        all_sub_terms.reject!(&:blank?)
-
-        # Remove free-text values before querying the DB
-        ontology_sub_terms = all_sub_terms.reject { |t| free_text_set.include?(t) }
-        known_ids = ontology_sub_terms.any? ? scope.where(identifier: ontology_sub_terms.to_a).pluck(:identifier).to_set : Set.new
-        known_ids.merge(free_text_set)
-
-        result[g[:term_path]] = term_vals.index_with do |v|
-          parts = v.to_s.split(' || ').map(&:strip).reject(&:blank?)
-          parts.all? { |p| known_ids.include?(p) }
-        end
-      end
-
-      # Check the label path (names like "fat body" or multi-values like
-      # "neuron || microglial cell").
-      if g[:label_path].present?
-        label_vals = raw_values[g[:label_path]] || []
-        if label_vals.any?
-          # Expand multi-value label entries
-          all_sub_names = Set.new
-          label_vals.each do |v|
-            v.to_s.split(' || ').each { |t| all_sub_names << t.strip }
-          end
-          all_sub_names.reject!(&:blank?)
-
-          # Remove free-text values before name resolution
-          ontology_sub_names = all_sub_names.reject { |t| free_text_set.include?(t) }
-          name_to_term = ontology_sub_names.any? ? batch_find_ontology_terms_by_name(scope, ontology_sub_names.to_a) : {}
-
-          result[g[:label_path]] = label_vals.index_with do |v|
-            parts = v.to_s.split(' || ').map(&:strip).reject(&:blank?)
-            parts.all? { |p| free_text_set.include?(p) || name_to_term.key?(p) }
-          end
-        end
-      end
-    end
-
-    result
-  end
-
-  # Read unique values for multiple metadata fields from the LOOM in a single call.
-  # Returns a hash { "/col_attrs/sex" => ["female", "male", "mixed sex"], ... }
-  # Read unique values from LOOM fields.  For paired fields, also build a
-  # co-occurrence mapping so both sides can be displayed in the same order.
-  #
-  # field_paths  - array of HDF5 paths to read independently
-  # paired_paths - array of [term_path, label_path] pairs whose values should
-  #                be read together and returned as an ordered list of
-  #                [term_value, label_value] tuples (unique combinations).
-  #
-  # Returns { path => [unique_values], ... } for individual fields.
-  # For paired fields, additionally stores under the key
-  #   "#{term_path}||#{label_path}" => [[term_val, label_val], ...]
-  def batch_read_field_values(loom_path, field_paths, paired_paths: [])
-    return {} if field_paths.blank? || loom_path.blank?
-
-    container = ENV.fetch('ASAP_RUN_CONTAINER')
-    fields_json = field_paths.to_json
-    pairs_json = paired_paths.to_json
-
-    script = <<~PY
-      import h5py, sys, json
-
-      def decode(v):
-          return v.decode() if hasattr(v, 'decode') else str(v)
-
-      f = h5py.File(sys.argv[1], 'r')
-      fields = json.loads(sys.argv[2])
-      pairs = json.loads(sys.argv[3])
-      result = {}
-
-      for fp in fields:
-          parts = fp.lstrip('/').split('/')
-          try:
-              ds = f
-              for p in parts:
-                  ds = ds[p]
-              vals = ds[:]
-              unique = sorted(set(decode(v) for v in vals))
-              result[fp] = unique
-          except Exception:
-              result[fp] = []
-
-      for term_fp, label_fp in pairs:
-          tp = term_fp.lstrip('/').split('/')
-          lp = label_fp.lstrip('/').split('/')
-          try:
-              tds = f
-              for p in tp:
-                  tds = tds[p]
-              lds = f
-              for p in lp:
-                  lds = lds[p]
-              tvals = tds[:]
-              lvals = lds[:]
-              seen = set()
-              ordered_pairs = []
-              for tv, lv in zip(tvals, lvals):
-                  tv_s = decode(tv)
-                  lv_s = decode(lv)
-                  key = (tv_s, lv_s)
-                  if key not in seen:
-                      seen.add(key)
-                      ordered_pairs.append([tv_s, lv_s])
-              ordered_pairs.sort(key=lambda x: x[1])
-              result[term_fp + '||' + label_fp] = ordered_pairs
-          except Exception:
-              pass
-
-      f.close()
-      print(json.dumps(result))
-    PY
-
-    stdout, _stderr, status = Open3.capture3(
-      'docker', 'exec', container, 'python3', '-c', script, loom_path, fields_json, pairs_json
-    )
-    return {} unless status.success?
-
-    JSON.parse(stdout) rescue {}
-  end
-
   # Read category counts for a list of field paths from a LOOM file.
   # Returns { field_path => { categories_json:, list_cat_json:, nber_cats: } }
   # matching the format expected by Annot records.
@@ -1432,15 +1255,21 @@ class ComplianceController < ApplicationController
 
     groups = []
     load_field_groups.each do |group|
-      term_has_error = error_fields.include?(group[:term_path])
-      label_has_error = group[:label_path].present? && error_fields.include?(group[:label_path])
+      term_paths = Scfair::Rules.compliance_field_message_paths(group[:term_path])
+      label_paths = group[:label_path].present? ? Scfair::Rules.compliance_field_message_paths(group[:label_path]) : []
+
+      term_has_error = term_paths.any? { |path| error_fields.include?(path) }
+      label_has_error = label_paths.any? { |path| error_fields.include?(path) }
+
+      term_error = term_paths.lazy.map { |path| error_map[path] }.find(&:present?)
+      label_error = label_paths.lazy.map { |path| error_map[path] }.find(&:present?)
 
       groups << {
         group: group,
         term_has_error: term_has_error,
         label_has_error: label_has_error,
-        term_error: error_map[group[:term_path]],
-        label_error: error_map[group[:label_path]]
+        term_error: term_error,
+        label_error: label_error
       }
     end
     groups
@@ -1457,42 +1286,6 @@ class ComplianceController < ApplicationController
       tax_id: organism.tax_id,
       ontology_term_id: "NCBITaxon:#{organism.tax_id}"
     }
-  end
-
-  # Compute CXG schema constraints that force certain fields to specific values
-  # based on the project's organism, tissue_type, or assay.
-  # Returns a hash: { field_group_id => { forced_value:, reason:, dependent_on: } }
-  #
-  # Rules implemented (from scFAIR schema):
-  # 1. If organism != Homo sapiens -> self_reported_ethnicity* MUST be "na"
-  # 2. If tissue_type == "cell line" -> self_reported_ethnicity* MUST be "na",
-  #    donor_id SHOULD be the cell line name
-  # 3. suspension_type is determined by assay_ontology_term_id
-  def compute_schema_constraints(project, fixable_groups)
-    constraints = {}
-    organism = project.organism
-    is_human = organism && organism.tax_id.to_s == '9606'
-
-    # Rule 1: non-human -> ethnicity = "na"
-    unless is_human
-      reason = organism ? "Organism is #{organism.name} (not Homo sapiens)" : 'Organism is not Homo sapiens'
-      constraints['self_reported_ethnicity'] = {
-        forced_term_value: 'na',
-        forced_label_value: 'na',
-        reason: "#{reason} -- self_reported_ethnicity MUST be \"na\" per CXG schema.",
-        dependent_on: 'organism'
-      }
-    end
-
-    # Rule 2: tissue_type == "cell line" -> ethnicity = "na"
-    # (This is checked dynamically on the frontend when tissue_type changes.)
-    # We also provide the rule definition so the frontend knows about it.
-
-    # Build the assay-to-suspension_type mapping from the CXG schema.
-    # Each entry maps an EFO term (or ancestor) to its allowed suspension_type values.
-    # The frontend will use this to auto-set suspension_type when assay changes.
-
-    constraints
   end
 
   # ASSAY_SUSPENSION_TYPE_MAP, ASSAY_ANCESTOR_TERMS, and
@@ -2646,7 +2439,7 @@ class ComplianceController < ApplicationController
       is_term_id_path = entry[:field].include?('ontology_term_id')
       resolve_map = JSON.parse(fix_data[:resolve_map]) rescue next
       resolve_map.each_value do |replacement_value|
-        parts = replacement_value.to_s.include?(' || ') ? replacement_value.split(' || ').map(&:strip) : [replacement_value]
+        parts = Scfair::Rules.multi_value?(replacement_value) ? Scfair::Rules.split_multi_value(replacement_value) : [replacement_value]
         parts.each { |p| is_term_id_path ? all_identifiers.add(p) : all_names.add(p) }
       end
     end
@@ -2657,7 +2450,7 @@ class ComplianceController < ApplicationController
     cot_by_name = {}
     if all_names.any?
       lower_map = all_names.each_with_object({}) { |n, h| h[n.downcase] = n }
-      CellOntologyTerm.where(original: true).where('LOWER(name) IN (?)', lower_map.keys)
+      CellOntologyTerm.where(original: true).where('LOWER(cell_ontology_terms.name) IN (?)', lower_map.keys)
         .each { |cot| orig = lower_map[cot.name.downcase]; cot_by_name[orig] = cot if orig && !cot_by_name.key?(orig) }
     end
 
@@ -2699,7 +2492,7 @@ class ComplianceController < ApplicationController
 
         replacements_to_insert = []
         resolve_map.each do |original_value, replacement_value|
-          replacement_parts = replacement_value.to_s.include?(' || ') ? replacement_value.split(' || ').map(&:strip) : [replacement_value]
+          replacement_parts = Scfair::Rules.multi_value?(replacement_value) ? Scfair::Rules.split_multi_value(replacement_value) : [replacement_value]
 
           replacement_parts.each do |part|
             cot = is_term_id_path ? cot_by_identifier[part] : cot_by_name[part]

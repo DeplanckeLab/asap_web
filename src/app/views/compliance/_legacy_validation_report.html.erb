@@ -1,0 +1,56 @@
+<%
+  validation_result = local_assigns[:validation_result] || {}
+  errors = Array(validation_result[:errors] || validation_result['errors'])
+  warnings = Array(validation_result[:warnings] || validation_result['warnings'])
+  info = Array(validation_result[:info] || validation_result['info'])
+%>
+
+<div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6 text-sm text-amber-800">
+  Archived report format. Re-run validation to see the current file-check category report.
+</div>
+
+<% if errors.any? %>
+  <div class="bg-white rounded-lg shadow-sm border border-red-200 p-6 mb-6">
+    <h2 class="text-lg font-semibold text-red-800 mb-4">Errors (<%= errors.size %>)</h2>
+    <div class="space-y-3">
+      <% errors.each do |error| %>
+        <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+          <code class="text-sm bg-red-100 px-1 rounded"><%= error[:field] || error['field'] %></code>
+          <div class="text-red-700 mt-1"><%= error[:message] || error['message'] %></div>
+        </div>
+      <% end %>
+    </div>
+  </div>
+<% end %>
+
+<% if warnings.any? %>
+  <div class="bg-white rounded-lg shadow-sm border border-yellow-200 p-6 mb-6">
+    <h2 class="text-lg font-semibold text-yellow-800 mb-4">Warnings (<%= warnings.size %>)</h2>
+    <div class="space-y-3">
+      <% warnings.each do |warning| %>
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <code class="text-sm bg-yellow-100 px-1 rounded"><%= warning[:field] || warning['field'] %></code>
+          <div class="text-yellow-700 mt-1"><%= warning[:message] || warning['message'] %></div>
+        </div>
+      <% end %>
+    </div>
+  </div>
+<% end %>
+
+<% if info.any? %>
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+    <details class="group">
+      <summary class="text-lg font-semibold text-gray-900 cursor-pointer">
+        Information (<%= info.size %>)
+      </summary>
+      <div class="mt-4 space-y-2">
+        <% info.each do |entry| %>
+          <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm">
+            <code class="bg-blue-100 px-1 rounded"><%= entry[:field] || entry['field'] %></code>
+            <span class="text-blue-700 ml-2"><%= entry[:message] || entry['message'] %></span>
+          </div>
+        <% end %>
+      </div>
+    </details>
+  </div>
+<% end %>

@@ -4,7 +4,7 @@ require_relative 'test_base_without_fixtures'
 
 class ScfairComplianceServiceFieldValuesTest < TestBaseWithoutFixtures
   test 'attach_field_values adds values for present uns metadata fields' do
-    service = ScfairComplianceService.allocate
+    service = Scfair::ComplianceValidationCore.allocate
     item = {
       field: 'uns/organism_ontology_term_id',
       message: 'Found uns/organism_ontology_term_id metadata',
@@ -21,7 +21,7 @@ class ScfairComplianceServiceFieldValuesTest < TestBaseWithoutFixtures
   end
 
   test 'attach_field_values skips missing fields' do
-    service = ScfairComplianceService.allocate
+    service = Scfair::ComplianceValidationCore.allocate
     item = {
       field: 'uns/ensembl_release',
       message: 'Missing uns/ensembl_release metadata (required by schema)',
@@ -34,7 +34,7 @@ class ScfairComplianceServiceFieldValuesTest < TestBaseWithoutFixtures
   end
 
   test 'attach_field_values supports loom dataset metadata paths' do
-    service = ScfairComplianceService.allocate
+    service = Scfair::ComplianceValidationCore.allocate
     item = {
       field: '/attrs/title',
       message: 'Found /attrs/title metadata',

@@ -527,54 +527,7 @@ class ProjectsController < ApplicationController
       end
       @validation_result ||= load_validation_result(@project)
 
-      # Load field group definitions for structured display
-      co_id_to_tag = CellOntology.pluck(:id, :tag).to_h
-      @compliance_field_groups = OntologyTermType.where.not(field_group_id: [nil, ''])
-                                                  .order(:display_order)
-                                                  .map { |ott| ott.to_field_group(co_id_to_tag) }
-
-      # Load current metadata values (categories) for each field from Annot records.
-      # Also load co-occurrence pairs for paired fields (term <-> label matching).
-      @compliance_field_values = {}
-      all_paths = @compliance_field_groups.flat_map { |fg| [fg[:term_path], fg[:label_path]].compact }
-      paired_paths = @compliance_field_groups
-                       .select { |fg| fg[:label_path].present? }
-                       .map { |fg| [fg[:term_path], fg[:label_path]] }
-
-      loom_path = find_project_loom_path(@project)
-      if loom_path.present?
-        raw = batch_read_field_values(loom_path, all_paths, paired_paths: paired_paths)
-        raw.each { |k, v| @compliance_field_values[k] = v if v.present? }
-      else
-        annots_by_name = @project.annots.where(name: all_paths, latest_version: true).index_by(&:name)
-        all_paths.each do |path|
-          annot = annots_by_name[path]
-          next unless annot
-          if annot.list_cat_json.present?
-            begin
-              vals = JSON.parse(annot.list_cat_json)
-              @compliance_field_values[path] = vals if vals.is_a?(Array) && vals.any?
-            rescue JSON::ParserError; end
-          elsif annot.categories_json.present?
-            begin
-              cats = JSON.parse(annot.categories_json)
-              @compliance_field_values[path] = cats.keys if cats.is_a?(Hash) && cats.any?
-            rescue JSON::ParserError; end
-          end
-        end
-      end
-
-      # Read per-value resolution from the validation result (computed during validation).
-      # Fall back to on-the-fly resolution if no validation result is available.
-      if @validation_result&.dig(:field_resolutions).present?
-        @compliance_resolved = @validation_result[:field_resolutions].transform_keys(&:to_s)
-        @compliance_resolved.each do |path, val_map|
-          next unless val_map.is_a?(Hash)
-          @compliance_resolved[path] = val_map.transform_keys(&:to_s)
-        end
-      else
-        @compliance_resolved = resolve_field_values(@compliance_field_groups, @compliance_field_values)
-      end
+      @compliance_check_groups = resolve_compliance_check_groups(@validation_result) if @validation_result.present?
     end
     
     # Variables specific to summary view
@@ -9426,49 +9379,7 @@ class ProjectsController < ApplicationController
       end
       @validation_result ||= load_validation_result(@project)
 
-      co_id_to_tag = CellOntology.pluck(:id, :tag).to_h
-      @compliance_field_groups = OntologyTermType.where.not(field_group_id: [nil, ''])
-                                                .order(:display_order)
-                                                .map { |ott| ott.to_field_group(co_id_to_tag) }
-      @compliance_field_values = {}
-      all_paths = @compliance_field_groups.flat_map { |fg| [fg[:term_path], fg[:label_path]].compact }
-      paired_paths = @compliance_field_groups.select { |fg| fg[:label_path].present? }
-                                             .map { |fg| [fg[:term_path], fg[:label_path]] }
-
-      loom_path = find_project_loom_path(@project)
-      if loom_path.present?
-        raw = batch_read_field_values(loom_path, all_paths, paired_paths: paired_paths)
-        raw.each { |k, v| @compliance_field_values[k] = v if v.present? }
-      else
-        annots_by_name = @project.annots.where(name: all_paths, latest_version: true).index_by(&:name)
-        all_paths.each do |path|
-          annot = annots_by_name[path]
-          next unless annot
-          if annot.list_cat_json.present?
-            begin
-              vals = JSON.parse(annot.list_cat_json)
-              @compliance_field_values[path] = vals if vals.is_a?(Array) && vals.any?
-            rescue JSON::ParserError
-            end
-          elsif annot.categories_json.present?
-            begin
-              cats = JSON.parse(annot.categories_json)
-              @compliance_field_values[path] = cats.keys if cats.is_a?(Hash) && cats.any?
-            rescue JSON::ParserError
-            end
-          end
-        end
-      end
-
-      if @validation_result&.dig(:field_resolutions).present?
-        @compliance_resolved = @validation_result[:field_resolutions].transform_keys(&:to_s)
-        @compliance_resolved.each do |path, val_map|
-          next unless val_map.is_a?(Hash)
-          @compliance_resolved[path] = val_map.transform_keys(&:to_s)
-        end
-      else
-        @compliance_resolved = resolve_field_values(@compliance_field_groups, @compliance_field_values)
-      end
+      @compliance_check_groups = resolve_compliance_check_groups(@validation_result) if @validation_result.present?
     end
 
     def load_summary_context

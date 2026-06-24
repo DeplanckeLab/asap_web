@@ -7,7 +7,181 @@ require 'open3'
 module ComplianceHelpers
   extend ActiveSupport::Concern
 
+  included do
+    if respond_to?(:helper_method)
+      helper_method :compliance_report_uses_check_groups?
+      helper_method :compliance_check_report_payload
+    end
+  end
+
+  def compliance_report_uses_check_groups?(validation_result)
+    return false if validation_result.blank?
+
+    stored = validation_result[:check_groups] || validation_result['check_groups']
+    stored.is_a?(Array) && stored.any?
+  end
+
+  def compliance_check_report_payload(validation_result, check_groups)
+    schema_id = resolve_validation_schema_id(validation_result)
+    bundle = Scfair::Rules.for(schema_id)
+    {
+      valid: validation_result[:valid] == true || validation_result['valid'] == true,
+      errors: validation_result[:errors] || validation_result['errors'] || [],
+      warnings: validation_result[:warnings] || validation_result['warnings'] || [],
+      check_groups: check_groups || [],
+      format: (validation_result[:format] || validation_result['format'] || 'loom').to_s,
+      schema_id: schema_id,
+      rules_yaml_path: bundle.rules_relative_path
+    }
+  end
+
+  def resolve_project_schema_id(project, validation_result: nil)
+    resolve_validation_schema_id(validation_result || load_validation_result(project), project: project)
+  end
+
+  def resolve_validation_schema_id(validation_result, project: nil)
+    stored = validation_result&.dig(:schema_id) || validation_result&.dig('schema_id')
+    return stored.to_s if stored.present?
+
+    if project
+      cs = project.compliance_schemas.first
+      mapped = schema_id_for_compliance_schema(cs)
+      return mapped if mapped.present?
+    end
+
+    Scfair::Rules::DEFAULT_SCHEMA_ID
+  end
+
+  def schema_id_for_compliance_schema(compliance_schema)
+    return nil unless compliance_schema&.version.present?
+
+    version = compliance_schema.version.to_s
+    entry = Scfair::RulesRegistry.entries.values.find { |e| e.version == version }
+    entry&.id
+  end
+
+  def project_fix_field_resolutions(project, field_values, format: 'loom')
+    Scfair::ProjectOntologyResolutionChecker.new(
+      field_values: field_values || {},
+      project: project,
+      format: format
+    ).call[:field_resolutions] || {}
+  end
+
+  def merge_field_resolutions!(resolved_hash, resolutions)
+    return resolved_hash unless resolutions.is_a?(Hash)
+
+    resolutions.each do |path, vals|
+      next unless vals.is_a?(Hash)
+
+      path_s = path.to_s
+      resolved_hash[path_s] ||= {}
+      vals.each do |value, status|
+        value_s = value.to_s
+        resolved_hash[path_s][value_s] = status unless resolved_hash[path_s].key?(value_s)
+      end
+    end
+    resolved_hash
+  end
+
   private
+
+  def run_project_compliance_validation(loom_path, project, logger: Rails.logger)
+    schema_id = resolve_project_schema_id(project)
+    CompliancePipeline.validate_project_loom(loom_path, project, logger: logger, schema_id: schema_id)
+  end
+
+  def loom_compliance_result(loom_path, project: nil, logger: Rails.logger)
+    CompliancePipeline.validate_loom_file(loom_path, project: project, logger: logger)
+  end
+
+  def project_validation_payload(project, result, loom_path, schema_config)
+    payload = {
+      valid: result.valid?,
+      schema_version: result.schema_version,
+      schema_name: schema_config['name'],
+      source_url: schema_config['source_url'],
+      source_schema_name: schema_config['source_schema_name'],
+      description: schema_config['description'],
+      url: schema_config['url'],
+      compliant_icon: schema_config['compliant_icon'],
+      not_compliant_icon: schema_config['not_compliant_icon'],
+      validated_at: result.validated_at,
+      loom_path: loom_path,
+      errors: result.errors,
+      warnings: result.warnings,
+      info: result.info,
+      valid_checks: CompliancePipeline.displayable_valid_checks(result.valid_checks),
+      errors_count: result.errors.count,
+      warnings_count: result.warnings.count,
+      info_count: result.info.count,
+      valid_checks_count: CompliancePipeline.displayable_valid_checks(result.valid_checks).count,
+      report_format: 'file_check',
+      schema_id: result.respond_to?(:schema_id) ? result.schema_id : Scfair::Rules::DEFAULT_SCHEMA_ID
+    }
+    if result.respond_to?(:field_values) && result.field_values.present?
+      payload[:field_values] = result.field_values
+    end
+    if result.respond_to?(:check_groups) && result.check_groups.present?
+      payload[:check_groups] = result.check_groups
+    end
+    if result.respond_to?(:format) && result.format.present?
+      payload[:format] = result.format
+    end
+    payload
+  end
+
+  def resolve_compliance_check_groups(validation_result)
+    return [] if validation_result.blank?
+
+    stored = validation_result[:check_groups] || validation_result['check_groups']
+    return symbolize_check_groups(stored) if stored.present?
+
+    format = (validation_result[:format] || validation_result['format'] || 'loom').to_s
+    field_values = validation_result[:field_values] || validation_result['field_values'] || {}
+    errors = validation_result[:errors] || validation_result['errors'] || []
+    warnings = validation_result[:warnings] || validation_result['warnings'] || []
+    valid_checks = validation_result[:valid_checks] || validation_result['valid_checks'] || []
+
+    schema_id = resolve_validation_schema_id(validation_result)
+
+    Scfair::Rules.with_bundle(schema_id) do
+      Scfair::ComplianceCheckGroupsBuilder.call(
+        errors: errors,
+        warnings: warnings,
+        valid_checks: valid_checks,
+        field_values: field_values,
+        format: format
+      )
+    end
+  end
+
+  def symbolize_check_groups(groups)
+    Array(groups).map do |group|
+      g = group.deep_symbolize_keys
+      g[:items] = Array(g[:items]).map(&:deep_symbolize_keys)
+      g
+    end
+  end
+
+  def fix_ui_values_from_validation_or_loom(validation_result, loom_path, field_paths, paired_paths: [])
+    cached = validation_result[:field_values] || validation_result['field_values']
+    if cached.present?
+      return Scfair::FieldValuesFixUiAdapter.call(
+        field_values: cached,
+        field_paths: field_paths,
+        paired_paths: paired_paths
+      )
+    end
+
+    batch_read_field_values(loom_path, field_paths, paired_paths: paired_paths)
+  end
+
+  # valid_checks may include mirrored failed/warning entries for file-check grouping;
+  # project compliance UI should only show passed checks in the green list.
+  def displayable_valid_checks(valid_checks)
+    CompliancePipeline.displayable_valid_checks(valid_checks)
+  end
 
   # Load the validation result for a project, trying multiple storage locations.
   # Returns a Hash with symbolized keys, or nil.
@@ -146,101 +320,11 @@ module ComplianceHelpers
   # Returns a hash of { path => { value => true/false } } where true means
   # the value is a valid ontology term (or allowed free-text value).
   def resolve_field_values(groups, raw_values)
-    result = {}
-
-    allowed_specials = ScfairLoomValidatorService::ALLOWED_SPECIAL_VALUES rescue {}
-
-    groups.each do |g|
-      valid_values = g[:term_valid_values]
-      prefixes = g[:term_ontology_prefixes]
-
-      # Fields with a fixed valid-values list (e.g. tissue_type, suspension_type)
-      if valid_values.present?
-        term_vals = raw_values[g[:term_path]] || []
-        if term_vals.any?
-          valid_set = valid_values.map(&:downcase).to_set
-          result[g[:term_path]] = term_vals.index_with { |v| valid_set.include?(v.downcase) }
-        end
-        next
-      end
-
-      next if prefixes.blank?
-
-      ontology_ids = CellOntology.where(tag: prefixes).pluck(:id)
-      next if ontology_ids.empty?
-
-      scope = CellOntologyTerm.where(original: true, cell_ontology_id: ontology_ids)
-
-      # Build a set of allowed free-text values for this field
-      free_text_set = Set.new
-      specials = allowed_specials[g[:term_path]]
-      free_text_set.merge(specials) if specials
-      if g[:id].present?
-        ott = OntologyTermType.find_by(field_group_id: g[:id])
-        free_text_set.merge(ott.free_text_entries.map { |e| e.is_a?(Hash) ? e['value'].to_s : e.to_s }) if ott
-      end
-
-      # Resolve term path (identifiers like CL:0000540)
-      term_vals = raw_values[g[:term_path]] || []
-      if term_vals.any?
-        all_sub_terms = Set.new
-        term_vals.each { |v| v.to_s.split(' || ').each { |t| all_sub_terms << t.strip } }
-        all_sub_terms.reject!(&:blank?)
-
-        ontology_sub_terms = all_sub_terms.reject { |t| free_text_set.include?(t) }
-        known_ids = ontology_sub_terms.any? ? scope.where(identifier: ontology_sub_terms.to_a).pluck(:identifier).to_set : Set.new
-        known_ids.merge(free_text_set)
-
-        result[g[:term_path]] = term_vals.index_with do |v|
-          parts = v.to_s.split(' || ').map(&:strip).reject(&:blank?)
-          parts.all? { |p| known_ids.include?(p) }
-        end
-      end
-
-      # Resolve label path (names like "neuron", "fat body")
-      if g[:label_path].present?
-        label_vals = raw_values[g[:label_path]] || []
-        if label_vals.any?
-          all_sub_names = Set.new
-          label_vals.each { |v| v.to_s.split(' || ').each { |t| all_sub_names << t.strip } }
-          all_sub_names.reject!(&:blank?)
-
-          ontology_sub_names = all_sub_names.reject { |t| free_text_set.include?(t) }
-          exact_names = Set.new
-          exact_names.merge(free_text_set)
-          mappable_names = Set.new
-          if ontology_sub_names.any?
-            lower_map = {}
-            ontology_sub_names.each { |n| lower_map[n.downcase] = n }
-            scope.where('LOWER(name) IN (?)', lower_map.keys)
-                 .pluck(:name).each { |n| exact_names << lower_map[n.downcase] if lower_map[n.downcase] }
-
-            # Retry unresolved names with underscores replaced by spaces
-            remaining = ontology_sub_names.reject { |n| exact_names.include?(n) }
-            if remaining.any?
-              space_map = {}
-              remaining.select { |n| n.include?('_') }.each { |n| space_map[n.tr('_', ' ').downcase] = n }
-              if space_map.any?
-                scope.where('LOWER(name) IN (?)', space_map.keys)
-                     .pluck(:name).each { |n| mappable_names << space_map[n.downcase] if space_map[n.downcase] }
-              end
-            end
-          end
-
-          result[g[:label_path]] = label_vals.index_with do |v|
-            parts = v.to_s.split(' || ').map(&:strip).reject(&:blank?)
-            if parts.all? { |p| exact_names.include?(p) }
-              true
-            elsif parts.all? { |p| exact_names.include?(p) || mappable_names.include?(p) }
-              'mappable'
-            else
-              false
-            end
-          end
-        end
-      end
-    end
-
-    result
+    group_defs = Array(groups).map { |g| g.is_a?(Hash) && g[:group] ? g[:group] : g }
+    Scfair::OntologyValueResolver.call(
+      groups: group_defs,
+      field_values: raw_values,
+      format: 'loom'
+    )
   end
 end

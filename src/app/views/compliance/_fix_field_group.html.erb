@@ -1,13 +1,29 @@
 <%
   group = fg[:group]
   group_id = group[:id]
+  mv_config = (fix_form_config || {})['multi_value'] || {}
+  multi_value_delimiter = mv_config['delimiter'].to_s
+  multi_value_requirement = mv_config['requirement'].to_s
+  obs_field_name = Scfair::Rules.obs_field_name_from_path(group[:term_path])
+  field_multi_value = Scfair::Rules.multi_value_field?(obs_field_name)
+  field_multi_value_sorted = field_multi_value && Scfair::Rules.multi_value_sorted_field?(obs_field_name)
   is_paired = group[:label_path].present?
   is_auto_organism = group[:auto_from_project] == true && organism_info.present?
   is_auto_title = group[:auto_from_project] == :title && project_title.present?
+  is_auto_schema_version = group[:auto_from_project] == :schema_version
+  is_auto_schema_reference = group[:auto_from_project] == :schema_reference
+  schema_version_value = Scfair::Rules.schema_hash[:schema_version]
+  schema_reference_value = Scfair::Rules.schema_hash[:source_url]
   has_valid_values = group[:term_valid_values].present?
   has_ontology = group[:term_ontology_prefixes].present?
   has_allowed_terms = group[:allowed_terms].present?
   allowed_terms_csv = has_allowed_terms ? group[:allowed_terms].map { |t| t[:identifier] }.join(',') : ''
+  has_banned_terms = group[:banned_term_ids].present?
+  banned_terms_csv = has_banned_terms ? group[:banned_term_ids].join(',') : ''
+  ontology_rule_attrs = [
+    (has_allowed_terms ? "data-allowed-terms=\"#{allowed_terms_csv}\"" : nil),
+    (has_banned_terms ? "data-excluded-terms=\"#{banned_terms_csv}\"" : nil)
+  ].compact.join(' ')
 
   # Check if this field group has a schema constraint forcing its value
   constraint = schema_constraints[group_id]
@@ -19,7 +35,9 @@
      data-group-id="<%= group_id %>"
      data-term-has-error="<%= fg[:term_has_error] ? 'true' : 'false' %>"
      data-label-has-error="<%= (is_paired && fg[:label_has_error]) ? 'true' : 'false' %>"
-     data-is-auto="<%= (is_auto_organism || is_auto_title || is_constrained) ? 'true' : 'false' %>">
+     data-multi-value="<%= field_multi_value ? 'true' : 'false' %>"
+     data-multi-value-sorted="<%= field_multi_value_sorted ? 'true' : 'false' %>"
+     data-is-auto="<%= (is_auto_organism || is_auto_title || is_auto_schema_version || is_auto_schema_reference || is_constrained) ? 'true' : 'false' %>">
 
   <!-- Group header -->
   <div class="flex items-start justify-between mb-3">
@@ -28,8 +46,8 @@
       <p class="text-xs text-gray-500 mt-0.5"><%= group[:description] %></p>
     </div>
     <div class="flex items-center gap-2">
-      <% if group[:multi_value] %>
-        <span class="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full whitespace-nowrap">multi-value (|| separator)</span>
+      <% if field_multi_value %>
+        <span class="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full whitespace-nowrap">multi-value (<code><%= multi_value_delimiter.strip %></code> separator)</span>
       <% end %>
       <% if is_paired %>
         <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full whitespace-nowrap">paired fields</span>
@@ -225,6 +243,30 @@
       <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= project_title %>">
     </div>
 
+  <% elsif is_auto_schema_version %>
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from scFAIR schema</p>
+      <div>
+        <span class="text-xs font-medium text-gray-600">schema_version</span>
+        <p class="text-sm font-mono text-gray-900"><%= schema_version_value %></p>
+      </div>
+
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= schema_version_value %>">
+    </div>
+
+  <% elsif is_auto_schema_reference %>
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from scFAIR schema</p>
+      <div>
+        <span class="text-xs font-medium text-gray-600">schema_reference</span>
+        <p class="text-sm text-gray-900 break-all"><%= schema_reference_value %></p>
+      </div>
+
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= schema_reference_value %>">
+    </div>
+
   <% else %>
     <%# ── Regular field group ── %>
     <%
@@ -413,7 +455,7 @@
                        data-compliance-fix-target="mapFixInput"
                        data-group-id="<%= group_id %>"
                        data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
-                       <% if has_allowed_terms %>data-allowed-terms="<%= allowed_terms_csv %>"<% end %>
+                       <%= ontology_rule_attrs %>
                        data-action="input->compliance-fix#onMapFixAutocomplete keydown->compliance-fix#onMapFixKeydown"
                        class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
                 <div data-compliance-fix-target="mapFixResults"
@@ -568,14 +610,20 @@
                      data-compliance-fix-target="autocompleteInput"
                      data-group-id="<%= group_id %>"
                      data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
+                     <%= ontology_rule_attrs %>
                      data-action="input->compliance-fix#onAutocompleteInput keydown->compliance-fix#onAutocompleteKeydown"
                      class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
               <div data-compliance-fix-target="autocompleteResults"
                    data-group-id="<%= group_id %>"
                    class="hidden absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto"></div>
             </div>
-            <% if group[:multi_value] %>
-              <p class="text-xs text-gray-400 mt-1">For multiple values, select one at a time. Values are separated with <code>||</code>.</p>
+            <% if field_multi_value %>
+              <p class="text-xs text-gray-400 mt-1">
+                For multiple values, select one at a time. Values are separated with <code><%= multi_value_delimiter.strip %></code>.
+                <% if field_multi_value_sorted && multi_value_requirement.present? %>
+                  <%= multi_value_requirement %>
+                <% end %>
+              </p>
             <% end %>
           </div>
 
@@ -707,6 +755,7 @@
                      data-compliance-fix-target="autocompleteInput"
                      data-group-id="<%= group_id %>"
                      data-prefixes="<%= group[:term_ontology_prefixes].join(',') %>"
+                     <%= ontology_rule_attrs %>
                      data-action="input->compliance-fix#onAutocompleteInput keydown->compliance-fix#onAutocompleteKeydown"
                      class="block w-80 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
               <div data-compliance-fix-target="autocompleteResults"

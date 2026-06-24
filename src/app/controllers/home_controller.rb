@@ -64,6 +64,51 @@ class HomeController < ApplicationController
   def sitemap
   end
 
+  def llms
+    base = ENV.fetch('SERVER_URL').chomp('/')
+    render plain: <<~LLMS, content_type: 'text/plain; charset=utf-8'
+      # ASAP
+
+      > ASAP (Automated Single-cell Analysis Pipeline) is a collaborative web platform for analyzing and visualizing single-cell RNA-seq and related omics data. Developed at EPFL and listed among SIB resources.
+
+      ASAP guides users through a modular analysis pipeline on large single-cell datasets: import and parsing, filtering, normalization, clustering, differential expression, doublet calling, and interactive UMAP/t-SNE visualization. Public projects and JSON exports are available via the REST API.
+
+      ## Getting started
+
+      - [Welcome](#{base}/): Platform home and project browser
+      - [Guided tours](#{base}/guided-tours): Interactive walkthroughs of the application
+      - [FAQ](#{base}/home/faq): Frequently asked questions
+
+      ## Documentation
+
+      - [File formats](#{base}/home/file_format): Supported upload and export formats
+      - [API documentation](#{base}/api-doc): Interactive OpenAPI reference for JSON endpoints
+      - [OpenAPI spec](#{base}/api/openapi.yaml): Machine-readable API specification
+      - [Releases](#{base}/versions): ASAP version history and release notes
+      - [Project types](#{base}/project_types): Available pipeline types and configurations
+      - [Cell metadata schema](#{base}/ontology_term_types): Cell metadata fields used for annotations
+      - [Cross-references](#{base}/home/cross_references): External identifier types (GEO, ArrayExpress, BioProject, SRA)
+
+      ## Data and atlases
+
+      - [Public projects](#{base}/projects): Browse and clone shared analysis projects
+      - [Atlases](#{base}/atlases): Fly Cell Atlas and Human Cell Atlas entry points
+      - [scFAIR compliance](#{base}/compliance): Validate projects and files against scFAIR schema rules
+      - [File compliance check](#{base}/compliance/file-check): Standalone H5AD/Loom compliance check
+
+      ## Citation
+
+      - [Citing ASAP](#{base}/home/citing): Primary publications (Bioinformatics 2017; NAR 2020) and DOIs
+
+      ## Optional
+
+      - [Contact](#{base}/home/contact): Reach the ASAP team
+      - [Sitemap](#{base}/sitemap.xml): Full list of public URLs
+      - [GitHub discussions](https://github.com/DeplanckeLab/ASAP/discussions): Community Q&A
+      - [GitHub issues](https://github.com/DeplanckeLab/ASAP/issues): Bug reports and feature requests
+    LLMS
+  end
+
   def robots
     base = ENV.fetch('SERVER_URL').chomp('/')
     render plain: <<~ROBOTS, content_type: 'text/plain'

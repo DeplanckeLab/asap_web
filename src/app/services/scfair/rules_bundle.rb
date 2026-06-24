@@ -180,6 +180,56 @@ module Scfair
       Array(data.dig(:required, :var)).map(&:to_s).freeze
     end
 
+    def required_field_yaml_path(layer, field_name)
+      fields = case layer.to_sym
+               when :obs then required_obs_fields
+               when :uns then required_uns_fields
+               when :var then required_var_fields
+               else return nil
+               end
+      idx = fields.index(field_name.to_s)
+      idx ? "required.#{layer}.#{idx}" : nil
+    end
+
+    def presence_field_metadata_yaml_path(layer, field_name)
+      meta = data.dig(:presence_field_metadata, layer.to_sym, field_name.to_sym)
+      return nil if meta.blank?
+
+      "presence_field_metadata.#{layer}.#{field_name}"
+    end
+
+    def field_declarative_yaml_paths(layer, field_name)
+      layer = layer.to_sym
+      field_name = field_name.to_s
+      paths = []
+
+      req_path = required_field_yaml_path(layer, field_name)
+      paths << { label: 'Required field', value: field_name, path: req_path } if req_path
+
+      lp = label_pairs[field_name]
+      if lp.present?
+        paths << { label: 'Paired label field', value: lp, path: "label_pairs.#{field_name}" }
+      end
+
+      if enum_field_values(field_name).any?
+        paths << { label: 'Allowed values', value: enum_field_values(field_name).join(', '), path: "enum_fields.#{field_name}.values" }
+      end
+
+      if ontology_field(field_name).present?
+        paths << { label: 'Ontology field config', value: field_name, path: "ontology_fields.#{field_name}" }
+      end
+
+      field_constraint_entries(layer, field_name).each_with_index do |entry, idx|
+        paths << {
+          label: entry[:label].presence || 'Requirement',
+          value: field_constraint_display_value(entry),
+          path: "field_constraints.#{layer}.#{field_name}.#{idx}"
+        }
+      end
+
+      paths
+    end
+
     def anndata_index(layer)
       raw = (data[:anndata_indices] || {})[layer.to_sym] || {}
       fmt_h5ad = raw[:h5ad] || {}
@@ -778,7 +828,117 @@ module Scfair
         end
       end
 
+      generate_presence_check_entries(registry, category_ids)
+
       registry
+    end
+
+    PRESENCE_LAYER_CATEGORIES = {
+      obs: 'obs.required_presence',
+      uns: 'uns.required_presence',
+      var: 'var.required'
+    }.freeze
+
+    PRESENCE_BASE_CHECK_TEMPLATES = {
+      obs: 'Verifies required observation column %{path} is present',
+      uns: 'Field must be present in uns (H5AD) or /attrs (Loom)',
+      var: 'Column must be present in var (H5AD) or row_attrs (Loom)'
+    }.freeze
+
+    def generate_presence_check_entries(registry, category_ids)
+      PRESENCE_LAYER_CATEGORIES.each do |layer, category_id|
+        fields = send("required_#{layer}_fields")
+        field_metadata = data.dig(:presence_field_metadata, layer) || {}
+
+        fields.each do |field_name|
+          full_id = resolve_presence_entry_id(layer, field_name, category_ids)
+          next if registry.key?(full_id)
+
+          meta = field_metadata[field_name.to_sym] || {}
+          checks = build_presence_checks_performed(layer, field_name, meta)
+          summary = presence_field_summary(layer, field_name, meta)
+
+          registry[full_id] = {
+            id: full_id,
+            kind: 'check',
+            label: full_id.tr('.', ' '),
+            title: '',
+            category: category_id,
+            nested_key: field_name,
+            formats: [],
+            summary: summary,
+            checks: checks,
+            messages: {},
+            layer: layer.to_s,
+            field: field_name,
+            generated: true
+          }
+        end
+
+        generate_presence_rollup(registry, category_id, layer, fields)
+      end
+    end
+
+    def resolve_presence_entry_id(layer, field_name, category_ids)
+      base = "#{layer}.#{field_name}"
+      category_ids.include?(base) ? "#{base}.field" : base
+    end
+
+    def build_presence_checks_performed(layer, field_name, meta)
+      req_path = required_field_yaml_path(layer, field_name)
+      checks = [{
+        text: PRESENCE_BASE_CHECK_TEMPLATES[layer],
+        from_rules: true,
+        rules_path: req_path
+      }]
+
+      extra = Array(meta[:extra_checks])
+      meta_path = presence_field_metadata_yaml_path(layer, field_name)
+      extra.each_with_index do |c, idx|
+        checks << {
+          text: c.to_s,
+          from_rules: true,
+          rules_path: meta_path ? "#{meta_path}.extra_checks.#{idx}" : nil
+        }
+      end
+
+      label = label_pairs[field_name]
+      if label.present? && extra.none? { |c| c.to_s.include?(label) }
+        lp_path = "label_pairs.#{field_name}"
+        checks << {
+          text: "Paired label column %{label_path} is required for this ontology ID field",
+          from_rules: true,
+          rules_path: lp_path
+        }
+      end
+
+      values = enum_field_values(field_name)
+      if values.any? && extra.none? { |c| c.to_s.include?('must be one of') }
+        enum_path = "enum_fields.#{field_name}"
+        checks << {
+          text: "Values must be one of: %{allowed_values}",
+          from_rules: true,
+          rules_path: enum_path
+        }
+      end
+
+      checks
+    end
+
+    def presence_field_summary(layer, field_name, meta)
+      raw = meta[:summary].to_s
+      return raw if raw.present?
+
+      default_key = { obs: :required_observation, uns: :required_uns, var: :required_var }[layer]
+      default_summary_text(default_key) || ''
+    end
+
+    def generate_presence_rollup(registry, category_id, layer, fields)
+      entry = registry[category_id]
+      return unless entry && entry[:checks].blank?
+
+      entry[:checks] = ["Each required #{layer} field is validated individually"] +
+        fields.map { |f| "#{f} (#{layer})" }
     end
 
     def flatten_child_check_id(category_id, key, cfg, category_ids)
@@ -840,6 +1000,8 @@ module Scfair
         return nil
       end
 
+      return nil if entry[:generated]
+
       cat = entry[:category]
       key = entry[:nested_key].presence || entry[:field].presence || check_id.to_s.delete_prefix("#{cat}.")
       "checks.#{cat}.checks.#{key}.checks_performed"
@@ -900,10 +1062,20 @@ module Scfair
       entry = field_check_entry(layer, field_name)
       return [] if entry.blank? || entry[:checks].blank?
 
-      entry[:checks].map { |text| interpolate_layer_field_check(text, layer, field_name, format) }.freeze
+      entry[:checks].map { |item| interpolate_layer_field_check(item, layer, field_name, format) }.freeze
     end
 
-    def interpolate_layer_field_check(text, layer, field_name, format)
+    def interpolate_layer_field_check(item, layer, field_name, format)
+      if item.is_a?(Hash)
+        text = item[:text].to_s
+        interpolated = interpolate_check_text(text, layer, field_name, format)
+        return item.merge(text: interpolated)
+      end
+
+      interpolate_check_text(item.to_s, layer, field_name, format)
+    end
+
+    def interpolate_check_text(text, layer, field_name, format)
       return text unless text.include?('%{')
 
       path = field_path(format, layer, field_name)

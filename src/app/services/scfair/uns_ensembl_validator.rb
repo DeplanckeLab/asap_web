@@ -114,9 +114,8 @@ module Scfair
         field: metadata_path,
         path: metadata_path
       )
-      entry = check_entry(value_check:, status: 'failed', code: 'missing', message: message)
-      errors << { field: value_check, message: message }
-      valid_checks << entry
+      errors << { field: metadata_path, message: message }
+      valid_checks << { field: metadata_path, status: 'failed', code: 'missing', message: message }
     end
 
     def record_value_failure(errors, valid_checks, value_check:, message:)

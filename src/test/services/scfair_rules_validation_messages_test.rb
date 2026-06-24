@@ -107,12 +107,15 @@ class ScfairRulesValidationMessagesTest < TestBaseWithoutFixtures
 
   test 'obs layer field checks load from rules.yaml with format paths' do
     checks = Scfair::Rules.layer_field_checks(:obs, 'assay_ontology_term_id', format: 'h5ad')
-    assert_equal 1, checks.size
-    assert_includes checks.first, 'obs/assay_ontology_term_id'
+    assert_operator checks.size, :>=, 1
+    first_text = checks.first.is_a?(Hash) ? checks.first[:text] : checks.first
+    assert_includes first_text, 'obs/assay_ontology_term_id'
 
     loom_checks = Scfair::Rules.layer_field_checks(:obs, 'tissue_type', format: 'loom')
-    assert_includes loom_checks.first, '/col_attrs/tissue_type'
-    assert_includes loom_checks.last, 'tissue, organoid, cell line, primary cell culture'
+    first_loom = loom_checks.first.is_a?(Hash) ? loom_checks.first[:text] : loom_checks.first
+    last_loom = loom_checks.last.is_a?(Hash) ? loom_checks.last[:text] : loom_checks.last
+    assert_includes first_loom, '/col_attrs/tissue_type'
+    assert_includes last_loom, 'tissue, organoid, cell line, primary cell culture'
   end
 
   test 'presence check ids classify required field messages' do
@@ -131,5 +134,17 @@ class ScfairRulesValidationMessagesTest < TestBaseWithoutFixtures
                  Scfair::Rules.check_message('obs.required_presence', 'found', format: 'loom', path: '/col_attrs/assay')
     assert_equal 'Missing uns/title metadata (required by schema)',
                  Scfair::Rules.check_message('uns.required_presence', 'missing', format: 'h5ad', path: 'uns/title')
+  end
+
+  test 'required_field_yaml_path and field_declarative_yaml_paths return correct paths' do
+    assert_equal 'required.obs.0', Scfair::Rules.required_field_yaml_path(:obs, 'assay_ontology_term_id')
+    assert_equal 'required.uns.0', Scfair::Rules.required_field_yaml_path(:uns, 'title')
+    assert_equal 'required.var.0', Scfair::Rules.required_field_yaml_path(:var, 'feature_is_filtered')
+    assert_nil Scfair::Rules.required_field_yaml_path(:obs, 'nonexistent_field')
+
+    paths = Scfair::Rules.field_declarative_yaml_paths(:obs, 'sex_ontology_term_id')
+    assert paths.any? { |p| p[:path].start_with?('required.obs.') }
+    assert paths.any? { |p| p[:path].start_with?('label_pairs.') }
+    assert paths.any? { |p| p[:path].start_with?('ontology_fields.') }
   end
 end

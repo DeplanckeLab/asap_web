@@ -60,12 +60,13 @@ module Scfair
       message = (entry[:message] || entry['message']).to_s
       return nil if field.blank?
 
-      return 'schema.version' if field.match?(/\A(uns\/schema_version|\/attrs\/schema_version)\z/)
-      return 'schema.reference' if field.match?(/\A(uns\/schema_reference|\/attrs\/schema_reference)\z/)
-      return 'uns.ensembl_assembly' if field.match?(/\A(uns\/ensembl_assembly|\/attrs\/ensembl_assembly)\z/)
-      return 'schema.reference' if field.match?(/\A(uns\/schema_reference|\/attrs\/schema_reference)\z/)
-      return 'uns.ensembl' if field.start_with?('uns.ensembl') ||
-                              field.match?(/\A(uns\/ensembl_|\/attrs\/ensembl_)/)
+      unless presence_message?(message)
+        return 'schema.version' if field.match?(/\A(uns\/schema_version|\/attrs\/schema_version)\z/)
+        return 'schema.reference' if field.match?(/\A(uns\/schema_reference|\/attrs\/schema_reference)\z/)
+        return 'uns.ensembl_assembly' if field.match?(/\A(uns\/ensembl_assembly|\/attrs\/ensembl_assembly)\z/)
+        return 'uns.ensembl' if field.start_with?('uns.ensembl') ||
+                                field.match?(/\A(uns\/ensembl_|\/attrs\/ensembl_)/)
+      end
       return 'obs.experimental_condition' if field.start_with?('obs.experimental_condition') ||
                                             experimental_condition_obs_path?(field) ||
                                             experimental_condition_obs_path?(field)
@@ -201,6 +202,11 @@ module Scfair
       return false unless CROSS_FIELD_METADATA_FIELDS.include?(field_name)
 
       message.match?(Rules.cross_field_grouper_message_pattern)
+    end
+
+    def presence_message?(message)
+      message.match?(/\AMissing .* metadata \(required by schema\)\z/) ||
+        message.match?(/\AFound .* metadata\z/)
     end
   end
 end

@@ -35,13 +35,35 @@ class ScfairRulesSnippetExtractorTest < TestBaseWithoutFixtures
     assert_equal 'Path not found: missing.section.key', result[:error]
   end
 
-  test 'extracts checks_performed array entry at same indent as parent key' do
-    result = Scfair::RulesSnippetExtractor.call(
-      'checks.uns.required_presence.checks.ensembl_release.checks_performed.1'
-    )
+  test 'extracts required field list entry by array index' do
+    result = Scfair::RulesSnippetExtractor.call('required.uns.5')
+
+    assert_nil result[:error]
+    highlighted = result[:lines].select { |line| line[:highlight] }
+    assert highlighted.any? { |line| line[:text].include?('ensembl_release') }
+  end
+
+  test 'extracts presence_field_metadata extra_checks entry' do
+    result = Scfair::RulesSnippetExtractor.call('presence_field_metadata.uns.ensembl_release.extra_checks.0')
 
     assert_nil result[:error]
     highlighted = result[:lines].select { |line| line[:highlight] }
     assert highlighted.any? { |line| line[:text].include?('positive integer Ensembl release number') }
+  end
+
+  test 'extracts label_pairs entry' do
+    result = Scfair::RulesSnippetExtractor.call('label_pairs.sex_ontology_term_id')
+
+    assert_nil result[:error]
+    highlighted = result[:lines].select { |line| line[:highlight] }
+    assert highlighted.any? { |line| line[:text].include?('sex') }
+  end
+
+  test 'extracts ontology_fields entry' do
+    result = Scfair::RulesSnippetExtractor.call('ontology_fields.sex_ontology_term_id')
+
+    assert_nil result[:error]
+    highlighted = result[:lines].select { |line| line[:highlight] }
+    assert highlighted.any? { |line| line[:text].include?('sex_ontology_term_id') }
   end
 end

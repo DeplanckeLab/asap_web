@@ -390,8 +390,27 @@ module Scfair
       )
     end
 
+    def build_presence_constraints(field_name, category_id)
+      layer = presence_layer_for(category_id)
+      return [] if layer.blank? || field_name.blank?
+
+      Rules.field_declarative_yaml_paths(layer, field_name).map do |entry|
+        constraint_row(entry[:label], entry[:value], from_rules: true, rules_path: entry[:path])
+      end
+    end
+
+    def presence_layer_for(category_id)
+      case category_id.to_s
+      when 'obs.required_presence' then :obs
+      when 'uns.required_presence' then :uns
+      when 'var.required' then :var
+      else
+        %i[obs uns var].find { |l| send("#{l}_metadata_field_name", @field).present? }
+      end
+    end
+
     def build_constraints(field_name, category_id)
-      return [] if presence_check?
+      return build_presence_constraints(field_name, category_id) if presence_check? || Rules.presence_check_id?(category_id)
       return format_check_constraints(field_name) if ontology_format_check?
 
       suffix = semantic_rule_suffix(@field)
@@ -469,7 +488,20 @@ module Scfair
         rows << constraint_row('Paired label field', label_field, from_rules: true, rules_path: "label_pairs.#{field_name}")
       end
 
+      append_required_field_link(rows, field_name)
+
       rows
+    end
+
+    def append_required_field_link(rows, field_name)
+      existing = rows.filter_map { |r| r[:rules_path] }.to_set
+      %i[obs uns var].each do |layer|
+        path = Rules.required_field_yaml_path(layer, field_name)
+        next unless path && !existing.include?(path)
+
+        rows << constraint_row('Required field', field_name, from_rules: true, rules_path: path)
+        break
+      end
     end
 
     def semantic_subcheck_constraints(field_name, suffix)
@@ -905,65 +937,21 @@ module Scfair
 
       rule_id = @field.delete_prefix('cross-field.')
       rule = Rules.cross_field_rule_by_id(rule_id)
-      cell_line_rule = Rules.cross_field_cell_line_checks.find { |entry| entry[:id] == rule_id }
-      if cell_line_rule
-        rows << constraint_row(
-          'Applies when',
-          'tissue_type is "cell line"',
-          from_rules: true,
-          rules_path: Rules.cross_field_rules_yaml_path(cell_line_rule[:key], 'summary')
-        )
-        rows << constraint_row(
-          'Requirement',
-          cell_line_rule[:fail].to_s,
-          from_rules: true,
-          rules_path: Rules.cross_field_rules_yaml_path(cell_line_rule[:key], 'messages', 'fail')
-        )
-        return
-      end
-
-      if rule&.dig(:messages, 'fail').present?
-        rows << constraint_row(
-          'Requirement',
-          rule[:messages]['fail'].to_s,
-          from_rules: true,
-          rules_path: Rules.cross_field_rules_yaml_path(rule[:key], 'messages', 'fail')
-        )
-      end
-
-      append_cf_rule_constraints(rows, rule)
-    end
-
-    def append_cf_rule_constraints(rows, rule)
       return if rule.blank?
 
-      case rule[:key]
-      when Rules::CF8_RULE_KEY
+      if Array(rule[:checks]).any?
         rows << constraint_row(
-          'Requires',
-          Rules.cross_field_cf8_message('skipped_not_single'),
+          'Requirement',
+          rule[:summary].to_s,
           from_rules: true,
-          rules_path: Rules.cross_field_rules_yaml_path(Rules::CF8_RULE_KEY, 'messages', 'skipped_not_single')
+          rules_path: Rules.cross_field_rules_yaml_path(rule[:key], 'checks')
         )
+      else
         rows << constraint_row(
-          'Fail condition',
-          Rules.cross_field_cf8_message('fail'),
+          'Requirement',
+          rule[:summary].to_s,
           from_rules: true,
-          rules_path: Rules.cross_field_rules_yaml_path(Rules::CF8_RULE_KEY, 'messages', 'fail')
-        )
-      when Rules::CF9_RULE_KEY
-        spatial_root = @format == 'h5ad' ? 'uns/spatial' : '/attrs/spatial'
-        rows << constraint_row(
-          'Missing metadata',
-          Rules.cross_field_cf9_message('fail_missing_metadata', spatial_root: spatial_root),
-          from_rules: true,
-          rules_path: Rules.cross_field_rules_yaml_path(Rules::CF9_RULE_KEY, 'messages', 'fail_missing_metadata')
-        )
-        rows << constraint_row(
-          'Unexpected metadata',
-          Rules.cross_field_cf9_message('fail_metadata_without_spatial_assay', spatial_root: spatial_root),
-          from_rules: true,
-          rules_path: Rules.cross_field_rules_yaml_path(Rules::CF9_RULE_KEY, 'messages', 'fail_metadata_without_spatial_assay')
+          rules_path: Rules.cross_field_rules_yaml_path(rule[:key], 'summary')
         )
       end
     end

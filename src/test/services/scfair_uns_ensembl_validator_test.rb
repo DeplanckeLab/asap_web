@@ -29,10 +29,10 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    check = result[:valid_checks].find { |entry| entry[:field] == 'uns.ensembl.release' }
+    check = result[:valid_checks].find { |entry| entry[:field] == 'uns/ensembl_release' }
     assert_equal 'failed', check[:status]
     assert_equal 'Missing uns/ensembl_release metadata (required by schema)', check[:message]
-    assert_equal 'uns.ensembl', check[:check_id]
+    assert_nil check[:check_id]
   end
 
   test 'fails when ensembl_release column is absent from declared uns metadata' do
@@ -43,7 +43,7 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    check = result[:valid_checks].find { |entry| entry[:field] == 'uns.ensembl.release' }
+    check = result[:valid_checks].find { |entry| entry[:field] == 'uns/ensembl_release' }
     assert_equal 'failed', check[:status]
     assert_equal 'Missing uns/ensembl_release metadata (required by schema)', check[:message]
   end
@@ -85,7 +85,7 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    assembly = result[:valid_checks].find { |entry| entry[:field] == 'uns.ensembl.assembly' }
+    assembly = result[:valid_checks].find { |entry| entry[:field] == 'uns/ensembl_assembly' }
     assert_equal 'failed', assembly[:status]
     assert_equal 'Missing uns/ensembl_assembly metadata (required by schema)', assembly[:message]
   end
@@ -100,7 +100,7 @@ class ScfairUnsEnsemblValidatorTest < TestBaseWithoutFixtures
       format: 'h5ad'
     ).call
 
-    assembly = result[:valid_checks].find { |entry| entry[:field] == 'uns.ensembl.assembly' }
+    assembly = result[:valid_checks].find { |entry| entry[:field] == 'uns/ensembl_assembly' }
     assert_equal 'failed', assembly[:status]
   end
 

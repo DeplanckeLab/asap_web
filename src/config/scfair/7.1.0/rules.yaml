@@ -159,6 +159,8 @@ metadata_rules:
 # uns: dataset-level metadata in uns (H5AD) or /attrs (Loom).
 # var: per-gene metadata in var (H5AD) or /row_attrs (Loom).
 # Presence is checked under obs.required_presence, uns.required_presence, var.required.
+# Per-field check registry entries are auto-generated from these lists at load time;
+# custom summaries and extra checks_performed lines live in presence_field_metadata below.
 required:
   obs:
     # Ontology term ID + human-readable label pairs (label consistency: label_pairs).
@@ -198,6 +200,76 @@ required:
     - feature_reference
     - feature_type
     - feature_chromosome
+
+# Per-field metadata for auto-generated presence check entries.
+# Only fields that need custom summary or extra checks_performed lines beyond the
+# default presence template need an entry here. Fields omitted get the default.
+presence_field_metadata:
+  uns:
+    title:
+      summary: Short human-readable dataset title required in uns metadata.
+      extra_checks:
+      - Short human-readable dataset title required by scFAIR
+    organism_ontology_term_id:
+      summary: Species ontology term (NCBITaxon:tax_id) identifying the dataset organism.
+      extra_checks:
+      - Must use NCBITaxon:tax_id format for the dataset species
+      - Validated for ontology format and semantic constraints when values are present
+    organism:
+      summary: Human-readable organism name label paired with organism_ontology_term_id.
+      extra_checks:
+      - Human-readable organism label paired with organism_ontology_term_id
+      - Label must match the organism name for the declared NCBITaxon term
+    schema_version:
+      summary: Schema version identifier; must be compatible with scFAIR %{schema_version}.
+      extra_checks:
+      - Must be compatible with the reference scFAIR schema version
+    schema_reference:
+      summary: Canonical URL of the scFAIR schema this file claims to follow.
+      extra_checks:
+      - Must match the canonical schema URL for this validator release
+    ensembl_release:
+      summary: Ensembl release number used for gene annotation (positive integer).
+      extra_checks:
+      - Must be a positive integer Ensembl release number
+    ensembl_database:
+      summary: Ensembl database source used for gene annotation (Ensembl, EnsemblMetazoa, or EnsemblCOVID-19).
+      extra_checks:
+      - Must be one of the schema Ensembl database enum values
+    ensembl_assembly:
+      summary: Genome assembly name for the Ensembl annotation (e.g. GRCh38.p14).
+      extra_checks:
+      - Must be a non-empty assembly name string
+  var:
+    feature_is_filtered:
+      summary: Per-gene filter flag indicating whether the feature was filtered out of the matrix.
+      extra_checks:
+      - Values must be boolean true or false (true, false, True, or False)
+    feature_biotype:
+      summary: 'Gene biotype: distinguishes annotated genes from ERCC spike-in controls.'
+      extra_checks:
+      - Values must be one of the schema biotype enum values
+    feature_length:
+      summary: Gene length in base pairs as a positive integer.
+      extra_checks:
+      - Values must be a positive integer (gene length in base pairs)
+    feature_name:
+      summary: 'Display name from the gene reference: gene_name when assigned to var index, otherwise the index identifier; spike-ins use ERCC-ID (spike-in control).'
+      extra_checks:
+      - 'Spike-in: "{ERCC-ID} (spike-in control)" matching var index'
+      - 'Gene: gene_name from the reference for var index, or var index when gene_name is absent'
+    feature_reference:
+      summary: NCBITaxon term for the reference organism of the feature from the schema pinned gene annotations table.
+      extra_checks:
+      - Must be the schema NCBITaxon reference organism for the feature (pinned gene annotations table)
+    feature_type:
+      summary: Feature type label such as protein_coding or synthetic (non-empty string).
+      extra_checks:
+      - Values must be a non-empty string (e.g. protein_coding, synthetic)
+    feature_chromosome:
+      summary: Chromosome name for the feature, or na for spike-ins (non-empty string).
+      extra_checks:
+      - Values must be a non-empty string (chromosome name or na for spike-ins)
 
 # AnnData DataFrame indices (schema object model). @ separates layer from index attribute;
 # / in h5ad.path is the on-disk HDF5 location (not a metadata column).
@@ -1004,143 +1076,12 @@ checks:
       skipped_pre_analysis: Skipped (pre-analysis dataset)
       missing_visium: Missing %{path} metadata (required for Visium spatial data with
         is_single=true)
-    rollup:
-    - Each required observation (obs / col_attrs) column from scFAIR 7.1.0 is present
-    - 'Ontology term ID and paired label fields: assay, cell_type, disease, development_stage,
-      sex, tissue, ethnicity'
-    - 'Categorical fields: tissue_type, suspension_type, donor_id, is_primary_data'
-    - ID/label consistency for ontology fields is validated under obs.label_pairs
-      (derived from label_pairs)
-    checks:
-      assay_ontology_term_id:
-        layer: obs
-        field: assay_ontology_term_id
-        checks_performed:
-        - Verifies required observation column %{path} is present
-      cell_type_ontology_term_id:
-        layer: obs
-        field: cell_type_ontology_term_id
-        checks_performed:
-        - Verifies required observation column %{path} is present
-      development_stage_ontology_term_id:
-        layer: obs
-        field: development_stage_ontology_term_id
-        checks_performed:
-        - Verifies required observation column %{path} is present
-      disease_ontology_term_id:
-        layer: obs
-        field: disease_ontology_term_id
-        checks_performed:
-        - Verifies required observation column %{path} is present
-      self_reported_ethnicity_ontology_term_id:
-        layer: obs
-        field: self_reported_ethnicity_ontology_term_id
-        checks_performed:
-        - Verifies required observation column %{path} is present
-      sex_ontology_term_id:
-        layer: obs
-        field: sex_ontology_term_id
-        checks_performed:
-        - Verifies required observation column %{path} is present
-      tissue_ontology_term_id:
-        layer: obs
-        field: tissue_ontology_term_id
-        checks_performed:
-        - Verifies required observation column %{path} is present
-      donor_id:
-        layer: obs
-        field: donor_id
-        checks_performed:
-        - Verifies required observation column %{path} is present
-      is_primary_data:
-        layer: obs
-        field: is_primary_data
-        checks_performed:
-        - Verifies required observation column %{path} is present
-      suspension_type:
-        layer: obs
-        field: suspension_type
-        checks_performed:
-        - Verifies required observation column %{path} is present
-        - 'Values must be one of: %{allowed_values}'
-      tissue_type:
-        layer: obs
-        field: tissue_type
-        checks_performed:
-        - Verifies required observation column %{path} is present
-        - 'Values must be one of: %{allowed_values}'
   uns.required_presence:
     label: Required dataset metadata fields
     summary: Required dataset-level metadata fields in uns/attrs.
     messages:
       found: Found %{path} metadata
       missing: Missing %{path} metadata (required by schema)
-    rollup:
-    - Each required dataset metadata field is validated individually
-    - 'Fields: title, organism_ontology_term_id, organism, schema_version, schema_reference,
-      ensembl_release, ensembl_database, ensembl_assembly'
-    - Open a specific field check for presence requirements
-    checks:
-      title:
-        layer: uns
-        field: title
-        checks_performed:
-        - Field must be present in uns (H5AD) or /attrs (Loom)
-        - Short human-readable dataset title required by scFAIR
-        summary: Short human-readable dataset title required in uns metadata.
-      organism_ontology_term_id:
-        layer: uns
-        field: organism_ontology_term_id
-        checks_performed:
-        - Field must be present in uns (H5AD) or /attrs (Loom)
-        - Must use NCBITaxon:tax_id format for the dataset species
-        - Validated for ontology format and semantic constraints when values are present
-        summary: Species ontology term (NCBITaxon:tax_id) identifying the dataset
-          organism.
-      organism:
-        layer: uns
-        field: organism
-        checks_performed:
-        - Field must be present in uns (H5AD) or /attrs (Loom)
-        - Human-readable organism label paired with organism_ontology_term_id
-        - Label must match the organism name for the declared NCBITaxon term
-        summary: Human-readable organism name label paired with organism_ontology_term_id.
-      schema_version:
-        layer: uns
-        field: schema_version
-        checks_performed:
-        - Field must be present in uns (H5AD) or /attrs (Loom)
-        - Must be compatible with the reference scFAIR schema version
-        summary: Schema version identifier; must be compatible with scFAIR %{schema_version}.
-      schema_reference:
-        layer: uns
-        field: schema_reference
-        checks_performed:
-        - Field must be present in uns (H5AD) or /attrs (Loom)
-        - Must match the canonical schema URL for this validator release
-        summary: Canonical URL of the scFAIR schema this file claims to follow.
-      ensembl_release:
-        layer: uns
-        field: ensembl_release
-        checks_performed:
-        - Field must be present in uns (H5AD) or /attrs (Loom)
-        - Must be a positive integer Ensembl release number
-        summary: Ensembl release number used for gene annotation (positive integer).
-      ensembl_database:
-        layer: uns
-        field: ensembl_database
-        checks_performed:
-        - Field must be present in uns (H5AD) or /attrs (Loom)
-        - Must be one of the schema Ensembl database enum values
-        summary: Ensembl database source used for gene annotation (Ensembl, EnsemblMetazoa,
-          or EnsemblCOVID-19).
-      ensembl_assembly:
-        layer: uns
-        field: ensembl_assembly
-        checks_performed:
-        - Field must be present in uns (H5AD) or /attrs (Loom)
-        - Must be a non-empty assembly name string
-        summary: Genome assembly name for the Ensembl annotation (e.g. GRCh38.p14).
   schema.version:
     label: Schema version compatibility
     summary: The file schema_version must be compatible with the reference schema
@@ -1181,67 +1122,6 @@ checks:
     messages:
       found: Found %{path} metadata
       missing: Missing %{path} metadata (required by schema)
-    rollup:
-    - Each required var / row_attrs column is validated individually
-    - Open a specific field check for column presence and value constraints
-    checks:
-      feature_is_filtered:
-        layer: var
-        field: feature_is_filtered
-        checks_performed:
-        - Column must be present in var (H5AD) or row_attrs (Loom)
-        - Values must be boolean true or false (true, false, True, or False)
-        summary: Per-gene filter flag indicating whether the feature was filtered
-          out of the matrix.
-      feature_biotype:
-        layer: var
-        field: feature_biotype
-        checks_performed:
-        - Column must be present in var (H5AD) or row_attrs (Loom)
-        - Values must be one of the schema biotype enum values
-        summary: 'Gene biotype: distinguishes annotated genes from ERCC spike-in controls.'
-      feature_length:
-        layer: var
-        field: feature_length
-        checks_performed:
-        - Column must be present in var (H5AD) or row_attrs (Loom)
-        - Values must be a positive integer (gene length in base pairs)
-        summary: Gene length in base pairs as a positive integer.
-      feature_name:
-        layer: var
-        field: feature_name
-        checks_performed:
-        - Column must be present in var (H5AD) or row_attrs (Loom)
-        - 'Spike-in: "{ERCC-ID} (spike-in control)" matching var index'
-        - 'Gene: gene_name from the reference for var index, or var index when gene_name
-          is absent'
-        summary: 'Display name from the gene reference: gene_name when assigned to
-          var index, otherwise the index identifier; spike-ins use ERCC-ID (spike-in
-          control).'
-      feature_reference:
-        layer: var
-        field: feature_reference
-        checks_performed:
-        - Column must be present in var (H5AD) or row_attrs (Loom)
-        - Must be the schema NCBITaxon reference organism for the feature (pinned
-          gene annotations table)
-        summary: NCBITaxon term for the reference organism of the feature from the
-          schema pinned gene annotations table.
-      feature_type:
-        layer: var
-        field: feature_type
-        checks_performed:
-        - Column must be present in var (H5AD) or row_attrs (Loom)
-        - Values must be a non-empty string (e.g. protein_coding, synthetic)
-        summary: Feature type label such as protein_coding or synthetic (non-empty
-          string).
-      feature_chromosome:
-        layer: var
-        field: feature_chromosome
-        checks_performed:
-        - Column must be present in var (H5AD) or row_attrs (Loom)
-        - Values must be a non-empty string (chromosome name or na for spike-ins)
-        summary: Chromosome name for the feature, or na for spike-ins (non-empty string).
   var.index:
     label: Var index (feature identifiers)
     summary: 'Var pandas.DataFrame index: unique feature identifiers (Ensembl gene_id

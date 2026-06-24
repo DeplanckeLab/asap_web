@@ -270,7 +270,7 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
     refute detail[:checks_performed].any? { |check| check_text(check).match?(/CL,|UBERON|all ontology term/i) }
   end
 
-  test 'omits constraints for required field presence checks' do
+  test 'shows declarative constraints for required field presence checks' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'obs/sex_ontology_term_id',
       message: 'Found obs/sex_ontology_term_id metadata',
@@ -279,7 +279,16 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
     )
 
     assert_equal 'obs.required_presence', detail[:category_id]
-    assert_empty detail[:constraints]
+    required = detail[:constraints].find { |row| row[:label] == 'Required field' }
+    assert required[:from_rules]
+    assert required[:rules_path].start_with?('required.obs.')
+    assert_equal 'sex_ontology_term_id', required[:value]
+
+    label_pair = detail[:constraints].find { |row| row[:label] == 'Paired label field' }
+    assert_equal 'label_pairs.sex_ontology_term_id', label_pair[:rules_path]
+
+    ontology = detail[:constraints].find { |row| row[:label] == 'Ontology field config' }
+    assert_equal 'ontology_fields.sex_ontology_term_id', ontology[:rules_path]
   end
 
   test 'uns field check shows field-specific checks not full uns field list' do
@@ -295,7 +304,9 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
     refute detail[:checks_performed].any? { |check| check_text(check).include?('ensembl_release') }
     refute detail[:checks_performed].any? { |check| check_text(check).include?('title') }
     assert detail[:checks_performed].any? { |check| check_text(check).include?('organism_ontology_term_id') }
-    assert_empty detail[:constraints]
+    required = detail[:constraints].find { |row| row[:label] == 'Required field' }
+    assert required[:rules_path].start_with?('required.uns.')
+    assert_nil detail[:constraints].find { |row| row[:label] == 'Field metadata' }
   end
 
   test 'ensembl release constraint comes from rules.yaml field_constraints' do
@@ -414,7 +425,7 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
     )
 
     second_check = detail[:checks_performed][1]
-    assert_equal 'checks.uns.required_presence.checks.ensembl_release.checks_performed.1', second_check[:rules_path]
+    assert_equal 'presence_field_metadata.uns.ensembl_release.extra_checks.0', second_check[:rules_path]
     snippet = Scfair::RulesSnippetExtractor.call(second_check[:rules_path])
     assert_nil snippet[:error]
     assert snippet[:lines].any? { |line| line[:highlight] && line[:text].include?('positive integer') }
@@ -482,7 +493,8 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
 
     assert_equal 'feature_chromosome', detail[:title]
     assert_match(/Chromosome/i, detail[:summary])
-    assert_empty detail[:constraints]
+    required = detail[:constraints].find { |row| row[:label] == 'Required field' }
+    assert required[:rules_path].start_with?('required.var.')
     refute detail[:checks_performed].any? { |check| check_text(check).include?('feature_biotype') }
     assert detail[:checks_performed].any? { |check| check_text(check).include?('chromosome') }
   end

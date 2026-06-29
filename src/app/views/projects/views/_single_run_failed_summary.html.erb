@@ -18,7 +18,15 @@
   <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
     <div class="flex items-center justify-between">
       <h3 class="text-lg font-semibold text-gray-900"><%= step_label %> failed</h3>
-      <% if analyzable?(@project) && editable?(@project) %>
+      <% parsing_reset_allowed = analyzable?(@project) && editable?(@project) && @step&.name == 'parsing' &&
+           !single_run_step_locked_from_publication?(@project, @step, runs: run) &&
+           ((@project_step && [3, 4].include?(@project_step.status_id)) || (run && [3, 4].include?(run.status_id))) %>
+      <% reset_allowed = if @step&.name == 'parsing'
+           parsing_reset_allowed
+         else
+           analyzable?(@project) && editable?(@project) && single_run_step_resettable?(@project, @step, project_step: @project_step, runs: run)
+         end %>
+      <% if reset_allowed %>
         <% if @step&.name == 'parsing' %>
           <button type="button"
                   class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
@@ -36,6 +44,12 @@
             <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
           </button>
         <% end %>
+      <% elsif analyzable?(@project) && editable?(@project) && single_run_step_locked_from_publication?(@project, @step, runs: run) %>
+        <button type="button" disabled
+                class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                title="<%= publication_locked_step_message %>">
+          <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+        </button>
       <% elsif analyzable?(@project) %>
         <button type="button" disabled
                 class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"

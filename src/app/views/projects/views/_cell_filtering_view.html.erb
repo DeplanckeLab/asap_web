@@ -60,7 +60,8 @@
           </span>
         <% end %>
       </div>
-      <% if analyzable?(@project) && editable?(@project) %>
+      <% reset_allowed = analyzable?(@project) && editable?(@project) && single_run_step_resettable?(@project, @step, project_step: @project_step, runs: run_for_view) %>
+      <% if reset_allowed %>
         <button type="button"
                 class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                 data-controller="restart-step"
@@ -68,6 +69,12 @@
                 data-restart-step-step-id-value="<%= @step.id %>"
                 data-restart-step-restart-url-value="<%= restart_step_project_path(@project, return_to_form: 1) %>"
                 data-action="click->restart-step#restart">
+          Reset
+        </button>
+      <% elsif analyzable?(@project) && editable?(@project) && single_run_step_locked_from_publication?(@project, @step, runs: run_for_view) %>
+        <button type="button" disabled
+                class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                title="<%= publication_locked_step_message %>">
           Reset
         </button>
       <% elsif analyzable?(@project) %>

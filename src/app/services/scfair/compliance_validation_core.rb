@@ -5,15 +5,22 @@ module Scfair
   class ComplianceValidationCore
     include ComplianceReportEnrichment
 
-    def self.call(file_path:, schema_id:, logger: Rails.logger, progress_cb: nil)
-      new(file_path: file_path, schema_id: schema_id, logger: logger, progress_cb: progress_cb).call
+    def self.call(file_path:, schema_id:, logger: Rails.logger, progress_cb: nil, project_compliance: false)
+      new(
+        file_path: file_path,
+        schema_id: schema_id,
+        logger: logger,
+        progress_cb: progress_cb,
+        project_compliance: project_compliance
+      ).call
     end
 
-    def initialize(file_path:, schema_id:, logger: Rails.logger, progress_cb: nil)
+    def initialize(file_path:, schema_id:, logger: Rails.logger, progress_cb: nil, project_compliance: false)
       @file_path = file_path
       @schema_id = schema_id
       @logger = logger
       @progress_cb = progress_cb
+      @project_compliance = project_compliance
     end
 
     def validate
@@ -56,7 +63,8 @@ module Scfair
         ).call
         extensions = SchemaExtensionValidator.new(
           field_values: base_result.field_values || {},
-          format: format
+          format: format,
+          project_compliance: @project_compliance
         ).call
         metadata_general = MetadataGeneralValidator.new(
           field_values: base_result.field_values || {},

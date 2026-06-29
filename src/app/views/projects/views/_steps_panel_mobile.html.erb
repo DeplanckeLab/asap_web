@@ -122,6 +122,7 @@
                  <% end %>
                  data-step-id="<%= step.id %>"
                  data-step-name="<%= step.name %>"
+                 data-has-std-view="<%= step.has_std_view ? 'true' : 'false' %>"
                  data-step-lock-available="<%= is_available ? 'true' : 'false' %>"
                  data-step-lock-detail="<%= h(lock_reason.to_s) %>">
               <div class="flex-shrink-0 mr-3" style="width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;">

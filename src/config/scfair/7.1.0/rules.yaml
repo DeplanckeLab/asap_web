@@ -1021,6 +1021,7 @@ organism_specific_display:
 # Omit formats to apply to both h5ad and loom; set formats only for format-specific categories.
 # checks.catalog lists sidebar category ids per file format.
 # checks._defaults provides fallback popup summary templates.
+
 checks:
   catalog:
     common:
@@ -1443,6 +1444,11 @@ checks:
   extension.analysis_json:
     label: analysis_json extension checks
     summary: analysis_json extension metadata.
+    messages:
+      missing_file_check: 'analysis_json metadata not found (recommended)'
+      missing_project:
+        h5ad: 'ASAP will save/update the performed analysis in uns/analysis_json at download time.'
+        loom: 'ASAP will save/update the performed analysis in /attrs/analysis_json at download time.'
     rollup:
     - Looks for analysis_pipeline metadata (recommended analysis_json extension)
     - Warns when analysis pipeline metadata is absent

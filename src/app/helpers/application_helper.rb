@@ -2,6 +2,44 @@ module ApplicationHelper
   # Badges for published public projects (public_at set):
   # - Green closed lock: in the public snapshot (created before public_at); visible to anyone who can read the project in snapshot mode.
   # - Grey open lock: after public_at; only listed for users with full read access (owner/admin). Snapshot-only readers and guests must not see these rows (controller filters enforce that).
+  SINGLE_RUN_RESTARTABLE_STATUSES = [1, 2, 3, 4, 6].freeze
+
+  def publication_locked_step_message
+    'This analysis is included in the public snapshot and cannot be modified.'
+  end
+
+  # True when a single-run step has at least one run frozen in the public snapshot.
+  def single_run_step_locked_from_publication?(project, step, runs: nil)
+    return false unless project&.publication_lock_active?
+    return false unless step && !step.multiple_runs
+
+    step_runs =
+      if runs
+        Array(runs).compact
+      else
+        project.runs.where(step_id: step.id).to_a
+      end
+    step_runs.any? { |run| project.locked_from_publication?(run) }
+  end
+
+  # Whether a single-run step can be reset/restarted in the UI or via restart_step.
+  def single_run_step_resettable?(project, step, project_step: nil, runs: nil)
+    return false unless step && !step.multiple_runs
+    return false if single_run_step_locked_from_publication?(project, step, runs: runs)
+
+    project_step ||= ProjectStep.find_by(project_id: project.id, step_id: step.id)
+    project_step && SINGLE_RUN_RESTARTABLE_STATUSES.include?(project_step.status_id)
+  end
+
+  # Whether result-page refinement controls (e.g. doublet calling) may update parameters.
+  def step_result_refinement_allowed?(project, run)
+    return false unless project && run
+    return false unless analyzable?(project) && editable?(project)
+    return false if project.locked_from_publication?(run)
+
+    true
+  end
+
   def publication_visibility_badge(project, record, full_read_access:)
     return ''.html_safe unless project&.publication_lock_active? && record
 

@@ -21,6 +21,40 @@ class ScfairSchemaExtensionValidatorTest < TestBaseWithoutFixtures
     assert_equal 2, result[:valid_checks].count { |entry| entry[:status] == 'warning' }
   end
 
+  test 'uses file-check warning when analysis_json is absent outside project compliance' do
+    result = Scfair::SchemaExtensionValidator.new(
+      field_values: { 'obs/assay_ontology_term_id' => ['EFO:0030059'] },
+      format: 'h5ad'
+    ).call
+
+    warning = result[:warnings].find { |entry| entry[:field] == 'extension.analysis_json' }
+    assert_equal 'analysis_json metadata not found (recommended)', warning[:message]
+  end
+
+  test 'uses project compliance warning when analysis_json is absent for loom project validation' do
+    result = Scfair::SchemaExtensionValidator.new(
+      field_values: { '/col_attrs/assay_ontology_term_id' => ['EFO:0030059'] },
+      format: 'loom',
+      project_compliance: true
+    ).call
+
+    warning = result[:warnings].find { |entry| entry[:field] == 'extension.analysis_json' }
+    assert_equal 'ASAP will save/update the performed analysis in /attrs/analysis_json at download time.',
+                 warning[:message]
+  end
+
+  test 'uses project compliance warning when analysis_json is absent for h5ad project validation' do
+    result = Scfair::SchemaExtensionValidator.new(
+      field_values: { 'obs/assay_ontology_term_id' => ['EFO:0030059'] },
+      format: 'h5ad',
+      project_compliance: true
+    ).call
+
+    warning = result[:warnings].find { |entry| entry[:field] == 'extension.analysis_json' }
+    assert_equal 'ASAP will save/update the performed analysis in uns/analysis_json at download time.',
+                 warning[:message]
+  end
+
   test 'skips spatial extension when no spatial metadata or assay is present' do
     result = Scfair::SchemaExtensionValidator.new(
       field_values: { 'obs/assay_ontology_term_id' => ['EFO:0009899'] },

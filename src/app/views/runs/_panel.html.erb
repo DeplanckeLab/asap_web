@@ -36,7 +36,7 @@
                   onclick="if (typeof loadRunInRightPanel === 'function') { loadRunInRightPanel('<%= run_path(@run) %>', '<%= @step&.id %>'); }">
             <i class="fas fa-sync sm:mr-1"></i><span class="hidden sm:inline"> Refresh</span>
           </button>
-          <% single_run_resettable = !@step.multiple_runs && @step.name != 'parsing' && @project_step && [3, 4].include?(@project_step.status_id) %>
+          <% single_run_resettable = single_run_step_resettable?(@project, @step, project_step: @project_step, runs: @run) && @step.name != 'parsing' %>
           <% if single_run_resettable %>
             <% if analyzable?(@project) && editable?(@project) %>
               <button type="button"
@@ -58,6 +58,13 @@
                 <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
               </button>
             <% end %>
+          <% elsif @step && !@step.multiple_runs && @step.name != 'parsing' && @project_step && [3, 4].include?(@project_step.status_id) && single_run_step_locked_from_publication?(@project, @step, runs: @run) %>
+            <button type="button" disabled
+                    class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                    style="flex-shrink: 0;"
+                    title="<%= publication_locked_step_message %>">
+              <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
+            </button>
           <% end %>
           <% if @step.multiple_runs %>
             <% run_status_id = @run.status_id.to_i %>

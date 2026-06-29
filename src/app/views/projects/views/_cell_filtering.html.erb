@@ -1,6 +1,7 @@
 <%# Cell Filtering View - Based on form_cell_filtering_scalable.html.erb from original app %>
 
 <%
+  cell_filtering_locked = single_run_step_locked_from_publication?(@project, @step)
   @h_step_attrs ||= {}
   default_method_names = Array(@h_step_attrs['default_std_method'])
   default_std_method = if default_method_names.any? && defined?(@h_std_methods_by_name) && @h_std_methods_by_name
@@ -123,7 +124,9 @@
           </span>
         </div>
         <div class="flex items-center gap-2">
-          <% if analyzable?(@project) && default_std_method_id.present? %>
+          <% if cell_filtering_locked %>
+            <span class="text-sm text-amber-700"><%= publication_locked_step_message %></span>
+          <% elsif analyzable?(@project) && default_std_method_id.present? %>
             <button id="<%= @step.name %>_button"
                     type="button"
                     disabled
@@ -137,16 +140,18 @@
           <% else %>
             <span class="text-sm text-gray-500">Filter submission is not available for your permissions.</span>
           <% end %>
+          <% unless cell_filtering_locked %>
           <button type="button"
                   class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                   data-action="click->cell-filtering#resetFilters">
             Reset filters
           </button>
+          <% end %>
         </div>
       </div>
     </div>
 
-    <div class="space-y-6 w-full max-w-full px-4 sm:px-6 pb-6">
+    <div class="space-y-6 w-full max-w-full px-4 sm:px-6 pb-6<%= ' pointer-events-none opacity-60' if cell_filtering_locked %>">
       <div class='bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6 w-full max-w-full overflow-x-hidden'>
         <h4 class='text-lg font-semibold text-gray-900 mb-4'>Filter with QC parameters</h4>
         <div class='bg-green-50 border border-green-200 rounded-md p-3 mb-4'>

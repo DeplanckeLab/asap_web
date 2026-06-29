@@ -37,6 +37,7 @@
              style="<%= item_style %>"
              data-step-id="<%= step.id %>"
              data-step-name="<%= step.name %>"
+             data-has-std-view="<%= step.has_std_view ? 'true' : 'false' %>"
              data-step-lock-available="<%= is_available ? 'true' : 'false' %>"
              data-step-lock-detail="<%= h(lock_reason.to_s) %>"
              <% if is_available %>

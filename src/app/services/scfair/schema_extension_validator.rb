@@ -2,9 +2,10 @@
 
 module Scfair
   class SchemaExtensionValidator
-    def initialize(field_values:, format:)
+    def initialize(field_values:, format:, project_compliance: false)
       @field_values = field_values || {}
       @format = format
+      @project_compliance = project_compliance
       @resolver = OntologyLineageResolver.new
     end
 
@@ -39,7 +40,7 @@ module Scfair
       if analysis_json_enabled?
         valid_checks << { field: 'extension.analysis_json', status: 'passed', message: 'analysis_json metadata present' }
       else
-        message = 'analysis_json metadata not found (recommended)'
+        message = analysis_json_missing_message
         warnings << { field: 'extension.analysis_json', message: message }
         valid_checks << { field: 'extension.analysis_json', status: 'warning', message: message }
       end
@@ -133,6 +134,16 @@ module Scfair
 
     def analysis_json_enabled?
       present?(key('uns/analysis_pipeline')) || present?(key('attrs/analysis_pipeline'))
+    end
+
+    def analysis_json_missing_message
+      code = @project_compliance ? 'missing_project' : 'missing_file_check'
+      Rules.check_message(
+        'extension.analysis_json',
+        code,
+        format: @format,
+        default: 'analysis_json metadata not found (recommended)'
+      )
     end
   end
 end

@@ -23,7 +23,8 @@ module CompliancePipeline
     validate_loom_file_check(
       loom_path,
       logger: logger,
-      schema_id: schema_id || DEFAULT_SCHEMA_ID
+      schema_id: schema_id || DEFAULT_SCHEMA_ID,
+      project_compliance: true
     )
   end
 
@@ -36,11 +37,12 @@ module CompliancePipeline
     end
   end
 
-  def validate_loom_file_check(loom_path, logger: Rails.logger, schema_id: DEFAULT_SCHEMA_ID)
+  def validate_loom_file_check(loom_path, logger: Rails.logger, schema_id: DEFAULT_SCHEMA_ID, project_compliance: false)
     core = ScfairComplianceService.new(
       file_path: loom_path,
       schema_id: schema_id,
-      logger: logger
+      logger: logger,
+      project_compliance: project_compliance
     ).validate
     wrap_file_check_result(core)
   rescue StandardError => e

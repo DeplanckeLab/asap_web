@@ -52,7 +52,8 @@
         </div>
       </div>
     <% end %>
-    <% if analyzable?(@project) && editable?(@project) && @step&.name != 'parsing' %>
+    <% reset_allowed = analyzable?(@project) && editable?(@project) && single_run_step_resettable?(@project, @step, project_step: @project_step, runs: run) %>
+    <% if reset_allowed %>
       <div class="mt-6">
         <button type="button"
                 class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
@@ -61,6 +62,14 @@
                 data-restart-step-step-id-value="<%= @step.id %>"
                 data-restart-step-restart-url-value="<%= restart_step_project_path(@project, return_to_form: 1) %>"
                 data-action="click->restart-step#restart">
+          Reset
+        </button>
+      </div>
+    <% elsif analyzable?(@project) && editable?(@project) && single_run_step_locked_from_publication?(@project, @step, runs: run) %>
+      <div class="mt-6">
+        <button type="button" disabled
+                class="px-4 py-2 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                title="<%= publication_locked_step_message %>">
           Reset
         </button>
       </div>

@@ -2158,6 +2158,9 @@ class ProjectsController < ApplicationController
     unless run && run.status_id == 3
       return render json: { error: "Completed doublet calling run not found." }, status: :not_found
     end
+    if @project.locked_from_publication?(run)
+      return render json: { error: helpers.publication_locked_step_message }, status: :forbidden
+    end
 
     ctx = DoubletCallingFilterService.context_for_run(@project, run, @step)
     filter_params = {
@@ -6463,6 +6466,18 @@ class ProjectsController < ApplicationController
       
       # Get all steps with rank >= the restarted step's rank
       steps_to_reset = Step.where('rank >= ?', restart_step_rank).order(:rank, :id).all
+
+      locked_single_run_steps = steps_to_reset.select do |step|
+        next false if step.multiple_runs
+
+        @project.runs.where(step_id: step.id).any? { |run| @project.locked_from_publication?(run) }
+      end
+      if locked_single_run_steps.any?
+        labels = locked_single_run_steps.map { |s| s.label.presence || s.name.humanize }.join(', ')
+        redirect_to project_path(@project, view: 'analysis', step_id: step_id),
+                    alert: "Cannot reset: #{labels} include analyses in the public snapshot."
+        return
+      end
       
       steps_to_reset.each do |step|
         project_step = ProjectStep.find_by(project_id: @project.id, step_id: step.id)
@@ -6822,6 +6837,16 @@ class ProjectsController < ApplicationController
   # GET /projects/:id/reset_parsing
   def reset_parsing
     @original_project = Project.find_by(id: params[:id]) || Project.find_by!(key: params[:id])
+
+    parsing_step = parsing_step_for_project(@original_project)
+    if parsing_step && !parsing_step.multiple_runs
+      parsing_run = @original_project.runs.where(step_id: parsing_step.id).order(created_at: :desc).first
+      if parsing_run && @original_project.locked_from_publication?(parsing_run)
+        redirect_to project_path(@original_project, view: 'analysis', step_id: parsing_step.id),
+                    alert: helpers.publication_locked_step_message
+        return
+      end
+    end
     
     # Check if this is an integration project (no file upload, source projects instead)
     h_attrs = Basic.safe_parse_json(@original_project.parsing_attrs_json, {})
@@ -9244,9 +9269,10 @@ class ProjectsController < ApplicationController
 
       step = Step.find_by(id: params[:step_id].to_i)
       return unless step && !step.multiple_runs
-      # Parsing has its own custom results view (_parsing.html.erb) rendered via
-      # step_results; it must never be redirected to the generic run panel URL.
+      # Parsing and other steps with a custom results view are rendered via
+      # step_results; they must never be redirected to the generic run panel URL.
       return if step.name == 'parsing'
+      return unless step.has_std_view
 
       run_id = analysis_single_visible_run_id_for_step(step, all_annots_for_loom, @selected_loom_file)
       return unless run_id

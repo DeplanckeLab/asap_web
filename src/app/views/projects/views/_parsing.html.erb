@@ -2,7 +2,9 @@
 <%# Also show if status is complete but results are missing (after restart) %>
 <%# Show status section if no results OR if results exist but have displayed_error (so we show status + error) %>
 <%# Also show if parsing_run exists with status_id 4 (failed) even if @results is nil %>
-<% can_reset_parsing = @step && !@step.multiple_runs && ((@project_step && [3, 4].include?(@project_step.status_id)) || (@parsing_run && [3, 4].include?(@parsing_run.status_id))) %>
+<% can_reset_parsing = @step && !@step.multiple_runs &&
+     !single_run_step_locked_from_publication?(@project, @step, runs: @parsing_run) &&
+     ((@project_step && [3, 4].include?(@project_step.status_id)) || (@parsing_run && [3, 4].include?(@parsing_run.status_id))) %>
 <% if @step && @step.name == 'parsing' && (!@results || (@results && @results['displayed_error']) || (@parsing_run && @parsing_run.status_id == 4)) %>
   <%# Always show something when there are no results %>
   <%# Use ONLY the run's status_id, matching the left panel logic %>

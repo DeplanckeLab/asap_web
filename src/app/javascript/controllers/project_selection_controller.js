@@ -7,12 +7,14 @@ export default class extends Controller {
   static targets = ["checkbox", "selectAll", "deleteButton", "deleteButtonText", "selectedCount", "clearButton", "integrateButton", "integrateButtonText"]
 
   connect() {
-    const stored = this.getStoredIds()
+    const stored = this.getStoredIds().map(String)
+    const storedSet = new Set(stored)
+
     this.checkboxTargets.forEach(checkbox => {
-      if (stored.includes(checkbox.value)) {
-        checkbox.checked = true
-      }
+      checkbox.checked = storedSet.has(String(checkbox.value))
     })
+
+    this.syncToStorage()
     this.updateSelectAllState()
     this.updateUI()
   }
@@ -102,17 +104,18 @@ export default class extends Controller {
   }
 
   syncToStorage() {
-    const stored = new Set(this.getStoredIds())
-    const scStored = new Set(this.getStoredSingleCellIds())
+    const stored = new Set(this.getStoredIds().map(String))
+    const scStored = new Set(this.getStoredSingleCellIds().map(String))
 
     this.checkboxTargets.forEach(checkbox => {
+      const id = String(checkbox.value)
       const isSingleCell = checkbox.dataset.singleCell === 'true'
       if (checkbox.checked) {
-        stored.add(checkbox.value)
-        if (isSingleCell) scStored.add(checkbox.value)
+        stored.add(id)
+        if (isSingleCell) scStored.add(id)
       } else {
-        stored.delete(checkbox.value)
-        scStored.delete(checkbox.value)
+        stored.delete(id)
+        scStored.delete(id)
       }
     })
 
@@ -153,7 +156,16 @@ export default class extends Controller {
   }
 
   getSingleCellSelectedProjectIds() {
-    return this.getStoredSingleCellIds()
+    const fromStorage = this.getStoredSingleCellIds().map(String)
+    if (fromStorage.length >= 2) return fromStorage
+
+    const merged = new Set(fromStorage)
+    this.checkboxTargets.forEach(checkbox => {
+      if (checkbox.checked && checkbox.dataset.singleCell === 'true') {
+        merged.add(String(checkbox.value))
+      }
+    })
+    return [...merged]
   }
 
   clearStorage() {

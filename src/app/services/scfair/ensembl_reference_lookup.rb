@@ -249,6 +249,20 @@ module Scfair
       nil
     end
 
+    # Assembly name for an organism at a given Ensembl release, using this lookup's remote DB.
+    def assembly_name_at_release_for_organism(tax_id, release)
+      release = parse_release_value(release)
+      return nil unless release
+
+      assemblies = assemblies_for_tax_id(tax_id)
+      matched = assemblies.select { |assembly| assembly_supports_release?(assembly, release) }
+      return nil if matched.empty?
+
+      matched.max_by { |assembly| assembly.latest_ensembl_release.to_i }&.name
+    rescue StandardError
+      nil
+    end
+
     def release_gene_name(feature_reference:, ensembl_id:, release:)
       return nil if release.blank?
       return nil unless remote_available?

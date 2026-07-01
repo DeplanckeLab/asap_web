@@ -633,6 +633,10 @@ class ProjectsController < ApplicationController
     #end
 
     if !selective_project_view_loading_enabled? && @view_type == 'analysis' && request.get? && request.format.html?
+      @integration_in_progress = @project.integration_in_progress?
+      redirect_analysis_to_parsing_step_if_integration_in_progress!
+      return if performed?
+
       all_annots_for_loom = load_loom_file_list_context
       assign_analysis_loom_file_from_session!
       redirect_analysis_single_run_canonical_url!(all_annots_for_loom)
@@ -702,14 +706,13 @@ class ProjectsController < ApplicationController
         sc_type = @project_types.find { |pt| pt.name&.downcase&.include?('single') } || @project_types.first
         @project.project_type_id = sc_type&.id
 
-        # Load categorical annotations for each integration project
         @integrate_annots = {}
         @integrate_projects.each do |p|
-          # Get categorical cell-level metadata (dim=1 means cell-level, nber_cats > 0 means categorical)
           annots = Annot.where(project_id: p.id, dim: 1)
-                        .where('nber_cats > 0')
+                        .where('nber_cats > 0 OR list_cat_json IS NOT NULL')
                         .order(:name)
-          @integrate_annots[p.id] = annots.to_a
+                        .select(&:integration_batch_metadata?)
+          @integrate_annots[p.id] = annots
         end
       end
     end
@@ -758,10 +761,13 @@ class ProjectsController < ApplicationController
     tmp_attrs[:has_header] = 1 if tmp_attrs[:has_header]
     
     # Collect parsing attributes from params
-    [:file_type, :sel_name, :sel, :nber_cols, :nber_rows, :delimiter, :gene_name_col, :has_header, :integrate_batch_paths, :integrate_n_pcs].each do |k|
+    [:file_type, :sel_name, :sel, :nber_cols, :nber_rows, :delimiter, :gene_name_col, :has_header, :integrate_method, :integrate_source_keys, :integrate_batch_paths, :integrate_n_pcs].each do |k|
       if params[k].present? && (!params[k].is_a?(String) || !params[k].strip.empty?)
         tmp_attrs[k] = params[k]
       end
+    end
+    if tmp_attrs[:integrate_method].present? && !Basic::INTEGRATION_METHODS.include?(tmp_attrs[:integrate_method].to_s)
+      tmp_attrs.delete(:integrate_method)
     end
     [:rowname_metadata, :colname_metadata].each do |k|
       tmp_attrs[k] = params[k] if params.key?(k)
@@ -924,7 +930,7 @@ class ProjectsController < ApplicationController
       Rails.logger.info("[ProjectsController#create] input_file.upload_file_name: #{input_file&.upload_file_name.inspect}")
       
       # Check if this is an integration request (no file upload needed)
-      is_integrate = params[:integrate_batch_paths].present?
+      is_integrate = params[:integrate] == '1'
       
       # Require a Fu-backed input file for project creation (unless integrating).
       has_input_file = input_file.present? && input_file.id.present? && input_file.upload_file_name.present?
@@ -986,8 +992,12 @@ class ProjectsController < ApplicationController
           # Clean up session
           session.delete(:integrate_project_keys)
           
-          format.html { redirect_to project_path(@project, view: 'analysis'), notice: "Integrated project was successfully created." }
-          format.turbo_stream { redirect_to project_path(@project, view: 'analysis'), status: :see_other, notice: "Integrated project was successfully created." }
+          parsing_step = parsing_step_for_project(@project)
+          analysis_params = { view: 'analysis' }
+          analysis_params[:step_id] = parsing_step.id if parsing_step
+          
+          format.html { redirect_to project_path(@project, **analysis_params), notice: "Integrated project was successfully created." }
+          format.turbo_stream { redirect_to project_path(@project, **analysis_params), status: :see_other, notice: "Integrated project was successfully created." }
           format.json { render :show, status: :created, location: @project }
           next
         end
@@ -1185,7 +1195,7 @@ class ProjectsController < ApplicationController
         project_dir = user_data_root + @project.user_id.to_s + @project.key
         FileUtils.mkdir_p(project_dir.to_s) unless File.directory?(project_dir.to_s)
 
-        source_upload_file = input_file.upload_dir + input_file.upload_file_name
+        source_upload_file = input_file.upload_dir_for_project(@project) + input_file.upload_file_name
         unless File.exist?(source_upload_file.to_s)
           raise "Selected upload file is missing: #{source_upload_file}"
         end
@@ -5729,8 +5739,6 @@ class ProjectsController < ApplicationController
     # Handle both ActiveRecord relations (local) and arrays of hashes (remote)
     organisms_list = organisms.is_a?(Array) ? organisms : organisms.to_a
     
-    show_short_name = !version_v8_or_later?(version_id)
-
     organisms_list.each do |organism|
       # Handle both ActiveRecord objects and hash objects
       if organism.is_a?(Hash)
@@ -5738,7 +5746,7 @@ class ProjectsController < ApplicationController
         organism_name = organism['name']
         organism_id = organism['id']
         short_name = organism['short_name']
-        display_name = show_short_name && short_name.present? ? "#{organism_name} (#{short_name})" : organism_name
+        display_name = Organism.selector_label(organism_name, short_name)
         tax_id = organism['tax_id']
         
         # Get domain name from hash (already fetched in RemoteOrganism.list_for_version)
@@ -5748,7 +5756,7 @@ class ProjectsController < ApplicationController
         organism_name = organism.name
         organism_id = organism.id
         short_name = organism.short_name
-        display_name = show_short_name && short_name.present? ? "#{organism_name} (#{short_name})" : organism_name
+        display_name = Organism.selector_label(organism_name, short_name)
         tax_id = organism.tax_id
         
         # Get domain name from local database
@@ -6063,7 +6071,7 @@ class ProjectsController < ApplicationController
           if nber_not_found_genes && nber_not_found_genes > 0
             total_genes = @results['nber_rows'] || 1
             not_found_percentage = (nber_not_found_genes.to_f * 100 / total_genes).round(2)
-            @parsing_errors << "#{nber_not_found_genes} (#{not_found_percentage}%) #{helpers.row_label(@project)} were not found in Ensembl. Did you select the right species (now #{@project.organism&.name || 'Unknown'})? If not, create a new project"
+            @parsing_errors << "#{nber_not_found_genes} (#{not_found_percentage}%) #{helpers.row_label(@project)} were not found in Ensembl. Did you select the right species (now #{@project.organism&.name || 'Unknown'})? if not, reset the project"
           end
           
           # Validation warnings (info alerts - zero values percentage)
@@ -6850,8 +6858,8 @@ class ProjectsController < ApplicationController
     
     # Check if this is an integration project (no file upload, source projects instead)
     h_attrs = Basic.safe_parse_json(@original_project.parsing_attrs_json, {})
-    if h_attrs['integrate_batch_paths'].present?
-      source_keys = h_attrs['integrate_batch_paths'].keys
+    if Basic.integration_project?(h_attrs)
+      source_keys = Basic.integration_source_keys(h_attrs)
       session[:integrate_project_keys] = source_keys
       Rails.logger.info("[reset_parsing] Integration project detected, redirecting to new project integrate form source_keys=#{source_keys.inspect}")
       # Pass source_keys in URL params so the new action does not depend solely
@@ -6862,24 +6870,21 @@ class ProjectsController < ApplicationController
     end
 
     # Find the Fu (file upload) associated with this project
-    fu = if @original_project.fu_id
-           Fu.find_by(id: @original_project.fu_id)
-         else
-           Fu.where(:project_id => @original_project.id, :upload_type => 1).first
-         end
+    fu = Fu.resolve_for_project(@original_project)
     
     unless fu
       Rails.logger.warn("[reset_parsing] Fu not found for project id=#{@original_project.id} key=#{@original_project.key}; redirecting back to analysis")
-      redirect_to project_path(@original_project, view: 'analysis'), alert: 'File upload record not found. Cannot reset parsing.'
+      redirect_to reset_parsing_failure_path(@original_project, parsing_step, 'File upload record not found. Cannot reset parsing.')
       return
     end
     
     # Restore fus/<fu_id>/input_file.<ext> from the canonical project copy, then rerun preparsing.
-    upload_dir = fu.upload_dir
+    # Cloned projects may share fu_id with the source; always use this project's fus path.
+    upload_dir = fu.upload_dir_for_project(@original_project)
     upload_file_path = upload_dir + fu.upload_file_name
 
     user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
-    project_dir = Pathname.new(user_data_dir) + @original_project.user_id.to_s + @original_project.key
+    project_dir = @original_project.data_dir
     input_filename_candidates = [
       @original_project.input_filename,
       fu.upload_file_name,
@@ -6898,7 +6903,11 @@ class ProjectsController < ApplicationController
       checked_paths = input_filename_candidates.map { |candidate| (project_dir + candidate).to_s }
       fu_expected_path = upload_file_path.to_s
       Rails.logger.warn("[reset_parsing] Could not resolve project input file. checked_paths=#{checked_paths.inspect} fu_expected_path=#{fu_expected_path} project_dir_exists=#{File.exist?(project_dir)} upload_dir_exists=#{File.exist?(upload_dir)}")
-      redirect_to project_path(@original_project, view: 'analysis'), alert: 'Project input file copy not found (expected archived upload is missing). Please re-upload the file before resetting parsing.'
+      redirect_to reset_parsing_failure_path(
+        @original_project,
+        parsing_step,
+        'Project input file copy not found (expected archived upload is missing). Please re-upload the file before resetting parsing.'
+      )
       return
     end
 
@@ -6932,13 +6941,13 @@ class ProjectsController < ApplicationController
       end
       unless matrix_in_bundle.file?
         Rails.logger.warn("[reset_parsing] MTX bundle reset: no matrix file under #{upload_dir + 'input_file'}")
-        redirect_to project_path(@original_project, view: 'analysis'), alert: 'Project MTX bundle is missing matrix.mtx. Please re-upload the file before resetting parsing.'
+        redirect_to reset_parsing_failure_path(@original_project, parsing_step, 'Project MTX bundle is missing matrix.mtx. Please re-upload the file before resetting parsing.')
         return
       end
 
       unless File.exist?(upload_file_path)
         Rails.logger.warn("[reset_parsing] MTX bundle reset: original upload missing at #{upload_file_path}")
-        redirect_to project_path(@original_project, view: 'analysis'), alert: 'Original upload file is missing from the project. Please re-upload before resetting parsing.'
+        redirect_to reset_parsing_failure_path(@original_project, parsing_step, 'Original upload file is missing from the project. Please re-upload before resetting parsing.')
         return
       end
 
@@ -6984,7 +6993,8 @@ class ProjectsController < ApplicationController
 
     preparsing_options = {
       organism_id: @original_project.organism_id,
-      version_id: @original_project.version_id
+      version_id: @original_project.version_id,
+      project_id: @original_project.id
     }.compact
     fu.update!(
       upload_file_size: restored_file_size,
@@ -7041,6 +7051,16 @@ class ProjectsController < ApplicationController
     Rails.logger.info("[reset_parsing] Rendering new project form for project id=#{@project.id} key=#{@project.key} existing_fu_id=#{@existing_fu_id.inspect}")
     render :new
   end
+
+  def reset_parsing_failure_path(project, parsing_step, message)
+    flash[:alert] = message
+    if parsing_step
+      project_path(project, view: 'analysis', step_id: parsing_step.id)
+    else
+      project_path(project, view: 'analysis')
+    end
+  end
+  private :reset_parsing_failure_path
 
   # GET /projects/:id/creation_status
   def creation_status
@@ -7749,9 +7769,21 @@ class ProjectsController < ApplicationController
       @project_files_missing = @project.filesystem_project_data_missing?
       @project_archive_transitioning = [2, 4].include?(@project.archive_status_id)
       @project_unarchive_state = nil
+      @integration_in_progress = @project.integration_in_progress?
+
+      if @integration_in_progress
+        return
+      end
+
       return unless @project_files_missing
       return if request_user_agent_indicates_bot?
       return if metadata_only_view_request?
+
+      if @project.archived_on_s3? && !@project.archive_restore_expected?
+        @project.update_archive_metadata!(archive_status_id: 1)
+        @project_files_missing = @project.filesystem_project_data_missing?
+        return
+      end
 
       if @project.queue_unarchive_if_needed!
         @project_unarchive_state = 'queued'
@@ -8954,6 +8986,9 @@ class ProjectsController < ApplicationController
 
     def load_analysis_context
       @project_type = @project.project_type
+      @integration_in_progress = @project.integration_in_progress?
+      redirect_analysis_to_parsing_step_if_integration_in_progress!
+      return if performed?
 
       # Load loom file list for contextual dropdowns in analysis views
       all_annots_for_loom = load_loom_file_list_context
@@ -9577,6 +9612,18 @@ class ProjectsController < ApplicationController
       asap_docker_image = Basic.get_asap_docker(project.version)
       return nil unless asap_docker_image
       Step.find_by(docker_image_id: asap_docker_image.id, version_id: project.version_id, name: 'parsing')
+    end
+
+    def redirect_analysis_to_parsing_step_if_integration_in_progress!
+      return unless request.get?
+      return unless request.format.html?
+      return if params[:step_id].present?
+      return unless @project.integration_in_progress?
+
+      parsing_step = parsing_step_for_project(@project)
+      return unless parsing_step
+
+      redirect_to project_path(@project, view: 'analysis', step_id: parsing_step.id), status: :see_other
     end
 
     def step_scope_for_project(project)
@@ -12465,14 +12512,21 @@ class ProjectsController < ApplicationController
       # Resolve the std method used by the cell filtering custom form.
       @h_step_attrs = Basic.safe_parse_json(@step.attrs_json, {}) if @step&.attrs_json.present?
       @h_step_attrs ||= {}
-      default_method_names = Array(@h_step_attrs['default_std_method'])
       available_cell_filtering_methods = StdMethod.where(
         docker_image_id: asap_docker_image.id,
         obsolete: false,
         step_id: @step.id
       ).order(:name).to_a
+      h_std_methods_by_name = available_cell_filtering_methods.index_by(&:name)
+      h_obj_attrs_by_std_method = available_cell_filtering_methods.to_h { |m| [m.id, Basic.safe_parse_json(m.obj_attrs_json, {})] }
       @cell_filtering_std_method =
-        default_method_names.map { |name| available_cell_filtering_methods.find { |m| m.name == name } }.compact.first ||
+        Basic.resolve_default_std_method(
+          project: @project,
+          default_method_names: @h_step_attrs['default_std_method'],
+          std_methods_by_name: h_std_methods_by_name,
+          h_obj_attrs_by_std_method: h_obj_attrs_by_std_method
+        ) ||
+        available_cell_filtering_methods.find { |m| Basic.std_method_project_type_compatible?(@project, std_method: m, obj_attrs: h_obj_attrs_by_std_method[m.id]) } ||
         available_cell_filtering_methods.first
       
       # Find the parsing step for this docker image

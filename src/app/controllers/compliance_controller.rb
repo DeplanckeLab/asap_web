@@ -209,11 +209,13 @@ class ComplianceController < ApplicationController
     # Get the list of existing metadata fields in the loom file
     @available_col_attrs = extract_available_metadata(@project, @loom_path, :col_attrs)
     @available_global_attrs = extract_available_metadata(@project, @loom_path, :global_attrs)
+    @available_row_attrs = extract_available_metadata(@project, @loom_path, :row_attrs)
 
     # Parse validation errors to identify fixable field groups (paired term+label)
     @fixable_groups = build_fixable_field_groups(@validation_result)
     @schema_config = resolve_compliance_schema(@project)
     @organism_info = resolve_organism_info(@project)
+    @ensembl_info = resolve_ensembl_info(@project)
     @project_title = @project.respond_to?(:name) ? @project.name : nil
 
     # Filter ontology prefixes per field group to only those applicable for
@@ -224,9 +226,6 @@ class ComplianceController < ApplicationController
       g[:term_ontology_prefixes] = filter_prefixes_for_organism(g[:term_ontology_prefixes], @project)
     end
 
-    # Apply rules.yaml term whitelists/blacklists for ontology autocomplete.
-    Scfair::FixFieldGroupRulesEnricher.call(@fixable_groups)
-
     # Cross-field constraints for the fix form (rules.yaml is the source of truth).
     @fix_form_cross_field = Scfair::FixFormCrossFieldConstraints.build(
       project: @project,
@@ -236,6 +235,7 @@ class ComplianceController < ApplicationController
 
     # Load existing OtProject records for prefilling the form
     @prefill_data = build_prefill_data(@project)
+    apply_var_legacy_prefill!(@prefill_data, @fixable_groups, @available_row_attrs)
 
     # When the target field already exists in the loom (e.g. from a previous fix),
     # switch the prefill source to the target field itself so the "Map from existing"
@@ -1133,10 +1133,14 @@ class ComplianceController < ApplicationController
   end
 
   # Extract available metadata fields from the loom file
-  # type: :col_attrs or :global_attrs
+  # type: :col_attrs, :global_attrs, or :row_attrs
   def extract_available_metadata(project, loom_path, type)
     # Try from Annot records first (fast)
-    prefix = type == :col_attrs ? '/col_attrs/' : '/attrs/'
+    prefix = case type
+             when :col_attrs then '/col_attrs/'
+             when :row_attrs then '/row_attrs/'
+             else '/attrs/'
+             end
     annot_names = project.annots.pluck(:name).compact
     fields = annot_names.select { |n| n.start_with?(prefix) }.map { |n| n.sub(prefix, '') }.sort
 
@@ -1234,14 +1238,19 @@ class ComplianceController < ApplicationController
     end
   end
 
-  # Load compliance field group definitions from the database.
-  # Returns an array of hashes with the same structure previously held by FIELD_GROUPS.
-  # Pre-loads CellOntology tags in a single query to avoid N+1.
+  # Load compliance field group definitions from rules.yaml (fix_form.field_groups).
+  # Joins ontology_term_type_id from OntologyTermType for paired ontology fields only.
   def load_field_groups
-    otts = OntologyTermType.compliance_field_groups.to_a
-    all_co_ids = otts.flat_map(&:cell_ontology_ids_list).uniq
-    co_id_to_tag = all_co_ids.any? ? CellOntology.where(id: all_co_ids).pluck(:id, :tag).to_h : {}
-    otts.map { |ott| ott.to_field_group(co_id_to_tag) }
+    ott_id_map = OntologyTermType.where(field_group_id: ontology_pair_field_group_ids)
+                                 .pluck(:field_group_id, :id)
+                                 .to_h
+    Scfair::FixFormFieldGroupsBuilder.call(ontology_term_type_id_map: ott_id_map)
+  end
+
+  def ontology_pair_field_group_ids
+    Scfair::Rules.fix_form_field_group_definitions
+                 .select { |entry| entry[:field_kind] == :ontology_pair }
+                 .map { |entry| entry[:id].to_s }
   end
 
   # Build fixable field groups from validation errors.
@@ -1288,6 +1297,30 @@ class ComplianceController < ApplicationController
     }
   end
 
+  def resolve_ensembl_info(project)
+    Scfair::ProjectEnsemblMetadataResolver.call(project)
+  end
+
+  # Suggest legacy ASAP row_attrs sources when scFAIR var columns are missing.
+  def apply_var_legacy_prefill!(prefill_data, fixable_groups, available_row_attrs)
+    return if available_row_attrs.blank?
+
+    fixable_groups.each do |fg|
+      g = fg[:group]
+      next unless g[:type] == :row_attr
+
+      fg_id = g[:id].to_s
+      prefill_data[fg_id] ||= {}
+      next if prefill_data[fg_id][:source_annot_name].present?
+
+      term_field = Scfair::Rules.obs_field_name_from_path(g[:term_path])
+      legacy = Scfair::VarLegacySourceMatcher.suggest(term_field, available_row_attrs)
+      next unless legacy
+
+      prefill_data[fg_id][:source_annot_name] = "/row_attrs/#{legacy}"
+    end
+  end
+
   # ASSAY_SUSPENSION_TYPE_MAP, ASSAY_ANCESTOR_TERMS, and
   # resolve_suspension_type_for_assay are provided by ScfairSchemaRules.
 
@@ -1330,8 +1363,8 @@ class ComplianceController < ApplicationController
   def build_prefill_data(project)
     prefill = {}
 
-    # Load OntologyTermType records that have a field_group_id mapping
-    otts = OntologyTermType.where.not(field_group_id: [nil, '']).to_a
+    # Load OntologyTermType records for paired ontology field groups (OtProject prefill).
+    otts = OntologyTermType.where(field_group_id: ontology_pair_field_group_ids).to_a
 
     # Load OtProject records with eager-loaded associations
     ot_projects = OtProject.where(project_id: project.id)
@@ -2197,9 +2230,15 @@ class ComplianceController < ApplicationController
                   elif kind == 'set_value':
                       target = op['target']
                       value = op['value']
+                      if target.startswith('row_attrs/'):
+                          n = f['matrix'].shape[0]
+                      elif target.startswith('col_attrs/'):
+                          n = f['matrix'].shape[1]
+                      else:
+                          n = f['matrix'].shape[1]
                       if target in f:
                           del f[target]
-                      f.create_dataset(target, data=np.array([value] * n_cells, dtype=h5py.special_dtype(vlen=str)))
+                      f.create_dataset(target, data=np.array([value] * n, dtype=h5py.special_dtype(vlen=str)))
                       results[key] = {'status': 'ok'}
 
                   elif kind == 'set_global_attr':
@@ -2350,9 +2389,15 @@ class ComplianceController < ApplicationController
                           elif kind == 'set_value':
                               target = op['target']
                               value = op['value']
+                              if target.startswith('row_attrs/'):
+                                  n = f['matrix'].shape[0]
+                              elif target.startswith('col_attrs/'):
+                                  n = f['matrix'].shape[1]
+                              else:
+                                  n = f['matrix'].shape[1]
                               if target in f:
                                   del f[target]
-                              f.create_dataset(target, data=np.array([value] * n_cells, dtype=h5py.special_dtype(vlen=str)))
+                              f.create_dataset(target, data=np.array([value] * n, dtype=h5py.special_dtype(vlen=str)))
                               file_results[key] = {'status': 'ok'}
 
                           elif kind == 'set_global_attr':

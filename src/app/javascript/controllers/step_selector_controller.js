@@ -90,6 +90,25 @@ export default class extends Controller {
   connect() {
     console.log('[StepSelectorController] CONNECT METHOD CALLED!')
     try {
+      // Register reset-parsing navigation first so early returns below cannot skip it.
+      this.boundResetParsingClick = (event) => {
+        const target = event.target instanceof Element ? event.target : null
+        if (!target) return
+        const button = target.closest('[data-reset-parsing-url]')
+        if (!button) return
+
+        const url = button.getAttribute('data-reset-parsing-url')
+        if (!url) return
+
+        event.preventDefault()
+        event.stopPropagation()
+        if (typeof event.stopImmediatePropagation === 'function') {
+          event.stopImmediatePropagation()
+        }
+        window.location.assign(url)
+      }
+      document.addEventListener('click', this.boundResetParsingClick, true)
+
       console.log('[StepSelectorController] ===== CONNECTED =====')
       console.log('[StepSelectorController] Project ID:', this.projectIdValue)
       console.log('[StepSelectorController] Element:', this.element)
@@ -344,26 +363,6 @@ export default class extends Controller {
         this._cleanUrlParams()
       }, 300)
     }
-    
-      // Handle reset-parsing buttons in the right panel at capture phase,
-      // so navigation is not swallowed by other click handlers.
-      this.boundResetParsingClick = (event) => {
-        const target = event.target instanceof Element ? event.target : null
-        if (!target) return
-        const button = target.closest('[data-reset-parsing-url]')
-        if (!button) return
-
-        const url = button.getAttribute('data-reset-parsing-url')
-        if (!url) return
-
-        event.preventDefault()
-        event.stopPropagation()
-        if (typeof event.stopImmediatePropagation === 'function') {
-          event.stopImmediatePropagation()
-        }
-        window.location.assign(url)
-      }
-      document.addEventListener('click', this.boundResetParsingClick, true)
 
       // Subscribe to websocket updates for this project
       this.subscribeToProject()
@@ -722,9 +721,7 @@ export default class extends Controller {
       // reload would otherwise trigger a second right-panel swap ~300ms
       // after our own reload, which is the "double refresh on success" the
       // user was seeing.
-      this.refreshStepsPanel().then(() => {
-        this.updateStepStatusBadge(stepIdStr, data, { skipRightPanelReload: true })
-      }).catch(() => {
+      this.refreshStepsPanelIfNeeded(data, stepIdStr, () => {
         this.updateStepStatusBadge(stepIdStr, data, { skipRightPanelReload: true })
       })
     }
@@ -831,6 +828,15 @@ export default class extends Controller {
     if (runStepIdNum && currentStepIdNum && runStepIdNum === currentStepIdNum) {
       const statusIdNum = runStatus.status_id != null ? parseInt(runStatus.status_id, 10) : null
       const isTerminalStatus = statusIdNum === 3 || statusIdNum === 4
+      const runKey = String(runStatus.run_id)
+      this._lastIntermediateRunStatus = this._lastIntermediateRunStatus || {}
+      const prevStatusId = this._lastIntermediateRunStatus[runKey]
+
+      if (prevStatusId === statusIdNum && !isTerminalStatus) {
+        return
+      }
+      this._lastIntermediateRunStatus[runKey] = statusIdNum
+
       const stepEl = this.element.querySelector(`[data-step-id="${currentStepIdNum}"]`)
 
       clearTimeout(this.reloadTimeout)
@@ -917,10 +923,7 @@ export default class extends Controller {
       // Still update the badge in the left panel
       const updateStepId = data.step_id ? parseInt(data.step_id) : null
       if (updateStepId && (data.h_nber_analyses || data.parsing_status)) {
-        this.refreshStepsPanel().then(() => {
-          this.updateStepStatusBadge(updateStepId.toString(), data)
-        }).catch((error) => {
-          console.error('[StepSelectorController] Error refreshing steps panel:', error)
+        this.refreshStepsPanelIfNeeded(data, updateStepId, () => {
           this.updateStepStatusBadge(updateStepId.toString(), data)
         })
       }
@@ -936,14 +939,9 @@ export default class extends Controller {
     // Store websocket data to update badge after panel refresh (since DOM gets replaced)
     const websocketData = data
 
-    // Always refresh the steps panel from the server to ensure consistency
-    // After refresh completes, update the badge with websocket data
-    this.refreshStepsPanel().then(() => {
-      if (updateStepId && (websocketData.h_nber_analyses || websocketData.parsing_status)) {
-        this.updateStepStatusBadge(updateStepId.toString(), websocketData)
-      }
-    }).catch((error) => {
-      console.error('[StepSelectorController] Error refreshing steps panel:', error)
+    // Refresh the steps panel when step counts change; skip full DOM replacement
+    // when nothing changed so running spinners keep animating in Chrome.
+    this.refreshStepsPanelIfNeeded(websocketData, updateStepId, () => {
       if (updateStepId && (websocketData.h_nber_analyses || websocketData.parsing_status)) {
         this.updateStepStatusBadge(updateStepId.toString(), websocketData)
       }
@@ -1141,10 +1139,14 @@ export default class extends Controller {
     const statusKeys = ['pending', 'running', 'success', 'failed']
     statusKeys.forEach((statusKey) => {
       const count = parseInt(totals[statusKey]) || 0
+      const isActive = count > 0
 
       const countEl = headerRoot.querySelector(`[data-header-run-status-target="statusCount"][data-status-key="${statusKey}"]`)
       if (countEl) {
-        countEl.textContent = `${count}`
+        const oldCount = parseInt(countEl.textContent, 10) || 0
+        if (oldCount !== count) {
+          countEl.textContent = `${count}`
+        }
       }
 
       const iconEl = headerRoot.querySelector(`[data-header-run-status-target="statusIcon"][data-status-key="${statusKey}"]`)
@@ -1153,17 +1155,21 @@ export default class extends Controller {
         const iconSpin = iconEl.dataset.iconSpin || ''
         const activeColor = iconEl.dataset.activeColor || ''
         const inactiveColor = iconEl.dataset.inactiveColor || ''
-        const isActive = count > 0
         const colorClass = isActive ? activeColor : inactiveColor
         const spinClass = isActive && iconSpin ? ` ${iconSpin}` : ''
-        iconEl.className = `${iconBase}${spinClass} text-base ${colorClass}`
+        const nextClassName = `${iconBase}${spinClass} text-base ${colorClass}`
+        if (iconEl.className !== nextClassName) {
+          iconEl.className = nextClassName
+        }
       }
 
       const btnEl = headerRoot.querySelector(`[data-header-run-status-target="statusButton"][data-status-key="${statusKey}"]`)
       if (btnEl) {
-        const isActive = count > 0
         const label = iconEl?.dataset.uiLabel || statusKey
-        btnEl.title = `${label} (${count})`
+        const nextTitle = `${label} (${count})`
+        if (btnEl.title !== nextTitle) {
+          btnEl.title = nextTitle
+        }
         btnEl.disabled = !isActive
         if (isActive) {
           btnEl.classList.remove('cursor-default')
@@ -1419,6 +1425,65 @@ export default class extends Controller {
     return refreshPromise
   }
 
+  stepsPanelSignature(data, stepId) {
+    if (!data || stepId == null || stepId === '') return null
+
+    const stepIdNum = parseInt(stepId, 10)
+    const dataStepIdNum = data.step_id != null ? parseInt(data.step_id, 10) : null
+    if (!stepIdNum || dataStepIdNum !== stepIdNum) return null
+
+    const stepEl = this.element.querySelector(`[data-step-id="${stepId}"]`)
+    const stepNameLower = stepEl
+      ? (stepEl.getAttribute('data-step-name') || '').toString().toLowerCase()
+      : ''
+
+    if (stepNameLower === 'parsing' && data.parsing_status) {
+      return `parsing:${this.normalizeStatusName(data.parsing_status)}`
+    }
+
+    if (data.h_nber_analyses && typeof data.h_nber_analyses === 'object') {
+      return `counts:${JSON.stringify(data.h_nber_analyses)}`
+    }
+
+    return null
+  }
+
+  shouldRefreshStepsPanel(data, stepId) {
+    if (stepId == null || stepId === '') return false
+
+    const signature = this.stepsPanelSignature(data, stepId)
+    if (!signature) return false
+
+    this._stepsPanelSignatures = this._stepsPanelSignatures || {}
+    const key = String(stepId)
+    if (this._stepsPanelSignatures[key] === signature) {
+      return false
+    }
+    this._stepsPanelSignatures[key] = signature
+    return true
+  }
+
+  refreshStepsPanelIfNeeded(data, stepId, afterRefresh) {
+    const stepIdStr = stepId != null ? String(stepId) : null
+    if (!stepIdStr) return Promise.resolve()
+
+    const runAfterRefresh = () => {
+      if (typeof afterRefresh === 'function') {
+        afterRefresh()
+      }
+    }
+
+    if (!this.shouldRefreshStepsPanel(data, stepIdStr)) {
+      runAfterRefresh()
+      return Promise.resolve()
+    }
+
+    return this.refreshStepsPanel('status_update').then(runAfterRefresh).catch((error) => {
+      console.error('[StepSelectorController] Error refreshing steps panel:', error)
+      runAfterRefresh()
+    })
+  }
+
   updateStepStatusBadge(stepId, data, options = {}) {
     const rowSelector = `[data-step-id="${stepId}"]`
     const contentRoots = this.element.querySelectorAll('[data-step-selector-target="content"]')
@@ -1506,14 +1571,20 @@ export default class extends Controller {
       // in that case.
       const iconContainer = stepElement.querySelector('.flex-shrink-0')
       const iconCount = iconContainer ? iconContainer.querySelectorAll('i').length : 0
-      if (iconCount === 1) {
+      if (iconCount === 1 && statusChanged) {
         const iconElement = iconContainer.querySelector('i')
         const statusConfig = this.getStatusIconConfig(status)
         if (statusConfig) {
           const spinClass = status === 'running' && statusConfig.icon_spin ? ' ' + statusConfig.icon_spin : ''
-          iconElement.className = statusConfig.icon_base + spinClass + ' text-sm ' + statusConfig.active_color
+          const nextClassName = statusConfig.icon_base + spinClass + ' text-sm ' + statusConfig.active_color
+          if (iconElement.className !== nextClassName) {
+            iconElement.className = nextClassName
+          }
         } else {
-          iconElement.className = 'far fa-circle text-sm text-gray-400'
+          const fallbackClassName = 'far fa-circle text-sm text-gray-400'
+          if (iconElement.className !== fallbackClassName) {
+            iconElement.className = fallbackClassName
+          }
         }
 
         const badgeElement = stepElement.querySelector('.inline-flex.items-center')

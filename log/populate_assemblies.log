@@ -1,0 +1,18 @@
+ Container elasticsearch_asap_test  Running
+ Container asap_run_test  Running
+ Container asap2_test-redis-1  Running
+ Container asap2_test-postgres-1  Running
+2026-06-29 17:57:25 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.006s, query:n/a]
+2026-06-29 17:57:25 +0000: < 
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 2a/3: populate assemblies ==
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+  assemblies created=1542 updated=20007 skipped_no_meta=2 (537.1s)
+
+Pipeline done in 537.1s

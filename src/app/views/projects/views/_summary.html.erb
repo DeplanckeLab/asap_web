@@ -95,7 +95,7 @@ content_tag(:span, provider.name, class: "text-gray-700")
 end
 end
 summary_parsing_attrs = begin JSON.parse(@project.parsing_attrs_json.to_s); rescue; {}; end
-summary_integration_source_keys = summary_parsing_attrs['integrate_batch_paths'].is_a?(Hash) ? summary_parsing_attrs['integrate_batch_paths'].keys.reject(&:blank?) : []
+summary_integration_source_keys = Basic.integration_source_keys(summary_parsing_attrs)
 summary_integration_projects_by_key = summary_integration_source_keys.any? ? Project.where(key: summary_integration_source_keys).index_by(&:key) : {}
 summary_clone_lineage_projects = []
 summary_clone_lineage_deleted_parent_id = nil

@@ -10,6 +10,7 @@
 #   anndata_indices         - DataFrame index locations (not metadata columns)
 #   enum_fields             - closed string value sets per named metadata column
 #   field_constraints       - short constraint text for UI popups
+#   fix_form                - compliance fix UI field groups (field_groups) and metadata
 #   ontology_*              - format, prefixes, semantics, label pairs
 #   constants               - shared lookup tables (not column enums)
 #   spatial_extension, perturb_extension - optional schema extensions
@@ -639,7 +640,221 @@ label_pair_validation:
     pair_title_template: '%{label_field} / %{id_field}'
     pair_summary_template: 'The %{label_field} label must be present and match %{id_field} (including special placeholder values).'
 
-# Cross-field rules: constraints that depend on values in two or more metadata fields.
+# Compliance fix form: declarative registry of fixable metadata field groups.
+# Drives FixFormFieldGroupsBuilder (replaces ontology_term_types for form generation).
+# field_kind: ontology_pair | enum | free_text | boolean | auto_fill
+# Cross-field UI message templates remain under cross_field.fix_form.
+fix_form:
+  field_groups:
+    - id: organism
+      layer: uns
+      term_field: organism_ontology_term_id
+      label_field: organism
+      label: Organism
+      description: Organism taxonomy; auto-filled from the project organism
+      display_order: 1
+      field_kind: ontology_pair
+      auto_fill: organism
+      term_format_hint: 'NCBITaxon:9606 (Human), NCBITaxon:10090 (Mouse)'
+    - id: title
+      layer: uns
+      term_field: title
+      label: Title
+      description: Dataset title; auto-filled from the project name
+      display_order: 2
+      field_kind: auto_fill
+      auto_fill: title
+    - id: schema_version
+      layer: uns
+      term_field: schema_version
+      label: Schema Version
+      description: Schema version identifier declared in dataset metadata (must be compatible with scFAIR)
+      display_order: 3
+      field_kind: auto_fill
+      auto_fill: schema_version
+    - id: schema_reference
+      layer: uns
+      term_field: schema_reference
+      label: Schema Reference
+      description: Canonical URL of the scFAIR schema this file claims to follow
+      display_order: 4
+      field_kind: auto_fill
+      auto_fill: schema_reference
+    - id: ensembl_release
+      layer: uns
+      term_field: ensembl_release
+      label: Ensembl Release
+      description: Ensembl release from the project version tool_versions (auto-filled)
+      display_order: 5
+      field_kind: auto_fill
+      auto_fill: ensembl_release
+    - id: ensembl_database
+      layer: uns
+      term_field: ensembl_database
+      label: Ensembl Database
+      description: Ensembl database source derived from the project organism (auto-filled)
+      display_order: 6
+      field_kind: auto_fill
+      auto_fill: ensembl_database
+    - id: ensembl_assembly
+      layer: uns
+      term_field: ensembl_assembly
+      label: Ensembl Assembly
+      description: Genome assembly for the organism at the project Ensembl release (auto-filled from asap_data)
+      display_order: 7
+      field_kind: auto_fill
+      auto_fill: ensembl_assembly
+    - id: assay
+      layer: obs
+      term_field: assay_ontology_term_id
+      label_field: assay
+      label: Assay
+      description: Experimental technique used (e.g., 10x 3' v3)
+      display_order: 3
+      field_kind: ontology_pair
+      term_format_hint: EFO:XXXXXXX
+    - id: cell_type
+      layer: obs
+      term_field: cell_type_ontology_term_id
+      label_field: cell_type
+      label: Cell Type
+      description: Cell type annotation
+      display_order: 4
+      field_kind: ontology_pair
+      term_format_hint: CL:XXXXXXX
+    - id: development_stage
+      layer: obs
+      term_field: development_stage_ontology_term_id
+      label_field: development_stage
+      label: Development Stage
+      description: Developmental stage of the organism
+      display_order: 5
+      field_kind: ontology_pair
+      term_format_hint: 'HsapDv:XXXXXXX or "unknown"'
+    - id: disease
+      layer: obs
+      term_field: disease_ontology_term_id
+      label_field: disease
+      label: Disease
+      description: Disease condition or PATO:0000461 for normal/healthy
+      display_order: 6
+      field_kind: ontology_pair
+      term_format_hint: 'MONDO:XXXXXXX or PATO:0000461 (normal)'
+    - id: self_reported_ethnicity
+      layer: obs
+      term_field: self_reported_ethnicity_ontology_term_id
+      label_field: self_reported_ethnicity
+      label: Self-Reported Ethnicity
+      description: Self-reported ethnicity or "unknown" / "na"
+      display_order: 7
+      field_kind: ontology_pair
+      term_format_hint: 'HANCESTRO:XXXX or "unknown" or "na"'
+    - id: sex
+      layer: obs
+      term_field: sex_ontology_term_id
+      label_field: sex
+      label: Sex
+      description: Biological sex or "unknown" / "na"
+      display_order: 8
+      field_kind: ontology_pair
+      term_format_hint: 'PATO:0000384 (male), PATO:0000383 (female), or "unknown"'
+    - id: tissue
+      layer: obs
+      term_field: tissue_ontology_term_id
+      label_field: tissue
+      label: Tissue
+      description: Tissue of origin
+      display_order: 9
+      field_kind: ontology_pair
+      term_format_hint: UBERON:XXXXXXX
+    - id: tissue_type
+      layer: obs
+      term_field: tissue_type
+      label: Tissue Type
+      description: Type of tissue sample
+      display_order: 10
+      field_kind: enum
+    - id: suspension_type
+      layer: obs
+      term_field: suspension_type
+      label: Suspension Type
+      description: Type of cell suspension
+      display_order: 11
+      field_kind: enum
+    - id: donor_id
+      layer: obs
+      term_field: donor_id
+      label: Donor ID
+      description: Unique donor identifier
+      display_order: 12
+      field_kind: free_text
+    - id: is_primary_data
+      layer: obs
+      term_field: is_primary_data
+      label: Is Primary Data
+      description: Whether this is the canonical instance of this data (True/False)
+      display_order: 13
+      field_kind: boolean
+      allowed_values: ['True', 'False']
+    - id: feature_is_filtered
+      layer: var
+      term_field: feature_is_filtered
+      label: Feature Is Filtered
+      description: Per-gene filter flag (true/false); map from legacy row metadata if needed
+      display_order: 20
+      field_kind: boolean
+      allowed_values: ['false', 'true']
+    - id: feature_biotype
+      layer: var
+      term_field: feature_biotype
+      label: Feature Biotype
+      description: Gene or spike-in; map from an existing per-gene annotation
+      display_order: 21
+      field_kind: enum
+    - id: feature_length
+      layer: var
+      term_field: feature_length
+      label: Feature Length
+      description: Gene length in base pairs; map from legacy row metadata (e.g. Gene length columns)
+      display_order: 22
+      field_kind: free_text
+    - id: feature_name
+      layer: var
+      term_field: feature_name
+      label: Feature Name
+      description: Display gene name or spike-in label; map from legacy row metadata (e.g. Gene)
+      display_order: 23
+      field_kind: free_text
+    - id: feature_reference
+      layer: var
+      term_field: feature_reference
+      label: Feature Reference
+      description: NCBITaxon reference organism per feature; map from existing row metadata or set constant
+      display_order: 24
+      field_kind: free_text
+    - id: feature_type
+      layer: var
+      term_field: feature_type
+      label: Feature Type
+      description: Gene biotype label (e.g. protein_coding); map from legacy row metadata
+      display_order: 25
+      field_kind: free_text
+    - id: feature_chromosome
+      layer: var
+      term_field: feature_chromosome
+      label: Feature Chromosome
+      description: Chromosome name or na for spike-ins; map from legacy row metadata
+      display_order: 26
+      field_kind: free_text
+  # Legacy ASAP row_attrs names that can be mapped to scFAIR var columns (first match wins).
+  var_legacy_sources:
+    feature_name: [Gene, gene_name, GeneSymbol, Name]
+    feature_length: [gene_length, GeneLength, Length, gene_len]
+    feature_type: [biotype, Biotype, gene_type, GeneType]
+    feature_chromosome: [chr, Chr, Chromosome, chromosome, GeneChr]
+    feature_biotype: [Biotype, biotype, feature_biotype_legacy]
+    feature_is_filtered: [is_filtered, filtered, Filtered]
+    feature_reference: [feature_reference_legacy, taxon, Taxon]
 # Reference data (maps, organism prefixes) lives here; executable rule definitions
 # are under validation.rules (CF-1 .. CF-9).
 cross_field:

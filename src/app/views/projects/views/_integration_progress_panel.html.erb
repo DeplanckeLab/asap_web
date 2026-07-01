@@ -1,0 +1,25 @@
+<%# Compact integration sub-stages for the parsing/integration right panel (analysis view). %>
+<% h_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}) %>
+<% source_keys = Basic.integration_source_keys(h_attrs) %>
+<% method_label = Basic.integration_method_label(h_attrs) %>
+<div class="mt-6 max-w-md mx-auto text-left border-t border-gray-200 pt-6"
+     data-controller="integration-status"
+     data-integration-status-project-id-value="<%= @project.id %>"
+     data-integration-status-method-value="<%= method_label %>"
+     data-integration-status-source-keys-value="<%= source_keys.to_json %>">
+  <p class="text-sm font-medium text-gray-700 mb-3">Integration progress</p>
+  <p data-integration-status-target="statusText" class="text-sm text-gray-600 mb-3">
+    Preparing integration...
+  </p>
+  <div class="w-full h-2 bg-gray-200 rounded-full overflow-hidden mb-4">
+    <div data-integration-status-target="progressBar"
+         class="h-full bg-blue-600 transition-all duration-500"
+         style="width: 15%;"></div>
+  </div>
+  <div class="text-xs text-gray-500 space-y-1">
+    <div data-integration-status-target="unarchiveStep">1. Restoring source project data</div>
+    <div data-integration-status-target="integrateStep">2. Integrating datasets</div>
+    <div data-integration-status-target="parseStep">3. Parsing integrated project</div>
+  </div>
+  <p data-integration-status-target="errorText" class="hidden text-sm text-red-700 mt-3"></p>
+</div>

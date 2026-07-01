@@ -3,12 +3,16 @@
 <%
   cell_filtering_locked = single_run_step_locked_from_publication?(@project, @step)
   @h_step_attrs ||= {}
-  default_method_names = Array(@h_step_attrs['default_std_method'])
-  default_std_method = if default_method_names.any? && defined?(@h_std_methods_by_name) && @h_std_methods_by_name
-                         default_method_names.map { |name| @h_std_methods_by_name[name] }.compact.first
-                       end
+  @h_std_methods_by_name ||= {}
+  @h_obj_attrs_by_std_method ||= {}
+  default_std_method = Basic.resolve_default_std_method(
+    project: @project,
+    default_method_names: @h_step_attrs['default_std_method'],
+    std_methods_by_name: @h_std_methods_by_name,
+    h_obj_attrs_by_std_method: @h_obj_attrs_by_std_method
+  )
   default_std_method ||= @cell_filtering_std_method if defined?(@cell_filtering_std_method)
-  default_std_method ||= @std_methods&.first
+  default_std_method ||= @std_methods&.find { |m| Basic.std_method_project_type_compatible?(@project, std_method: m, obj_attrs: @h_obj_attrs_by_std_method[m.id]) }
   default_std_method_id = default_std_method&.id
 %>
 

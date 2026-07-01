@@ -46,6 +46,14 @@ class ScfairRulesMultiValueFieldsTest < TestBaseWithoutFixtures
     assert_equal 'organism_ontology_term_id', Scfair::Rules.obs_field_name_from_path('/attrs/organism_ontology_term_id')
   end
 
+  test 'compliance_field_message_paths includes var logical paths for row_attrs' do
+    Scfair::Rules.with_bundle('scfair_7_1_0') do
+      paths = Scfair::Rules.compliance_field_message_paths('/row_attrs/feature_name')
+      assert_includes paths, '/row_attrs/feature_name'
+      assert_includes paths, 'var/feature_name'
+    end
+  end
+
   test 'compliance_field_message_paths includes h5ad and ensembl check ids' do
     paths = Scfair::Rules.compliance_field_message_paths('/attrs/ensembl_release')
 

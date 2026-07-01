@@ -28,11 +28,7 @@
          end %>
       <% if reset_allowed %>
         <% if @step&.name == 'parsing' %>
-          <button type="button"
-                  class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
-                  data-reset-parsing-url="<%= reset_parsing_project_path(@project) %>">
-            <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
-          </button>
+          <%= reset_parsing_button(@project) %>
         <% else %>
           <button type="button"
                   class="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"

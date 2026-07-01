@@ -489,6 +489,8 @@ task update_genes: :environment do
                     if h_xref[xref_id]                    
                       if h_xref[xref_id][:type] == '1300'
                         h_upd[:ncbi_gene_id] = h_xref[xref_id][:acc].to_i
+                        ncbi_name = h_xref[xref_id][:name].to_s.gsub(/\s+\(\s*\d+\s+of\s+\w+\s*\)/, '').strip
+                        alt_names.push(ncbi_name) if ncbi_name.present? && ncbi_name != '\\N'
                       #   i+=1
                       elsif h_xref[xref_id][:type] == '1100'
                         hgnc_xref_id = xref_id 
@@ -522,6 +524,8 @@ task update_genes: :environment do
                     #		puts "Cannot find xref for #{gene_name_xref_id}!"
                     # 		exit 
 		  end
+                  alt_names.reject! { |n| n.blank? || n == h_upd[:name] }
+                  alt_names.uniq!
                   #             puts h_upd[:name].to_json
                   #                puts "h_upd[:ensembl_id] : Highest_priority_xref_id = #{highest_priority_xref_id} -> #{h_xref[highest_priority_xref_id].to_json}"
                   #                if h_external_synonym[gene_name_xref_id]

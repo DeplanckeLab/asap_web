@@ -51,7 +51,14 @@
   %>
   <% available_methods = @std_methods.select { |s| !@h_unavailable_methods[s.id] } %>
   <% unavailable_methods = @std_methods.select { |s| @h_unavailable_methods[s.id] } %>
-  <% default_methods = (@h_step_attrs['default_std_method'] || []).map { |method_name| @h_std_methods_by_name[method_name] }.compact & available_methods %>
+  <% @h_obj_attrs_by_std_method ||= {} %>
+  <% default_std_method = Basic.resolve_default_std_method(
+       project: @project,
+       default_method_names: @h_step_attrs['default_std_method'],
+       std_methods_by_name: @h_std_methods_by_name,
+       h_obj_attrs_by_std_method: @h_obj_attrs_by_std_method,
+       available_methods: available_methods
+     ) %>
 
   <% if @step.description.present? %>
     <div class="bg-blue-50 rounded-lg p-4 mb-6">
@@ -77,12 +84,8 @@
             Rails.logger.info("[_form_req] @h_obj_attrs_by_std_method keys: #{@h_obj_attrs_by_std_method&.keys&.inspect}")
             Rails.logger.info("[_form_req] @h_unavailable_methods: #{@h_unavailable_methods&.inspect}")
             
-            # Filter by project type first
-            project_type_tag = @project.project_type ? @project.project_type.tag : nil
-            filtered_methods = @std_methods.select { |s| 
-              method_attrs = @h_obj_attrs_by_std_method[s.id] || {}
-              project_types = method_attrs["project_types"] || []
-              project_types.empty? || project_types.include?(project_type_tag)
+            filtered_methods = @std_methods.select { |s|
+              Basic.std_method_project_type_compatible?(@project, std_method: s, obj_attrs: @h_obj_attrs_by_std_method[s.id])
             }.sort_by { |m| m.label }
             
             Rails.logger.info("[_form_req] Filtered methods count: #{filtered_methods.count}")
@@ -101,8 +104,12 @@
             Rails.logger.info("[_form_req] Options count: #{options.count}")
             Rails.logger.info("[_form_req] Unavailable method IDs: #{unavailable_method_ids.inspect}")
             
-            # Set default value
-            default_value = (default_methods.first ? default_methods.first.id : (available_methods.first ? available_methods.first.id : nil))
+            # Set default value (must be in filtered_methods so options_for_select can select it)
+            default_value = if default_std_method && filtered_methods.include?(default_std_method)
+              default_std_method.id
+            else
+              filtered_methods.find { |m| !@h_unavailable_methods[m.id] }&.id
+            end
           %>
           <% if options.empty? %>
             <div class="text-red-600 text-sm p-2">
@@ -142,7 +149,7 @@
       </div>
     </div>
   <% else %>
-    <%= f.hidden_field :std_method_id, value: ((d = default_methods.first) ? d.id : ((d = available_methods.first) ? d.id : nil)) %>
+    <%= f.hidden_field :std_method_id, value: default_std_method&.id %>
   <% end %>
 
   <div id="attrs_container" class="space-y-4" data-form-req-target="attrsContainer"></div>

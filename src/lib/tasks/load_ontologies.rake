@@ -168,7 +168,9 @@ task load_ontologies: :environment do
     h_new_tool_versions[k] = h_tool_versions[k]
   end
 
-  CellOntology.where(obsolete: false).order(id: :desc).find_each do |co|
+  CellOntology.where(obsolete: false).order(id: :desc).then { |scope|
+    ENV['ONTOLOGY_TAG'].present? ? scope.where(tag: ENV['ONTOLOGY_TAG']) : scope
+  }.find_each do |co|
     if co.file_url.blank?
       puts "Skipping #{co.tag} (id=#{co.id}): file_url is not set"
       next

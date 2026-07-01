@@ -52,12 +52,9 @@ module Scfair
 
     def free_text_for_group(g)
       set = Set.new
-      specials = @allowed_specials[g[:term_path]] || @allowed_specials[g[:term_path].to_sym]
+      term_path = g[:term_path]
+      specials = @allowed_specials[term_path] || @allowed_specials[term_path.to_sym]
       set.merge(specials) if specials
-      if g[:id].present?
-        ott = OntologyTermType.find_by(field_group_id: g[:id])
-        set.merge(ott.free_text_entries.map { |e| e.is_a?(Hash) ? e['value'].to_s : e.to_s }) if ott
-      end
       set
     end
 

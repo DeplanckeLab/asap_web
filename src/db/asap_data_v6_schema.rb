@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_10_150000) do
+ActiveRecord::Schema[8.1].define(version: 2026_06_30_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -123,13 +123,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_10_150000) do
     t.integer "sum_exon_length"
     t.integer "sum_exon_length2"
     t.datetime "updated_at", precision: nil
-    t.index "organism_id, lower(alt_names)", name: "organism_lc_alt_names_idx"
+    t.index "lower(alt_names) gin_trgm_ops", name: "genes_lc_alt_names_gin_trgm_idx", where: "((alt_names IS NOT NULL) AND (alt_names <> ''::text))", using: :gin
     t.index "organism_id, lower(ensembl_id)", name: "organism_lc_ensembl_id_idx"
     t.index "organism_id, lower(name)", name: "organism_lc_name_idx"
+    t.index ["alt_names"], name: "genes_alt_names_gin_trgm_idx", opclass: :gin_trgm_ops, where: "((alt_names IS NOT NULL) AND (alt_names <> ''::text))", using: :gin
     t.index ["ensembl_id"], name: "ensembl_id_genes"
     t.index ["ensembl_id"], name: "genes_ensembl_id_idx"
     t.index ["name"], name: "genes_name_idx"
-    t.index ["organism_id", "alt_names"], name: "organism_alt_names_idx"
     t.index ["organism_id", "ensembl_id"], name: "organism_ensembl_id_idx"
     t.index ["organism_id", "name"], name: "organism_gene_name_idx"
     t.index ["organism_id"], name: "organism_id_genes"

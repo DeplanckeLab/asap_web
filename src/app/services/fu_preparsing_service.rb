@@ -63,7 +63,7 @@ class FuPreparsingService
   private
 
   def prepare_input_file
-    path = @fu.file_path
+    path = preparsing_file_path
     @logger.info("[FuPreparsingService] Fu##{@fu.id} file_path: #{path}")
     @logger.info("[FuPreparsingService] File exists? #{File.exist?(path)}")
     @logger.info("[FuPreparsingService] File size: #{File.size(path) if path && File.exist?(path)}")
@@ -769,8 +769,15 @@ class FuPreparsingService
     Organism.first&.id
   end
 
+  def preparsing_file_path
+    upload_dir + @fu.upload_file_name
+  end
+
   def upload_dir
-    @upload_dir ||= @fu.upload_dir
+    @upload_dir ||= begin
+      project = Project.find_by(id: @options[:project_id]) if @options[:project_id].present?
+      project ? @fu.upload_dir_for_project(project) : @fu.upload_dir
+    end
   end
 
   def ensure_directory_writable

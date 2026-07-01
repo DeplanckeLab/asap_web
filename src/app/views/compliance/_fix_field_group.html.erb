@@ -12,6 +12,17 @@
   is_auto_title = group[:auto_from_project] == :title && project_title.present?
   is_auto_schema_version = group[:auto_from_project] == :schema_version
   is_auto_schema_reference = group[:auto_from_project] == :schema_reference
+  ensembl_auto_key = group[:auto_from_project]
+  is_auto_ensembl = %i[ensembl_release ensembl_database ensembl_assembly].include?(ensembl_auto_key) &&
+                    ensembl_info.present? && ensembl_info[ensembl_auto_key].present?
+  path_prefix = case group[:type]
+                when :global_attr then '/attrs/'
+                when :row_attr then '/row_attrs/'
+                else '/col_attrs/'
+                end
+  attr_name_from_path = lambda do |p|
+    p.to_s.sub(%r{\A/(col_attrs|row_attrs|attrs)/}, '')
+  end
   schema_version_value = Scfair::Rules.schema_hash[:schema_version]
   schema_reference_value = Scfair::Rules.schema_hash[:source_url]
   has_valid_values = group[:term_valid_values].present?
@@ -37,7 +48,7 @@
      data-label-has-error="<%= (is_paired && fg[:label_has_error]) ? 'true' : 'false' %>"
      data-multi-value="<%= field_multi_value ? 'true' : 'false' %>"
      data-multi-value-sorted="<%= field_multi_value_sorted ? 'true' : 'false' %>"
-     data-is-auto="<%= (is_auto_organism || is_auto_title || is_auto_schema_version || is_auto_schema_reference || is_constrained) ? 'true' : 'false' %>">
+     data-is-auto="<%= (is_auto_organism || is_auto_title || is_auto_schema_version || is_auto_schema_reference || is_auto_ensembl || is_constrained) ? 'true' : 'false' %>">
 
   <!-- Group header -->
   <div class="flex items-start justify-between mb-3">
@@ -267,6 +278,18 @@
       <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= schema_reference_value %>">
     </div>
 
+  <% elsif is_auto_ensembl %>
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from project version and organism</p>
+      <div>
+        <span class="text-xs font-medium text-gray-600"><%= group[:term_path].sub(%r{\A/attrs/}, '') %></span>
+        <p class="text-sm font-mono text-gray-900"><%= ensembl_info[ensembl_auto_key] %></p>
+      </div>
+
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= ensembl_info[ensembl_auto_key] %>">
+    </div>
+
   <% else %>
     <%# ── Regular field group ── %>
     <%
@@ -274,7 +297,7 @@
       pf = prefill || {}
       pf_source = pf[:source_annot_name]
       pf_terms = pf[:terms] || []
-      pf_has_source = pf_source.present? && available_attrs.include?(pf_source.sub(%r{\A/col_attrs/}, '').sub(%r{\A/attrs/}, ''))
+      pf_has_source = pf_source.present? && available_attrs.include?(attr_name_from_path.call(pf_source))
       pf_has_terms = pf_terms.any?
       pf_single_term = pf_terms.size == 1 && pf_terms.first[:identifier].present?
       # If neither field has a validation error the group is already compliant;
@@ -302,6 +325,9 @@
         <p class="text-xs font-medium text-blue-800 mb-1">Previous assignment found</p>
         <% if pf_has_source %>
           <p class="text-xs text-blue-700">Source metadata: <code class="bg-blue-100 px-1 rounded"><%= pf_source %></code></p>
+          <% if group[:type] == :row_attr && pf_source != group[:term_path] %>
+            <p class="text-xs text-blue-600 mt-1">Suggested legacy mapping into <code class="bg-blue-100 px-1 rounded"><%= group[:term_path] %></code></p>
+          <% end %>
         <% end %>
         <% if pf_has_terms %>
           <div class="flex flex-wrap gap-1 mt-1">
@@ -375,7 +401,12 @@
       <%# ── Map from existing metadata ── %>
       <% if available_attrs.any? %>
         <div id="map_from_<%= group_id %>" class="<%= pf_action == 'map_from' ? '' : 'hidden' %> pl-6 space-y-3">
-          <% prefix = group[:type] == :col_attr ? '/col_attrs/' : '/attrs/' %>
+          <% if group[:type] == :row_attr %>
+            <p class="text-xs text-gray-500 mb-1">
+              Copy per-gene values from an existing row metadata column into the scFAIR field name
+              (e.g. map <code>Gene</code> to <code>feature_name</code>).
+            </p>
+          <% end %>
 
           <% if is_paired && has_ontology %>
             <%# ── Paired ontology field: select one source, show values, auto-resolve the other ── %>
@@ -401,7 +432,7 @@
                         class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
                   <option value="">-- select source metadata --</option>
                   <% available_attrs.each do |attr| %>
-                    <option value="<%= prefix %><%= attr %>" <%= 'selected' if pf_action == 'map_from' && pf_has_source && pf_source == "#{prefix}#{attr}" %>><%= attr %></option>
+                    <option value="<%= path_prefix %><%= attr %>" <%= 'selected' if pf_action == 'map_from' && pf_has_source && pf_source == "#{path_prefix}#{attr}" %>><%= attr %></option>
                   <% end %>
                 </select>
                 <div data-compliance-fix-target="mapBadges" data-group-id="<%= group_id %>" data-role="term"
@@ -426,7 +457,7 @@
                         class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
                   <option value="">-- select source metadata --</option>
                   <% available_attrs.each do |attr| %>
-                    <option value="<%= prefix %><%= attr %>" <%= 'selected' if pf_action == 'map_from' && pf_has_source && pf_source == "#{prefix}#{attr}" %>><%= attr %></option>
+                    <option value="<%= path_prefix %><%= attr %>" <%= 'selected' if pf_action == 'map_from' && pf_has_source && pf_source == "#{path_prefix}#{attr}" %>><%= attr %></option>
                   <% end %>
                 </select>
                 <div data-compliance-fix-target="mapBadges" data-group-id="<%= group_id %>" data-role="label"
@@ -492,7 +523,7 @@
                           class="block w-64 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
                     <option value="">-- select --</option>
                     <% available_attrs.each do |attr| %>
-                      <option value="<%= prefix %><%= attr %>"><%= attr %></option>
+                      <option value="<%= path_prefix %><%= attr %>"<%= ' selected' if pf_source == "#{path_prefix}#{attr}" %>><%= attr %></option>
                     <% end %>
                   </select>
                   <span data-compliance-fix-target="preview"
@@ -516,7 +547,7 @@
                           class="block w-64 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
                     <option value="">-- select --</option>
                     <% available_attrs.each do |attr| %>
-                      <option value="<%= prefix %><%= attr %>"><%= attr %></option>
+                      <option value="<%= path_prefix %><%= attr %>"<%= ' selected' if pf_source == "#{path_prefix}#{attr}" %>><%= attr %></option>
                     <% end %>
                   </select>
                   <span data-compliance-fix-target="preview"

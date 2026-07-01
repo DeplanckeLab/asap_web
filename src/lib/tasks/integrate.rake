@@ -31,12 +31,8 @@ task :integrate, [:project_key] => [:environment] do |t, args|
   h_env_docker_image = h_env['docker_images']['asap_run']
   image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
 
-  asap_data_db_name = h_env['asap_data_db_name'].to_s
-  if asap_data_db_name.blank?
-    logger.error("[IntegrateRake] Missing asap_data_db_name in version env_json for version #{version.id}")
-    exit 1
-  end
-  db_conn = "postgres:5434/#{asap_data_db_name}"
+  asap_data_db_name = Basic.asap_data_db_name_from_env!(h_env)
+  db_conn = Basic.asap_data_db_url(h_env)
 
   project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
   tmp_dir = project_dir + 'parsing'
@@ -78,6 +74,7 @@ task :integrate, [:project_key] => [:environment] do |t, args|
   Basic.upd_project_step(project, parsing_step.id)
   project.update(status_id: 2)
   project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
+  Basic.broadcast_integration_status(project, 'queued')
   logger.info("[IntegrateRake] Updated project status to running")
 
   h_data_types = {}
@@ -90,8 +87,16 @@ task :integrate, [:project_key] => [:environment] do |t, args|
     h_attrs = Basic.safe_parse_json(run.attrs_json, {})
     puts h_attrs.to_json
 
-    project_keys = h_attrs['integrate_batch_paths'].keys
-    source_projects = Project.where(key: project_keys).all
+    project_keys = Basic.integration_source_keys(h_attrs)
+    unless project_keys.any?
+      raise "[IntegrateRake] No integration source project keys found in run attrs"
+    end
+    source_projects_by_key = Project.where(key: project_keys).index_by(&:key)
+    source_projects = project_keys.filter_map { |key| source_projects_by_key[key] }
+    if source_projects.size != project_keys.size
+      missing = project_keys - source_projects.map(&:key)
+      raise "[IntegrateRake] Source project(s) not found: #{missing.join(', ')}"
+    end
 
     # Carry over references (articles) and accessions (exp_entries) from source projects
     source_projects.each do |src|
@@ -112,16 +117,52 @@ task :integrate, [:project_key] => [:environment] do |t, args|
     ) if project.pmid.nil? && project.doi.nil?
     logger.info("[IntegrateRake] Carried over #{project.articles.count} article(s) and #{project.exp_entries.count} accession(s) from source projects")
 
+    source_projects.each do |src|
+      next if src.filesystem_project_data_present?
+
+      if src.archive_restore_expected?
+        Basic.broadcast_integration_status(project, 'unarchiving', source_key: src.key)
+        unless Basic.unarchive(src.key)
+          raise "[IntegrateRake] Failed to restore archived source project #{src.key}"
+        end
+      else
+        raise "[IntegrateRake] Source project #{src.key} data is not available locally"
+      end
+    end
+
     file_paths = source_projects.map { |p|
       p_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s + p.key
       p_dir + 'parsing' + 'output.loom'
     }.join(",")
 
-    batch_paths = source_projects.map { |p|
-      h_attrs['integrate_batch_paths'][p.key]
-    }.join(",")
+    integrate_method = h_attrs['integrate_method'].presence
+    unless integrate_method.present? && Basic::INTEGRATION_METHODS.include?(integrate_method.to_s)
+      integrate_method = 'harmony'
+    end
 
-    rds_file = project_dir + 'parsing' + "output.rds"
+    loom_file = project_dir + 'parsing' + "output.loom"
+
+    batch_paths_hash = h_attrs['integrate_batch_paths']
+    batch_paths_hash = {} unless batch_paths_hash.is_a?(Hash)
+    batch_paths_list = project_keys.map do |key|
+      val = batch_paths_hash.is_a?(Hash) ? (batch_paths_hash[key] || batch_paths_hash[key.to_sym]) : nil
+      val.present? && val.to_s != 'null' ? val.to_s : 'null'
+    end
+    batch_paths = batch_paths_list.join(',')
+
+    r_opts = [
+      { 'opt' => '--input_looms', 'value' => file_paths },
+      { 'opt' => '--output_path', 'value' => loom_file.to_s },
+      { 'opt' => '--method', 'value' => integrate_method.to_s }
+    ]
+    r_opts << { 'opt' => '--batch_paths', 'value' => batch_paths } if batch_paths_hash.any?
+    unless integrate_method.to_s == 'uncorrected'
+      n_pcs = h_attrs['integrate_n_pcs'].presence&.to_i
+      n_pcs = 50 if n_pcs.nil? || n_pcs < 1
+      r_opts << { 'opt' => '--n_pcs', 'value' => n_pcs.to_s }
+    end
+
+    Basic.broadcast_integration_status(project, 'integrating')
 
     # Step 1: Run R integration script
     h_cmd_r = {
@@ -130,37 +171,46 @@ task :integrate, [:project_key] => [:environment] do |t, args|
       'container_name' => ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev') + "_" + run.id.to_s,
       'docker_call' => h_env_docker_image['call'].gsub(/\#image_name/, image_name),
       'program' => "Rscript integration.v8.R",
-      'opts' => {},
-      'args' => [
-        { "param_key" => 'input_loom_path_list', "value" => file_paths },
-        { "param_key" => 'input_batch_path_list', "value" => batch_paths },
-        { "param_key" => 'input_n_pcs', "value" => h_attrs['integrate_n_pcs'] },
-        { "param_key" => 'output_rds_path', "value" => rds_file.to_s },
-        { "param_key" => 'output_convergence_plot', "value" => (project_dir + 'parsing' + "convergence_plot.png").to_s }
-      ]
+      'opts' => r_opts,
+      'args' => []
     }
 
     cmd = Basic.build_cmd(h_cmd_r)
     puts "CMD_R: #{cmd}"
-    `#{cmd}`
+    r_output = `#{cmd} 2>&1`
+    r_exitstatus = $?.exitstatus
+    puts "R_OUTPUT: #{r_output}"
+    puts "R_EXITSTATUS: #{r_exitstatus}"
 
-    unless File.exist?(rds_file)
-      raise "[IntegrateRake] R integration failed: output RDS file not found at #{rds_file}"
+    r_result = Basic.integration_r_result_from_output(r_output)
+    if r_result && r_result['displayed_error'].present?
+      err = r_result['displayed_error']
+      err = err.is_a?(Array) ? err.join(' ') : err.to_s
+      raise "[IntegrateRake] R integration failed: #{err}"
     end
-    logger.info("[IntegrateRake] R integration produced #{rds_file} (#{File.size(rds_file)} bytes)")
+    unless r_exitstatus == 0
+      friendly = Basic.integration_command_error_message(r_output, context: 'R integration')
+      raise "[IntegrateRake] #{friendly}"
+    end
+    unless File.exist?(loom_file)
+      raise "[IntegrateRake] R integration failed: output loom file not found at #{loom_file}. #{r_output.to_s.strip.split("\n").last(5).join(' ')}"
+    end
+    unless Basic.loom_has_main_matrix?(loom_file, image_name: image_name)
+      raise "[IntegrateRake] R integration produced an invalid loom (missing /matrix) at #{loom_file} (#{File.size(loom_file)} bytes)"
+    end
+    logger.info("[IntegrateRake] R integration produced #{loom_file} (#{File.size(loom_file)} bytes, matrix present)")
 
-    # Step 2: Parse the integrated file
+    Basic.broadcast_integration_status(project, 'parsing')
+
+    # Step 2: Parse the integrated file (copy first so parse cannot destroy the R output)
+    parse_input_loom = tmp_dir + 'integrated_input.loom'
+    FileUtils.cp(loom_file, parse_input_loom)
+
     opts = [
-      #{ 'opt' => "-type", 'value' => 'RDS' },
-      #{ 'opt' => '-T', 'value' => "Parsing" },
-      #{ 'opt' => "-organism", 'value' => project.organism_id.to_s },
-      #{ 'opt' => "-o", 'value' => tmp_dir.to_s },
-      #{ 'opt' => "-f", 'value' => rds_file.to_s },
-      #{ 'opt' => '-h', 'value' => db_conn }
       {'opt' => "--organism", 'value' => project.organism_id.to_s},
-      {'opt' => "--filetype", 'value' => 'RDS'},
+      {'opt' => "--filetype", 'value' => 'LOOM'},
       {'opt' => "-o", 'value' => tmp_dir.to_s},
-      {'opt' => "-f", 'value' => rds_file.to_s},
+      {'opt' => "-f", 'value' => parse_input_loom.to_s},
       {'opt' => '--dburl', 'value' => db_conn}
     ]
 
@@ -177,34 +227,43 @@ task :integrate, [:project_key] => [:environment] do |t, args|
     cmd_parse = Basic.build_cmd(h_cmd_parse)
     puts "CMD_PARSE: #{cmd_parse}"
     parse_output = `#{cmd_parse} 2>&1`
+    parse_exitstatus = $?.exitstatus
     puts "PARSE_OUTPUT: #{parse_output}"
+    puts "PARSE_EXITSTATUS: #{parse_exitstatus}"
 
-    # Update project with parsing results
     output_json_parse = tmp_dir + "output.json"
     h_parsing = {}
     if File.exist?(output_json_parse)
       h_parsing = Basic.safe_parse_json(File.read(output_json_parse), {})
-      if h_parsing["nber_cols"] && h_parsing["nber_rows"]
-        project.update_columns(
-          nber_cols: h_parsing["nber_cols"],
-          nber_rows: h_parsing["nber_rows"],
-          extension: 'loom'
-        )
-        logger.info("[IntegrateRake] Set counts from parsing: #{h_parsing["nber_cols"]} cells, #{h_parsing["nber_rows"]} genes")
-      else
-        logger.warn("[IntegrateRake] Parsing output.json missing nber_cols/nber_rows, computing from source projects")
-        total_cols = source_projects.sum { |p| p.nber_cols.to_i }
-        total_rows = source_projects.map { |p| p.nber_rows.to_i }.max || 0
-        project.update_columns(nber_cols: total_cols, nber_rows: total_rows, extension: 'loom')
-        logger.info("[IntegrateRake] Set counts from source projects: #{total_cols} cells, #{total_rows} genes")
-      end
-    else
-      logger.error("[IntegrateRake] Parsing output.json not found at #{output_json_parse}, computing from source projects")
-      total_cols = source_projects.sum { |p| p.nber_cols.to_i }
-      total_rows = source_projects.map { |p| p.nber_rows.to_i }.max || 0
-      project.update_columns(nber_cols: total_cols, nber_rows: total_rows, extension: 'loom')
-      logger.info("[IntegrateRake] Set counts from source projects: #{total_cols} cells, #{total_rows} genes")
     end
+
+    stdout_parse = Basic.parse_result_from_command_output(parse_output)
+    if stdout_parse && stdout_parse['displayed_error'].present?
+      err = stdout_parse['displayed_error']
+      err = err.is_a?(Array) ? err.join(' ') : err.to_s
+      h_parsing['displayed_error'] = [err]
+      File.open(output_json_parse.to_s, 'w') { |f| f.write(h_parsing.to_json) } rescue nil
+    end
+
+    parse_error = h_parsing["displayed_error"]
+    if parse_error.present?
+      message = parse_error.is_a?(Array) ? parse_error.join(' ') : parse_error.to_s
+      raise "[IntegrateRake] Parsing failed: #{message}"
+    end
+    unless parse_exitstatus == 0
+      tail = parse_output.to_s.strip.split("\n").last(5).join(' ')
+      raise "[IntegrateRake] Parsing exited with status #{parse_exitstatus}. #{tail}"
+    end
+    unless h_parsing["nber_cols"] && h_parsing["nber_rows"]
+      raise "[IntegrateRake] Parsing output.json missing nber_cols/nber_rows at #{output_json_parse}"
+    end
+
+    project.update_columns(
+      nber_cols: h_parsing["nber_cols"],
+      nber_rows: h_parsing["nber_rows"],
+      extension: 'loom'
+    )
+    logger.info("[IntegrateRake] Set counts from parsing: #{h_parsing["nber_cols"]} cells, #{h_parsing["nber_rows"]} genes")
 
     # Call finish_run to create annotations, set run status, and update project step.
     # skip_broadcast: true because finish_run broadcasts before we update project.status_id,
@@ -220,14 +279,18 @@ task :integrate, [:project_key] => [:environment] do |t, args|
     project.update(status_id: 3)
 
     project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)
+    Basic.broadcast_integration_status(project, 'completed')
     logger.info("[IntegrateRake] Integration completed for project #{project_key}")
 
   rescue => e
+    user_error = Basic.integration_user_error_message(e.message)
+    Basic.broadcast_integration_status(project, 'failed', error: user_error) if project
     logger.error("[IntegrateRake] Error during integration for project #{project_key}: #{e.class} - #{e.message}")
     logger.error(e.backtrace.join("\n")) if e.backtrace
 
-    # Update status to failed
-    run.update(status_id: 4) if run
+    Basic.write_parsing_output_json_displayed_error(project_dir, logger, user_error) if project_dir
+
+    run.update(status_id: 4, error: user_error) if run
     Basic.upd_project_step(project, parsing_step.id) if project_step
     project.update(status_id: 4)
     project.broadcast(parsing_step.id) if project.respond_to?(:broadcast)

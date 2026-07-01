@@ -1,7 +1,8 @@
 class OntologyTermType < ApplicationRecord
   DEFAULT_RANK_RANGE = (1..20).freeze
 
-  # Scope for records that serve as compliance field groups.
+  # Paired ontology annotation types (linked to fix_form.field_groups via field_group_id).
+  # Other fix-form fields are defined in rules.yaml only.
   scope :compliance_field_groups, -> {
     where.not(field_group_id: [nil, '']).order(:display_order)
   }

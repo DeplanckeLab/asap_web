@@ -3,6 +3,9 @@
 module Scfair
   # Applies rules.yaml constraints to compliance fix field groups so autocomplete
   # and fixed-value pickers only propose allowed ontology terms.
+  #
+  # Deprecated for fix-form loading: {FixFormFieldGroupsBuilder} applies the same
+  # enrichment when building groups from fix_form.field_groups in rules.yaml.
   class FixFieldGroupRulesEnricher
     def self.call(fixable_groups)
       new(fixable_groups).call

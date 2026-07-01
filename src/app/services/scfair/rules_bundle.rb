@@ -72,8 +72,19 @@ module Scfair
 
       paths = [path]
       field = obs_field_name_from_path(path)
-      uns_path = field_path('h5ad', :uns, field)
-      paths << uns_path unless paths.include?(uns_path)
+
+      if path.start_with?('/row_attrs/')
+        logical = "var/#{field}"
+        paths << logical unless paths.include?(logical)
+        h5ad_var = field_path('h5ad', :var, field)
+        paths << h5ad_var unless paths.include?(h5ad_var)
+      elsif path.start_with?('/attrs/')
+        h5ad_uns = field_path('h5ad', :uns, field)
+        paths << h5ad_uns unless paths.include?(h5ad_uns)
+      else
+        h5ad_obs = field_path('h5ad', :obs, field)
+        paths << h5ad_obs unless paths.include?(h5ad_obs)
+      end
 
       case field
       when 'ensembl_release'
@@ -550,6 +561,33 @@ module Scfair
         assay_suspension_restrict_message: raw.fetch(:assay_suspension_restrict_message).to_s,
         assay_suspension_restrict_detail: raw.fetch(:assay_suspension_restrict_detail).to_s
       }.freeze
+    end
+
+    def fix_form_field_group_definitions
+      Array(data.dig(:fix_form, :field_groups)).map { |raw| normalize_fix_form_field_group(raw) }.freeze
+    end
+
+    def fix_form_field_groups(format: 'loom', ontology_term_type_id_map: nil)
+      FixFormFieldGroupsBuilder.call(
+        rules: self,
+        format: format,
+        ontology_term_type_id_map: ontology_term_type_id_map
+      ).freeze
+    end
+
+    def fix_form_var_legacy_sources
+      raw = data.dig(:fix_form, :var_legacy_sources) || {}
+      raw.each_with_object({}) do |(field, names), hash|
+        hash[field.to_s] = Array(names).map(&:to_s)
+      end.freeze
+    end
+
+    def fix_form_auto_fill_value(kind)
+      case kind.to_s
+      when 'schema_version' then schema_hash[:schema_version]
+      when 'schema_reference' then schema_hash[:source_url]
+      else nil
+      end
     end
 
     def cross_field_cell_line_forced_rule_keys
@@ -1525,7 +1563,25 @@ module Scfair
       }
       normalized.each_with_object({}) { |(k, v), out| out[k] = v unless v.blank? && !v.is_a?(Hash) && !v.is_a?(Array) }.freeze
     end
-    private :normalize_cross_field_rule, :normalize_cross_field_mapping
+
+    def normalize_fix_form_field_group(raw)
+      cfg = raw.deep_symbolize_keys
+      {
+        id: cfg[:id].to_s,
+        layer: cfg[:layer].to_sym,
+        term_field: cfg[:term_field].to_s,
+        label_field: cfg[:label_field].to_s.presence,
+        label: cfg[:label].to_s,
+        description: cfg[:description].to_s,
+        display_order: cfg.fetch(:display_order, 999).to_i,
+        field_kind: cfg[:field_kind].to_s.to_sym,
+        auto_fill: cfg[:auto_fill].to_s.presence,
+        term_format_hint: cfg[:term_format_hint].to_s.presence,
+        allowed_values: Array(cfg[:allowed_values]).map(&:to_s).presence
+      }.compact.freeze
+    end
+
+    private :normalize_cross_field_rule, :normalize_cross_field_mapping, :normalize_fix_form_field_group
 
     def symbolize_spatial_section(section)
       section ||= {}

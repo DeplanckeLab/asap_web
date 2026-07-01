@@ -45,20 +45,10 @@ task :parse, [:project_key] => [:environment] do |t, args|
     exit 1
   end
   
-  asap_data_db_name = if ENV["ASAP2_REMOTE_DB"].present?
-                        ENV["ASAP2_REMOTE_DB"]
-                      else
-                        h_env['asap_data_db_name'].to_s
-                      end
+  asap_data_db_name = Basic.asap_data_db_name_from_env!(h_env)
   puts asap_data_db_name.to_s
-  
-  if asap_data_db_name.blank?
-    logger.error("[ParseRake] Missing asap_data_db_name in version env_json for version #{version.id}")
-    exit 1
-  end
-  asap_data_db_host = ENV.fetch("ASAP2_REMOTE_HOST", "host.docker.internal")
-  asap_data_db_port = ENV.fetch("ASAP2_REMOTE_PORT", 5433).to_s
-  db_conn = "#{asap_data_db_host}:#{asap_data_db_port}/#{asap_data_db_name}"
+
+  db_conn = Basic.asap_data_db_url(h_env)
   
   project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
   tmp_dir = project_dir + 'parsing'
@@ -94,6 +84,8 @@ task :parse, [:project_key] => [:environment] do |t, args|
        else
          Fu.where(:project_id => project.id, :upload_type => 1).first
        end
+
+  fu_upload_dir = fu&.upload_dir_for_project(project)
 
   if reset_mode
     phase_start.call('reset_cleanup')
@@ -290,7 +282,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
       else
         phase_start.call('load_preparsing_predictions')
         begin
-          upload_dir = fu.upload_dir
+          upload_dir = fu_upload_dir
           output_file = upload_dir + "output.json"
           
           if File.exist?(output_file)
@@ -330,7 +322,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
       if file_type.blank?
         # Try to get detected_format from preparsing output
         begin
-          upload_dir = fu.upload_dir
+          upload_dir = fu_upload_dir
           output_file = upload_dir + "output.json"
           
           if File.exist?(output_file)
@@ -354,10 +346,9 @@ task :parse, [:project_key] => [:environment] do |t, args|
         # the root symlink (e.g. overwrote it with a regular file), fall back to
         # the canonical pre-extracted bundle in the fu upload dir. Matching v8's
         # MTX short-circuit at line 520 below.
-        if file_type.to_s.upcase == 'MTX' && fu
+        if file_type.to_s.upcase == 'MTX' && fu && fu_upload_dir
           begin
-            fu_upload_dir = fu.upload_dir.to_s
-            preparsed_mtx_dir = File.join(fu_upload_dir, 'input_file')
+            preparsed_mtx_dir = File.join(fu_upload_dir.to_s, 'input_file')
             if File.directory?(preparsed_mtx_dir) && File.file?(File.join(preparsed_mtx_dir, 'matrix.mtx'))
               filepath = Pathname.new(preparsed_mtx_dir)
               logger.info("[ParseRake] Using pre-extracted MTX bundle from fu upload dir: #{filepath}")
@@ -371,10 +362,10 @@ task :parse, [:project_key] => [:environment] do |t, args|
         # of passing the archive to Java with a -sel basename (fails for nested paths).
         if fu
           begin
-            preparsing_output_file = fu.upload_dir + "output.json"
+            preparsing_output_file = fu_upload_dir + "output.json"
             if File.exist?(preparsing_output_file)
               h_prep = Basic.safe_parse_json(File.read(preparsing_output_file), {})
-              prep_file_path = Basic.resolve_preparsed_input_file_path(fu, h_preparsing: h_prep)
+              prep_file_path = Basic.resolve_preparsed_input_file_path(fu, h_preparsing: h_prep, project: project)
               if prep_file_path.present?
                 archive_path = /\.(tar|tgz|tbz2|txz|zip|bz2|7z)(\..*)?\z/i
                 if prep_file_path.match?(archive_path)
@@ -396,7 +387,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
                   logger.info("[ParseRake] Using preparsed member file for v<8 parsing: #{filepath} (file_type=#{file_type})")
                 end
               end
-              p = Basic.reconcile_archive_sel_name!(p, fu.upload_dir)
+              p = Basic.reconcile_archive_sel_name!(p, fu_upload_dir)
             end
           rescue => e
             logger.warn("[ParseRake] Could not resolve preparsing file_path: #{e.class} - #{e.message}")
@@ -424,13 +415,15 @@ task :parse, [:project_key] => [:environment] do |t, args|
           end
         end
 
-        skip_legacy_convert = version.id < 8 &&
-                              file_type.to_s.upcase == 'RAW_TEXT' &&
-                              Basic.raw_text_matrix_file?(filepath.to_s)
+        skip_legacy_convert = (version.id >= 8 && file_type.to_s.upcase == 'RDS') ||
+                              (version.id < 8 &&
+                               file_type.to_s.upcase == 'RAW_TEXT' &&
+                               Basic.raw_text_matrix_file?(filepath.to_s))
 
         begin
           if skip_legacy_convert
-            logger.info("[ParseRake] Skipping legacy convert_other_formats for RAW_TEXT matrix at #{filepath}")
+            reason = file_type.to_s.upcase == 'RDS' ? 'RDS (v8 native parser)' : 'RAW_TEXT matrix'
+            logger.info("[ParseRake] Skipping legacy convert_other_formats for #{reason} at #{filepath}")
             conv_res = nil
           else
             conv_res = Basic.convert_other_formats(filepath, logger)
@@ -495,9 +488,10 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
        h_types = {
         'MEX' => "H5_10x",
-        'RDS' => "LOOM",
         'H5_10X' => 'H5_10x'
       }
+      # Legacy Java parser reads LOOM, not RDS; v8 parse.v8.py has a native RDS handler.
+      h_types['RDS'] = 'LOOM' if version.id < 8
       
       # Ensure H5AD selection is always explicit for Java parsing.
       # Java H5AD parser crashes with a NullPointerException if selection is missing.
@@ -535,7 +529,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
        if version.id < 8 && ['H5AD', 'H5_10x'].include?(file_type) && p['sel_name'].blank?
          begin
-          upload_dir = fu.upload_dir
+          upload_dir = fu_upload_dir
           output_file = upload_dir + "output.json"
           h_preparsing = File.exist?(output_file) ? Basic.safe_parse_json(File.read(output_file), {}) : {}
           list_groups = Array(h_preparsing['list_groups'])
@@ -562,7 +556,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
       # hold dimensions from preparsing preview of a different matrix.
       if version.id < 8 && fu && ['H5AD', 'H5_10x'].include?(file_type)
         begin
-          preparsing_output = fu.upload_dir + 'output.json'
+          preparsing_output = fu_upload_dir + 'output.json'
           if File.exist?(preparsing_output.to_s) && sel_for_java.present?
             h_preparsing = Basic.safe_parse_json(File.read(preparsing_output), {})
             list_groups = Array(h_preparsing['list_groups'])
@@ -689,7 +683,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
         # Use that resolved path for v8 parser instead of the archive itself.
         if file_type == 'RAW_TEXT' && fu
           begin
-            preparsing_output_file = fu.upload_dir + "output.json"
+            preparsing_output_file = fu_upload_dir + "output.json"
             if File.exist?(preparsing_output_file)
               h_preparsing = Basic.safe_parse_json(File.read(preparsing_output_file), {})
               preparsed_file_path = h_preparsing['file_path'].to_s
@@ -697,7 +691,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
                 staging_dir = fu.global_upload_dir.to_s
                 if preparsed_file_path.start_with?(staging_dir)
                   rest = preparsed_file_path.delete_prefix(staging_dir).sub(/\A\/+/, '')
-                  preparsed_file_path = File.join(fu.upload_dir.to_s, rest)
+                  preparsed_file_path = File.join(fu_upload_dir.to_s, rest)
                 end
                 if File.exist?(preparsed_file_path)
                   filepath = Pathname.new(preparsed_file_path)
@@ -714,7 +708,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
         if file_type.to_s.upcase == 'MTX' && fu
             staging_dir = fu.global_upload_dir.to_s
-            preparsing_output_file = fu.upload_dir + "output.json"
+            preparsing_output_file = fu_upload_dir + "output.json"
             if File.exist?(preparsing_output_file)
               h_mtx_prep = Basic.safe_parse_json(File.read(preparsing_output_file), {})
               raw_fp = h_mtx_prep['file_path']
@@ -727,7 +721,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
               prep_paths.each do |prep_p|
                 if prep_p.start_with?(staging_dir)
                   rest = prep_p.delete_prefix(staging_dir).sub(/\A\/+/, '')
-                  prep_p = File.join(fu.upload_dir.to_s, rest)
+                  prep_p = File.join(fu_upload_dir.to_s, rest)
                 end
                 next unless prep_p.downcase.end_with?('.mtx') && File.file?(prep_p)
 
@@ -757,7 +751,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
             mtx_final = filepath.to_s
             unless mtx_final.downcase.end_with?('.mtx') && File.file?(mtx_final)
-              bundle_dir = fu.upload_dir + 'input_file'
+              bundle_dir = fu_upload_dir + 'input_file'
               if bundle_dir.directory?
                 bd = begin
                   File.realpath(bundle_dir.to_s)
@@ -1063,10 +1057,10 @@ task :parse, [:project_key] => [:environment] do |t, args|
         logger.warn("[ParseRake] No Fu record found for project #{project.key} (fu_id: #{project.fu_id}), cannot proceed with metadata copying")
       else
         phase_start.call('metadata_copying')
-        upload_dir = fu.upload_dir
+        upload_dir = fu_upload_dir
         output_file = upload_dir + "output.json"
         output_path = project_dir + "parsing" + "output.loom"
-        ori_fu_path = fu.upload_dir + fu.upload_file_name
+        ori_fu_path = fu_upload_dir + fu.upload_file_name
         puts ori_fu_path
         h_preparsing = Basic.safe_parse_json(File.read(output_file), {})
         puts h_preparsing.to_json
@@ -1225,7 +1219,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
     ensure
       if fu
         begin
-          upload_dir_to_cleanup = fu.upload_dir
+          upload_dir_to_cleanup = fu_upload_dir
           global_upload_root = Fu.global_upload_root.to_s
           cleanup_allowed = upload_dir_to_cleanup.to_s.start_with?(global_upload_root + "/")
           if cleanup_allowed && File.exist?(upload_dir_to_cleanup)

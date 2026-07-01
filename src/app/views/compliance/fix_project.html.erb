@@ -62,6 +62,7 @@
                 fg: fg,
                 available_attrs: @available_global_attrs,
                 organism_info: @organism_info,
+                ensembl_info: @ensembl_info,
                 project_title: @project_title,
                 prefill: @prefill_data[fg[:group][:id]],
                 compliant_field_values: @compliant_field_values,
@@ -89,6 +90,36 @@
                 fg: fg,
                 available_attrs: @available_col_attrs,
                 organism_info: @organism_info,
+                ensembl_info: @ensembl_info,
+                project_title: @project_title,
+                prefill: @prefill_data[fg[:group][:id]],
+                compliant_field_values: @compliant_field_values,
+                compliant_field_resolved: @compliant_field_resolved,
+                schema_constraints: @schema_constraints,
+                fix_form_config: @fix_form_cross_field
+              } %>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <!-- Gene Metadata Section -->
+      <% var_groups = @fixable_groups.select { |fg| fg[:group][:type] == :row_attr } %>
+      <% if var_groups.any? %>
+        <div class="bg-white rounded-lg border border-gray-200 p-5">
+          <h2 class="text-lg font-semibold text-gray-900 mb-1">Gene Metadata</h2>
+          <p class="text-sm text-gray-500 mb-4">
+            These fields are stored per gene (row_attrs). Map from legacy ASAP column names
+            (e.g. <code>Gene</code>, <code>chr</code>) to create scFAIR-compliant metadata, or set a constant value for all genes.
+          </p>
+
+          <div class="space-y-4">
+            <% var_groups.each do |fg| %>
+              <%= render partial: 'compliance/fix_field_group', locals: {
+                fg: fg,
+                available_attrs: @available_row_attrs,
+                organism_info: @organism_info,
+                ensembl_info: @ensembl_info,
                 project_title: @project_title,
                 prefill: @prefill_data[fg[:group][:id]],
                 compliant_field_values: @compliant_field_values,

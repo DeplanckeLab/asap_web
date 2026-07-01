@@ -145,7 +145,8 @@ export default class extends Controller {
   updateIconState(statusKey, count) {
     const isActive = count > 0
 
-    // Update icon classes (color + spin)
+    // Update icon classes (color + spin) only when active state changes so
+    // Chrome does not restart the CSS animation on every websocket tick.
     const iconEl = this.statusIconTargets.find(el => el.dataset.statusKey === statusKey)
     if (iconEl) {
       const iconBase = iconEl.dataset.iconBase || ''
@@ -154,7 +155,10 @@ export default class extends Controller {
       const inactiveColor = iconEl.dataset.inactiveColor || ''
       const colorClass = isActive ? activeColor : inactiveColor
       const spinClass = isActive && iconSpin ? ` ${iconSpin}` : ''
-      iconEl.className = `${iconBase}${spinClass} text-base ${colorClass}`
+      const nextClassName = `${iconBase}${spinClass} text-base ${colorClass}`
+      if (iconEl.className !== nextClassName) {
+        iconEl.className = nextClassName
+      }
     }
 
     // Update button disabled state and title

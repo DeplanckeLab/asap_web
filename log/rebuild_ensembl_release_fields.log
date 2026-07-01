@@ -1,0 +1,46 @@
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-redis-1  Running
+ Container asap2_test-postgres-1  Running
+2026-06-29 11:41:10 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.006s, query:n/a]
+2026-06-29 11:41:10 +0000: < 
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /data/asap/ensembl, /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 1/3: complete meta.txt and coord_system.txt ==
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+  vertebrates: checked=7520 meta=3855 coord=7520 already=0 (4650.4s)
+  bacteria: checked=25 meta=25 coord=25 already=0 (4668.5s)
+  fungi: checked=2576 meta=1816 coord=2573 already=0 (5991.9s)
+  metazoa: checked=5237 meta=2420 coord=5236 already=0 (8197.5s)
+  plants: checked=3244 meta=1501 coord=3242 already=1 (9873.5s)
+  protists: checked=1523 meta=1132 coord=1522 already=0 (11046.9s)
+
+== Step 2a/3: populate assemblies ==
+rake aborted!
+ArgumentError: invalid byte sequence in UTF-8 (ArgumentError)
+
+        parts = line.chomp.split("\t", 4)
+                                 ^^^^^^^
+/app/lib/asap_data/ensembl_assemblies_loader.rb:597:in 'String#split'
+/app/lib/asap_data/ensembl_assemblies_loader.rb:597:in 'block in AsapData::EnsemblAssembliesLoader.parse_assembly_name'
+/app/lib/asap_data/ensembl_assemblies_loader.rb:596:in 'IO.foreach'
+/app/lib/asap_data/ensembl_assemblies_loader.rb:596:in 'AsapData::EnsemblAssembliesLoader.parse_assembly_name'
+/app/lib/asap_data/ensembl_assemblies_loader.rb:451:in 'AsapData::EnsemblAssembliesLoader.valid_meta_file?'
+/app/lib/asap_data/ensembl_assemblies_loader.rb:415:in 'AsapData::EnsemblAssembliesLoader.ensure_meta_txt'
+/app/lib/asap_data/ensembl_assemblies_loader.rb:388:in 'AsapData::EnsemblAssembliesLoader.assembly_name_for_organism'
+/app/lib/asap_data/ensembl_assemblies_loader.rb:91:in 'block (2 levels) in AsapData::EnsemblAssembliesLoader.populate!'
+/app/lib/asap_data/ensembl_assemblies_loader.rb:82:in 'Array#each'
+/app/lib/asap_data/ensembl_assemblies_loader.rb:82:in 'block in AsapData::EnsemblAssembliesLoader.populate!'
+/app/lib/asap_data/ensembl_assemblies_loader.rb:62:in 'Array#each'
+/app/lib/asap_data/ensembl_assemblies_loader.rb:62:in 'AsapData::EnsemblAssembliesLoader.populate!'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:41:in 'block (2 levels) in <main>'
+/usr/local/bundle/gems/rake-13.3.1/exe/rake:27:in '<top (required)>'
+/usr/local/bin/bundle:25:in 'Kernel#load'
+/usr/local/bin/bundle:25:in '<main>'
+Tasks: TOP => asap_data:rebuild_ensembl_release_fields
+(See full trace by running task with --trace)

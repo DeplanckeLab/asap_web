@@ -1,0 +1,69 @@
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-postgres-1  Running
+ Container asap2_test-redis-1  Running
+2026-06-30 08:51:03 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.006s, query:n/a]
+2026-06-30 08:51:03 +0000: < 
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 3/3: rebuild genes.name, alt_names, obsolete_alt_names from Ensembl xrefs ==
+  mus_musculus: 62 releases, 97071 genes in db
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+    release 65: 37681 genes, 187315 xrefs, 23830 changed (12.2s)
+    release 66: 37991 genes, 189581 xrefs, 13998 changed (12.0s)
+    release 67: 37991 genes, 188728 xrefs, 11513 changed (13.3s)
+    release 68: 37315 genes, 184968 xrefs, 13860 changed (11.6s)
+    release 69: 37315 genes, 184968 xrefs, 8 changed (11.6s)
+    release 70: 38293 genes, 224744 xrefs, 17670 changed (12.6s)
+    release 71: 38293 genes, 224744 xrefs, 11 changed (12.5s)
+    release 72: 38561 genes, 236665 xrefs, 8006 changed (12.2s)
+    release 73: 38561 genes, 236665 xrefs, 0 changed (11.6s)
+    release 74: 39179 genes, 236810 xrefs, 3298 changed (13.6s)
+    release 75: 39179 genes, 236810 xrefs, 2 changed (14.0s)
+    release 76: 41388 genes, 301319 xrefs, 6362 changed (16.9s)
+    release 77: 41388 genes, 301313 xrefs, 11 changed (16.3s)
+    release 78: 43629 genes, 316860 xrefs, 8873 changed (15.7s)
+    release 79: 43629 genes, 310808 xrefs, 1942 changed (15.4s)
+    release 80: 45513 genes, 363064 xrefs, 10494 changed (17.5s)
+    release 81: 46078 genes, 367504 xrefs, 1247 changed (16.6s)
+    release 82: 46925 genes, 321400 xrefs, 11578 changed (17.5s)
+    release 83: 47400 genes, 324997 xrefs, 12620 changed (17.3s)
+    release 84: 48034 genes, 292988 xrefs, 2535 changed (15.3s)
+    release 85: 48831 genes, 298848 xrefs, 17829 changed (17.8s)
+    release 86: 49100 genes, 301645 xrefs, 16286 changed (16.5s)
+    release 87: 50143 genes, 309471 xrefs, 2378 changed (16.5s)
+    release 88: 51158 genes, 316174 xrefs, 17269 changed (16.5s)
+    release 90: 53110 genes, 197363 xrefs, 5063 changed (12.0s)
+    release 91: 53946 genes, 335065 xrefs, 3196 changed (16.9s)
+    release 92: 54590 genes, 179668 xrefs, 3608 changed (13.0s)
+    release 93: 55029 genes, 204977 xrefs, 2416 changed (12.9s)
+    release 94: 55341 genes, 205446 xrefs, 951 changed (13.2s)
+    release 95: 55647 genes, 205842 xrefs, 616 changed (12.6s)
+    release 96: 56355 genes, 210404 xrefs, 1655 changed (12.6s)
+    release 97: 56393 genes, 215428 xrefs, 1125 changed (13.7s)
+    release 98: 56239 genes, 208291 xrefs, 1048 changed (13.7s)
+    release 99: 56289 genes, 208770 xrefs, 2812 changed (13.8s)
+    release 100: 56305 genes, 355966 xrefs, 2594 changed (18.2s)
+    release 101: 56305 genes, 355967 xrefs, 2 changed (18.3s)
+    release 102: 56305 genes, 355966 xrefs, 1 changed (18.5s)
+    release 103: 53700 genes, 216788 xrefs, 1924 changed (10.3s)
+    release 104: 55416 genes, 216749 xrefs, 3223 changed (13.4s)
+    release 105: 55414 genes, 216779 xrefs, 1122 changed (12.3s)
+    release 106: 55414 genes, 216246 xrefs, 207 changed (12.4s)
+    release 107: 56748 genes, 219216 xrefs, 1499 changed (12.6s)
+    release 108: 56980 genes, 221553 xrefs, 2502 changed (12.7s)
+    release 109: 57010 genes, 221327 xrefs, 1620 changed (12.6s)
+    release 110: 56941 genes, 222422 xrefs, 1498 changed (12.7s)
+    release 111: 57180 genes, 222351 xrefs, 542 changed (12.9s)
+    release 112: 57186 genes, 222461 xrefs, 362 changed (12.8s)
+    release 113: 78298 genes, 244779 xrefs, 21625 changed (14.0s)
+    release 114: 78317 genes, 244758 xrefs, 30 changed (14.0s)
+    release 115: 78334 genes, 266423 xrefs, 21614 changed (16.1s)
+  genes updated=0 unchanged=22421 organisms=1 releases=50 skipped_releases=12 table_reads=244 (715.5s)
+
+Pipeline done in 715.5s

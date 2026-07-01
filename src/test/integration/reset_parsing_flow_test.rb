@@ -4,7 +4,16 @@ require "fileutils"
 
 class ResetParsingFlowTest < ActionDispatch::IntegrationTest
   include ActiveJob::TestHelper
-  self.fixture_paths = []
+
+  def self.fixtures(*names)
+    @fixtures = []
+  end
+
+  def setup_fixtures
+  end
+
+  def teardown_fixtures
+  end
 
   setup do
     clear_enqueued_jobs

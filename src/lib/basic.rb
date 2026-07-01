@@ -16,6 +16,13 @@ module Basic
     '.h5ad' => 'H5AD',
     '.rds' => 'RDS'
   }.freeze
+  INTEGRATION_METHODS = %w[harmony cca rpca uncorrected].freeze
+  INTEGRATION_METHOD_LABELS = {
+    'harmony' => 'Harmony',
+    'cca' => 'CCA',
+    'rpca' => 'RPCA',
+    'uncorrected' => 'Uncorrected'
+  }.freeze
 
   # Raised when a cloned project needs the same metadata column on the immediate parent project
   # (see marker_groups_annot_id) and that source Annot row cannot be found.
@@ -26,10 +33,20 @@ module Basic
   class << self
 
     def asap_data_db_name_from_env!(h_env)
-      db_name = h_env['asap_data_db_name'].to_s.strip
+      db_name = if ENV["ASAP2_REMOTE_DB"].present?
+                  ENV["ASAP2_REMOTE_DB"].to_s.strip
+                else
+                  h_env['asap_data_db_name'].to_s.strip
+                end
       raise ArgumentError, "Missing asap_data_db_name in version env_json" if db_name.empty?
 
       db_name
+    end
+
+    def asap_data_db_url(h_env)
+      host = ENV.fetch("ASAP2_REMOTE_HOST", "host.docker.internal")
+      port = ENV.fetch("ASAP2_REMOTE_PORT", 5433).to_s
+      "#{host}:#{port}/#{asap_data_db_name_from_env!(h_env)}"
     end
 
     def project_export_server_url
@@ -788,12 +805,13 @@ module Basic
     end
 
     # Preparsing may write file_path under global fus/<id>/ while the Fu now lives under project/fus/<id>/.
-    def resolve_preparsed_input_file_path(fu, h_preparsing: nil)
+    def resolve_preparsed_input_file_path(fu, h_preparsing: nil, project: nil)
       return nil unless fu
 
       h_prep = h_preparsing
+      upload_root = project ? fu.upload_dir_for_project(project) : fu.upload_dir
       if h_prep.nil?
-        output_path = fu.upload_dir + 'output.json'
+        output_path = upload_root + 'output.json'
         return nil unless output_path.file?
 
         h_prep = safe_parse_json(output_path.read, {})
@@ -805,7 +823,7 @@ module Basic
       staging_dir = fu.global_upload_dir.to_s
       if staging_dir.present? && prep_path.start_with?(staging_dir)
         rest = prep_path.delete_prefix(staging_dir).sub(/\A\/+/, '')
-        prep_path = File.join(fu.upload_dir.to_s, rest)
+        prep_path = File.join(upload_root.to_s, rest)
       end
 
       File.file?(prep_path) ? prep_path : nil
@@ -3178,6 +3196,129 @@ module Basic
       end
       return h
     end
+
+    # Extract JSON object(s) printed to stdout by pipeline scripts (R, parse.v8.py).
+    def json_objects_from_command_output(output)
+      return [] if output.blank?
+
+      objects = []
+      output.to_s.each_line do |line|
+        line = line.strip
+        next if line.empty?
+
+        next unless line.start_with?('{') || line.start_with?('[')
+
+        begin
+          objects << JSON.parse(line)
+        rescue JSON::ParserError
+          # ignore non-JSON lines
+        end
+      end
+      objects
+    end
+
+    def integration_r_result_from_output(r_output)
+      json_objects_from_command_output(r_output).reverse.find do |obj|
+        obj.is_a?(Hash) && (obj.key?('nber_rows') || obj.key?('displayed_error'))
+      end
+    end
+
+    def parse_result_from_command_output(parse_output)
+      json_objects_from_command_output(parse_output).reverse.find do |obj|
+        obj.is_a?(Hash) && (obj.key?('nber_rows') || obj.key?('displayed_error'))
+      end
+    end
+
+    def loom_has_main_matrix?(loom_path, image_name:)
+      return false unless File.exist?(loom_path)
+
+      require 'shellwords'
+      script = "import h5py,sys; f=h5py.File(sys.argv[1],'r'); sys.exit(0 if 'matrix' in f else 1)"
+      mount = user_data_docker_volume_mount_arg
+      cmd = [
+        'docker run --rm',
+        mount,
+        '--entrypoint python3',
+        image_name,
+        '-c',
+        Shellwords.escape(script),
+        Shellwords.escape(loom_path.to_s)
+      ].join(' ')
+      system(cmd)
+      $?.success?
+    end
+
+    def integration_project?(h_attrs)
+      h = h_attrs.is_a?(Hash) ? h_attrs : safe_parse_json(h_attrs.to_s, {})
+      h['integrate_method'].present? || h['integrate_batch_paths'].present?
+    end
+
+    def integration_source_keys(h_attrs)
+      h = h_attrs.is_a?(Hash) ? h_attrs : safe_parse_json(h_attrs.to_s, {})
+      if h['integrate_source_keys'].present?
+        Array(h['integrate_source_keys']).map(&:to_s).reject(&:blank?)
+      elsif h['integrate_batch_paths'].is_a?(Hash)
+        h['integrate_batch_paths'].keys.map(&:to_s).reject(&:blank?)
+      else
+        []
+      end
+    end
+
+    def integration_method_label(h_attrs)
+      h = h_attrs.is_a?(Hash) ? h_attrs : safe_parse_json(h_attrs.to_s, {})
+      method_key = h['integrate_method'].presence || 'harmony'
+      Basic::INTEGRATION_METHOD_LABELS[method_key.to_s] || method_key.to_s.capitalize
+    end
+
+    def broadcast_integration_status(project, stage, source_key: nil, error: nil)
+      payload = {
+        project_id: project.id,
+        integration_status: stage.to_s
+      }
+      payload[:integration_source_key] = source_key if source_key.present?
+      payload[:integration_error] = error.to_s if error.present?
+      ActionCable.server.broadcast("project_#{project.id}", payload)
+    end
+
+    def integration_batch_levels_error_message
+      'Batch correction requires at least two distinct batch levels. The selected batch metadata has only one value in one or more source projects (for example donor_id is "pooled" everywhere). Choose "None" to treat each project as its own batch, or pick a metadata column with multiple categories.'
+    end
+
+    def integration_command_error_message(output, context: 'Integration')
+      result = integration_r_result_from_output(output)
+      if result && result['displayed_error'].present?
+        err = result['displayed_error']
+        return err.is_a?(Array) ? err.join(' ') : err.to_s
+      end
+
+      text = output.to_s
+      if text.include?('contrasts can be applied only to factors with 2 or more levels')
+        return integration_batch_levels_error_message
+      end
+
+      if (m = text.match(/Error in[^:\n]*:\s*(.+)/))
+        return m[1].strip
+      end
+
+      tail = text.strip.split("\n").reject(&:blank?).last(2).join(' ')
+      tail.presence || "#{context} failed"
+    end
+
+    def integration_user_error_message(message)
+      msg = message.to_s.sub(/\A\[IntegrateRake\]\s*/, '')
+      return integration_batch_levels_error_message if msg.include?('contrasts can be applied only to factors with 2 or more levels')
+
+      if (m = msg.match(/R integration exited with status \d+\.\s*(.+)/m))
+        inner = m[1].strip
+        return integration_batch_levels_error_message if inner.include?('contrasts can be applied only to factors with 2 or more levels')
+        if (em = inner.match(/Error in[^:\n]*:\s*(.+)/))
+          return em[1].strip
+        end
+        return inner.lines.first.to_s.strip.presence || msg
+      end
+
+      msg
+    end
         
     # Show the average system load of the past minute
     def machine_load
@@ -3261,6 +3402,32 @@ module Basic
   #    puts project_dir + " -- " + path
   #    return path.relative_path_from(project_dir)
       return path.to_s.gsub(/^#{project_dir}\//, "")
+    end
+
+    def std_method_project_type_compatible?(project, std_method: nil, obj_attrs: nil)
+      obj_attrs ||= safe_parse_json(std_method&.obj_attrs_json, {})
+      project_types = Array(obj_attrs['project_types'])
+      return true if project_types.empty?
+
+      project_type_tag = project&.project_type&.tag
+      project_type_name = project&.project_type&.name
+      project_types.include?(project_type_name) ||
+        (project_type_tag.present? && project_types.include?(project_type_tag))
+    end
+
+    # Walk default_std_method names in order; skip methods unavailable for this project type.
+    def resolve_default_std_method(project:, default_method_names:, std_methods_by_name:, h_obj_attrs_by_std_method: {}, available_methods: nil)
+      Array(default_method_names).each do |name|
+        method = std_methods_by_name[name]
+        next unless method
+        next if available_methods && !available_methods.include?(method)
+
+        obj_attrs = h_obj_attrs_by_std_method[method.id] || safe_parse_json(method.obj_attrs_json, {})
+        next unless std_method_project_type_compatible?(project, obj_attrs: obj_attrs)
+
+        return method
+      end
+      nil
     end
 
     def get_std_method_attrs std_method, step

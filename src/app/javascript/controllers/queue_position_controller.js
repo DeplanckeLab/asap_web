@@ -338,7 +338,9 @@ export default class extends Controller {
     if (this.hasEmptyQueueTarget) {
       this.emptyQueueTarget.classList.add("hidden")
     }
-    this.positionTarget.innerHTML = '<i class="fas fa-spinner fa-spin"></i>'
+    if (!this.positionTarget.querySelector("i.fa-spin")) {
+      this.positionTarget.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>'
+    }
     this.positionTarget.removeAttribute("data-slurm-queue-position")
     this.positionTarget.removeAttribute("aria-label")
   }

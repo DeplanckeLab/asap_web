@@ -8,7 +8,7 @@ namespace :compliance do
     project_id = ENV['PROJECT_ID']
     limit      = ENV['LIMIT']&.to_i
 
-    # ── Load field definitions from the database ──
+    # ── Load field definitions from rules.yaml (fix_form.field_groups) ──
 
     co_id_to_tag = CellOntology.pluck(:id, :tag).to_h
     ontology_id_by_tag = co_id_to_tag.invert
@@ -18,36 +18,34 @@ namespace :compliance do
     label_rules = {}
     free_text_fields = []
 
-    OntologyTermType.compliance_field_groups.each do |ott|
-      fg = ott.to_field_group(co_id_to_tag)
-      next if fg[:auto_from_project] # skip organism/title
+    Scfair::Rules.with_bundle(Scfair::Rules::DEFAULT_SCHEMA_ID) do
+      Scfair::FixFormFieldGroupsBuilder.call.each do |fg|
+        next if fg[:auto_from_project]
 
-      # Extract field name from term_path (e.g. "/col_attrs/tissue_ontology_term_id" -> "tissue_ontology_term_id")
-      term_name = fg[:term_path].to_s.sub(%r{^/col_attrs/}, '').sub(%r{^/attrs/}, '')
-      next if term_name.blank?
+        term_path = fg[:term_path].to_s
+        next unless term_path.start_with?('/col_attrs/')
 
-      prefixes = fg[:term_ontology_prefixes] || []
-      valid_values = fg[:term_valid_values] || []
+        term_name = term_path.sub(%r{\A/col_attrs/}, '')
+        prefixes = fg[:term_ontology_prefixes] || []
+        valid_values = fg[:term_valid_values] || []
 
-      if valid_values.any?
-        # Enum field (tissue_type, suspension_type, is_primary_data)
-        enum_rules[term_name] = valid_values
-      elsif prefixes.any?
-        # Ontology term ID field -- special accepted values depend on the field
-        special = %w[unknown na]
-        special = [] if %w[assay_ontology_term_id disease_ontology_term_id tissue_ontology_term_id].include?(term_name)
-        ontology_rules[term_name] = { prefixes: prefixes, special: special }
+        if valid_values.any?
+          enum_rules[term_name] = valid_values
+        elsif prefixes.any?
+          special = Scfair::Rules.special_values_for_field('loom', term_name)
+          special = %w[unknown na] if special.empty?
+          special = [] if %w[assay_ontology_term_id disease_ontology_term_id tissue_ontology_term_id].include?(term_name)
+          ontology_rules[term_name] = { prefixes: prefixes, special: special }
 
-        # Paired label field
-        if fg[:label_path].present?
-          label_name = fg[:label_path].to_s.sub(%r{^/col_attrs/}, '').sub(%r{^/attrs/}, '')
-          label_special = special.dup
-          label_special = %w[normal] if label_name == 'disease'
-          label_rules[label_name] = { prefixes: prefixes, special: label_special }
+          if fg[:label_path].present?
+            label_name = fg[:label_path].to_s.sub(%r{\A/col_attrs/}, '')
+            label_special = special.dup
+            label_special = %w[normal] if label_name == 'disease'
+            label_rules[label_name] = { prefixes: prefixes, special: label_special }
+          end
+        else
+          free_text_fields << term_name
         end
-      else
-        # Free text field (donor_id)
-        free_text_fields << term_name
       end
     end
 
@@ -490,5 +488,19 @@ namespace :compliance do
     cm_count = ComplianceMapping.where(project_id: project.id).count
     total_annots = project.annots.count
     puts "  Verification: total annots=#{total_annots}, .vX annots=#{vx_count}, v>1 annots=#{high_v}, mappings=#{cm_count}"
+  end
+
+  desc "Audit fix-form field definitions: compare ontology_term_types compliance rows " \
+       "against rules.yaml. Reports classifications, divergences, and misplaced rows. " \
+       "Usage: rake compliance:audit_fix_form_field_sources [SCHEMA_ID=scfair_7_1_0] " \
+       "[FAIL_ON_DIVERGENCE=1]"
+  task audit_fix_form_field_sources: :environment do
+    schema_id = ENV['SCHEMA_ID'].presence
+    result = Scfair::FixFormFieldSourcesAudit.call(schema_id: schema_id)
+    puts Scfair::FixFormFieldSourcesAudit.format_report(result)
+
+    if ENV['FAIL_ON_DIVERGENCE'].present? && result.divergences?
+      abort 'Fix form field source audit failed (see report above).'
+    end
   end
 end

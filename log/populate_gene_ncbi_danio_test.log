@@ -1,0 +1,56 @@
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-redis-1  Running
+ Container asap2_test-postgres-1  Running
+2026-06-30 13:36:48 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.008s, query:n/a]
+2026-06-30 13:36:48 +0000: < 
+rake aborted!
+SignalException: SIGTERM (SignalException)
+/app/lib/asap_data/gene_ncbi_alt_names_populator.rb:319:in 'String#split'
+/app/lib/asap_data/gene_ncbi_alt_names_populator.rb:319:in 'block in AsapData::GeneNcbiAltNamesPopulator.parse_xrefs_filtered'
+/app/lib/asap_data/gene_ncbi_alt_names_populator.rb:317:in 'IO.foreach'
+/app/lib/asap_data/gene_ncbi_alt_names_populator.rb:317:in 'AsapData::GeneNcbiAltNamesPopulator.parse_xrefs_filtered'
+/app/lib/asap_data/gene_ncbi_alt_names_populator.rb:277:in 'AsapData::GeneNcbiAltNamesPopulator.load_release_data'
+/app/lib/asap_data/gene_ncbi_alt_names_populator.rb:87:in 'block in AsapData::GeneNcbiAltNamesPopulator.populate_for_organism!'
+/app/lib/asap_data/gene_ncbi_alt_names_populator.rb:79:in 'Array#each'
+/app/lib/asap_data/gene_ncbi_alt_names_populator.rb:79:in 'AsapData::GeneNcbiAltNamesPopulator.populate_for_organism!'
+/app/lib/asap_data/gene_ncbi_alt_names_populator.rb:41:in 'block in AsapData::GeneNcbiAltNamesPopulator.populate!'
+/app/lib/asap_data/gene_ncbi_alt_names_populator.rb:40:in 'Array#each'
+/app/lib/asap_data/gene_ncbi_alt_names_populator.rb:40:in 'AsapData::GeneNcbiAltNamesPopulator.populate!'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:74:in 'block (2 levels) in <main>'
+/usr/local/bundle/gems/rake-13.3.1/exe/rake:27:in '<top (required)>'
+Tasks: TOP => asap_data:rebuild_ensembl_release_fields
+(See full trace by running task with --trace)
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 3/3: rebuild genes.name, alt_names, obsolete_alt_names from Ensembl xrefs ==
+  danio_rerio: 62 releases, 82410 genes in db
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+    release 65: 32379 genes, 152916 xrefs, 24780 changed (8.1s)
+    release 66: 32379 genes, 152787 xrefs, 1699 changed (7.5s)
+    release 67: 32469 genes, 145605 xrefs, 14260 changed (7.2s)
+    release 68: 32469 genes, 145371 xrefs, 1429 changed (6.7s)
+    release 69: 32434 genes, 174402 xrefs, 9418 changed (7.5s)
+    release 70: 32434 genes, 174222 xrefs, 1109 changed (7.6s)
+    release 71: 32574 genes, 175027 xrefs, 5061 changed (7.5s)
+    release 72: 32574 genes, 174905 xrefs, 994 changed (7.6s)
+    release 73: 32677 genes, 163691 xrefs, 10374 changed (7.2s)
+    release 74: 32677 genes, 164288 xrefs, 1259 changed (7.2s)
+    release 75: 33737 genes, 216255 xrefs, 9362 changed (8.8s)
+    release 76: 33737 genes, 216017 xrefs, 1044 changed (8.5s)
+    release 77: 33737 genes, 216171 xrefs, 815 changed (8.5s)
+    release 78: 33737 genes, 216337 xrefs, 841 changed (8.6s)
+    release 79: 33737 genes, 216131 xrefs, 886 changed (8.6s)
+    release 80: 31953 genes, 201290 xrefs, 15784 changed (8.5s)
+    release 81: 31953 genes, 194160 xrefs, 7026 changed (8.2s)
+    release 82: 31953 genes, 194557 xrefs, 7878 changed (9.3s)
+    release 83: 31953 genes, 194555 xrefs, 500 changed (9.5s)
+    release 84: 32105 genes, 195694 xrefs, 4589 changed (8.4s)
+    release 85: 32105 genes, 195076 xrefs, 1726 changed (8.3s)
+    release 86: 32189 genes, 196555 xrefs, 7964 changed (8.6s)
+    release 87: 32266 genes, 198746 xrefs, 913 changed (9.1s)

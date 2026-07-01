@@ -1,0 +1,2970 @@
+ Container asap2_test-redis-1  Running
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-postgres-1  Running
+2026-06-29 18:15:29 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.006s, query:n/a]
+2026-06-29 18:15:29 +0000: < 
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 2b/3: populate genes.first_ensembl_release ==
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+rake aborted!
+SignalException: SIGTERM (SignalException)
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:200:in 'String#split'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:200:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.parse_ensembl_ids_from_gene_txt'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:198:in 'IO.foreach'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:198:in 'AsapData::GeneFirstEnsemblReleasePopulator.parse_ensembl_ids_from_gene_txt'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:157:in 'AsapData::GeneFirstEnsemblReleasePopulator.ensembl_ids_for_organism_release'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:78:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:67:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:67:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:34:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:33:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:33:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:60:in 'block (4 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:92:in 'Object#with_env'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:53:in 'block (3 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'Array#each'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'block (2 levels) in <main>'
+/usr/local/bundle/gems/rake-13.3.1/exe/rake:27:in '<top (required)>'
+Tasks: TOP => asap_data:rebuild_ensembl_release_fields
+(See full trace by running task with --trace)
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-postgres-1  Running
+ Container asap_run_test  Running
+ Container asap2_test-redis-1  Running
+2026-06-29 18:56:54 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.006s, query:n/a]
+2026-06-29 18:56:54 +0000: < 
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 2b/3: populate genes.first_ensembl_release ==
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+rake aborted!
+gunzip failed for /mnt/asap_data/ensembl/vertebrates/65/macropus_eugenii/gene_stable_id.txt.gz: gzip: /mnt/asap_data/ensembl/vertebrates/65/macropus_eugenii/gene_stable_id.txt.gz: unexpected end of file
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:408:in 'AsapData::GeneFirstEnsemblReleasePopulator.gunzip_file'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:249:in 'AsapData::GeneFirstEnsemblReleasePopulator.ensure_gene_stable_id_txt'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:204:in 'AsapData::GeneFirstEnsemblReleasePopulator.load_gene_stable_id_map'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:160:in 'AsapData::GeneFirstEnsemblReleasePopulator.ensembl_ids_for_organism_release'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:79:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:68:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:68:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:35:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:34:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:34:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:60:in 'block (4 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:92:in 'Object#with_env'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:53:in 'block (3 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'Array#each'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'block (2 levels) in <main>'
+/usr/local/bundle/gems/rake-13.3.1/exe/rake:27:in '<top (required)>'
+Tasks: TOP => asap_data:rebuild_ensembl_release_fields
+(See full trace by running task with --trace)
+ Container asap2_test-redis-1  Running
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-postgres-1  Running
+2026-06-29 18:58:19 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.006s, query:n/a]
+2026-06-29 18:58:19 +0000: < 
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 2b/3: populate genes.first_ensembl_release ==
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+rake aborted!
+SignalException: SIGTERM (SignalException)
+/usr/local/bundle/gems/activesupport-8.1.1/lib/active_support/core_ext/object/blank.rb:163:in 'String#blank?'
+/usr/local/bundle/gems/activesupport-8.1.1/lib/active_support/core_ext/object/blank.rb:166:in 'String#present?'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:367:in 'AsapData::GeneFirstEnsemblReleasePopulator.valid_ensembl_id?'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:363:in 'AsapData::GeneFirstEnsemblReleasePopulator.resolve_ensembl_id_from_gene_row'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:337:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.parse_ensembl_ids_from_gene_txt'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:334:in 'IO.foreach'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:334:in 'AsapData::GeneFirstEnsemblReleasePopulator.parse_ensembl_ids_from_gene_txt'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:172:in 'AsapData::GeneFirstEnsemblReleasePopulator.ensembl_ids_for_organism_release'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:79:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:68:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:68:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:35:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:34:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:34:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:60:in 'block (4 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:92:in 'Object#with_env'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:53:in 'block (3 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'Array#each'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'block (2 levels) in <main>'
+/usr/local/bundle/gems/rake-13.3.1/exe/rake:27:in '<top (required)>'
+Tasks: TOP => asap_data:rebuild_ensembl_release_fields
+(See full trace by running task with --trace)
+ Container asap2_test-redis-1  Running
+ Container elasticsearch_asap_test  Running
+ Container asap_run_test  Running
+ Container asap2_test-postgres-1  Running
+2026-06-29 19:09:50 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.007s, query:n/a]
+2026-06-29 19:09:50 +0000: < 
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 2b/3: populate genes.first_ensembl_release ==
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+rake aborted!
+SignalException: SIGTERM (SignalException)
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:182:in 'AsapData::GeneFirstEnsemblReleasePopulator.uses_gene_stable_id_map?'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:370:in 'AsapData::GeneFirstEnsemblReleasePopulator.resolve_ensembl_id_from_gene_row'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:337:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.parse_ensembl_ids_from_gene_txt'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:334:in 'IO.foreach'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:334:in 'AsapData::GeneFirstEnsemblReleasePopulator.parse_ensembl_ids_from_gene_txt'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:172:in 'AsapData::GeneFirstEnsemblReleasePopulator.ensembl_ids_for_organism_release'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:79:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:68:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:68:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:35:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:34:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:34:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:60:in 'block (4 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:92:in 'Object#with_env'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:53:in 'block (3 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'Array#each'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'block (2 levels) in <main>'
+/usr/local/bundle/gems/rake-13.3.1/exe/rake:27:in '<top (required)>'
+Tasks: TOP => asap_data:rebuild_ensembl_release_fields
+(See full trace by running task with --trace)
+ Container asap2_test-redis-1  Running
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-postgres-1  Running
+2026-06-29 19:17:11 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.007s, query:n/a]
+2026-06-29 19:17:11 +0000: < 
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 2b/3: populate genes.first_ensembl_release ==
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+=== 2026-06-29T20:56:31Z incremental step 2b ===
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-redis-1  Running
+ Container asap2_test-postgres-1  Running
+Error response from daemon: Conflict. The container name "/asap_gene_first_release" is already in use by container "0f707042c0265cf02ff0c1404bed0627616788cf9704b3f625be6616fa77a867". You have to remove (or rename) that container to be able to reuse that name.
+ Container asap2_test-redis-1  Running
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-postgres-1  Running
+2026-06-29 20:56:56 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.008s, query:n/a]
+2026-06-29 20:56:56 +0000: < 
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 2b/3: populate genes.first_ensembl_release ==
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism mus_musculus_aj (vertebrates): updated=1 reads=29 (2.8s)
+  organism mus_musculus_c3hhej (vertebrates): updated=2 reads=29 (40.8s)
+  organism mus_musculus_casteij (vertebrates): updated=2 reads=29 (41.1s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism caenorhabditis_elegans (vertebrates): updated=47248 reads=61 (96.2s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism saccharomyces_cerevisiae (vertebrates): updated=19 reads=61 (27.3s)
+  organism denticeps_clupeoides (vertebrates): updated=3491 reads=18 (29.6s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism anolis_carolinensis (vertebrates): updated=14945 reads=61 (66.9s)
+  organism macaca_fascicularis (vertebrates): updated=9469 reads=25 (31.5s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism choloepus_hoffmanni (vertebrates): updated=113 reads=61 (83.5s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism tupaia_belangeri (vertebrates): updated=209 reads=61 (83.9s)
+  organism astyanax_mexicanus (vertebrates): updated=12958 reads=41 (44.4s)
+  organism salmo_salar (vertebrates): updated=25848 reads=17 (25.4s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism ailuropoda_melanoleuca (vertebrates): updated=6870 reads=55 (73.9s)
+  organism anabas_testudineus (vertebrates): updated=5645 reads=22 (17.3s)
+
+gzip: stdin: unexpected end of file
+  organism anas_platyrhynchos (vertebrates): updated=16450 reads=38 (38.6s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism bos_taurus (vertebrates): updated=8077 reads=61 (106.0s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism callithrix_jacchus (vertebrates): updated=47145 reads=59 (114.6s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism cavia_porcellus (vertebrates): updated=9368 reads=61 (73.6s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism ciona_savignyi (vertebrates): updated=314 reads=61 (27.0s)
+
+gzip: stdin: unexpected end of file
+  organism ficedula_albicollis (vertebrates): updated=10353 reads=42 (39.1s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism ictidomys_tridecemlineatus (vertebrates): updated=2884 reads=47 (57.5s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism myotis_lucifugus (vertebrates): updated=4587 reads=61 (77.7s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism xiphophorus_maculatus (vertebrates): updated=5857 reads=46 (44.8s)
+  organism mus_caroli (vertebrates): updated=3 reads=26 (27.7s)
+  organism mus_pahari (vertebrates): updated=3 reads=26 (27.1s)
+  organism phascolarctos_cinereus (vertebrates): updated=8092 reads=21 (15.8s)
+  organism scophthalmus_maximus (vertebrates): updated=3664 reads=22 (17.1s)
+  organism esox_lucius (vertebrates): updated=3265 reads=22 (47.8s)
+  organism hippocampus_comes (vertebrates): updated=1 reads=22 (15.2s)
+  organism salmo_trutta (vertebrates): updated=2299 reads=17 (24.3s)
+  organism scleropages_formosus (vertebrates): updated=6110 reads=22 (20.2s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism gasterosteus_aculeatus (vertebrates): updated=87 reads=61 (62.1s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism ochotona_princeps (vertebrates): updated=381 reads=61 (91.2s)
+  organism canis_lupus_familiaris (vertebrates): updated=30951 reads=16 (14.1s)
+  organism peromyscus_maniculatus_bairdii (vertebrates): updated=6037 reads=26 (21.4s)
+  vertebrates: updated=292748 latest_updated=292748 processed=35 reads=3224 (2208.5s)
+  bacteria: updated=0 latest_updated=0 processed=0 reads=0 (0.0s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism gibberella_zeae (fungi): updated=13321 reads=16 (6.8s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism nectria_haematococca (fungi): updated=15707 reads=15 (7.7s)
+  organism fusarium_fujikuroi (fungi): updated=39 reads=40 (4.7s)
+
+gzip: stdin: unexpected end of file
+  organism blumeria_graminis (fungi): updated=7073 reads=43 (3.4s)
+  organism colletotrichum_higginsianum (fungi): updated=3 reads=40 (4.9s)
+  organism colletotrichum_orbiculare (fungi): updated=20 reads=40 (4.4s)
+  organism fusarium_graminearum (fungi): updated=29348 reads=38 (3.4s)
+  organism puccinia_graminisug99 (fungi): updated=104 reads=40 (2.8s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism trichoderma_virens (fungi): updated=298 reads=48 (5.3s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism gaeumannomyces_graminis (fungi): updated=5 reads=50 (7.1s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism puccinia_graministritici (fungi): updated=20534 reads=7 (3.8s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism mycosphaerella_graminicola (fungi): updated=10933 reads=6 (1.9s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism botryotinia_fuckeliana (fungi): updated=26734 reads=11 (4.7s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism gibberella_moniliformis (fungi): updated=14169 reads=16 (4.7s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism glomerella_graminicola (fungi): updated=12020 reads=8 (1.9s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism leptosphaeria_maculans (fungi): updated=95 reads=48 (3.8s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism schizosaccharomyces_pombe (fungi): updated=83 reads=58 (6.8s)
+  organism verticillium_dahliaejr2 (fungi): updated=11751 reads=38 (1.7s)
+  organism botrytis_cinerea (fungi): updated=10377 reads=38 (1.7s)
+  organism schizosaccharomyces_cryophilus (fungi): updated=1 reads=42 (9.4s)
+  organism verticillium_dahliae (fungi): updated=369 reads=42 (11.0s)
+  organism fusarium_pseudograminearum (fungi): updated=213 reads=40 (11.8s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism melampsora_laricipopulina (fungi): updated=2 reads=46 (19.7s)
+  organism puccinia_striiformis (fungi): updated=373 reads=28 (6.1s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism cryptococcus_neoformans (fungi): updated=524 reads=45 (12.0s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism aspergillus_niger (fungi): updated=14445 reads=58 (26.4s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism puccinia_triticina (fungi): updated=2 reads=53 (17.5s)
+  fungi: updated=188543 latest_updated=188543 processed=27 reads=954 (199.4s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism loa_loa (metazoa): updated=137 reads=42 (6.8s)
+  organism onchocerca_volvulus (metazoa): updated=972 reads=38 (1.0s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism schistosoma_mansoni (metazoa): updated=2930 reads=52 (6.7s)
+  organism strongyloides_ratti (metazoa): updated=2 reads=29 (0.8s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism apis_mellifera (metazoa): updated=134 reads=52 (5.1s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism brugia_malayi (metazoa): updated=19208 reads=42 (4.0s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism caenorhabditis_briggsae (metazoa): updated=1701 reads=55 (9.6s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism drosophila_pseudoobscura (metazoa): updated=2874 reads=55 (50.2s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism drosophila_ananassae (metazoa): updated=2159 reads=55 (50.2s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism drosophila_mojavensis (metazoa): updated=2126 reads=55 (44.3s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism nematostella_vectensis (metazoa): updated=45966 reads=52 (67.9s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism trichoplax_adhaerens (metazoa): updated=107 reads=52 (20.6s)
+  organism aedes_aegypti_lvpagwg (metazoa): updated=9 reads=14 (7.6s)
+  organism anopheles_albimanus (metazoa): updated=685 reads=14 (2.5s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism drosophila_sechellia (metazoa): updated=8 reads=55 (48.6s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism drosophila_simulans (metazoa): updated=3674 reads=55 (51.0s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism tribolium_castaneum (metazoa): updated=4307 reads=48 (20.7s)
+rake aborted!
+ArgumentError: invalid byte sequence in UTF-8 (ArgumentError)
+
+          parts = line.chomp.split("\t")
+                                   ^^^^
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:347:in 'String#split'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:347:in 'block (2 levels) in AsapData::GeneFirstEnsemblReleasePopulator.stream_ensembl_ids_with_map'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:346:in 'IO#each_line'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:346:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.stream_ensembl_ids_with_map'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:345:in 'IO.popen'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:345:in 'AsapData::GeneFirstEnsemblReleasePopulator.stream_ensembl_ids_with_map'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:326:in 'AsapData::GeneFirstEnsemblReleasePopulator.stream_ensembl_ids'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:240:in 'AsapData::GeneFirstEnsemblReleasePopulator.accumulate_ensembl_releases!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:88:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:87:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:87:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:41:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:37:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:37:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:59:in 'block (4 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:91:in 'Object#with_env'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:53:in 'block (3 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'Array#each'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'block (2 levels) in <main>'
+/usr/local/bundle/gems/rake-13.3.1/exe/rake:27:in '<top (required)>'
+/usr/local/bin/bundle:25:in 'Kernel#load'
+/usr/local/bin/bundle:25:in '<main>'
+Tasks: TOP => asap_data:rebuild_ensembl_release_fields
+(See full trace by running task with --trace)
+ Container asap2_test-redis-1  Running
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-postgres-1  Running
+2026-06-30 04:44:00 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.007s, query:n/a]
+2026-06-30 04:44:00 +0000: < 
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 2b/3: populate genes.first_ensembl_release ==
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  vertebrates: updated=0 latest_updated=0 processed=0 reads=2385 (847.4s)
+  bacteria: updated=0 latest_updated=0 processed=0 reads=0 (0.0s)
+  fungi: updated=0 latest_updated=0 processed=0 reads=40 (10.1s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism daphnia_pulex (metazoa): updated=30895 reads=50 (22.9s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism drosophila_virilis (metazoa): updated=1914 reads=55 (22.0s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism drosophila_willistoni (metazoa): updated=3131 reads=55 (24.1s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism drosophila_yakuba (metazoa): updated=2618 reads=55 (23.9s)
+  organism solenopsis_invicta (metazoa): updated=231 reads=39 (8.8s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism strongylocentrotus_purpuratus (metazoa): updated=57536 reads=52 (29.9s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism atta_cephalotes (metazoa): updated=18060 reads=48 (15.3s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism danaus_plexippus (metazoa): updated=16260 reads=46 (17.9s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism amphimedon_queenslandica (metazoa): updated=30289 reads=47 (10.9s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism caenorhabditis_remanei (metazoa): updated=1 reads=55 (21.9s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+  organism tetranychus_urticae (metazoa): updated=930 reads=41 (2.5s)
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+
+gzip: stdin: unexpected end of file
+rake aborted!
+Interrupt: Interrupt
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:379:in 'IO.popen'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:379:in 'AsapData::GeneFirstEnsemblReleasePopulator.open_gene_table_stream'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:424:in 'AsapData::GeneFirstEnsemblReleasePopulator.load_gene_stable_id_map'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:261:in 'AsapData::GeneFirstEnsemblReleasePopulator.cached_gene_stable_id_map'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:228:in 'AsapData::GeneFirstEnsemblReleasePopulator.accumulate_ensembl_releases!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:88:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:87:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:87:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:41:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:37:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:37:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:59:in 'block (4 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:91:in 'Object#with_env'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:53:in 'block (3 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'Array#each'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'block (2 levels) in <main>'
+/usr/local/bundle/gems/rake-13.3.1/exe/rake:27:in '<top (required)>'
+/usr/local/bin/bundle:25:in 'Kernel#load'
+/usr/local/bin/bundle:25:in '<main>'
+
+Caused by:
+Interrupt: Interrupt
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:425:in 'IO#each_line'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:425:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.load_gene_stable_id_map'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:379:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.open_gene_table_stream'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:379:in 'IO.popen'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:379:in 'AsapData::GeneFirstEnsemblReleasePopulator.open_gene_table_stream'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:424:in 'AsapData::GeneFirstEnsemblReleasePopulator.load_gene_stable_id_map'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:261:in 'AsapData::GeneFirstEnsemblReleasePopulator.cached_gene_stable_id_map'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:228:in 'AsapData::GeneFirstEnsemblReleasePopulator.accumulate_ensembl_releases!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:88:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:87:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:87:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:41:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:37:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:37:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:59:in 'block (4 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:91:in 'Object#with_env'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:53:in 'block (3 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'Array#each'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'block (2 levels) in <main>'
+/usr/local/bundle/gems/rake-13.3.1/exe/rake:27:in '<top (required)>'
+/usr/local/bin/bundle:25:in 'Kernel#load'
+/usr/local/bin/bundle:25:in '<main>'
+Tasks: TOP => asap_data:rebuild_ensembl_release_fields
+(See full trace by running task with --trace)
+
+gzip: stdin: unexpected end of file
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-redis-1  Running
+ Container asap2_test-postgres-1  Running
+2026-06-30 05:03:33 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.008s, query:n/a]
+2026-06-30 05:03:33 +0000: < 
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 2b/3: populate genes.first_ensembl_release ==
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/homo_sapiens.tgz:homo_sapiens/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/homo_sapiens.tgz:homo_sapiens/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/homo_sapiens.tgz:homo_sapiens/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/homo_sapiens.tgz:homo_sapiens/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/homo_sapiens.tgz:homo_sapiens/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/homo_sapiens.tgz:homo_sapiens/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/homo_sapiens.tgz:homo_sapiens/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/homo_sapiens.tgz:homo_sapiens/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/homo_sapiens.tgz:homo_sapiens/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/danio_rerio.tgz:danio_rerio/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/danio_rerio.tgz:danio_rerio/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/danio_rerio.tgz:danio_rerio/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/danio_rerio.tgz:danio_rerio/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/danio_rerio.tgz:danio_rerio/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/danio_rerio.tgz:danio_rerio/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/danio_rerio.tgz:danio_rerio/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/danio_rerio.tgz:danio_rerio/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/danio_rerio.tgz:danio_rerio/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/dipodomys_ordii.tgz:dipodomys_ordii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/dipodomys_ordii.tgz:dipodomys_ordii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/dipodomys_ordii.tgz:dipodomys_ordii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/dipodomys_ordii.tgz:dipodomys_ordii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/dipodomys_ordii.tgz:dipodomys_ordii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/dipodomys_ordii.tgz:dipodomys_ordii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/dipodomys_ordii.tgz:dipodomys_ordii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/dipodomys_ordii.tgz:dipodomys_ordii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/dipodomys_ordii.tgz:dipodomys_ordii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/equus_caballus.tgz:equus_caballus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/equus_caballus.tgz:equus_caballus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/equus_caballus.tgz:equus_caballus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/equus_caballus.tgz:equus_caballus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/equus_caballus.tgz:equus_caballus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/equus_caballus.tgz:equus_caballus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/equus_caballus.tgz:equus_caballus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/equus_caballus.tgz:equus_caballus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/equus_caballus.tgz:equus_caballus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/macaca_mulatta.tgz:macaca_mulatta/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/macaca_mulatta.tgz:macaca_mulatta/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/macaca_mulatta.tgz:macaca_mulatta/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/macaca_mulatta.tgz:macaca_mulatta/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/macaca_mulatta.tgz:macaca_mulatta/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/macaca_mulatta.tgz:macaca_mulatta/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/macaca_mulatta.tgz:macaca_mulatta/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/macaca_mulatta.tgz:macaca_mulatta/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/macaca_mulatta.tgz:macaca_mulatta/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/ornithorhynchus_anatinus.tgz:ornithorhynchus_anatinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/ornithorhynchus_anatinus.tgz:ornithorhynchus_anatinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/ornithorhynchus_anatinus.tgz:ornithorhynchus_anatinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/ornithorhynchus_anatinus.tgz:ornithorhynchus_anatinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/ornithorhynchus_anatinus.tgz:ornithorhynchus_anatinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/ornithorhynchus_anatinus.tgz:ornithorhynchus_anatinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/ornithorhynchus_anatinus.tgz:ornithorhynchus_anatinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/ornithorhynchus_anatinus.tgz:ornithorhynchus_anatinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/ornithorhynchus_anatinus.tgz:ornithorhynchus_anatinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/spermophilus_tridecemlineatus.tgz:spermophilus_tridecemlineatus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/spermophilus_tridecemlineatus.tgz:spermophilus_tridecemlineatus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/spermophilus_tridecemlineatus.tgz:spermophilus_tridecemlineatus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/takifugu_rubripes.tgz:takifugu_rubripes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/takifugu_rubripes.tgz:takifugu_rubripes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/takifugu_rubripes.tgz:takifugu_rubripes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/takifugu_rubripes.tgz:takifugu_rubripes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/takifugu_rubripes.tgz:takifugu_rubripes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/takifugu_rubripes.tgz:takifugu_rubripes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/takifugu_rubripes.tgz:takifugu_rubripes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/takifugu_rubripes.tgz:takifugu_rubripes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/takifugu_rubripes.tgz:takifugu_rubripes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/loxodonta_africana.tgz:loxodonta_africana/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/loxodonta_africana.tgz:loxodonta_africana/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/loxodonta_africana.tgz:loxodonta_africana/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/loxodonta_africana.tgz:loxodonta_africana/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/loxodonta_africana.tgz:loxodonta_africana/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/loxodonta_africana.tgz:loxodonta_africana/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/loxodonta_africana.tgz:loxodonta_africana/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/loxodonta_africana.tgz:loxodonta_africana/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/loxodonta_africana.tgz:loxodonta_africana/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/oryzias_latipes.tgz:oryzias_latipes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/oryzias_latipes.tgz:oryzias_latipes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/oryzias_latipes.tgz:oryzias_latipes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/oryzias_latipes.tgz:oryzias_latipes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/oryzias_latipes.tgz:oryzias_latipes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/oryzias_latipes.tgz:oryzias_latipes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/oryzias_latipes.tgz:oryzias_latipes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/oryzias_latipes.tgz:oryzias_latipes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/oryzias_latipes.tgz:oryzias_latipes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/pan_troglodytes.tgz:pan_troglodytes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/pan_troglodytes.tgz:pan_troglodytes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/pan_troglodytes.tgz:pan_troglodytes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/pan_troglodytes.tgz:pan_troglodytes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/pan_troglodytes.tgz:pan_troglodytes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/pan_troglodytes.tgz:pan_troglodytes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/pan_troglodytes.tgz:pan_troglodytes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/pan_troglodytes.tgz:pan_troglodytes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/pan_troglodytes.tgz:pan_troglodytes/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/canis_familiaris.tgz:canis_familiaris/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/canis_familiaris.tgz:canis_familiaris/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/canis_familiaris.tgz:canis_familiaris/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/canis_familiaris.tgz:canis_familiaris/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/canis_familiaris.tgz:canis_familiaris/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/canis_familiaris.tgz:canis_familiaris/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/canis_familiaris.tgz:canis_familiaris/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/canis_familiaris.tgz:canis_familiaris/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/canis_familiaris.tgz:canis_familiaris/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/procavia_capensis.tgz:procavia_capensis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/procavia_capensis.tgz:procavia_capensis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/procavia_capensis.tgz:procavia_capensis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/procavia_capensis.tgz:procavia_capensis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/procavia_capensis.tgz:procavia_capensis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/procavia_capensis.tgz:procavia_capensis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/procavia_capensis.tgz:procavia_capensis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/procavia_capensis.tgz:procavia_capensis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/procavia_capensis.tgz:procavia_capensis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/tetraodon_nigroviridis.tgz:tetraodon_nigroviridis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/tetraodon_nigroviridis.tgz:tetraodon_nigroviridis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/tetraodon_nigroviridis.tgz:tetraodon_nigroviridis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/tetraodon_nigroviridis.tgz:tetraodon_nigroviridis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/tetraodon_nigroviridis.tgz:tetraodon_nigroviridis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/tetraodon_nigroviridis.tgz:tetraodon_nigroviridis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/tetraodon_nigroviridis.tgz:tetraodon_nigroviridis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/tetraodon_nigroviridis.tgz:tetraodon_nigroviridis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/tetraodon_nigroviridis.tgz:tetraodon_nigroviridis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/tursiops_truncatus.tgz:tursiops_truncatus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/tursiops_truncatus.tgz:tursiops_truncatus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/tursiops_truncatus.tgz:tursiops_truncatus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/tursiops_truncatus.tgz:tursiops_truncatus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/tursiops_truncatus.tgz:tursiops_truncatus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/tursiops_truncatus.tgz:tursiops_truncatus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/tursiops_truncatus.tgz:tursiops_truncatus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/tursiops_truncatus.tgz:tursiops_truncatus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/tursiops_truncatus.tgz:tursiops_truncatus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/xenopus_tropicalis.tgz:xenopus_tropicalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/xenopus_tropicalis.tgz:xenopus_tropicalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/xenopus_tropicalis.tgz:xenopus_tropicalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/xenopus_tropicalis.tgz:xenopus_tropicalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/xenopus_tropicalis.tgz:xenopus_tropicalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/xenopus_tropicalis.tgz:xenopus_tropicalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/xenopus_tropicalis.tgz:xenopus_tropicalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/xenopus_tropicalis.tgz:xenopus_tropicalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/xenopus_tropicalis.tgz:xenopus_tropicalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/microcebus_murinus.tgz:microcebus_murinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/microcebus_murinus.tgz:microcebus_murinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/microcebus_murinus.tgz:microcebus_murinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/microcebus_murinus.tgz:microcebus_murinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/microcebus_murinus.tgz:microcebus_murinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/microcebus_murinus.tgz:microcebus_murinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/microcebus_murinus.tgz:microcebus_murinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/microcebus_murinus.tgz:microcebus_murinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/microcebus_murinus.tgz:microcebus_murinus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/ciona_intestinalis.tgz:ciona_intestinalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/ciona_intestinalis.tgz:ciona_intestinalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/ciona_intestinalis.tgz:ciona_intestinalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/ciona_intestinalis.tgz:ciona_intestinalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/ciona_intestinalis.tgz:ciona_intestinalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/ciona_intestinalis.tgz:ciona_intestinalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/ciona_intestinalis.tgz:ciona_intestinalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/ciona_intestinalis.tgz:ciona_intestinalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/ciona_intestinalis.tgz:ciona_intestinalis/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/dasypus_novemcinctus.tgz:dasypus_novemcinctus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/dasypus_novemcinctus.tgz:dasypus_novemcinctus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/dasypus_novemcinctus.tgz:dasypus_novemcinctus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/dasypus_novemcinctus.tgz:dasypus_novemcinctus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/dasypus_novemcinctus.tgz:dasypus_novemcinctus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/dasypus_novemcinctus.tgz:dasypus_novemcinctus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/dasypus_novemcinctus.tgz:dasypus_novemcinctus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/dasypus_novemcinctus.tgz:dasypus_novemcinctus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/dasypus_novemcinctus.tgz:dasypus_novemcinctus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/gallus_gallus.tgz:gallus_gallus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/gallus_gallus.tgz:gallus_gallus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/gallus_gallus.tgz:gallus_gallus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/gallus_gallus.tgz:gallus_gallus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/gallus_gallus.tgz:gallus_gallus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/gallus_gallus.tgz:gallus_gallus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/gallus_gallus.tgz:gallus_gallus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/gallus_gallus.tgz:gallus_gallus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/gallus_gallus.tgz:gallus_gallus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/mus_musculus.tgz:mus_musculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/mus_musculus.tgz:mus_musculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/mus_musculus.tgz:mus_musculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/mus_musculus.tgz:mus_musculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/mus_musculus.tgz:mus_musculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/mus_musculus.tgz:mus_musculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/mus_musculus.tgz:mus_musculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/mus_musculus.tgz:mus_musculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/mus_musculus.tgz:mus_musculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/echinops_telfairi.tgz:echinops_telfairi/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/echinops_telfairi.tgz:echinops_telfairi/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/echinops_telfairi.tgz:echinops_telfairi/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/echinops_telfairi.tgz:echinops_telfairi/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/echinops_telfairi.tgz:echinops_telfairi/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/echinops_telfairi.tgz:echinops_telfairi/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/echinops_telfairi.tgz:echinops_telfairi/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/echinops_telfairi.tgz:echinops_telfairi/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/echinops_telfairi.tgz:echinops_telfairi/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/oryctolagus_cuniculus.tgz:oryctolagus_cuniculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/oryctolagus_cuniculus.tgz:oryctolagus_cuniculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/oryctolagus_cuniculus.tgz:oryctolagus_cuniculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/oryctolagus_cuniculus.tgz:oryctolagus_cuniculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/oryctolagus_cuniculus.tgz:oryctolagus_cuniculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/oryctolagus_cuniculus.tgz:oryctolagus_cuniculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/oryctolagus_cuniculus.tgz:oryctolagus_cuniculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/oryctolagus_cuniculus.tgz:oryctolagus_cuniculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/oryctolagus_cuniculus.tgz:oryctolagus_cuniculus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/otolemur_garnettii.tgz:otolemur_garnettii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/otolemur_garnettii.tgz:otolemur_garnettii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/otolemur_garnettii.tgz:otolemur_garnettii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/otolemur_garnettii.tgz:otolemur_garnettii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/otolemur_garnettii.tgz:otolemur_garnettii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/otolemur_garnettii.tgz:otolemur_garnettii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/otolemur_garnettii.tgz:otolemur_garnettii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/otolemur_garnettii.tgz:otolemur_garnettii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/otolemur_garnettii.tgz:otolemur_garnettii/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/pteropus_vampyrus.tgz:pteropus_vampyrus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/pteropus_vampyrus.tgz:pteropus_vampyrus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/pteropus_vampyrus.tgz:pteropus_vampyrus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/pteropus_vampyrus.tgz:pteropus_vampyrus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/pteropus_vampyrus.tgz:pteropus_vampyrus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/pteropus_vampyrus.tgz:pteropus_vampyrus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/pteropus_vampyrus.tgz:pteropus_vampyrus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/pteropus_vampyrus.tgz:pteropus_vampyrus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/pteropus_vampyrus.tgz:pteropus_vampyrus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/rattus_norvegicus.tgz:rattus_norvegicus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/rattus_norvegicus.tgz:rattus_norvegicus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/rattus_norvegicus.tgz:rattus_norvegicus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/rattus_norvegicus.tgz:rattus_norvegicus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/rattus_norvegicus.tgz:rattus_norvegicus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/rattus_norvegicus.tgz:rattus_norvegicus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/rattus_norvegicus.tgz:rattus_norvegicus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/rattus_norvegicus.tgz:rattus_norvegicus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/rattus_norvegicus.tgz:rattus_norvegicus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/sorex_araneus.tgz:sorex_araneus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/sorex_araneus.tgz:sorex_araneus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/sorex_araneus.tgz:sorex_araneus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/sorex_araneus.tgz:sorex_araneus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/sorex_araneus.tgz:sorex_araneus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/sorex_araneus.tgz:sorex_araneus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/sorex_araneus.tgz:sorex_araneus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/sorex_araneus.tgz:sorex_araneus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/sorex_araneus.tgz:sorex_araneus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/vicugna_pacos.tgz:vicugna_pacos/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/vicugna_pacos.tgz:vicugna_pacos/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/vicugna_pacos.tgz:vicugna_pacos/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/vicugna_pacos.tgz:vicugna_pacos/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/vicugna_pacos.tgz:vicugna_pacos/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/vicugna_pacos.tgz:vicugna_pacos/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/vicugna_pacos.tgz:vicugna_pacos/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/vicugna_pacos.tgz:vicugna_pacos/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/vicugna_pacos.tgz:vicugna_pacos/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/erinaceus_europaeus.tgz:erinaceus_europaeus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/erinaceus_europaeus.tgz:erinaceus_europaeus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/erinaceus_europaeus.tgz:erinaceus_europaeus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/erinaceus_europaeus.tgz:erinaceus_europaeus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/erinaceus_europaeus.tgz:erinaceus_europaeus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/erinaceus_europaeus.tgz:erinaceus_europaeus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/erinaceus_europaeus.tgz:erinaceus_europaeus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/erinaceus_europaeus.tgz:erinaceus_europaeus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/erinaceus_europaeus.tgz:erinaceus_europaeus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/felis_catus.tgz:felis_catus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/felis_catus.tgz:felis_catus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/felis_catus.tgz:felis_catus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/felis_catus.tgz:felis_catus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/felis_catus.tgz:felis_catus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/felis_catus.tgz:felis_catus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/felis_catus.tgz:felis_catus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/felis_catus.tgz:felis_catus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/felis_catus.tgz:felis_catus/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/65/monodelphis_domestica.tgz:monodelphis_domestica/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/66/monodelphis_domestica.tgz:monodelphis_domestica/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/67/monodelphis_domestica.tgz:monodelphis_domestica/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/68/monodelphis_domestica.tgz:monodelphis_domestica/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/69/monodelphis_domestica.tgz:monodelphis_domestica/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/70/monodelphis_domestica.tgz:monodelphis_domestica/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/71/monodelphis_domestica.tgz:monodelphis_domestica/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/72/monodelphis_domestica.tgz:monodelphis_domestica/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+  WARN corrupt gene table /mnt/asap_data/ensembl/vertebrates/73/monodelphis_domestica.tgz:monodelphis_domestica/gene_stable_id.txt.gz: gzip: stdin: unexpected end of file
+rake aborted!
+Interrupt: Interrupt
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:451:in 'String#strip'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:451:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.load_gene_stable_id_map'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:361:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.each_gene_table_line'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:367:in 'block (2 levels) in AsapData::GeneFirstEnsemblReleasePopulator.each_pipeline_line'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:367:in 'IO#each_line'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:367:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.each_pipeline_line'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:366:in 'AsapData::GeneFirstEnsemblReleasePopulator.each_pipeline_line'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:360:in 'AsapData::GeneFirstEnsemblReleasePopulator.each_gene_table_line'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:447:in 'AsapData::GeneFirstEnsemblReleasePopulator.load_gene_stable_id_map'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:262:in 'AsapData::GeneFirstEnsemblReleasePopulator.cached_gene_stable_id_map'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:229:in 'AsapData::GeneFirstEnsemblReleasePopulator.accumulate_ensembl_releases!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:89:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:88:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:88:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate_for_organism!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:42:in 'block in AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:38:in 'Array#each'
+/app/lib/asap_data/gene_first_ensembl_release_populator.rb:38:in 'AsapData::GeneFirstEnsemblReleasePopulator.populate!'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:59:in 'block (4 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:91:in 'Object#with_env'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:53:in 'block (3 levels) in <main>'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'Array#each'
+/app/lib/tasks/asap_data_rebuild_ensembl_release_fields.rake:51:in 'block (2 levels) in <main>'
+/usr/local/bundle/gems/rake-13.3.1/exe/rake:27:in '<top (required)>'
+/usr/local/bin/bundle:25:in 'Kernel#load'
+/usr/local/bin/bundle:25:in '<main>'
+Tasks: TOP => asap_data:rebuild_ensembl_release_fields
+(See full trace by running task with --trace)
+ Container asap2_test-redis-1  Running
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-postgres-1  Running
+2026-06-30 05:13:40 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.007s, query:n/a]
+2026-06-30 05:13:40 +0000: < 
+Rebuild Ensembl release fields
+  remote db: asap_data_v8
+  ensembl data dirs: /mnt/asap_data/ensembl
+  vertebrates releases: 54-115
+  ensembl genomes releases: 5-62
+
+== Step 2b/3: populate genes.first_ensembl_release ==
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+  vertebrates: updated=0 latest_updated=0 processed=0 reads=2385 corrupt=0 (2728.6s)
+  bacteria: updated=0 latest_updated=0 processed=0 reads=0 corrupt=0 (0.0s)
+  fungi: updated=0 latest_updated=0 processed=0 reads=40 corrupt=0 (21.4s)
+  organism drosophila_erecta (metazoa): updated=2221 reads=55 (23.8s)
+  organism drosophila_grimshawi (metazoa): updated=2117 reads=55 (22.7s)
+  metazoa: updated=4338 latest_updated=4338 processed=2 reads=353 corrupt=0 (147.0s)
+  organism oryza_glumaepatula (plants): updated=39306 reads=19 (39.8s)
+  organism cajanus_cajan (plants): updated=2212 reads=8 (8.6s)
+  organism amborella_trichopoda (plants): updated=1395 reads=41 (41.2s)
+  organism oryza_barthii (plants): updated=13564 reads=41 (54.6s)
+  organism panicum_hallii_hal2 (plants): updated=33263 reads=7 (17.8s)
+  organism dioscorea_rotundata (plants): updated=19086 reads=25 (19.1s)
+  organism oryza_indica (plants): updated=95528 reads=58 (144.8s)
+  organism oryza_meridionalis (plants): updated=5869 reads=41 (50.4s)
+  organism oryza_nivara (plants): updated=1959 reads=41 (50.8s)
+  organism oryza_rufipogon (plants): updated=5843 reads=40 (50.0s)
+  organism oryza_punctata (plants): updated=5208 reads=41 (60.0s)
+  organism leersia_perrieri (plants): updated=3477 reads=40 (35.1s)
+  organism oryza_longistaminata (plants): updated=30447 reads=37 (22.8s)
+  organism physcomitrella_patens (plants): updated=131918 reads=44 (73.9s)
+  organism populus_trichocarpa (plants): updated=41377 reads=58 (111.6s)
+  organism setaria_italica (plants): updated=35471 reads=49 (68.2s)
+  organism chlamydomonas_reinhardtii (plants): updated=14354 reads=52 (44.1s)
+  organism sorghum_bicolor (plants): updated=67687 reads=58 (79.8s)
+  organism glycine_max (plants): updated=193217 reads=52 (126.6s)
+  organism vitis_vinifera (plants): updated=29971 reads=58 (99.8s)
+  organism zea_mays (plants): updated=155104 reads=56 (132.3s)
+  organism brachypodium_distachyon (plants): updated=26552 reads=58 (75.3s)
+  organism medicago_truncatula (plants): updated=19420 reads=45 (88.5s)
+  organism oryza_sativa (plants): updated=164536 reads=58 (154.6s)
+  organism solanum_lycopersicum (plants): updated=32308 reads=49 (83.2s)
+  organism brassica_rapa (plants): updated=1995 reads=50 (106.2s)
+  organism musa_acuminata (plants): updated=37579 reads=47 (61.2s)
+  organism prunus_persica (plants): updated=29527 reads=41 (60.7s)
+  organism solanum_tuberosum (plants): updated=4013 reads=47 (79.3s)
+  organism theobroma_cacao (plants): updated=24561 reads=37 (58.2s)
+  organism oryza_brachyantha (plants): updated=4254 reads=49 (63.1s)
+  organism malus_domestica (plants): updated=42496 reads=1 (3.6s)
+  organism theobroma_cacao_matina (plants): updated=29188 reads=3 (6.1s)
+  organism triticum_aestivum_arinalrfor (plants): updated=117537 reads=13 (48.9s)
+  organism triticum_aestivum_jagger (plants): updated=116843 reads=13 (50.0s)
+  organism triticum_aestivum_julius (plants): updated=117525 reads=13 (40.5s)
+  organism triticum_aestivum_landmark (plants): updated=117162 reads=13 (50.1s)
+  organism triticum_aestivum_mace (plants): updated=116466 reads=13 (38.6s)
+  organism triticum_aestivum_norin61 (plants): updated=117782 reads=13 (47.5s)
+  organism triticum_aestivum_stanley (plants): updated=117101 reads=13 (49.4s)
+  organism arabidopsis_thaliana (plants): updated=38842 reads=58 (125.7s)
+  organism helianthus_annuus (plants): updated=57832 reads=25 (67.6s)
+  organism oryza_glaberrima (plants): updated=113923 reads=54 (64.4s)
+  organism triticum_aestivum (plants): updated=352330 reads=42 (115.7s)
+  organism triticum_dicoccoides (plants): updated=43974 reads=22 (51.7s)
+  organism triticum_urartu (plants): updated=2674 reads=44 (74.4s)
+  organism triticum_aestivum_lancer (plants): updated=116326 reads=13 (31.5s)
+  organism triticum_aestivum_mattis (plants): updated=116479 reads=13 (31.6s)
+  organism vigna_radiata (plants): updated=52188 reads=22 (11.0s)
+  organism aegilops_tauschii (plants): updated=37083 reads=44 (55.6s)
+  organism cyanidioschyzon_merolae (plants): updated=219 reads=51 (7.4s)
+  organism prunus_dulcis (plants): updated=34421 reads=16 (17.1s)
+  organism hordeum_vulgare (plants): updated=65958 reads=46 (54.2s)
+  plants: updated=3195350 latest_updated=3195350 processed=53 reads=1892 corrupt=0 (3227.4s)
+  organism plasmodium_knowlesi (protists): updated=186 reads=58 (21.9s)
+  organism plasmodium_berghei (protists): updated=25 reads=57 (24.7s)
+  organism plasmodium_chabaudi (protists): updated=5159 reads=57 (18.7s)
+  organism guillardia_theta (protists): updated=398 reads=45 (59.7s)
+  organism hyaloperonospora_arabidopsidis (protists): updated=5 reads=48 (28.8s)
+  organism plasmodium_falciparum (protists): updated=5849 reads=58 (26.2s)
+  organism plasmodium_vivax (protists): updated=93 reads=58 (20.1s)
+  organism phytophthora_parasitica (protists): updated=109 reads=40 (32.0s)
+  organism pythium_iwayamai (protists): updated=14869 reads=41 (28.4s)
+  organism pythium_vexans (protists): updated=1 reads=41 (31.2s)
+  organism trypanosoma_brucei (protists): updated=341 reads=53 (23.0s)
+  organism bigelowiella_natans (protists): updated=5 reads=41 (24.4s)
+  organism emiliania_huxleyi (protists): updated=2 reads=42 (68.5s)
+  organism albugo_laibachii (protists): updated=357 reads=49 (24.5s)
+  organism leishmania_major (protists): updated=9379 reads=54 (31.1s)
+  organism thalassiosira_pseudonana (protists): updated=12020 reads=58 (31.9s)
+  organism dictyostelium_discoideum (protists): updated=163 reads=57 (28.6s)
+  organism entamoeba_histolytica (protists): updated=1 reads=49 (28.2s)
+  organism phaeodactylum_tricornutum (protists): updated=10616 reads=58 (27.6s)
+  organism tetrahymena_thermophila (protists): updated=1 reads=49 (27.2s)
+  organism giardia_lamblia (protists): updated=58 reads=44 (21.9s)
+  organism toxoplasma_gondii (protists): updated=8485 reads=50 (19.9s)
+  organism phytophthora_sojae (protists): updated=19324 reads=55 (26.0s)
+  organism phytophthora_ramorum (protists): updated=1 reads=55 (24.3s)
+  protists: updated=87447 latest_updated=87447 processed=24 reads=1217 corrupt=0 (699.9s)
+
+Pipeline done in 6824.3s

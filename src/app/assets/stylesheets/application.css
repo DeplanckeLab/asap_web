@@ -515,3 +515,24 @@ p, label, li, td, th, input, select, textarea, button {
   color: #111827;
   background: #f3f4f6;
 }
+
+/* Font Awesome spinners need inline-block for transform animations (Chrome). */
+.fa-spin,
+.fa-pulse,
+.fas.fa-spin,
+.far.fa-spin,
+.fab.fa-spin {
+  display: inline-block;
+}
+
+@keyframes asap-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.fa-spin {
+  animation-name: asap-spin;
+  animation-duration: 1s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}

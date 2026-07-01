@@ -40,6 +40,26 @@ class Project < ApplicationRecord
   has_many :exp_entries, through: :exp_entries_projects
   has_many :fus
 
+  # Project-local Fu storage (fus/<fu_id>/ under this project's directory).
+  def fu_storage_dir
+    return nil unless fu_id
+
+    fu = Fu.find_by(id: fu_id)
+    return fu.upload_dir_for_project(self) if fu
+
+    upload_root = data_dir + 'fus' + fu_id.to_s
+    upload_root if upload_root.directory?
+  end
+
+  def find_fu_for_upload
+    Fu.resolve_for_project(self)
+  end
+
+  def data_dir
+    user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
+    Pathname.new(user_data_dir) + user_id.to_s + key
+  end
+
   # Elasticsearch settings
   settings index: {
     number_of_shards: 1,
@@ -440,6 +460,33 @@ class Project < ApplicationRecord
     !filesystem_project_data_present?
   end
 
+  def archive_file_path
+    Pathname.new("#{storage_dir}.tgz")
+  end
+
+  # True when missing local files likely mean data lives in S3/archive, not a brand-new project still being created.
+  def archive_restore_expected?
+    disk_size_archived.present? || (archive_file_path.exist? && archive_file_path.size.to_i.positive?)
+  end
+
+  def integration_in_progress?
+    return false unless Basic.integration_project?(parsing_attrs_json)
+
+    v = version
+    return true unless v
+
+    asap_docker_image = Basic.get_asap_docker(v)
+    return true unless asap_docker_image
+
+    parsing_step = Step.where(docker_image_id: asap_docker_image.id, version_id: version_id, name: 'parsing').first
+    return true unless parsing_step
+
+    project_step = ProjectStep.find_by(project_id: id, step_id: parsing_step.id)
+    return true unless project_step
+
+    [1, 2].include?(project_step.status_id)
+  end
+
   def archived_on_s3?
     archive_status_id == 3
   end
@@ -500,7 +547,7 @@ class Project < ApplicationRecord
         )
         update_archive_metadata!(archive_status_id: 1, disk_size_archived: nil)
         true
-      elsif !data_present && effective_unarchived
+      elsif !data_present && effective_unarchived && archive_restore_expected?
         Rails.logger.info(
           "[Project#reconcile_archive_status_with_filesystem!] Project #{id} (#{key}): project data missing or empty but status was unarchived; setting archived"
         )

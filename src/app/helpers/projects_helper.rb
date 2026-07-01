@@ -291,4 +291,18 @@ module ProjectsHelper
 
     %(<div class="pt-1"><div class="inline-flex items-center flex-wrap gap-x-1 gap-y-0.5 max-w-full px-3 py-1.5 rounded-md text-sm font-medium bg-white text-gray-700 border border-gray-300"#{title_attr}><span class="font-medium text-gray-800">#{display_name}</span>#{detail_html}</div></div>).html_safe
   end
+
+  def reset_parsing_button(project, extra_class: nil, extra_style: nil)
+    base_class = "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block border-0"
+    css_class = [base_class, extra_class].compact.join(' ')
+    link_to reset_parsing_project_path(project),
+            class: css_class,
+            style: extra_style,
+            data: { turbo: false } do
+      safe_join([
+        tag.i(class: 'fas fa-redo sm:mr-1'),
+        tag.span(' Reset', class: 'hidden sm:inline')
+      ])
+    end
+  end
 end

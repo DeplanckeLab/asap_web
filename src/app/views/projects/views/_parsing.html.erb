@@ -15,6 +15,8 @@
      else
        "Parsing"
      end %>
+  <% h_integration_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}) %>
+  <% show_integration_progress = Basic.integration_project?(h_integration_attrs) && @parsing_run && [1, 2].include?(@parsing_run.status_id) %>
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 mb-6 overflow-hidden"
        data-parsing-status-panel="true"
        data-current-status-id="<%= status_id || '' %>">
@@ -54,6 +56,9 @@
                 Nothing in the queue, will start shortly...
               </div>
             <% end %>
+          <% end %>
+          <% if show_integration_progress %>
+            <%= render 'projects/views/integration_progress_panel' %>
           <% end %>
         </div>
       <% elsif status_id == 2 %>
@@ -96,6 +101,9 @@
               </button>
             <% end %>
           </div>
+          <% if show_integration_progress %>
+            <%= render 'projects/views/integration_progress_panel' %>
+          <% end %>
         </div>
       <% elsif status_id == 3 %>
         <%# Status is complete but parsed output is not currently available in the panel. %>
@@ -109,27 +117,22 @@
         <div class="flex flex-col items-center justify-center">
           <i class="fas fa-exclamation-circle text-red-500 text-5xl mb-4"></i>
           <h3 class="text-xl font-semibold text-red-900 mb-2"><%= step_display_name %> Failed</h3>
-          <p class="text-gray-600 mb-4">
+          <p class="text-gray-600 mb-4 text-left max-w-2xl mx-auto">
+            <% raw_error = nil %>
             <% if @results && @results['displayed_error'] %>
-              <%# Show error from output.json if available %>
-              <% if @results['displayed_error'].is_a?(Array) %>
-                <%= @results['displayed_error'].first %>
-              <% else %>
-                <%= @results['displayed_error'] %>
-              <% end %>
+              <% raw_error = @results['displayed_error'].is_a?(Array) ? @results['displayed_error'].first : @results['displayed_error'] %>
             <% elsif @parsing_run && @parsing_run.error.present? %>
-              <%= @parsing_run.error %>
+              <% raw_error = @parsing_run.error %>
+            <% end %>
+            <% if raw_error.present? %>
+              <%= Basic.integration_user_error_message(raw_error) %>
             <% else %>
-              The parsing job failed. Please check the logs or try restarting the parsing step.
+              The <%= step_display_name.downcase %> job failed. Please check the logs or try restarting the parsing step.
             <% end %>
           </p>
           <% if can_reset_parsing %>
             <% if editable?(@project) %>
-              <%= button_tag type: 'button',
-                    data: { reset_parsing_url: reset_parsing_project_path(@project) },
-                    class: "mt-2 px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block border-0" do %>
-                <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
-              <% end %>
+              <%= reset_parsing_button(@project, extra_class: 'mt-2') %>
             <% else %>
               <span class="mt-2 px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed inline-block" title="You need edit rights to reset parsing">
                 <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
@@ -205,12 +208,7 @@
           <!-- Reset Button -->
           <% if can_reset_parsing %>
             <% if editable?(@project) %>
-              <%= button_tag type: 'button',
-                    data: { reset_parsing_url: reset_parsing_project_path(@project) },
-                    class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block border-0",
-                    style: "flex-shrink: 0;" do %>
-                <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
-              <% end %>
+              <%= reset_parsing_button(@project, extra_style: 'flex-shrink: 0;') %>
             <% else %>
               <span class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed inline-block" style="flex-shrink: 0;" title="You need edit rights to reset parsing">
                 <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
@@ -238,9 +236,11 @@
           <i class="fas fa-exclamation-circle text-red-600 mt-0.5 flex-shrink-0"></i>
           <div class="flex-1 min-w-0 break-words">
             <h4 class="text-sm font-semibold text-red-800 mb-2"><%= @parsing_errors.size == 1 ? 'Error' : 'Errors' %></h4>
-            <% @parsing_errors.each do |error| %>
-              <p class="text-red-800 mb-1 last:mb-0"><%= error %></p>
-            <% end %>
+            <ul class="list-disc list-inside space-y-1 text-red-800">
+              <% @parsing_errors.each do |error| %>
+                <li><%= error %></li>
+              <% end %>
+            </ul>
           </div>
         </div>
       <% end %>
@@ -250,9 +250,11 @@
           <i class="fas fa-exclamation-triangle text-yellow-600 mt-0.5 flex-shrink-0"></i>
           <div class="flex-1 min-w-0 break-words">
             <h4 class="text-sm font-semibold text-yellow-800 mb-2">Warnings</h4>
-            <% @parsing_warnings.each do |warning| %>
-              <p class="text-yellow-800 mb-1 last:mb-0"><%= warning %></p>
-            <% end %>
+            <ul class="list-disc list-inside space-y-1 text-yellow-800">
+              <% @parsing_warnings.each do |warning| %>
+                <li><%= warning %></li>
+              <% end %>
+            </ul>
           </div>
         </div>
       <% end %>
@@ -262,9 +264,11 @@
           <i class="fas fa-info-circle text-blue-600 mt-0.5 flex-shrink-0"></i>
           <div class="flex-1 min-w-0 break-words">
             <h4 class="text-sm font-semibold text-blue-800 mb-2"><%= @parsing_infos.size == 1 ? 'Note' : 'Notes' %></h4>
-            <% @parsing_infos.each do |info| %>
-              <p class="text-blue-800 mb-1 last:mb-0"><%= info %></p>
-            <% end %>
+            <ul class="list-disc list-inside space-y-1 text-blue-800">
+              <% @parsing_infos.each do |info| %>
+                <li><%= info %></li>
+              <% end %>
+            </ul>
           </div>
         </div>
       <% end %>
@@ -322,18 +326,28 @@
       <!-- Integration section (if applicable) -->
       <% if @project.parsing_attrs_json %>
         <% h_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}) %>
-        <% if h_attrs['integrate_batch_paths'] %>
+        <% if Basic.integration_project?(h_attrs) %>
           <div class="border-t border-gray-200 pt-4">
             <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4 flex items-center gap-2">
               <i class="fas fa-layer-group text-gray-500"></i>
               Integration
             </h4>
-            <% integrated_projects = Project.where(key: h_attrs['integrate_batch_paths'].keys).all %>
+            <% project_keys = Basic.integration_source_keys(h_attrs) %>
+            <% projects_by_key = Project.where(key: project_keys).index_by(&:key) %>
+            <% integrated_projects = project_keys.filter_map { |key| projects_by_key[key] } %>
+            <% integrate_method_label = Basic.integration_method_label(h_attrs) %>
+            <% batch_paths = h_attrs['integrate_batch_paths'].is_a?(Hash) ? h_attrs['integrate_batch_paths'] : {} %>
             <div class="bg-gray-50 rounded-lg p-4 space-y-4">
               <div class="flex items-center justify-between py-2 border-b border-gray-200">
-                <span class="text-sm font-medium text-gray-700">Number of PCs taken into account</span>
-                <span class="text-sm text-gray-900 font-semibold"><%= h_attrs["integrate_n_pcs"] %></span>
+                <span class="text-sm font-medium text-gray-700">Integration method</span>
+                <span class="text-sm text-gray-900 font-semibold"><%= integrate_method_label %></span>
               </div>
+              <% if h_attrs['integrate_n_pcs'].present? && h_attrs['integrate_method'].to_s != 'uncorrected' %>
+                <div class="flex items-center justify-between py-2 border-b border-gray-200">
+                  <span class="text-sm font-medium text-gray-700">Number of PCs</span>
+                  <span class="text-sm text-gray-900 font-semibold"><%= h_attrs['integrate_n_pcs'] %></span>
+                </div>
+              <% end %>
               <div>
                 <p class="text-sm font-medium text-gray-700 mb-3">Integrated projects</p>
                 <div class="overflow-x-auto max-w-full w-full">
@@ -342,7 +356,9 @@
                       <tr>
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Project key</th>
                         <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Project name</th>
-                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Batch metadata</th>
+                        <% if batch_paths.any? %>
+                          <th class="px-4 py-3 text-left text-xs font-medium text-gray-700 uppercase tracking-wider">Batch metadata</th>
+                        <% end %>
                       </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
@@ -350,9 +366,12 @@
                         <tr class="hover:bg-gray-50">
                           <td class="px-4 py-3 text-sm text-gray-900"><%= p.key %></td>
                           <td class="px-4 py-3 text-sm text-gray-900"><%= p.name %></td>
-                          <td class="px-4 py-3 text-sm text-gray-900">
-                            <%= (h_attrs['integrate_batch_paths'][p.key] == 'null') ? 'None' : h_attrs['integrate_batch_paths'][p.key] %>
-                          </td>
+                          <% if batch_paths.any? %>
+                            <td class="px-4 py-3 text-sm text-gray-900">
+                              <% batch_val = batch_paths[p.key] || batch_paths[p.key.to_s] %>
+                              <%= batch_val.blank? || batch_val.to_s == 'null' ? 'None' : batch_val %>
+                            </td>
+                          <% end %>
                         </tr>
                       <% end %>
                     </tbody>
@@ -497,7 +516,7 @@
     
     <% if @project.parsing_attrs_json %>
       <% h_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {}) %>
-      <% if h_attrs['integrate_batch_paths'] %>
+      <% if Basic.integration_project?(h_attrs) %>
         if (typeof DataTable !== 'undefined') {
           new DataTable('#integration_projects')
         }
@@ -518,12 +537,7 @@
         </h3>
         <% if can_reset_parsing %>
           <% if editable?(@project) %>
-            <%= button_tag type: 'button',
-                  data: { reset_parsing_url: reset_parsing_project_path(@project) },
-                  class: "px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer inline-block border-0",
-                  style: "flex-shrink: 0;" do %>
-              <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>
-            <% end %>
+            <%= reset_parsing_button(@project, extra_style: 'flex-shrink: 0;') %>
           <% else %>
             <span class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed inline-block" style="flex-shrink: 0;" title="You need edit rights to reset parsing">
               <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Reset</span>

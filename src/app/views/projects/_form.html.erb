@@ -89,7 +89,6 @@
             <% 
               # Treat organism_id of 1 (database default) as nil for new projects, except in integration mode
               effective_organism_id = (project.new_record? && project.organism_id == 1 && !@integrate_mode) ? nil : project.organism_id
-              show_short_name = project.version_id.to_i < 8
             %>
             <%= form.hidden_field :organism_id, value: effective_organism_id || "", data: { organism_selector_target: "hiddenInput", action: "change->file-upload#checkSubmitButton change->organism-selector#syncSelectionFromHiddenInput" } %>
             
@@ -107,18 +106,14 @@
                       # Remote organisms (array of hashes)
                       selected_org = @organisms.find { |o| o.is_a?(Hash) ? o['id'] == effective_organism_id : o.id == effective_organism_id }
                       selected_display = if selected_org.is_a?(Hash)
-                        if show_short_name && selected_org['short_name'].present?
-                          "#{selected_org['name']} (#{selected_org['short_name']})"
-                        else
-                          selected_org['name']
-                        end
+                        Organism.selector_label(selected_org['name'], selected_org['short_name'])
                       else
-                        show_short_name && selected_org&.short_name.present? ? "#{selected_org.name} (#{selected_org.short_name})" : selected_org&.name
+                        Organism.selector_label(selected_org&.name, selected_org&.short_name)
                       end
                     else
                       # Local organisms (ActiveRecord relation)
                       selected_org = @organisms.find { |o| o.id == effective_organism_id }
-                      selected_display = show_short_name && selected_org&.short_name.present? ? "#{selected_org.name} (#{selected_org.short_name})" : selected_org&.name
+                      selected_display = Organism.selector_label(selected_org&.name, selected_org&.short_name)
                     end
                   %>
                   <%= selected_display || "Please select an organism" %>

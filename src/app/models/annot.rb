@@ -156,6 +156,37 @@ class Annot < ApplicationRecord
     end
   end
 
+  # Distinct category labels stored in list_cat_json (per-cell array or label list).
+  def distinct_category_labels_from_list_cat_json
+    return [] if list_cat_json.blank?
+
+    parsed = JSON.parse(list_cat_json)
+    Array(parsed)
+      .flat_map { |v| v.to_s.split(' || ') }
+      .map { |v| v.strip }
+      .reject(&:blank?)
+      .uniq
+  rescue JSON::ParserError
+    []
+  end
+
+  # Number of distinct categories for integration batch selection (list_cat_json first).
+  def integration_batch_category_count
+    labels = distinct_category_labels_from_list_cat_json
+    return labels.size if labels.any?
+
+    if categories_json.present?
+      cats = JSON.parse(categories_json) rescue {}
+      return cats.keys.size if cats.is_a?(Hash) && cats.any?
+    end
+
+    nber_cats.to_i
+  end
+
+  def integration_batch_metadata?
+    integration_batch_category_count > 1
+  end
+
   private
 
   def prevent_deletion_if_locked_from_publication

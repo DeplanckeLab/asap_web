@@ -1,0 +1,267 @@
+2026-06-29 15:44:43 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.007s, query:n/a]
+2026-06-29 15:44:43 +0000: < 
+Complete local Ensembl meta.txt and coord_system.txt
+  ensembl data dirs: /mnt/asap_data/ensembl
+
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-redis-1  Running
+ Container asap_run_test  Running
+ Container asap2_test-postgres-1  Running
+2026-06-29 15:56:24 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.012s, query:n/a]
+2026-06-29 15:56:24 +0000: < 
+Complete local Ensembl meta.txt and coord_system.txt
+  ensembl data dirs: /mnt/asap_data/ensembl
+
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+  progress: checked=200 complete=86 meta_dl=0 coord_dl=114 meta_fail=0 coord_fail=0 skipped_no_core=0 last=vertebrates/57/xenopus_tropicalis
+  progress: checked=400 complete=157 meta_dl=48 coord_dl=243 meta_fail=0 coord_fail=0 skipped_no_core=0 last=vertebrates/61/tupaia_belangeri
+  progress: checked=600 complete=254 meta_dl=51 coord_dl=346 meta_fail=0 coord_fail=0 skipped_no_core=0 last=vertebrates/65/oryzias_latipes
+  progress: checked=800 complete=319 meta_dl=108 coord_dl=481 meta_fail=0 coord_fail=0 skipped_no_core=0 last=vertebrates/69/canis_familiaris
+  progress: checked=1000 complete=407 meta_dl=108 coord_dl=593 meta_fail=0 coord_fail=0 skipped_no_core=0 last=vertebrates/72/homo_sapiens
+  progress: checked=1200 complete=493 meta_dl=108 coord_dl=707 meta_fail=0 coord_fail=0 skipped_no_core=0 last=vertebrates/75/meleagris_gallopavo
+  progress: checked=1400 complete=582 meta_dl=108 coord_dl=818 meta_fail=0 coord_fail=0 skipped_no_core=0 last=vertebrates/78/lepisosteus_oculatus
+  progress: checked=1600 complete=671 meta_dl=108 coord_dl=929 meta_fail=0 coord_fail=0 skipped_no_core=0 last=vertebrates/81/gadus_morhua
+  progress: checked=1800 complete=761 meta_dl=108 coord_dl=1039 meta_fail=0 coord_fail=0 skipped_no_core=0 last=vertebrates/84/dipodomys_ordii
+  progress: checked=2000 complete=861 meta_dl=108 coord_dl=1139 meta_fail=0 coord_fail=0 skipped_no_core=0 last=vertebrates/86/takifugu_rubripes
+  progress: checked=2200 complete=909 meta_dl=193 coord_dl=1280 meta_fail=23 coord_fail=0 skipped_no_core=0 last=vertebrates/89/ficedula_albicollis
+  progress: checked=2400 complete=959 meta_dl=231 coord_dl=1394 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/91/heterocephalus_glaber_male
+  progress: checked=2600 complete=1018 meta_dl=305 coord_dl=1535 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/93/cavia_porcellus
+  progress: checked=2800 complete=1128 meta_dl=305 coord_dl=1625 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/94/nannospalax_galili
+  progress: checked=3000 complete=1251 meta_dl=305 coord_dl=1702 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/95/scophthalmus_maximus
+  progress: checked=3200 complete=1393 meta_dl=305 coord_dl=1760 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/96/sphenodon_punctatus
+  progress: checked=3400 complete=1537 meta_dl=305 coord_dl=1816 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/97/serinus_canaria
+  progress: checked=3600 complete=1688 meta_dl=305 coord_dl=1865 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/98/pongo_abelii
+  progress: checked=3800 complete=1728 meta_dl=454 coord_dl=2025 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/99/mus_musculus_pwkphj
+  progress: checked=4000 complete=1795 meta_dl=572 coord_dl=2158 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/100/echeneis_naucrates
+  progress: checked=4200 complete=1956 meta_dl=572 coord_dl=2197 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/100/xenopus_tropicalis
+  progress: checked=4400 complete=2119 meta_dl=572 coord_dl=2234 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/101/oncorhynchus_tshawytscha
+  progress: checked=4600 complete=2216 meta_dl=657 coord_dl=2337 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/102/delphinapterus_leucas
+  progress: checked=4800 complete=2216 meta_dl=855 coord_dl=2537 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/102/sus_scrofa_rongchang
+  progress: checked=5000 complete=2216 meta_dl=1053 coord_dl=2737 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/103/mus_spicilegus
+  progress: checked=5200 complete=2216 meta_dl=1251 coord_dl=2937 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/104/ciona_savignyi
+  progress: checked=5400 complete=2216 meta_dl=1449 coord_dl=3137 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/104/sorex_araneus
+  progress: checked=5600 complete=2216 meta_dl=1493 coord_dl=3337 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/105/monodon_monoceros
+  progress: checked=5800 complete=2216 meta_dl=1493 coord_dl=3537 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/106/canis_lupus_familiarisboxer
+  progress: checked=6000 complete=2216 meta_dl=1493 coord_dl=3737 meta_fail=85 coord_fail=0 skipped_no_core=0 last=vertebrates/106/pygocentrus_nattereri
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-redis-1  Running
+ Container asap2_test-postgres-1  Running
+2026-06-29 16:36:41 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.007s, query:n/a]
+2026-06-29 16:36:41 +0000: < 
+Complete local Ensembl meta.txt and coord_system.txt
+  ensembl data dirs: /mnt/asap_data/ensembl
+
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+  scan: 21759 organisms in 54.9s, 15720 complete, 6039 to fetch (meta: 1375, coord: 5952)
+  progress: 50/6039 meta_dl=0 coord_dl=44 meta_fail=0 coord_fail=6 skipped_no_core=0 last=vertebrates/107/lepisosteus_oculatus
+  progress: 100/6039 meta_dl=0 coord_dl=86 meta_fail=0 coord_fail=14 skipped_no_core=0 last=vertebrates/107/macaca_fascicularis
+  progress: 150/6039 meta_dl=0 coord_dl=125 meta_fail=0 coord_fail=25 skipped_no_core=0 last=vertebrates/107/leptobrachium_leishanense
+  progress: 200/6039 meta_dl=0 coord_dl=169 meta_fail=0 coord_fail=31 skipped_no_core=0 last=vertebrates/108/kryptolebias_marmoratus
+  progress: 250/6039 meta_dl=0 coord_dl=206 meta_fail=0 coord_fail=44 skipped_no_core=0 last=vertebrates/108/sarcophilus_harrisii
+  progress: 300/6039 meta_dl=0 coord_dl=249 meta_fail=0 coord_fail=51 skipped_no_core=0 last=vertebrates/108/sinocyclocheilus_anshuiensis
+  progress: 350/6039 meta_dl=0 coord_dl=293 meta_fail=0 coord_fail=57 skipped_no_core=0 last=vertebrates/108/fundulus_heteroclitus
+  progress: 400/6039 meta_dl=0 coord_dl=335 meta_fail=0 coord_fail=65 skipped_no_core=0 last=vertebrates/108/lepidothrix_coronata
+  progress: 450/6039 meta_dl=0 coord_dl=375 meta_fail=0 coord_fail=75 skipped_no_core=0 last=vertebrates/108/cervus_hanglu_yarkandensis
+  progress: 500/6039 meta_dl=0 coord_dl=418 meta_fail=0 coord_fail=82 skipped_no_core=0 last=vertebrates/108/denticeps_clupeoides
+  progress: 550/6039 meta_dl=0 coord_dl=463 meta_fail=0 coord_fail=87 skipped_no_core=0 last=vertebrates/109/coturnix_japonica
+  progress: 600/6039 meta_dl=0 coord_dl=501 meta_fail=0 coord_fail=99 skipped_no_core=0 last=vertebrates/109/taeniopygia_guttata
+  progress: 650/6039 meta_dl=0 coord_dl=545 meta_fail=0 coord_fail=105 skipped_no_core=0 last=vertebrates/109/otolemur_garnettii
+  progress: 700/6039 meta_dl=0 coord_dl=587 meta_fail=0 coord_fail=113 skipped_no_core=0 last=vertebrates/109/ornithorhynchus_anatinus
+  progress: 750/6039 meta_dl=0 coord_dl=625 meta_fail=0 coord_fail=125 skipped_no_core=0 last=vertebrates/109/lonchura_striata_domestica
+  progress: 800/6039 meta_dl=0 coord_dl=671 meta_fail=0 coord_fail=129 skipped_no_core=0 last=vertebrates/109/chrysemys_picta_bellii
+  progress: 850/6039 meta_dl=0 coord_dl=696 meta_fail=22 coord_fail=132 skipped_no_core=0 last=vertebrates/89/mus_musculus
+  progress: 900/6039 meta_dl=0 coord_dl=696 meta_fail=72 coord_fail=132 skipped_no_core=0 last=vertebrates/89/notamacropus_eugenii
+  progress: 950/6039 meta_dl=37 coord_dl=716 meta_fail=85 coord_fail=149 skipped_no_core=0 last=fungi/24/yarrowia_lipolytica
+  progress: 1000/6039 meta_dl=84 coord_dl=735 meta_fail=88 coord_fail=180 skipped_no_core=0 last=fungi/51/sclerotinia_sclerotiorum
+  progress: 1050/6039 meta_dl=134 coord_dl=761 meta_fail=88 coord_fail=204 skipped_no_core=0 last=fungi/13/magnaporthe_poae
+  progress: 1100/6039 meta_dl=184 coord_dl=787 meta_fail=88 coord_fail=228 skipped_no_core=0 last=fungi/50/sporisorium_reilianum
+  progress: 1150/6039 meta_dl=234 coord_dl=811 meta_fail=88 coord_fail=254 skipped_no_core=0 last=fungi/49/puccinia_graminisug99
+  progress: 1200/6039 meta_dl=276 coord_dl=838 meta_fail=88 coord_fail=277 skipped_no_core=0 last=metazoa/55/lepeophtheirus_salmonis
+  progress: 1250/6039 meta_dl=276 coord_dl=870 meta_fail=88 coord_fail=295 skipped_no_core=0 last=metazoa/55/bombus_terrestris
+  progress: 1300/6039 meta_dl=277 coord_dl=905 meta_fail=88 coord_fail=310 skipped_no_core=0 last=metazoa/55/ixodes_persulcatus_gca013358835v1
+  progress: 1350/6039 meta_dl=278 coord_dl=934 meta_fail=88 coord_fail=331 skipped_no_core=0 last=metazoa/55/anopheles_culicifacies
+  progress: 1400/6039 meta_dl=278 coord_dl=965 meta_fail=88 coord_fail=350 skipped_no_core=0 last=metazoa/52/octopus_bimaculoides
+  progress: 1450/6039 meta_dl=278 coord_dl=984 meta_fail=88 coord_fail=381 skipped_no_core=0 last=metazoa/52/stegodyphus_mimosarum
+  progress: 1500/6039 meta_dl=280 coord_dl=1004 meta_fail=88 coord_fail=411 skipped_no_core=0 last=metazoa/52/acyrthosiphon_pisum
+  progress: 1550/6039 meta_dl=280 coord_dl=1037 meta_fail=88 coord_fail=428 skipped_no_core=0 last=metazoa/57/patiria_miniata_gca015706575v1
+  progress: 1600/6039 meta_dl=280 coord_dl=1073 meta_fail=88 coord_fail=442 skipped_no_core=0 last=metazoa/57/acromyrmex_echinatior_gca000204515v1rs
+  progress: 1650/6039 meta_dl=281 coord_dl=1108 meta_fail=88 coord_fail=457 skipped_no_core=0 last=metazoa/57/schistosoma_mansoni
+  progress: 1700/6039 meta_dl=282 coord_dl=1146 meta_fail=88 coord_fail=469 skipped_no_core=0 last=metazoa/57/haliotis_rufescens_gca023055435v1rs
+  progress: 1750/6039 meta_dl=282 coord_dl=1182 meta_fail=88 coord_fail=483 skipped_no_core=0 last=metazoa/57/hyalella_azteca_gca000764305v2
+  progress: 1800/6039 meta_dl=282 coord_dl=1217 meta_fail=88 coord_fail=498 skipped_no_core=0 last=metazoa/56/culex_quinquefasciatus_gca015732765v1
+  progress: 1850/6039 meta_dl=282 coord_dl=1251 meta_fail=88 coord_fail=514 skipped_no_core=0 last=metazoa/56/actinia_tenebrosa_gca009602425v1
+  progress: 1900/6039 meta_dl=283 coord_dl=1286 meta_fail=88 coord_fail=529 skipped_no_core=0 last=metazoa/56/anopheles_atroparvus_gca914969975
+  progress: 1950/6039 meta_dl=284 coord_dl=1322 meta_fail=88 coord_fail=543 skipped_no_core=0 last=metazoa/56/apis_florea_gca000184785v2rs
+  progress: 2000/6039 meta_dl=293 coord_dl=1350 meta_fail=88 coord_fail=565 skipped_no_core=0 last=metazoa/51/amphimedon_queenslandica
+  progress: 2050/6039 meta_dl=343 coord_dl=1370 meta_fail=88 coord_fail=595 skipped_no_core=0 last=metazoa/51/anopheles_culicifacies
+  progress: 2100/6039 meta_dl=393 coord_dl=1392 meta_fail=88 coord_fail=623 skipped_no_core=0 last=metazoa/51/glossina_fuscipes
+  progress: 2150/6039 meta_dl=407 coord_dl=1420 meta_fail=88 coord_fail=645 skipped_no_core=0 last=metazoa/54/stylophora_pistillata_gca002571385v1
+  progress: 2200/6039 meta_dl=407 coord_dl=1449 meta_fail=88 coord_fail=666 skipped_no_core=0 last=metazoa/54/actinia_equina_gca011057435
+  progress: 2250/6039 meta_dl=409 coord_dl=1478 meta_fail=88 coord_fail=687 skipped_no_core=0 last=metazoa/54/diabrotica_virgifera_gca003013835v2
+  progress: 2300/6039 meta_dl=409 coord_dl=1512 meta_fail=88 coord_fail=703 skipped_no_core=0 last=metazoa/59/cataglyphis_hispanica_gca021464435v1rs
+  progress: 2350/6039 meta_dl=409 coord_dl=1553 meta_fail=88 coord_fail=712 skipped_no_core=0 last=metazoa/59/hymenolepis_microstoma
+  progress: 2400/6039 meta_dl=409 coord_dl=1594 meta_fail=88 coord_fail=721 skipped_no_core=0 last=metazoa/59/daktulosphaira_vitifoliae_gca025091365v1rs
+  progress: 2450/6039 meta_dl=409 coord_dl=1633 meta_fail=88 coord_fail=732 skipped_no_core=0 last=metazoa/59/drosophila_subobscura_gca008121235v1rs
+  progress: 2500/6039 meta_dl=410 coord_dl=1675 meta_fail=88 coord_fail=740 skipped_no_core=0 last=metazoa/59/patella_pellucida_gca917208275v1
+  progress: 2550/6039 meta_dl=411 coord_dl=1714 meta_fail=88 coord_fail=751 skipped_no_core=0 last=metazoa/59/drosophila_subpulchrella_gca014743375v2rs
+  progress: 2600/6039 meta_dl=411 coord_dl=1753 meta_fail=88 coord_fail=762 skipped_no_core=0 last=metazoa/59/anopheles_stephensi_indian
+  progress: 2650/6039 meta_dl=437 coord_dl=1784 meta_fail=88 coord_fail=781 skipped_no_core=0 last=metazoa/50/anopheles_gambiae
+  progress: 2700/6039 meta_dl=487 coord_dl=1800 meta_fail=88 coord_fail=815 skipped_no_core=0 last=metazoa/50/caenorhabditis_remanei
+  progress: 2750/6039 meta_dl=537 coord_dl=1822 meta_fail=88 coord_fail=843 skipped_no_core=0 last=metazoa/45/octopus_bimaculoides
+  progress: 2800/6039 meta_dl=587 coord_dl=1837 meta_fail=88 coord_fail=878 skipped_no_core=0 last=metazoa/45/hofstenia_miamia
+  progress: 2850/6039 meta_dl=612 coord_dl=1863 meta_fail=88 coord_fail=902 skipped_no_core=0 last=metazoa/58/schistocerca_gregaria_gca023897955v2rs
+  progress: 2900/6039 meta_dl=612 coord_dl=1901 meta_fail=88 coord_fail=914 skipped_no_core=0 last=metazoa/58/macrosteles_quadrilineatus_gca028750875v1rs
+  progress: 2950/6039 meta_dl=612 coord_dl=1939 meta_fail=88 coord_fail=926 skipped_no_core=0 last=metazoa/58/anopheles_arabiensis
+  progress: 3000/6039 meta_dl=613 coord_dl=1978 meta_fail=88 coord_fail=937 skipped_no_core=0 last=metazoa/58/ixodes_scapularis_ise6
+  progress: 3050/6039 meta_dl=614 coord_dl=2016 meta_fail=88 coord_fail=949 skipped_no_core=0 last=metazoa/58/galleria_mellonella_gca003640425v2rs
+  progress: 3100/6039 meta_dl=614 coord_dl=2054 meta_fail=88 coord_fail=961 skipped_no_core=0 last=metazoa/58/clytia_hemisphaerica_gca902728285
+  progress: 3150/6039 meta_dl=659 coord_dl=2071 meta_fail=88 coord_fail=994 skipped_no_core=0 last=metazoa/49/crassostrea_gigas
+  progress: 3200/6039 meta_dl=709 coord_dl=2085 meta_fail=88 coord_fail=1030 skipped_no_core=0 last=metazoa/49/tetranychus_urticae
+  progress: 3250/6039 meta_dl=729 coord_dl=2104 meta_fail=89 coord_fail=1060 skipped_no_core=0 last=metazoa/53/caenorhabditis_japonica
+  progress: 3300/6039 meta_dl=730 coord_dl=2125 meta_fail=89 coord_fail=1089 skipped_no_core=0 last=metazoa/53/anopheles_coluzzii
+  progress: 3350/6039 meta_dl=731 coord_dl=2150 meta_fail=89 coord_fail=1114 skipped_no_core=0 last=metazoa/53/melitaea_cinxia
+  progress: 3400/6039 meta_dl=731 coord_dl=2195 meta_fail=89 coord_fail=1119 skipped_no_core=0 last=plants/61/hordeum_vulgare_hid380
+  progress: 3450/6039 meta_dl=731 coord_dl=2239 meta_fail=89 coord_fail=1125 skipped_no_core=0 last=plants/61/trifolium_pratense
+  progress: 3500/6039 meta_dl=731 coord_dl=2286 meta_fail=89 coord_fail=1128 skipped_no_core=0 last=plants/61/camelina_sativa
+  progress: 3550/6039 meta_dl=731 coord_dl=2329 meta_fail=89 coord_fail=1135 skipped_no_core=0 last=plants/61/hordeum_vulgare_hor14121
+  progress: 3600/6039 meta_dl=731 coord_dl=2373 meta_fail=89 coord_fail=1141 skipped_no_core=0 last=plants/55/vitis_vinifera
+  progress: 3650/6039 meta_dl=731 coord_dl=2413 meta_fail=89 coord_fail=1151 skipped_no_core=0 last=plants/55/quercus_suber
+  progress: 3700/6039 meta_dl=731 coord_dl=2452 meta_fail=89 coord_fail=1162 skipped_no_core=0 last=plants/55/solanum_tuberosum_rh8903916
+  progress: 3750/6039 meta_dl=731 coord_dl=2491 meta_fail=89 coord_fail=1173 skipped_no_core=0 last=plants/52/amborella_trichopoda
+  progress: 3800/6039 meta_dl=731 coord_dl=2529 meta_fail=89 coord_fail=1185 skipped_no_core=0 last=plants/52/zea_mays
+  progress: 3850/6039 meta_dl=731 coord_dl=2569 meta_fail=89 coord_fail=1195 skipped_no_core=0 last=plants/62/hordeum_vulgare_bowman
+  progress: 3900/6039 meta_dl=731 coord_dl=2616 meta_fail=89 coord_fail=1198 skipped_no_core=0 last=plants/62/hordeum_vulgare_rgtplanet
+  progress: 3950/6039 meta_dl=731 coord_dl=2661 meta_fail=90 coord_fail=1202 skipped_no_core=0 last=plants/62/avena_insularis_gca910574615v1cm
+  progress: 4000/6039 meta_dl=731 coord_dl=2708 meta_fail=90 coord_fail=1205 skipped_no_core=0 last=plants/62/setaria_italica
+  progress: 4050/6039 meta_dl=731 coord_dl=2751 meta_fail=90 coord_fail=1212 skipped_no_core=0 last=plants/62/papaver_somniferum
+  progress: 4100/6039 meta_dl=731 coord_dl=2797 meta_fail=90 coord_fail=1216 skipped_no_core=0 last=plants/62/arabidopsis_thaliana
+  progress: 4150/6039 meta_dl=731 coord_dl=2839 meta_fail=90 coord_fail=1224 skipped_no_core=0 last=plants/57/oryza_sativa_chaomeo
+  progress: 4200/6039 meta_dl=731 coord_dl=2879 meta_fail=90 coord_fail=1234 skipped_no_core=0 last=plants/57/aegilops_tauschii
+  progress: 4250/6039 meta_dl=731 coord_dl=2921 meta_fail=90 coord_fail=1242 skipped_no_core=0 last=plants/57/arabidopsis_thaliana
+  progress: 4300/6039 meta_dl=731 coord_dl=2963 meta_fail=90 coord_fail=1250 skipped_no_core=0 last=plants/60/beta_vulgaris
+  progress: 4350/6039 meta_dl=731 coord_dl=3006 meta_fail=90 coord_fail=1257 skipped_no_core=0 last=plants/60/ipomoea_triloba
+  progress: 4400/6039 meta_dl=731 coord_dl=3050 meta_fail=90 coord_fail=1263 skipped_no_core=0 last=plants/60/digitaria_exilis
+  progress: 4450/6039 meta_dl=731 coord_dl=3089 meta_fail=90 coord_fail=1274 skipped_no_core=0 last=plants/56/beta_vulgaris
+  progress: 4500/6039 meta_dl=731 coord_dl=3128 meta_fail=90 coord_fail=1285 skipped_no_core=0 last=plants/56/brassica_rapa
+  progress: 4550/6039 meta_dl=738 coord_dl=3168 meta_fail=90 coord_fail=1295 skipped_no_core=0 last=plants/51/vitis_vinifera
+  progress: 4600/6039 meta_dl=788 coord_dl=3206 meta_fail=90 coord_fail=1307 skipped_no_core=0 last=plants/51/marchantia_polymorpha
+  progress: 4650/6039 meta_dl=838 coord_dl=3243 meta_fail=90 coord_fail=1320 skipped_no_core=0 last=plants/51/ipomoea_triloba
+  progress: 4700/6039 meta_dl=888 coord_dl=3287 meta_fail=90 coord_fail=1326 skipped_no_core=0 last=plants/40/oryza_sativa
+  progress: 4750/6039 meta_dl=901 coord_dl=3328 meta_fail=90 coord_fail=1335 skipped_no_core=0 last=plants/54/solanum_tuberosum
+  progress: 4800/6039 meta_dl=901 coord_dl=3367 meta_fail=90 coord_fail=1346 skipped_no_core=0 last=plants/54/zea_mays
+  progress: 4850/6039 meta_dl=901 coord_dl=3407 meta_fail=90 coord_fail=1356 skipped_no_core=0 last=plants/59/vitis_vinifera
+  progress: 4900/6039 meta_dl=901 coord_dl=3448 meta_fail=90 coord_fail=1365 skipped_no_core=0 last=plants/59/sesamum_indicum
+  progress: 4950/6039 meta_dl=901 coord_dl=3489 meta_fail=90 coord_fail=1374 skipped_no_core=0 last=plants/59/oryza_sativa_larhamugad
+  progress: 5000/6039 meta_dl=910 coord_dl=3531 meta_fail=90 coord_fail=1382 skipped_no_core=0 last=plants/50/oryza_indica
+  progress: 5050/6039 meta_dl=959 coord_dl=3569 meta_fail=90 coord_fail=1394 skipped_no_core=0 last=plants/50/citrullus_lanatus
+  progress: 5100/6039 meta_dl=1009 coord_dl=3605 meta_fail=90 coord_fail=1408 skipped_no_core=0 last=plants/50/brassica_rapa
+  progress: 5150/6039 meta_dl=1010 coord_dl=3648 meta_fail=90 coord_fail=1415 skipped_no_core=0 last=plants/58/panicum_hallii_fil2
+  progress: 5200/6039 meta_dl=1010 coord_dl=3688 meta_fail=90 coord_fail=1425 skipped_no_core=0 last=plants/58/glycine_soja
+  progress: 5250/6039 meta_dl=1010 coord_dl=3730 meta_fail=90 coord_fail=1433 skipped_no_core=0 last=plants/58/triticum_aestivum_jagger
+  progress: 5300/6039 meta_dl=1058 coord_dl=3768 meta_fail=90 coord_fail=1445 skipped_no_core=0 last=plants/49/triticum_aestivum_claire
+  progress: 5350/6039 meta_dl=1106 coord_dl=3803 meta_fail=90 coord_fail=1460 skipped_no_core=0 last=plants/53/citrus_clementina
+  progress: 5400/6039 meta_dl=1106 coord_dl=3844 meta_fail=90 coord_fail=1469 skipped_no_core=0 last=plants/53/sesamum_indicum
+  progress: 5450/6039 meta_dl=1106 coord_dl=3882 meta_fail=90 coord_fail=1481 skipped_no_core=0 last=plants/53/triticum_aestivum_paragon
+  progress: 5500/6039 meta_dl=1136 coord_dl=3924 meta_fail=90 coord_fail=1489 skipped_no_core=0 last=plants/47/oryza_glaberrima
+  progress: 5550/6039 meta_dl=1185 coord_dl=3961 meta_fail=90 coord_fail=1502 skipped_no_core=0 last=protists/61/thalassiosira_pseudonana
+  progress: 5600/6039 meta_dl=1185 coord_dl=3990 meta_fail=90 coord_fail=1523 skipped_no_core=0 last=protists/55/pythium_aphanidermatum
+  progress: 5650/6039 meta_dl=1185 coord_dl=4008 meta_fail=90 coord_fail=1555 skipped_no_core=0 last=protists/52/phytophthora_sojae
+  progress: 5700/6039 meta_dl=1185 coord_dl=4038 meta_fail=90 coord_fail=1575 skipped_no_core=0 last=protists/62/plasmodium_knowlesi
+  progress: 5750/6039 meta_dl=1185 coord_dl=4061 meta_fail=90 coord_fail=1602 skipped_no_core=0 last=protists/60/pythium_arrhenomanes
+  progress: 5800/6039 meta_dl=1185 coord_dl=4082 meta_fail=90 coord_fail=1631 skipped_no_core=0 last=protists/56/guillardia_theta
+  progress: 5850/6039 meta_dl=1218 coord_dl=4103 meta_fail=90 coord_fail=1660 skipped_no_core=0 last=protists/54/pythium_vexans
+  progress: 5900/6039 meta_dl=1218 coord_dl=4124 meta_fail=90 coord_fail=1689 skipped_no_core=0 last=protists/59/tetrahymena_thermophila
+  progress: 5950/6039 meta_dl=1251 coord_dl=4146 meta_fail=90 coord_fail=1717 skipped_no_core=0 last=protists/58/plasmodium_falciparum
+  progress: 6000/6039 meta_dl=1278 coord_dl=4169 meta_fail=91 coord_fail=1744 skipped_no_core=0 last=protists/49/plasmodium_vivax
+  progress: 6039/6039 meta_dl=1284 coord_dl=4186 meta_fail=91 coord_fail=1766 skipped_no_core=0 last=protists/53/emiliania_huxleyi
+
+Done in 2855.1s
+  filesystem scan: 54.9s
+  organisms checked: 21759
+  already complete: 15720
+  missing entries: 6039
+  meta.txt downloaded: 1284
+  coord_system.txt downloaded: 4186
+  meta.txt failed: 91
+  coord_system.txt failed: 1766
+  skipped (no core folder on FTP): 0
+ Container asap2_test-redis-1  Running
+ Container asap_run_test  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-postgres-1  Running
+2026-06-29 17:27:46 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.008s, query:n/a]
+2026-06-29 17:27:46 +0000: < 
+Complete local Ensembl meta.txt and coord_system.txt
+  ensembl data dirs: /mnt/asap_data/ensembl
+
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+  scan: 21759 organisms in 60.0s, 21668 complete, 91 to fetch (meta: 91, coord: 4)
+  progress: 50/91 meta_dl=0 coord_dl=0 meta_fail=50 coord_fail=0 skipped_no_core=0 last=vertebrates/89/xenopus_tropicalis
+  progress: 91/91 meta_dl=0 coord_dl=0 meta_fail=91 coord_fail=4 skipped_no_core=0 last=protists/10/dictyostelium_discoideum
+
+Done in 91.8s
+  filesystem scan: 60.0s
+  organisms checked: 21759
+  already complete: 21668
+  missing entries: 91
+  meta.txt downloaded: 0
+  coord_system.txt downloaded: 0
+  meta.txt failed: 91
+  coord_system.txt failed: 4
+  skipped (no core folder on FTP): 0
+ Container asap_run_test  Running
+ Container asap2_test-redis-1  Running
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-postgres-1  Running
+2026-06-29 17:29:24 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.008s, query:n/a]
+2026-06-29 17:29:24 +0000: < 
+Complete local Ensembl meta.txt and coord_system.txt
+  ensembl data dirs: /mnt/asap_data/ensembl
+
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+  scan: 21759 organisms in 63.4s, 21668 complete, 91 to fetch (meta: 91, coord: 4)
+  progress: 50/91 meta_dl=0 coord_dl=0 meta_fail=50 coord_fail=0 skipped_no_core=0 last=vertebrates/89/xenopus_tropicalis
+  progress: 91/91 meta_dl=0 coord_dl=0 meta_fail=91 coord_fail=4 skipped_no_core=0 last=protists/10/dictyostelium_discoideum
+
+Done in 94.2s
+  filesystem scan: 63.4s
+  organisms checked: 21759
+  already complete: 21668
+  missing entries: 91
+  meta.txt downloaded: 0
+  coord_system.txt downloaded: 0
+  meta.txt failed: 91
+  coord_system.txt failed: 4
+  skipped (no core folder on FTP): 0
+ Container elasticsearch_asap_test  Running
+ Container asap2_test-redis-1  Running
+ Container asap_run_test  Running
+ Container asap2_test-postgres-1  Running
+2026-06-29 17:34:42 +0000: HEAD http://elasticsearch:9200/projects [status:200, request:0.006s, query:n/a]
+2026-06-29 17:34:42 +0000: < 
+Complete local Ensembl meta.txt and coord_system.txt
+  ensembl data dirs: /mnt/asap_data/ensembl
+
+[slurm:monitor_jobs] Starting
+[SlurmMonitor] No runs with status_id=2 (running)
+  scan: 21759 organisms in 58.8s, 21668 complete, 91 to fetch (meta: 91, coord: 4)
+  progress: 50/91 meta_dl=49 coord_dl=0 meta_fail=1 coord_fail=0 skipped_no_core=0 last=vertebrates/89/xenopus_tropicalis
+  progress: 91/91 meta_dl=83 coord_dl=0 meta_fail=8 coord_fail=4 skipped_no_core=0 last=protists/10/dictyostelium_discoideum
+
+Done in 136.8s
+  filesystem scan: 58.8s
+  organisms checked: 21759
+  already complete: 21668
+  missing entries: 91
+  meta.txt downloaded: 83
+  coord_system.txt downloaded: 0
+  meta.txt failed: 8
+  coord_system.txt failed: 4
+  skipped (no core folder on FTP): 0

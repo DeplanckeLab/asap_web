@@ -93,6 +93,15 @@ export default class extends Controller {
     setTimeout(() => {
       this.initialize();
     }, 100);
+
+    this.boundResizePlot = this.resizePlot.bind(this);
+    window.addEventListener("resize", this.boundResizePlot);
+  }
+
+  disconnect() {
+    if (this.boundResizePlot) {
+      window.removeEventListener("resize", this.boundResizePlot);
+    }
   }
   
   initialize() {
@@ -542,16 +551,25 @@ export default class extends Controller {
     }
     
     if (traces.length > 0) {
-      // Ensure layout has autosize to fit container width
+      const plotEl = document.getElementById("cell_filtering_plotly_plot");
+      const plotHeight = plotEl ? Math.max(plotEl.clientHeight, 320) : 400;
+
       layout.autosize = true;
-      layout.width = null; // Let Plotly calculate from container
-      layout.height = null; // Let Plotly calculate from container
-      
+      layout.width = null;
+      layout.height = plotHeight;
+
       Plotly.newPlot("cell_filtering_plotly_plot", traces, layout, {
         modeBarButtonsToRemove: ['sendDataToCloud'],
         displaylogo: false,
         responsive: true
       });
+    }
+  }
+
+  resizePlot() {
+    const plotEl = document.getElementById("cell_filtering_plotly_plot");
+    if (plotEl && typeof Plotly !== "undefined" && plotEl.data) {
+      Plotly.Plots.resize(plotEl);
     }
   }
 

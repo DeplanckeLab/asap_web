@@ -94,7 +94,7 @@ export default class extends Controller {
   renderCategories(categories) {
     if (!this.hasCategoriesContainerTarget) return
     if (!categories.length) {
-      this.categoriesContainerTarget.innerHTML = "<div class='text-sm text-gray-500'>No categories available.</div>"
+      this.categoriesContainerTarget.innerHTML = "<div class='cell-filtering-hint text-gray-500'>No categories available.</div>"
       return
     }
 
@@ -104,7 +104,7 @@ export default class extends Controller {
       const indices = Array.isArray(cat.indices) ? cat.indices : []
       const encodedIndices = JSON.stringify(indices).replace(/"/g, "&quot;")
       return `
-        <label class="inline-flex items-center gap-2 px-2 py-1 rounded-md border border-gray-200 bg-gray-50 text-sm text-gray-700">
+        <label class="inline-flex items-center gap-1 rounded border border-gray-200 bg-gray-50 text-gray-700">
           <input type="checkbox"
                  class="check_box_cat"
                  id="sc_${safeCat}"
@@ -117,17 +117,17 @@ export default class extends Controller {
     }).join("")
 
     this.categoriesContainerTarget.innerHTML = `
-      <div class="flex items-center gap-2 mb-2">
+      <div class="cell-filtering-metadata-actions">
         <button type="button"
-                class="px-2 py-1 text-xs bg-sky-600 hover:bg-sky-700 text-white rounded"
+                class="bg-sky-600 hover:bg-sky-700 text-white rounded"
                 data-action="click->cell-filtering-metadata#toggleAll"
                 data-cell-filtering-metadata-checked-param="true">Select all</button>
         <button type="button"
-                class="px-2 py-1 text-xs bg-sky-600 hover:bg-sky-700 text-white rounded"
+                class="bg-sky-600 hover:bg-sky-700 text-white rounded"
                 data-action="click->cell-filtering-metadata#toggleAll"
                 data-cell-filtering-metadata-checked-param="false">Unselect all</button>
       </div>
-      <div id="list_of_cats" class="flex flex-wrap gap-2">${badges}</div>
+      <div id="list_of_cats" class="flex flex-wrap">${badges}</div>
     `
   }
 

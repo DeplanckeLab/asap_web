@@ -662,7 +662,14 @@ class ProjectsController < ApplicationController
         {
           domain: domain,
           count: orgs.count,
-          organisms: orgs.map { |display_name, id, tax_id| { display_name: display_name, id: id, tax_id: tax_id } }
+          organisms: orgs.map do |display_name, id, tax_id, assembly_at_latest_release|
+            {
+              display_name: display_name,
+              id: id,
+              tax_id: tax_id,
+              assembly_at_latest_release: assembly_at_latest_release
+            }
+          end
         }
       end
     }
@@ -5748,6 +5755,7 @@ class ProjectsController < ApplicationController
         short_name = organism['short_name']
         display_name = Organism.selector_label(organism_name, short_name)
         tax_id = organism['tax_id']
+        assembly_at_latest_release = organism['assembly_at_latest_release']
         
         # Get domain name from hash (already fetched in RemoteOrganism.list_for_version)
         domain_name = organism['domain_name'] || 'Other'
@@ -5758,6 +5766,7 @@ class ProjectsController < ApplicationController
         short_name = organism.short_name
         display_name = Organism.selector_label(organism_name, short_name)
         tax_id = organism.tax_id
+        assembly_at_latest_release = nil
         
         # Get domain name from local database
         domain_name = if organism.ensembl_subdomain
@@ -5791,7 +5800,7 @@ class ProjectsController < ApplicationController
       # Keep each organism in a single group to avoid duplicates in the selector.
       # Model organisms are surfaced in the dedicated group; all others stay in domain groups.
       target_group = is_model_organism ? 'Main model organisms' : formatted_domain
-      group_entry = [display_name, organism_id, tax_id]
+      group_entry = [display_name, organism_id, tax_id, assembly_at_latest_release]
 
       # Remote v8+ lists can contain duplicate rows; keep only one entry per group.
       next if grouped_seen[target_group][group_entry]
@@ -6046,6 +6055,12 @@ class ProjectsController < ApplicationController
           # Collect errors from @results['error'] (single value, but not displayed_error)
           if @results['error'].present? && !@results['displayed_error']
             @parsing_errors << @results['error']
+          end
+
+          # Collect info notes from @results['messages'] (array or single value)
+          if @results['messages']
+            messages = @results['messages'].is_a?(Array) ? @results['messages'] : [@results['messages']]
+            @parsing_infos.concat(messages.compact.reject(&:blank?))
           end
           
           # Collect validation warnings/errors based on data conditions

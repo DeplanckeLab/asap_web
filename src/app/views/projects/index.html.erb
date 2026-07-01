@@ -122,7 +122,9 @@
                         <i class="fas fa-chevron-right" style="font-size: 14px; transition: transform 0.3s ease-out;" data-organism-selector-target="groupChevron"></i>
                       </div>
                       <span class="flex-1"><%= domain %></span>
-                      <span class="inline-flex items-center justify-center px-2 py-1 text-xs font-semibold rounded-full bg-gray-200 text-gray-700 ml-2">
+                      <span class="inline-flex items-center justify-center px-2 py-1 text-xs font-semibold rounded-full bg-gray-200 text-gray-700 ml-2"
+                            data-organism-selector-target="groupCount"
+                            data-total-count="<%= organisms.count %>">
                         <%= organisms.count %>
                       </span>
                     </button>

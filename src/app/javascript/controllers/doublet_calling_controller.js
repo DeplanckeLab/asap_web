@@ -28,6 +28,27 @@ export default class extends Controller {
     if (this.canFilterValue) {
       this.applyFilter()
     }
+
+    this.boundResizePlots = this.resizePlots.bind(this)
+    window.addEventListener("resize", this.boundResizePlots)
+  }
+
+  disconnect() {
+    if (this.boundResizePlots) {
+      window.removeEventListener("resize", this.boundResizePlots)
+    }
+  }
+
+  resizePlots() {
+    if (!window.Plotly) return
+    const plotTargets = [
+      this.hasHistogramPlotTarget ? this.histogramPlotTarget : null,
+      this.hasScatterPlotTarget ? this.scatterPlotTarget : null,
+      this.hasSortedPlotTarget ? this.sortedPlotTarget : null
+    ]
+    plotTargets.forEach((el) => {
+      if (el?.data) Plotly.Plots.resize(el)
+    })
   }
 
   methodChanged() {

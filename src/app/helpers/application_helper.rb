@@ -415,6 +415,17 @@ module ApplicationHelper
     sma['label'].presence || key.to_s.humanize
   end
 
+  # Maps attr_layout_json container_class (Bootstrap grid) to form layout column widths.
+  def attr_layout_column_class(container_class)
+    case container_class.to_s.strip
+    when "col-md-6", "col-6" then "attr-layout-col-half"
+    when "col-md-4", "col-4" then "attr-layout-col-third"
+    when "col-md-8", "col-8" then "attr-layout-col-two-thirds"
+    when "col-md-3", "col-3" then "attr-layout-col-quarter"
+    else "attr-layout-col-full"
+    end
+  end
+
   def form_param_empty?(value)
     value.nil? ||
       value == "" ||

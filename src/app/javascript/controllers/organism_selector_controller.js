@@ -4,7 +4,7 @@ import { Controller } from "@hotwired/stimulus"
 console.log('🔵 [OrganismSelector] JavaScript file loaded!')
 
 export default class extends Controller {
-  static targets = ["dropdownButton", "dropdownMenu", "groupHeader", "groupContent", "groupChevron", "option", "hiddenInput", "selectedText", "chevron", "searchInput"]
+  static targets = ["dropdownButton", "dropdownMenu", "groupHeader", "groupContent", "groupChevron", "groupCount", "option", "hiddenInput", "selectedText", "chevron", "searchInput"]
 
   connect() {
     console.log('=== [OrganismSelector] Controller connecting... ===')
@@ -147,7 +147,7 @@ export default class extends Controller {
     event.stopPropagation()
     const clickedOption = event.currentTarget
     const organismId = clickedOption.dataset.organismId
-    const organismName = clickedOption.textContent.trim()
+    const organismName = clickedOption.dataset.displayName || clickedOption.textContent.trim()
 
     // Update hidden input
     if (this.hasHiddenInputTarget) {
@@ -187,6 +187,7 @@ export default class extends Controller {
 
   filterOptions() {
     const query = this.hasSearchInputTarget ? this.searchInputTarget.value.trim().toLowerCase() : ''
+    const isFiltered = query !== ''
 
     this.groupContentTargets.forEach(content => {
       const options = Array.from(content.querySelectorAll('[data-organism-id]'))
@@ -203,6 +204,14 @@ export default class extends Controller {
 
       const header = content.previousElementSibling
       const chevron = header?.querySelector('[data-organism-selector-target="groupChevron"]')
+      const countSpan = header?.querySelector('[data-organism-selector-target="groupCount"]')
+      const totalCount = countSpan
+        ? parseInt(countSpan.dataset.totalCount, 10) || options.length
+        : options.length
+
+      if (countSpan) {
+        countSpan.textContent = isFiltered ? `${visibleCount} / ${totalCount}` : String(totalCount)
+      }
 
       if (header) {
         header.classList.toggle('hidden', visibleCount === 0)
@@ -213,7 +222,7 @@ export default class extends Controller {
         if (chevron) {
           chevron.style.transform = 'rotate(0deg)'
         }
-      } else if (query !== '') {
+      } else if (isFiltered) {
         content.classList.remove('hidden')
         if (chevron) {
           chevron.style.transform = 'rotate(90deg)'
@@ -336,7 +345,7 @@ export default class extends Controller {
     }
     
     // Get the organism name from the option
-    const organismName = option.textContent.trim()
+    const organismName = option.dataset.displayName || option.textContent.trim()
     
     // Update hidden input
     if (this.hasHiddenInputTarget) {
@@ -391,6 +400,22 @@ export default class extends Controller {
     this.dropdownMenuTarget.appendChild(searchWrapper)
   }
 
+  createAssemblyStatusTag(assemblyAtLatestRelease) {
+    if (assemblyAtLatestRelease === null || assemblyAtLatestRelease === undefined) {
+      return null
+    }
+
+    const tag = document.createElement('span')
+    tag.className = assemblyAtLatestRelease
+      ? 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border border-green-200 dark:border-green-800 ml-auto cursor-help flex-shrink-0'
+      : 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 ml-auto cursor-help flex-shrink-0'
+    tag.textContent = assemblyAtLatestRelease ? 'assembly' : 'no assembly'
+    tag.title = assemblyAtLatestRelease
+      ? 'assembly in the latest Ensembl release'
+      : 'no assembly in the latest Ensembl release'
+    return tag
+  }
+
   updateOrganismDropdown(groups) {
     if (!this.hasDropdownMenuTarget) {
       return
@@ -428,6 +453,8 @@ export default class extends Controller {
 
       const countSpan = document.createElement('span')
       countSpan.className = 'inline-flex items-center justify-center px-2 py-1 text-xs font-semibold rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 ml-2'
+      countSpan.setAttribute('data-organism-selector-target', 'groupCount')
+      countSpan.dataset.totalCount = String(group.count)
       countSpan.textContent = group.count
 
       header.appendChild(chevronDiv)
@@ -442,21 +469,28 @@ export default class extends Controller {
       group.organisms.forEach(org => {
         const option = document.createElement('button')
         option.type = 'button'
-        option.className = 'w-full px-6 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors'
+        option.className = 'w-full px-6 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-2'
         option.setAttribute('data-organism-id', org.id)
+        option.dataset.displayName = org.display_name || ''
         option.setAttribute('data-search-text', `${org.display_name || ''} ${org.tax_id || ''}`.toLowerCase())
         option.setAttribute('data-organism-selector-target', 'option')
         option.setAttribute('data-action', 'click->organism-selector#selectOrganism')
 
         const nameSpan = document.createElement('span')
+        nameSpan.className = 'min-w-0 truncate'
         nameSpan.textContent = org.display_name
 
         option.appendChild(nameSpan)
         if (org.tax_id) {
           const taxSpan = document.createElement('span')
-          taxSpan.className = 'text-gray-500 dark:text-gray-400 ml-2 text-xs italic'
-          taxSpan.textContent = `(${org.tax_id})`
+          taxSpan.className = 'text-gray-500 dark:text-gray-400 text-xs flex-shrink-0'
+          taxSpan.textContent = org.tax_id
           option.appendChild(taxSpan)
+        }
+
+        const assemblyTag = this.createAssemblyStatusTag(org.assembly_at_latest_release)
+        if (assemblyTag) {
+          option.appendChild(assemblyTag)
         }
 
         content.appendChild(option)

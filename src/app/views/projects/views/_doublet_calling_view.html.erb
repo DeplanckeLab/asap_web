@@ -78,7 +78,7 @@
     <% elsif run_status_id == 3 %>
       <% if @doublet_score_path.present? %>
         <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
-        <div class="space-y-6"
+        <div class="doublet-calling-layout-host"
              data-controller="doublet-calling"
              data-doublet-calling-filter-url-value="<%= filter_doublet_results_project_path(@project) %>"
              data-doublet-calling-can-filter-value="<%= can_filter %>"
@@ -86,6 +86,8 @@
              data-doublet-calling-initial-threshold-value="<%= initial_threshold.to_f if initial_threshold.present? %>"
              data-doublet-calling-initial-method-value="<%= initial_method %>"
              data-doublet-calling-run-id-value="<%= run_for_view.id %>">
+          <div class="doublet-calling-layout">
+          <div class="doublet-calling-controls-col">
           <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6 space-y-4">
             <% if @std_method %>
               <div class="space-y-3">
@@ -200,8 +202,9 @@
           <% end %>
           <div data-doublet-calling-target="error" class="hidden text-sm text-red-700 bg-red-50 border border-red-200 rounded-md px-3 py-2"></div>
           </div>
+          </div>
 
-          <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6 space-y-6">
+          <div class="doublet-calling-plots-col bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6 space-y-6">
           <div>
             <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Summary</h4>
             <div data-doublet-calling-target="statsPanel" class="flex flex-wrap gap-3">
@@ -226,10 +229,11 @@
             Singlet cells are shown in <span class="text-green-700 font-medium">green</span>, doublets in <span class="text-red-700 font-medium">red</span>.
           </p>
 
-          <div data-doublet-calling-target="histogramPlot" class="bg-gray-50 border border-gray-200 rounded-md p-2 w-full" style="min-height: 320px;"></div>
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div data-doublet-calling-target="scatterPlot" class="bg-gray-50 border border-gray-200 rounded-md p-2 w-full" style="min-height: 320px;"></div>
-            <div data-doublet-calling-target="sortedPlot" class="bg-gray-50 border border-gray-200 rounded-md p-2 w-full" style="min-height: 320px;"></div>
+          <div data-doublet-calling-target="histogramPlot" class="doublet-calling-plot-area bg-gray-50 border border-gray-200 rounded-md p-2 w-full"></div>
+          <div class="doublet-calling-plot-grid">
+            <div data-doublet-calling-target="scatterPlot" class="doublet-calling-plot-area bg-gray-50 border border-gray-200 rounded-md p-2 w-full"></div>
+            <div data-doublet-calling-target="sortedPlot" class="doublet-calling-plot-area bg-gray-50 border border-gray-200 rounded-md p-2 w-full"></div>
+          </div>
           </div>
           </div>
         </div>

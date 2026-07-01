@@ -305,4 +305,24 @@ module ProjectsHelper
       ])
     end
   end
+
+  def organism_assembly_status_tag(assembly_at_latest_release)
+    return '' if assembly_at_latest_release.nil?
+
+    if assembly_at_latest_release
+      content_tag(
+        :span,
+        'assembly',
+        class: 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border border-green-200 dark:border-green-800 ml-auto cursor-help flex-shrink-0',
+        title: 'assembly in the latest Ensembl release'
+      )
+    else
+      content_tag(
+        :span,
+        'no assembly',
+        class: 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 ml-auto cursor-help flex-shrink-0',
+        title: 'no assembly in the latest Ensembl release'
+      )
+    end
+  end
 end

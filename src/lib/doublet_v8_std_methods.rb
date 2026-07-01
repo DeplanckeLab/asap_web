@@ -314,7 +314,7 @@ module DoubletV8StdMethods
             {
               "type" => "card",
               "card-header" => "Input data",
-              "container_class" => "col-md-12",
+              "container_class" => "col-md-6",
               "class" => "card h-100",
               "label_class" => "col-md-6",
               "attr_list" => input_attrs
@@ -322,7 +322,7 @@ module DoubletV8StdMethods
             {
               "type" => "card",
               "card-header" => "Parameters",
-              "container_class" => "col-md-12",
+              "container_class" => "col-md-6",
               "class" => "card h-100",
               "label_class" => "col-md-6",
               "attr_list" => param_attrs

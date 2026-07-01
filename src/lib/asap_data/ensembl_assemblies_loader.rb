@@ -124,7 +124,46 @@ module AsapData
         end
       end
 
+      sync_stats = sync_subdomain_latest_releases_from_disk!(remote_db: remote_db, base_dirs: base_dirs)
+      stats[:subdomain_latest_corrected] = sync_stats
+
       stats
+    end
+
+    # Subdomain latest_ensembl_release can drift above what is on disk (e.g. metazoa stuck at 62
+    # while Ensembl genomes metazoa only has releases through 59). Cap each subdomain to the
+    # highest release directory available locally so assembly checks match reality.
+    def sync_subdomain_latest_releases_from_disk!(remote_db: default_remote_db, base_dirs: nil)
+      base_dirs ||= all_ensembl_base_dirs
+      return {} if base_dirs.empty?
+
+      corrected = {}
+      RemoteOrganism.with_remote(remote_db) do
+        conn = RemoteOrganism.connection
+        DB_TYPES.each do |db_type|
+          max_on_disk = available_release_numbers(base_dirs, db_type).max
+          next unless max_on_disk.to_i.positive?
+
+          row = conn.select_one(<<~SQL.squish)
+            SELECT id, latest_ensembl_release
+            FROM ensembl_subdomains
+            WHERE name = #{conn.quote(db_type.to_s)}
+            LIMIT 1
+          SQL
+          next unless row
+
+          current = row['latest_ensembl_release'].to_i
+          next if current <= max_on_disk
+
+          conn.execute(<<~SQL.squish)
+            UPDATE ensembl_subdomains
+            SET latest_ensembl_release = #{max_on_disk.to_i}
+            WHERE id = #{row['id'].to_i}
+          SQL
+          corrected[db_type.to_s] = { from: current, to: max_on_disk.to_i }
+        end
+      end
+      corrected
     end
 
     def complete_local_meta_files!(remote_db: default_remote_db)
@@ -516,7 +555,13 @@ module AsapData
 
       meta_gz_path = organism_dir + "meta.txt.gz"
       if meta_gz_path.file?
-        gunzip_file(meta_gz_path)
+        begin
+          gunzip_file(meta_gz_path)
+        rescue StandardError => e
+          Rails.logger.warn("[EnsemblAssembliesLoader] corrupt meta.gz for #{db_name} release #{release_num}: #{e.message}")
+          FileUtils.rm_f(meta_gz_path)
+          FileUtils.rm_f(meta_path)
+        end
         return meta_path if valid_meta_file?(meta_path)
       end
 
@@ -622,7 +667,7 @@ module AsapData
         end
 
         gz = extract_archive_member(archive_path, tmpdir, "*/#{table_name}.txt.gz")
-        if gz
+        if gz && File.size(gz).positive?
           FileUtils.mkdir_p(organism_dir)
           destination = organism_dir + "#{table_name}.txt.gz"
           FileUtils.cp(gz, destination)
@@ -846,7 +891,8 @@ module AsapData
     def upsert_assembly!(assemblies_by_key, organism_id, name, release_num, remote_db:)
       RemoteAssembly.with_remote(remote_db) do
         key = assembly_cache_key(organism_id, name)
-        existing = assemblies_by_key[key]
+        existing = assemblies_by_key[key] || RemoteAssembly.find_by(organism_id: organism_id, name: name)
+        assemblies_by_key[key] = existing if existing
         if existing
           new_first = [existing.first_ensembl_release, release_num].compact.min
           new_latest = [existing.latest_ensembl_release, release_num].compact.max

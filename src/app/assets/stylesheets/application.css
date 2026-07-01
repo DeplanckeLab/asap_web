@@ -774,3 +774,144 @@ p, label, li, td, th, input, select, textarea, button {
   font-size: 0.6875rem;
   line-height: 1.2;
 }
+
+.doublet-calling-layout-host {
+  container-type: inline-size;
+  container-name: doublet-calling;
+  width: 100%;
+  min-width: 0;
+}
+
+.doublet-calling-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.doublet-calling-controls-col {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.doublet-calling-plots-col {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.doublet-calling-plot-area {
+  min-height: 280px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.doublet-calling-plot-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+@container doublet-calling (min-width: 40rem) {
+  .doublet-calling-layout {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .doublet-calling-controls-col {
+    flex: 0 0 38%;
+    width: 38%;
+    max-width: 24rem;
+    overflow-y: auto;
+    max-height: calc(100vh - 220px);
+  }
+
+  .doublet-calling-plots-col {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+  }
+}
+
+@container doublet-calling (min-width: 56rem) {
+  .doublet-calling-plot-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+}
+
+.attr-layout-host {
+  container-type: inline-size;
+  container-name: attr-layout;
+  width: 100%;
+  min-width: 0;
+}
+
+.attr-layout-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
+}
+
+.attr-layout-col {
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.attr-layout-col-full {
+  flex: none;
+}
+
+@container attr-layout (min-width: 36rem) {
+  .attr-layout-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .attr-layout-col {
+    width: auto;
+  }
+
+  .attr-layout-col-full {
+    flex: 1 1 100%;
+    max-width: 100%;
+  }
+
+  .attr-layout-col-half {
+    flex: 1 1 calc(50% - 0.5rem);
+    max-width: calc(50% - 0.5rem);
+    min-width: 12rem;
+  }
+
+  .attr-layout-col-third {
+    flex: 1 1 calc(33.333% - 0.667rem);
+    max-width: calc(33.333% - 0.667rem);
+    min-width: 10rem;
+  }
+
+  .attr-layout-col-two-thirds {
+    flex: 1 1 calc(66.667% - 0.667rem);
+    max-width: calc(66.667% - 0.667rem);
+    min-width: 14rem;
+  }
+
+  .attr-layout-col-quarter {
+    flex: 1 1 calc(25% - 0.75rem);
+    max-width: calc(25% - 0.75rem);
+    min-width: 8rem;
+  }
+}

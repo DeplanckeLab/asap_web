@@ -61,7 +61,7 @@
   end
 %>
 
-<div class="space-y-4">
+<div class="attr-layout-host space-y-4">
   <% @attr_layout.each_with_index do |vertical_el, vertical_idx| %>
     <% vertical_class = vertical_el['class'].presence || '' %>
     <% vertical_title = layout_title_for.call(vertical_el) %>
@@ -70,15 +70,15 @@
       <% if vertical_title.present? %>
         <h3 class="text-sm font-semibold text-gray-800"><%= vertical_title %></h3>
       <% end %>
-      <% vertical_el["horiz_elements"].each_with_index do |horiz_element, horiz_idx| %>
-        <% section_container_class = horiz_element['container_class'].presence || 'w-full' %>
+      <div class="attr-layout-row">
+      <% (vertical_el["horiz_elements"] || []).each_with_index do |horiz_element, horiz_idx| %>
+        <% layout_col_class = attr_layout_column_class(horiz_element['container_class']) %>
         <% raw_custom_section_class = horiz_element['class'].to_s %>
         <% custom_section_class = raw_custom_section_class.split.reject { |klass| klass == 'h-100' || klass == 'card' }.join(' ') %>
-        <% section_class = "bg-white border border-gray-200 rounded-lg shadow-sm p-4 space-y-4 #{custom_section_class}".strip %>
+        <% section_class = "bg-white border border-gray-200 rounded-lg shadow-sm p-4 space-y-4 h-full flex flex-col #{custom_section_class}".strip %>
         <% section_title = layout_title_for.call(horiz_element) %>
-        <div class="<%= section_container_class %>">
+        <div class="attr-layout-col horiz_element <%= layout_col_class %>">
           <div class="<%= section_class %>">
-            <% if horiz_idx > 0 %><div class="pt-1"></div><% end %>
             <% if section_title.present? %>
               <h4 class="text-sm font-medium text-gray-700"><%= section_title %></h4>
             <% end %>
@@ -358,8 +358,10 @@
               </div>
               <% end %>
             <% end %>
+          </div>
         </div>
       <% end %>
+      </div>
     </div>
   <% end %>
 </div>

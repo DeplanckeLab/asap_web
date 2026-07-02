@@ -117,8 +117,7 @@ module Scfair
     end
 
     def known_gene_reference_taxon?(reference)
-      Rules.feature_reference_taxa.key?(reference.to_s) &&
-        reference.to_s != SPIKE_IN_TAXON
+      FeatureReferenceTaxonPolicy.allowed_gene_reference?(reference)
     end
 
     def gene_for_reference_and_index(feature_reference, index_id)
@@ -186,19 +185,11 @@ module Scfair
     end
 
     def allowed_feature_reference?(reference, biotype:)
-      reference = reference.to_s
-      case biotype.to_s
-      when 'spike-in'
-        reference == SPIKE_IN_TAXON
-      when 'gene'
-        known_gene_reference_taxon?(reference)
-      else
-        feature_reference_taxa.key?(reference)
-      end
+      FeatureReferenceTaxonPolicy.allowed?(reference, biotype:)
     end
 
-    def feature_reference_taxa
-      Rules.feature_reference_taxa
+    def feature_reference_policy
+      Rules.feature_reference_policy
     end
 
     def extract_tax_id(term_id)

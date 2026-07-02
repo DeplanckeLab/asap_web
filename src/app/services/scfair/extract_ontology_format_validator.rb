@@ -37,10 +37,10 @@ module Scfair
             prefix = term.split(':').first
             next if prefixes.include?(prefix)
 
-            warnings << CheckResult.ontology_format(
+            errors << CheckResult.ontology_format(
               field: path,
               format: @format,
-              status: 'warning',
+              status: 'failed',
               code: 'unexpected_prefix',
               message: "Unexpected ontology prefix '#{prefix}' for #{path}"
             )

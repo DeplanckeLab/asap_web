@@ -50,82 +50,82 @@ module Scfair
         progress_cb: method(:relay_extract_progress)
       ).call
 
-      if format == 'loom'
-        errors = base_result.errors
-        warnings = base_result.warnings
-        cross_field = CrossFieldConstraintEvaluator.new(
-          field_values: base_result.field_values || {},
-          format: format
-        ).call
-        obs_label_pairs = ObsLabelPairConstraintEvaluator.new(
-          field_values: base_result.field_values || {},
-          format: format
-        ).call
-        extensions = SchemaExtensionValidator.new(
-          field_values: base_result.field_values || {},
-          format: format,
-          project_compliance: @project_compliance
-        ).call
-        metadata_general = MetadataGeneralValidator.new(
-          field_values: base_result.field_values || {},
-          format: format
-        ).call
-        schema_reference_check = schema_reference_evaluation(base_result.field_values || {}, format)
-        uns_ensembl_check = uns_ensembl_evaluation(base_result.field_values || {}, format)
-        experimental_condition_check = experimental_condition_evaluation(base_result.field_values || {}, format)
-        var_metadata_check = var_metadata_evaluation(base_result.field_values || {}, format)
-        var_index_check = var_index_evaluation(base_result.field_values || {}, format)
-        var_cross_field_check = var_cross_field_evaluation(base_result.field_values || {}, format)
-        uns_ensembl_cross_field_check = uns_ensembl_cross_field_evaluation(base_result.field_values || {}, format)
-        organism_label_check = organism_label_pair_evaluation(base_result.field_values || {}, format)
-        errors.concat(extensions[:errors])
-        errors.concat(metadata_general[:errors])
-        errors.concat(uns_ensembl_check[:errors])
-        errors.concat(experimental_condition_check[:errors])
-        errors.concat(var_metadata_check[:errors])
-        errors.concat(var_index_check[:errors])
-        errors.concat(var_cross_field_check[:errors])
-        errors.concat(uns_ensembl_cross_field_check[:errors])
-        errors.concat(obs_label_pairs[:errors])
-        errors.concat(organism_label_check[:errors])
-        warnings.concat(extensions[:warnings])
-        warnings.concat(schema_reference_check[:warnings])
-        valid_checks = reconcile_schema_version_checks(
-          base_result.valid_checks + cross_field[:valid_checks] + obs_label_pairs[:valid_checks] + extensions[:valid_checks] + metadata_general[:valid_checks] + schema_reference_check[:valid_checks] + uns_ensembl_check[:valid_checks] + experimental_condition_check[:valid_checks] + var_metadata_check[:valid_checks] + var_index_check[:valid_checks] + var_cross_field_check[:valid_checks] + uns_ensembl_cross_field_check[:valid_checks] + organism_label_check[:valid_checks],
-          errors,
-          warnings,
-          format
-        )
-      else
-        tick('ontology', 'Resolving ontology terms in ASAP database', 72, format: format)
-        ontology = StandaloneOntologyComplianceChecker.new(
-          field_values: base_result.field_values || {},
-          format: format,
-          organism_term_id: first_organism(base_result.field_values, format)
-        ).run
-        cross_field = CrossFieldConstraintEvaluator.new(field_values: base_result.field_values || {}, format: format).call
-        obs_label_pairs = ObsLabelPairConstraintEvaluator.new(field_values: base_result.field_values || {}, format: format).call
-        organism_specific = OrganismSpecificConstraintEvaluator.new(field_values: base_result.field_values || {}, format: format).call
-        extensions = SchemaExtensionValidator.new(field_values: base_result.field_values || {}, format: format).call
-        metadata_general = MetadataGeneralValidator.new(field_values: base_result.field_values || {}, format: format).call
-        schema_version_check = schema_version_evaluation(base_result.field_values || {}, format)
-        schema_reference_check = schema_reference_evaluation(base_result.field_values || {}, format)
-        uns_ensembl_check = uns_ensembl_evaluation(base_result.field_values || {}, format)
-        experimental_condition_check = experimental_condition_evaluation(base_result.field_values || {}, format)
-        var_metadata_check = var_metadata_evaluation(base_result.field_values || {}, format)
-        var_index_check = var_index_evaluation(base_result.field_values || {}, format)
-        var_cross_field_check = var_cross_field_evaluation(base_result.field_values || {}, format)
-        uns_ensembl_cross_field_check = uns_ensembl_cross_field_evaluation(base_result.field_values || {}, format)
-        organism_label_check = organism_label_pair_evaluation(base_result.field_values || {}, format)
+      field_values = base_result.field_values || {}
 
-        errors = (base_result.errors + ontology[:errors] + cross_field[:errors] + obs_label_pairs[:errors] + organism_specific[:errors] + extensions[:errors] + metadata_general[:errors] + schema_version_check[:errors] + uns_ensembl_check[:errors] + experimental_condition_check[:errors] + var_metadata_check[:errors] + var_index_check[:errors] + var_cross_field_check[:errors] + uns_ensembl_cross_field_check[:errors] + organism_label_check[:errors]).uniq
-        warnings = (base_result.warnings + ontology[:warnings] + cross_field[:warnings] + organism_specific[:warnings] + extensions[:warnings] + schema_version_check[:warnings] + schema_reference_check[:warnings]).uniq
-        valid_checks = (base_result.valid_checks + ontology[:valid_checks] + cross_field[:valid_checks] + obs_label_pairs[:valid_checks] + organism_specific[:valid_checks] + extensions[:valid_checks] + metadata_general[:valid_checks] + schema_version_check[:valid_checks] + schema_reference_check[:valid_checks] + uns_ensembl_check[:valid_checks] + experimental_condition_check[:valid_checks] + var_metadata_check[:valid_checks] + var_index_check[:valid_checks] + var_cross_field_check[:valid_checks] + uns_ensembl_cross_field_check[:valid_checks] + organism_label_check[:valid_checks])
-        valid_checks = reconcile_schema_version_checks(valid_checks, errors, warnings, format)
-      end
+      tick('ontology', 'Resolving ontology terms in ASAP database', 72, format: format)
+      ontology = StandaloneOntologyComplianceChecker.new(
+        field_values: field_values,
+        format: format,
+        organism_term_id: first_organism(field_values, format)
+      ).run
+      cross_field = CrossFieldConstraintEvaluator.new(field_values: field_values, format: format).call
+      obs_label_pairs = ObsLabelPairConstraintEvaluator.new(field_values: field_values, format: format).call
+      organism_specific = OrganismSpecificConstraintEvaluator.new(field_values: field_values, format: format).call
+      extensions = SchemaExtensionValidator.new(
+        field_values: field_values,
+        format: format,
+        project_compliance: @project_compliance
+      ).call
+      metadata_general = MetadataGeneralValidator.new(field_values: field_values, format: format).call
+      schema_version_check = schema_version_evaluation(field_values, format)
+      schema_reference_check = schema_reference_evaluation(field_values, format)
+      uns_ensembl_check = uns_ensembl_evaluation(field_values, format)
+      experimental_condition_check = experimental_condition_evaluation(field_values, format)
+      var_metadata_check = var_metadata_evaluation(field_values, format)
+      var_index_check = var_index_evaluation(field_values, format)
+      var_cross_field_check = var_cross_field_evaluation(field_values, format)
+      uns_ensembl_cross_field_check = uns_ensembl_cross_field_evaluation(field_values, format)
+      organism_label_check = organism_label_pair_evaluation(field_values, format)
+
+      errors = (
+        base_result.errors +
+        ontology[:errors] +
+        cross_field[:errors] +
+        obs_label_pairs[:errors] +
+        organism_specific[:errors] +
+        extensions[:errors] +
+        metadata_general[:errors] +
+        schema_version_check[:errors] +
+        uns_ensembl_check[:errors] +
+        experimental_condition_check[:errors] +
+        var_metadata_check[:errors] +
+        var_index_check[:errors] +
+        var_cross_field_check[:errors] +
+        uns_ensembl_cross_field_check[:errors] +
+        organism_label_check[:errors]
+      ).uniq
+      warnings = (
+        base_result.warnings +
+        ontology[:warnings] +
+        cross_field[:warnings] +
+        organism_specific[:warnings] +
+        extensions[:warnings] +
+        schema_version_check[:warnings] +
+        schema_reference_check[:warnings]
+      ).uniq
+      valid_checks = (
+        base_result.valid_checks +
+        ontology[:valid_checks] +
+        cross_field[:valid_checks] +
+        obs_label_pairs[:valid_checks] +
+        organism_specific[:valid_checks] +
+        extensions[:valid_checks] +
+        metadata_general[:valid_checks] +
+        schema_version_check[:valid_checks] +
+        schema_reference_check[:valid_checks] +
+        uns_ensembl_check[:valid_checks] +
+        experimental_condition_check[:valid_checks] +
+        var_metadata_check[:valid_checks] +
+        var_index_check[:valid_checks] +
+        var_cross_field_check[:valid_checks] +
+        uns_ensembl_cross_field_check[:valid_checks] +
+        organism_label_check[:valid_checks]
+      )
+      valid_checks = reconcile_schema_version_checks(valid_checks, errors, warnings, format)
 
       errors, valid_checks, warnings = reconcile_rollup_metadata_checks(errors, valid_checks, warnings, format)
       errors, warnings = promote_valid_check_issues(valid_checks, errors, warnings)
+      errors, warnings, valid_checks = suppress_rollup_summary_issues(errors, warnings, valid_checks)
       valid_checks = mirror_metadata_field_checks(valid_checks, errors, warnings, format)
       check_groups = ComplianceReportGrouper.call(
         checks_catalog: CheckCatalog.checks_for(format),
@@ -333,6 +333,29 @@ module Scfair
     end
 
     METADATA_FIELD_CHECK = /\A(uns\/|obs\/|var\/|\/attrs\/|\/col_attrs\/|\/row_attrs\/)/
+
+    def suppress_rollup_summary_issues(errors, warnings, valid_checks)
+      errors = Array(errors).dup
+      warnings = Array(warnings).dup
+      valid_checks = Array(valid_checks).dup
+      other_issues = errors + warnings + valid_checks.select { |entry| entry_status(entry) == 'failed' }
+
+      errors.reject! do |entry|
+        Rules.redundant_rollup_summary?(entry_field(entry), entry[:message] || entry['message'], other_issues)
+      end
+
+      warnings.reject! do |entry|
+        Rules.redundant_rollup_summary?(entry_field(entry), entry[:message] || entry['message'], other_issues)
+      end
+
+      valid_checks.reject! do |entry|
+        next false unless entry_status(entry) == 'failed'
+
+        Rules.redundant_rollup_summary?(entry_field(entry), entry[:message] || entry['message'], other_issues)
+      end
+
+      [errors, warnings, valid_checks]
+    end
 
     def promote_valid_check_issues(valid_checks, errors, warnings)
       promoted_errors = Array(errors).dup

@@ -14,6 +14,7 @@ module Scfair
       @field_values = field_values || {}
       @format = format.to_s
       @lookup = lookup
+      @reference_policy = FeatureReferenceTaxonPolicy.new
     end
 
     def call
@@ -44,7 +45,7 @@ module Scfair
 
       if issues.any?
         message = build_failure_message(
-          summary: 'feature_reference must use the schema NCBITaxon term for each feature biotype',
+          summary: 'feature_reference must use an allowed NCBITaxon lineage for each feature biotype',
           failed_count: issues.size,
           total_count: rows.size,
           examples: issues
@@ -62,7 +63,8 @@ module Scfair
       return nil if reference.blank?
 
       unless @lookup.allowed_feature_reference?(reference, biotype:)
-        return "#{reference}: not an allowed feature_reference for feature_biotype #{biotype.inspect}"
+        return @reference_policy.rejection_message(reference, biotype:) ||
+               "#{reference}: not an allowed feature_reference for feature_biotype #{biotype.inspect}"
       end
 
       if biotype == GENE_BIOTYPE && organism_term.present? && reference != organism_term
@@ -81,9 +83,9 @@ module Scfair
         return
       end
 
-      unexpected = references.reject { |reference| Rules.feature_reference_taxa.key?(reference) }
+      unexpected = references.reject { |reference| @reference_policy.allowed_gene_reference?(reference) || reference == EnsemblReferenceLookup::SPIKE_IN_TAXON }
       if unexpected.any?
-        message = "feature_reference must be a schema NCBITaxon identifier (unexpected: #{unexpected.first(3).join(', ')})"
+        message = "feature_reference must use an allowed NCBITaxon lineage (#{Rules.feature_reference_policy_requirement_text}; unexpected: #{unexpected.first(3).join(', ')})"
         record_failure(errors, valid_checks, check_id:, message:)
         return
       end
@@ -98,7 +100,7 @@ module Scfair
         return
       end
 
-      record_pass(valid_checks, check_id, 'feature_reference values are schema-allowed reference taxa')
+      record_pass(valid_checks, check_id, 'feature_reference values match allowed NCBITaxon lineages')
     end
 
     def validate_feature_name_index(errors, valid_checks)

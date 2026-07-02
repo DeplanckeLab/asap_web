@@ -24,10 +24,18 @@ module Scfair
       end
 
       total = embedding_sections.sum { |section| section.size }
-      if total.zero?
-        warnings << { field: 'obsm', message: 'No embeddings found' }
+      if total.positive?
+        valid_checks << {
+          field: summary_field,
+          status: 'passed',
+          message: "#{total} embedding(s) found"
+        }
       else
-        valid_checks << { field: 'obsm', message: "#{total} embedding(s) found" }
+        valid_checks << {
+          field: summary_field,
+          status: 'skipped',
+          message: 'No embeddings present (optional per schema)'
+        }
       end
 
       { errors: errors, warnings: warnings, valid_checks: valid_checks }
@@ -48,6 +56,10 @@ module Scfair
 
     def embedding_path(key)
       key.to_s.start_with?('/') ? key.to_s : "obsm/#{key}"
+    end
+
+    def summary_field
+      @format == 'loom' ? 'loom.embeddings' : 'obsm'
     end
 
     def validate_embedding(path, meta, errors)

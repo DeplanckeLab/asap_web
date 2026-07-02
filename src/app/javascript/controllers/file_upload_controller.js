@@ -75,6 +75,7 @@ export default class extends Controller {
     this.h5adMetadataChosenByUser = false
     this.h5adMetadataRerunTimer = null
     this.currentDetectedFormat = null  // Track current file format
+    this.rdsMultipleAssays = false  // RDS file had multiple assays at preparsing
     this.projectNameTouched = false
     this.projectNameInputHandler = null
     this._fileFormatsMap = this.loadFileFormats()  // This will also build the extension map
@@ -364,6 +365,7 @@ export default class extends Controller {
     this.archiveFilesData = null
     this.selectedArchiveEntry = null
     this.cameFromArchive = false
+    this.rdsMultipleAssays = false
     this.stopAllUploadTracking()
     this.resetPreparsingState()
     this.checkSubmitButton()
@@ -1182,6 +1184,9 @@ export default class extends Controller {
     const datasets = Array.isArray(summary?.datasets) ? summary.datasets : []
     const detectedFormat = summary?.detected_format
     this.currentDetectedFormat = detectedFormat
+    if (detectedFormat === 'RDS' && datasets.length > 1) {
+      this.rdsMultipleAssays = true
+    }
     if (datasets.length === 1 && datasets[0]?.name) {
       this.selectedDatasetName = datasets[0].name
       if (this.cameFromArchive && !this.selectedArchiveEntry) {
@@ -1677,7 +1682,10 @@ export default class extends Controller {
         this.selectedDatasetIndex = index
         const datasetDisplayName = this.getDatasetDisplayName(dataset)
         this.selectedDatasetName = datasetDisplayName || dataset?.name || dataset?.group || null
-        this.maybeSetProjectNameFromDataset(this.selectedDatasetName, previousSelection)
+        this.maybeSetProjectNameFromDataset(this.selectedDatasetName, previousSelection, {
+          detectedFormat,
+          multipleAssays: datasets.length > 1
+        })
         
         // Update UI to highlight selected option
         const options = this.preparsingResultTarget.querySelectorAll('.dataset-option')
@@ -1749,7 +1757,10 @@ export default class extends Controller {
   async rerunPreparsingWithDataset(datasetName, previousDatasetName = null) {
     if (!this.fuId || !datasetName) return
 
-    this.maybeSetProjectNameFromDataset(datasetName, previousDatasetName)
+    this.maybeSetProjectNameFromDataset(datasetName, previousDatasetName, {
+      detectedFormat: this.currentDetectedFormat,
+      multipleAssays: this.rdsMultipleAssays
+    })
     this.setPreparsingStatus(`Re-running preparsing for: ${this.escapeHtml(datasetName)}...`, 'info', true)
     
     // Disable the select button during processing (could be dataset or archive file button)
@@ -1878,13 +1889,15 @@ export default class extends Controller {
 
   buildDatasetCard(dataset, detectedFormat, index) {
     const datasetName = this.getDatasetDisplayName(dataset)
+    const multipleAssays = detectedFormat === 'RDS' && this.rdsMultipleAssays
 
-    // Prefer the selected dataset name over the uploaded filename.
-    let label = datasetName || this.originalFilename || `Dataset ${index + 1}`
+    let label = this.datasetDisplayLabel(detectedFormat, datasetName, { multipleAssays })
+      || this.originalFilename
+      || `Dataset ${index + 1}`
     
     // Always remove extension from label for display
     // Skip if it's the default "Dataset X" label
-    if (label && label !== `Dataset ${index + 1}`) {
+    if (detectedFormat !== 'RDS' && label && label !== `Dataset ${index + 1}`) {
       const hasSlash = label.includes('/')
       const hasExtension = label.includes('.')
       // Remove extension if it exists and there's no slash (path separator)
@@ -1995,7 +2008,7 @@ export default class extends Controller {
 
     // Pass the display label (after extension removal) to project name setter
     // so project name matches exactly what's displayed
-    this.maybeSetProjectNameFromDataset(label)
+    this.maybeSetProjectNameFromDataset(datasetName, null, { detectedFormat, multipleAssays })
 
     return `
       <div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/80 p-4">
@@ -2132,6 +2145,33 @@ export default class extends Controller {
     return label
   }
 
+  isGenericRdsAssayName(assayName) {
+    return (assayName || '').trim().toUpperCase() === 'RNA'
+  }
+
+  datasetDisplayLabel(detectedFormat, assayName, { multipleAssays = false } = {}) {
+    const assay = (assayName || '').trim()
+    const filename = (this.originalFilename || '').trim()
+
+    if (detectedFormat !== 'RDS') {
+      return assay || filename
+    }
+
+    if (!filename) {
+      return assay
+    }
+
+    if (!multipleAssays) {
+      return filename
+    }
+
+    if (assay && !this.isGenericRdsAssayName(assay)) {
+      return `${filename} - ${assay}`
+    }
+
+    return filename
+  }
+
   projectNameMatchesSelection(projectName, selectionName) {
     const normalizedProjectName = this.normalizeProjectNameCandidate(projectName)
     const normalizedSelection = this.normalizeProjectNameCandidate(selectionName)
@@ -2139,7 +2179,7 @@ export default class extends Controller {
     return normalizedProjectName === normalizedSelection
   }
 
-  maybeSetProjectNameFromDataset(datasetName, previousDatasetName = null) {
+  maybeSetProjectNameFromDataset(assayName, previousAssayName = null, options = {}) {
     if (this.projectNameTouched) return
 
     const inputEl = this.projectNameInputElement ||
@@ -2148,11 +2188,21 @@ export default class extends Controller {
 
     if (!inputEl) return
 
-    const displayName = this.normalizeProjectNameCandidate(datasetName)
+    const detectedFormat = options.detectedFormat ?? this.currentDetectedFormat
+    const multipleAssays = options.multipleAssays ?? (detectedFormat === 'RDS' && this.rdsMultipleAssays)
+    const displayName = this.normalizeProjectNameCandidate(
+      this.datasetDisplayLabel(detectedFormat, assayName, { multipleAssays })
+    )
     if (!displayName) return
 
+    const previousDisplayName = previousAssayName
+      ? this.normalizeProjectNameCandidate(
+          this.datasetDisplayLabel(detectedFormat, previousAssayName, { multipleAssays })
+        )
+      : null
+
     const currentName = (inputEl.value || '').trim()
-    if (currentName !== '' && !this.projectNameMatchesSelection(currentName, previousDatasetName)) {
+    if (currentName !== '' && !this.projectNameMatchesSelection(currentName, previousDisplayName)) {
       return
     }
 
@@ -2852,6 +2902,7 @@ export default class extends Controller {
     this.selectedArchiveEntry = null
     this.archiveFilesData = null
     this.cameFromArchive = false
+    this.rdsMultipleAssays = false
     this.projectNameTouched = false
     
     // Reset preparsing state and stop background polls/subscriptions

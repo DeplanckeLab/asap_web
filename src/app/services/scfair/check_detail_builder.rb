@@ -1605,9 +1605,9 @@ module Scfair
       when 'feature_reference'
         rows << constraint_row(
           'Allowed values',
-          Rules.feature_reference_taxa.keys.join(', '),
+          Rules.feature_reference_policy_requirement_text,
           from_rules: true,
-          rules_path: 'constants.feature_reference_taxa'
+          rules_path: 'constants.feature_reference_policy.requirement'
         )
       end
     end

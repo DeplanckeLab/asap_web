@@ -474,13 +474,13 @@ class ScfairLoomValidatorService
 
     prefix = term.split(':').first
     unless valid_prefixes.include?(prefix)
-      @warnings << Scfair::CheckResult.build(
+      @errors << Scfair::CheckResult.build(
         check_id: Scfair::Rules::ONTOLOGY_FORMAT_CHECK_ID,
         field: field,
-        status: 'warning',
+        status: 'failed',
         code: 'unexpected_prefix',
         format: 'loom',
-        message: "Ontology prefix '#{prefix}' in '#{term}' may not be valid for this field. Expected: #{valid_prefixes.join(', ')}"
+        message: "Unexpected ontology prefix '#{prefix}' for #{field}"
       )
     end
   end

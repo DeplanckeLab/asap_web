@@ -94,17 +94,40 @@ def decode_obs_value(value: Any) -> str | None:
     return str(value)
 
 
+def to_json_safe(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.ndarray):
+        return [to_json_safe(v) for v in value.tolist()]
+    if isinstance(value, dict):
+        return {k: to_json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_json_safe(v) for v in value]
+    return value
+
+
 def uns_scalar(value: Any, type_name: str | None = None) -> dict[str, Any]:
+    value = to_json_safe(value)
     if type_name is None:
         if isinstance(value, bool):
             type_name = "boolean"
-        elif isinstance(value, (int, np.integer)) and not isinstance(value, bool):
+        elif isinstance(value, int) and not isinstance(value, bool):
             type_name = "integer"
         else:
             type_name = "string"
             value = str(value)
     if type_name == "string":
         value = str(value)
+    elif type_name == "integer":
+        value = int(value)
+    elif type_name == "boolean":
+        value = bool(value)
     return {"type": type_name, "value": value}
 
 
@@ -128,6 +151,16 @@ def array_meta(shape: tuple | list, dtype: str, has_inf: bool = False, has_nan: 
         "has_inf": bool(has_inf),
         "has_nan": bool(has_nan),
     }
+
+
+def normalize_hwc_shape(shape: tuple[int, ...]) -> tuple[int, ...]:
+    """Return height x width x channels for 3D image arrays.
+
+    H5AD spatial images are stored as HWC. Only transpose channels-first CHW arrays.
+    """
+    if len(shape) == 3 and shape[0] in (3, 4):
+        return (shape[1], shape[2], shape[0])
+    return shape
 
 
 def truncate_unique(values: list[str | None], max_n: int = MAX_DISTINCT) -> list[str]:
@@ -343,9 +376,7 @@ def walk_nested_extension(group: h5py.Group, prefix_parts: list[str], scalars: d
                 val = val.decode("utf-8", "replace")
             scalars[rel] = uns_scalar(val)
         else:
-            shape = tuple(int(s) for s in node.shape)
-            if len(shape) == 3:
-                shape = (shape[2], shape[1], shape[0])
+            shape = normalize_hwc_shape(tuple(int(s) for s in node.shape))
             has_inf = has_nan = False
             if node.size > 0 and np.issubdtype(node.dtype, np.floating):
                 sample = np.asarray(node[()])
@@ -726,7 +757,11 @@ def run_self_tests(fixture_path: Path | None = None) -> None:
         assert_true("missing_for_full_compliance" not in ex, "extract must not include compliance diagnostics")
 
     assert_true(uns_scalar("x")["type"] == "string", "uns_scalar helper")
+    assert_true(uns_scalar(np.int64(51))["value"] == 51, "uns_scalar converts numpy integers")
+    assert_true(isinstance(uns_scalar(np.int64(51))["value"], int), "uns_scalar value is native int")
     assert_true(bool(paired_block("a", [{"id": "1", "label": "2"}])["pairs"]), "paired_block helper")
+    assert_true(normalize_hwc_shape((1820, 2000, 3)) == (1820, 2000, 3), "preserves HWC image shape")
+    assert_true(normalize_hwc_shape((3, 1820, 2000)) == (1820, 2000, 3), "converts CHW image shape to HWC")
 
     if errors:
         print("FAILED:")
@@ -760,7 +795,7 @@ def main() -> int:
     if args.output:
         output_path = Path(args.output)
 
-    extract = parse_file(input_path)
+    extract = to_json_safe(parse_file(input_path))
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w") as fh:
         json.dump(extract, fh, indent=2)

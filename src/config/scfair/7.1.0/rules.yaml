@@ -260,9 +260,9 @@ presence_field_metadata:
       - 'Spike-in: "{ERCC-ID} (spike-in control)" matching var index'
       - 'Gene: gene_name from the reference for var index, or var index when gene_name is absent'
     feature_reference:
-      summary: NCBITaxon term for the reference organism of the feature from the schema pinned gene annotations table.
+      summary: NCBITaxon term for the reference organism of the feature (Metazoa, Vertebrata, or Ensembl COVID-19).
       extra_checks:
-      - Must be the schema NCBITaxon reference organism for the feature (pinned gene annotations table)
+      - Gene rows must use an allowed NCBITaxon lineage per feature_reference_policy (Metazoa, Vertebrata, or Ensembl COVID-19)
     feature_type:
       summary: Feature type label such as protein_coding or synthetic (non-empty string).
       extra_checks:
@@ -489,7 +489,8 @@ ontology_fields:
 # Shared reference data for validators (not keyed as "column X allowed values").
 # visium_assay_terms / slide_seq_assay: spatial assay detection (SpatialAssayHelper).
 # ensembl_database_values: allowed uns/ensembl_database strings.
-# feature_reference_taxa: pinned NCBITaxon IDs for var/feature_reference.
+# feature_reference_policy: allowed NCBITaxon lineages for var/feature_reference (gene biotype).
+# feature_reference_taxa: non-exhaustive examples for documentation and UI hints.
 constants:
   multi_value_delimiter: *multi_value_delimiter
   # Known Visium EFO assay terms (fast path; descendants of EFO:0010961 also match).
@@ -503,6 +504,13 @@ constants:
     - Ensembl
     - EnsemblMetazoa
     - EnsemblCOVID-19
+  feature_reference_policy:
+    spike_in_taxon: NCBITaxon:32630
+    covid_taxon: NCBITaxon:2697049
+    lineage_roots:
+      vertebrata: 7742
+      metazoa: 33208
+    requirement: 'NCBITaxon terms for Metazoa (EnsemblMetazoa), Vertebrata (Ensembl), or Ensembl COVID-19 (NCBITaxon:2697049); spike-ins use NCBITaxon:32630'
   feature_reference_taxa:
     NCBITaxon:6293: Caenorhabditis elegans
     NCBITaxon:9483: Callithrix jacchus
@@ -1381,18 +1389,18 @@ checks:
     label: Var metadata cross-field consistency
     summary: Var metadata must be consistent with uns organism and ensembl_release.
     rollup:
-    - feature_reference must use schema NCBITaxon reference taxa per feature biotype
+    - feature_reference must use allowed NCBITaxon lineages per feature biotype (Metazoa, Vertebrata, Ensembl COVID-19)
     - feature_name must match var index per gene reference rules (gene_name or index;
       ERCC for spike-ins)
     - var index gene identifiers must exist for the organism at ensembl_release
     checks:
       feature_reference:
         title: feature_reference
-        summary: Each feature must declare the schema NCBITaxon reference organism
-          for its annotation (pinned gene references table).
+        summary: Each feature must declare the NCBITaxon reference organism for its
+          gene annotation (Metazoa, Vertebrata, or Ensembl COVID-19).
         checks_performed:
         - Spike-in rows must use NCBITaxon:32630
-        - Gene rows must use a schema-allowed reference taxon
+        - Gene rows must use an NCBITaxon term in Metazoa, Vertebrata, or Ensembl COVID-19
         - Gene rows must match organism_ontology_term_id for the dataset
       feature_name.index:
         title: feature_name vs var index

@@ -12,7 +12,7 @@ module Scfair
       @format = format.to_s
       @required_fields = Rules.required_var_fields
       @biotype_values = Rules.enum_field_values('feature_biotype')
-      @reference_taxa = Rules.feature_reference_taxa.keys
+      @reference_policy = FeatureReferenceTaxonPolicy.new
     end
 
     def call
@@ -105,9 +105,15 @@ module Scfair
       return unless var_columns.include?(field_name)
 
       field = var_path(field_name)
-      invalid = values_for_var(field_name).reject { |value| @reference_taxa.include?(value) }
+      references = values_for_var(field_name).uniq
+      biotypes = values_for_var('feature_biotype').uniq
+      biotypes = ['gene'] if biotypes.empty?
+
+      invalid = references.reject do |value|
+        biotypes.any? { |biotype| @reference_policy.allowed?(value, biotype:) }
+      end
       if invalid.any?
-        message = "feature_reference must be a schema NCBITaxon identifier (found: #{invalid.first(3).join(', ')})"
+        message = "feature_reference must use an allowed NCBITaxon lineage (#{Rules.feature_reference_policy_requirement_text}; found: #{invalid.first(3).join(', ')})"
         record_value_failure(errors, valid_checks, field:, message:)
       else
         record_value_pass(valid_checks, field)

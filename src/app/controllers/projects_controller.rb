@@ -662,12 +662,12 @@ class ProjectsController < ApplicationController
         {
           domain: domain,
           count: orgs.count,
-          organisms: orgs.map do |display_name, id, tax_id, assembly_at_latest_release|
+          organisms: orgs.map do |display_name, id, tax_id, assembly_status|
             {
               display_name: display_name,
               id: id,
               tax_id: tax_id,
-              assembly_at_latest_release: assembly_at_latest_release
+              assembly_status: assembly_status
             }
           end
         }
@@ -5755,7 +5755,7 @@ class ProjectsController < ApplicationController
         short_name = organism['short_name']
         display_name = Organism.selector_label(organism_name, short_name)
         tax_id = organism['tax_id']
-        assembly_at_latest_release = organism['assembly_at_latest_release']
+        assembly_status = organism['assembly_status']
         
         # Get domain name from hash (already fetched in RemoteOrganism.list_for_version)
         domain_name = organism['domain_name'] || 'Other'
@@ -5766,7 +5766,7 @@ class ProjectsController < ApplicationController
         short_name = organism.short_name
         display_name = Organism.selector_label(organism_name, short_name)
         tax_id = organism.tax_id
-        assembly_at_latest_release = nil
+        assembly_status = nil
         
         # Get domain name from local database
         domain_name = if organism.ensembl_subdomain
@@ -5800,7 +5800,7 @@ class ProjectsController < ApplicationController
       # Keep each organism in a single group to avoid duplicates in the selector.
       # Model organisms are surfaced in the dedicated group; all others stay in domain groups.
       target_group = is_model_organism ? 'Main model organisms' : formatted_domain
-      group_entry = [display_name, organism_id, tax_id, assembly_at_latest_release]
+      group_entry = [display_name, organism_id, tax_id, assembly_status]
 
       # Remote v8+ lists can contain duplicate rows; keep only one entry per group.
       next if grouped_seen[target_group][group_entry]
@@ -6937,6 +6937,10 @@ class ProjectsController < ApplicationController
       false
     end
 
+    preparsing_in_progress = fu.status == 'preparsing'
+    restored_file_size = nil
+
+    unless preparsing_in_progress
     if bundle_reset
       # For MTX bundle projects (pre-extracted triplet under fus/<fu_id>/input_file/),
       # upload_dir must retain BOTH the real uploaded archive (upload_file_path) and
@@ -6998,9 +7002,15 @@ class ProjectsController < ApplicationController
         source_path = staged_source_path.to_s
       end
 
-      FileUtils.rm_rf(upload_dir) if File.exist?(upload_dir)
+      # Do not rm_rf upload_dir: in-flight preparsing runs docker exec with this
+      # directory as --workdir; deleting it causes getcwd() failures and R errors.
       FileUtils.mkdir_p(upload_dir)
-      FileUtils.cp(source_path, upload_file_path)
+      %w[output.json output.err].each do |name|
+        FileUtils.rm_f((upload_dir + name).to_s)
+      end
+      input_file_subdir = upload_dir + 'input_file'
+      FileUtils.rm_rf(input_file_subdir) if File.directory?(input_file_subdir)
+      FileUtils.cp(source_path, upload_file_path.to_s)
       FileUtils.rm_f(staged_source_path.to_s) if staged_source_path
       restored_file_size = File.size(upload_file_path)
       Rails.logger.info("[reset_parsing] Restored upload file to #{upload_file_path} from #{source_path}")
@@ -7017,6 +7027,14 @@ class ProjectsController < ApplicationController
     )
     FuPreparsingJob.perform_later(fu.id, preparsing_options)
     Rails.logger.info("[reset_parsing] Restarted preparsing for Fu##{fu.id} with options #{preparsing_options.inspect}")
+    else
+      restored_file_size = if File.exist?(upload_file_path)
+                             File.size(upload_file_path)
+                           else
+                             fu.upload_file_size.to_i
+                           end
+      Rails.logger.info("[reset_parsing] Fu##{fu.id} preparsing in progress; skipping file restore and re-enqueue")
+    end
 
     # Set up session with file upload info
     session[:file_upload] = {

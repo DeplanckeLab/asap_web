@@ -59,6 +59,10 @@ import RestartStepController from "controllers/restart_step_controller"
 application.register("restart-step", RestartStepController)
 console.log('Restart step controller registered')
 
+import ResetParsingController from "controllers/reset_parsing_controller"
+application.register("reset-parsing", ResetParsingController)
+console.log('Reset parsing controller registered')
+
 import RestartRunController from "controllers/restart_run_controller"
 application.register("restart-run", RestartRunController)
 console.log('Restart run controller registered')

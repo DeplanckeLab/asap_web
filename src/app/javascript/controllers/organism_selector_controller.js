@@ -400,19 +400,32 @@ export default class extends Controller {
     this.dropdownMenuTarget.appendChild(searchWrapper)
   }
 
-  createAssemblyStatusTag(assemblyAtLatestRelease) {
-    if (assemblyAtLatestRelease === null || assemblyAtLatestRelease === undefined) {
+  createAssemblyStatusTag(assemblyStatus) {
+    if (!assemblyStatus) {
       return null
     }
 
+    const targetRelease = assemblyStatus.release
+    const assemblyRelease = assemblyStatus.assembly_release
+    const name = (assemblyStatus.name || '').trim()
+    const present = assemblyStatus.present === true
+
     const tag = document.createElement('span')
-    tag.className = assemblyAtLatestRelease
-      ? 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border border-green-200 dark:border-green-800 ml-auto cursor-help flex-shrink-0'
-      : 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 ml-auto cursor-help flex-shrink-0'
-    tag.textContent = assemblyAtLatestRelease ? 'assembly' : 'no assembly'
-    tag.title = assemblyAtLatestRelease
-      ? 'assembly in the latest Ensembl release'
-      : 'no assembly in the latest Ensembl release'
+    tag.className = present
+      ? 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border border-green-200 dark:border-green-800 ml-auto cursor-help flex-shrink-0 max-w-[55%] truncate'
+      : 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 ml-auto cursor-help flex-shrink-0 max-w-[55%] truncate'
+
+    if (name) {
+      const displayRelease = present ? targetRelease : assemblyRelease
+      tag.textContent = displayRelease ? `${name} (release ${displayRelease})` : name
+      tag.title = present
+        ? `Assembly ${name} available for Ensembl release ${targetRelease}`
+        : `Assembly ${name} available up to Ensembl release ${assemblyRelease}; this assembly doesn't exist in release ${targetRelease}, please be aware that gene sets will not be available if you select this assembly.`
+    } else {
+      tag.textContent = 'no assembly'
+      tag.title = 'No assembly available'
+    }
+
     return tag
   }
 
@@ -488,7 +501,7 @@ export default class extends Controller {
           option.appendChild(taxSpan)
         }
 
-        const assemblyTag = this.createAssemblyStatusTag(org.assembly_at_latest_release)
+        const assemblyTag = this.createAssemblyStatusTag(org.assembly_status)
         if (assemblyTag) {
           option.appendChild(assemblyTag)
         }

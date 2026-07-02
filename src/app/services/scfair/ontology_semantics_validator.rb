@@ -27,13 +27,14 @@ module Scfair
         ordering_check_failed = false
         allowed_specials = OntologySemanticRules.allowed_special_values_for(field_name)
 
+        ordering_failures = []
         if rules[:sorted_multi]
-          normalized = values.reject { |v| special_value?(v, allowed_specials) }
-          sorted = normalized.sort
-          if normalized != sorted || normalized.uniq.size != normalized.size
+          ordering_failures = multi_value_ordering_failures(@field_values[path], allowed_specials)
+          if ordering_failures.any?
+            delimiter = Rules.multi_value_delimiter
             @errors << {
               field: "ontology.semantics.#{field_name}.ordering",
-              message: "#{field_name} values must be unique and sorted lexically with '#{Rules.multi_value_delimiter}' separator"
+              message: "#{field_name} values must be unique and sorted lexically with '#{delimiter}' separator — #{ordering_failures.join('; ')}"
             }
             ordering_check_failed = true
           end
@@ -122,7 +123,11 @@ module Scfair
           checks << {
             field: "ontology.semantics.#{field_name}.sorted_multi",
             status: ordering_check_failed ? 'failed' : 'passed',
-            message: ordering_check_failed ? 'Multi-value ordering/uniqueness failed' : 'Multi-value ordering/uniqueness passed'
+            message: if ordering_check_failed
+                       "Multi-value ordering/uniqueness failed — #{ordering_failures.join('; ')}"
+                     else
+                       'Multi-value ordering/uniqueness passed'
+                     end
           }
         end
 
@@ -159,6 +164,29 @@ module Scfair
 
     def split_values(raw)
       Array(raw).flat_map { |v| Rules.split_multi_value(v) }
+    end
+
+    def multi_value_ordering_failures(raw_values, allowed_specials)
+      delimiter = Rules.multi_value_delimiter
+      Array(raw_values).filter_map do |raw|
+        parts = Rules.split_multi_value(raw)
+        next if parts.size <= 1
+
+        normalized = parts.reject { |v| special_value?(v, allowed_specials) }
+        next if normalized.empty?
+
+        issues = []
+        if normalized.uniq.size != normalized.size
+          dups = normalized.group_by(&:itself).select { |_term, occurrences| occurrences.size > 1 }.keys
+          issues << "duplicate #{'term'.pluralize(dups.size)} #{dups.join(', ')}"
+        end
+        if normalized != normalized.sort
+          issues << "not sorted lexically (expected #{normalized.sort.join(delimiter)})"
+        end
+        next if issues.empty?
+
+        %("#{raw}": #{issues.join('; ')})
+      end
     end
 
     def special_value?(v, allowed_specials = nil)

@@ -159,11 +159,11 @@
                   <div class="hidden" data-organism-selector-target="groupContent">
                     <% organisms.each do |organism_data| %>
                       <% 
-                        # Handle array format: [display_name, organism_id, tax_id, assembly_at_latest_release]
+                        # Handle array format: [display_name, organism_id, tax_id, assembly_status]
                         display_name = organism_data[0]
                         organism_id = organism_data[1]
                         tax_id = organism_data[2]
-                        assembly_at_latest_release = organism_data[3]
+                        assembly_status = organism_data[3]
                       %>
                       <button type="button"
                               class="w-full px-6 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-2 <%= 'bg-blue-50 dark:bg-blue-900/30 font-medium' if organism_id == effective_organism_id %>"
@@ -176,7 +176,7 @@
                         <% if tax_id.present? %>
                           <span class="text-gray-500 dark:text-gray-400 text-xs flex-shrink-0"><%= tax_id %></span>
                         <% end %>
-                        <%= organism_assembly_status_tag(assembly_at_latest_release) %>
+                        <%= organism_assembly_status_tag(assembly_status) %>
                       </button>
                     <% end %>
                   </div>

@@ -23,9 +23,10 @@ class ScfairVarCrossFieldValidatorTest < TestBaseWithoutFixtures
       gene_statuses.fetch(key, :ok)
     end
 
+    ALLOWED_GENE_REFERENCES = %w[NCBITaxon:9606 NCBITaxon:10090 NCBITaxon:7159].freeze
+
     def known_gene_reference_taxon?(reference)
-      reference != Scfair::EnsemblReferenceLookup::SPIKE_IN_TAXON &&
-        Scfair::Rules.feature_reference_taxa.key?(reference)
+      ALLOWED_GENE_REFERENCES.include?(reference.to_s)
     end
 
     def allowed_feature_reference?(reference, biotype:)
@@ -35,7 +36,7 @@ class ScfairVarCrossFieldValidatorTest < TestBaseWithoutFixtures
       when 'gene'
         known_gene_reference_taxon?(reference)
       else
-        Scfair::Rules.feature_reference_taxa.key?(reference)
+        false
       end
     end
 

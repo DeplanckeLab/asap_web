@@ -581,10 +581,10 @@ class ScfairH5adValidatorService
             continue
           prefix = term.split(":")[0]
           if prefix not in prefixes:
-            warnings.append({
+            errors.append({
               "field": field_path,
               "check_id": ONTOLOGY_FORMAT_CHECK_ID,
-              "status": "warning",
+              "status": "failed",
               "code": "unexpected_prefix",
               "message": f"Unexpected ontology prefix '{prefix}' for {field_path}"
             })
@@ -777,9 +777,9 @@ class ScfairH5adValidatorService
           emit_timing(f"h5py.obsm/{key}", key_started, detail)
 
       if len(obsm_key_list) == 0:
-        warnings.append({"field": "obsm", "message": "No embeddings found"})
+        valid_checks.append({"field": "obsm", "status": "skipped", "message": "No embeddings present (optional per schema)"})
       else:
-        valid_checks.append({"field": "obsm", "message": f"{len(obsm_key_list)} embedding(s) found"})
+        valid_checks.append({"field": "obsm", "status": "passed", "message": f"{len(obsm_key_list)} embedding(s) found"})
       emit_timing("h5py.obsm", obsm_started, {"keys": len(obsm_key_list)})
 
     emit_progress("load", "Opening H5AD file (metadata only, matrix not loaded)")

@@ -298,7 +298,12 @@ module ProjectsHelper
     link_to reset_parsing_project_path(project),
             class: css_class,
             style: extra_style,
-            data: { turbo: false } do
+            data: {
+              turbo: false,
+              controller: "reset-parsing",
+              action: "click->reset-parsing#visit",
+              reset_parsing_link: true
+            } do
       safe_join([
         tag.i(class: 'fas fa-redo sm:mr-1'),
         tag.span(' Reset', class: 'hidden sm:inline')
@@ -306,23 +311,31 @@ module ProjectsHelper
     end
   end
 
-  def organism_assembly_status_tag(assembly_at_latest_release)
-    return '' if assembly_at_latest_release.nil?
+  def organism_assembly_status_tag(assembly_status)
+    return '' if assembly_status.blank?
 
-    if assembly_at_latest_release
-      content_tag(
-        :span,
-        'assembly',
-        class: 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border border-green-200 dark:border-green-800 ml-auto cursor-help flex-shrink-0',
-        title: 'assembly in the latest Ensembl release'
-      )
+    status = assembly_status.with_indifferent_access
+    target_release = status[:release]
+    assembly_release = status[:assembly_release]
+    name = status[:name].to_s.strip.presence
+    present = ActiveModel::Type::Boolean.new.cast(status[:present])
+
+    if name
+      display_release = present ? target_release : assembly_release
+      label = display_release.present? ? "#{name} (release #{display_release})" : name
+      if present
+        title = "Assembly #{name} available for Ensembl release #{target_release}"
+        css = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border border-green-200 dark:border-green-800 ml-auto cursor-help flex-shrink-0 max-w-[55%] truncate'
+      else
+        title = "Assembly #{name} available up to Ensembl release #{assembly_release}; this assembly doesn't exist in release #{target_release}, please be aware that gene sets will not be available if you select this assembly."
+        css = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 ml-auto cursor-help flex-shrink-0 max-w-[55%] truncate'
+      end
     else
-      content_tag(
-        :span,
-        'no assembly',
-        class: 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 ml-auto cursor-help flex-shrink-0',
-        title: 'no assembly in the latest Ensembl release'
-      )
+      label = 'no assembly'
+      title = 'No assembly available'
+      css = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 ml-auto cursor-help flex-shrink-0 max-w-[55%] truncate'
     end
+
+    content_tag(:span, label, class: css, title: title)
   end
 end

@@ -322,6 +322,27 @@ module Scfair
       raw.each_with_object({}) { |(id, label), h| h[id.to_s] = label.to_s }.freeze
     end
 
+    def feature_reference_policy
+      raw = data.dig(:constants, :feature_reference_policy) || {}
+      lineage_roots = raw[:lineage_roots] || {}
+      covid_taxon = raw[:covid_taxon].to_s
+      covid_match = covid_taxon.match(/\ANCBITaxon:(\d+)\z/)
+      {
+        spike_in_taxon: raw[:spike_in_taxon].to_s,
+        covid_taxon: covid_taxon,
+        covid_tax_id: covid_match ? covid_match[1].to_i : nil,
+        lineage_root_tax_ids: lineage_roots.values.map { |value| value.to_i }.select(&:positive?).uniq.freeze,
+        requirement: raw[:requirement].to_s
+      }.freeze
+    end
+
+    def feature_reference_policy_requirement_text
+      text = feature_reference_policy[:requirement]
+      return text if text.present?
+
+      'NCBITaxon terms for Metazoa, Vertebrata, or Ensembl COVID-19'
+    end
+
     def experimental_condition_rules
       raw = data[:experimental_condition_rules] || {}
       {
@@ -1094,6 +1115,103 @@ module Scfair
 
     def spatial_rollup_checks
       Array(check_entry('extension.spatial')&.dig(:checks)).map(&:to_s).freeze
+    end
+
+    def issue_has_own_rules?(field, message)
+      msg = message.to_s
+      fld = field.to_s
+      return true if fld.match?(%r{\A(?:uns|obs|var)/})
+      return true if fld.match?(%r{\A/(?:attrs|col_attrs|row_attrs)/})
+      return true if msg.match?(%r{\b(?:uns|obs|var|/attrs|/col_attrs|/row_attrs)/})
+      return true if msg.match?(/\b(?:CL|UBERON|EFO|MONDO|PATO|NCBITaxon|CVCL_|HsapDv|WBbt|ZFA|FBbt):/)
+      return true if msg.include?('Missing ') && msg.include?('metadata')
+      return true if msg.include?('not sorted lexically') || msg.include?('duplicate term')
+      return true if msg.include?('ID/label mismatch') || msg.include?('term not found in ontology DB')
+      return true if msg.include?('dtype must be') || msg.include?('channel dimension')
+      return true if msg.include?('expected ') && !msg.match?(/\bchecks (?:failed|passed)\z/)
+
+      false
+    end
+
+    def in_rollup_scope?(ancestor, field)
+      ancestor = ancestor.to_s
+      field = field.to_s
+      return false if ancestor.blank? || field.blank? || ancestor == field
+
+      rollup_scope_prefixes(ancestor).any? { |prefix| field.start_with?(prefix) }
+    end
+
+    def in_semantic_subcheck_scope?(rollup_field, specific_field)
+      base = ontology_semantics_base(rollup_field)
+      return false if base.blank?
+
+      specific_field.to_s.start_with?("#{base}.") && specific_field.to_s != rollup_field.to_s
+    end
+
+    SEMANTIC_ROLLUP_SUBCHECKS = {
+      'sorted_multi' => %w[ordering],
+      'allowed_terms' => %w[existence],
+      'banned_terms' => %w[forbidden],
+      'descendants' => %w[lineage],
+      'special_values' => %w[special_label_pair]
+    }.freeze
+
+    def redundant_rollup_summary?(field, message, other_issues)
+      fld = field.to_s
+      msg = message.to_s
+
+      if semantic_rollup_subcheck_field?(fld)
+        return Array(other_issues).any? do |other|
+          redundant_semantic_subcheck_rollup?(fld, other[:field].to_s)
+        end
+      end
+
+      return false if issue_has_own_rules?(fld, msg)
+
+      Array(other_issues).any? do |other|
+        other_field = other[:field].to_s
+        other_message = other[:message].to_s
+        next false if other_field.blank? || other_field == fld
+        next false unless issue_has_own_rules?(other_field, other_message)
+
+        in_rollup_scope?(fld, other_field) || in_semantic_subcheck_scope?(fld, other_field)
+      end
+    end
+
+    def semantic_rollup_subcheck_field?(field)
+      base = ontology_semantics_base(field)
+      return false if base.blank?
+
+      SEMANTIC_ROLLUP_SUBCHECKS.key?(field.to_s.delete_prefix("#{base}."))
+    end
+
+    def redundant_semantic_subcheck_rollup?(rollup_field, specific_field)
+      base = ontology_semantics_base(rollup_field)
+      return false if base.blank?
+
+      rollup_suffix = rollup_field.to_s.delete_prefix("#{base}.")
+      canonicals = SEMANTIC_ROLLUP_SUBCHECKS[rollup_suffix]
+      return false if canonicals.blank?
+
+      canonicals.include?(specific_field.to_s.delete_prefix("#{base}."))
+    end
+
+    def rollup_scope_prefixes(check_id)
+      check_id = check_id.to_s
+      prefixes = ["#{check_id}."]
+      Array(check_entry(check_id)&.dig(:checks)).each do |line|
+        next unless (match = line.match(/\A([a-z][\w.]*):/i))
+
+        prefixes.concat(rollup_scope_prefixes(match[1]))
+      end
+      if check_id == 'extension.spatial.assets'
+        prefixes.concat(%w[extension.spatial.images. extension.spatial.obsm])
+      end
+      prefixes.uniq
+    end
+
+    def ontology_semantics_base(field)
+      field.to_s.match(/\A(ontology\.semantics\.[^.]+)/)&.captures&.first
     end
 
     def layer_field_checks(layer, field_name, format: 'h5ad')

@@ -187,4 +187,58 @@ class ScfairOntologySemanticsValidatorTest < TestBaseWithoutFixtures
 
     resolver.verify
   end
+
+  test 'sorted multi-value ordering checks each distinct entry independently' do
+    field_values = {
+      'obs/cell_type_ontology_term_id' => %w[CL:0002214 CL:0002211 CL:0000136 CL:0002320 CL:0002212]
+    }
+    resolver = Object.new
+    resolver.define_singleton_method(:exists?) { |_id| true }
+    resolver.define_singleton_method(:descendant_of?) { |_id, _root| true }
+
+    Scfair::OntologyLineageResolver.stub(:new, resolver) do
+      result = Scfair::OntologySemanticsValidator.new(field_values: field_values, format: 'h5ad').call
+
+      refute result[:errors].any? { |entry| entry[:field].to_s.end_with?('.ordering') }
+      ordering = result[:valid_checks].find { |check| check[:field] == 'ontology.semantics.cell_type_ontology_term_id.sorted_multi' }
+      assert_equal 'passed', ordering[:status]
+    end
+  end
+
+  test 'sorted multi-value ordering reports failing entry with expected order' do
+    field_values = {
+      'obs/cell_type_ontology_term_id' => ['CL:0000540 || CL:0000136', 'CL:0000001']
+    }
+    resolver = Object.new
+    resolver.define_singleton_method(:exists?) { |_id| true }
+    resolver.define_singleton_method(:descendant_of?) { |_id, _root| true }
+
+    Scfair::OntologyLineageResolver.stub(:new, resolver) do
+      result = Scfair::OntologySemanticsValidator.new(field_values: field_values, format: 'h5ad').call
+
+      ordering_error = result[:errors].find { |entry| entry[:field] == 'ontology.semantics.cell_type_ontology_term_id.ordering' }
+      assert ordering_error, 'expected ordering error'
+      assert_includes ordering_error[:message], 'CL:0000540 || CL:0000136'
+      assert_includes ordering_error[:message], 'CL:0000136 || CL:0000540'
+      assert_includes ordering_error[:message], 'not sorted lexically'
+    end
+  end
+
+  test 'sorted multi-value ordering reports duplicate terms in an entry' do
+    field_values = {
+      'obs/tissue_ontology_term_id' => ['UBERON:0002048 || UBERON:0002048']
+    }
+    resolver = Object.new
+    resolver.define_singleton_method(:exists?) { |_id| true }
+    resolver.define_singleton_method(:descendant_of?) { |_id, _root| true }
+
+    Scfair::OntologyLineageResolver.stub(:new, resolver) do
+      result = Scfair::OntologySemanticsValidator.new(field_values: field_values, format: 'h5ad').call
+
+      ordering_error = result[:errors].find { |entry| entry[:field] == 'ontology.semantics.tissue_ontology_term_id.ordering' }
+      assert ordering_error, 'expected ordering error'
+      assert_includes ordering_error[:message], 'UBERON:0002048 || UBERON:0002048'
+      assert_includes ordering_error[:message], 'duplicate term UBERON:0002048'
+    end
+  end
 end

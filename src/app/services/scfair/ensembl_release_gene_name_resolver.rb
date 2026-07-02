@@ -32,6 +32,15 @@ module Scfair
       return if @loaded_keys.include?(key)
 
       target_ids = ids.to_set
+      if db_type.to_s == AsapData::EnsemblCovidLoader::SUBDOMAIN
+        gtf_path = AsapData::EnsemblCovidLoader.cached_gtf_path(release: release)
+        if gtf_path
+          @names_by_cache_key[key] = AsapData::EnsemblCovidLoader.gene_names_from_gtf(gtf_path, target_ids)
+          @loaded_keys << key
+        end
+        return
+      end
+
       gene_path, xref_path = table_paths(db_type:, ensembl_db_name:, release:)
       return unless gene_path && xref_path
 

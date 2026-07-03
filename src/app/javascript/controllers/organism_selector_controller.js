@@ -420,7 +420,7 @@ export default class extends Controller {
       tag.textContent = displayRelease ? `${name} (release ${displayRelease})` : name
       tag.title = present
         ? `Assembly ${name} available for Ensembl release ${targetRelease}`
-        : `Assembly ${name} available up to Ensembl release ${assemblyRelease}; this assembly doesn't exist in release ${targetRelease}, please be aware that gene sets will not be available if you select this assembly.`
+        : `Assembly ${name} available up to Ensembl release ${assemblyRelease}; this assembly doesn't exist in release ${targetRelease}.`
     } else {
       tag.textContent = 'no assembly'
       tag.title = 'No assembly available'

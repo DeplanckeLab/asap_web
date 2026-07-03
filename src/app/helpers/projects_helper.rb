@@ -327,7 +327,7 @@ module ProjectsHelper
         title = "Assembly #{name} available for Ensembl release #{target_release}"
         css = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300 border border-green-200 dark:border-green-800 ml-auto cursor-help flex-shrink-0 max-w-[55%] truncate'
       else
-        title = "Assembly #{name} available up to Ensembl release #{assembly_release}; this assembly doesn't exist in release #{target_release}, please be aware that gene sets will not be available if you select this assembly."
+        title = "Assembly #{name} available up to Ensembl release #{assembly_release}; this assembly doesn't exist in release #{target_release}."
         css = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 ml-auto cursor-help flex-shrink-0 max-w-[55%] truncate'
       end
     else

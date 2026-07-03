@@ -723,6 +723,9 @@ class ProjectsController < ApplicationController
         end
       end
     end
+
+    @prefill_file_url = params[:file_url].to_s.strip.presence
+    adopt_upload_fu_for_new_project(params[:fu_id])
   end
 
   # GET /projects/1/edit
@@ -7470,6 +7473,51 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def adopt_upload_fu_for_new_project(fu_id)
+      return if fu_id.blank?
+
+      fu = find_upload_fu_for_new_project(fu_id)
+      path = fu&.file_path&.to_s
+      return unless path.present? && File.exist?(path)
+
+      project_input_type = UploadType.id_for('project_input')
+      updates = {}
+      updates[:upload_type] = project_input_type if project_input_type.present?
+      if fu.status.in?(%w[validating validated validation_failed])
+        updates[:status] = 'uploaded'
+      end
+      fu.update!(updates) if updates.present?
+
+      size = File.size(path)
+      session[:file_upload] = {
+        fu_id: fu.id,
+        original_filename: fu.name.presence || fu.upload_file_name,
+        input_filename: fu.upload_file_name,
+        path: path,
+        size: size,
+        total_size: fu.upload_file_size.presence || size,
+        complete: true
+      }
+      @existing_fu_id = fu.id
+      @existing_filename = fu.name.presence || fu.upload_file_name
+    end
+
+    def find_upload_fu_for_new_project(fu_id)
+      if user_signed_in?
+        uid = current_user.id
+        fu_t = Fu.arel_table
+        projects_t = Project.arel_table
+        scope = Fu.left_joins(:project).where(id: fu_id).where(
+          fu_t[:user_id].eq(uid).or(projects_t[:user_id].eq(uid))
+        )
+        return Fu.find_by(id: fu_id) if scope.exists?
+      elsif session[:sandbox].present?
+        return Fu.find_by(id: fu_id, user_id: nil, project_key: session[:sandbox])
+      end
+
+      nil
+    end
+
     def module_score_run_cache_key(request_id)
       "module_score_run:#{request_id}"
     end

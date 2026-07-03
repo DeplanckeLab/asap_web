@@ -43,7 +43,8 @@ export default class extends Controller {
     rowLabel: { type: String, default: 'genes' },
     colLabel: { type: String, default: 'cells' },
     existingFuId: { type: Number, default: null },
-    existingFilename: { type: String, default: '' }
+    existingFilename: { type: String, default: '' },
+    prefillFileUrl: String
   }
 
   connect() {
@@ -133,9 +134,6 @@ export default class extends Controller {
       console.error('[FileUpload] Form not found! Cannot attach submit handler.')
     }
 
-    // Initially disable submit button
-    this.checkSubmitButton()
-    
     // Check if we have an existing upload (from reset_parsing)
     if (this.hasExistingFuIdValue && this.existingFuIdValue) {
       this.fuId = this.existingFuIdValue
@@ -161,7 +159,26 @@ export default class extends Controller {
       this.checkPreparsingStatus(this.fuId)
       
       this.updateResetButtonState()
+    } else if (this.hasPrefillFileUrlValue && this.prefillFileUrlValue) {
+      this.prefillDownloadUrl(this.prefillFileUrlValue)
     }
+
+    // Initially disable submit button
+    this.checkSubmitButton()
+  }
+
+  prefillDownloadUrl(url) {
+    if (!this.hasUrlInputTarget) return
+
+    this.urlInputTarget.value = url
+    if (this.hasDownloadFormTarget) {
+      this.downloadFormTarget.scrollIntoView({ behavior: "smooth", block: "center" })
+    }
+
+    window.setTimeout(() => {
+      if (!this.currentVersionId()) return
+      void this.downloadFromUrl()
+    }, 0)
   }
 
   disconnect() {

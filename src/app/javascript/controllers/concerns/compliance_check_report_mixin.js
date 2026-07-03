@@ -20,6 +20,10 @@ export const complianceCheckReportMixin = {
       this.resultWrapTarget.classList.remove("hidden")
     }
 
+    const solutionHintHtml = !valid && typeof this.renderNonCompliantSolutionHint === "function"
+      ? this.renderNonCompliantSolutionHint()
+      : ""
+
     const bannerHtml = showResultBanner
       ? `
       <div class="mb-4 p-4 rounded border ${valid ? "border-green-300 bg-green-50" : "border-red-300 bg-red-50"}">
@@ -29,6 +33,7 @@ export const complianceCheckReportMixin = {
         <div class="text-sm text-gray-700 mt-1">
           ${this.renderGlobalCheckSummary(errors.length, warnings.length, checkCounts)}
         </div>
+        ${solutionHintHtml}
         <div class="text-xs text-gray-600 mt-2">Click a message to view rule details.</div>
       </div>`
       : `<div class="text-xs text-gray-600 mb-4">Click a message to view rule details.</div>`

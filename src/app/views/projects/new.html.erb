@@ -8,6 +8,30 @@
     </p>
   </div>
 
+  <% unless user_signed_in? %>
+    <% sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '1').to_i %>
+    <% sandbox_delete_label = sandbox_idle_days == 1 ? '24 hours' : "#{sandbox_idle_days} days" %>
+    <div class="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-left shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+      <div class="flex items-start gap-3">
+        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-500/20 dark:text-amber-200 dark:border-amber-400/40 shrink-0 mt-0.5">
+          Sandbox project
+        </span>
+        <div class="min-w-0">
+          <p class="text-sm text-gray-900 dark:text-neutral-200">
+            You are in guest mode. This project will be created as a temporary sandbox and will be
+            <strong>automatically deleted</strong> after <%= sandbox_delete_label %> without activity.
+          </p>
+          <p class="mt-2 text-sm text-gray-700 dark:text-neutral-300">
+            <%= link_to "Create a free account", new_user_registration_path, class: "text-blue-700 hover:underline dark:text-blue-400" %>
+            to keep your projects in a personal workspace that is not subject to sandbox auto-deletion.
+            Already have an account?
+            <%= link_to "Sign in", new_user_session_path, class: "text-blue-700 hover:underline dark:text-blue-400" %>.
+          </p>
+        </div>
+      </div>
+    </div>
+  <% end %>
+
   <%= render "form", project: @project %>
 
 </div>

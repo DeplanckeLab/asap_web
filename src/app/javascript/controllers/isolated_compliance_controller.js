@@ -183,9 +183,7 @@ class IsolatedComplianceController extends Controller {
     const fileFormatsUrl = this.hasFileFormatsUrlValue
       ? this.fileFormatsUrlValue
       : "/home/file_format"
-    const newProjectUrl = this.hasNewProjectUrlValue
-      ? this.newProjectUrlValue
-      : "/projects/new"
+    const newProjectUrl = this.newProjectLinkUrl()
     return `
       <span class="text-red-700">
         This tool supports only Loom (.loom) and H5AD (.h5ad) file formats.
@@ -198,8 +196,31 @@ class IsolatedComplianceController extends Controller {
     `
   }
 
+  newProjectLinkUrl() {
+    const base = this.hasNewProjectUrlValue ? this.newProjectUrlValue : "/projects/new"
+    const params = new URLSearchParams()
+    if (this.sourceUrlTarget?.checked && this.urlValue) {
+      params.set("file_url", this.urlValue)
+    } else if (this.fuId) {
+      params.set("fu_id", String(this.fuId))
+    }
+    const query = params.toString()
+    return query ? `${base}?${query}` : base
+  }
+
   showUnsupportedFormatError() {
     this.setStatusMessage(this.unsupportedFormatErrorHtml(), { asHtml: true })
+  }
+
+  renderNonCompliantSolutionHint() {
+    const newProjectUrl = this.newProjectLinkUrl()
+    return `
+      <div class="text-sm text-gray-700 mt-3 pt-3 border-t border-red-200">
+        A solution to create a compliant file is to
+        <a href="${this.escape(newProjectUrl)}" class="text-blue-600 hover:underline">create a new ASAP project</a>,
+        which includes an editor to help reach scFAIR compliance.
+      </div>
+    `
   }
 
   setStatusMessage(message, { asHtml = false } = {}) {

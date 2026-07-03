@@ -2,7 +2,9 @@
      data-controller="isolated-compliance"
      data-isolated-compliance-upload-type-name-value="compliance_file_check"
      data-isolated-compliance-rules-snippet-url-value="<%= compliance_rules_snippet_path %>"
-     data-isolated-compliance-rules-yaml-url-value="<%= compliance_rules_yaml_path %>">
+     data-isolated-compliance-rules-yaml-url-value="<%= compliance_rules_yaml_path %>"
+     data-isolated-compliance-file-formats-url-value="<%= file_format_home_index_path %>"
+     data-isolated-compliance-new-project-url-value="<%= new_project_path %>">
   <div class="mb-8">
     <h1 class="text-3xl font-bold text-gray-900">Standalone scFAIR Compliance Check</h1>
     <p class="mt-2 text-gray-600">
@@ -60,7 +62,7 @@
 
     <div class="hidden mb-4" data-isolated-compliance-target="urlWrap">
       <input type="url"
-             placeholder="https://example.org/data.h5ad"
+             placeholder="https://example.org/data?file=matrix.h5ad"
              class="w-full border rounded p-2"
              data-isolated-compliance-target="urlInput"
              data-action="input->isolated-compliance#urlChanged">

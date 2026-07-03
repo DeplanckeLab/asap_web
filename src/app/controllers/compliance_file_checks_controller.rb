@@ -27,6 +27,8 @@ class ComplianceFileChecksController < ApplicationController
 
     task_id = SecureRandom.uuid
     tmp_path = download_remote_file!(task_id)
+    detected_format = ComplianceFileCheckQueueService.validate_downloaded_file!(tmp_path)
+    final_path = rename_downloaded_file!(tmp_path, task_id, detected_format)
 
     initial = {
       status: 'queued',
@@ -35,14 +37,16 @@ class ComplianceFileChecksController < ApplicationController
       message: 'Validation queued'
     }
     IsolatedComplianceStatusStore.write(task_id, initial)
-    IsolatedComplianceValidationJob.perform_later(task_id, tmp_path, schema_id, File.basename(tmp_path))
+    IsolatedComplianceValidationJob.perform_later(task_id, final_path, schema_id, File.basename(final_path))
 
     render json: {
       task_id: task_id,
       status: 'queued',
-      filename: File.basename(tmp_path),
+      filename: File.basename(final_path),
       schema_id: schema_id
     }
+  rescue ComplianceFileCheckQueueService::UnsupportedFormatError => e
+    render json: unsupported_format_error_json(e.message), status: :unprocessable_entity
   rescue ArgumentError => e
     render json: { error: e.message }, status: :unprocessable_entity
   rescue StandardError => e
@@ -68,6 +72,13 @@ class ComplianceFileChecksController < ApplicationController
     dir
   end
 
+  def unsupported_format_error_json(message)
+    {
+      error: message,
+      error_code: ComplianceFileCheckQueueService::UNSUPPORTED_FORMAT_ERROR_CODE
+    }
+  end
+
   def download_remote_file!(task_id)
     url = params[:data_url].to_s.strip
     raise ArgumentError, 'No URL provided' if url.blank?
@@ -75,10 +86,7 @@ class ComplianceFileChecksController < ApplicationController
     uri = URI.parse(url)
     raise ArgumentError, 'Only HTTP/HTTPS URLs are supported' unless uri.is_a?(URI::HTTP)
 
-    ext = File.extname(uri.path.to_s).downcase
-    raise ArgumentError, 'URL must end with .loom or .h5ad' unless ComplianceFileCheckQueueService::ALLOWED_EXTENSIONS.include?(ext)
-
-    path = File.join(temp_dir, "#{task_id}#{ext}")
+    path = File.join(temp_dir, "#{task_id}.download")
     total = 0
     Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https') do |http|
       request = Net::HTTP::Get.new(uri.request_uri)
@@ -98,5 +106,12 @@ class ComplianceFileChecksController < ApplicationController
     path
   rescue URI::InvalidURIError
     raise ArgumentError, 'Invalid URL'
+  end
+
+  def rename_downloaded_file!(path, task_id, detected_format)
+    extension = detected_format == 'loom' ? '.loom' : '.h5ad'
+    final_path = File.join(temp_dir, "#{task_id}#{extension}")
+    FileUtils.mv(path, final_path)
+    final_path
   end
 end

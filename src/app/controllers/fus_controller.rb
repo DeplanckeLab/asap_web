@@ -209,6 +209,11 @@ class FusController < ApplicationController
         complete: is_complete,
         progress: progress
       }
+    rescue ComplianceFileCheckQueueService::UnsupportedFormatError => e
+      render json: {
+        error: e.message,
+        error_code: ComplianceFileCheckQueueService::UNSUPPORTED_FORMAT_ERROR_CODE
+      }, status: :unprocessable_entity
     rescue ArgumentError => e
       render json: { error: e.message }, status: :unprocessable_entity
     rescue => e

@@ -3902,17 +3902,12 @@ module Basic
       4
     end
 
-    def output_log_transform_block(h_results)
-      return nil unless h_results.is_a?(Hash)
+    def output_log_transform_block(h_results, step_name)
+      return nil unless h_results.is_a?(Hash) && step_name.present?
 
-      %w[normalization scaling hvg pca clustering].each do |key|
-        block = h_results[key]
-        return block if block.is_a?(Hash) && block.key?('is_log_transformed')
-      end
-      h_results.each_value do |v|
-        next unless v.is_a?(Hash) && v.key?('is_log_transformed')
-        return v
-      end
+      block = h_results[step_name]
+      return block if block.is_a?(Hash) && block.key?('is_log_transformed')
+
       nil
     end
 
@@ -5587,7 +5582,7 @@ puts "TEST RUN"
       logger.debug("[Basic.finish_run] h_output_files: #{h_output_files.to_json}")
       finish_run_cache = {}
       input_dt_id = input_matrix_data_transformation_id_for_run(run, h_attrs, finish_run_cache)
-      log_block = output_log_transform_block(h_results)
+      log_block = output_log_transform_block(h_results, step.name)
       output_log_specified = log_block.is_a?(Hash) && log_block.key?('is_log_transformed')
       if output_log_specified
         finish_run_cache[:data_transformation_from_output] = true

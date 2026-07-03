@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Upserts ASAP release v8 HVG StdMethod rows:
-#   - R-based methods (vst, dispersion, mean.var.plot) using hvg.asap.3.R
+#   - R-based methods (vst, dispersion, mvp) using hvg.v8.R
 #     with per-method CLI options exposed in attrs_json.
 #   - Python-based methods (seurat, seurat_v3, cell_ranger) using hvg.v8.py.
 module HvgV8StdMethods
@@ -25,22 +25,21 @@ module HvgV8StdMethods
     ]
   JSON
 
-  # hvg.asap.3.R reads commandArgs(trailingOnly=TRUE) as fixed positional args (no optparse).
   SEURAT_SELECTION_METHOD = {
     "vst" => "vst",
     "dispersion" => "disp",
-    "mvp" => "mean.var.plot"
+    "mvp" => "mvp"
   }.freeze
 
-  R_BASE_ARGS = [
-    { "param_key" => "input_matrix_filename" },
-    { "param_key" => "raw_matrix_dataset", "value" => "/matrix" },
-    { "param_key" => "input_matrix_dataset" },
-    { "param_key" => "output_matrix_dataset", "value" => '/row_attrs/hvg_#{run_num}_#{std_method_name}' },
-    { "param_key" => "output_dir" },
-    { "param_key" => "seurat_selection_method" },
-    { "param_key" => "n_top_genes" }
-  ].freeze
+  R_PARAM_OPTS = {
+    "loess_span" => "--loess_span",
+    "clip_max" => "--clip_max",
+    "mean_cutoff" => "--mean_cutoff",
+    "dispersion_cutoff" => "--dispersion_cutoff",
+    "num_bin" => "--num_bin"
+  }.freeze
+
+  OUTPUT_MATRIX_DATASET = '/row_attrs/#{step_tag}_#{std_method_name}'.freeze
 
   PARAM_DEFS = {
     "n_top_genes" => {
@@ -169,7 +168,7 @@ module HvgV8StdMethods
           link: '[<a href="https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.highly_variable_genes.html">Reference</a>]',
           program: "python3.12 hvg.v8.py",
           cli_method: "seurat",
-          output_attr: '/row_attrs/hvg_#{run_num}_#{std_method_name}',
+          output_attr: OUTPUT_MATRIX_DATASET,
           handles_log: false,
           project_types: %w[sc]
         },
@@ -182,7 +181,7 @@ module HvgV8StdMethods
           link: '[<a href="https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.highly_variable_genes.html">Reference</a>]',
           program: "python3.12 hvg.v8.py",
           cli_method: "seurat_v3",
-          output_attr: '/row_attrs/hvg_#{run_num}_#{std_method_name}',
+          output_attr: OUTPUT_MATRIX_DATASET,
           handles_log: false,
           project_types: %w[sc]
         },
@@ -195,7 +194,7 @@ module HvgV8StdMethods
           link: '[<a href="https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.highly_variable_genes.html">Reference</a>]',
           program: "python3.12 hvg.v8.py",
           cli_method: "cell_ranger",
-          output_attr: '/row_attrs/hvg_#{run_num}_#{std_method_name}',
+          output_attr: OUTPUT_MATRIX_DATASET,
           handles_log: false,
           project_types: %w[sc]
         }
@@ -279,16 +278,26 @@ module HvgV8StdMethods
     def command_json_for(defn)
       if defn[:r_params]
         seurat_method = SEURAT_SELECTION_METHOD.fetch(defn[:name])
-        args = R_BASE_ARGS.map do |entry|
-          if entry["param_key"] == "seurat_selection_method"
-            { "value" => seurat_method }
-          else
-            entry.dup
-          end
+        opts = [
+          { "opt" => "-f", "param_key" => "input_matrix_filename" },
+          { "opt" => "--input_meta", "param_key" => "input_matrix_dataset" },
+          {
+            "opt" => "--output_meta",
+            "param_key" => "output_matrix_dataset",
+            "value" => OUTPUT_MATRIX_DATASET
+          },
+          { "opt" => "--method", "value" => seurat_method },
+          { "opt" => "-o", "param_key" => "output_dir" },
+          { "opt" => "--n_top_genes", "param_key" => "n_top_genes" }
+        ]
+        defn[:r_params].each do |param_key|
+          next if param_key == "n_top_genes"
+
+          opts << { "opt" => R_PARAM_OPTS.fetch(param_key), "param_key" => param_key }
         end
         {
-          "program" => "Rscript --vanilla hvg.asap.3.R",
-          "args" => args,
+          "program" => "Rscript --vanilla hvg.v8.R",
+          "opts" => opts,
           "predict_params" => %w[nber_cols nber_rows std_method_name]
         }
       else

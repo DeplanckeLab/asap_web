@@ -79,3 +79,77 @@
     command_json: '{"program":"Rscript --vanilla scaling.v8.R","opts":[{"opt":"--method","value":"ScaleData"},{"opt":"-f","param_key":"input_matrix_filename"},{"opt":"--input_meta","param_key":"input_matrix_dataset"},{"opt":"--output_meta","param_key":"output_matrix_dataset","value":"/layers/#{step_tag}_#{std_method_name}"},{"opt":"-o","param_key":"output_dir"},{"opt":"--do_scale","param_key":"do_scale"},{"opt":"--do_center","param_key":"do_center"},{"opt":"--vars_to_regress","param_key":"covariates","omit_when_null":true}],"predict_params":["nber_cols","nber_rows","std_method_name"]}'
     attrs_json: '{"do_scale":{"description":"Whether to scale the data.","label":"Scale","type":"bool","widget":"checkbox","default":true},"do_center":{"description":"Whether to center the data.","label":"Center","type":"bool","widget":"checkbox","default":true},"covariates":{"label":"Covariates to regress out","description":"Variables to regress out. For example, nUMI, or percent.mito.","widget":"input_data","valid_types":[["dataset"],["col_mdata"],["discrete_mdata","numeric_mdata"]],"default":null,"dataset_field":"output_dataset","constraints":{"in_loom":["input_matrix"]},"requires":["input_matrix"],"source_steps":["import_metadata","parsing","cell_filtering","gene_filtering"],"req_data_structure":"array","min_nber_items":0,"optional":true}}'
 
+# Scaling run panel omitted card-results from show_view_json, so output annots were never shown in Results.
+- model: Step
+  find_by: { id: 119, name: "scaling" }
+  updates:
+    show_view_json: |
+      [
+        {
+          "horiz_elements": [
+            {
+              "id": "card-params",
+              "type": "card",
+              "class": "h-100",
+              "container_class": "col-md-4"
+            },
+            {
+              "id": "card-downloads",
+              "type": "card",
+              "class": "h-100",
+              "container_class": "col-md-8"
+            }
+          ]
+        },
+        {
+          "horiz_elements": [
+            {
+              "id": "card-results",
+              "type": "card",
+              "class": "h-100",
+              "container_class": "col-md-12"
+            }
+          ]
+        },
+        {
+          "admin": false,
+          "horiz_elements": [
+            {
+              "id": "card-exec_stdout",
+              "type": "card",
+              "class": "h-100",
+              "container_class": "col-md-6",
+              "output_name": "exec_stdout",
+              "title": "Docker execution STDOUT",
+              "partial": "text_file_content",
+              "admin": true
+            },
+            {
+              "id": "card-exec_stderr",
+              "type": "card",
+              "class": "h-100",
+              "container_class": "col-md-6",
+              "output_name": "exec_stderr",
+              "title": "Docker execution STDERR",
+              "partial": "text_file_content",
+              "admin": true
+            }
+          ]
+        },
+        {
+          "admin": true,
+          "horiz_elements": [
+            {
+              "id": "card-log",
+              "type": "card",
+              "class": "h-100",
+              "container_class": "col-md-12",
+              "output_name": "output_log",
+              "title": "Log file",
+              "partial": "text_file_content",
+              "admin": true
+            }
+          ]
+        }
+      ]
+

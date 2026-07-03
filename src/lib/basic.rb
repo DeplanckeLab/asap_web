@@ -3946,6 +3946,89 @@ module Basic
       { 'nber_rows' => nber_rows, 'nber_cols' => nber_cols, 'dataset_size' => dataset_size, 'is_count' => is_count }
     end
 
+    def normalize_dataset_path(path)
+      s = path.to_s.strip
+      return '' if s.empty?
+
+      s.start_with?('/') ? s : "/#{s}"
+    end
+
+    # Dataset paths declared in step.output_json expected_outputs (with #{var} substitution).
+    def resolved_expected_output_datasets(step, h_var = {})
+      return [] unless step&.output_json.present?
+
+      h_output = safe_parse_json(step.output_json, {})
+      h_expected = h_output['expected_outputs']
+      return [] unless h_expected.is_a?(Hash)
+
+      datasets = []
+      h_expected.each_value do |cfg|
+        next unless cfg.is_a?(Hash) && cfg['dataset'].present?
+
+        dataset = cfg['dataset'].to_s
+        if h_var.present? && dataset.match(/#\{/)
+          dataset = dataset.gsub(/(\#\{[\w_]+?\})/) { |var| h_var[var[2..-2]].to_s }
+        end
+        datasets << normalize_dataset_path(dataset)
+      end
+      datasets.uniq
+    end
+
+    # Legacy fix_annots.rake: only on parsing, annots whose dataset is not a declared
+    # expected output (typically /matrix) were present in the source loom and are imported.
+    # Do not apply to de, normalization, etc. — those runs produce many annots outside
+    # expected_outputs that are still ASAP pipeline outputs.
+    def apply_imported_flag_for_unexpected_outputs!(run, meta, cache = nil)
+      return if meta['imported'] == true
+      return unless run.step&.name == 'parsing'
+
+      cache ||= {}
+      unless cache.key?(:resolved_expected_datasets)
+        cache[:resolved_expected_datasets] = resolved_expected_output_datasets(run.step, {})
+      end
+      expected = cache[:resolved_expected_datasets]
+      return if expected.empty?
+
+      name = normalize_dataset_path(meta['name'])
+      return if name.empty?
+      return if expected.include?(name)
+
+      meta['imported'] = true
+    end
+
+    # Same rules as load_annot when imported=true: infer data_class_names from path and data type.
+    def infer_imported_data_class_names(name, type_name = nil)
+      data_class_names = []
+      if name.to_s.match?(%r{^/layers/})
+        data_class_names |= %w[dataset matrix num_matrix]
+      elsif name.to_s.match?(%r{^/col_attrs/})
+        data_class_names |= %w[dataset mdata col_mdata]
+      elsif name.to_s.match?(%r{^/row_attrs/})
+        data_class_names |= %w[dataset mdata row_mdata]
+      elsif name.to_s.match?(%r{^/attrs/})
+        data_class_names |= %w[global_mdata]
+      elsif name == '/matrix'
+        data_class_names |= %w[dataset matrix int_matrix]
+      end
+      data_class_names |= ["#{type_name.downcase}_mdata"] if type_name.present?
+      data_class_names.uniq
+    end
+
+    def backfill_imported_annot_data_classes!(annot)
+      return false unless annot.imported?
+      return false if annot.data_class_ids.present?
+
+      type_name = annot.data_type&.name
+      names = infer_imported_data_class_names(annot.name, type_name)
+      return false if names.empty?
+
+      ids = names.filter_map { |n| DataClass.find_by(name: n)&.id }.uniq
+      return false if ids.empty?
+
+      annot.update!(data_class_ids: ids.join(','))
+      true
+    end
+
     def load_annot run, meta, relative_filepath, h_data_types, h_data_classes, logger, cache = nil
       cache ||= {}
       project_by_id = cache[:project_by_id] ||= {}
@@ -4004,6 +4087,7 @@ module Basic
         end
         meta["imported"] = ori_annot.imported
       end
+      apply_imported_flag_for_unexpected_outputs!(run, meta, cache)
       if meta['forced_type_id'] && (fdt = h_data_types[meta['forced_type_id']])
         meta['type'] = fdt.name
       end
@@ -4043,18 +4127,8 @@ module Basic
       ### if imported data, try to guess types
       #if data_class_names.size == 0 #meta['imported'] == true
       if meta['imported'] == true or meta['forced_type_id'] #or data_class_names.size == 0
-        #data_class_names |= ['dataset'] #, h_on[meta['on']]]
-        if meta['name'].match(/^\/layers\//)
-          data_class_names |= ['dataset', 'matrix', 'num_matrix']
-        elsif meta['name'].match(/^\/col_attrs\//)
-          data_class_names |= ['dataset', 'mdata', 'col_mdata']
-        elsif meta['name'].match(/^\/row_attrs\//)
-          data_class_names |= ['dataset', 'mdata', 'row_mdata']
-            #        elsif meta['name'].match(/^\/row_attrs\//)
-        elsif meta['name'].match(/^\/attrs\//)
-          data_class_names |= ['global_mdata']
-        end
-        data_class_names |= ["#{meta["type"].downcase}_mdata"] if meta["type"]
+        inferred = infer_imported_data_class_names(meta['name'], meta['type'])
+        data_class_names |= inferred if inferred.any?
         if meta['on'] == 'EXPRESSION_MATRIX' # meta['nber_cols'] > 1 and meta['nber_rows'] > 1 and meta["type"] == 'NUMERIC'
           data_class_names |= ['matrix', 'num_matrix']
         end
@@ -5581,6 +5655,7 @@ puts "TEST RUN"
       logger.info("[Basic.finish_run] h_output_files keys: #{h_output_files.keys.inspect}")
       logger.debug("[Basic.finish_run] h_output_files: #{h_output_files.to_json}")
       finish_run_cache = {}
+      finish_run_cache[:resolved_expected_datasets] = resolved_expected_output_datasets(step, h_var)
       input_dt_id = input_matrix_data_transformation_id_for_run(run, h_attrs, finish_run_cache)
       log_block = output_log_transform_block(h_results, step.name)
       output_log_specified = log_block.is_a?(Hash) && log_block.key?('is_log_transformed')

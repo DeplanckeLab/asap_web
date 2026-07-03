@@ -142,6 +142,7 @@
                        } %>
                     <% allowed_source_step_names = Array(attr['source_steps']).map(&:to_s) %>
                     <% h_steps_by_id = applicable_steps.index_by(&:id) %>
+                    <% source_step_ids = allowed_source_step_names.map { |name| h_steps_by_id.values.find { |s| s.name == name }&.id }.compact %>
                     <% source_runs = @h_runs.values.select do |r|
                          step_name = h_steps_by_id[r.step_id]&.name
                          step_name.present? && allowed_source_step_names.include?(step_name)
@@ -149,20 +150,28 @@
                     <% source_run_ids = source_runs.map(&:id) %>
                     <% h_data_classes = {} %>
                     <% DataClass.all.each { |dc| h_data_classes[dc.id] = dc.name } %>
-                    <%# Only matrices from successful runs of the listed source_steps (run.step, not ori/store links). %>
-                    <% candidate_annots = if source_run_ids.any?
-                                            Annot.where(project_id: @project.id, run_id: source_run_ids)
-                                                 .order(:name, :id)
-                                                 .to_a
-                                                 .select do |annot|
-                                                   run = @h_runs[annot.run_id]
-                                                   next false unless run
-                                                   step_name = h_steps_by_id[run.step_id]&.name
-                                                   allowed_source_step_names.include?(step_name)
-                                                 end
-                                          else
-                                            []
-                                          end %>
+                    <%# Pipeline outputs plus imported data mapped via sim_step_id or ori_step_id. %>
+                    <% candidate_annots = [] %>
+                    <% if source_run_ids.any? %>
+                      <% candidate_annots.concat(
+                           Annot.where(project_id: @project.id, run_id: source_run_ids)
+                                .order(:name, :id)
+                                .to_a
+                                .select do |annot|
+                                  run = @h_runs[annot.run_id]
+                                  next false unless run
+                                  step_name = h_steps_by_id[run.step_id]&.name
+                                  allowed_source_step_names.include?(step_name)
+                                end
+                         ) %>
+                    <% end %>
+                    <% if source_step_ids.any? %>
+                      <% imported_annots = Annot.where(project_id: @project.id, imported: true)
+                                                .order(:name, :id)
+                                                .select { |annot| annot.matches_source_step_ids?(source_step_ids) } %>
+                      <% candidate_annots.concat(imported_annots) %>
+                    <% end %>
+                    <% candidate_annots = candidate_annots.uniq(&:id) %>
                     <% if defined?(@selected_loom_file) && @selected_loom_file.present? %>
                       <% candidate_annots = candidate_annots.select { |annot| annot.filepath == @selected_loom_file } %>
                     <% end %>
@@ -232,7 +241,13 @@
                             <% matching_annots.each do |annot| %>
                               <% run_id = annot.run_id || annot.ori_run_id || annot.store_run_id %>
                               <% run = run_id ? (@h_runs[run_id] || h_runs_by_id[run_id]) : nil %>
-                              <% step = run ? @h_steps[run.step_id] : @h_steps[annot.step_id] || @h_steps[annot.ori_step_id] %>
+                              <% step = if annot.sim_step_id && h_steps_by_id[annot.sim_step_id]
+                                          h_steps_by_id[annot.sim_step_id]
+                                        elsif run
+                                          h_steps_by_id[run.step_id]
+                                        else
+                                          h_steps_by_id[annot.step_id] || h_steps_by_id[annot.ori_step_id]
+                                        end %>
                               <% categories = Basic.safe_parse_json(annot.categories_json, {}) %>
                               <% annot_data_class_names = annot.data_class_ids.to_s.split(',').map { |dc_id| h_data_classes[dc_id.to_i] }.compact %>
                               <% is_count_dataset = annot_data_class_names.include?('int_matrix') %>

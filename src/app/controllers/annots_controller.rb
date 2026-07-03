@@ -322,6 +322,8 @@ class AnnotsController < ApplicationController
       end
     end
 
+    load_sim_step_options if editable?(@project) && @annot.imported?
+
     render :show, layout: false if @embedded
   end
 
@@ -453,6 +455,11 @@ class AnnotsController < ApplicationController
     unless editable?(@project)
       redirect_to annot_path(@annot, annot_back_params), alert: 'You cannot edit this project.' and return
     end
+
+    if params[:annot]&.key?(:sim_step_id)
+      return update_sim_step_mapping
+    end
+
     unless metadata_type_editable?(@annot)
       redirect_to annot_path(@annot, annot_back_params), alert: 'This annotation does not support changing data type.' and return
     end
@@ -524,6 +531,64 @@ class AnnotsController < ApplicationController
 
   private
 
+  def update_sim_step_mapping
+    unless @annot.imported?
+      respond_to do |format|
+        format.html { redirect_to annot_path(@annot, annot_back_params), alert: 'Only imported metadata and matrices can be mapped to an ASAP step.' }
+        format.json { render json: { error: 'Only imported metadata and matrices can be mapped to an ASAP step.' }, status: :unprocessable_entity }
+      end
+      return
+    end
+
+    raw_sim_step_id = params.require(:annot).permit(:sim_step_id)[:sim_step_id]
+    sim_step_id = raw_sim_step_id.presence&.to_i
+
+    if sim_step_id.present?
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      valid_step_ids = if asap_docker_image
+                         Step.where(docker_image_id: asap_docker_image.id, version_id: @project.version_id).pluck(:id)
+                       else
+                         []
+                       end
+      unless valid_step_ids.include?(sim_step_id)
+        respond_to do |format|
+          format.html { redirect_to annot_path(@annot, annot_back_params), alert: 'Invalid step selected.' }
+          format.json { render json: { error: 'Invalid step selected.' }, status: :unprocessable_entity }
+        end
+        return
+      end
+    end
+
+    @annot.update!(sim_step_id: sim_step_id.presence)
+
+    step_label = @annot.sim_step&.label.presence || @annot.sim_step&.name&.humanize
+
+    respond_to do |format|
+      format.html do
+        redirect_to annot_path(@annot, annot_back_params), notice: 'ASAP step mapping updated.'
+      end
+      format.json do
+        render json: {
+          sim_step_id: @annot.sim_step_id,
+          step_label: step_label,
+          effective_source_step_id: @annot.effective_source_step_id
+        }
+      end
+    end
+  rescue StandardError => e
+    Rails.logger.error("[annots#update_sim_step_mapping] #{e.class}: #{e.message}")
+    respond_to do |format|
+      format.html { redirect_to annot_path(@annot, annot_back_params), alert: "Update failed: #{e.message}" }
+      format.json { render json: { error: e.message }, status: :internal_server_error }
+    end
+  end
+
+  private
+
+  def load_sim_step_options
+    @sim_step_options = helpers.sim_step_options_for_project(@project)
+  end
+
   def annot_params
     params.require(:annot).permit(:data_type_id, :data_class_ids)
   end
@@ -540,7 +605,7 @@ class AnnotsController < ApplicationController
   end
 
   def set_annot
-    @annot = Annot.find(params[:id])
+    @annot = Annot.includes(:data_transformation, :data_type, :sim_step).find(params[:id])
     unless readable?(@annot.project)
       redirect_to unauthorized_path and return
     end

@@ -9,6 +9,7 @@ class Annot < ApplicationRecord
   belongs_to :output_attr, optional: true
   belongs_to :user, optional: true
   belongs_to :original_run, class_name: 'Run', foreign_key: 'ori_run_id', optional: true
+  belongs_to :sim_step, class_name: 'Step', foreign_key: 'sim_step_id', optional: true
   has_many :annot_cell_sets, dependent: :destroy
   has_many :cell_sets, through: :annot_cell_sets
   has_many :clas, class_name: 'Cla', dependent: :destroy
@@ -187,7 +188,152 @@ class Annot < ApplicationRecord
     integration_batch_category_count > 1
   end
 
+  # Step that produced this annot for downstream ASAP method inputs.
+  # Manual sim_step_id on imported data overrides pipeline linkage.
+  def effective_source_step_id
+    return sim_step_id if sim_step_id.present?
+
+    ori_step_id.presence || step_id.presence || run&.step_id
+  end
+
+  def matches_source_step_ids?(source_step_ids)
+    return false if source_step_ids.blank?
+
+    ids = source_step_ids.map(&:to_i)
+    if sim_step_id.present?
+      return ids.include?(sim_step_id)
+    end
+
+    return true if step_id.present? && ids.include?(step_id)
+    return true if ori_step_id.present? && ids.include?(ori_step_id)
+
+    annot_run = run || (ori_run_id.present? ? original_run : nil)
+    annot_run.present? && ids.include?(annot_run.step_id)
+  end
+
+  def expression_matrix?
+    dim == 3 || name == '/matrix' || name.to_s.start_with?('/layers/')
+  end
+
+  def data_class_names
+    return [] if data_class_ids.blank?
+
+    @data_class_names ||= data_class_records.map(&:name)
+  end
+
+  def data_class_records
+    return [] if data_class_ids.blank?
+
+    @data_class_records ||= DataClass.where(id: data_class_ids.split(',').map(&:to_i)).to_a
+  end
+
+  def count_matrix?
+    expression_matrix? && data_class_names.include?('int_matrix')
+  end
+
+  def normalized_matrix?
+    expression_matrix? && data_class_names.include?('num_matrix')
+  end
+
+  def integer_storage?
+    data_class_names.intersect?(%w[int_matrix discrete_mdata])
+  end
+
+  def float_storage?
+    data_class_names.intersect?(%w[num_matrix numeric_mdata])
+  end
+
+  # Human-readable storage type from data_class_ids (e.g. "integer matrix", "cell metadata (float vector)").
+  def storage_type_label(project = nil)
+    by_name = data_class_records.index_by(&:name)
+    return nil if by_name.empty?
+
+    row_label = project&.project_type&.row_label || 'rows'
+    col_label = project&.project_type&.col_label || 'columns'
+    row_singular = row_label.singularize
+    col_singular = col_label.singularize
+
+    apply_template = lambda do |dc|
+      template = dc&.label_template
+      return nil if template.blank?
+
+      template.gsub('{row_label_singular}', row_singular)
+              .gsub('{col_label_singular}', col_singular)
+              .gsub('{row_label}', row_label)
+              .gsub('{col_label}', col_label)
+    end
+
+    if expression_matrix?
+      matrix_dc = by_name['int_matrix'] || by_name['num_matrix'] || by_name['matrix']
+      matrix_dc ||= DataClass.find_by(name: infer_matrix_data_class_name(by_name))
+      label = apply_template.call(matrix_dc)
+      return nil if label.blank?
+
+      label = "#{label} vector" if expression_vector_shape?
+      return label
+    end
+
+    base_dc = by_name['col_mdata'] || by_name['row_mdata'] || by_name['global_mdata'] || by_name['mdata']
+    value_dc = by_name['numeric_mdata'] || by_name['discrete_mdata'] || by_name['string_mdata']
+    if value_dc.nil?
+      inferred_value = infer_metadata_value_data_class_name
+      value_dc = DataClass.find_by(name: inferred_value) if inferred_value
+    end
+
+    parts = []
+    parts << apply_template.call(base_dc) if base_dc
+    if value_dc
+      value_label = apply_template.call(value_dc)
+      shape = metadata_table_shape? ? 'matrix' : 'vector'
+      parts << "(#{value_label} #{shape})"
+    elsif metadata_table_shape?
+      parts << '(matrix)'
+    elsif base_dc
+      parts << '(vector)'
+    end
+
+    label = parts.compact.join(' ').presence
+    return label if label.present?
+
+    other = data_class_records.reject { |dc| dc.category == 'skip' || dc.label_template.blank? }
+    other.filter_map { |dc| apply_template.call(dc) }.uniq.join(', ').presence
+  end
+
+  def matrix_type_label
+    storage_type_label
+  end
+
+  def data_transformation_label
+    return nil unless expression_matrix?
+
+    data_transformation&.label.presence || data_transformation&.name.presence || 'Unknown'
+  end
+
   private
+
+  def expression_vector_shape?
+    nr = nber_rows.to_i
+    nc = nber_cols.to_i
+    nr.positive? && nc.positive? && (nr == 1 || nc == 1)
+  end
+
+  def metadata_table_shape?
+    nber_rows.to_i > 1 && nber_cols.to_i > 1
+  end
+
+  def infer_matrix_data_class_name(by_name)
+    return 'int_matrix' if by_name.key?('int_matrix')
+    return 'num_matrix' if by_name.key?('num_matrix')
+
+    data_type&.name == 'NUMERIC' ? 'num_matrix' : 'matrix'
+  end
+
+  def infer_metadata_value_data_class_name
+    case data_type&.name
+    when 'NUMERIC' then 'numeric_mdata'
+    when 'DISCRETE', 'CATEGORICAL' then 'discrete_mdata'
+    end
+  end
 
   def prevent_deletion_if_locked_from_publication
     return unless project&.locked_from_publication?(self)

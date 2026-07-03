@@ -98,6 +98,12 @@
                         <%= annot.data_type.name %>
                       </span>
                     <% end %>
+                    <% if annot_storage_type_label(annot, @project).present? %>
+                      <%= annot_matrix_type_badge(annot, @project) %>
+                    <% end %>
+                    <% if annot.expression_matrix? %>
+                      <%= annot_data_transformation_badge(annot) %>
+                    <% end %>
                     <%= categorical_categories_badge(annot) %>
                   </div>
                   <% if annot.mem_size %>
@@ -119,6 +125,29 @@
                   <% end %>
                 </div>
               </div>
+              <% if @sim_step_options && annot.imported? %>
+                <div class="mt-3 pt-3 border-t border-gray-200">
+                  <label class="block text-xs font-medium text-gray-500 mb-1">ASAP step mapping</label>
+                  <select class="annot-sim-step-select w-full max-w-xs rounded-md border border-gray-300 px-2 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                          data-annot-id="<%= annot.id %>"
+                          data-update-url="<%= annot_path(annot, from: 'data') %>"
+                          data-action="change->data-view#simStepChanged">
+                    <option value="">Not defined</option>
+                    <% @sim_step_options.each do |label, step_id| %>
+                      <option value="<%= step_id %>" <%= 'selected' if annot.sim_step_id == step_id %>><%= label %></option>
+                    <% end %>
+                  </select>
+                  <p class="mt-1 text-xs text-gray-400 mb-0">Map imported data to a pipeline step for downstream analyses.</p>
+                </div>
+              <% elsif annot.imported? && annot.sim_step_id.present? %>
+                <% mapped_step = Step.find_by(id: annot.sim_step_id) %>
+                <% if mapped_step %>
+                  <div class="mt-3 pt-3 border-t border-gray-200">
+                    <span class="text-xs font-medium text-gray-500">ASAP step mapping</span>
+                    <p class="mt-1 text-xs text-gray-700 mb-0"><%= mapped_step.label.presence || mapped_step.name.humanize %></p>
+                  </div>
+                <% end %>
+              <% end %>
             </div>
           <% end %>
         </div>

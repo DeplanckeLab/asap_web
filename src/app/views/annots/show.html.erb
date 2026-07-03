@@ -11,6 +11,21 @@
           <% end %>
           <%= annot_metadata_type_label(@annot, @project) %> -
           <%= @annot.label.presence || format_annot_name(@annot.name) %>
+          <% if @annot.imported %>
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+              Imported
+            </span>
+          <% else %>
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+              ASAP pipeline
+            </span>
+          <% end %>
+          <% if annot_storage_type_label(@annot, @project).present? %>
+            <%= annot_matrix_type_badge(@annot, @project) %>
+          <% end %>
+          <% if @annot.expression_matrix? %>
+            <%= annot_data_transformation_badge(@annot) %>
+          <% end %>
         </h3>
       </div>
       <div class="flex items-center gap-3">
@@ -118,6 +133,25 @@
               <% end %>
             </div>
           </div>
+          <% if annot_storage_type_label(@annot, @project).present? %>
+            <div>
+              <span class="text-sm font-medium text-gray-500">Storage type</span>
+              <div class="mt-2">
+                <%= annot_matrix_type_badge(@annot, @project) %>
+              </div>
+            </div>
+          <% end %>
+          <% if @annot.expression_matrix? %>
+            <div>
+              <span class="text-sm font-medium text-gray-500">Data transformation</span>
+              <div class="mt-2 flex items-center gap-2">
+                <%= annot_data_transformation_badge(@annot) %>
+              </div>
+              <% if @annot.data_transformation&.description.present? %>
+                <p class="mt-1 text-xs text-gray-500 mb-0"><%= @annot.data_transformation.description %></p>
+              <% end %>
+            </div>
+          <% end %>
           <% if @annot.filepath.present? %>
             <div>
               <span class="text-sm font-medium text-gray-500">Loom File Path</span>
@@ -135,6 +169,22 @@
             </div>
           <% end %>
           <div>
+            <span class="text-sm font-medium text-gray-500">Data origin</span>
+            <div class="mt-2">
+              <% if @annot.imported %>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                  Imported
+                </span>
+                <p class="mt-1 text-xs text-gray-500 mb-0">Present in the loom file before or outside the producing analysis run.</p>
+              <% else %>
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
+                  ASAP pipeline
+                </span>
+                <p class="mt-1 text-xs text-gray-500 mb-0">Registered from an analysis run in this project.</p>
+              <% end %>
+            </div>
+          </div>
+          <div>
             <span class="text-sm font-medium text-gray-500">Produced by Analysis</span>
             <p class="mt-1 text-sm text-gray-900">
               <% if @run %>
@@ -151,6 +201,33 @@
               <% end %>
             </p>
           </div>
+          <% if @sim_step_options && @annot.imported? %>
+            <div class="md:col-span-2">
+              <span class="text-sm font-medium text-gray-500">Manual mapping to ASAP step</span>
+              <p class="mt-1 text-xs text-gray-500 mb-2">
+                Imported metadata and matrices can be associated with a pipeline step so they become available as input for downstream analyses.
+              </p>
+              <div class="flex items-center gap-2 max-w-md">
+                <select id="annot-sim-step-id"
+                        class="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                        data-annot-id="<%= @annot.id %>"
+                        data-update-url="<%= annot_path(@annot, from: @from) %>">
+                  <option value="">Not defined</option>
+                  <% @sim_step_options.each do |label, step_id| %>
+                    <option value="<%= step_id %>" <%= 'selected' if @annot.sim_step_id == step_id %>><%= label %></option>
+                  <% end %>
+                </select>
+                <span id="annot-sim-step-status" class="text-sm text-green-600 hidden" aria-live="polite">Saved</span>
+              </div>
+            </div>
+          <% elsif @annot.imported? && @annot.sim_step_id.present? && @annot.sim_step %>
+            <div>
+              <span class="text-sm font-medium text-gray-500">Manual mapping to ASAP step</span>
+              <p class="mt-1 text-sm text-gray-900">
+                <%= @annot.sim_step.label.presence || @annot.sim_step.name.humanize %>
+              </p>
+            </div>
+          <% end %>
           <% if @annot.mem_size %>
             <div>
               <span class="text-sm font-medium text-gray-500">Size</span>
@@ -697,5 +774,54 @@ function renderBarChart(canvasId, categories, counts, title, xLabel) {
     var xLabel = '<%= format_annot_name(@annot.name) %>';
     renderBarChart('plotly_histo', categories, counts, title, xLabel);
   })();
+<% end %>
+
+<% if @sim_step_options && @annot.imported? %>
+(function() {
+  var select = document.getElementById('annot-sim-step-id');
+  if (!select) return;
+  var status = document.getElementById('annot-sim-step-status');
+  var csrfToken = document.querySelector('meta[name="csrf-token"]');
+  select.addEventListener('change', function() {
+    var url = select.getAttribute('data-update-url');
+    if (!url) return;
+    if (status) {
+      status.classList.add('hidden');
+      status.textContent = 'Saving...';
+      status.classList.remove('hidden', 'text-green-600', 'text-red-600');
+      status.classList.add('text-gray-500');
+    }
+    fetch(url, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-CSRF-Token': csrfToken ? csrfToken.content : ''
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ annot: { sim_step_id: select.value } })
+    })
+      .then(function(r) { return r.json().then(function(data) { return { ok: r.ok, data: data }; }); })
+      .then(function(res) {
+        if (!status) return;
+        if (res.ok) {
+          status.textContent = 'Saved';
+          status.classList.remove('text-gray-500', 'text-red-600', 'hidden');
+          status.classList.add('text-green-600');
+          setTimeout(function() { status.classList.add('hidden'); }, 2000);
+        } else {
+          status.textContent = res.data.error || 'Save failed';
+          status.classList.remove('text-gray-500', 'text-green-600', 'hidden');
+          status.classList.add('text-red-600');
+        }
+      })
+      .catch(function() {
+        if (!status) return;
+        status.textContent = 'Save failed';
+        status.classList.remove('text-gray-500', 'text-green-600', 'hidden');
+        status.classList.add('text-red-600');
+      });
+  });
+})();
 <% end %>
 <% end %>

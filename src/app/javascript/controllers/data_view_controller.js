@@ -1023,4 +1023,41 @@ export default class extends Controller {
       }
     }
   }
+
+  simStepChanged(event) {
+    const select = event.currentTarget
+    const url = select.dataset.updateUrl
+    if (!url) return
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')
+    const previousValue = select.dataset.lastValue || ''
+    select.disabled = true
+
+    fetch(url, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-CSRF-Token': csrfToken ? csrfToken.content : ''
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ annot: { sim_step_id: select.value } })
+    })
+      .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
+      .then((res) => {
+        if (res.ok) {
+          select.dataset.lastValue = select.value
+        } else {
+          select.value = previousValue
+          window.alert(res.data.error || 'Failed to save ASAP step mapping.')
+        }
+      })
+      .catch(() => {
+        select.value = previousValue
+        window.alert('Failed to save ASAP step mapping.')
+      })
+      .finally(() => {
+        select.disabled = false
+      })
+  }
 }

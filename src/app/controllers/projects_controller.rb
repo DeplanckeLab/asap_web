@@ -447,7 +447,7 @@ class ProjectsController < ApplicationController
       all_annots = apply_publication_snapshot_to_annots(
         Annot.where(project_id: @project.id)
              .where.not(filepath: nil)
-             .includes(:step, run: [:std_method])
+             .includes(:step, :data_type, :data_transformation, run: [:std_method])
              .order(:name)
       )
       
@@ -510,6 +510,10 @@ class ProjectsController < ApplicationController
       
       # Get selected data type from params or default to matrices
       @selected_data_type = params[:data_type].presence || 'matrices'
+
+      if editable?(@project)
+        @sim_step_options = helpers.sim_step_options_for_project(@project)
+      end
     end
     
     # Variables specific to settings view
@@ -2537,7 +2541,7 @@ class ProjectsController < ApplicationController
     annot_relation = annot_relation.where(filepath: @selected_loom_file) if @selected_loom_file.present?
 
     all_annots = apply_publication_snapshot_to_annots(
-      annot_relation.includes(:step, :data_type, run: [:std_method]).order(:name)
+      annot_relation.includes(:step, :data_type, :data_transformation, run: [:std_method]).order(:name)
     ).to_a
 
     filepath_info = if @selected_loom_file.present?
@@ -2606,6 +2610,10 @@ class ProjectsController < ApplicationController
     run_ids = filepath_info.values.map { |info| info[:run_id] }.compact.uniq
     @loom_file_runs = Run.where(id: run_ids).includes(:step, :std_method).index_by(&:id) if run_ids.any?
     @loom_file_runs ||= {}
+
+    if editable?(@project)
+      @sim_step_options = helpers.sim_step_options_for_project(@project)
+    end
     
     respond_to do |format|
       format.html { render partial: 'projects/views/data_content', layout: false }
@@ -11290,24 +11298,7 @@ class ProjectsController < ApplicationController
         # Filter annotations to only those from source steps
         # Match by step ID from the project's docker_image_id
         source_annots = available_annots.select do |annot|
-          # Check step_id directly
-          if annot.step_id && source_step_ids.include?(annot.step_id)
-            true
-          # Check ori_step_id
-          elsif annot.ori_step_id && source_step_ids.include?(annot.ori_step_id)
-            true
-          else
-            # Otherwise check the run's step_id
-            annot_run = if annot.run_id && annot.run
-                          annot.run
-                        elsif annot.ori_run_id
-                          Run.find_by(id: annot.ori_run_id)
-                        else
-                          nil
-                        end
-            
-            annot_run && source_step_ids.include?(annot_run.step_id)
-          end
+          annot.matches_source_step_ids?(source_step_ids)
         end
         
         if @project.id == 69560 && step.name == 'normalization'
@@ -11406,20 +11397,7 @@ class ProjectsController < ApplicationController
         
         # Filter annotations to only those from source steps
         source_annots = available_annots.select do |annot|
-          if annot.step_id && source_step_ids.include?(annot.step_id)
-            true
-          elsif annot.ori_step_id && source_step_ids.include?(annot.ori_step_id)
-            true
-          else
-            annot_run = if annot.run_id && annot.run
-                          annot.run
-                        elsif annot.ori_run_id
-                          Run.find_by(id: annot.ori_run_id)
-                        else
-                          nil
-                        end
-            annot_run && source_step_ids.include?(annot_run.step_id)
-          end
+          annot.matches_source_step_ids?(source_step_ids)
         end
 
         # Apply source_methods / excluded_source_methods filtering
@@ -13120,8 +13098,8 @@ class ProjectsController < ApplicationController
                      clause = []
                      values = []
                      if source_step_ids.any?
-                       clause << "(step_id IN (?) OR ori_step_id IN (?))"
-                       values << source_step_ids << source_step_ids
+                       clause << "(step_id IN (?) OR ori_step_id IN (?) OR sim_step_id IN (?))"
+                       values << source_step_ids << source_step_ids << source_step_ids
                      end
                      if source_run_ids.any?
                        clause << "(run_id IN (?) OR ori_run_id IN (?))"
@@ -13167,20 +13145,7 @@ class ProjectsController < ApplicationController
           
           # Filter annotations to only those from source steps
           source_annots = all_annots.select do |annot|
-            if annot.step_id && source_step_ids.include?(annot.step_id)
-              true
-            elsif annot.ori_step_id && source_step_ids.include?(annot.ori_step_id)
-              true
-            else
-              annot_run = if annot.run_id
-                            runs_by_id[annot.run_id] || Run.find_by(id: annot.run_id)
-                          elsif annot.ori_run_id
-                            Run.find_by(id: annot.ori_run_id)
-                          else
-                            nil
-                          end
-              annot_run && source_step_ids.include?(annot_run.step_id)
-            end
+            annot.matches_source_step_ids?(source_step_ids)
           end
 
           # Apply source_methods / excluded_source_methods filtering

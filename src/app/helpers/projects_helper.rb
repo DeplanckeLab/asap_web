@@ -338,4 +338,40 @@ module ProjectsHelper
 
     content_tag(:span, label, class: css, title: title)
   end
+
+  def sim_step_options_for_project(project)
+    asap_docker_image = Basic.get_asap_docker(project.version)
+    return [] unless asap_docker_image
+
+    Step.where(docker_image_id: asap_docker_image.id, version_id: project.version_id)
+        .order(:rank)
+        .map { |s| [s.label.presence || s.name.humanize, s.id] }
+  end
+
+  def annot_storage_type_label(annot, project = nil)
+    annot.storage_type_label(project)
+  end
+
+  def annot_matrix_type_badge(annot, project = nil)
+    label = annot_storage_type_label(annot, project)
+    return '' if label.blank?
+
+    css = if annot.integer_storage?
+            'bg-amber-50 text-amber-800 border-amber-200'
+          elsif annot.float_storage?
+            'bg-purple-50 text-purple-800 border-purple-200'
+          else
+            'bg-gray-100 text-gray-700 border-gray-200'
+          end
+    content_tag(:span, label, class: "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border #{css}")
+  end
+
+  def annot_data_transformation_badge(annot)
+    return '' unless annot.expression_matrix?
+
+    label = annot.data_transformation_label
+    content_tag(:span, label,
+                class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200',
+                title: annot.data_transformation&.description.presence)
+  end
 end

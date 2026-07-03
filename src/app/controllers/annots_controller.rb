@@ -104,7 +104,7 @@ class AnnotsController < ApplicationController
             n_sample = [n_sample, n_total].min if n_total.positive?
             n_sample = 1 if n_sample < 1
             sample_data = H5DataService.extract_row_by_indexes(loom_path.to_s, @annot.name, (0...n_sample).to_a)
-            @preview_data = sample_data['rows'] || []
+            @preview_data = sample_data['rows'] || sample_data['values'] || []
           rescue StandardError => e
             Rails.logger.error("Failed to extract expression matrix sample: #{e.message}")
             @preview_data = []

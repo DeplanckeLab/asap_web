@@ -157,7 +157,9 @@ class H5DataService
       raise "ASAP.jar ExtractRow failed for #{i_annot} (exit #{status.exitstatus}): #{stderr}"
     end
 
-    JSON.parse(stdout)
+    parsed = JSON.parse(stdout)
+    parsed['rows'] = parsed['values'] if parsed['rows'].blank? && parsed['values'].is_a?(Array)
+    parsed
   end
 
   # Full row range via repeated ExtractRow (index list size is bounded per call).
@@ -167,7 +169,7 @@ class H5DataService
     all_rows = []
     (0...total).each_slice(chunk_size) do |slice|
       j = extract_row_by_indexes(h5_file, i_annot, slice)
-      batch = j['rows'] || []
+      batch = j['rows'] || j['values'] || []
       all_rows.concat(batch)
     end
     nc = all_rows.first.is_a?(Array) ? all_rows.first.size : nil

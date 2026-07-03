@@ -3940,6 +3940,17 @@ module Basic
       cache[:input_matrix_data_transformation_id] = annot&.data_transformation_id
     end
 
+    # v8 tools often put matrix shape in output.json metadata[] instead of top-level nber_rows/nber_cols.
+    def matrix_dims_from_results(h_results, dataset_name, h_metadata_by_name = {})
+      meta = h_metadata_by_name[dataset_name]
+      nber_rows = h_results['nber_rows'].presence || meta&.[]('nber_rows')
+      nber_cols = h_results['nber_cols'].presence || meta&.[]('nber_cols')
+      dataset_size = meta&.[]('dataset_size')
+      dataset_size ||= (nber_rows.present? && nber_cols.present?) ? 4 * nber_rows.to_i * nber_cols.to_i : nil
+      is_count = h_results['is_count_table'].to_i == 1 || meta&.[]('is_count_table').to_i == 1
+      { 'nber_rows' => nber_rows, 'nber_cols' => nber_cols, 'dataset_size' => dataset_size, 'is_count' => is_count }
+    end
+
     def load_annot run, meta, relative_filepath, h_data_types, h_data_classes, logger, cache = nil
       cache ||= {}
       project_by_id = cache[:project_by_id] ||= {}
@@ -4152,6 +4163,10 @@ module Basic
         end
         
 #        annot = Annot.where(:name => meta['name'], :filepath => relative_filepath, :store_run_id => (fo) ? fo.run_id : nil, :project_id => run.project_id).first
+
+        if h_annot[:data_class_ids].blank? && annot&.data_class_ids.present?
+          h_annot[:data_class_ids] = annot.data_class_ids
+        end
 
         if !annot
           annot = Annot.new(h_annot)
@@ -5597,21 +5612,22 @@ puts "TEST RUN"
               dataset_name = h_output_files[k][k2]["dataset"]
               if dataset_name
                 if dataset_name == '/matrix' or dataset_name.match(/^\/layers\//)
-                  h_output_files[k][k2]["types"].push((h_results and h_results['is_count_table'].to_i == 1) ? "int_matrix" : "num_matrix")
-                  h_output_files[k][k2]["nber_rows"] = h_results['nber_rows']
-                  h_output_files[k][k2]["nber_cols"] = h_results['nber_cols']
-                  h_output_files[k][k2]["dataset_size"] = (h_results['nber_rows'] and h_results['nber_cols']) ? 4 * h_results['nber_rows'] * h_results['nber_cols'] : nil
+                  matrix_dims = matrix_dims_from_results(h_results, dataset_name, h_metadata_by_name)
+                  h_output_files[k][k2]["types"].push(matrix_dims['is_count'] ? "int_matrix" : "num_matrix")
+                  h_output_files[k][k2]["nber_rows"] = matrix_dims['nber_rows']
+                  h_output_files[k][k2]["nber_cols"] = matrix_dims['nber_cols']
+                  h_output_files[k][k2]["dataset_size"] = matrix_dims['dataset_size']
                   
                   h_data = {
                     'output_attr_name' => k,
-                    'nber_cols' => h_results['nber_cols'],
-                    'nber_rows' =>  h_results['nber_rows'],
+                    'nber_cols' => matrix_dims['nber_cols'],
+                    'nber_rows' => matrix_dims['nber_rows'],
                     'type' => 'NUMERIC',
                     'data_class_names' => h_output_files[k][k2]["types"],
                     'on' => 'EXPRESSION_MATRIX',
-                    'dataset_size' => h_output_files[k][k2]["dataset_size"],                    
+                    'dataset_size' => matrix_dims['dataset_size'],
                     'name' => dataset_name,
-                    'count' => (h_results and h_results['is_count_table'].to_i == 1) ? true : false
+                    'count' => matrix_dims['is_count']
                   }
                   logger.info("[Basic.finish_run] Creating matrix annotation: #{h_data.to_json}")
                   new_annot = load_annot(run, h_data, relative_filepath, h_data_types, h_data_classes, logger, finish_run_cache)
@@ -5622,9 +5638,11 @@ puts "TEST RUN"
                   end
                   h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
                   
-                  if  h_metadata_by_name.keys.size > 0
+                  if h_metadata_by_name.keys.size > 0
                     h_metadata_by_name.each_key do |meta_name|
-                      metadata = h_metadata_by_name[meta_name]                    
+                      next if meta_name == dataset_name
+
+                      metadata = h_metadata_by_name[meta_name]
                       new_annot = load_annot(run, metadata, relative_filepath, h_data_types, h_data_classes, logger, finish_run_cache)
                       h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
                     end

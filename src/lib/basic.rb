@@ -3998,6 +3998,13 @@ module Basic
 
     # Same rules as load_annot when imported=true: infer data_class_names from path and data type.
     def infer_imported_data_class_names(name, type_name = nil)
+      data_class_names = path_base_data_class_names(name)
+      value_class = value_mdata_class_for_type(type_name)
+      data_class_names << value_class if value_class
+      data_class_names.uniq
+    end
+
+    def path_base_data_class_names(name)
       data_class_names = []
       if name.to_s.match?(%r{^/layers/})
         data_class_names |= %w[dataset matrix num_matrix]
@@ -4010,8 +4017,43 @@ module Basic
       elsif name == '/matrix'
         data_class_names |= %w[dataset matrix int_matrix]
       end
-      data_class_names |= ["#{type_name.downcase}_mdata"] if type_name.present?
-      data_class_names.uniq
+      data_class_names
+    end
+
+    def value_mdata_class_for_type(type_name)
+      case type_name.to_s.upcase
+      when 'NUMERIC' then 'numeric_mdata'
+      when 'DISCRETE', 'CATEGORICAL' then 'discrete_mdata'
+      when 'STRING' then 'string_mdata'
+      when 'NOT_HANDLED' then 'not_handled_mdata'
+      end
+    end
+
+    # Recompute storage-related data classes when the user changes data type.
+    # For expression matrices, int_matrix vs num_matrix is preserved unless unknown.
+    def data_class_names_for_data_type(name, type_name, keep_matrix_storage: nil)
+      path = name.to_s
+      names = path_base_data_class_names(path)
+      value_mdata_classes = %w[numeric_mdata discrete_mdata string_mdata not_handled_mdata integer_mdata]
+
+      if path == '/matrix' || path.match?(%r{^/layers/})
+        matrix_storage =
+          if keep_matrix_storage.to_s.in?(%w[int_matrix num_matrix])
+            keep_matrix_storage.to_s
+          elsif path == '/matrix'
+            'int_matrix'
+          else
+            'num_matrix'
+          end
+        names.reject! { |n| n == 'int_matrix' || n == 'num_matrix' }
+        names << matrix_storage
+      else
+        value_class = value_mdata_class_for_type(type_name)
+        names.reject! { |n| value_mdata_classes.include?(n) }
+        names << value_class if value_class
+      end
+
+      names.compact.uniq
     end
 
     def backfill_imported_annot_data_classes!(annot)
@@ -4123,10 +4165,11 @@ module Basic
       end
 
       data_class_names = meta['data_class_names'] || []
+      explicit_data_classes = meta.key?('data_class_names') && meta['data_class_names'].is_a?(Array)
       
       ### if imported data, try to guess types
       #if data_class_names.size == 0 #meta['imported'] == true
-      if meta['imported'] == true or meta['forced_type_id'] #or data_class_names.size == 0
+      if !explicit_data_classes && (meta['imported'] == true or meta['forced_type_id']) #or data_class_names.size == 0
         inferred = infer_imported_data_class_names(meta['name'], meta['type'])
         data_class_names |= inferred if inferred.any?
         if meta['on'] == 'EXPRESSION_MATRIX' # meta['nber_cols'] > 1 and meta['nber_rows'] > 1 and meta["type"] == 'NUMERIC'

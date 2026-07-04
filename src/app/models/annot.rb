@@ -306,7 +306,7 @@ class Annot < ApplicationRecord
   def data_transformation_label
     return nil unless expression_matrix?
 
-    data_transformation&.label.presence || data_transformation&.name.presence || 'Unknown'
+    data_transformation&.label.presence || data_transformation&.name.presence
   end
 
   private

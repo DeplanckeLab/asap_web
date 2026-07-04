@@ -1,7 +1,7 @@
 require 'open3'
 
 class AnnotsController < ApplicationController
-  helper_method :metadata_type_editable?
+  helper_method :data_type_editable?, :metadata_type_editable?
 
   before_action :set_annot, only: [:show, :download, :categories, :edit, :update]
 
@@ -309,8 +309,11 @@ class AnnotsController < ApplicationController
       end
     end
 
-    if editable?(@project) && metadata_type_editable?(@annot)
-      @data_type_options = DataType.order(:id).map { |dt| [dt.label.presence || dt.name, dt.id] }
+    if editable?(@project) && data_type_editable?(@annot)
+      allowed_type_names = allowed_data_type_names_for(@annot)
+      @data_type_options = DataType.order(:id)
+                                   .select { |dt| allowed_type_names.include?(dt.name) }
+                                   .map { |dt| [dt.label.presence || dt.name, dt.id] }
 
       # Disable unsafe target data types in the select. Switching a DISCRETE
       # (categorical) annotation to NUMERIC is unsafe when its category names
@@ -320,6 +323,8 @@ class AnnotsController < ApplicationController
         numeric_id = DataType.find_by(name: 'NUMERIC')&.id
         @disabled_data_type_ids << numeric_id if numeric_id
       end
+    elsif editable?(@project) && annot_loom_file_present?(@annot)
+      @data_type_edit_blocked = annot_referenced_by_runs?(@annot)
     end
 
     load_sim_step_options if editable?(@project) && @annot.imported?
@@ -444,8 +449,8 @@ class AnnotsController < ApplicationController
     unless editable?(@project)
       redirect_to annot_path(@annot, annot_back_params), alert: 'You cannot edit this project.' and return
     end
-    unless metadata_type_editable?(@annot)
-      redirect_to annot_path(@annot, annot_back_params), alert: 'This annotation does not support changing data type.' and return
+    unless data_type_editable?(@annot)
+      redirect_to annot_path(@annot, annot_back_params), alert: data_type_edit_blocked_message(@annot) and return
     end
     redirect_to "#{annot_path(@annot, annot_back_params)}#annot-data-type"
   end
@@ -460,8 +465,8 @@ class AnnotsController < ApplicationController
       return update_sim_step_mapping
     end
 
-    unless metadata_type_editable?(@annot)
-      redirect_to annot_path(@annot, annot_back_params), alert: 'This annotation does not support changing data type.' and return
+    unless data_type_editable?(@annot)
+      redirect_to annot_path(@annot, annot_back_params), alert: data_type_edit_blocked_message(@annot) and return
     end
 
     permitted = annot_params
@@ -478,11 +483,6 @@ class AnnotsController < ApplicationController
       redirect_to annot_path(@annot, annot_back_params),
                   alert: "Cannot change data type to NUMERIC: some category names are not numeric values." and return
     end
-
-    h_annot = {
-      data_type_id: new_type_id,
-      data_class_ids: (new_type_id != @annot.data_type_id ? '' : permitted[:data_class_ids].to_s)
-    }
 
     h_data_types = {}
     DataType.find_each { |dt| h_data_types[dt.name] = dt; h_data_types[dt.id] = dt }
@@ -501,11 +501,35 @@ class AnnotsController < ApplicationController
 
     old_type_label = @annot.data_type&.then { |dt| dt.label.presence || dt.name } || 'none'
     new_dt = h_data_types[new_type_id]
+    type_changed = new_type_id != @annot.data_type_id
+    keep_matrix_storage =
+      if @annot.integer_storage?
+        'int_matrix'
+      elsif @annot.float_storage?
+        'num_matrix'
+      end
+    new_class_names =
+      if type_changed
+        Basic.data_class_names_for_data_type(@annot.name, new_dt.name, keep_matrix_storage: keep_matrix_storage)
+      else
+        []
+      end
+    new_class_ids =
+      if type_changed
+        new_class_names.filter_map { |n| h_data_classes[n]&.id || DataClass.find_by(name: n)&.id }.uniq.sort.join(',')
+      else
+        permitted[:data_class_ids].to_s
+      end
+
+    h_annot = {
+      data_type_id: new_type_id,
+      data_class_ids: new_class_ids
+    }
     new_type_label = new_dt ? (new_dt.label.presence || new_dt.name) : 'unknown'
     instances = all_annots.size
     instance_word = (instances == 1) ? 'instance' : 'instances'
     notice =
-      "Data type of all metadata named #{@annot.name} in the different loom files " \
+      "Data type of all entries named #{@annot.name} in the different loom files " \
       "(#{instances} #{instance_word}) were changed from #{old_type_label} to #{new_type_label}."
 
     ActiveRecord::Base.transaction do
@@ -515,6 +539,7 @@ class AnnotsController < ApplicationController
           'name' => annot.name,
           'forced_type_id' => h_annot[:data_type_id]
         }
+        meta['data_class_names'] = new_class_names if type_changed && new_class_names.any?
         Basic.load_annot(annot.run, meta, annot.filepath, h_data_types, h_data_classes, logger, {})
       end
     end
@@ -594,14 +619,44 @@ class AnnotsController < ApplicationController
   end
 
   def metadata_type_editable?(annot)
-    return false if annot.blank?
-    return false if annot.dim == 3
-    return false if annot.name == '/matrix'
-    return false if annot.filepath.blank?
+    data_type_editable?(annot)
+  end
 
+  def data_type_editable?(annot)
+    return false if annot.blank?
+    return false if annot.filepath.blank?
+    return false unless annot_loom_file_present?(annot)
+    return false if annot_referenced_by_runs?(annot)
+
+    true
+  end
+
+  def annot_loom_file_present?(annot)
     user_data_dir = ENV.fetch('USER_DATA_DIR', Rails.root.join('storage', 'user_data').to_s)
     loom = Pathname.new(user_data_dir) + annot.project.user_id.to_s + annot.project.key + annot.filepath
     File.exist?(loom)
+  end
+
+  def annot_referenced_by_runs?(annot)
+    Annot.where(project_id: annot.project_id, name: annot.name).any? do |a|
+      RunAnnotReferenceScanner.run_ids_referencing_annot(annot.project_id, a).any?
+    end
+  end
+
+  def data_type_edit_blocked_message(annot)
+    if annot_referenced_by_runs?(annot)
+      'Cannot change data type: this data is used as input for one or more pipeline runs.'
+    else
+      'This annotation does not support changing data type.'
+    end
+  end
+
+  def allowed_data_type_names_for(annot)
+    if annot.expression_matrix?
+      %w[NUMERIC]
+    else
+      %w[NUMERIC DISCRETE STRING]
+    end
   end
 
   def set_annot

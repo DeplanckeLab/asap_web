@@ -27,15 +27,27 @@ export default class extends Controller {
     })
     if (this.canFilterValue) {
       this.applyFilter()
+    } else {
+      this.schedulePlotResize()
     }
 
-    this.boundResizePlots = this.resizePlots.bind(this)
+    this.boundResizePlots = () => this.schedulePlotResize()
     window.addEventListener("resize", this.boundResizePlots)
+    this.resizeObserver = new ResizeObserver(() => {
+      this.schedulePlotResize()
+    })
+    this.resizeObserver.observe(this.element)
   }
 
   disconnect() {
     if (this.boundResizePlots) {
       window.removeEventListener("resize", this.boundResizePlots)
+    }
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect()
+    }
+    if (this.resizeFrame) {
+      cancelAnimationFrame(this.resizeFrame)
     }
   }
 
@@ -47,7 +59,7 @@ export default class extends Controller {
       this.hasSortedPlotTarget ? this.sortedPlotTarget : null
     ]
     plotTargets.forEach((el) => {
-      if (el?.data) Plotly.Plots.resize(el)
+      if (el?.data) window.Plotly.Plots.resize(el)
     })
   }
 
@@ -251,6 +263,7 @@ export default class extends Controller {
     }
 
     Plotly.react(this.histogramPlotTarget, traces, layout, { responsive: true, displayModeBar: true })
+    this.schedulePlotResize()
   }
 
   renderScatter(threshold) {
@@ -302,6 +315,7 @@ export default class extends Controller {
     }
 
     Plotly.react(this.scatterPlotTarget, traces, layout, { responsive: true, displayModeBar: true })
+    this.schedulePlotResize()
   }
 
   renderSortedScores(threshold) {
@@ -332,6 +346,12 @@ export default class extends Controller {
     }
 
     Plotly.react(this.sortedPlotTarget, traces, layout, { responsive: true, displayModeBar: true })
+    this.schedulePlotResize()
+  }
+
+  schedulePlotResize() {
+    if (this.resizeFrame) cancelAnimationFrame(this.resizeFrame)
+    this.resizeFrame = requestAnimationFrame(() => this.resizePlots())
   }
 
   thresholdLineV(threshold) {

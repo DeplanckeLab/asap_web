@@ -784,13 +784,15 @@ p, label, li, td, th, input, select, textarea, button {
 
 .doublet-calling-layout {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: stretch;
   gap: 1rem;
   width: 100%;
   min-width: 0;
 }
 
 .doublet-calling-controls-col {
+  flex: 1 1 100%;
   min-width: 0;
   width: 100%;
   display: flex;
@@ -799,46 +801,53 @@ p, label, li, td, th, input, select, textarea, button {
 }
 
 .doublet-calling-plots-col {
+  flex: 1 1 100%;
   min-width: 0;
   width: 100%;
   display: flex;
   flex-direction: column;
+  overflow-x: hidden;
+  container-type: inline-size;
+  container-name: doublet-calling-plots;
 }
 
 .doublet-calling-plot-area {
   min-height: 280px;
   width: 100%;
+  max-width: 100%;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .doublet-calling-plot-grid {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  width: 100%;
+  min-width: 0;
 }
 
-@container doublet-calling (min-width: 40rem) {
+@container doublet-calling (min-width: 53rem) {
   .doublet-calling-layout {
-    flex-direction: row;
     align-items: stretch;
   }
 
   .doublet-calling-controls-col {
-    flex: 0 0 38%;
-    width: 38%;
+    flex: 0 1 24rem;
+    width: auto;
     max-width: 24rem;
-    overflow-y: auto;
-    max-height: calc(100vh - 220px);
+    align-self: stretch;
   }
 
   .doublet-calling-plots-col {
-    flex: 1 1 0;
+    flex: 1 1 28rem;
     width: auto;
-    min-width: 0;
+    min-width: 28rem;
+    align-self: stretch;
   }
 }
 
-@container doublet-calling (min-width: 56rem) {
+@container doublet-calling-plots (min-width: 48rem) {
   .doublet-calling-plot-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -914,4 +923,28 @@ p, label, li, td, th, input, select, textarea, button {
     max-width: calc(25% - 0.75rem);
     min-width: 8rem;
   }
+}
+
+/* Standard step form embedded in the analysis results panel (single outer frame). */
+[data-step-selector-target="content"] .std-form,
+.step-results > .std-form {
+  margin-bottom: 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+[data-step-selector-target="content"] .std-form > .std-form-card,
+.step-results > .std-form > .std-form-card {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  flex: 1;
+  min-height: 0;
+}
+
+/* py-5 on .std-form-req-body plus 1px so card top borders are not clipped when scrolling */
+.std-form-req-body {
+  padding-top: calc(1.25rem + 1px);
 }

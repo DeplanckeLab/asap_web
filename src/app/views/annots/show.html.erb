@@ -130,6 +130,10 @@
                         onclick="document.getElementById('edit-data-type-modal').classList.remove('hidden')">
                   <i class="fas fa-pen text-xs"></i>
                 </button>
+              <% elsif @data_type_edit_blocked %>
+                <span class="text-xs text-gray-500" title="Editing is disabled while pipeline runs use this data as input">
+                  Used as pipeline input
+                </span>
               <% end %>
             </div>
           </div>
@@ -141,13 +145,13 @@
               </div>
             </div>
           <% end %>
-          <% if @annot.expression_matrix? %>
+          <% if @annot.expression_matrix? && @annot.data_transformation.present? %>
             <div>
               <span class="text-sm font-medium text-gray-500">Data transformation</span>
               <div class="mt-2 flex items-center gap-2">
                 <%= annot_data_transformation_badge(@annot) %>
               </div>
-              <% if @annot.data_transformation&.description.present? %>
+              <% if @annot.data_transformation.description.present? %>
                 <p class="mt-1 text-xs text-gray-500 mb-0"><%= @annot.data_transformation.description %></p>
               <% end %>
             </div>
@@ -474,6 +478,7 @@
         <p class="text-sm text-gray-600 mb-4">
           Change the data type of <span class="font-mono text-gray-900"><%= @annot.name %></span>.
           The change is applied to every loom file in this project that contains an annotation with the same name.
+          The storage type is updated automatically to match the new data type.
         </p>
         <%= render 'data_type_form',
                    annot: @annot,

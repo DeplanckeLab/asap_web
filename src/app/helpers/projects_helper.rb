@@ -352,6 +352,11 @@ module ProjectsHelper
     annot.storage_type_label(project)
   end
 
+  def annot_imported_badge
+    content_tag(:span, 'Imported',
+                class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200')
+  end
+
   def annot_matrix_type_badge(annot, project = nil)
     label = annot_storage_type_label(annot, project)
     return '' if label.blank?
@@ -359,7 +364,7 @@ module ProjectsHelper
     css = if annot.integer_storage?
             'bg-amber-50 text-amber-800 border-amber-200'
           elsif annot.float_storage?
-            'bg-purple-50 text-purple-800 border-purple-200'
+            'bg-teal-50 text-teal-800 border-teal-200'
           else
             'bg-gray-100 text-gray-700 border-gray-200'
           end
@@ -368,10 +373,13 @@ module ProjectsHelper
 
   def annot_data_transformation_badge(annot)
     return '' unless annot.expression_matrix?
+    return '' unless annot.data_transformation.present?
 
     label = annot.data_transformation_label
+    return '' if label.blank?
+
     content_tag(:span, label,
-                class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200',
-                title: annot.data_transformation&.description.presence)
+                class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200',
+                title: annot.data_transformation.description.presence)
   end
 end

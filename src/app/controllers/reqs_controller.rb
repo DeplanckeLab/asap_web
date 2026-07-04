@@ -456,7 +456,25 @@ class ReqsController < ApplicationController
       tmp_attrs.delete(:input_matrix_dataset) if tmp_attrs
     end
 
+    if @step&.name == 'module_score' && tmp_attrs
+      source = tmp_attrs['geneset_source'] || tmp_attrs[:geneset_source]
+      if source.to_s == 'global'
+        tmp_attrs.delete('geneset')
+        tmp_attrs.delete(:geneset)
+        tmp_attrs.delete('geneset_sel')
+        tmp_attrs.delete(:geneset_sel)
+      elsif source.to_s == 'loom'
+        tmp_attrs.delete('global_gene_set_collection_id')
+        tmp_attrs.delete(:global_gene_set_collection_id)
+        tmp_attrs.delete('global_gene_set_item_id')
+        tmp_attrs.delete(:global_gene_set_item_id)
+      end
+    end
+
     constraint_errors = validate_required_if_constraints(@h_attrs, tmp_attrs || {})
+    if @step&.name == 'module_score'
+      constraint_errors.concat(validate_module_score_gene_set_constraints(tmp_attrs || {}))
+    end
     if constraint_errors.any?
       respond_to do |format|
         format.json { render json: { status: 'failed', errors: constraint_errors.join('; ') }, status: :unprocessable_entity }
@@ -620,6 +638,32 @@ class ReqsController < ApplicationController
 
         label = attr_config['label'].presence || attr_name.to_s.humanize
         errors << "#{label}: This field is required"
+      end
+
+      errors
+    end
+
+    def validate_module_score_gene_set_constraints(h_attr_values)
+      errors = []
+      source = fetch_attr_value(h_attr_values, 'geneset_source').to_s.strip
+      if source.blank?
+        errors << 'Gene set source: This field is required'
+        return errors
+      end
+
+      case source
+      when 'global'
+        collection = fetch_attr_value(h_attr_values, 'global_gene_set_collection_id')
+        item = fetch_attr_value(h_attr_values, 'global_gene_set_item_id')
+        errors << 'Gene set collection: This field is required' if constraint_value_blank?(collection)
+        errors << 'Gene set: This field is required' if constraint_value_blank?(item)
+      when 'loom'
+        geneset = fetch_attr_value(h_attr_values, 'geneset')
+        sel = fetch_attr_value(h_attr_values, 'geneset_sel')
+        errors << 'Gene set metadata: This field is required' if constraint_value_blank?(geneset)
+        errors << 'Gene set category: This field is required' if constraint_value_blank?(sel)
+      else
+        errors << 'Gene set source: Invalid value'
       end
 
       errors

@@ -528,7 +528,7 @@ export default class extends Controller {
           attrExpressionsDebugLog('default_expression_skip', { attrName, reason: 'hidden' })
           return
         }
-        if (!this.isDependencySatisfied(container)) {
+        if (!this.isFieldActive(container)) {
           attrExpressionsDebugLog('default_expression_skip', { attrName, reason: 'dependency_unmet' })
           return
         }
@@ -620,10 +620,20 @@ export default class extends Controller {
     attrInputs.forEach(input => {
       input.addEventListener('change', () => {
         console.log('[FormReqController] Attribute changed:', input.name || input.id)
+        if (input.id === 'attrs_geneset_source') {
+          this.syncModuleScoreGenesetSourceFields()
+        }
         this.syncDependencyVisibility()
         this.validateForm()
       })
       input.addEventListener('input', () => {
+        this.syncDependencyVisibility()
+        this.validateForm()
+      })
+    })
+
+    this.attrsContainerTarget.querySelectorAll('[data-controller*="gene-set-item-selector"]').forEach((widget) => {
+      widget.addEventListener('gene-set-item-selector:changed', () => {
         this.syncDependencyVisibility()
         this.validateForm()
       })
@@ -791,12 +801,106 @@ export default class extends Controller {
     return `Requires ${head}, and ${tail} to be set first`
   }
 
+  isVisibleIfSatisfied(container) {
+    const constraints = this.parseAttrConstraints(container)
+    const entries = this.normalizeRequiredIfEntries(constraints.visible_if)
+    if (entries.length === 0) {
+      return true
+    }
+    return entries.every((entry) => {
+      if (!entry.attr) {
+        return false
+      }
+      const actualValue = this.parseFieldValueForConstraint(String(entry.attr))
+      return this.valuesEqualForConstraint(actualValue, entry.equals)
+    })
+  }
+
+  isFieldActive(container) {
+    return this.isDependencySatisfied(container) && this.isVisibleIfSatisfied(container)
+  }
+
+  syncModuleScoreGenesetSourceFields() {
+    if (!this.hasAttrsContainerTarget) {
+      return
+    }
+    const sourceSelect = this.attrsContainerTarget.querySelector('#attrs_geneset_source')
+    if (!sourceSelect) {
+      return
+    }
+
+    const source = String(sourceSelect.value || '').trim()
+    if (source === 'global') {
+      this.clearInputDataAttr('geneset')
+      this.clearSelectAttr('geneset_sel')
+    } else if (source === 'loom') {
+      this.clearSelectAttr('global_gene_set_collection_id')
+      this.clearGeneSetItemAttr('global_gene_set_item_id')
+    }
+  }
+
+  clearSelectAttr(attrName) {
+    const select = this.attrsContainerTarget.querySelector(`#attrs_${attrName}`)
+    if (select) {
+      select.value = ''
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+  }
+
+  clearGeneSetItemAttr(attrName) {
+    const container = this.attrsContainerTarget.querySelector(`#form-container_${attrName}`)
+    if (!container) {
+      return
+    }
+    const hidden = container.querySelector(`#attrs_${attrName}`)
+    if (hidden) {
+      hidden.value = ''
+      hidden.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    const searchInput = container.querySelector('[data-gene-set-item-selector-target="searchInput"]')
+    if (searchInput) {
+      searchInput.value = ''
+    }
+    const selectedDisplay = container.querySelector('[data-gene-set-item-selector-target="selectedDisplay"]')
+    if (selectedDisplay) {
+      selectedDisplay.textContent = ''
+      selectedDisplay.classList.add('hidden')
+    }
+  }
+
+  clearInputDataAttr(attrName) {
+    const container = this.attrsContainerTarget.querySelector(`#form-container_${attrName}`)
+    if (!container) {
+      return
+    }
+    const hidden = container.querySelector('[data-input-data-selector-target="hiddenField"]')
+    if (hidden) {
+      hidden.value = ''
+    }
+    container.querySelectorAll('[data-input-data-selector-target="option"]').forEach((input) => {
+      input.checked = false
+    })
+    const widget = container.querySelector('[data-controller*="input-data-selector"]')
+    if (widget && this.application) {
+      const controller = this.application.getControllerForElementAndIdentifier(widget, 'input-data-selector')
+      if (controller && typeof controller.updateSelectedItems === 'function') {
+        controller.updateSelectedItems()
+      }
+    }
+  }
+
   syncDependencyVisibility() {
     if (!this.hasAttrsContainerTarget) {
       return
     }
     const attrContainers = this.attrsContainerTarget.querySelectorAll('[data-attr-name]')
     attrContainers.forEach((container) => {
+      if (!this.isVisibleIfSatisfied(container)) {
+        container.style.display = 'none'
+        return
+      }
+      container.style.display = ''
+
       const unmet = this.unmetRequiredAttrs(container)
       const inputWrap = container.querySelector('[data-attr-input-wrap="1"]')
       const label = container.querySelector('label')
@@ -1015,7 +1119,7 @@ export default class extends Controller {
       if (container.offsetParent === null) {
         return
       }
-      if (!this.isDependencySatisfied(container)) {
+      if (!this.isFieldActive(container)) {
         return
       }
       const attrName = container.getAttribute('data-attr-name')

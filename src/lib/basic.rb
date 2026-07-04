@@ -4717,6 +4717,10 @@ module Basic
         end
       end
 
+      if p['global_gene_set_item_id'].present? && p['global_gene_set_item_id'].to_s.strip != ''
+        h_var['global_gene_set_db_conn'] = Basic.asap_data_db_url(h_p[:h_env])
+      end
+
 #      puts "!H_VAR:" + h_var.to_json
 #      logger.debug("!H_VAR:" + h_var.to_json)
       toto_path = project_dir + "tmp" + "toto.txt"

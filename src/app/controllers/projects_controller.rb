@@ -7185,6 +7185,7 @@ class ProjectsController < ApplicationController
     # Get attributes using Basic.get_std_method_attrs
     h_res = Basic.get_std_method_attrs(@std_method, @step)
     @h_attrs = h_res[:h_attrs]
+    inject_module_score_gene_set_collection_options!(@h_attrs) if @step.name == 'module_score'
     
     # Get attribute layout from std_method
     @attr_layout = Basic.safe_parse_json(@std_method.attr_layout_json, [])
@@ -11458,7 +11459,76 @@ class ProjectsController < ApplicationController
       end
       
       has_all = missing_requirements.empty?
+      if step.name == 'module_score' && !module_score_gene_set_input_available?(available_annots, h_steps_by_name)
+        missing_requirements << {
+          steps: ['global gene set database or loom gene set metadata'],
+          valid_types: [['dataset'], ['row_mdata'], ['discrete_mdata']]
+        }
+        has_all = false
+      end
       [has_all, missing_requirements]
+    end
+
+    def module_score_gene_set_input_available?(available_annots, h_steps_by_name)
+      return true if pipeline_global_gene_set_collections.any?
+
+      source_steps = %w[import_metadata parsing cell_filtering gene_filtering]
+      valid_types = [['dataset'], ['row_mdata'], ['discrete_mdata']]
+      source_step_ids = source_steps.map { |ssn| h_steps_by_name[ssn]&.id }.compact
+      return false if source_step_ids.empty?
+
+      h_data_classes = {}
+      DataClass.all.each { |dc| h_data_classes[dc.id] = dc.name }
+
+      source_annots = available_annots.select { |annot| annot.matches_source_step_ids?(source_step_ids) }
+      source_annots.any? do |annot|
+        next false if annot.data_class_ids.blank?
+
+        annot_data_class_names = annot.data_class_ids.split(',').map { |dc_id| h_data_classes[dc_id.to_i] }.compact
+        valid_types.all? do |or_group|
+          or_group.any? { |valid_type| annot_data_class_names.include?(valid_type) }
+        end
+      end
+    end
+
+    def inject_module_score_gene_set_collection_options!(h_attrs)
+      return unless h_attrs.is_a?(Hash)
+      return unless h_attrs['global_gene_set_collection_id'].is_a?(Hash)
+
+      collections = pipeline_global_gene_set_collections
+      h_attrs['global_gene_set_collection_id']['list'] = collections.map { |c| [c[:label], c[:id].to_s] }
+      if collections.empty?
+        h_attrs['global_gene_set_collection_id']['requires_message'] = 'No global gene set collections are available for this organism'
+      end
+    end
+
+    def pipeline_global_gene_set_collections
+      h_env = Basic.safe_parse_json(@project.version.env_json, {})
+      db_version = asap_data_db_name_for_env(h_env, context: 'module_score_form')
+      rows = []
+      RemoteGene.with_remote(db_version) do
+        conn = RemoteGene.connection
+        rows = conn.select_all(<<~SQL)
+          SELECT gs.id, gs.label, ds.label AS database_name
+          FROM gene_sets gs
+          LEFT JOIN db_sets ds ON ds.id = gs.ref_id
+          WHERE gs.organism_id = #{@project.organism_id.to_i}
+            AND gs.ref_id IS NOT NULL
+            AND gs.project_id IS NULL
+            AND COALESCE(gs.obsolete, FALSE) = FALSE
+          ORDER BY LOWER(COALESCE(ds.label, '')), LOWER(COALESCE(gs.label, ''))
+        SQL
+      end
+      rows.map do |row|
+        label_parts = [row['database_name'], row['label']].map(&:to_s).reject(&:blank?)
+        {
+          id: row['id'].to_i,
+          label: label_parts.join(' - ').presence || row['label'].to_s
+        }
+      end
+    rescue StandardError => e
+      Rails.logger.error("[pipeline_global_gene_set_collections] #{e.message}")
+      []
     end
 
     def prepare_steps_with_status

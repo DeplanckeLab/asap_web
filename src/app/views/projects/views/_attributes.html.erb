@@ -359,6 +359,31 @@
                   <% if attr['description'].present? %>
                     <p class="mt-1 text-xs text-gray-500"><%= attr['description'] %></p>
                   <% end %>
+
+                <% when 'input_gene_set_item' %>
+                  <div class="gene_set_item_widget relative"
+                       data-controller="gene-set-item-selector"
+                       data-gene-set-item-selector-project-id-value="<%= @project.id %>"
+                       data-gene-set-item-selector-attr-name-value="<%= attr_name %>"
+                       data-gene-set-item-selector-collection-attr-name-value="global_gene_set_collection_id"
+                       data-gene-set-item-selector-matrix-attr-name-value="input_matrix">
+                    <input type="text"
+                           id="search_<%= attr_name %>"
+                           data-gene-set-item-selector-target="searchInput"
+                           data-action="input->gene-set-item-selector#searchInputChanged focus->gene-set-item-selector#searchInputChanged"
+                           value=""
+                           placeholder="<%= attr['placeholder'].presence || 'Search gene sets...' %>"
+                           autocomplete="off"
+                           class="w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900">
+                    <div data-gene-set-item-selector-target="selectedDisplay"
+                         class="mt-2 text-sm text-gray-700 hidden"></div>
+                    <div data-gene-set-item-selector-target="results"
+                         class="hidden absolute z-50 top-full left-0 w-full max-h-64 overflow-auto rounded-md border border-gray-300 bg-white shadow-lg mt-1"></div>
+                    <%= hidden_field_tag form_attr_name, scalar_value_for_field, { id: "attrs_#{attr_name}", data: { 'gene-set-item-selector-target': 'hiddenField' } } %>
+                  </div>
+                  <% if attr['description'].present? %>
+                    <p class="mt-1 text-xs text-gray-500"><%= attr['description'] %></p>
+                  <% end %>
                   
                 <% else %>
                   <%# Default: text field %>

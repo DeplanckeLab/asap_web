@@ -107,6 +107,10 @@ import InputDataSelectorController from "controllers/input_data_selector_control
 application.register("input-data-selector", InputDataSelectorController)
 console.log('Input data selector controller registered')
 
+import GeneSetItemSelectorController from "controllers/gene_set_item_selector_controller"
+application.register("gene-set-item-selector", GeneSetItemSelectorController)
+console.log('Gene set item selector controller registered')
+
 import RunTimerController from "controllers/run_timer_controller"
 application.register("run-timer", RunTimerController)
 console.log('Run timer controller registered')

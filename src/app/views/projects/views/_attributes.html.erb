@@ -46,7 +46,10 @@
       end
     end
 
-    badges.empty? ? '' : %(<span class="ml-2 inline-flex flex-wrap gap-1 align-middle">#{badges.join}</span>)
+    type_badge = form_attr_validation_type_badge_html(attr)
+    badges << type_badge if type_badge.present?
+
+    badges.empty? ? '' : %(<span data-attr-constraint-badges="1" class="ml-2 inline-flex flex-wrap gap-1 align-middle">#{badges.join}</span>)
   end
 
   layout_title_for = lambda do |node|
@@ -107,7 +110,8 @@
                    data-attr-max-val="<%= attr['max_val'] || '' %>"
                    data-attr-min-val-expression="<%= h(attr['min_val_expression'].to_s) %>"
                    data-attr-max-val-expression="<%= h(attr['max_val_expression'].to_s) %>"
-                   data-attr-default-expression="<%= h(attr['default_expression'].to_s) %>">
+                   data-attr-default-expression="<%= h(attr['default_expression'].to_s) %>"
+                   data-attr-type="<%= h(form_attr_validation_type(attr).to_s) %>">
                 <% if attr['widget'] != 'checkbox' && attr['widget'] != 'hidden' %>
                   <label for="attrs_<%= attr_name %>" class="block text-sm font-medium text-gray-700 mb-2">
                     <%= raw(attr['label'] || attr_name.humanize) %>

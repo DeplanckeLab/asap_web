@@ -944,7 +944,44 @@ p, label, li, td, th, input, select, textarea, button {
   min-height: 0;
 }
 
-/* py-5 on .std-form-req-body plus 1px so card top borders are not clipped when scrolling */
-.std-form-req-body {
-  padding-top: calc(1.25rem + 1px);
+/* std-form attribute validation error highlighting */
+.form-attr-field-error {
+  border-color: #ef4444 !important;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.35);
+}
+
+.form-attr-field-error-pulse {
+  animation: form-attr-error-pulse 0.75s ease-in-out 2;
+}
+
+.form-attr-label-error {
+  color: #b91c1c;
+}
+
+.form-attr-constraint-badges-error > span {
+  background-color: #fef2f2 !important;
+  color: #b91c1c !important;
+  box-shadow: inset 0 0 0 1px #fecaca;
+}
+
+.form-attr-constraint-badges-error-pulse > span {
+  animation: form-attr-badge-pulse 0.75s ease-in-out 2;
+}
+
+@keyframes form-attr-error-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.7);
+  }
+}
+
+@keyframes form-attr-badge-pulse {
+  0%, 100% {
+    box-shadow: inset 0 0 0 1px #fecaca;
+  }
+  50% {
+    box-shadow: inset 0 0 0 1px #ef4444, 0 0 0 2px rgba(239, 68, 68, 0.35);
+  }
 }

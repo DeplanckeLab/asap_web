@@ -6,6 +6,7 @@ import {
 } from "visualization/de_second_metadata_attrs"
 import { resetInputDataWidgetToEmptyPlaceholder } from "lib/reset_input_data_widget_placeholder"
 import { evaluateAttrExpression, attrExpressionsDebugLog } from "lib/attr_selection_expression"
+import { attrTypeValidationError } from "lib/form_attr_type_validation"
 
 export default class extends Controller {
   static targets = [
@@ -35,6 +36,7 @@ export default class extends Controller {
     this._predictionPreventSubmit = false
     this._applyingDefaultExpr = false
     this._resourcePredictionTimer = null
+    this._invalidAttrNames = new Set()
     console.log("=== [FormReqController] CONNECTED ===")
     console.log("[FormReqController] Element:", this.element)
     console.log("[FormReqController] Step name:", this.stepNameValue)
@@ -1073,6 +1075,125 @@ export default class extends Controller {
     toggle.addEventListener('change', applyVisibility)
     applyVisibility()
   }
+
+  recordFieldValidationError(invalidFields, attrName, message, errors) {
+    if (!invalidFields.has(attrName)) {
+      invalidFields.set(attrName, message)
+    }
+    errors.push(`${attrName}: ${message}`)
+  }
+
+  findAttrFieldHighlightTargets(container) {
+    const widget = container.getAttribute('data-attr-widget')
+    const attrName = container.getAttribute('data-attr-name')
+    const targets = []
+
+    if (widget === 'input_data') {
+      const dropdownButton = container.querySelector('[data-input-data-selector-target="dropdownButton"]')
+      if (dropdownButton) {
+        targets.push(dropdownButton)
+      }
+      return targets
+    }
+
+    if (widget === 'checkbox') {
+      const checkbox = container.querySelector(`#checkbox-${attrName}`)
+      if (checkbox) {
+        targets.push(checkbox)
+      }
+      return targets
+    }
+
+    if (widget === 'input_gene_set_item') {
+      const searchInput = container.querySelector('[data-gene-set-item-selector-target="searchInput"]')
+      if (searchInput) {
+        targets.push(searchInput)
+      }
+      return targets
+    }
+
+    container.querySelectorAll(
+      `#attrs_${attrName}, input[name="attrs[${attrName}]"], select[name="attrs[${attrName}]"], textarea[name="attrs[${attrName}]"]`
+    ).forEach((input) => {
+      if (input.type !== 'hidden') {
+        targets.push(input)
+      }
+    })
+
+    return targets
+  }
+
+  clearAttrValidationVisuals(container) {
+    container.querySelectorAll('.form-attr-field-error, .form-attr-field-error-pulse').forEach((element) => {
+      element.classList.remove('form-attr-field-error', 'form-attr-field-error-pulse')
+    })
+
+    const badges = container.querySelector('[data-attr-constraint-badges]')
+    if (badges) {
+      badges.classList.remove('form-attr-constraint-badges-error', 'form-attr-constraint-badges-error-pulse')
+    }
+
+    const label = container.querySelector('label')
+    if (label) {
+      label.classList.remove('form-attr-label-error')
+    }
+
+    const attrName = container.getAttribute('data-attr-name')
+    const validationEl = container.querySelector(`#validation_${attrName}`)
+    if (validationEl) {
+      validationEl.textContent = ''
+    }
+  }
+
+  setAttrValidationVisuals(container, message, pulse = false) {
+    const attrName = container.getAttribute('data-attr-name')
+    const validationEl = container.querySelector(`#validation_${attrName}`)
+    if (validationEl) {
+      validationEl.textContent = message
+    }
+
+    this.findAttrFieldHighlightTargets(container).forEach((element) => {
+      element.classList.add('form-attr-field-error')
+      if (pulse) {
+        element.classList.add('form-attr-field-error-pulse')
+      }
+    })
+
+    const badges = container.querySelector('[data-attr-constraint-badges]')
+    if (badges) {
+      badges.classList.add('form-attr-constraint-badges-error')
+      if (pulse) {
+        badges.classList.add('form-attr-constraint-badges-error-pulse')
+      }
+    }
+
+    const label = container.querySelector('label')
+    if (label) {
+      label.classList.add('form-attr-label-error')
+    }
+  }
+
+  syncAttrValidationVisuals(invalidFields) {
+    if (!this.hasAttrsContainerTarget) {
+      return
+    }
+
+    const previousInvalid = this._invalidAttrNames || new Set()
+
+    this.attrsContainerTarget.querySelectorAll('[data-attr-name]').forEach((container) => {
+      this.clearAttrValidationVisuals(container)
+    })
+
+    invalidFields.forEach((message, attrName) => {
+      const container = this.attrsContainerTarget.querySelector(`#form-container_${attrName}`)
+      if (!container) {
+        return
+      }
+      this.setAttrValidationVisuals(container, message, !previousInvalid.has(attrName))
+    })
+
+    this._invalidAttrNames = new Set(invalidFields.keys())
+  }
   
   validateForm() {
     if (!this.hasSubmitButtonTarget) {
@@ -1087,6 +1208,7 @@ export default class extends Controller {
     
     let isValid = true
     const errors = []
+    const invalidFields = new Map()
     
     // Check if method is selected (if method select exists)
     if (this.hasMethodSelectTarget) {
@@ -1109,6 +1231,7 @@ export default class extends Controller {
         this.submitButtonTarget.classList.add('opacity-50', 'cursor-not-allowed')
         this.submitButtonTarget.classList.remove('cursor-pointer')
       }
+      this.syncAttrValidationVisuals(invalidFields)
       return isValid && !blockedByPrediction
     }
     
@@ -1133,6 +1256,7 @@ export default class extends Controller {
       const maxVal = container.getAttribute('data-attr-max-val')
       const minValExpression = container.getAttribute('data-attr-min-val-expression')
       const maxValExpression = container.getAttribute('data-attr-max-val-expression')
+      const attrType = (container.getAttribute('data-attr-type') || '').trim()
       
       // Skip hidden widgets
       if (widget === 'hidden') {
@@ -1164,16 +1288,31 @@ export default class extends Controller {
         // Check min/max items constraints
         if (isEmpty && minItems > 0) {
           isValid = false
-          errors.push(`${attrName}: Please select at least ${minItems} item${minItems > 1 ? 's' : ''}`)
+          this.recordFieldValidationError(
+            invalidFields,
+            attrName,
+            `Please select at least ${minItems} item${minItems > 1 ? 's' : ''}`,
+            errors
+          )
         } else if (!isEmpty && value) {
           const count = Array.isArray(value) ? value.length : 1
           if (minItems > 0 && count < minItems) {
             isValid = false
-            errors.push(`${attrName}: Please select at least ${minItems} item${minItems > 1 ? 's' : ''}`)
+            this.recordFieldValidationError(
+              invalidFields,
+              attrName,
+              `Please select at least ${minItems} item${minItems > 1 ? 's' : ''}`,
+              errors
+            )
           }
           if (maxItems && count > parseInt(maxItems)) {
             isValid = false
-            errors.push(`${attrName}: Please select at most ${maxItems} item${maxItems > 1 ? 's' : ''}`)
+            this.recordFieldValidationError(
+              invalidFields,
+              attrName,
+              `Please select at most ${maxItems} item${maxItems > 1 ? 's' : ''}`,
+              errors
+            )
           }
         }
       } else if (widget === 'checkbox') {
@@ -1200,8 +1339,15 @@ export default class extends Controller {
       // Check not_null constraint
       if ((notNull || conditionallyRequired) && isEmpty) {
         isValid = false
-        const label = container.querySelector('label')?.textContent?.trim() || attrName
-        errors.push(`${label}: This field is required`)
+        this.recordFieldValidationError(invalidFields, attrName, 'This field is required', errors)
+      }
+
+      if (!isEmpty && widget !== 'input_data' && typeof value === 'string') {
+        const typeError = attrTypeValidationError(value, attrType)
+        if (typeError) {
+          isValid = false
+          this.recordFieldValidationError(invalidFields, attrName, typeError, errors)
+        }
       }
       
       // Check min_val / max_val and optional *_expression (expression wins over static bound)
@@ -1229,7 +1375,12 @@ export default class extends Controller {
           if (effectiveMin != null && !isNaN(effectiveMin) && numValue < effectiveMin - 1e-9) {
             isValid = false
             const roundedMin = Number.isInteger(effectiveMin) ? String(Math.round(effectiveMin)) : String(effectiveMin)
-            errors.push(`${attrName}: Value must be at least ${roundedMin}`)
+            this.recordFieldValidationError(
+              invalidFields,
+              attrName,
+              `Value must be at least ${roundedMin}`,
+              errors
+            )
           }
 
           let effectiveMax = null
@@ -1244,7 +1395,12 @@ export default class extends Controller {
           if (effectiveMax != null && !isNaN(effectiveMax) && numValue > effectiveMax + 1e-9) {
             isValid = false
             const rounded = Number.isInteger(effectiveMax) ? String(Math.round(effectiveMax)) : String(effectiveMax)
-            errors.push(`${attrName}: Value must be at most ${rounded}`)
+            this.recordFieldValidationError(
+              invalidFields,
+              attrName,
+              `Value must be at most ${rounded}`,
+              errors
+            )
           }
         }
       }
@@ -1257,9 +1413,16 @@ export default class extends Controller {
       const hidden2 = g2c.querySelector('[data-input-data-selector-target="hiddenField"]')
       if (!hidden2 || !String(hidden2.value || "").trim()) {
         isValid = false
-        errors.push("Second metadata: select a metadata column for the compared group")
+        this.recordFieldValidationError(
+          invalidFields,
+          'groups2',
+          'Select a metadata column for the compared group',
+          errors
+        )
       }
     }
+
+    this.syncAttrValidationVisuals(invalidFields)
     
     // Update submit button state (resource prediction can block submit like legacy ASAP)
     const blockedByPrediction = this._predictionPreventSubmit === true

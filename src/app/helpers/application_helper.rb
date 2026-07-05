@@ -549,12 +549,27 @@ module ApplicationHelper
     lines
   end
 
+  def form_attr_validation_type(attr)
+    return nil unless attr.is_a?(Hash)
+
+    attr['type'].to_s.strip.presence
+  end
+
+  def form_attr_validation_type_badge_html(attr)
+    type = form_attr_validation_type(attr)
+    return nil if type.blank?
+
+    %(<span class="inline-flex items-center rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-medium text-blue-700 ring-1 ring-inset ring-blue-200">#{ERB::Util.html_escape(type)}</span>)
+  end
+
   def form_attr_detail_lines(attr)
     lines = []
     return lines unless attr.is_a?(Hash)
 
+    validation_type = form_attr_validation_type(attr)
+    lines << "Type: #{validation_type}" if validation_type.present?
+
     widget = attr['widget'].to_s
-    lines << "Input type: #{widget.tr('_', ' ')}" if widget.present?
     if attr.key?('default')
       default = attr['default']
       unless default.nil? || (default.is_a?(String) && default.empty?)

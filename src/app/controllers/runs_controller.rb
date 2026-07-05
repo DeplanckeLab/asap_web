@@ -658,16 +658,9 @@ class RunsController < ApplicationController
 
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
     step_dir = project_dir + @step.name
-    output_dir = step_dir + @run.id.to_s
-
-    if File.directory?(output_dir)
-      %w[output.json output.log exec.out exec.err output.plot.json].each do |fname|
-        fpath = output_dir + fname
-        File.delete(fpath) if File.file?(fpath)
-      end
-    else
-      FileUtils.mkdir_p(output_dir)
-    end
+    output_dir = Basic.run_output_dir(@run)
+    Basic.clear_step_run_output_files!(@run, logger: Rails.logger)
+    FileUtils.mkdir_p(output_dir) unless File.directory?(output_dir.to_s)
 
     # Kill any running container associated with the run.
     Basic.kill_run(@run) rescue nil

@@ -11214,17 +11214,9 @@ class ProjectsController < ApplicationController
            .all
     end
     
-    # Input-data attrs marked optional (or min_nber_items 0) do not gate step/method availability.
+    # Input-data attrs marked optional (min_nber_items 0) do not gate step/method availability.
     def optional_std_method_input_attr?(attr_config)
-      return false unless attr_config.is_a?(Hash)
-
-      if ActiveModel::Type::Boolean.new.cast(attr_config['optional'])
-        return true
-      end
-
-      attr_config['widget'].to_s == 'input_data' &&
-        attr_config.key?('min_nber_items') &&
-        attr_config['min_nber_items'].to_i.zero?
+      FormAttrConstraints.input_data_optional?(attr_config)
     end
 
     # Check if a std_method has all required parameters satisfied
@@ -11520,10 +11512,16 @@ class ProjectsController < ApplicationController
         SQL
       end
       rows.map do |row|
-        label_parts = [row['database_name'], row['label']].map(&:to_s).reject(&:blank?)
+        db_label = row['database_name'].to_s.strip
+        gs_label = row['label'].to_s.strip
+        label = if db_label.present? && gs_label.present?
+                  db_label.casecmp?(gs_label) ? db_label : "#{db_label} - #{gs_label}"
+                else
+                  db_label.presence || gs_label
+                end
         {
           id: row['id'].to_i,
-          label: label_parts.join(' - ').presence || row['label'].to_s
+          label: label.presence || gs_label.to_s
         }
       end
     rescue StandardError => e

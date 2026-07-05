@@ -15,8 +15,7 @@ module ClusteringV8StdMethods
       "req_data_structure" => "array",
       "constraints" => {},
       "min_nber_items" => 1,
-      "max_nber_items" => 1,
-      "optional" => false
+      "max_nber_items" => 1
     },
     "nber_dims" => {
       "description" => "Number of PCA dimensions to use as input (NULL in R = all available PCs).",
@@ -80,8 +79,7 @@ module ClusteringV8StdMethods
       "req_data_structure" => "array",
       "constraints" => {},
       "min_nber_items" => 1,
-      "max_nber_items" => 1,
-      "optional" => false
+      "max_nber_items" => 1
     },
     "nber_dims" => {
       "description" => "Number of PCA dimensions to use as input (NULL = all available PCs).",
@@ -165,7 +163,7 @@ module ClusteringV8StdMethods
 
   SCANPY_DEFINITIONS = [
     {
-      name: "leiden_scanpy",
+      name: "scanpy_leiden",
       label: "Leiden [Scanpy]",
       short_label: "leiden",
       cli_method: "leiden",
@@ -173,7 +171,7 @@ module ClusteringV8StdMethods
       link: '[<a href="https://scanpy.readthedocs.io/en/stable/generated/scanpy.tl.leiden.html">Reference</a>]'
     },
     {
-      name: "louvain_scanpy",
+      name: "scanpy_louvain",
       label: "Louvain [Scanpy]",
       short_label: "louvain",
       cli_method: "louvain",
@@ -199,6 +197,7 @@ module ClusteringV8StdMethods
                           version_id: version_id, summary: summary, backend: :seurat)
       upsert_definitions!(SCANPY_DEFINITIONS, step: step, docker_image: docker_image, speed: speed,
                           version_id: version_id, summary: summary, backend: :scanpy)
+      obsolete_duplicate_scanpy_clustering_methods!(step, version_id)
 
       summary
     end
@@ -217,6 +216,11 @@ module ClusteringV8StdMethods
       raise "No DockerImage found for version_id=#{version_id}" unless image
 
       image
+    end
+
+    def obsolete_duplicate_scanpy_clustering_methods!(step, version_id)
+      StdMethod.where(step_id: step.id, version_id: version_id, name: %w[leiden_scanpy louvain_scanpy], obsolete: false)
+               .update_all(obsolete: true)
     end
 
     def upsert_definitions!(definitions, step:, docker_image:, speed:, version_id:, summary:, backend:)
@@ -297,7 +301,7 @@ module ClusteringV8StdMethods
             {
               "type" => "card",
               "card-header" => "Input matrix",
-              "container_class" => "col-md-12",
+              "container_class" => "col-md-6",
               "class" => "card h-100",
               "label_class" => "col-md-6",
               "attr_list" => %w[input_matrix nber_dims]
@@ -305,7 +309,7 @@ module ClusteringV8StdMethods
             {
               "type" => "card",
               "card-header" => "Clustering parameters",
-              "container_class" => "col-md-12",
+              "container_class" => "col-md-6",
               "class" => "card h-100",
               "label_class" => "col-md-6",
               "attr_list" => %w[n_neighbors metric resolution] + [seed_attr]

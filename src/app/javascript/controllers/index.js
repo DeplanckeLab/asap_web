@@ -131,6 +131,14 @@ import PipelineRunsController from "controllers/pipeline_runs_controller"
 application.register("pipeline-runs", PipelineRunsController)
 console.log('Pipeline runs controller registered')
 
+import RunParamInfoController from "controllers/run_param_info_controller"
+application.register("run-param-info", RunParamInfoController)
+console.log('Run param info controller registered')
+
+import FormAttrInfoController from "controllers/form_attr_info_controller"
+application.register("form-attr-info", FormAttrInfoController)
+console.log('Form attr info controller registered')
+
 import RunSelectionController from "controllers/run_selection_controller"
 application.register("run-selection", RunSelectionController)
 console.log('Run selection controller registered')

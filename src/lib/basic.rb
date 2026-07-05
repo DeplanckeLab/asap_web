@@ -3946,6 +3946,93 @@ module Basic
       { 'nber_rows' => nber_rows, 'nber_cols' => nber_cols, 'dataset_size' => dataset_size, 'is_count' => is_count }
     end
 
+    STALE_STEP_OUTPUT_FILES = %w[
+      output.json output.log exec.out exec.err output.plot.json exec_run_details.log
+    ].freeze
+
+    def run_output_dir(run)
+      project = run.project
+      step = run.step
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+      step_dir = project_dir + step.name
+      (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+    end
+
+    # Remove result files from a step output directory when a run is (re)started.
+    # Keeps subdirectories such as input/ intact. Steps with multiple_runs=false share
+    # the step directory, so this must run at submission time (see RunExecutionJob).
+    def clear_step_run_output_files!(run, logger: nil)
+      output_dir = run_output_dir(run)
+      return unless output_dir
+
+      FileUtils.mkdir_p(output_dir) unless File.directory?(output_dir.to_s)
+
+      removed = []
+      STALE_STEP_OUTPUT_FILES.each do |fname|
+        fpath = output_dir + fname
+        next unless File.file?(fpath.to_s)
+
+        File.delete(fpath.to_s)
+        removed << fname
+      end
+
+      slurm_script = output_dir + "slurm_#{run.id}.sh"
+      if File.file?(slurm_script.to_s)
+        File.delete(slurm_script.to_s)
+        removed << slurm_script.basename.to_s
+      end
+
+      if removed.any?
+        (logger || Rails.logger).info(
+          "[Basic.clear_step_run_output_files] Run##{run.id} cleared #{removed.join(', ')} in #{output_dir}"
+        )
+      end
+    end
+
+    # When a shared step/output.json is read before the current job finishes, annots can get
+    # dimensions from a previous run. Reconcile from the on-disk output.json when they differ.
+    def sync_run_annots_from_output_json!(logger, run)
+      output_json_path = run_output_dir(run) + 'output.json'
+      return false unless File.exist?(output_json_path.to_s)
+
+      h_results = safe_parse_json(File.read(output_json_path), {})
+      return false unless h_results.is_a?(Hash)
+
+      metadata = h_results['metadata']
+      metadata = metadata.is_a?(Array) ? metadata : (metadata ? [metadata] : [])
+      return false if metadata.empty?
+
+      h_metadata_by_name = {}
+      metadata.each do |m|
+        next unless m.is_a?(Hash) && m['name'].present?
+        h_metadata_by_name[normalize_dataset_path(m['name'])] = m
+      end
+
+      updated = false
+      Annot.where(run_id: run.id).find_each do |annot|
+        meta = h_metadata_by_name[normalize_dataset_path(annot.name)]
+        next unless meta
+
+        dims = matrix_dims_from_results(h_results, annot.name, h_metadata_by_name)
+        nr = dims['nber_rows']
+        nc = dims['nber_cols']
+        next if nr.blank? || nc.blank?
+
+        if annot.nber_rows.to_i != nr.to_i || annot.nber_cols.to_i != nc.to_i
+          logger.info(
+            "[Basic.sync_run_annots_from_output_json] Run##{run.id} #{annot.name}: " \
+            "#{annot.nber_rows}x#{annot.nber_cols} -> #{nr}x#{nc}"
+          )
+          annot.update!(
+            nber_rows: nr.to_i,
+            nber_cols: nc.to_i
+          )
+          updated = true
+        end
+      end
+      updated
+    end
+
     def normalize_dataset_path(path)
       s = path.to_s.strip
       return '' if s.empty?
@@ -4467,13 +4554,17 @@ module Basic
 #        h_steps[s.id] = s
 #      end
       
+      std_method = h_p[:std_method]
+      step = h_p[:step]
       h_var = {
         'user_id' => h_p[:run].user_id,
         'project_dir' => project_dir,        
         'output_dir' => output_dir, #project_dir + h_p[:step].name + run.id.to_s,
-        'std_method_name' => h_p[:std_method].name,
-        'step_tag' => h_p[:step].tag,
-        'step_name' => h_p[:step].name,
+        'std_method_name' => std_method.name,
+        'std_method_label' => std_method.label.presence || step.label,
+        'std_method_short_label' => std_method.short_label.presence || step.short_label,
+        'step_tag' => step.tag,
+        'step_name' => step.name,
         'run_num' => run.num,
         'asap_data_docker_db_conn' => 'postgres:5434/' + Basic.asap_data_db_name_from_env!(h_p[:h_env]), #h_p[:project].version_id.to_s,
         'asap_data_direct_db_conn' => 'postgres:5433/' + Basic.asap_data_db_name_from_env!(h_p[:h_env]), #h_p[:project].version_id.to_s,

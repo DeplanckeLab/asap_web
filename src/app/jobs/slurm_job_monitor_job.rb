@@ -28,11 +28,12 @@ class SlurmJobMonitorJob < ApplicationJob
         Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} is complete (status_id=3) but has NO annotations (#{annot_count}). Calling finish_run_successfully to create annotations.")
         slurm_service = SlurmService.new(logger: Rails.logger)
         finish_run_successfully(run, slurm_service, slurm_job_id)
-        return
+      elsif output_json_fresh_for_run?(run) && Basic.sync_run_annots_from_output_json!(Rails.logger, run)
+        Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} synced annot dimensions from fresh output.json")
       else
         Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} already marked as complete with #{annot_count} annotations, stopping monitoring")
-        return
       end
+      return
     end
 
     if run.status_id == 4
@@ -63,11 +64,11 @@ class SlurmJobMonitorJob < ApplicationJob
         output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
         output_json_filename = output_dir + 'output.json'
         
-        if File.exist?(output_json_filename)
-          # Output.json exists - check if run is already complete or needs to be finished
+        if output_json_fresh_for_run?(run, output_json_filename)
+          # Output.json exists for this run - check if run is already complete or needs to be finished
           annot_count = Annot.where(run_id: run.id).count
           if run.status_id != 3
-            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} has output.json but not marked complete, finishing run")
+            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} has fresh output.json but not marked complete, finishing run")
             finish_run_successfully(run, slurm_service, slurm_job_id)
           elsif annot_count == 0
             Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} already complete but has NO annotations (#{annot_count}). Will call finish_run_successfully to create annotations.")
@@ -169,8 +170,8 @@ class SlurmJobMonitorJob < ApplicationJob
           SlurmJobMonitorJob.set(wait: MONITOR_INTERVAL).perform_later(run_id, slurm_job_id, attempt + 1)
         else
           # Before marking as failed, double-check if output.json exists (might have been created between attempts)
-          if File.exist?(output_json_filename)
-            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} has output.json after max attempts, finishing run successfully")
+          if output_json_fresh_for_run?(run, output_json_filename)
+            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} has fresh output.json after max attempts, finishing run successfully")
             finish_run_successfully(run, slurm_service, slurm_job_id)
           else
             # Also check ProjectStep status - if it's already complete, don't mark as failed
@@ -236,13 +237,11 @@ class SlurmJobMonitorJob < ApplicationJob
           broadcast_queue_position_if_changed(run, slurm_service)
         end
         
-        # Then check if output.json exists (job might have completed)
-        if File.exist?(output_json_filename)
-          # Output.json exists - check if run status is already complete (set by parse.rake)
-          # Only mark as complete if run status is not already complete
+        # Then check if output.json was written for this run (shared step dirs keep stale files from prior runs)
+        if output_json_fresh_for_run?(run, output_json_filename)
           annot_count = Annot.where(run_id: run.id).count
           if run.status_id != 3
-            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} has output.json but run status is #{run.status_id}, finishing run")
+            Rails.logger.info("[SlurmJobMonitorJob] Run##{run_id} has fresh output.json but run status is #{run.status_id}, finishing run")
             finish_run_successfully(run, slurm_service, slurm_job_id)
           elsif annot_count == 0
             Rails.logger.warn("[SlurmJobMonitorJob] Run##{run_id} already marked as complete but has NO annotations (#{annot_count}). Will call finish_run_successfully to create annotations.")
@@ -549,6 +548,9 @@ class SlurmJobMonitorJob < ApplicationJob
       annot_count = Annot.where(run_id: run.id).count
       if annot_count == 0
         Rails.logger.warn("[SlurmJobMonitorJob] Run##{run.id} is complete (status_id=3) but has NO annotations. This should not happen - finish_run should have created them. Calling finish_run again to create annotations.")
+      elsif Basic.sync_run_annots_from_output_json!(Rails.logger, run)
+        Rails.logger.info("[SlurmJobMonitorJob] Run##{run.id} synced annot dimensions from output.json")
+        return
       else
         Rails.logger.info("[SlurmJobMonitorJob] Run##{run.id} already marked as complete with #{annot_count} annotations. finish_run should have been called already, skipping.")
         return
@@ -563,6 +565,17 @@ class SlurmJobMonitorJob < ApplicationJob
     output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
     
     output_json_filename = output_dir + 'output.json'
+
+    unless output_json_fresh_for_run?(run, output_json_filename)
+      unless wait_for_fresh_output_json(run, output_json_filename)
+        Rails.logger.warn(
+          "[SlurmJobMonitorJob] Run##{run.id} output.json is missing or stale " \
+          "(submitted_at=#{run.submitted_at}, mtime=#{File.exist?(output_json_filename) ? File.mtime(output_json_filename) : 'missing'}); " \
+          "skipping finish_run"
+        )
+        return
+      end
+    end
     
     h_results = {}
     if run.return_stdout == true
@@ -710,6 +723,36 @@ class SlurmJobMonitorJob < ApplicationJob
     else
       nil
     end
+  end
+
+  def run_output_dir(run)
+    Basic.run_output_dir(run)
+  end
+
+  def output_json_path_for_run(run)
+    run_output_dir(run) + 'output.json'
+  end
+
+  # Steps with multiple_runs=false reuse step/output.json; only treat the file as belonging
+  # to this run when it was modified after the run was submitted.
+  def output_json_fresh_for_run?(run, output_json_path = nil)
+    path = output_json_path || output_json_path_for_run(run)
+    return false unless path && File.exist?(path.to_s)
+
+    submitted = run.submitted_at || run.created_at
+    return false unless submitted
+
+    File.mtime(path.to_s) >= submitted
+  end
+
+  def wait_for_fresh_output_json(run, output_json_path = nil, max_wait_seconds: 120)
+    path = output_json_path || output_json_path_for_run(run)
+    deadline = Time.now + max_wait_seconds
+    while Time.now < deadline
+      return true if output_json_fresh_for_run?(run, path)
+      sleep 2
+    end
+    false
   end
 end
 

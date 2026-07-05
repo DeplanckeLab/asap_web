@@ -45,7 +45,7 @@ module SeuratTsneUmapV8StdMethods
   DEFINITIONS = [
     {
       id: 348,
-      name: "tsne_seurat",
+      name: "seurat_tsne",
       short_label: "RunTSNE",
       label: "t-SNE [Seurat]",
       description: "t-SNE embedding with Seurat v5 RunTSNE on PCA cell embeddings.",
@@ -70,7 +70,7 @@ module SeuratTsneUmapV8StdMethods
     },
     {
       id: 349,
-      name: "umap_seurat",
+      name: "seurat_umap",
       short_label: "RunUMAP",
       label: "UMAP [Seurat]",
       description: "UMAP embedding with Seurat v5 FindNeighbors and RunUMAP on PCA cell embeddings.",
@@ -164,7 +164,7 @@ module SeuratTsneUmapV8StdMethods
             {
               "type" => "card",
               "card-header" => "Input matrix",
-              "container_class" => "col-md-12",
+              "container_class" => "col-md-6",
               "class" => "card h-100",
               "label_class" => "col-md-6",
               "attr_list" => %w[input_matrix nber_pcs n_components]
@@ -172,7 +172,7 @@ module SeuratTsneUmapV8StdMethods
             {
               "type" => "card",
               "card-header" => "#{defn[:short_label]} parameters",
-              "container_class" => "col-md-12",
+              "container_class" => "col-md-6",
               "class" => "card h-100",
               "label_class" => "col-md-6",
               "attr_list" => defn[:param_attr_list]

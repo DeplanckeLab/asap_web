@@ -7,8 +7,7 @@
   # field rules without stealing vertical space below the input.
   render_constraint_badges = lambda do |attr_name, attr|
     badges = []
-    auto_filled_required_attrs = %w[group_ref group_comp]
-    if attr['not_null'] && !auto_filled_required_attrs.include?(attr_name.to_s)
+    if form_attr_required?(attr_name, attr)
       badges << %(<span class="inline-flex items-center rounded-md bg-red-50 px-2 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-inset ring-red-200">required</span>)
     end
 
@@ -98,7 +97,7 @@
                    class="mb-4"
                    data-attr-name="<%= attr_name %>"
                    data-attr-widget="<%= attr['widget'] %>"
-                   data-attr-not-null="<%= attr['not_null'] ? 'true' : 'false' %>"
+                   data-attr-not-null="<%= form_attr_required?(attr_name, attr) ? 'true' : 'false' %>"
                    data-attr-constraints="<%= h((attr['constraints'] || {}).to_json) %>"
                    data-attr-requires="<%= h(Array(attr['requires']).to_json) %>"
                    data-attr-requires-message="<%= h(attr['requires_message'].to_s) %>"
@@ -112,8 +111,11 @@
                 <% if attr['widget'] != 'checkbox' && attr['widget'] != 'hidden' %>
                   <label for="attrs_<%= attr_name %>" class="block text-sm font-medium text-gray-700 mb-2">
                     <%= raw(attr['label'] || attr_name.humanize) %>
-                    <% if attr['description'].present? %>
-                      <span class="text-gray-400 text-xs ml-1" title="<%= attr['description'] %>">?</span>
+                    <% if form_attr_help_available?(attr_name, attr) %>
+                      <button type="button"
+                              class="inline-flex items-center justify-center ml-1 align-middle text-xs text-gray-400 hover:text-gray-600 cursor-pointer"
+                              aria-label="Field help for <%= h(attr['label'] || attr_name.humanize) %>"
+                              <%= raw(form_attr_info_html_attrs(attr_name, attr)) %>>?</button>
                     <% end %>
                     <%= raw(render_constraint_badges.call(attr_name, attr)) %>
                     <% if attr['widget'] == 'input_data' %>

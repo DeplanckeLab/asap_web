@@ -91,7 +91,7 @@
           <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6 space-y-4">
             <% if @std_method %>
               <div class="space-y-3">
-                <h5 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Method</h5>
+                <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Method</h4>
                 <div class="text-sm text-gray-900"><%= @std_method.label.presence || @std_method.name %></div>
               </div>
             <% end %>
@@ -99,7 +99,7 @@
             <% (@doublet_param_sections || []).each do |section| %>
               <div class="space-y-3">
                 <% if section[:header].present? %>
-                  <h5 class="text-xs font-semibold text-gray-500 uppercase tracking-wide"><%= section[:header] %></h5>
+                  <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3"><%= section[:header] %></h4>
                 <% end %>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
                   <% section[:keys].each do |attr_name| %>

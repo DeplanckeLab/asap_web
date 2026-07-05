@@ -23,8 +23,9 @@ class RunExecutionJob < ApplicationJob
       project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
       step_dir = project_dir + step.name
       FileUtils.mkdir_p(step_dir) unless File.exist?(step_dir)
-      output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+      output_dir = Basic.run_output_dir(run)
       FileUtils.mkdir_p(output_dir) unless File.exist?(output_dir)
+      Basic.clear_step_run_output_files!(run, logger: Rails.logger)
       
       h_cmd = Basic.safe_parse_json(run.command_json, {})
       if h_cmd.empty?

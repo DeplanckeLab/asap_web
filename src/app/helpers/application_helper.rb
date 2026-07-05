@@ -409,10 +409,194 @@ module ApplicationHelper
     "#{key}: #{parts.join(' ')}"
   end
 
+  def param_field_description(key, h_method_attrs)
+    sma = h_method_attrs.is_a?(Hash) ? h_method_attrs[key.to_s] : nil
+    return '' unless sma.is_a?(Hash)
+    sma['description_text'].presence || sma['description'].presence || ''
+  end
+
+  def param_info_badge_html_attrs(key, display_value, h_method_attrs, full_value: nil, pipeline: nil)
+    copy_value = (full_value.presence || display_value).to_s
+    attrs = [
+      %(data-controller="run-param-info"),
+      %(data-action="click->run-param-info#toggle"),
+      %(data-run-param-info-name-value="#{ERB::Util.html_escape(key.to_s)}"),
+      %(data-run-param-info-label-value="#{ERB::Util.html_escape(form_param_label(key, h_method_attrs))}"),
+      %(data-run-param-info-description-value="#{ERB::Util.html_escape(param_field_description(key, h_method_attrs))}"),
+      %(data-run-param-info-value-value="#{ERB::Util.html_escape(copy_value)}")
+    ]
+    if pipeline.is_a?(Hash)
+      if pipeline[:annot_id].present?
+        attrs << %(data-run-param-info-pipeline-annot-id-value="#{pipeline[:annot_id].to_i}")
+      end
+      if pipeline[:run_id].present?
+        attrs << %(data-run-param-info-pipeline-run-id-value="#{pipeline[:run_id].to_i}")
+      end
+      if pipeline[:url].present?
+        attrs << %(data-run-param-info-pipeline-url-value="#{ERB::Util.html_escape(pipeline[:url])}")
+      end
+    end
+    attrs.join(' ')
+  end
+
   def form_param_label(key, h_method_attrs)
     sma = h_method_attrs.is_a?(Hash) ? h_method_attrs[key.to_s] : nil
     return key.to_s.humanize unless sma.is_a?(Hash)
     sma['label'].presence || key.to_s.humanize
+  end
+
+  def form_attr_optional?(_attr_name, attr)
+    FormAttrConstraints.optional?(_attr_name, attr)
+  end
+
+  def form_attr_required?(attr_name, attr)
+    FormAttrConstraints.required?(attr_name, attr)
+  end
+
+  def format_form_attr_constraint_rule(prefix, rule)
+    return nil unless rule.is_a?(Hash)
+
+    attr = rule['attr'] || rule[:attr]
+    equals = rule['equals'] || rule[:equals]
+    return nil if attr.blank?
+
+    "#{prefix} when #{attr} is #{equals}"
+  end
+
+  def form_attr_constraint_lines(attr_name, attr)
+    lines = []
+    return lines unless attr.is_a?(Hash)
+
+    auto_filled_required_attrs = %w[group_ref group_comp]
+    if form_attr_optional?(attr_name, attr)
+      lines << 'Optional'
+    elsif form_attr_required?(attr_name, attr)
+      lines << 'Required'
+    end
+
+    widget = attr['widget'].to_s
+    min_items = attr['min_nber_items']
+    max_items = attr['max_nber_items']
+    show_item_constraints = widget == 'input_data' || attr['req_data_structure'] == 'array'
+    if show_item_constraints
+      exact_count = min_items && max_items && min_items.to_i.positive? &&
+                    max_items.to_i.positive? && min_items.to_i == max_items.to_i
+      if exact_count
+        lines << "Exactly #{min_items.to_i} item#{'s' if min_items.to_i > 1} required"
+      else
+        if min_items && min_items.to_i.positive?
+          lines << "Minimum #{min_items.to_i} item#{'s' if min_items.to_i > 1}"
+        end
+        if max_items && max_items.to_i.positive?
+          lines << "Maximum #{max_items.to_i} item#{'s' if max_items.to_i > 1}"
+        end
+      end
+    end
+
+    if widget != 'select'
+      unless attr['min_val_expression'].present? || attr['max_val_expression'].present?
+        min_val = attr['min_val']
+        max_val = attr['max_val']
+        if min_val.present? && max_val.present?
+          lines << "Value must be between #{min_val} and #{max_val}"
+        elsif min_val.present?
+          lines << "Minimum value: #{min_val}"
+        elsif max_val.present?
+          lines << "Maximum value: #{max_val}"
+        end
+      end
+      lines << "Min value expression: #{attr['min_val_expression']}" if attr['min_val_expression'].present?
+      lines << "Max value expression: #{attr['max_val_expression']}" if attr['max_val_expression'].present?
+    end
+
+    if attr['valid_types'].is_a?(Array) && attr['valid_types'].any?
+      formatted = attr['valid_types'].map { |group| Array(group).join(' or ') }.join('; or ')
+      lines << "Accepted data types: #{formatted}"
+    end
+
+    if attr['source_steps'].present?
+      steps = Array(attr['source_steps']).map { |step| step.to_s.tr('_', ' ') }.join(', ')
+      lines << "Available from steps: #{steps}"
+    end
+
+    source_methods = attr['source_methods']
+    if source_methods.is_a?(Hash) && source_methods.any?
+      sm_lines = source_methods.map { |step, methods| "#{step}: #{Array(methods).join(', ')}" }
+      lines << "Allowed methods: #{sm_lines.join('; ')}"
+    end
+
+    excluded = attr['excluded_source_methods']
+    if excluded.is_a?(Hash) && excluded.any?
+      ex_lines = excluded.map { |step, methods| "#{step}: exclude #{Array(methods).join(', ')}" }
+      lines << "Excluded methods: #{ex_lines.join('; ')}"
+    end
+
+    lines << "Requires: #{Array(attr['requires']).join(', ')}" if attr['requires'].present?
+    lines << attr['requires_message'].to_s if attr['requires_message'].present?
+
+    constraints = attr['constraints']
+    if constraints.is_a?(Hash)
+      visible_if = constraints['visible_if']
+      required_if = constraints['required_if']
+      if visible_if.is_a?(Array) && visible_if.any?
+        lines.concat(visible_if.filter_map { |rule| format_form_attr_constraint_rule('Visible', rule) })
+      end
+      if required_if.is_a?(Array) && required_if.any?
+        lines.concat(required_if.filter_map { |rule| format_form_attr_constraint_rule('Required', rule) })
+      end
+    end
+
+    lines
+  end
+
+  def form_attr_detail_lines(attr)
+    lines = []
+    return lines unless attr.is_a?(Hash)
+
+    widget = attr['widget'].to_s
+    lines << "Input type: #{widget.tr('_', ' ')}" if widget.present?
+    if attr.key?('default')
+      default = attr['default']
+      unless default.nil? || (default.is_a?(String) && default.empty?)
+        lines << "Default: #{default}"
+      end
+    end
+    lines << "Default expression: #{attr['default_expression']}" if attr['default_expression'].present?
+    lines << "Placeholder: #{attr['placeholder']}" if attr['placeholder'].present?
+
+    if attr['list'].is_a?(Array) && attr['list'].any? && widget == 'select'
+      options = attr['list'].map { |entry| Array(entry).first }.join(', ')
+      lines << "Choices: #{options}"
+    end
+
+    lines
+  end
+
+  def form_attr_info_payload(attr_name, attr)
+    h_method_attrs = { attr_name.to_s => attr }
+    {
+      name: attr_name.to_s,
+      label: form_param_label(attr_name, h_method_attrs),
+      description: param_field_description(attr_name, h_method_attrs),
+      constraints: form_attr_constraint_lines(attr_name, attr),
+      details: form_attr_detail_lines(attr)
+    }
+  end
+
+  def form_attr_help_available?(attr_name, attr)
+    payload = form_attr_info_payload(attr_name, attr)
+    payload[:description].present? ||
+      payload[:constraints].any? ||
+      payload[:details].any?
+  end
+
+  def form_attr_info_html_attrs(attr_name, attr)
+    payload = form_attr_info_payload(attr_name, attr)
+    [
+      %(data-controller="form-attr-info"),
+      %(data-action="click->form-attr-info#toggle"),
+      %(data-form-attr-info-payload-value="#{ERB::Util.html_escape(payload.to_json)}")
+    ].join(' ')
   end
 
   # Maps attr_layout_json container_class (Bootstrap grid) to form layout column widths.
@@ -470,8 +654,167 @@ module ApplicationHelper
     end
   end
 
+  def gene_set_display_label_cache
+    @gene_set_display_label_cache ||= { collections: {}, items: {} }
+  end
+
+  def preload_gene_set_display_labels!(project, collection_ids:, item_ids:)
+    cache = gene_set_display_label_cache
+    missing_collections = Array(collection_ids).map(&:to_i).uniq.reject(&:zero?) - cache[:collections].keys
+    missing_items = Array(item_ids).map(&:to_i).uniq.reject(&:zero?) - cache[:items].keys
+    return if missing_collections.empty? && missing_items.empty?
+
+    fetched = GlobalGeneSetDisplayLabels.fetch(
+      project,
+      collection_ids: missing_collections,
+      item_ids: missing_items
+    )
+    cache[:collections].merge!(fetched[:collections])
+    cache[:items].merge!(fetched[:items])
+  end
+
+  def resolve_select_param_display_value(key, value, h_method_attrs)
+    sma = h_method_attrs[key.to_s]
+    return value.to_s unless sma.is_a?(Hash)
+
+    list = sma['list']
+    return value.to_s unless list.is_a?(Array)
+
+    pair = list.find do |entry|
+      next false unless entry.is_a?(Array) && entry.length >= 2
+      entry[1].to_s == value.to_s
+    end
+    pair ? pair[0].to_s : value.to_s
+  end
+
+  def resolve_scalar_param_display_value(run, key, value, h_method_attrs)
+    key_s = key.to_s
+    case key_s
+    when 'geneset_source'
+      resolve_select_param_display_value(key_s, value, h_method_attrs)
+    when 'global_gene_set_collection_id'
+      cache = gene_set_display_label_cache
+      cache[:collections][value.to_i].presence || value.to_s
+    when 'global_gene_set_item_id'
+      cache = gene_set_display_label_cache
+      cache[:items][value.to_i].presence || value.to_s
+    when 'geneset_sel'
+      value.to_s
+    else
+      value.to_s
+    end
+  end
+
+  def module_score_global_gene_set_badge_labels(h_attrs)
+    cache = gene_set_display_label_cache
+    collection_label = cache[:collections][h_attrs['global_gene_set_collection_id'].to_i]
+    item_label = cache[:items][h_attrs['global_gene_set_item_id'].to_i]
+    GlobalGeneSetDisplayLabels.module_score_gene_set_badge_labels(collection_label, item_label)
+  end
+
+  def run_attr_layout_order(run)
+    std_method = run&.std_method
+    return [] unless std_method&.attr_layout_json.present?
+
+    layout = Basic.safe_parse_json(std_method.attr_layout_json, [])
+    layout.flat_map do |block|
+      Array(block['horiz_elements']).flat_map { |el| Array(el['attr_list']).map(&:to_s) }
+    end.uniq
+  end
+
+  def sort_run_attr_keys_for_display(attr_keys, layout_order)
+    return attr_keys if layout_order.empty?
+
+    order_index = layout_order.each_with_index.to_h
+    attr_keys.sort_by.with_index do |key, idx|
+      [order_index.fetch(key.to_s, layout_order.length + idx), idx]
+    end
+  end
+
+  def run_display_visible?(conditions, h_attrs)
+    return true if conditions.blank?
+
+    Array(conditions).all? do |condition|
+      next false unless condition.is_a?(Hash)
+      h_attrs[condition['attr'].to_s].to_s == condition['equals'].to_s
+    end
+  end
+
+  def run_display_composite_config(attr, method_attrs_map, h_attrs)
+    sma = method_attrs_map[attr.to_s]
+    return nil unless sma.is_a?(Hash)
+
+    run_display = sma['run_display']
+    return nil unless run_display.is_a?(Hash) && run_display['composite']
+    return nil unless run_display_visible?(run_display['visible_when'], h_attrs)
+
+    run_display
+  end
+
+  def attrs_hidden_by_composite_display(method_attrs_map, h_attrs)
+    hidden = []
+    method_attrs_map.each do |_attr, sma|
+      next unless sma.is_a?(Hash)
+
+      run_display = sma['run_display']
+      next unless run_display.is_a?(Hash) && run_display['composite']
+      next unless run_display_visible?(run_display['visible_when'], h_attrs)
+
+      hidden.concat(Array(run_display['merge_with']).map(&:to_s))
+    end
+    hidden.uniq
+  end
+
+  def render_composite_run_param_badge(h_attrs, run_display)
+    case run_display['resolver'].to_s
+    when 'global_gene_set_item'
+      gene_set_labels = module_score_global_gene_set_badge_labels(h_attrs)
+      return nil if gene_set_labels[:display].blank?
+
+      render_simple_param_badge(
+        key: 'gene_set',
+        key_label: run_display['composite_label'].presence || 'Gene set',
+        value: gene_set_labels[:display],
+        full_value: gene_set_labels[:tooltip],
+        h_method_attrs: { 'gene_set' => { 'label' => run_display['composite_label'].presence || 'Gene set', 'description' => run_display['description'].to_s } },
+        palette_key: 'gene_set'
+      )
+    end
+  end
+
+  def composite_run_param_txt(h_attrs, run_display)
+    case run_display['resolver'].to_s
+    when 'global_gene_set_item'
+      gene_set_labels = module_score_global_gene_set_badge_labels(h_attrs)
+      return nil if gene_set_labels[:display].blank?
+      label = run_display['composite_label'].presence || 'Gene set'
+      "#{label}:#{gene_set_labels[:display]}"
+    end
+  end
+
+  def prepare_run_attr_keys_for_display(run, h_attrs, method_attrs_map, reject_attrs, reject_if_default)
+    attr_keys = h_attrs.keys.reject { |attr|
+      reject_attrs.include?(attr) ||
+      reject_default_run_param?(attr, h_attrs, method_attrs_map, reject_if_default)
+    }
+    attr_keys -= attrs_hidden_by_composite_display(method_attrs_map, h_attrs)
+    sort_run_attr_keys_for_display(attr_keys, run_attr_layout_order(run))
+  end
+
+  def render_simple_param_badge(key:, key_label:, value:, h_method_attrs:, palette_key:, full_value: nil, pipeline: nil)
+    palette = param_badge_palette(palette_key)
+    key_txt = ERB::Util.html_escape(key_label.to_s)
+    val_txt = ERB::Util.html_escape(value.to_s)
+    truncated = val_txt.length > 80 ? "#{val_txt[0..76]}..." : val_txt
+    info_attrs = param_info_badge_html_attrs(key, value, h_method_attrs, full_value: full_value, pipeline: pipeline)
+
+    "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border #{palette[:container]} cursor-pointer' #{info_attrs}>" \
+      "<span class='font-semibold #{palette[:key]}'>#{key_txt}:</span>" \
+      "<span class='#{palette[:value]}'>#{truncated}</span>" \
+      "</span>"
+  end
+
   def render_run_param_badge(run:, key:, value:, h_method_attrs:, context: {}, clickable: true)
-    tooltip = param_tooltip(key, h_method_attrs)
     h_annots = context[:h_annots] || {}
     h_runs = context[:h_runs] || {}
     h_steps = context[:h_steps] || @h_steps || {}
@@ -507,8 +850,17 @@ module ApplicationHelper
               end
       next if label.blank?
 
+      full_value = if annot
+                     annot.name.to_s
+                   elsif output_dataset.present?
+                     output_dataset.to_s
+                   else
+                     label
+                   end
+
       dataset_items << {
         label: label,
+        full_value: full_value,
         annot_id: annot&.id || annot_id,
         run_id: run_id
       }
@@ -517,21 +869,19 @@ module ApplicationHelper
     if dataset_items.any?
       palette = param_badge_palette(key)
       uniq_items = dataset_items.uniq { |e| [e[:label], e[:annot_id].to_s, e[:run_id].to_s] }
-      key_txt = ERB::Util.html_escape(key.to_s)
-      tooltip_txt = ERB::Util.html_escape(tooltip.to_s)
-      pipeline_url = run ? pipeline_runs_project_path(run.project) : nil
+      key_txt = ERB::Util.html_escape(form_param_label(key, h_method_attrs))
+      pipeline_url = (clickable && run) ? pipeline_runs_project_path(run.project) : nil
       badges = uniq_items.map do |item|
         item_label = ERB::Util.html_escape(item[:label].to_s)
-        clickable_attrs = ''
-        if clickable && pipeline_url
-          if item[:annot_id].present?
-            clickable_attrs = " data-controller='pipeline-runs' data-pipeline-runs-annot-id-value='#{item[:annot_id]}' data-pipeline-runs-url-value='#{pipeline_url}' data-action='click->pipeline-runs#showPipeline' onclick='event.stopPropagation();'"
-          elsif item[:run_id].present?
-            clickable_attrs = " data-controller='pipeline-runs' data-pipeline-runs-run-id-value='#{item[:run_id]}' data-pipeline-runs-url-value='#{pipeline_url}' data-action='click->pipeline-runs#showPipeline' onclick='event.stopPropagation();'"
-          end
+        pipeline = nil
+        if pipeline_url && (item[:annot_id].present? || item[:run_id].present?)
+          pipeline = { url: pipeline_url }
+          pipeline[:annot_id] = item[:annot_id] if item[:annot_id].present?
+          pipeline[:run_id] = item[:run_id] if item[:run_id].present?
         end
+        info_attrs = param_info_badge_html_attrs(key, item[:label], h_method_attrs, full_value: item[:full_value], pipeline: pipeline)
 
-        "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border #{palette[:container]}#{clickable_attrs.present? ? ' cursor-pointer' : ''}' title='#{tooltip_txt}'#{clickable_attrs}>" \
+        "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border #{palette[:container]} cursor-pointer' #{info_attrs}>" \
           "<span class='font-semibold #{palette[:key]}'>#{key_txt}:</span>" \
           "<span class='#{palette[:value]}'>#{item_label}</span>" \
           "</span>"
@@ -541,36 +891,46 @@ module ApplicationHelper
 
     if key.to_s == 'covariates' && value.is_a?(Array) && value.empty?
       palette = param_badge_palette(key)
-      key_txt = ERB::Util.html_escape(key.to_s)
-      tooltip_txt = ERB::Util.html_escape(tooltip.to_s)
+      key_txt = ERB::Util.html_escape(form_param_label(key, h_method_attrs))
+      info_attrs = param_info_badge_html_attrs(key, 'none', h_method_attrs)
       return (
-        "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border #{palette[:container]} cursor-help' title='#{tooltip_txt}'>" \
+        "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border #{palette[:container]} cursor-pointer' #{info_attrs}>" \
           "<span class='font-semibold #{palette[:key]}'>#{key_txt}:</span>" \
           "<span class='#{palette[:value]} italic'>none</span>" \
           "</span>"
       ).html_safe
     end
 
-    value_str = if value.is_a?(Array) || value.is_a?(Hash)
-                  value.to_json
-                else
-                  value.to_s
-                end
-    value_str = value_str.to_s
-    truncated = value_str.length > 80 ? "#{value_str[0..76]}..." : value_str
-    key_txt = ERB::Util.html_escape(key.to_s)
-    val_txt = ERB::Util.html_escape(truncated)
-    tooltip_txt = ERB::Util.html_escape(tooltip.to_s)
-
-    "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200 cursor-help' title='#{tooltip_txt}'>" \
-      "<span class='font-semibold text-gray-800'>#{key_txt}:</span>" \
-      "<span class='text-gray-600'>#{val_txt}</span>" \
-      "</span>"
+    display_value = if value.is_a?(Array) || value.is_a?(Hash)
+                      value.to_json
+                    else
+                      resolve_scalar_param_display_value(run, key, value, h_method_attrs)
+                    end
+    render_simple_param_badge(
+      key: key,
+      key_label: form_param_label(key, h_method_attrs),
+      value: display_value,
+      h_method_attrs: h_method_attrs,
+      palette_key: key
+    )
   end
 
   # When std_method attrs_json defines "default" for a param, run badges and display_run_attrs_txt
   # omit that param if h_attrs[param].to_s matches (use sma.key?("default") so false / 0 work).
   # opt[:reject_if_default] defaults to true; pass false to show every stored param for that render.
+  def skip_reject_default_for_display?(attr, method_attrs_map)
+    sma = method_attrs_map[attr.to_s]
+    sma.is_a?(Hash) && sma.dig('run_display', 'show_when_default') == true
+  end
+
+  def reject_default_run_param?(attr, h_attrs, method_attrs_map, reject_if_default)
+    return false unless reject_if_default
+    return false if skip_reject_default_for_display?(attr, method_attrs_map)
+
+    sma = method_attrs_map[attr.to_s]
+    sma.is_a?(Hash) && sma.key?('default') && sma['default'].to_s == h_attrs[attr].to_s
+  end
+
   def std_method_attrs_map_for_run_display(run, h_std_method_attrs)
     return {} unless run && h_std_method_attrs.is_a?(Hash) && h_std_method_attrs.any?
 
@@ -597,24 +957,38 @@ module ApplicationHelper
     method_attrs_map = std_method_attrs_map_for_run_display(run, h_std_method_attrs)
     reject_if_default = opt.fetch(:reject_if_default, true)
 
-    array = h_attrs.keys.reject { |attr|
-      reject_attrs.include?(attr) ||
-      (reject_if_default && run &&
-       (sma = method_attrs_map[attr]).is_a?(Hash) &&
-       sma.key?('default') &&
-       sma['default'].to_s == h_attrs[attr].to_s)
-    }.map { |attr|
-      render_run_param_badge(
-        run: run,
-        key: attr,
-        value: h_attrs[attr],
-        h_method_attrs: method_attrs_map,
-        context: {
-          h_annots: opt[:h_annots] || {},
-          h_runs: opt[:h_runs] || {},
-          h_steps: opt[:h_steps] || {}
-        }
-      )
+    if run&.project_id && h_attrs.values_at('global_gene_set_collection_id', 'global_gene_set_item_id').any?(&:present?)
+      project = run.project || Project.find_by(id: run.project_id)
+      if project
+        preload_gene_set_display_labels!(
+          project,
+          collection_ids: [h_attrs['global_gene_set_collection_id']],
+          item_ids: [h_attrs['global_gene_set_item_id']]
+        )
+      end
+    end
+
+    context = {
+      h_annots: opt[:h_annots] || {},
+      h_runs: opt[:h_runs] || {},
+      h_steps: opt[:h_steps] || {}
+    }
+
+    attr_keys = prepare_run_attr_keys_for_display(run, h_attrs, method_attrs_map, reject_attrs, reject_if_default)
+
+    array = attr_keys.map { |attr|
+      composite_cfg = run_display_composite_config(attr, method_attrs_map, h_attrs)
+      if composite_cfg
+        render_composite_run_param_badge(h_attrs, composite_cfg)
+      else
+        render_run_param_badge(
+          run: run,
+          key: attr,
+          value: h_attrs[attr],
+          h_method_attrs: method_attrs_map,
+          context: context
+        )
+      end
     }.reject(&:blank?)
 
     { datasets: [], attrs: array }
@@ -640,14 +1014,30 @@ module ApplicationHelper
     method_map = std_method_attrs_map_for_run_display(run, h_std_method_attrs)
     reject_if_default = opt.fetch(:reject_if_default, true)
 
+    if run&.project_id && h_attrs.values_at('global_gene_set_collection_id', 'global_gene_set_item_id').any?(&:present?)
+      project = run.project || Project.find_by(id: run.project_id)
+      if project
+        preload_gene_set_display_labels!(
+          project,
+          collection_ids: [h_attrs['global_gene_set_collection_id']],
+          item_ids: [h_attrs['global_gene_set_item_id']]
+        )
+      end
+    end
+
+    context = { h_steps: opt[:h_steps] || @h_steps || {} }
+    h_steps = context[:h_steps]
+    attr_keys = prepare_run_attr_keys_for_display(run, h_attrs, method_map, reject_attrs, reject_if_default)
+
     list = []
-    h_attrs.keys.reject { |attr|
-      reject_attrs.include?(attr) ||
-      (reject_if_default &&
-       (sma = method_map[attr]).is_a?(Hash) &&
-       sma.key?('default') &&
-       sma['default'].to_s == h_attrs[attr].to_s)
-    }.each do |attr|
+    attr_keys.each do |attr|
+      composite_cfg = run_display_composite_config(attr, method_map, h_attrs)
+      if composite_cfg
+        txt = composite_run_param_txt(h_attrs, composite_cfg)
+        list.push(txt) if txt.present?
+        next
+      end
+
       v = h_attrs[attr]
       txt = ''
       list_datasets = []
@@ -656,13 +1046,18 @@ module ApplicationHelper
       elsif v.is_a?(Array) && v[0].is_a?(Hash) && v[0]['run_id']
         list_datasets = v
       else
-        std_method_attr = (h_std_method_attrs && run.std_method_id) ? h_std_method_attrs[run.std_method_id]&.[](attr) : nil
-        txt = std_method_attr ? "#{attr}:#{v}" : ''
+        label = form_param_label(attr, method_map)
+        display_v = if v.is_a?(Array) || v.is_a?(Hash)
+                      v.to_json
+                    else
+                      resolve_scalar_param_display_value(run, attr, v, method_map)
+                    end
+        txt = "#{label}:#{display_v}" if method_map[attr]
       end
       list_datasets.each_index do |_dataset_i|
         v_ds = list_datasets[_dataset_i]
         tmp_run = v_ds && v_ds['run_id'] ? Run.find_by(id: v_ds['run_id']) : nil
-        tmp_step = tmp_run ? @h_steps[tmp_run.step_id] : nil
+        tmp_step = tmp_run ? h_steps[tmp_run.step_id] : nil
         txt = if tmp_run && tmp_step
                 "#{attr}:#{tmp_step.name}" + (tmp_step.multiple_runs? ? " ##{tmp_run.num}" : '')
               else

@@ -77,7 +77,6 @@ module DoubletV8StdMethods
       "req_data_structure" => "array",
       "max_nber_items" => 1,
       "min_nber_items" => 0,
-      "optional" => true,
       "default" => nil
     },
     "variable_features_dataset" => {
@@ -92,7 +91,6 @@ module DoubletV8StdMethods
       "req_data_structure" => "array",
       "min_nber_items" => 0,
       "max_nber_items" => 1,
-      "optional" => true,
       "default" => nil
     }
   }.freeze

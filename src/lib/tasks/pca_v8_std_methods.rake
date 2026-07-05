@@ -3,7 +3,7 @@
 require_relative "../pca_v8_std_methods"
 
 namespace :reference_data do
-  desc "Upsert v8 Scanpy PCA StdMethod (pca). Optional VERSION_ID=8 DOCKER_IMAGE_ID="
+  desc "Upsert v8 PCA StdMethods (pca Scanpy, seurat RunPCA). Optional VERSION_ID=8 DOCKER_IMAGE_ID="
   task pca_v8_std_methods: :environment do
     version_id = ENV.fetch("VERSION_ID", PcaV8StdMethods::VERSION_ID).to_i
     docker_image_id = ENV["DOCKER_IMAGE_ID"].presence&.to_i

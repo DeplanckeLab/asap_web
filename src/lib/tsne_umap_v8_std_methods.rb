@@ -32,7 +32,7 @@ module TsneUmapV8StdMethods
 
   DEFINITIONS = [
     {
-      name: "tsne",
+      name: "scanpy",
       step_name: "tsne",
       label: "t-SNE [Scanpy]",
       short_label: "tsne",
@@ -76,7 +76,7 @@ module TsneUmapV8StdMethods
       ]
     },
     {
-      name: "umap",
+      name: "scanpy",
       step_name: "umap",
       label: "UMAP [Scanpy]",
       short_label: "umap",
@@ -138,6 +138,11 @@ module TsneUmapV8StdMethods
     }
   ].freeze
 
+  OBSOLETE_STD_METHOD_NAMES = {
+    "tsne" => %w[tsne],
+    "umap" => %w[umap]
+  }.freeze
+
   class << self
     def upsert!(version_id: VERSION_ID, docker_image_id: nil)
       docker_image = resolve_docker_image!(version_id, docker_image_id)
@@ -162,12 +167,22 @@ module TsneUmapV8StdMethods
         else
           summary[:unchanged] << defn[:name]
         end
+
+        obsolete_duplicate_std_methods!(step, version_id, defn[:step_name])
       end
 
       summary
     end
 
     private
+
+    def obsolete_duplicate_std_methods!(step, version_id, step_name)
+      obsolete_names = OBSOLETE_STD_METHOD_NAMES[step_name]
+      return if obsolete_names.blank?
+
+      StdMethod.where(step_id: step.id, version_id: version_id, name: obsolete_names, obsolete: false)
+               .update_all(obsolete: true)
+    end
 
     def resolve_docker_image!(version_id, docker_image_id)
       if docker_image_id.present?
@@ -223,7 +238,7 @@ module TsneUmapV8StdMethods
             {
               "type" => "card",
               "card-header" => "Input matrix",
-              "container_class" => "col-md-12",
+              "container_class" => "col-md-6",
               "class" => "card h-100",
               "label_class" => "col-md-6",
               "attr_list" => ["input_matrix", "nber_pcs", "n_components"]
@@ -231,7 +246,7 @@ module TsneUmapV8StdMethods
             {
               "type" => "card",
               "card-header" => "Parameters",
-              "container_class" => "col-md-12",
+              "container_class" => "col-md-6",
               "class" => "card h-100",
               "label_class" => "col-md-6",
               "attr_list" => defn[:param_attr_list].reject { |a| %w[nber_pcs n_components].include?(a) }

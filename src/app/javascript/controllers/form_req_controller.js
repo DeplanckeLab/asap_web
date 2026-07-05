@@ -1036,71 +1036,111 @@ export default class extends Controller {
         badge.remove()
       }
     })
+
+    if (this.stepNameValue === 'de') {
+      this.applyDeFormConditionalVisibility()
+    }
+  }
+
+  applyDeFormConditionalVisibility() {
+    if (!this.hasAttrsContainerTarget) {
+      return
+    }
+
+    const allAgainstToggle = this.attrsContainerTarget.querySelector('#checkbox-all_against_compl')
+    const refContainer = this.attrsContainerTarget.querySelector('#form-container_group_ref')
+    const compContainer = this.attrsContainerTarget.querySelector('#form-container_group_comp')
+    const g2Container = this.attrsContainerTarget.querySelector('#form-container_groups2')
+    const secondMetaBlock = queryDeSecondMetadataFormBlock(this.attrsContainerTarget)
+    const secondToggle = queryDeSecondMetadataCheckbox(this.attrsContainerTarget)
+    const allAgainst = !!(allAgainstToggle && allAgainstToggle.checked)
+
+    if (refContainer) {
+      refContainer.style.display = allAgainst ? 'none' : ''
+    }
+    if (compContainer) {
+      compContainer.style.display = allAgainst ? 'none' : ''
+    }
+    if (secondMetaBlock) {
+      secondMetaBlock.style.display = allAgainst ? 'none' : ''
+    }
+    if (g2Container) {
+      if (allAgainst) {
+        g2Container.style.display = 'none'
+      } else {
+        const secondOn = !!(secondToggle && secondToggle.checked)
+        g2Container.style.display = secondOn ? '' : 'none'
+      }
+    }
+  }
+
+  clearDeSecondGroupMetadataSelection() {
+    const g2Container = this.attrsContainerTarget.querySelector('#form-container_groups2')
+    if (!g2Container) {
+      return
+    }
+    const hidden = g2Container.querySelector('[data-input-data-selector-target="hiddenField"]')
+    if (hidden) {
+      hidden.value = ''
+    }
+    g2Container.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((inp) => {
+      inp.checked = false
+    })
+    resetInputDataWidgetToEmptyPlaceholder(g2Container, this.application)
+    const selectedDiv = g2Container.querySelector('[data-input-data-selector-target="selectedDiv"]')
+    if (selectedDiv) {
+      selectedDiv.innerHTML = ''
+      selectedDiv.classList.add('hidden')
+    }
+  }
+
+  clearDeSecondMetadataToggleUi() {
+    const st = queryDeSecondMetadataCheckbox(this.attrsContainerTarget)
+    const stHidden = queryDeSecondMetadataHidden(this.attrsContainerTarget)
+    if (st) {
+      st.checked = false
+    }
+    if (stHidden) {
+      stHidden.value = 'false'
+    }
+    this.clearDeSecondGroupMetadataSelection()
+  }
+
+  triggerPrimaryDeGroupDropdownRefresh() {
+    const sel = '[data-input-data-selector-attr-name-value="groups"]'
+    const el = this.attrsContainerTarget.querySelector(sel)
+    if (!el || !this.application) {
+      return
+    }
+    const c = this.application.getControllerForElementAndIdentifier(el, 'input-data-selector')
+    if (c && typeof c.refreshDeGroupDropdownsAfterSecondMetadataToggle === 'function') {
+      c.refreshDeGroupDropdownsAfterSecondMetadataToggle()
+    }
   }
 
   syncSecondGroupMetadataVisibility() {
     const toggle = queryDeSecondMetadataCheckbox(this.attrsContainerTarget)
-    const g2Container = this.attrsContainerTarget.querySelector("#form-container_groups2")
+    const g2Container = this.attrsContainerTarget.querySelector('#form-container_groups2')
     if (!toggle || !g2Container) {
       return
     }
-    if (toggle.dataset.secondGroupBound === "1") {
+    if (toggle.dataset.secondGroupBound === '1') {
       return
     }
-    toggle.dataset.secondGroupBound = "1"
+    toggle.dataset.secondGroupBound = '1'
 
-    const clearGroupDataset2 = () => {
-      const hidden = g2Container.querySelector('[data-input-data-selector-target="hiddenField"]')
-      if (hidden) {
-        hidden.value = ""
-      }
-      g2Container.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((inp) => {
-        inp.checked = false
-      })
-      resetInputDataWidgetToEmptyPlaceholder(g2Container, this.application)
-      const selectedDiv = g2Container.querySelector('[data-input-data-selector-target="selectedDiv"]')
-      if (selectedDiv) {
-        selectedDiv.innerHTML = ""
-        selectedDiv.classList.add("hidden")
-      }
-    }
-
-    const triggerPrimaryDeRefresh = () => {
-      const sel = '[data-input-data-selector-attr-name-value="groups"]'
-      const el = this.attrsContainerTarget.querySelector(sel)
-      if (!el || !this.application) {
-        return
-      }
-      const c = this.application.getControllerForElementAndIdentifier(el, "input-data-selector")
-      if (c && typeof c.refreshDeGroupDropdownsAfterSecondMetadataToggle === "function") {
-        c.refreshDeGroupDropdownsAfterSecondMetadataToggle()
-      }
-    }
-
-    const apply = () => {
-      const allAgainst = this.attrsContainerTarget.querySelector("#checkbox-all_against_compl")
-      if (allAgainst && allAgainst.checked) {
-        g2Container.style.display = "none"
-        this.validateForm()
-        return
-      }
-      const on = !!toggle.checked
-      g2Container.style.display = on ? "" : "none"
-      if (!on) {
-        clearGroupDataset2()
-      }
-      triggerPrimaryDeRefresh()
-      this.validateForm()
-    }
-
-    toggle.addEventListener("change", () => {
+    toggle.addEventListener('change', () => {
       const hiddenAttr = queryDeSecondMetadataHidden(this.attrsContainerTarget)
       if (hiddenAttr) {
-        hiddenAttr.value = toggle.checked ? "true" : "false"
+        hiddenAttr.value = toggle.checked ? 'true' : 'false'
       }
-      apply()
+      if (!toggle.checked) {
+        this.clearDeSecondGroupMetadataSelection()
+      }
+      this.triggerPrimaryDeGroupDropdownRefresh()
+      this.applyDeFormConditionalVisibility()
+      this.validateForm()
     })
-    apply()
   }
 
   syncDeGroupVisibility() {
@@ -1116,53 +1156,8 @@ export default class extends Controller {
     }
     toggle.dataset.deAllAgainstBound = '1'
 
-    const g2Container = this.attrsContainerTarget.querySelector('#form-container_groups2')
-    const secondMetaBlock = queryDeSecondMetadataFormBlock(this.attrsContainerTarget)
-
-    const clearSecondMetadataUi = () => {
-      const st = queryDeSecondMetadataCheckbox(this.attrsContainerTarget)
-      const stHidden = queryDeSecondMetadataHidden(this.attrsContainerTarget)
-      if (st) {
-        st.checked = false
-      }
-      if (stHidden) {
-        stHidden.value = 'false'
-      }
-      if (!g2Container) {
-        return
-      }
-      const hidden = g2Container.querySelector('[data-input-data-selector-target="hiddenField"]')
-      if (hidden) {
-        hidden.value = ''
-      }
-      g2Container.querySelectorAll('input[type="radio"], input[type="checkbox"]').forEach((inp) => {
-        inp.checked = false
-      })
-      resetInputDataWidgetToEmptyPlaceholder(g2Container, this.application)
-      const selectedDiv = g2Container.querySelector('[data-input-data-selector-target="selectedDiv"]')
-      if (selectedDiv) {
-        selectedDiv.innerHTML = ''
-        selectedDiv.classList.add('hidden')
-      }
-    }
-
-    const applyVisibility = () => {
-      const allAgainst = !!toggle.checked
-      refContainer.style.display = allAgainst ? 'none' : ''
-      compContainer.style.display = allAgainst ? 'none' : ''
-      if (secondMetaBlock) {
-        secondMetaBlock.style.display = allAgainst ? 'none' : ''
-      }
-      if (g2Container) {
-        if (allAgainst) {
-          g2Container.style.display = 'none'
-        } else {
-          const stHidden = queryDeSecondMetadataHidden(this.attrsContainerTarget)
-          const secondOn = stHidden && String(stHidden.value) === 'true'
-          g2Container.style.display = secondOn ? '' : 'none'
-        }
-      }
-      if (allAgainst) {
+    toggle.addEventListener('change', () => {
+      if (toggle.checked) {
         const gref = this.attrsContainerTarget.querySelector('#attrs_group_ref')
         const gcomp = this.attrsContainerTarget.querySelector('#attrs_group_comp')
         if (gref) {
@@ -1171,13 +1166,11 @@ export default class extends Controller {
         if (gcomp) {
           gcomp.value = ''
         }
-        clearSecondMetadataUi()
+        this.clearDeSecondMetadataToggleUi()
       }
+      this.applyDeFormConditionalVisibility()
       this.validateForm()
-    }
-
-    toggle.addEventListener('change', applyVisibility)
-    applyVisibility()
+    })
   }
 
   recordFieldValidationError(invalidFields, attrName, message, errors) {
@@ -1510,8 +1503,8 @@ export default class extends Controller {
       }
     })
 
-    const secondHidden = queryDeSecondMetadataHidden(this.attrsContainerTarget)
-    const secondOn = secondHidden && String(secondHidden.value) === "true"
+    const secondToggle = queryDeSecondMetadataCheckbox(this.attrsContainerTarget)
+    const secondOn = !!(secondToggle && secondToggle.checked)
     const g2c = this.attrsContainerTarget.querySelector("#form-container_groups2")
     if (secondOn && g2c && g2c.offsetParent !== null) {
       const hidden2 = g2c.querySelector('[data-input-data-selector-target="hiddenField"]')

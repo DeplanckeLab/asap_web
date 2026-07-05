@@ -1,5 +1,7 @@
 <% if @step && @run %>
 <% numeric_fields = ['Gene index', 'logFC', 'P-value', 'FDR', 'Avg group1', 'Avg group2'] %>
+<% is_up_regulated = params[:type].to_s == 'up' %>
+<% gene_badge_cls = is_up_regulated ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-red-100 text-red-800 hover:bg-red-200' %>
 
 <div class="bg-white rounded-lg shadow-sm flex flex-col"
      style="max-height: calc(100vh - 200px);"
@@ -65,6 +67,13 @@
               <td class="px-3 py-1.5 text-gray-700 whitespace-nowrap">
                 <% if @fields[i] == 'EnsemblID' && e[i].present? %>
                   <span class="text-blue-600 cursor-pointer hover:underline gene-link" data-ensembl-id="<%= e[i] %>"><%= e[i] %></span>
+                <% elsif @fields[i] == 'Gene name' %>
+                  <% gene_name = e[i].presence || e[1] %>
+                  <% ensembl_id = e[1].to_s %>
+                  <span class="gene-badge cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= gene_badge_cls %>"
+                        data-ensembl-id="<%= ensembl_id %>"
+                        <% if gene_name.present? && gene_name != ensembl_id %>data-gene-symbol="<%= gene_name %>"<% end %>
+                        title="<%= ensembl_id.presence || gene_name %>"><%= gene_name %></span>
                 <% else %>
                   <%= e[i] %>
                 <% end %>
@@ -77,57 +86,27 @@
   </div>
 </div>
 
-<!-- Gene Details Modal -->
-<div id="gene-modal-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5);">
-  <div class="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 overflow-hidden">
-    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200" style="background: linear-gradient(to right, #eff6ff, #eef2ff);">
-      <h3 class="text-lg font-semibold text-gray-900" id="gene-modal-title">Gene Details</h3>
-      <button type="button" onclick="closeGeneModal()" class="text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer">&times;</button>
-    </div>
-    <div class="px-6 py-5" id="gene-modal-body">
-      <div class="text-gray-500 text-sm">Loading...</div>
-    </div>
-  </div>
-</div>
+<%= render 'projects/views/annotation_popup' %>
 
 <script>
 (function() {
-  var container = document.querySelector('.gene-link')?.closest('.flex-1.overflow-y-auto') || document.querySelector('.flex-1.overflow-y-auto');
-  if (container) {
-    container.addEventListener('click', function(e) {
-      var link = e.target.closest('.gene-link');
-      if (!link) return;
-      var ensemblId = link.dataset.ensemblId;
-      if (!ensemblId) return;
-      openGeneModal(ensemblId);
-    });
-  }
+  var container = document.getElementById('de-genelist-container');
+  var searchGeneUrl = '<%= search_gene_project_path(@project) %>';
+  if (!container) return;
+  container.addEventListener('click', function(e) {
+    var badge = e.target.closest('.gene-badge');
+    var link = e.target.closest('.gene-link');
+    var el = badge || link;
+    if (!el) return;
+    if (window.openAnnotationPopupGeneModal) {
+      var ens = el.getAttribute('data-ensembl-id') || '';
+      var sym = el.getAttribute('data-gene-symbol') || '';
+      if (ens || sym) {
+        window.openAnnotationPopupGeneModal(ens, searchGeneUrl, sym, '');
+      }
+    }
+  });
 })();
-
-function openGeneModal(ensemblId) {
-  var overlay = document.getElementById('gene-modal-overlay');
-  var body = document.getElementById('gene-modal-body');
-  var title = document.getElementById('gene-modal-title');
-  title.textContent = ensemblId;
-  body.innerHTML = '<div class="text-gray-500 text-sm">Loading...</div>';
-  overlay.classList.remove('hidden');
-
-  var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-  fetch('<%= search_gene_project_path(@project) %>?ensembl_id=' + encodeURIComponent(ensemblId), {
-    headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html' }
-  })
-  .then(function(r) { return r.text(); })
-  .then(function(html) { body.innerHTML = html; })
-  .catch(function(err) { body.innerHTML = '<div class="text-red-600 text-sm">Failed to load gene details.</div>'; });
-}
-
-function closeGeneModal() {
-  document.getElementById('gene-modal-overlay').classList.add('hidden');
-}
-
-document.getElementById('gene-modal-overlay').addEventListener('click', function(e) {
-  if (e.target === this) closeGeneModal();
-});
 
 (function() {
   var c = document.getElementById('de-genelist-container');

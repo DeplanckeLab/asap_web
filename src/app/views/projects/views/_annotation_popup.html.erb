@@ -147,7 +147,9 @@
   <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 overflow-hidden" style="max-height: 80vh;">
     <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200" style="background: linear-gradient(to right, #f0fdf4, #ecfdf5);">
       <h3 class="text-lg font-semibold text-gray-900" id="annotation-popup-gene-modal-title">Gene details</h3>
-      <button type="button" onclick="closeAnnotationPopupGeneModal()" class="text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer">&times;</button>
+      <button type="button" onclick="closeAnnotationPopupGeneModal()" style="background: none; border: none; cursor: pointer; color: #6b7280; padding: 4px; border-radius: 4px; transition: color 0.2s;" onmouseover="this.style.color='#111827'" onmouseout="this.style.color='#6b7280'">
+        <i class="fas fa-times" style="font-size: 18px;"></i>
+      </button>
     </div>
     <div class="px-6 py-5 overflow-auto" style="max-height: calc(80vh - 60px);" id="annotation-popup-gene-modal-body">
       <div class="text-gray-500 text-sm">Loading...</div>

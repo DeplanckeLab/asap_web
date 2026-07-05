@@ -37,7 +37,33 @@ module PcaV8StdMethods
     }
   }.freeze
 
-  SCANPY_ATTRS_JSON = SHARED_ATTRS_JSON.merge(
+  SCANPY_NBER_DIMS_ATTR = {
+    "description" => "Number of PCs to compute. Usually, the more cells you have in your dataset, the more PCs you should use.",
+    "label" => "Number of PCs",
+    "type" => "int",
+    "default" => 50,
+    "min_val" => 2,
+    "max_val" => 200,
+    "widget" => "select",
+    "not_null" => 1
+  }.freeze
+
+  SCANPY_ATTRS_JSON = {
+    "variable_features_dataset" => {
+      "label" => "Variable features metadata",
+      "description" => "HVG metadata (defaults to all genes when omitted).",
+      "widget" => "input_data",
+      "valid_types" => [["dataset"], ["row_mdata"], ["discrete_mdata", "numeric_mdata"]],
+      "default" => nil,
+      "dataset_field" => "output_dataset",
+      "constraints" => { "in_loom" => ["input_matrix"] },
+      "requires" => ["input_matrix"],
+      "source_steps" => %w[import_metadata hvg],
+      "req_data_structure" => "array",
+      "min_nber_items" => 0,
+      "max_nber_items" => 1
+    },
+    "nber_dims" => SCANPY_NBER_DIMS_ATTR,
     "no_zero_center" => {
       "label" => "Disable zero-centering",
       "description" => "Disable zero-centering in sc.pp.pca (default is zero-centering enabled).",
@@ -47,7 +73,6 @@ module PcaV8StdMethods
     },
     "svd_solver" => {
       "label" => "SVD solver",
-      "description" => "SVD solver passed to sc.pp.pca: arpack, randomized, or auto.",
       "widget" => "select",
       "default" => "arpack",
       "list" => [%w[arpack arpack], %w[randomized randomized], %w[auto auto]],
@@ -55,23 +80,21 @@ module PcaV8StdMethods
     },
     "random_state" => {
       "label" => "Random seed",
-      "description" => "Random seed for sc.pp.pca (random_state).",
       "widget" => "textfield",
       "type" => "int",
-      "default" => "0",
-      "min_val" => 0,
-      "not_null" => true
+      "default" => "42",
+      "min_val" => 0
     },
     "chunked" => {
       "label" => "Process in chunks",
-      "description" => "Process in chunks for memory-efficient sc.pp.pca.",
+      "description" => "Memory-efficient chunked processing.",
       "widget" => "checkbox",
       "type" => "bool",
       "default" => false
     },
     "chunk_size" => {
       "label" => "Chunk size",
-      "description" => "Chunk size for sc.pp.pca (only used when chunked processing is enabled).",
+      "description" => "Chunk size when chunked processing is enabled.",
       "widget" => "textfield",
       "type" => "int",
       "default" => "",
@@ -79,7 +102,7 @@ module PcaV8StdMethods
       "requires" => ["chunked"],
       "requires_message" => "Enable chunked processing to set chunk size."
     }
-  ).freeze
+  }.freeze
 
   SEURAT_ATTRS_JSON = SHARED_ATTRS_JSON.merge(
     "weight_by_var" => {
@@ -95,8 +118,7 @@ module PcaV8StdMethods
       "widget" => "textfield",
       "type" => "int",
       "default" => "42",
-      "min_val" => 0,
-      "not_null" => true
+      "min_val" => 0
     }
   ).freeze
 

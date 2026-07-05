@@ -5,7 +5,11 @@ import {
   queryDeSecondMetadataHidden
 } from "visualization/de_second_metadata_attrs"
 import { resetInputDataWidgetToEmptyPlaceholder } from "lib/reset_input_data_widget_placeholder"
-import { evaluateAttrExpression, attrExpressionsDebugLog } from "lib/attr_selection_expression"
+import {
+  evaluateAttrExpression,
+  attrExpressionsDebugLog,
+  resolveAttrBounds
+} from "lib/attr_selection_expression"
 import { attrTypeValidationError } from "lib/form_attr_type_validation"
 
 export default class extends Controller {
@@ -509,6 +513,104 @@ export default class extends Controller {
     })
   }
 
+  syncSelectOptionsFromBounds() {
+    if (!this.hasAttrsContainerTarget) {
+      return
+    }
+    const root = this.attrsContainerTarget
+    root.querySelectorAll('[data-attr-widget="select"]').forEach((container) => {
+      const minVal = container.getAttribute("data-attr-min-val")
+      const maxVal = container.getAttribute("data-attr-max-val")
+      if (!minVal || !maxVal || String(minVal).trim() === "" || String(maxVal).trim() === "") {
+        return
+      }
+      const minExpr = (container.getAttribute("data-attr-min-val-expression") || "").trim()
+      const maxExpr = (container.getAttribute("data-attr-max-val-expression") || "").trim()
+      if (!minExpr && !maxExpr) {
+        return
+      }
+      if (container.offsetParent === null) {
+        return
+      }
+      if (!this.isFieldActive(container)) {
+        return
+      }
+
+      const attrName = container.getAttribute("data-attr-name")
+      if (!attrName) {
+        return
+      }
+      const select = container.querySelector(
+        `#attrs_${attrName}, select[name="attrs[${attrName}]"]`
+      )
+      if (!select) {
+        return
+      }
+
+      const { effectiveMin, effectiveMax } = resolveAttrBounds(container, root)
+      const staticMin = parseFloat(minVal)
+      const staticMax = parseFloat(maxVal)
+      let boundMin = effectiveMin
+      let boundMax = effectiveMax
+      if (minExpr && (boundMin == null || !Number.isFinite(boundMin))) {
+        boundMin = Number.isFinite(staticMin) ? staticMin : null
+      }
+      if (maxExpr && (boundMax == null || !Number.isFinite(boundMax))) {
+        boundMax = Number.isFinite(staticMax) ? staticMax : null
+      }
+      if (
+        boundMin == null ||
+        boundMax == null ||
+        !Number.isFinite(boundMin) ||
+        !Number.isFinite(boundMax)
+      ) {
+        return
+      }
+
+      let lo = Math.ceil(boundMin)
+      let hi = Math.floor(boundMax)
+      if (lo > hi) {
+        hi = lo
+      }
+
+      const notNull = container.getAttribute("data-attr-not-null") === "true"
+      const prevValue = String(select.value || "").trim()
+      const prevNum = parseFloat(prevValue)
+
+      while (select.firstChild) {
+        select.removeChild(select.firstChild)
+      }
+      if (!notNull) {
+        const emptyOpt = document.createElement("option")
+        emptyOpt.value = ""
+        emptyOpt.textContent = "None"
+        select.appendChild(emptyOpt)
+      }
+      for (let i = lo; i <= hi; i += 1) {
+        const opt = document.createElement("option")
+        opt.value = String(i)
+        opt.textContent = String(i)
+        select.appendChild(opt)
+      }
+
+      if (prevValue && !Number.isNaN(prevNum) && prevNum >= lo && prevNum <= hi) {
+        select.value = prevValue
+      } else if (prevValue && !Number.isNaN(prevNum) && prevNum > hi) {
+        select.value = String(hi)
+      } else if (prevValue && !Number.isNaN(prevNum) && prevNum < lo) {
+        select.value = String(lo)
+      }
+
+      attrExpressionsDebugLog("select_options_sync", {
+        attrName,
+        lo,
+        hi,
+        prevValue,
+        selected: select.value
+      })
+    })
+  }
+
   applyDefaultExpressionsFromSelections() {
     if (!this.hasAttrsContainerTarget) {
       return
@@ -649,6 +751,7 @@ export default class extends Controller {
       // Listen for custom validation events from input-data-selector
       selector.addEventListener('validation-changed', () => {
         this.syncDependencyVisibility()
+        this.syncSelectOptionsFromBounds()
         this.applyDefaultExpressionsFromSelections()
         this.validateForm()
         this.scheduleResourcePrediction()
@@ -659,6 +762,7 @@ export default class extends Controller {
     this.syncDeGroupVisibility()
     this.syncSecondGroupMetadataVisibility()
     this.syncDependencyVisibility()
+    this.syncSelectOptionsFromBounds()
     this.applyDefaultExpressionsFromSelections()
     this.validateForm()
     this.scheduleResourcePrediction()

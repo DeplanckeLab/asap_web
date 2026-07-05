@@ -1,7 +1,11 @@
 /**
- * Resolves references like #input_matrix.nber_cols|min inside expressions.
+ * Resolves references like #input_matrix.nber_rows|min inside expressions.
  * Hidden input_data values are JSON: a single object or an array of objects
  * (run_id, annot_id, nber_rows, nber_cols, ...).
+ *
+ * For PCA embedding matrices (/col_attrs/_pca_*), nber_rows is the PC count and
+ * nber_cols is the cell count. Downstream steps (clustering, t-SNE, UMAP) should
+ * reference nber_rows when constraining the number of PCs to use.
  *
  * Reference form: #<attr_name>.<field_name>[|min|max|first]
  * - |min   smallest numeric field across selected objects
@@ -330,6 +334,38 @@ export function evaluateArithmeticOnly(expression) {
     throw new Error("trailing input")
   }
   return v
+}
+
+export function resolveAttrBounds(container, attrsRoot) {
+  if (!container) {
+    return { effectiveMin: null, effectiveMax: null }
+  }
+  const minVal = container.getAttribute("data-attr-min-val")
+  const maxVal = container.getAttribute("data-attr-max-val")
+  const minExpr = (container.getAttribute("data-attr-min-val-expression") || "").trim()
+  const maxExpr = (container.getAttribute("data-attr-max-val-expression") || "").trim()
+
+  let effectiveMin = null
+  if (minExpr) {
+    const ev = evaluateAttrExpression(attrsRoot, minExpr)
+    if (ev.ok && Number.isFinite(ev.value)) {
+      effectiveMin = ev.value
+    }
+  } else if (minVal && String(minVal).trim() !== "") {
+    effectiveMin = parseFloat(minVal)
+  }
+
+  let effectiveMax = null
+  if (maxExpr) {
+    const ev = evaluateAttrExpression(attrsRoot, maxExpr)
+    if (ev.ok && Number.isFinite(ev.value)) {
+      effectiveMax = ev.value
+    }
+  } else if (maxVal && String(maxVal).trim() !== "") {
+    effectiveMax = parseFloat(maxVal)
+  }
+
+  return { effectiveMin, effectiveMax }
 }
 
 export function evaluateAttrExpression(attrsRoot, expression) {

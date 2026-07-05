@@ -5,6 +5,31 @@ module ClusteringV8StdMethods
   VERSION_ID = 8
   STEP_NAME = "clustering"
 
+  NBER_PCS_EXPRESSIONS = {
+    "default_expression" => "min(50, #input_matrix.nber_rows|min)",
+    "max_val_expression" => "min(#input_matrix.nber_rows|min, 200)"
+  }.freeze
+
+  SEURAT_NBER_DIMS_ATTR = {
+    "description" => "Number of PCA dimensions to use as input (NULL in R = all available PCs).",
+    "label" => "Number of PCs from PCA to use",
+    "type" => "int",
+    "min_val" => 2,
+    "max_val" => 200,
+    "widget" => "select",
+    "not_null" => 1
+  }.merge(NBER_PCS_EXPRESSIONS).freeze
+
+  SCANPY_NBER_DIMS_ATTR = {
+    "description" => "Number of PCA dimensions to use as input (NULL = all available PCs).",
+    "label" => "Number of PCs from PCA to use",
+    "type" => "int",
+    "min_val" => 2,
+    "max_val" => 200,
+    "widget" => "select",
+    "not_null" => 1
+  }.merge(NBER_PCS_EXPRESSIONS).freeze
+
   SEURAT_ATTRS_JSON = {
     "input_matrix" => {
       "label" => "PCA matrix",
@@ -17,24 +42,14 @@ module ClusteringV8StdMethods
       "min_nber_items" => 1,
       "max_nber_items" => 1
     },
-    "nber_dims" => {
-      "description" => "Number of PCA dimensions to use as input (NULL in R = all available PCs).",
-      "label" => "Number of PCs from PCA to use",
-      "type" => "int",
-      "default" => 50,
-      "min_val" => 2,
-      "max_val" => 200,
-      "widget" => "select",
-      "not_null" => 1
-    },
+    "nber_dims" => SEURAT_NBER_DIMS_ATTR,
     "n_neighbors" => {
       "label" => "Number of neighbors",
       "description" => "Number of neighbors for the kNN graph (FindNeighbors).",
       "widget" => "textfield",
       "type" => "int",
       "default" => "20",
-      "min_val" => 2,
-      "not_null" => true
+      "min_val" => 2
     },
     "metric" => {
       "label" => "Distance metric",
@@ -46,8 +61,7 @@ module ClusteringV8StdMethods
         %w[Euclidean euclidean],
         %w[Manhattan manhattan],
         %w[Pearson pearson]
-      ],
-      "not_null" => true
+      ]
     },
     "resolution" => {
       "description" => "Clustering resolution. Higher values yield more clusters (FindClusters).",
@@ -55,8 +69,7 @@ module ClusteringV8StdMethods
       "type" => "float",
       "default" => "0.5",
       "min_val" => 0,
-      "widget" => "textfield",
-      "not_null" => true
+      "widget" => "textfield"
     },
     "seed" => {
       "label" => "Random seed",
@@ -64,8 +77,7 @@ module ClusteringV8StdMethods
       "widget" => "textfield",
       "type" => "int",
       "default" => "42",
-      "min_val" => 0,
-      "not_null" => true
+      "min_val" => 0
     }
   }.freeze
 
@@ -81,24 +93,14 @@ module ClusteringV8StdMethods
       "min_nber_items" => 1,
       "max_nber_items" => 1
     },
-    "nber_dims" => {
-      "description" => "Number of PCA dimensions to use as input (NULL = all available PCs).",
-      "label" => "Number of PCs from PCA to use",
-      "type" => "int",
-      "default" => 50,
-      "min_val" => 2,
-      "max_val" => 200,
-      "widget" => "select",
-      "not_null" => 1
-    },
+    "nber_dims" => SCANPY_NBER_DIMS_ATTR,
     "n_neighbors" => {
       "label" => "Number of neighbors",
       "description" => "Number of neighbors for the kNN graph (sc.pp.neighbors).",
       "widget" => "textfield",
       "type" => "int",
       "default" => "15",
-      "min_val" => 2,
-      "not_null" => true
+      "min_val" => 2
     },
     "metric" => {
       "label" => "Distance metric",
@@ -111,8 +113,7 @@ module ClusteringV8StdMethods
         %w[Manhattan manhattan],
         %w[Correlation correlation],
         %w[Jaccard jaccard]
-      ],
-      "not_null" => true
+      ]
     },
     "resolution" => {
       "description" => "Clustering resolution. Higher values yield more clusters.",
@@ -120,17 +121,15 @@ module ClusteringV8StdMethods
       "type" => "float",
       "default" => "0.5",
       "min_val" => 0,
-      "widget" => "textfield",
-      "not_null" => true
+      "widget" => "textfield"
     },
     "random_state" => {
       "label" => "Random seed",
       "description" => "Random seed for sc.tl.leiden / sc.tl.louvain.",
       "widget" => "textfield",
       "type" => "int",
-      "default" => "0",
-      "min_val" => 0,
-      "not_null" => true
+      "default" => "42",
+      "min_val" => 0
     }
   }.freeze
 

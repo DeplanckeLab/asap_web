@@ -4,17 +4,21 @@
 module TsneUmapV8StdMethods
   VERSION_ID = 8
 
+  NBER_PCS_EXPRESSIONS = {
+    "default_expression" => "min(50, #input_matrix.nber_rows|min)",
+    "max_val_expression" => "min(#input_matrix.nber_rows|min, 200)"
+  }.freeze
+
   SHARED_PCA_DIMS_ATTR = {
     "nber_pcs" => {
       "description" => "Number of PCA dimensions to use as input (NULL = all).",
       "label" => "Number of PCs from PCA to use",
       "type" => "int",
-      "default" => 50,
       "min_val" => 2,
       "max_val" => 200,
       "widget" => "select",
       "not_null" => 1
-    }
+    }.merge(NBER_PCS_EXPRESSIONS)
   }.freeze
 
   N_COMPONENTS_ATTR = {
@@ -48,8 +52,7 @@ module TsneUmapV8StdMethods
           "widget" => "textfield",
           "type" => "float",
           "default" => "30",
-          "min_val" => 1,
-          "not_null" => true
+          "min_val" => 1
         },
         "random_state" => {
           "label" => "Random seed",
@@ -57,16 +60,14 @@ module TsneUmapV8StdMethods
           "widget" => "textfield",
           "type" => "int",
           "default" => "0",
-          "min_val" => 0,
-          "not_null" => true
+          "min_val" => 0
         },
         "learning_rate" => {
           "label" => "Learning rate",
           "description" => "Learning rate for t-SNE ('auto' or a positive number).",
           "widget" => "textfield",
           "type" => "text",
-          "default" => "auto",
-          "not_null" => true
+          "default" => "auto"
         }
       ),
       param_attr_list: %w[nber_pcs n_components perplexity random_state learning_rate],
@@ -92,8 +93,7 @@ module TsneUmapV8StdMethods
           "widget" => "textfield",
           "type" => "int",
           "default" => "15",
-          "min_val" => 2,
-          "not_null" => true
+          "min_val" => 2
         },
         "metric" => {
           "label" => "Distance metric",
@@ -106,8 +106,7 @@ module TsneUmapV8StdMethods
             %w[Manhattan manhattan],
             %w[Correlation correlation],
             %w[Jaccard jaccard]
-          ],
-          "not_null" => true
+          ]
         },
         "min_dist" => {
           "label" => "Minimum distance",
@@ -116,17 +115,15 @@ module TsneUmapV8StdMethods
           "type" => "float",
           "default" => "0.5",
           "min_val" => 0,
-          "max_val" => 1,
-          "not_null" => true
+          "max_val" => 1
         },
         "random_state" => {
           "label" => "Random seed",
           "description" => "Random seed for UMAP.",
           "widget" => "textfield",
           "type" => "int",
-          "default" => "0",
-          "min_val" => 0,
-          "not_null" => true
+          "default" => 42,
+          "min_val" => 0
         }
       ),
       param_attr_list: %w[nber_pcs n_components n_neighbors metric min_dist random_state],

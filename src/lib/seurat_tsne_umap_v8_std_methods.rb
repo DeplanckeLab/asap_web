@@ -4,17 +4,21 @@
 module SeuratTsneUmapV8StdMethods
   VERSION_ID = 8
 
+  NBER_PCS_EXPRESSIONS = {
+    "default_expression" => "min(50, #input_matrix.nber_rows|min)",
+    "max_val_expression" => "min(#input_matrix.nber_rows|min, 200)"
+  }.freeze
+
   NBER_PCS_ATTR = {
     "nber_pcs" => {
       "description" => "Number of PCA dimensions to use as input (omit in R to use all available PCs).",
       "label" => "Number of PCs from PCA to use",
       "type" => "int",
-      "default" => 50,
       "min_val" => 2,
       "max_val" => 200,
       "widget" => "select",
       "not_null" => 1
-    }
+    }.merge(NBER_PCS_EXPRESSIONS)
   }.freeze
 
   N_COMPONENTS_ATTR = {
@@ -37,15 +41,14 @@ module SeuratTsneUmapV8StdMethods
       "widget" => "textfield",
       "type" => "int",
       "default" => "42",
-      "min_val" => 0,
-      "not_null" => true
+      "min_val" => 0
     }
   }.freeze
 
   DEFINITIONS = [
     {
       id: 348,
-      name: "seurat_tsne",
+      name: "seurat",
       short_label: "RunTSNE",
       label: "t-SNE [Seurat]",
       description: "t-SNE embedding with Seurat v5 RunTSNE on PCA cell embeddings.",
@@ -59,8 +62,7 @@ module SeuratTsneUmapV8StdMethods
           "widget" => "textfield",
           "type" => "float",
           "default" => "30",
-          "min_val" => 1,
-          "not_null" => true
+          "min_val" => 1
         }
       ),
       param_attr_list: %w[perplexity seed_use],
@@ -70,7 +72,7 @@ module SeuratTsneUmapV8StdMethods
     },
     {
       id: 349,
-      name: "seurat_umap",
+      name: "seurat",
       short_label: "RunUMAP",
       label: "UMAP [Seurat]",
       description: "UMAP embedding with Seurat v5 FindNeighbors and RunUMAP on PCA cell embeddings.",
@@ -84,8 +86,7 @@ module SeuratTsneUmapV8StdMethods
           "widget" => "textfield",
           "type" => "int",
           "default" => "30",
-          "min_val" => 2,
-          "not_null" => true
+          "min_val" => 2
         },
         "metric" => {
           "label" => "Distance metric",
@@ -97,8 +98,7 @@ module SeuratTsneUmapV8StdMethods
             %w[Euclidean euclidean],
             %w[Manhattan manhattan],
             %w[Pearson pearson]
-          ],
-          "not_null" => true
+          ]
         },
         "min_dist" => {
           "label" => "Minimum distance",
@@ -107,8 +107,7 @@ module SeuratTsneUmapV8StdMethods
           "type" => "float",
           "default" => "0.3",
           "min_val" => 0,
-          "max_val" => 1,
-          "not_null" => true
+          "max_val" => 1
         }
       ),
       param_attr_list: %w[n_neighbors metric min_dist seed_use],
@@ -126,16 +125,19 @@ module SeuratTsneUmapV8StdMethods
 
       DEFINITIONS.each do |defn|
         record = StdMethod.find(defn[:id])
-        raise "StdMethod id=#{defn[:id]} (#{defn[:name]}) not found" unless record
-        raise "Expected name #{defn[:name]}, got #{record.name}" unless record.name == defn[:name]
+        raise "StdMethod id=#{defn[:id]} (#{defn[:short_label]}) not found" unless record
+        unless record.name == defn[:name] && record.short_label == defn[:short_label]
+          raise "Expected name=#{defn[:name]} short_label=#{defn[:short_label]}, " \
+                "got name=#{record.name} short_label=#{record.short_label}"
+        end
 
         attrs = build_attrs(defn, record: record)
 
         if std_method_changed?(record, attrs)
           record.update!(attrs)
-          summary[:updated] << defn[:name]
+          summary[:updated] << defn[:short_label]
         else
-          summary[:unchanged] << defn[:name]
+          summary[:unchanged] << defn[:short_label]
         end
       end
 

@@ -707,7 +707,7 @@ module ApplicationHelper
     case key_s
     when 'geneset_source'
       resolve_select_param_display_value(key_s, value, h_method_attrs)
-    when 'global_gene_set_collection_id'
+    when 'global_gene_set_collection_id', 'gene_set_id'
       cache = gene_set_display_label_cache
       cache[:collections][value.to_i].presence || value.to_s
     when 'global_gene_set_item_id'
@@ -972,14 +972,18 @@ module ApplicationHelper
     method_attrs_map = std_method_attrs_map_for_run_display(run, h_std_method_attrs)
     reject_if_default = opt.fetch(:reject_if_default, true)
 
-    if run&.project_id && h_attrs.values_at('global_gene_set_collection_id', 'global_gene_set_item_id').any?(&:present?)
-      project = run.project || Project.find_by(id: run.project_id)
-      if project
-        preload_gene_set_display_labels!(
-          project,
-          collection_ids: [h_attrs['global_gene_set_collection_id']],
-          item_ids: [h_attrs['global_gene_set_item_id']]
-        )
+    if run&.project_id
+      collection_ids = [h_attrs['global_gene_set_collection_id'], h_attrs['gene_set_id']].compact
+      item_ids = [h_attrs['global_gene_set_item_id']].compact
+      if collection_ids.any? || item_ids.any?
+        project = run.project || Project.find_by(id: run.project_id)
+        if project
+          preload_gene_set_display_labels!(
+            project,
+            collection_ids: collection_ids,
+            item_ids: item_ids
+          )
+        end
       end
     end
 
@@ -1029,14 +1033,18 @@ module ApplicationHelper
     method_map = std_method_attrs_map_for_run_display(run, h_std_method_attrs)
     reject_if_default = opt.fetch(:reject_if_default, true)
 
-    if run&.project_id && h_attrs.values_at('global_gene_set_collection_id', 'global_gene_set_item_id').any?(&:present?)
-      project = run.project || Project.find_by(id: run.project_id)
-      if project
-        preload_gene_set_display_labels!(
-          project,
-          collection_ids: [h_attrs['global_gene_set_collection_id']],
-          item_ids: [h_attrs['global_gene_set_item_id']]
-        )
+    if run&.project_id
+      collection_ids = [h_attrs['global_gene_set_collection_id'], h_attrs['gene_set_id']].compact
+      item_ids = [h_attrs['global_gene_set_item_id']].compact
+      if collection_ids.any? || item_ids.any?
+        project = run.project || Project.find_by(id: run.project_id)
+        if project
+          preload_gene_set_display_labels!(
+            project,
+            collection_ids: collection_ids,
+            item_ids: item_ids
+          )
+        end
       end
     end
 

@@ -1783,6 +1783,55 @@ module Basic
       { 'up' => vec_up.size, 'down' => vec_down.size }
     end
 
+    # GE enrichment reads gene row ids from tmp/<user_id>_<de_run_id>_<fc>_<fdr>_filtered_ids.json
+    # (same rules as lib/filter_de.cpp ge_form mode).
+    def write_ge_filtered_ids_json!(project_dir:, user_id:, input_de_run_id:, fdr_cutoff:, fc_cutoff:, input_de:, h_annots: {})
+      run_id = input_de_run_id.to_i
+      raise ArgumentError, 'Missing DE run for gene enrichment' unless run_id.positive?
+
+      base = project_dir.is_a?(Pathname) ? project_dir : Pathname.new(project_dir.to_s)
+      input_de_item = input_de.is_a?(Array) ? input_de.first : input_de
+      output_txt = nil
+      if input_de_item.is_a?(Hash)
+        annot_id = (input_de_item['annot_id'] || input_de_item[:annot_id]).to_i
+        annot = h_annots[annot_id] if annot_id.positive?
+        annot ||= Annot.find_by(id: annot_id) if annot_id.positive?
+        output_txt = de_annot_output_txt_path(base, annot) if annot
+      end
+      output_txt ||= ((base + 'de') + run_id.to_s) + 'output.txt'
+      unless File.exist?(output_txt.to_s) && File.size(output_txt.to_s).positive?
+        raise StandardError, "DE output file not found for gene enrichment (#{output_txt})"
+      end
+
+      fdr_c = fdr_cutoff.to_f
+      fc_val = fc_cutoff.to_f
+      fc_val = 1.0 if fc_val <= 0
+      log_fc_c = Math.log2(fc_val)
+      vec_up_ids = []
+      vec_down_ids = []
+      File.foreach(output_txt.to_s, mode: 'rt', encoding: 'UTF-8') do |line|
+        cols = line.chomp.split("\t")
+        next if cols.size <= 7 || cols[7] == 'NA' || cols[5] == 'NA'
+
+        fdr = Float(cols[7]) rescue nil
+        logfc = Float(cols[5]) rescue nil
+        gene_id = Float(cols[0]) rescue nil
+        next unless fdr && logfc && gene_id && fdr <= fdr_c
+
+        if logfc >= 0 && logfc >= log_fc_c
+          vec_up_ids << gene_id.to_i
+        elsif logfc <= 0 && logfc <= -log_fc_c
+          vec_down_ids << gene_id.to_i
+        end
+      end
+
+      tmp_dir = base + 'tmp'
+      FileUtils.mkdir_p(tmp_dir.to_s)
+      dest = tmp_dir + "#{user_id}_#{run_id}_#{fc_cutoff}_#{fdr_cutoff}_filtered_ids.json"
+      File.write(dest.to_s, JSON.generate({ 'down' => vec_down_ids, 'up' => vec_up_ids }))
+      dest.to_s
+    end
+
     # First discrete groups annot id from run attrs (v8 DE: list_cat_json order matches /attrs/de_<run>_k).
     def de_groups_discrete_annot_id_for_de_table(run)
       return nil unless run
@@ -4566,7 +4615,7 @@ module Basic
         'step_tag' => step.tag,
         'step_name' => step.name,
         'run_num' => run.num,
-        'asap_data_docker_db_conn' => 'postgres:5434/' + Basic.asap_data_db_name_from_env!(h_p[:h_env]), #h_p[:project].version_id.to_s,
+        'asap_data_docker_db_conn' => Basic.asap_data_db_url(h_p[:h_env]),
         'asap_data_direct_db_conn' => 'postgres:5433/' + Basic.asap_data_db_name_from_env!(h_p[:h_env]), #h_p[:project].version_id.to_s,
         'asap_docker_db_conn' => 'postgres:5434/' + ENV["POSTGRES_DB"]
       }
@@ -4657,8 +4706,8 @@ module Basic
                 dt['output_attr_name'] = (oa = linked_annot.output_attr) ? oa.name : nil
               end
 
-              if dt['output_dataset'].to_s.start_with?('/attrs/')
-                raise RuntimeError("Dataset path under /attrs is not allowed for run inputs: #{dt['output_dataset']}")
+              if dt['output_dataset'].to_s.start_with?('/attrs/') && k.to_s != 'input_de'
+                raise ::RuntimeError, "Dataset path under /attrs is not allowed for run inputs: #{dt['output_dataset']}"
               end
               
               linked_run = Run.where(:id => dt['run_id']).first
@@ -4810,6 +4859,20 @@ module Basic
 
       if p['global_gene_set_item_id'].present? && p['global_gene_set_item_id'].to_s.strip != ''
         h_var['global_gene_set_db_conn'] = Basic.asap_data_db_url(h_p[:h_env])
+      end
+
+      if h_p[:step].name == 'ge'
+        fdr_cutoff = p['fdr_cutoff'].presence || h_p[:h_attrs].dig('fdr_cutoff', 'default')
+        fc_cutoff = p['fc_cutoff'].presence || h_p[:h_attrs].dig('fc_cutoff', 'default')
+        write_ge_filtered_ids_json!(
+          project_dir: project_dir,
+          user_id: h_var['user_id'],
+          input_de_run_id: h_var['input_de_run_id'],
+          fdr_cutoff: fdr_cutoff,
+          fc_cutoff: fc_cutoff,
+          input_de: p['input_de'],
+          h_annots: h_p[:h_annots] || {}
+        )
       end
 
 #      puts "!H_VAR:" + h_var.to_json

@@ -471,9 +471,22 @@ class ReqsController < ApplicationController
       end
     end
 
+    if @step&.name == 'ge' && tmp_attrs
+      de_filter = Basic.safe_parse_json(@project.de_filter_json, { 'fc_cutoff' => 2, 'fdr_cutoff' => 0.05 })
+      if constraint_value_blank?(fetch_attr_value(tmp_attrs, 'fdr_cutoff'))
+        tmp_attrs['fdr_cutoff'] = de_filter['fdr_cutoff'].to_s
+      end
+      if constraint_value_blank?(fetch_attr_value(tmp_attrs, 'fc_cutoff'))
+        tmp_attrs['fc_cutoff'] = de_filter['fc_cutoff'].to_s
+      end
+    end
+
     constraint_errors = validate_required_if_constraints(@h_attrs, tmp_attrs || {})
     if @step&.name == 'module_score'
       constraint_errors.concat(validate_module_score_gene_set_constraints(tmp_attrs || {}))
+    end
+    if @step&.name == 'ge'
+      constraint_errors.concat(validate_ge_gene_set_constraints(tmp_attrs || {}))
     end
     if constraint_errors.any?
       respond_to do |format|
@@ -640,6 +653,13 @@ class ReqsController < ApplicationController
         errors << "#{label}: This field is required"
       end
 
+      errors
+    end
+
+    def validate_ge_gene_set_constraints(h_attr_values)
+      errors = []
+      gene_set_id = fetch_attr_value(h_attr_values, 'gene_set_id')
+      errors << 'Gene set collection: This field is required' if constraint_value_blank?(gene_set_id)
       errors
     end
 

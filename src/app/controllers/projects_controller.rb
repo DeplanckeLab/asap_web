@@ -7185,7 +7185,7 @@ class ProjectsController < ApplicationController
     # Get attributes using Basic.get_std_method_attrs
     h_res = Basic.get_std_method_attrs(@std_method, @step)
     @h_attrs = h_res[:h_attrs]
-    inject_module_score_gene_set_collection_options!(@h_attrs) if @step.name == 'module_score'
+    inject_pipeline_gene_set_collection_options!(@h_attrs) if %w[module_score ge].include?(@step.name)
     
     # Get attribute layout from std_method
     @attr_layout = Basic.safe_parse_json(@std_method.attr_layout_json, [])
@@ -11483,14 +11483,21 @@ class ProjectsController < ApplicationController
       end
     end
 
-    def inject_module_score_gene_set_collection_options!(h_attrs)
+    def inject_pipeline_gene_set_collection_options!(h_attrs)
       return unless h_attrs.is_a?(Hash)
-      return unless h_attrs['global_gene_set_collection_id'].is_a?(Hash)
 
       collections = pipeline_global_gene_set_collections
-      h_attrs['global_gene_set_collection_id']['list'] = collections.map { |c| [c[:label], c[:id].to_s] }
-      if collections.empty?
-        h_attrs['global_gene_set_collection_id']['requires_message'] = 'No global gene set collections are available for this organism'
+      list = collections.map { |c| [c[:label], c[:id].to_s] }
+      requires_message = collections.empty? ? 'No global gene set collections are available for this organism' : nil
+
+      %w[global_gene_set_collection_id gene_set_id].each do |attr_name|
+        attr = h_attrs[attr_name]
+        next unless attr.is_a?(Hash)
+
+        attr['widget'] = 'select' if attr['widget'] == 'input_gene_set'
+        attr['list'] = list
+        attr['not_null'] = true if attr_name == 'gene_set_id'
+        attr['requires_message'] = requires_message if requires_message
       end
     end
 

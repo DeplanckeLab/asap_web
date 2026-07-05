@@ -4562,7 +4562,7 @@ module Basic
         'output_dir' => output_dir, #project_dir + h_p[:step].name + run.id.to_s,
         'std_method_name' => std_method.name,
         'std_method_label' => std_method.label.presence || step.label,
-        'std_method_short_label' => std_method.short_label.presence || step.short_label,
+        'std_method_short_label' => std_method.short_label.presence || std_method.name.presence || step.name,
         'step_tag' => step.tag,
         'step_name' => step.name,
         'run_num' => run.num,
@@ -5469,7 +5469,7 @@ module Basic
         'step_tag' => step.tag,
         'std_method_name' => (std_method = run.std_method) ? std_method.name : step.name,
         'std_method_label' => (std_method = run.std_method) ? std_method.label : step.label,
-        'std_method_short_label' => (std_method = run.std_method) ? std_method.short_label : step.short_label,
+        'std_method_short_label' => (std_method = run.std_method) ? (std_method.short_label.presence || std_method.name) : step.name,
         'run_num' => run.num
       }
 

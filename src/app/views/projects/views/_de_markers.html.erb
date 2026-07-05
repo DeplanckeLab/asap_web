@@ -245,6 +245,7 @@
                 <% is_highlighted = !highlight_type.present? || h_highlight_ensembl_ids[g[1]] %>
                 <span class="gene-badge cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= is_highlighted ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200' %>"
                       data-ensembl-id="<%= g[1] %>"
+                      <% if g[2].present? %>data-gene-symbol="<%= g[2] %>"<% end %>
                       title="<%= g[1] %> | logFC: <%= g[5] %> | FDR: <%= g[7] %>"><%= g[2].presence || g[1] %></span>
               <% end %>
               <% if up_count == 0 %>
@@ -276,6 +277,7 @@
                 <% is_highlighted = !highlight_type.present? || h_highlight_ensembl_ids[g[1]] %>
                 <span class="gene-badge cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= is_highlighted ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200' %>"
                       data-ensembl-id="<%= g[1] %>"
+                      <% if g[2].present? %>data-gene-symbol="<%= g[2] %>"<% end %>
                       title="<%= g[1] %> | logFC: <%= g[5] %> | FDR: <%= g[7] %>"><%= g[2].presence || g[1] %></span>
               <% end %>
               <% if down_count == 0 %>
@@ -341,19 +343,6 @@
   </div>
 </div>
 
-<!-- Gene Details Modal -->
-<div id="markers-gene-modal-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5);">
-  <div class="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 overflow-hidden">
-    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200" style="background: linear-gradient(to right, #eff6ff, #eef2ff);">
-      <h3 class="text-lg font-semibold text-gray-900" id="markers-gene-modal-title">Gene Details</h3>
-      <button type="button" onclick="closeMarkersGeneModal()" class="text-gray-400 hover:text-gray-600 text-xl font-bold cursor-pointer">&times;</button>
-    </div>
-    <div class="px-6 py-5" id="markers-gene-modal-body">
-      <div class="text-gray-500 text-sm">Loading...</div>
-    </div>
-  </div>
-</div>
-
 <!-- Enrichment Modal -->
 <div id="markers-enrichment-modal-overlay" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5);">
   <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 overflow-hidden" style="max-height: 80vh;">
@@ -371,12 +360,19 @@
 (function() {
   var container = document.getElementById('markers-results');
   if (!container) return;
+  var markersSearchGeneUrl = '<%= search_gene_project_path(@project) %>';
 
   container.addEventListener('click', function(e) {
     var badge = e.target.closest('.gene-badge');
     if (badge) {
-      var ensemblId = badge.dataset.ensemblId;
-      if (ensemblId) openMarkersGeneModal(ensemblId);
+      if (window.openAnnotationPopupGeneModal) {
+        var ens = badge.getAttribute('data-ensembl-id') || '';
+        var sym = badge.getAttribute('data-gene-symbol') || '';
+        var rid = badge.getAttribute('data-remote-gene-id') || '';
+        if (ens || sym) {
+          window.openAnnotationPopupGeneModal(ens, markersSearchGeneUrl, sym, rid);
+        }
+      }
       return;
     }
     var enrBadge = e.target.closest('.enrichment-badge');
@@ -532,31 +528,6 @@
 
   sortRows(0);
 })();
-
-function openMarkersGeneModal(ensemblId) {
-  var overlay = document.getElementById('markers-gene-modal-overlay');
-  var body = document.getElementById('markers-gene-modal-body');
-  var title = document.getElementById('markers-gene-modal-title');
-  title.textContent = ensemblId;
-  body.innerHTML = '<div class="text-gray-500 text-sm">Loading...</div>';
-  overlay.classList.remove('hidden');
-
-  var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-  fetch('<%= search_gene_project_path(@project) %>?ensembl_id=' + encodeURIComponent(ensemblId), {
-    headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html' }
-  })
-  .then(function(r) { return r.text(); })
-  .then(function(html) { body.innerHTML = html; })
-  .catch(function(err) { body.innerHTML = '<div class="text-red-600 text-sm">Failed to load gene details.</div>'; });
-}
-
-function closeMarkersGeneModal() {
-  document.getElementById('markers-gene-modal-overlay').classList.add('hidden');
-}
-
-document.getElementById('markers-gene-modal-overlay').addEventListener('click', function(e) {
-  if (e.target === this) closeMarkersGeneModal();
-});
 
 function openEnrichmentModal(geRunId, type) {
   var overlay = document.getElementById('markers-enrichment-modal-overlay');

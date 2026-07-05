@@ -40,7 +40,13 @@
     <% end %>
   </div>
 
-  <div class="space-y-3" data-controller="table-row-filter">
+  <div
+    class="space-y-3"
+    data-controller="table-row-filter"
+    data-table-row-filter-save-url-value="<%= index_filters_std_methods_path %>"
+    data-table-row-filter-initial-filter-value="<%= h(@table_filter) %>"
+    data-table-row-filter-initial-columns-only-value="<%= @columns_only %>"
+  >
     <div class="rounded-lg border border-gray-200 bg-white shadow-sm p-4">
       <label class="block text-sm font-medium text-gray-700 mb-1" for="std_methods_table_filter">Filter table</label>
       <input
@@ -48,6 +54,7 @@
         id="std_methods_table_filter"
         autocomplete="off"
         placeholder="Type to filter by any text in standard method or step fields"
+        value="<%= h(@table_filter) %>"
         class="w-full max-w-xl rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900"
         data-table-row-filter-target="input"
         data-action="input->table-row-filter#filter"
@@ -57,6 +64,7 @@
           type="checkbox"
           id="std_methods_table_filter_columns_only"
           class="mt-1 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+          <%= 'checked' if @columns_only %>
           data-table-row-filter-target="columnsOnly"
           data-action="change->table-row-filter#filter"
         />

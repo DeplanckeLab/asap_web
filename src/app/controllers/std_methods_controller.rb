@@ -1,6 +1,7 @@
 class StdMethodsController < ApplicationController
+  skip_before_action :authenticate_user!, only: [:index_filters], raise: false
   before_action :set_std_method, only: [:show, :edit, :update, :destroy]
-  before_action :ensure_admin!, except: [:index, :show]
+  before_action :ensure_admin!, except: [:index, :show, :index_filters]
 
   def index
     @versions = Version.where('id > 3').order(id: :desc)
@@ -14,8 +15,20 @@ class StdMethodsController < ApplicationController
         @latest_version_id&.to_s
       end
 
+    index_filters = std_methods_index_filters
+    @table_filter = index_filters['table_filter'].to_s
+    @columns_only = ActiveModel::Type::Boolean.new.cast(index_filters['columns_only'])
+
     @std_methods = StdMethod.includes(:docker_image, step: :docker_image).order(:name)
     @std_methods = @std_methods.where(version_id: @selected_version_id) if @selected_version_id.present?
+  end
+
+  def index_filters
+    filters = std_methods_index_filters
+    filters['table_filter'] = params[:table_filter].to_s
+    filters['columns_only'] = ActiveModel::Type::Boolean.new.cast(params[:columns_only])
+    session[:std_methods_index_filters] = filters
+    head :no_content
   end
 
   def show
@@ -59,6 +72,10 @@ class StdMethodsController < ApplicationController
   end
 
   private
+
+  def std_methods_index_filters
+    session[:std_methods_index_filters] ||= {}
+  end
 
   def set_std_method
     @std_method = StdMethod.find(params[:id])

@@ -133,7 +133,9 @@ Rails.application.routes.draw do
   resources :steps do
     patch :reorder, on: :collection
   end
-  resources :std_methods
+  resources :std_methods do
+    patch :index_filters, on: :collection
+  end
   resources :statuses
   resources :guided_tours do
     get :editor, on: :collection

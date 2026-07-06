@@ -25,8 +25,13 @@ Rails.application.routes.draw do
       get :summary_test
       get :tsv_from_json
       get :metadata_coordinates
+      get :spatial_data
+      get :spatial_image
       get :metadata_vectors
       get :gene_expression
+      get :heatmap_data
+      get :heatmap_metadata_catalog
+      get :heatmap_track
       get :get_autocomplete_genes
       get :creating
       get :creation_status

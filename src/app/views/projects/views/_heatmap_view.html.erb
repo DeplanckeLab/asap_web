@@ -1,0 +1,46 @@
+<%# Interactive heatmap viewer card body (rendered into show_view_json card-heatmap). %>
+<% project = local_assigns[:project] || @project %>
+<% run = local_assigns[:run] || @run %>
+<div class="heatmap-viewer"
+     data-controller="heatmap"
+     data-heatmap-project-key-value="<%= project.key %>"
+     data-heatmap-run-id-value="<%= run.id %>"
+     data-heatmap-data-url-value="<%= heatmap_data_project_path(project, run_id: run.id) %>">
+  <div class="heatmap-toolbar" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; align-items:flex-end;">
+    <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-action="heatmap#reset">Reset</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-action="heatmap#toggleColTree">Toggle column tree</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-action="heatmap#toggleRowTree">Toggle row tree</button>
+      <button type="button" class="btn btn-sm btn-outline-secondary" data-action="heatmap#toggleLabels">Toggle labels</button>
+    </div>
+    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; margin-left:auto;">
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        <label class="text-xs text-gray-500 mb-0">Column track</label>
+        <div style="display:flex; gap:4px;">
+          <select data-heatmap-target="colTrackSelect" class="form-select form-select-sm" style="min-width:180px; max-width:240px;"></select>
+          <button type="button" class="btn btn-sm btn-outline-primary" data-action="heatmap#addColTrack">Add</button>
+        </div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        <label class="text-xs text-gray-500 mb-0">Row track</label>
+        <div style="display:flex; gap:4px;">
+          <select data-heatmap-target="rowTrackSelect" class="form-select form-select-sm" style="min-width:180px; max-width:240px;"></select>
+          <button type="button" class="btn btn-sm btn-outline-primary" data-action="heatmap#addRowTrack">Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div data-heatmap-target="activeTracks" class="heatmap-active-tracks" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px;"></div>
+  <div data-heatmap-target="legendPanel" class="heatmap-legends" style="display:flex; flex-wrap:wrap; gap:12px; margin-bottom:8px;"></div>
+  <div class="heatmap-canvas-area" style="position:relative; width:100%; height:660px; background:#ffffff; border:1px solid #e2e8f0; border-radius:6px; overflow:hidden;">
+    <canvas data-heatmap-target="webgl"></canvas>
+    <canvas data-heatmap-target="overlay"></canvas>
+    <div data-heatmap-target="tooltip"
+         style="position:absolute; display:none; z-index:5; pointer-events:none; background:rgba(15,23,42,0.9); color:#fff; padding:4px 8px; border-radius:4px; font-size:12px; max-width:320px; white-space:normal;"></div>
+    <div data-heatmap-target="status"
+         style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#64748b; font-size:14px;">Loading heatmap...</div>
+  </div>
+  <p class="text-xs text-gray-500 mt-2 mb-0">
+    Scroll to zoom, drag to pan, click a dendrogram branch to collapse/expand. Hover annotation tracks for values; categorical tracks with many levels show tooltips instead of a full legend.
+  </p>
+</div>

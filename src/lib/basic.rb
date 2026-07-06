@@ -1785,6 +1785,53 @@ module Basic
 
     # GE enrichment reads gene row ids from tmp/<user_id>_<de_run_id>_<fc>_<fdr>_filtered_ids.json
     # (same rules as lib/filter_de.cpp ge_form mode).
+    # Heatmap step: resolve the selected gene set into gene identifiers and write a
+    # single self-contained heatmap_config.json into the run output_dir before the
+    # container starts. heatmap.v8.py reads it via --config. This makes the run fully
+    # specified and reproducible (genes, category selection, transform, clustering opts).
+    def write_heatmap_config!(project:, output_dir:, h_var:, p:)
+      out = output_dir.is_a?(Pathname) ? output_dir : Pathname.new(output_dir.to_s)
+      FileUtils.mkdir_p(out.to_s) unless File.exist?(out.to_s)
+
+      resolved = HeatmapGeneResolver.resolve(
+        project: project,
+        item_id: p['global_gene_set_item_id'],
+        collection_id: p['global_gene_set_collection_id']
+      )
+
+      config = {
+        'gene_identifiers' => resolved.genes,
+        'cells_metadata' => h_var['cells_metadata'].presence,
+        'cells_categories' => heatmap_normalize_list(p['cells_metadata_sel']),
+        'column_mode' => p['column_mode'].presence || 'cells',
+        'group_metadata' => h_var['group_metadata'].presence,
+        'value_transform' => p['value_transform'].presence || 'zscore',
+        'max_cells' => (p['max_cells'].presence || 5000).to_i,
+        'seed' => (p['seed'].presence || 42).to_i,
+        'cluster_rows' => command_json_boolean_truthy?(p.fetch('cluster_rows', true)),
+        'cluster_cols' => command_json_boolean_truthy?(p.fetch('cluster_cols', true)),
+        'linkage_method' => p['linkage_method'].presence || 'ward',
+        'distance_metric' => p['distance_metric'].presence || 'euclidean',
+        'warnings' => resolved.warnings
+      }
+
+      File.write((out + 'heatmap_config.json').to_s, JSON.pretty_generate(config))
+      config
+    end
+
+    def heatmap_normalize_list(val)
+      case val
+      when Array then val.map(&:to_s).reject(&:empty?)
+      when nil then []
+      else val.to_s.split(',').map(&:strip).reject(&:empty?)
+      end
+    end
+
+    def heatmap_split_paths(val)
+      return [] if val.nil?
+      val.to_s.split(',').map(&:strip).reject(&:empty?)
+    end
+
     def write_ge_filtered_ids_json!(project_dir:, user_id:, input_de_run_id:, fdr_cutoff:, fc_cutoff:, input_de:, h_annots: {})
       run_id = input_de_run_id.to_i
       raise ArgumentError, 'Missing DE run for gene enrichment' unless run_id.positive?
@@ -4872,6 +4919,15 @@ module Basic
           fc_cutoff: fc_cutoff,
           input_de: p['input_de'],
           h_annots: h_p[:h_annots] || {}
+        )
+      end
+
+      if h_p[:step].name == 'heatmap'
+        write_heatmap_config!(
+          project: h_p[:project],
+          output_dir: output_dir,
+          h_var: h_var,
+          p: p
         )
       end
 

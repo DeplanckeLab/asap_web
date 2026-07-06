@@ -3752,10 +3752,216 @@ export default class extends Controller {
     await this.renderCheckpointCommentsForSelectedTarget()
   }
 
+  // Locate the embedding (Annot) record for an id within the loaded catalog.
+  findEmbeddingRecord(embeddingId, loomFile = null) {
+    const catalog = this.embeddingsByLoomValue
+    if (!catalog || typeof catalog !== 'object') return null
+    const idStr = String(embeddingId)
+
+    const searchIn = (list) => {
+      if (!Array.isArray(list)) return null
+      return list.find(emb => emb && String(emb.id) === idStr) || null
+    }
+
+    if (loomFile && catalog[loomFile]) {
+      const found = searchIn(catalog[loomFile])
+      if (found) return found
+    }
+    for (const list of Object.values(catalog)) {
+      const found = searchIn(list)
+      if (found) return found
+    }
+    return null
+  }
+
+  // A spatial (Visium) embedding is the per-spot pixel coordinate set stored at
+  // /col_attrs/spatial. It is rendered with the tissue image behind the spots.
+  isSpatialEmbedding(embeddingId, loomFile = null) {
+    const emb = this.findEmbeddingRecord(embeddingId, loomFile)
+    if (!emb || typeof emb.name !== 'string') return false
+    return emb.name === '/col_attrs/spatial' || emb.name.endsWith('/spatial')
+  }
+
+  // Expand data bounds so the data-to-screen scale is identical on both axes,
+  // keeping the tissue image (and spots) undistorted while still fitting the view.
+  adjustBoundsToEqualAspect(bounds) {
+    if (!this.canvas) return bounds
+    const margins = this.rendererManager.getPlotMargins()
+    const availableWidth = this.canvas.width - margins.left - margins.right
+    const availableHeight = this.canvas.height - margins.top - margins.bottom
+    if (availableWidth <= 0 || availableHeight <= 0) return bounds
+
+    const dataWidth = bounds.maxX - bounds.minX
+    const dataHeight = bounds.maxY - bounds.minY
+    if (dataWidth <= 0 || dataHeight <= 0) return bounds
+
+    const scaleX = availableWidth / dataWidth
+    const scaleY = availableHeight / dataHeight
+    const scale = Math.min(scaleX, scaleY)
+
+    const newDataWidth = availableWidth / scale
+    const newDataHeight = availableHeight / scale
+    const centerX = (bounds.minX + bounds.maxX) / 2
+    const centerY = (bounds.minY + bounds.maxY) / 2
+
+    return {
+      minX: centerX - newDataWidth / 2,
+      maxX: centerX + newDataWidth / 2,
+      minY: centerY - newDataHeight / 2,
+      maxY: centerY + newDataHeight / 2
+    }
+  }
+
+  // Screen-space corners of the tissue image for the current pan/zoom. Returns
+  // null when there is no spatial image. The corners go through the same
+  // normalizeX/normalizeY transform as the spots, so image and spots stay aligned.
+  computeSpatialImageScreenCorners() {
+    const extent = this.spatialImageExtent
+    if (!extent || !this.currentBounds || !this.canvas) return null
+
+    const nX = (x) => this.interactionHandler.normalizeX(x, this.currentBounds)
+    const nY = (y) => this.interactionHandler.normalizeY(y, this.currentBounds)
+
+    // Image spans display coords x:[minX,maxX], y:[minY,maxY] with the top of the
+    // tissue (texture row 0) at maxY and the bottom at minY.
+    return {
+      tl: [nX(extent.minX), nY(extent.maxY)],
+      tr: [nX(extent.maxX), nY(extent.maxY)],
+      br: [nX(extent.maxX), nY(extent.minY)],
+      bl: [nX(extent.minX), nY(extent.minY)]
+    }
+  }
+
+  // Point size (in screen pixels) matching the Visium spot diameter at the
+  // current zoom, so spots grow/shrink with the tissue instead of staying fixed.
+  applySpatialSpotSize() {
+    if (!this.isSpatialView || !this.reglRenderer || !this.currentBounds || !this.canvas) return
+    if (!(this.spatialSpotDiameter > 0)) return
+
+    const margins = this.rendererManager.getPlotMargins()
+    const availableWidth = this.canvas.width - margins.left - margins.right
+    const dataWidth = this.currentBounds.maxX - this.currentBounds.minX
+    if (availableWidth <= 0 || dataWidth <= 0) return
+
+    const pixelsPerDataUnit = availableWidth / dataWidth
+    let size = this.spatialSpotDiameter * pixelsPerDataUnit
+    size = Math.max(1, Math.min(size, 60))
+    this.currentPointSize = size
+    this.reglRenderer.setPointSize(size)
+  }
+
+  // Load and render a spatial (Visium) embedding: fetch the spot coordinates and
+  // tissue image, draw the tissue behind the spots, and reapply active coloring.
+  async loadSpatialEmbedding(metadataId, loomFile) {
+    const normalizedMetadataId = String(metadataId)
+    try {
+      const projectIdentifier = this.getProjectIdentifier()
+      const url = `/projects/${encodeURIComponent(projectIdentifier)}/spatial_data?metadata_id=${normalizedMetadataId}&loom_file=${encodeURIComponent(loomFile || '')}`
+
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: { 'Accept': 'application/json' },
+        credentials: 'same-origin'
+      })
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+      const data = await response.json()
+      if (!Array.isArray(data.coordinates) || data.coordinates.length === 0) {
+        throw new Error('No spatial coordinates returned')
+      }
+
+      const coordinates = data.coordinates
+
+      // Load the tissue image (if any) before rendering so it appears immediately.
+      let tissueImage = null
+      if (data.has_image && data.image_url) {
+        try {
+          tissueImage = await this.loadImageElement(data.image_url)
+        } catch (imageError) {
+          console.warn('Failed to load tissue image, showing spots only:', imageError)
+        }
+      }
+
+      // Track spatial state used by the renderer transform and spot sizing.
+      this.spatialImageExtent = (tissueImage && data.image_extent) ? data.image_extent : null
+      this.spatialSpotDiameter = Number(data.spot_diameter_fullres) || 0
+
+      const initialExtent = this.spatialImageExtent || this.dataManager.calculateBounds(coordinates)
+
+      this.metadataData = {
+        id: normalizedMetadataId,
+        name: data.name,
+        cellCount: coordinates.length,
+        loadedAt: Date.now()
+      }
+      this.currentCoordinates = coordinates
+      this.decompressedCoordinatesCache.set(data.name, coordinates)
+
+      await this.rendererManager.initializeScatterPlot(coordinates, {
+        spatial: true,
+        equalAspect: true,
+        spatialExtent: initialExtent
+      })
+
+      // Attach the tissue background now that the renderer/canvas exist.
+      if (tissueImage && this.spatialImageExtent && this.reglRenderer) {
+        this.reglRenderer.setBackgroundImage(
+          tissueImage,
+          () => this.computeSpatialImageScreenCorners(),
+          1.0
+        )
+      }
+
+      // Size spots to the spot diameter and draw the final frame.
+      this.applySpatialSpotSize()
+      if (this.reglRenderer) this.reglRenderer.render()
+
+      // Reapply any active gene/metadata coloring to the new embedding.
+      if (this.currentMetadataVector && this.currentMetadataId) {
+        this.updateVisualizationWithMetadataVector()
+      }
+
+      // Re-show any selected cells on top.
+      if (this.selectedCells && this.selectedCells.size > 0) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (this.reglRenderer && this.displayOrder && this.selectedCells && this.selectedCells.size > 0) {
+              this.updateSelectedPointColors()
+            }
+          })
+        })
+      }
+
+      this.syncEmbeddingUiToLoadedEmbedding(normalizedMetadataId, data.name || null)
+      return true
+    } catch (error) {
+      console.error('Error loading spatial embedding:', error)
+      alert(`Failed to load spatial embedding: ${error.message}`)
+      return false
+    }
+  }
+
+  // Decode an image URL into an <img> element resolved on load.
+  loadImageElement(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error(`Failed to load image: ${src}`))
+      img.src = src
+    })
+  }
+
   async loadMetadataCoordinates(metadataId) {
     const normalizedMetadataId = String(metadataId)
     const requestedLoomFile = this.getCurrentLoomFileForRequest()
     const requestKey = `${normalizedMetadataId}::${requestedLoomFile || ''}`
+
+    // Spatial (Visium) embeddings use a dedicated JSON path that also carries the
+    // tissue image and scalefactors; they cannot use the lossy Int16 binary path.
+    if (this.isSpatialEmbedding(normalizedMetadataId, requestedLoomFile)) {
+      return await this.loadSpatialEmbedding(normalizedMetadataId, requestedLoomFile)
+    }
 
     if (!(this.pendingMetadataCoordinateLoads instanceof Map)) {
       this.pendingMetadataCoordinateLoads = new Map()
@@ -4023,16 +4229,33 @@ export default class extends Controller {
 
 
 
-  async renderScatterPlot(coordinates) {
+  async renderScatterPlot(coordinates, options = {}) {
 
     if (!this.reglRenderer) return
     
     const startTime = performance.now()
     // console.log(`🎯 [ReGL] Rendering ${coordinates.length.toLocaleString()} points...`)
-    
+
+    // Spatial (Visium) view: keep an undistorted (equal-aspect) transform and
+    // remember we are in the spatial mode. Non-spatial embeddings drop any tissue
+    // background left over from a previous spatial selection.
+    this.isSpatialView = !!options.spatial
+    this.spatialAspectLock = !!options.equalAspect
+    if (!options.spatial && this.reglRenderer.clearBackgroundImage) {
+      this.reglRenderer.clearBackgroundImage()
+      this.spatialImageExtent = null
+    }
+
     const boundsStart = performance.now()
-    // Calculate bounds for normalization
-    const originalBounds = this.dataManager.calculateBounds(coordinates)
+    // Calculate bounds for normalization. Spatial views seed the bounds from the
+    // tissue image extent so the whole tissue is visible, and lock the aspect
+    // ratio so the tissue is not stretched.
+    let originalBounds = options.spatialExtent
+      ? { minX: options.spatialExtent.minX, maxX: options.spatialExtent.maxX, minY: options.spatialExtent.minY, maxY: options.spatialExtent.maxY }
+      : this.dataManager.calculateBounds(coordinates)
+    if (options.equalAspect && this.canvas) {
+      originalBounds = this.adjustBoundsToEqualAspect(originalBounds)
+    }
     const boundsMs = performance.now() - boundsStart
     //const bounds = originalBounds
     this.currentBounds = originalBounds
@@ -11660,6 +11883,11 @@ export default class extends Controller {
     
     // Update current bounds
     this.currentBounds = newBounds
+
+    // Keep Visium spots proportional to the tissue while zooming.
+    if (this.isSpatialView) {
+      this.applySpatialSpotSize()
+    }
     
     // Use shape-based zooming for smooth performance with large datasets
     // Only use for very large visible point counts (legacy path)

@@ -372,7 +372,8 @@
                        data-gene-set-item-selector-project-id-value="<%= @project.id %>"
                        data-gene-set-item-selector-attr-name-value="<%= attr_name %>"
                        data-gene-set-item-selector-collection-attr-name-value="global_gene_set_collection_id"
-                       data-gene-set-item-selector-matrix-attr-name-value="input_matrix">
+                       data-gene-set-item-selector-matrix-attr-name-value="input_matrix"
+                       data-gene-set-item-selector-allow-local-value="<%= @step&.name == 'heatmap' ? 'true' : 'false' %>">
                     <input type="text"
                            id="search_<%= attr_name %>"
                            data-gene-set-item-selector-target="searchInput"

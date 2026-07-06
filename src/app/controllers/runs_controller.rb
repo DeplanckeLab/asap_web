@@ -312,6 +312,13 @@ class RunsController < ApplicationController
           }.join(" ") : '') + dataset_results_html
         }
       }
+
+      if @step.name == 'heatmap' && @run.status_id == 3
+        @h_el["card-heatmap"] = {
+          card_header: 'Heatmap',
+          card_body: render_to_string(partial: 'projects/views/heatmap_view', locals: { project: @project, run: @run })
+        }
+      end
     end
     
     # Pre-load annots and their associated runs/steps for dataset parameters

@@ -11,8 +11,8 @@ export class RendererManager {
   }
 
   // Main rendering methods
-  initializeScatterPlot(coordinates) {
-    return this.controller.initializeScatterPlot(coordinates)
+  initializeScatterPlot(coordinates, options = {}) {
+    return this.controller.initializeScatterPlot(coordinates, options)
   }
 
   renderPointsWithCurrentColoringInContainer(container) {
@@ -951,7 +951,7 @@ export class RendererManager {
   }
 
   // Initialize scatter plot with coordinates
-  async initializeScatterPlot(coordinates) {
+  async initializeScatterPlot(coordinates, options = {}) {
     try {
       // CRITICAL: Check if renderer already exists with state and matching coordinate count
       // If so, we should reuse it instead of destroying it!
@@ -967,7 +967,7 @@ export class RendererManager {
           // console.log(`⏱️ [PERF] Step 3: Reusing existing ${this.controller.rendererType.toUpperCase()} renderer (FAST PATH - renderer has state)`)
           // console.log(`⏱️ [PERF] Renderer instance: ${this.controller.reglRenderer.instanceId}, points: ${rendererPointCount}`)
           // Renderer already exists with correct state - just render the coordinates
-          await this.controller.renderScatterPlot(coordinates)
+          await this.controller.renderScatterPlot(coordinates, options)
           return
         } else {
           // console.log(`⏱️ [PERF] Step 3: Creating new ${this.controller.rendererType.toUpperCase()} renderer (SLOW PATH - first render or count mismatch)`)
@@ -1084,7 +1084,7 @@ export class RendererManager {
       }
       
       // Render the scatter plot
-      await this.controller.renderScatterPlot(coordinates)
+      await this.controller.renderScatterPlot(coordinates, options)
       
     } catch (error) {
       console.error('Error initializing scatter plot:', error)

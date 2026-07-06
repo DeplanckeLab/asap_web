@@ -17,9 +17,9 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states spatial_data spatial_image]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
@@ -5476,6 +5476,229 @@ class ProjectsController < ApplicationController
     end
   end
 
+  # GET /projects/:id/spatial_data
+  # Returns the spot coordinates for a spatial (Visium) embedding together with
+  # the tissue image extent and Visium scalefactors so the visualization can draw
+  # the tissue map behind the spots (CellxGene-style spatial view).
+  #
+  # The spot coordinates are the fullres pixel positions stored in the loom at
+  # /col_attrs/spatial. The Y axis is negated so that image row 0 (top of the
+  # tissue) appears at the top of the plot, whose Y axis points upward.
+  def spatial_data
+    metadata = Annot.find_by(id: params[:metadata_id], project_id: @project.id)
+    if metadata.nil?
+      render json: { error: 'Embedding not found' }, status: :not_found
+      return
+    end
+
+    loom_file = params[:loom_file].presence || metadata.filepath
+    loom_path = @project_dir + loom_file
+    unless File.exist?(loom_path)
+      render json: { error: "Data file not found: #{loom_file}" }, status: :not_found
+      return
+    end
+
+    coordinates = H5DataService.get_metadata_vector(loom_path.to_s, metadata.name)
+    if coordinates.blank?
+      render json: { error: 'No spatial coordinates found' }, status: :not_found
+      return
+    end
+
+    # Negate Y for an upright tissue display (plot Y axis points up, image rows go down).
+    display_coordinates = coordinates.map do |pair|
+      [pair[0].to_f, -pair[1].to_f]
+    end
+
+    info = SpatialDataService.metadata_info(loom_path.to_s)
+
+    result = {
+      is_spatial: true,
+      name: metadata.display_name,
+      cell_count: display_coordinates.length,
+      coordinates: display_coordinates,
+      has_image: false
+    }
+
+    scalef = info['tissue_hires_scalef']
+    if info['has_image'] && scalef && scalef.to_f.positive? && info['library'].present?
+      hires_width = info['hires_width'].to_f
+      hires_height = info['hires_height'].to_f
+      extent_x = hires_width / scalef.to_f
+      extent_y = hires_height / scalef.to_f
+
+      result[:has_image] = true
+      result[:library] = info['library']
+      result[:tissue_hires_scalef] = scalef.to_f
+      result[:spot_diameter_fullres] = info['spot_diameter_fullres']&.to_f
+      # Image extent in the same (display) coordinate space as the spots.
+      # Top of the image is at display Y = 0, bottom at display Y = -extent_y.
+      result[:image_extent] = { minX: 0.0, maxX: extent_x, minY: -extent_y, maxY: 0.0 }
+      result[:image_url] = spatial_image_project_path(@project, loom_file: loom_file, library: info['library'])
+    end
+
+    render json: result
+  rescue => e
+    Rails.logger.error "Error fetching spatial data: #{e.message}"
+    Rails.logger.error e.backtrace.first(10).join("\n")
+    render json: { error: 'Failed to fetch spatial data' }, status: :internal_server_error
+  end
+
+  # GET /projects/:id/spatial_image
+  # Streams the hires tissue image (PNG) for a Visium library so it can be drawn
+  # as the background of the spatial visualization.
+  def spatial_image
+    loom_file = params[:loom_file].presence
+    library = params[:library].presence
+    if loom_file.blank? || library.blank? || !library.match?(/\A[0-9A-Za-z_\-]+\z/)
+      render json: { error: 'Invalid parameters' }, status: :bad_request
+      return
+    end
+
+    loom_path = @project_dir + loom_file
+    unless File.exist?(loom_path)
+      render json: { error: "Data file not found: #{loom_file}" }, status: :not_found
+      return
+    end
+
+    cache_path = SpatialDataService.export_hires_png(loom_path.to_s, library)
+    if cache_path.nil? || !File.exist?(cache_path)
+      render json: { error: 'Tissue image not available' }, status: :not_found
+      return
+    end
+
+    response.headers['Cache-Control'] = 'private, max-age=86400'
+    send_file cache_path, type: 'image/png', disposition: 'inline'
+  rescue => e
+    Rails.logger.error "Error serving spatial image: #{e.message}"
+    render json: { error: 'Failed to serve tissue image' }, status: :internal_server_error
+  end
+
+  # GET /projects/:id/heatmap_data?run_id=:run_id[&part=matrix]
+  # Serves the precomputed heatmap output for the interactive viewer:
+  #   - part=matrix -> streams heatmap_matrix.bin (Float32 little-endian, row-major genes x columns)
+  #   - otherwise   -> renders heatmap_meta.json (orders, dendrograms, labels, tracks, value range)
+  def heatmap_data
+    run = Run.find_by(id: params[:run_id], project_id: @project.id)
+    if run.nil?
+      render json: { error: 'Run not found' }, status: :not_found
+      return
+    end
+
+    step = run.step || Step.find_by(id: run.step_id)
+    step_name = step&.name || 'heatmap'
+    step_dir = @project_dir + step_name
+    output_dir = (step && step.multiple_runs == false) ? step_dir : (step_dir + run.id.to_s)
+
+    meta_path = output_dir + 'heatmap_meta.json'
+    matrix_path = output_dir + 'heatmap_matrix.bin'
+
+    if params[:part].to_s == 'matrix'
+      unless File.exist?(matrix_path)
+        render json: { error: 'Heatmap matrix not found' }, status: :not_found
+        return
+      end
+      response.headers['Content-Type'] = 'application/octet-stream'
+      response.headers['X-Run-ID'] = run.id.to_s
+      send_file matrix_path.to_s, type: 'application/octet-stream', disposition: 'inline'
+      return
+    end
+
+    unless File.exist?(meta_path)
+      render json: { error: 'Heatmap results not found', status: run.status_id }, status: :not_found
+      return
+    end
+
+    # Legacy runs stored dendrograms as deeply nested JSON; read without the
+    # default nesting cap, convert to flat linkage, then serialize (render json:
+    # would hit the same cap when re-encoding nested trees).
+    meta = JSON.parse(File.read(meta_path), max_nesting: false)
+    HeatmapMetaNormalizer.normalize!(meta)
+    meta['loom_file'] = heatmap_loom_file_for_run(run)
+    meta['matrix_url'] = heatmap_data_project_path(@project, run_id: run.id, part: 'matrix')
+    render body: JSON.generate(meta), content_type: 'application/json'
+  rescue StandardError => e
+    Rails.logger.error("[heatmap_data] #{e.class} - #{e.message}")
+    render json: { error: 'Failed to load heatmap data' }, status: :internal_server_error
+  end
+
+  # GET /projects/:id/heatmap_metadata_catalog?run_id=:run_id
+  # Lists cell (column) and gene (row) metadata available for dynamic annotation tracks.
+  def heatmap_metadata_catalog
+    run = heatmap_run_for_params
+    return unless run
+
+    loom_file = heatmap_loom_file_for_run(run)
+    if loom_file.blank?
+      render json: { error: 'Heatmap loom file not found' }, status: :not_found
+      return
+    end
+
+    render json: {
+      loom_file: loom_file,
+      column_metadata: heatmap_metadata_options_for(loom_file, dim: 1),
+      row_metadata: heatmap_metadata_options_for(loom_file, dim: 2)
+    }
+  rescue StandardError => e
+    Rails.logger.error("[heatmap_metadata_catalog] #{e.class} - #{e.message}")
+    render json: { error: 'Failed to load metadata catalog' }, status: :internal_server_error
+  end
+
+  # GET /projects/:id/heatmap_track?run_id=&metadata_id=&axis=column|row
+  # Returns a metadata vector aligned to the heatmap column or row order.
+  def heatmap_track
+    run = heatmap_run_for_params
+    return unless run
+
+    metadata_id = params[:metadata_id].to_i
+    axis = params[:axis].to_s
+    unless metadata_id.positive? && %w[column row].include?(axis)
+      render json: { error: 'metadata_id and axis (column or row) are required' }, status: :bad_request
+      return
+    end
+
+    annot = Annot.find_by(id: metadata_id, project_id: @project.id)
+    unless annot
+      render json: { error: 'Metadata not found' }, status: :not_found
+      return
+    end
+
+    expected_dim = axis == 'column' ? 1 : 2
+    if annot.dim != expected_dim
+      render json: { error: "Metadata is not valid for #{axis} tracks" }, status: :unprocessable_entity
+      return
+    end
+
+    meta = heatmap_meta_for_run(run)
+    unless meta
+      render json: { error: 'Heatmap results not found' }, status: :not_found
+      return
+    end
+
+    loom_file = params[:loom_file].presence || heatmap_loom_file_for_run(run)
+    loom_path = @project_dir + loom_file
+    unless File.exist?(loom_path)
+      render json: { error: "Loom file not found: #{loom_file}" }, status: :not_found
+      return
+    end
+
+    raw_vector = H5DataService.get_metadata_vector(loom_path.to_s, annot.name)
+    if raw_vector.blank?
+      render json: { error: 'No metadata values found' }, status: :not_found
+      return
+    end
+
+    values = if axis == 'column'
+               HeatmapTrackAligner.column_values(meta, raw_vector, loom_path)
+             else
+               HeatmapTrackAligner.row_values(meta, raw_vector, loom_path)
+             end
+
+    render json: HeatmapTrackAligner.build_track_payload(annot, values)
+  rescue StandardError => e
+    Rails.logger.error("[heatmap_track] #{e.class} - #{e.message}")
+    render json: { error: 'Failed to load heatmap track' }, status: :internal_server_error
+  end
+
   # GET /projects/1/metadata_vectors.json
   def metadata_vectors
     metadata_ids = params[:metadata_ids]&.split(',') || []
@@ -7186,6 +7409,7 @@ class ProjectsController < ApplicationController
     h_res = Basic.get_std_method_attrs(@std_method, @step)
     @h_attrs = h_res[:h_attrs]
     inject_pipeline_gene_set_collection_options!(@h_attrs) if %w[module_score ge].include?(@step.name)
+    inject_heatmap_gene_set_collection_options!(@h_attrs) if @step.name == 'heatmap'
     
     # Get attribute layout from std_method
     @attr_layout = Basic.safe_parse_json(@std_method.attr_layout_json, [])
@@ -11483,6 +11707,77 @@ class ProjectsController < ApplicationController
       end
     end
 
+    # Heatmap form: list both global reference AND custom/local gene set collections,
+    # since heatmap genes are resolved server-side (HeatmapGeneResolver) for either source.
+    def inject_heatmap_gene_set_collection_options!(h_attrs)
+      return unless h_attrs.is_a?(Hash)
+
+      attr = h_attrs['global_gene_set_collection_id']
+      return unless attr.is_a?(Hash)
+
+      load_gene_set_collections
+      list = Array(@gene_set_collections).map do |c|
+        db = c[:database_name].to_s.strip
+        lbl = c[:label].to_s.strip
+        label = (db.present? && lbl.present? && !db.casecmp?(lbl)) ? "#{db} - #{lbl}" : (db.presence || lbl)
+        [label.presence || lbl, c[:id].to_s]
+      end
+
+      attr['widget'] = 'select'
+      attr['list'] = list
+      attr['requires_message'] = 'No gene set collections are available for this organism' if list.empty?
+    rescue StandardError => e
+      Rails.logger.error("[inject_heatmap_gene_set_collection_options!] #{e.message}")
+    end
+
+    def heatmap_run_for_params
+      run = Run.find_by(id: params[:run_id], project_id: @project.id)
+      unless run
+        render json: { error: 'Run not found' }, status: :not_found
+        return nil
+      end
+      run
+    end
+
+    def heatmap_output_dir_for_run(run)
+      step = run.step || Step.find_by(id: run.step_id)
+      step_name = step&.name || 'heatmap'
+      step_dir = @project_dir + step_name
+      (step && step.multiple_runs == false) ? step_dir : (step_dir + run.id.to_s)
+    end
+
+    def heatmap_meta_for_run(run)
+      meta_path = heatmap_output_dir_for_run(run) + 'heatmap_meta.json'
+      return nil unless File.exist?(meta_path)
+
+      meta = JSON.parse(File.read(meta_path), max_nesting: false)
+      HeatmapMetaNormalizer.normalize!(meta)
+      meta
+    end
+
+    def heatmap_loom_file_for_run(run)
+      attrs = Basic.safe_parse_json(run.attrs_json, {})
+      item = attrs['input_matrix']
+      item = item.first if item.is_a?(Array)
+      return nil unless item.is_a?(Hash)
+
+      item['output_filename'].presence || item['filepath'].presence
+    end
+
+    def heatmap_metadata_options_for(loom_file, dim:)
+      Annot.where(project_id: @project.id, filepath: loom_file, dim: dim)
+           .includes(:data_type)
+           .order(Arel.sql('LOWER(COALESCE(display_name, name))'))
+           .map do |annot|
+        {
+          id: annot.id,
+          name: annot.display_name.presence || annot.name,
+          path: annot.name,
+          data_type: annot.data_type&.name
+        }
+      end
+    end
+
     def inject_pipeline_gene_set_collection_options!(h_attrs)
       return unless h_attrs.is_a?(Hash)
 
@@ -13374,6 +13669,13 @@ class ProjectsController < ApplicationController
           }.join(" ") : '') + dataset_results_html
         }
       }
+
+      if @step.name == 'heatmap' && run.status_id == 3
+        @h_el["card-heatmap"] = {
+          card_header: 'Heatmap',
+          card_body: render_to_string(partial: 'projects/views/heatmap_view', locals: { project: @project, run: run })
+        }
+      end
     end
     
     # Create run cards for dashboard

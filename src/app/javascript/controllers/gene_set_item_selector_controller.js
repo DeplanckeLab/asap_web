@@ -6,7 +6,8 @@ export default class extends Controller {
     projectId: String,
     attrName: String,
     collectionAttrName: { type: String, default: "global_gene_set_collection_id" },
-    matrixAttrName: { type: String, default: "input_matrix" }
+    matrixAttrName: { type: String, default: "input_matrix" },
+    allowLocal: { type: Boolean, default: false }
   }
 
   connect() {
@@ -150,7 +151,7 @@ export default class extends Controller {
       }
 
       const items = Array.isArray(payload.items)
-        ? payload.items.filter((item) => item.supports_module_score !== false)
+        ? payload.items.filter((item) => this.allowLocalValue || item.supports_module_score !== false)
         : []
       this.renderItems(items)
     } catch (_e) {

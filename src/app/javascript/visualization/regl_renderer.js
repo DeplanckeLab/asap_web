@@ -36,6 +36,14 @@ export class ReglRenderer {
       offsetY: 0
     }
     
+    // Background tissue image (spatial/Visium view)
+    this.backgroundTexture = null
+    this.backgroundCornersProvider = null
+    this.backgroundImageOpacity = 1.0
+    this.imagePositionBuffer = null
+    this.imageTexcoordBuffer = null
+    this.drawImage = null
+
     // Buffers
     this.positionBuffer = null
     this.colorBuffer = null
@@ -134,6 +142,160 @@ export class ReglRenderer {
       depth: {
         enable: false
       }
+    })
+
+    // Draw command for the tissue background image (textured quad).
+    // Corner positions are supplied in screen/pixel space, matching the point
+    // positions, so the image stays aligned with the spots under pan/zoom.
+    this.drawImage = this.regl({
+      vert: `
+        precision highp float;
+
+        attribute vec2 position;
+        attribute vec2 texcoord;
+
+        uniform vec2 canvasSize;
+
+        varying vec2 vTexcoord;
+
+        void main() {
+          vec2 normalizedPos = position / canvasSize;
+          vec2 clipSpace = normalizedPos * 2.0 - 1.0;
+          clipSpace.y *= -1.0;
+          gl_Position = vec4(clipSpace, 0.0, 1.0);
+          vTexcoord = texcoord;
+        }
+      `,
+
+      frag: `
+        precision highp float;
+
+        varying vec2 vTexcoord;
+
+        uniform sampler2D tissue;
+        uniform float opacity;
+
+        void main() {
+          vec4 texColor = texture2D(tissue, vTexcoord);
+          gl_FragColor = vec4(texColor.rgb, texColor.a * opacity);
+        }
+      `,
+
+      attributes: {
+        position: this.regl.prop('positions'),
+        texcoord: this.regl.prop('texcoords')
+      },
+
+      uniforms: {
+        canvasSize: ({ viewportWidth, viewportHeight }) => [viewportWidth, viewportHeight],
+        tissue: this.regl.prop('texture'),
+        opacity: this.regl.prop('opacity')
+      },
+
+      count: 6,
+      primitive: 'triangles',
+
+      blend: {
+        enable: true,
+        func: {
+          srcRGB: 'src alpha',
+          srcAlpha: 'one',
+          dstRGB: 'one minus src alpha',
+          dstAlpha: 'one minus src alpha'
+        }
+      },
+
+      depth: {
+        enable: false
+      }
+    })
+  }
+
+  /**
+   * Set (or replace) the tissue background image for the spatial view.
+   * @param {HTMLImageElement|ImageBitmap|HTMLCanvasElement} image - decoded image
+   * @param {Function} cornersProvider - returns { tl, tr, br, bl } screen-space
+   *   corner coordinates ([x, y]) for the current pan/zoom, or null
+   * @param {number} opacity - image opacity (0..1)
+   */
+  setBackgroundImage(image, cornersProvider, opacity = 1.0) {
+    if (this.backgroundTexture) {
+      this.backgroundTexture.destroy()
+      this.backgroundTexture = null
+    }
+
+    if (!image) {
+      this.backgroundCornersProvider = null
+      return this
+    }
+
+    this.backgroundTexture = this.regl.texture({
+      data: image,
+      flipY: false,
+      min: 'linear',
+      mag: 'linear',
+      wrapS: 'clamp',
+      wrapT: 'clamp'
+    })
+    this.backgroundCornersProvider = typeof cornersProvider === 'function' ? cornersProvider : null
+    this.backgroundImageOpacity = opacity
+
+    if (!this.imagePositionBuffer) {
+      this.imagePositionBuffer = this.regl.buffer(new Float32Array(12))
+    }
+    if (!this.imageTexcoordBuffer) {
+      // Two triangles: TL, TR, BR / TL, BR, BL
+      this.imageTexcoordBuffer = this.regl.buffer(new Float32Array([
+        0, 0, 1, 0, 1, 1,
+        0, 0, 1, 1, 0, 1
+      ]))
+    }
+
+    return this
+  }
+
+  /**
+   * Remove the tissue background image (e.g. switching to a non-spatial embedding).
+   */
+  clearBackgroundImage() {
+    if (this.backgroundTexture) {
+      this.backgroundTexture.destroy()
+      this.backgroundTexture = null
+    }
+    this.backgroundCornersProvider = null
+    return this
+  }
+
+  setBackgroundImageOpacity(opacity) {
+    this.backgroundImageOpacity = opacity
+    return this
+  }
+
+  hasBackgroundImage() {
+    return !!(this.backgroundTexture && this.backgroundCornersProvider)
+  }
+
+  /**
+   * Draw the tissue background image using the current pan/zoom transform.
+   */
+  drawBackgroundImage() {
+    if (!this.hasBackgroundImage()) return
+
+    const corners = this.backgroundCornersProvider()
+    if (!corners || !corners.tl || !corners.tr || !corners.br || !corners.bl) return
+
+    const { tl, tr, br, bl } = corners
+    const positions = new Float32Array([
+      tl[0], tl[1], tr[0], tr[1], br[0], br[1],
+      tl[0], tl[1], br[0], br[1], bl[0], bl[1]
+    ])
+    this.imagePositionBuffer.subdata(positions)
+
+    this.drawImage({
+      positions: this.imagePositionBuffer,
+      texcoords: this.imageTexcoordBuffer,
+      texture: this.backgroundTexture,
+      opacity: this.backgroundImageOpacity
     })
   }
   
@@ -491,7 +653,11 @@ export class ReglRenderer {
       color: [1, 1, 1, 1], // White background
       depth: 1
     })
-    
+
+    // Draw the tissue background image (spatial view) before the points so the
+    // spots are overlaid on top of the tissue.
+    this.drawBackgroundImage()
+
     // console.log('🚀 [ReGL] Calling drawPoints...')
     // Draw points (positions are already in screen/pixel coordinates)
     this.drawPoints({
@@ -552,6 +718,9 @@ export class ReglRenderer {
   destroy() {
     if (this.positionBuffer) this.positionBuffer.destroy()
     if (this.colorBuffer) this.colorBuffer.destroy()
+    if (this.backgroundTexture) this.backgroundTexture.destroy()
+    if (this.imagePositionBuffer) this.imagePositionBuffer.destroy()
+    if (this.imageTexcoordBuffer) this.imageTexcoordBuffer.destroy()
     if (this.regl) this.regl.destroy()
   }
 }

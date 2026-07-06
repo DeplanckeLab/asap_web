@@ -112,8 +112,11 @@ class Annot < ApplicationRecord
     if name.present?
       # Remove the /col_attrs/ prefix and clean up the name
       clean_name = name.gsub('/col_attrs/', '').gsub('/row_attrs/', '')
+      # Spatial (Visium) spot coordinates used for the tissue map view.
+      if clean_name == 'spatial'
+        "Spatial"
       # For embeddings, extract the type and dimensions
-      if embedding?
+      elsif embedding?
         if clean_name.start_with?('_dr_')
           parts = clean_name.split('_')
           method = parts[2].upcase

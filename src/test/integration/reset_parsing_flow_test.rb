@@ -5,16 +5,6 @@ require "fileutils"
 class ResetParsingFlowTest < ActionDispatch::IntegrationTest
   include ActiveJob::TestHelper
 
-  def self.fixtures(*names)
-    @fixtures = []
-  end
-
-  def setup_fixtures
-  end
-
-  def teardown_fixtures
-  end
-
   setup do
     clear_enqueued_jobs
     clear_performed_jobs
@@ -28,7 +18,7 @@ class ResetParsingFlowTest < ActionDispatch::IntegrationTest
     FileUtils.mkdir_p(ENV["UPLOAD_DATA_DIR"])
     FileUtils.mkdir_p(ENV["USER_DATA_DIR"])
 
-    @project = Project.create!(
+    @project = create_test_project!(
       name: "Reset parsing integration project",
       key: "reset_project_#{SecureRandom.hex(4)}",
       user_id: nil,
@@ -38,8 +28,8 @@ class ResetParsingFlowTest < ActionDispatch::IntegrationTest
   end
 
   teardown do
-    Fu.where(project_id: @project.id).find_each(&:destroy!) if @project&.persisted?
-    @project&.destroy!
+    # Destroy test-created DB rows while temp USER_DATA_DIR / UPLOAD_DATA_DIR are still set.
+    destroy_registered_test_records!
     ENV["UPLOAD_DATA_DIR"] = @previous_upload_data_dir
     ENV["USER_DATA_DIR"] = @previous_user_data_dir
     FileUtils.rm_rf(@tmp_root) if @tmp_root.present?
@@ -48,12 +38,14 @@ class ResetParsingFlowTest < ActionDispatch::IntegrationTest
   end
 
   test "reset parsing restores canonical input file and restarts preparsing" do
-    fu = Fu.create!(
-      project_id: @project.id,
-      project_key: @project.key,
-      upload_file_name: "input_file.txt",
-      upload_file_size: 3,
-      status: "completed"
+    fu = register_for_test_cleanup(
+      Fu.create!(
+        project_id: @project.id,
+        project_key: @project.key,
+        upload_file_name: "input_file.txt",
+        upload_file_size: 3,
+        status: "completed"
+      )
     )
     @project.update_columns(fu_id: fu.id)
 

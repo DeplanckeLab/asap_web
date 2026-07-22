@@ -10,6 +10,8 @@ class ProjectCloneServiceTest < TestBaseWithoutFixtures
   end
 
   teardown do
+    # Destroy test-created DB rows while temp USER_DATA_DIR is still set.
+    destroy_registered_test_records!
     ENV["USER_DATA_DIR"] = @previous_user_data_dir
     FileUtils.rm_rf(@tmp_root) if @tmp_root.present?
   end

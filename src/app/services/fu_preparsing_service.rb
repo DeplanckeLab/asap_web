@@ -39,6 +39,7 @@ class FuPreparsingService
     end
     output = apply_legacy_rds_preparsing_labels(output, working_file) if @legacy_rds_upload
     output = enrich_h5ad_metadata_if_needed!(output)
+    output = enrich_file_title_if_needed!(output)
     output = sync_raw_text_preparsing_dimensions!(output)
     summary = build_summary(output)
     
@@ -500,6 +501,21 @@ class FuPreparsingService
     output
   end
 
+  def enrich_file_title_if_needed!(output)
+    before = output['title'].to_s.strip
+    output = PreparsingFileTitle.enrich_output!(
+      output,
+      host_path: @fu.file_path,
+      workdir: upload_dir,
+      logger: @logger
+    )
+    after = output['title'].to_s.strip
+    if before.blank? && after.present?
+      (upload_dir + 'output.json').write(JSON.pretty_generate(output))
+    end
+    output
+  end
+
   def build_summary(output)
     @prediction_debug_data = []  # Store prediction debug info for each dataset
     
@@ -589,6 +605,7 @@ class FuPreparsingService
       summary[:row_names] = H5adPreparsingMetadata.java_metadata_path(output['row_names'], :row).presence
       summary[:col_names] = H5adPreparsingMetadata.java_metadata_path(output['col_names'], :col).presence
     end
+    summary[:file_title] = output['title'].to_s.strip.presence
 
     # Add prediction debug data to summary (always include, even if empty)
     summary[:prediction_debug] = @prediction_debug_data

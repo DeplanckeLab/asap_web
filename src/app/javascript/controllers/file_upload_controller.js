@@ -33,6 +33,7 @@ export default class extends Controller {
     "projectTypesData",
     "projectName",
     "versionSelect",
+    "projectTypeSelect",
     "supportedFormatsText",
     "formatMention"
   ]
@@ -51,7 +52,7 @@ export default class extends Controller {
     this.currentUpload = null
     this.isUploadComplete = false
     this.fuId = null
-    this.originalFilename = null  // Store original uploaded filename
+    this.originalFilename = null  // Uploaded or downloaded basename without extension
     this.preparsingSubscription = null
     this.preparsingStatusPollInterval = null  // For polling preparsing status
     this.downloadStatusPollInterval = null
@@ -79,6 +80,7 @@ export default class extends Controller {
     this.currentDetectedFormat = null  // Track current file format
     this.rdsMultipleAssays = false  // RDS file had multiple assays at preparsing
     this.projectNameTouched = false
+    this.preparsingFileTitle = null  // /uns/title or loom /attrs/title from preparsing
     this.projectNameInputHandler = null
     this._fileFormatsMap = this.loadFileFormats()  // This will also build the extension map
     this.projectTypesMap = this.loadProjectTypes()  // Load project types data
@@ -851,6 +853,7 @@ export default class extends Controller {
     this.hasMatrixData = false
     this.archiveFilesData = null
     this.cameFromArchive = false
+    this.preparsingFileTitle = null
   }
 
   ensureSpinnerAnimation() {
@@ -1203,6 +1206,9 @@ export default class extends Controller {
     const datasets = Array.isArray(summary?.datasets) ? summary.datasets : []
     const detectedFormat = summary?.detected_format
     this.currentDetectedFormat = detectedFormat
+    this.preparsingFileTitle =
+      (summary?.file_title || rawData?.raw_output?.title || rawData?.python_raw_output?.title || '').toString().trim() ||
+      null
     if (detectedFormat === 'RDS' && datasets.length > 1) {
       this.rdsMultipleAssays = true
     }
@@ -1286,7 +1292,7 @@ export default class extends Controller {
     }
 
     const datasetDetailsVisible = this.isDatasetDetailsVisible(datasets)
-    if (detectedFormat === 'H5AD' && datasetDetailsVisible) {
+    if (detectedFormat === 'H5AD' && datasetDetailsVisible && this.currentLegacyPreparsingVersion()) {
       html += this.buildH5adGeneCellMetadataUI(summary)
     }
 
@@ -2188,6 +2194,40 @@ export default class extends Controller {
     return filename
   }
 
+  archiveMemberBaseName(name) {
+    let label = (name || '').toString().trim()
+    if (!label) return ''
+    const slash = Math.max(label.lastIndexOf('/'), label.lastIndexOf('\\'))
+    if (slash >= 0) {
+      label = label.substring(slash + 1)
+    }
+    return this.normalizeProjectNameCandidate(label)
+  }
+
+  resolveAutoProjectName(assayName, options = {}) {
+    const detectedFormat = ((options.detectedFormat ?? this.currentDetectedFormat) || '').toString().toUpperCase()
+    const fromArchive = Boolean(options.fromArchive ?? this.cameFromArchive)
+
+    // Archive / compressed-archive members: use the selected file name inside the archive.
+    if (fromArchive || this.isArchivePreparsingFormat(detectedFormat)) {
+      const memberName =
+        this.archiveMemberBaseName(assayName) ||
+        this.archiveMemberBaseName(this.selectedArchiveEntry) ||
+        this.normalizeProjectNameCandidate(this.originalFilename)
+      return memberName
+    }
+
+    // H5AD / LOOM: prefer file-level title, else uploaded/downloaded filename without extension.
+    if (detectedFormat === 'H5AD' || detectedFormat === 'LOOM') {
+      const fileTitle = String(options.fileTitle ?? this.preparsingFileTitle ?? '').trim()
+      if (fileTitle) return fileTitle
+      return this.normalizeProjectNameCandidate(this.originalFilename)
+    }
+
+    // Any other non-archive format: uploaded or downloaded filename without extension.
+    return this.normalizeProjectNameCandidate(this.originalFilename)
+  }
+
   projectNameMatchesSelection(projectName, selectionName) {
     const normalizedProjectName = this.normalizeProjectNameCandidate(projectName)
     const normalizedSelection = this.normalizeProjectNameCandidate(selectionName)
@@ -2204,17 +2244,11 @@ export default class extends Controller {
 
     if (!inputEl) return
 
-    const detectedFormat = options.detectedFormat ?? this.currentDetectedFormat
-    const multipleAssays = options.multipleAssays ?? (detectedFormat === 'RDS' && this.rdsMultipleAssays)
-    const displayName = this.normalizeProjectNameCandidate(
-      this.datasetDisplayLabel(detectedFormat, assayName, { multipleAssays })
-    )
+    const displayName = this.resolveAutoProjectName(assayName, options)
     if (!displayName) return
 
     const previousDisplayName = previousAssayName
-      ? this.normalizeProjectNameCandidate(
-          this.datasetDisplayLabel(detectedFormat, previousAssayName, { multipleAssays })
-        )
+      ? this.resolveAutoProjectName(previousAssayName, options)
       : null
 
     const currentName = (inputEl.value || '').trim()
@@ -2479,6 +2513,10 @@ export default class extends Controller {
     const integrateField = this.form?.querySelector('[name="integrate"]')
     const isIntegrateMode = integrateField && integrateField.value === '1'
 
+    const hasProjectName = this.hasProjectNameTarget
+      ? this.projectNameTarget.value.trim() !== ''
+      : true
+
     // 3. Organism is selected
     const organismField = this.form?.querySelector('[name="project[organism_id]"]')
     const hasOrganism = organismField && organismField.value && organismField.value !== ''
@@ -2487,20 +2525,91 @@ export default class extends Controller {
     const versionField = this.form?.querySelector('[name="project[version_id]"]')
     const hasVersion = versionField && versionField.value && versionField.value !== ''
 
-    // 5. Project type is selected (not required for versions < 6)
+    // 5. Project type is selected (not required for versions < 5)
     const projectTypeField = this.form?.querySelector('[name="project[project_type_id]"]')
     const versionId = this.currentVersionId()
     const projectTypeNotRequired = Number.isFinite(versionId) && versionId < 5
     const hasProjectType = projectTypeNotRequired || (projectTypeField && projectTypeField.value && projectTypeField.value !== '')
 
-    if (isIntegrateMode) {
-      // In integrate mode, enable if organism, version, and project type are set
-      this.submitButtonTarget.disabled = !(hasOrganism && hasVersion && hasProjectType)
+    const hasValidUpload = isIntegrateMode ? true : this.isUploadComplete
+    const hasValidPreparsing = isIntegrateMode ? true : (this.isPreparsingComplete && this.hasMatrixData)
+
+    const shouldEnable =
+      hasProjectName &&
+      hasOrganism &&
+      hasVersion &&
+      hasProjectType &&
+      hasValidUpload &&
+      hasValidPreparsing
+
+    this.submitButtonTarget.disabled = !shouldEnable
+
+    this.updateSubmitBlockingFieldHighlights({
+      hasProjectName,
+      hasOrganism,
+      hasVersion,
+      hasProjectType,
+      projectTypeNotRequired,
+      hasValidUpload,
+      hasValidPreparsing,
+      isIntegrateMode
+    })
+  }
+
+  updateSubmitBlockingFieldHighlights({
+    hasProjectName,
+    hasOrganism,
+    hasVersion,
+    hasProjectType,
+    projectTypeNotRequired,
+    hasValidUpload,
+    hasValidPreparsing,
+    isIntegrateMode
+  }) {
+    this.setRequiredFieldHighlight(this.hasProjectNameTarget ? this.projectNameTarget : null, !hasProjectName)
+
+    const versionEl = this.hasVersionSelectTarget
+      ? this.versionSelectTarget
+      : this.form?.querySelector('[name="project[version_id]"]')
+    this.setRequiredFieldHighlight(versionEl, !hasVersion)
+
+    const projectTypeEl = this.hasProjectTypeSelectTarget
+      ? this.projectTypeSelectTarget
+      : this.form?.querySelector('select[name="project[project_type_id]"]')
+    this.setRequiredFieldHighlight(projectTypeEl, !projectTypeNotRequired && !hasProjectType)
+
+    const organismButton = this.element.querySelector('[data-organism-selector-target="dropdownButton"]')
+    this.setRequiredFieldHighlight(organismButton, !hasOrganism)
+
+    if (!isIntegrateMode) {
+      this.setRequiredFieldHighlight(
+        this.hasFileUploadContainerTarget ? this.fileUploadContainerTarget : null,
+        !hasValidUpload
+      )
+      this.setRequiredFieldHighlight(
+        this.hasPreparsingPanelTarget ? this.preparsingPanelTarget : null,
+        hasValidUpload && !hasValidPreparsing
+      )
     } else {
-      // Normal mode: also require file upload and preparsing
-      const hasValidPreparsing = this.isPreparsingComplete && this.hasMatrixData
-      const shouldEnable = this.isUploadComplete && hasValidPreparsing && hasOrganism && hasVersion && hasProjectType
-      this.submitButtonTarget.disabled = !shouldEnable
+      this.setRequiredFieldHighlight(
+        this.hasFileUploadContainerTarget ? this.fileUploadContainerTarget : null,
+        false
+      )
+      this.setRequiredFieldHighlight(
+        this.hasPreparsingPanelTarget ? this.preparsingPanelTarget : null,
+        false
+      )
+    }
+  }
+
+  setRequiredFieldHighlight(el, missing) {
+    if (!el) return
+    const classes = ['border-red-500', 'dark:border-red-500', 'ring-2', 'ring-red-500', 'dark:ring-red-400']
+    classes.forEach((cls) => el.classList.toggle(cls, missing))
+    if (missing) {
+      el.setAttribute('aria-invalid', 'true')
+    } else {
+      el.removeAttribute('aria-invalid')
     }
   }
 
@@ -2921,6 +3030,7 @@ export default class extends Controller {
     this.cameFromArchive = false
     this.rdsMultipleAssays = false
     this.projectNameTouched = false
+    this.preparsingFileTitle = null
     
     // Reset preparsing state and stop background polls/subscriptions
     this.resetPreparsingState()
@@ -3004,6 +3114,10 @@ export default class extends Controller {
   }
 
   buildH5adGeneCellMetadataUI(summary) {
+    // ASAP v8+ uses native AnnData indices; this selector is only for legacy preparsing.
+    if (!this.currentLegacyPreparsingVersion()) {
+      return ''
+    }
     const datasets = Array.isArray(summary?.datasets) ? summary.datasets : []
     const ds = this.getEffectiveH5adMetadataDataset(datasets)
     const meta = this.collectH5adMetadataEntries(ds, summary)
@@ -3231,7 +3345,12 @@ export default class extends Controller {
     if (!this.form) return
     this.removeHiddenFieldByName('rowname_metadata')
     this.removeHiddenFieldByName('colname_metadata')
-    if (this.currentDetectedFormat !== 'H5AD') {
+    if (this.currentDetectedFormat !== 'H5AD' || !this.currentLegacyPreparsingVersion()) {
+      if (!this.currentLegacyPreparsingVersion()) {
+        this.parsingParams.rowname_metadata = ''
+        this.parsingParams.colname_metadata = ''
+        this.h5adMetadataChosenByUser = false
+      }
       return
     }
     const rowSel = this.preparsingResultTarget?.querySelector('#h5ad-rowname-metadata')

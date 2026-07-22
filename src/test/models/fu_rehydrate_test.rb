@@ -15,9 +15,9 @@ class FuRehydrateTest < TestBaseWithoutFixtures
   end
 
   test "resolve_for_project rehydrates missing fu row from project fus directory" do
-    user = User.create!(email: "rehydrate_#{SecureRandom.hex(4)}@example.com", password: "password123")
+    user = register_for_test_cleanup(User.create!(email: "rehydrate_#{SecureRandom.hex(4)}@example.com", password: "password123"))
     fu_id = 900_000 + SecureRandom.random_number(99_999)
-    project = Project.create!(
+    project = create_test_project!(
       name: "Rehydrate project",
       key: "reh#{SecureRandom.hex(3)}",
       user_id: user.id,
@@ -32,6 +32,7 @@ class FuRehydrateTest < TestBaseWithoutFixtures
 
     fu = Fu.resolve_for_project(project)
     assert fu, "Expected Fu to be rehydrated"
+    register_for_test_cleanup(fu)
     assert_equal fu_id, fu.id
     assert_equal "input_file.rds", fu.upload_file_name
     assert_equal project.id, fu.project_id

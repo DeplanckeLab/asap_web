@@ -11,14 +11,11 @@
           <% end %>
           <%= annot_metadata_type_label(@annot, @project) %> -
           <%= @annot.label.presence || format_annot_name(@annot.name) %>
+          <%= publication_visibility_badge(@project, @annot, full_read_access: !publication_snapshot_reader?(@project)) %>
           <% if @annot.imported %>
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-              Imported
-            </span>
+            <%= annot_imported_badge %>
           <% else %>
-            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-              ASAP pipeline
-            </span>
+            <%= annot_asap_pipeline_badge %>
           <% end %>
           <% if annot_storage_type_label(@annot, @project).present? %>
             <%= annot_matrix_type_badge(@annot, @project) %>
@@ -103,22 +100,19 @@
                   <%= dimension_badge(@annot.nber_rows, :row, @project) if @annot.nber_rows.present? %>
                   <%= dimension_badge_col_aligned_with_matrix(@annot.nber_cols, @annot.filepath, @project) if @annot.nber_cols.present? %>
                 <% else %>
-                  <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">Global</span>
+                  <%= annot_global_badge %>
                 <% end %>
               <% else %>
-                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                  Global
-                </span>
+                <%= annot_global_badge %>
               <% end %>
+              <%= categorical_categories_badge(@annot) %>
             </div>
           </div>
           <div id="annot-data-type">
             <span class="text-sm font-medium text-gray-500">Data Type</span>
             <div class="mt-2 flex items-center gap-2">
               <% if @annot.data_type %>
-                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                  <%= @annot.data_type.name %>
-                </span>
+                <%= annot_data_type_badge(@annot) %>
               <% else %>
                 <span class="text-sm text-gray-500">N/A</span>
               <% end %>
@@ -176,14 +170,10 @@
             <span class="text-sm font-medium text-gray-500">Data origin</span>
             <div class="mt-2">
               <% if @annot.imported %>
-                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
-                  Imported
-                </span>
+                <%= annot_imported_badge %>
                 <p class="mt-1 text-xs text-gray-500 mb-0">Present in the loom file before or outside the producing analysis run.</p>
               <% else %>
-                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                  ASAP pipeline
-                </span>
+                <%= annot_asap_pipeline_badge %>
                 <p class="mt-1 text-xs text-gray-500 mb-0">Registered from an analysis run in this project.</p>
               <% end %>
             </div>
@@ -418,10 +408,20 @@
         <%# Expression Matrix Distributions %>
         <% if @h_sums && @h_sums.any? %>
           <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h4 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <i class="fas fa-chart-bar text-blue-600"></i>
-              Distribution
-            </h4>
+            <div class="flex items-center justify-between mb-4">
+              <h4 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                <i class="fas fa-chart-bar text-blue-600"></i>
+                Distribution
+              </h4>
+              <label class="flex items-center gap-2 text-sm text-gray-600">
+                <span>Y-axis scale</span>
+                <select class="annot-y-scale-select border border-gray-300 rounded px-2 py-1 text-sm bg-white text-gray-700 cursor-pointer"
+                        data-plot-group="expression">
+                  <option value="linear">Linear</option>
+                  <option value="log" selected>Log</option>
+                </select>
+              </label>
+            </div>
             <div class="space-y-6">
               <% @h_sums.each_key do |k| %>
                 <% if @h_sums[k][:bin_counts] %>
@@ -439,21 +439,41 @@
       <% elsif @annot.data_type && (@annot.data_type.name == 'NUMERIC' || @annot.data_type_id == 1) && @bin_counts && @bin_counts.any? %>
         <%# Numerical Metadata Histogram %>
         <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h4 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <i class="fas fa-chart-bar text-blue-600"></i>
-            Distribution
-          </h4>
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <i class="fas fa-chart-bar text-blue-600"></i>
+              Distribution
+            </h4>
+            <label class="flex items-center gap-2 text-sm text-gray-600">
+              <span>Y-axis scale</span>
+              <select class="annot-y-scale-select border border-gray-300 rounded px-2 py-1 text-sm bg-white text-gray-700 cursor-pointer"
+                      data-plot-group="numeric">
+                <option value="linear">Linear</option>
+                <option value="log" selected>Log</option>
+              </select>
+            </label>
+          </div>
           <canvas id="plotly_histo" style="width: 100%; height: 400px;"></canvas>
         </div>
       <% elsif @annot.data_type && (@annot.data_type.name == 'CATEGORICAL' || @annot.data_type_id == 3) && @h_counts && @h_counts.any? %>
         <%# Categorical Metadata Bar Chart %>
         <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <h4 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <i class="fas fa-chart-bar text-blue-600"></i>
-            Distribution
-            <span class="text-sm font-normal text-gray-500">(Top 25 categories)</span>
-          </h4>
-          <div id="plotly_histo" style="height: 400px;"></div>
+          <div class="flex items-center justify-between mb-4">
+            <h4 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              <i class="fas fa-chart-bar text-blue-600"></i>
+              Distribution
+              <span class="text-sm font-normal text-gray-500">(Top 25 categories)</span>
+            </h4>
+            <label class="flex items-center gap-2 text-sm text-gray-600">
+              <span>Y-axis scale</span>
+              <select class="annot-y-scale-select border border-gray-300 rounded px-2 py-1 text-sm bg-white text-gray-700 cursor-pointer"
+                      data-plot-group="categorical">
+                <option value="linear">Linear</option>
+                <option value="log" selected>Log</option>
+              </select>
+            </label>
+          </div>
+          <canvas id="plotly_histo" style="width: 100%; height: 400px;"></canvas>
         </div>
       <% end %>
     </div>
@@ -492,260 +512,298 @@
 
 <%= javascript_tag do %>
 // Canvas-based chart rendering (matching CustomPlotManager style)
-function renderHistogram(canvasId, binCenters, binCounts, title, xLabel) {
-  const canvas = document.getElementById(canvasId);
-  if (!canvas) return;
-  
-  const ctx = canvas.getContext('2d');
-  const width = canvas.width = canvas.offsetWidth;
-  const height = canvas.height = canvas.offsetHeight || 400;
-  
-  // Clear canvas
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, width, height);
-  
-  // Padding (matching CustomPlotManager style)
-  const topPadding = 40;
-  const bottomPadding = 60;
-  const leftPadding = 60;
-  const rightPadding = 20;
-  const plotWidth = width - leftPadding - rightPadding;
-  const plotHeight = height - topPadding - bottomPadding;
-  
-  // Find max count for scaling
-  const maxCount = Math.max(...binCounts);
-  if (maxCount === 0) return;
-  
-  // Draw title
-  ctx.fillStyle = '#374151';
-  ctx.font = '14px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(title, width / 2, 20);
-  
-  // Draw axes (matching CustomPlotManager style)
-  const axisStroke = '#9ca3af';
+var annotPlotRegistry = {};
+
+function formatTickValue(val, maxCount) {
+  if (val === 0) return '0';
+  if (val < 0.01) return val.toExponential(1);
+  if (val === Math.floor(val)) return val.toString();
+  if (maxCount <= 1) return val.toFixed(2);
+  if (maxCount <= 10) return val.toFixed(1);
+  return Math.round(val).toString();
+}
+
+function generateLogYTicks(min, max, base) {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max <= 0 || min >= max) {
+    return [min, max].filter(function(v) { return v > 0; });
+  }
+  var ticks = [];
+  var startPower = Math.floor(Math.log(min) / Math.log(base));
+  var endPower = Math.ceil(Math.log(max) / Math.log(base));
+  for (var power = startPower; power <= endPower; power++) {
+    var tick = Math.pow(base, power);
+    if (tick >= min && tick <= max) {
+      ticks.push(tick);
+    }
+  }
+  if (ticks.length === 0) {
+    ticks.push(min, max);
+  }
+  return ticks;
+}
+
+function valueToBarHeight(value, maxCount, plotHeight, yLogScale) {
+  if (value <= 0) return 0;
+  if (!yLogScale) {
+    return (value / maxCount) * plotHeight;
+  }
+  if (maxCount <= 1) return plotHeight;
+  return (Math.log10(value) / Math.log10(maxCount)) * plotHeight;
+}
+
+function getYTickValues(maxCount, yLogScale, numYTicks) {
+  if (!yLogScale) {
+    var linearTicks = [];
+    for (var i = 0; i <= numYTicks; i++) {
+      linearTicks.push((maxCount / numYTicks) * i);
+    }
+    return linearTicks;
+  }
+  return generateLogYTicks(1, maxCount, 10);
+}
+
+function drawYAxis(ctx, options) {
+  var leftPadding = options.leftPadding;
+  var topPadding = options.topPadding;
+  var height = options.height;
+  var bottomPadding = options.bottomPadding;
+  var plotHeight = options.plotHeight;
+  var maxCount = options.maxCount;
+  var yLogScale = options.yLogScale;
+  var numYTicks = options.numYTicks || 5;
+  var axisStroke = '#9ca3af';
+
   ctx.strokeStyle = axisStroke;
   ctx.lineWidth = 1;
-  
-  // Y-axis
   ctx.beginPath();
   ctx.moveTo(leftPadding, topPadding);
   ctx.lineTo(leftPadding, height - bottomPadding);
   ctx.stroke();
-  
-  // X-axis
-  ctx.beginPath();
-  ctx.moveTo(leftPadding, height - bottomPadding);
-  ctx.lineTo(width - rightPadding, height - bottomPadding);
-  ctx.stroke();
-  
-  // Draw bars
-  const barWidth = plotWidth / binCenters.length;
-  ctx.fillStyle = '#3b82f6';
-  ctx.strokeStyle = '#2563eb';
-  ctx.lineWidth = 0.5;
-  
-  binCenters.forEach((center, i) => {
-    if (binCounts[i] > 0) {
-      const barHeight = (binCounts[i] / maxCount) * plotHeight;
-      const x = leftPadding + i * barWidth;
-      const y = height - bottomPadding - barHeight;
-      
-      ctx.fillRect(x, y, barWidth, barHeight);
-      ctx.strokeRect(x, y, barWidth, barHeight);
-    }
-  });
-  
-  // Draw x-axis label
+
   ctx.fillStyle = '#374151';
-  ctx.font = '13px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText(xLabel, width / 2, height - bottomPadding + 28);
-  
-  // Draw y-axis label
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+
+  var yTickValues = getYTickValues(maxCount, yLogScale, numYTicks);
+  yTickValues.forEach(function(value) {
+    var barHeight = valueToBarHeight(value, maxCount, plotHeight, yLogScale);
+    var y = height - bottomPadding - barHeight;
+
+    ctx.beginPath();
+    ctx.moveTo(leftPadding, y);
+    ctx.lineTo(leftPadding - 5, y);
+    ctx.stroke();
+
+    ctx.fillText(formatTickValue(value, maxCount), leftPadding - 8, y);
+  });
+
   ctx.save();
   ctx.translate(15, height / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = 'center';
-  ctx.fillText('Frequency', 0, 0);
-  ctx.restore();
-  
-  // Draw x-axis ticks and labels (matching CustomPlotManager style)
   ctx.fillStyle = '#374151';
+  ctx.font = '13px sans-serif';
+  ctx.fillText('Frequency' + (yLogScale ? ' (log)' : ''), 0, 0);
+  ctx.restore();
+}
+
+function renderHistogram(canvasId, binCenters, binCounts, title, xLabel, yLogScale) {
+  var canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+
+  var ctx = canvas.getContext('2d');
+  var width = canvas.width = canvas.offsetWidth;
+  var height = canvas.height = canvas.offsetHeight || 400;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+
+  var topPadding = 40;
+  var bottomPadding = 60;
+  var leftPadding = 60;
+  var rightPadding = 20;
+  var plotWidth = width - leftPadding - rightPadding;
+  var plotHeight = height - topPadding - bottomPadding;
+
+  var maxCount = Math.max.apply(null, binCounts);
+  if (maxCount === 0) return;
+
+  ctx.fillStyle = '#374151';
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(title, width / 2, 20);
+
+  var axisStroke = '#9ca3af';
+  ctx.strokeStyle = axisStroke;
+  ctx.lineWidth = 1;
+
+  drawYAxis(ctx, {
+    leftPadding: leftPadding,
+    topPadding: topPadding,
+    height: height,
+    bottomPadding: bottomPadding,
+    plotHeight: plotHeight,
+    maxCount: maxCount,
+    yLogScale: yLogScale
+  });
+
+  ctx.beginPath();
+  ctx.moveTo(leftPadding, height - bottomPadding);
+  ctx.lineTo(width - rightPadding, height - bottomPadding);
+  ctx.stroke();
+
+  var barWidth = plotWidth / binCenters.length;
+  ctx.fillStyle = '#3b82f6';
+  ctx.strokeStyle = '#2563eb';
+  ctx.lineWidth = 0.5;
+
+  binCenters.forEach(function(center, i) {
+    if (binCounts[i] > 0) {
+      var barHeight = valueToBarHeight(binCounts[i], maxCount, plotHeight, yLogScale);
+      var x = leftPadding + i * barWidth;
+      var y = height - bottomPadding - barHeight;
+
+      ctx.fillRect(x, y, barWidth, barHeight);
+      ctx.strokeRect(x, y, barWidth, barHeight);
+    }
+  });
+
+  ctx.fillStyle = '#374151';
+  ctx.font = '13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(xLabel, width / 2, height - bottomPadding + 28);
+
   ctx.font = '11px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  
-  const numXTicks = Math.min(10, binCenters.length);
-  for (let i = 0; i < numXTicks; i++) {
-    const idx = Math.floor((i / (numXTicks - 1)) * (binCenters.length - 1));
-    const x = leftPadding + idx * barWidth + barWidth / 2;
-    const value = binCenters[idx];
-    const label = typeof value === 'number' ? (value < 0.01 ? value.toExponential(1) : value.toFixed(2)) : value.toString();
-    
+
+  var numXTicks = Math.min(10, binCenters.length);
+  for (var i = 0; i < numXTicks; i++) {
+    var idx = Math.floor((i / (numXTicks - 1)) * (binCenters.length - 1));
+    var x = leftPadding + idx * barWidth + barWidth / 2;
+    var value = binCenters[idx];
+    var label = typeof value === 'number' ? (value < 0.01 ? value.toExponential(1) : value.toFixed(2)) : value.toString();
+
     ctx.beginPath();
     ctx.moveTo(x, height - bottomPadding);
     ctx.lineTo(x, height - bottomPadding + 5);
     ctx.stroke();
-    
+
     ctx.fillText(label, x, height - bottomPadding + 8);
-  }
-  
-  // Draw y-axis ticks (matching CustomPlotManager style)
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'middle';
-  const numYTicks = 5;
-  
-  // Format tick values to avoid duplicates and show proper decimals
-  const formatTickValue = (val) => {
-    if (val === 0) return '0';
-    if (val < 0.01) return val.toExponential(1);
-    if (val === Math.floor(val)) return val.toString();
-    // Show decimals based on the value range
-    if (maxCount <= 1) return val.toFixed(2);
-    if (maxCount <= 10) return val.toFixed(1);
-    return Math.round(val).toString();
-  };
-  
-  for (let i = 0; i <= numYTicks; i++) {
-    const value = (maxCount / numYTicks) * i;
-    const y = height - bottomPadding - (i / numYTicks) * plotHeight;
-    
-    ctx.beginPath();
-    ctx.moveTo(leftPadding, y);
-    ctx.lineTo(leftPadding - 5, y);
-    ctx.stroke();
-    
-    const label = formatTickValue(value);
-    ctx.fillText(label, leftPadding - 8, y);
   }
 }
 
-function renderBarChart(canvasId, categories, counts, title, xLabel) {
-  const canvas = document.getElementById(canvasId);
+function renderBarChart(canvasId, categories, counts, title, xLabel, yLogScale) {
+  var canvas = document.getElementById(canvasId);
   if (!canvas) return;
-  
-  const ctx = canvas.getContext('2d');
-  const width = canvas.width = canvas.offsetWidth;
-  const height = canvas.height = canvas.offsetHeight || 400;
-  
-  // Clear canvas
+
+  var ctx = canvas.getContext('2d');
+  var width = canvas.width = canvas.offsetWidth;
+  var height = canvas.height = canvas.offsetHeight || 400;
+
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
-  
-  // Padding (matching CustomPlotManager style)
-  const topPadding = 40;
-  const bottomPadding = 100;
-  const leftPadding = 60;
-  const rightPadding = 20;
-  const plotWidth = width - leftPadding - rightPadding;
-  const plotHeight = height - topPadding - bottomPadding;
-  
-  // Find max count for scaling
-  const maxCount = Math.max(...counts);
+
+  var topPadding = 40;
+  var bottomPadding = 100;
+  var leftPadding = 60;
+  var rightPadding = 20;
+  var plotWidth = width - leftPadding - rightPadding;
+  var plotHeight = height - topPadding - bottomPadding;
+
+  var maxCount = Math.max.apply(null, counts);
   if (maxCount === 0) return;
-  
-  // Draw title
+
   ctx.fillStyle = '#374151';
   ctx.font = '14px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText(title, width / 2, 20);
-  
-  // Draw axes (matching CustomPlotManager style)
-  const axisStroke = '#9ca3af';
+
+  var axisStroke = '#9ca3af';
   ctx.strokeStyle = axisStroke;
   ctx.lineWidth = 1;
-  
-  // Y-axis
-  ctx.beginPath();
-  ctx.moveTo(leftPadding, topPadding);
-  ctx.lineTo(leftPadding, height - bottomPadding);
-  ctx.stroke();
-  
-  // X-axis
+
+  drawYAxis(ctx, {
+    leftPadding: leftPadding,
+    topPadding: topPadding,
+    height: height,
+    bottomPadding: bottomPadding,
+    plotHeight: plotHeight,
+    maxCount: maxCount,
+    yLogScale: yLogScale
+  });
+
   ctx.beginPath();
   ctx.moveTo(leftPadding, height - bottomPadding);
   ctx.lineTo(width - rightPadding, height - bottomPadding);
   ctx.stroke();
-  
-  // Draw bars
-  const barWidth = (plotWidth / categories.length) * 0.8;
-  const barSpacing = (plotWidth / categories.length) * 0.2;
+
+  var barWidth = (plotWidth / categories.length) * 0.8;
+  var barSpacing = (plotWidth / categories.length) * 0.2;
   ctx.fillStyle = '#3b82f6';
   ctx.strokeStyle = '#2563eb';
   ctx.lineWidth = 0.5;
-  
-  categories.forEach((category, i) => {
+
+  categories.forEach(function(category, i) {
     if (counts[i] > 0) {
-      const barHeight = (counts[i] / maxCount) * plotHeight;
-      const x = leftPadding + i * (barWidth + barSpacing) + barSpacing / 2;
-      const y = height - bottomPadding - barHeight;
-      
+      var barHeight = valueToBarHeight(counts[i], maxCount, plotHeight, yLogScale);
+      var x = leftPadding + i * (barWidth + barSpacing) + barSpacing / 2;
+      var y = height - bottomPadding - barHeight;
+
       ctx.fillRect(x, y, barWidth, barHeight);
       ctx.strokeRect(x, y, barWidth, barHeight);
     }
   });
-  
-  // Draw x-axis label
+
   ctx.fillStyle = '#374151';
   ctx.font = '13px sans-serif';
   ctx.textAlign = 'center';
   ctx.fillText(xLabel, width / 2, height - bottomPadding + 28);
-  
-  // Draw y-axis label
-  ctx.save();
-  ctx.translate(15, height / 2);
-  ctx.rotate(-Math.PI / 2);
-  ctx.textAlign = 'center';
-  ctx.fillText('Frequency', 0, 0);
-  ctx.restore();
-  
-  // Draw category labels (rotated, matching CustomPlotManager style)
-  ctx.fillStyle = '#374151';
+
   ctx.font = '10px sans-serif';
-  categories.forEach((category, i) => {
-    const x = leftPadding + i * (barWidth + barSpacing) + barSpacing / 2 + barWidth / 2;
-    const y = height - bottomPadding + 8;
-    
+  categories.forEach(function(category, i) {
+    var x = leftPadding + i * (barWidth + barSpacing) + barSpacing / 2 + barWidth / 2;
+    var y = height - bottomPadding + 8;
+
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(-Math.PI / 4);
     ctx.textAlign = 'right';
-    const label = category.length > 15 ? category.substring(0, 12) + '...' : category;
+    var label = category.length > 15 ? category.substring(0, 12) + '...' : category;
     ctx.fillText(label, 0, 0);
     ctx.restore();
   });
-  
-  // Draw y-axis ticks (matching CustomPlotManager style)
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'middle';
-  const numYTicks = 5;
-  
-  // Format tick values to avoid duplicates and show proper decimals
-  const formatTickValue = (val) => {
-    if (val === 0) return '0';
-    if (val < 0.01) return val.toExponential(1);
-    if (val === Math.floor(val)) return val.toString();
-    // Show decimals based on the value range
-    if (maxCount <= 1) return val.toFixed(2);
-    if (maxCount <= 10) return val.toFixed(1);
-    return Math.round(val).toString();
-  };
-  
-  for (let i = 0; i <= numYTicks; i++) {
-    const value = (maxCount / numYTicks) * i;
-    const y = height - bottomPadding - (i / numYTicks) * plotHeight;
-    
-    ctx.beginPath();
-    ctx.moveTo(leftPadding, y);
-    ctx.lineTo(leftPadding - 5, y);
-    ctx.stroke();
-    
-    const label = formatTickValue(value);
-    ctx.fillText(label, leftPadding - 8, y);
+}
+
+function registerAnnotPlot(group, plotConfig) {
+  if (!annotPlotRegistry[group]) {
+    annotPlotRegistry[group] = [];
   }
+  annotPlotRegistry[group].push(plotConfig);
+}
+
+function renderAnnotPlotGroup(group, yLogScale) {
+  var plots = annotPlotRegistry[group] || [];
+  plots.forEach(function(plot) {
+    if (plot.type === 'histogram') {
+      renderHistogram(plot.canvasId, plot.binCenters, plot.binCounts, plot.title, plot.xLabel, yLogScale);
+    } else if (plot.type === 'bar') {
+      renderBarChart(plot.canvasId, plot.categories, plot.counts, plot.title, plot.xLabel, yLogScale);
+    }
+  });
+}
+
+function initAnnotYScaleControls() {
+  document.querySelectorAll('.annot-y-scale-select').forEach(function(select) {
+    var group = select.getAttribute('data-plot-group');
+    renderAnnotPlotGroup(group, select.value === 'log');
+    select.addEventListener('change', function() {
+      renderAnnotPlotGroup(group, select.value === 'log');
+    });
+  });
 }
 
 <% if @annot.dim == 3 %>
@@ -756,7 +814,14 @@ function renderBarChart(canvasId, categories, counts, title, xLabel) {
         var binCenters = <%= raw (0..@h_sums[k][:bin_counts].size - 1).map { |bin_i| @h_sums[k][:min] + bin_i * @h_sums[k][:bin_size] }.to_json %>;
         var binCounts = <%= raw @h_sums[k][:bin_counts].to_json %>;
         var title = '<%= (k == :sum) ? "Distribution of total counts by " + row_label(@project, plural: false) : "Distribution of total counts by " + col_label(@project, plural: false) %>';
-        renderHistogram('plotly_histo_<%= k %>', binCenters, binCounts, title, 'Count');
+        registerAnnotPlot('expression', {
+          type: 'histogram',
+          canvasId: 'plotly_histo_<%= k %>',
+          binCenters: binCenters,
+          binCounts: binCounts,
+          title: title,
+          xLabel: 'Count'
+        });
       })();
     <% end %>
   <% end %>
@@ -765,9 +830,14 @@ function renderBarChart(canvasId, categories, counts, title, xLabel) {
   (function() {
     var binCenters = <%= raw (0..@bin_counts.size - 1).map { |bin_i| @min + bin_i * @bin_size }.to_json %>;
     var binCounts = <%= raw @bin_counts.to_json %>;
-    var title = 'Value Distribution';
-    var xLabel = '<%= format_annot_name(@annot.name) %>';
-    renderHistogram('plotly_histo', binCenters, binCounts, title, xLabel);
+    registerAnnotPlot('numeric', {
+      type: 'histogram',
+      canvasId: 'plotly_histo',
+      binCenters: binCenters,
+      binCounts: binCounts,
+      title: 'Value Distribution',
+      xLabel: '<%= format_annot_name(@annot.name) %>'
+    });
   })();
 <% elsif @annot.data_type && (@annot.data_type.name == 'CATEGORICAL' || @annot.data_type_id == 3) && @h_counts && @h_counts.any? %>
   <%# Categorical Metadata Bar Chart %>
@@ -775,11 +845,18 @@ function renderBarChart(canvasId, categories, counts, title, xLabel) {
   (function() {
     var categories = <%= raw ordered_keys.to_json %>;
     var counts = <%= raw ordered_keys.map { |k| @h_counts[k] }.to_json %>;
-    var title = 'Category Distribution';
-    var xLabel = '<%= format_annot_name(@annot.name) %>';
-    renderBarChart('plotly_histo', categories, counts, title, xLabel);
+    registerAnnotPlot('categorical', {
+      type: 'bar',
+      canvasId: 'plotly_histo',
+      categories: categories,
+      counts: counts,
+      title: 'Category Distribution',
+      xLabel: '<%= format_annot_name(@annot.name) %>'
+    });
   })();
 <% end %>
+
+initAnnotYScaleControls();
 
 <% if @sim_step_options && @annot.imported? %>
 (function() {

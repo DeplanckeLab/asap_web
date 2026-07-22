@@ -357,6 +357,23 @@ module ProjectsHelper
                 class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200')
   end
 
+  def annot_asap_pipeline_badge
+    content_tag(:span, 'ASAP pipeline',
+                class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200')
+  end
+
+  def annot_global_badge
+    content_tag(:span, 'Global',
+                class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200')
+  end
+
+  def annot_data_type_badge(annot)
+    return '' unless annot&.data_type
+
+    content_tag(:span, annot.data_type.name,
+                class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200')
+  end
+
   def annot_matrix_type_badge(annot, project = nil)
     label = annot_storage_type_label(annot, project)
     return '' if label.blank?

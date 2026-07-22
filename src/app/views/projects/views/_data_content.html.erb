@@ -85,15 +85,9 @@
                       <%= dimension_badge(matrix_nber_rows, :row, @project) if matrix_nber_rows %>
                       <%= component_dimension_badge(annot.nber_cols) %>
                     <% else %>
-                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                        Global
-                      </span>
+                      <%= annot_global_badge %>
                     <% end %>
-                    <% if annot.data_type %>
-                      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200">
-                        <%= annot.data_type.name %>
-                      </span>
-                    <% end %>
+                    <%= annot_data_type_badge(annot) %>
                     <% if annot_storage_type_label(annot, @project).present? %>
                       <%= annot_matrix_type_badge(annot, @project) %>
                     <% end %>

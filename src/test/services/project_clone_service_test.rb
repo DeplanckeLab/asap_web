@@ -15,20 +15,20 @@ class ProjectCloneServiceTest < TestBaseWithoutFixtures
   end
 
   test "clone keeps shared fu_id and copies fus directory under new project key" do
-    user = User.create!(email: "clone_fu_#{SecureRandom.hex(4)}@example.com", password: "password123")
-    source = Project.create!(
+    user = register_for_test_cleanup(User.create!(email: "clone_fu_#{SecureRandom.hex(4)}@example.com", password: "password123"))
+    source = create_test_project!(
       name: "Source project",
       key: "src#{SecureRandom.hex(3)}",
       user_id: user.id
     )
-    source_fu = Fu.create!(
+    source_fu = register_for_test_cleanup(Fu.create!(
       project_id: source.id,
       project_key: source.key,
       user_id: user.id,
       upload_file_name: "input_file.rds",
       upload_file_size: 4,
       status: "completed"
-    )
+    ))
     source.update_columns(fu_id: source_fu.id)
 
     source_upload_dir = source_fu.upload_dir
@@ -42,6 +42,7 @@ class ProjectCloneServiceTest < TestBaseWithoutFixtures
     service = ProjectCloneService.new(source, user: user, session: {})
     clone = service.call
     assert clone, "Expected clone to succeed: #{service.errors.inspect}"
+    register_for_test_cleanup(clone)
 
     assert_equal source_fu.id, clone.fu_id
     clone_upload_dir = source_fu.upload_dir_for_project(clone)
@@ -50,8 +51,8 @@ class ProjectCloneServiceTest < TestBaseWithoutFixtures
   end
 
   test "clone assigns a unique key even when source and clone share an owner" do
-    user = User.create!(email: "clone_key_#{SecureRandom.hex(4)}@example.com", password: "password123")
-    source = Project.create!(
+    user = register_for_test_cleanup(User.create!(email: "clone_key_#{SecureRandom.hex(4)}@example.com", password: "password123"))
+    source = create_test_project!(
       name: "Source project",
       key: "src#{SecureRandom.hex(3)}",
       user_id: user.id
@@ -63,20 +64,21 @@ class ProjectCloneServiceTest < TestBaseWithoutFixtures
     service = ProjectCloneService.new(source, user: user, session: {})
     clone = service.call
     assert clone, "Expected clone to succeed: #{service.errors.inspect}"
+    register_for_test_cleanup(clone)
 
     assert_not_equal source.key, clone.key
     assert_not Project.where(key: source.key).where.not(id: source.id).exists?
   end
 
   test "upload_dir_for_project uses clone path when fu row points at source project" do
-    user = User.create!(email: "fu_scope_#{SecureRandom.hex(4)}@example.com", password: "password123")
-    source = Project.create!(name: "Scope source", key: "scp#{SecureRandom.hex(3)}", user_id: user.id)
-    fu = Fu.create!(
+    user = register_for_test_cleanup(User.create!(email: "fu_scope_#{SecureRandom.hex(4)}@example.com", password: "password123"))
+    source = create_test_project!(name: "Scope source", key: "scp#{SecureRandom.hex(3)}", user_id: user.id)
+    fu = register_for_test_cleanup(Fu.create!(
       project_id: source.id,
       project_key: source.key,
       upload_file_name: "input_file.rds"
-    )
-    clone = Project.create!(
+    ))
+    clone = create_test_project!(
       name: "Scope clone",
       key: "cln#{SecureRandom.hex(3)}",
       user_id: user.id,

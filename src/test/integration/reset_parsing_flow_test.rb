@@ -38,6 +38,8 @@ class ResetParsingFlowTest < ActionDispatch::IntegrationTest
   end
 
   teardown do
+    Fu.where(project_id: @project.id).find_each(&:destroy!) if @project&.persisted?
+    @project&.destroy!
     ENV["UPLOAD_DATA_DIR"] = @previous_upload_data_dir
     ENV["USER_DATA_DIR"] = @previous_user_data_dir
     FileUtils.rm_rf(@tmp_root) if @tmp_root.present?

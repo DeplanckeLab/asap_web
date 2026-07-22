@@ -52,13 +52,13 @@ class ProjectCloneService
     @new_project = source_project.dup
     
     if user
-      @new_project.key = generate_unique_key
       @new_project.sandbox = false
     else
-      # Sandbox mode for non-logged-in users
-      @new_project.key = session[:sandbox]
       @new_project.sandbox = true
     end
+
+    @new_project.key = Project.generate_unique_key
+    session[:sandbox] = @new_project.key if user.nil?
     
     now = Time.current
     
@@ -100,13 +100,6 @@ class ProjectCloneService
                            .filter_map { |n| n[/cloned\s*\[(\d+)\]$/, 1]&.to_i }
     max_num = ([repeated] + existing_nums).max || 0
     "#{base} cloned [#{max_num + 1}]"
-  end
-
-  def generate_unique_key
-    loop do
-      key = Array.new(6) { [*'0'..'9', *'a'..'z'].sample }.join
-      return key unless Project.exists?(key: key)
-    end
   end
 
   def create_project_directory

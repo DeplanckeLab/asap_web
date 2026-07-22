@@ -17,9 +17,9 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states spatial_data spatial_image]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states spatial_data spatial_image]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
@@ -830,10 +830,7 @@ class ProjectsController < ApplicationController
     
     # Generate unique project key only for signed-in users if not provided.
     unless @project.key.present?
-      loop do
-        @project.key = SecureRandom.alphanumeric(7).downcase
-        break unless Project.exists?(key: @project.key)
-      end
+      @project.key = Project.generate_unique_key
     end
     
     # Get version and docker image info
@@ -6690,6 +6687,18 @@ class ProjectsController < ApplicationController
     }
 
     render json: counts
+  end
+
+  # GET /projects/:id/unarchive_status
+  # Lightweight polling endpoint used by the unarchive pending overlay as a
+  # fallback when the ActionCable completion broadcast is missed (e.g. the
+  # unarchive job finished before the browser subscribed, or the WebSocket
+  # never connected).
+  def unarchive_status
+    render json: {
+      project_id: @project.id,
+      unarchive_status: @project.unarchive_client_state
+    }
   end
 
   # POST /projects/:id/restart_step

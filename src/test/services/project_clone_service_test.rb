@@ -49,6 +49,25 @@ class ProjectCloneServiceTest < TestBaseWithoutFixtures
            "Expected cloned upload file at #{clone_upload_dir}"
   end
 
+  test "clone assigns a unique key even when source and clone share an owner" do
+    user = User.create!(email: "clone_key_#{SecureRandom.hex(4)}@example.com", password: "password123")
+    source = Project.create!(
+      name: "Source project",
+      key: "src#{SecureRandom.hex(3)}",
+      user_id: user.id
+    )
+
+    source_dir = Pathname.new(ENV["USER_DATA_DIR"]) + user.id.to_s + source.key
+    FileUtils.mkdir_p(source_dir)
+
+    service = ProjectCloneService.new(source, user: user, session: {})
+    clone = service.call
+    assert clone, "Expected clone to succeed: #{service.errors.inspect}"
+
+    assert_not_equal source.key, clone.key
+    assert_not Project.where(key: source.key).where.not(id: source.id).exists?
+  end
+
   test "upload_dir_for_project uses clone path when fu row points at source project" do
     user = User.create!(email: "fu_scope_#{SecureRandom.hex(4)}@example.com", password: "password123")
     source = Project.create!(name: "Scope source", key: "scp#{SecureRandom.hex(3)}", user_id: user.id)

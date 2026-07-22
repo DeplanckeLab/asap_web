@@ -4,6 +4,8 @@ class Project < ApplicationRecord
   include Elasticsearch::Model
   include Elasticsearch::Model::Callbacks
   before_save :sanitize_non_raw_text_parsing_attrs!
+
+  validates :key, presence: true, uniqueness: { case_sensitive: true }
   # Remove fus rows first (raw delete). Upload rows must not block project delete if
   # association-dependent cleanup is skipped or the running app is an older image.
   before_destroy :purge_fus_for_project_destroy!, prepend: true
@@ -152,6 +154,14 @@ class Project < ApplicationRecord
     return embedded if embedded
 
     public_projects.order(:id).first || order(:id).first
+  end
+
+  # Generate a project key that is unique across all projects (filesystem paths and URLs rely on this).
+  def self.generate_unique_key
+    loop do
+      key = Array.new(6) { [*"0".."9", *"a".."z"].sample }.join
+      return key unless exists?(key: key)
+    end
   end
 
   # Canonical root of a clone lineage (+cloned_project_id+ chain). Used when creating a new clone.
@@ -493,6 +503,25 @@ class Project < ApplicationRecord
 
   def being_unarchived?
     archive_status_id == 4
+  end
+
+  # Client-facing unarchive state derived from the database and filesystem truth.
+  # Used by the ProjectChannel initial snapshot and the unarchive_status polling
+  # endpoint so the unarchive pending overlay can recover when the one-shot
+  # ActionCable completion broadcast is missed (e.g. the job finished before the
+  # browser subscribed).
+  def unarchive_client_state
+    case archive_status_id
+    when 2
+      'archiving'
+    when 3
+      'archived'
+    when 4
+      archive_file = archive_file_path
+      archive_file.exist? && archive_file.size.to_i.positive? ? 'unpacking' : 'in_progress'
+    else
+      filesystem_project_data_present? ? 'completed' : 'archived'
+    end
   end
 
   # UI: +archive_status_id+ is what jobs and Basic.unarchive use. Rows in +archive_statuses+ can have

@@ -66,6 +66,14 @@ class ProjectChannel < ApplicationCable::Channel
       initial_snapshot: true
     }
 
+    # Only the unarchive pending overlay subscribes with unarchive_watch. Including
+    # the current unarchive state in its snapshot lets the overlay recover when the
+    # job completed before the browser was subscribed (missed one-shot broadcast).
+    # Deliberately no :project_unarchived key: header_run_status_controller reloads
+    # on it, which would loop on every subscribe.
+    # Computed only on demand because it can shell out to `du` on the project dir.
+    payload[:unarchive_status] = project.unarchive_client_state if params[:unarchive_watch]
+
     transmit(payload)
   rescue => e
     Rails.logger.warn("[ProjectChannel] failed to transmit initial snapshot for project #{project_id}: #{e.class} - #{e.message}")

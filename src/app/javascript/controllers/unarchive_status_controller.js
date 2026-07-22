@@ -6,19 +6,25 @@ export default class extends Controller {
   static values = { projectId: Number, initialState: String }
 
   connect() {
+    this.reloadScheduled = false
     this.applyState(this.initialStateValue || "queued")
     this.subscribe()
+    this.startPolling()
   }
 
   disconnect() {
     this.unsubscribe()
+    this.stopPolling()
   }
 
   subscribe() {
     if (!this.projectIdValue) return
 
+    // unarchive_watch tells ProjectChannel to include the current unarchive
+    // state in its initial snapshot, so a completion that happened before the
+    // subscription was established is not lost.
     this.subscription = consumer.subscriptions.create(
-      { channel: "ProjectChannel", project_id: this.projectIdValue },
+      { channel: "ProjectChannel", project_id: this.projectIdValue, unarchive_watch: true },
       {
         connected: () => {
           console.log(`[UnarchiveStatus] subscribed project=${this.projectIdValue}`)
@@ -54,8 +60,59 @@ export default class extends Controller {
     }
 
     if (data.project_unarchived === true || data.unarchive_status === "completed") {
-      setTimeout(() => window.location.reload(), 600)
+      this.scheduleReload()
     }
+  }
+
+  scheduleReload() {
+    if (this.reloadScheduled) return
+    this.reloadScheduled = true
+    this.stopPolling()
+    setTimeout(() => window.location.reload(), 600)
+  }
+
+  // Slow polling fallback: the WebSocket broadcast is the fast path, but it is
+  // a one-shot message. If it is missed (job finished before the subscription
+  // was up, dropped connection, rejected subscription), this poll detects the
+  // terminal state from the server and recovers.
+  startPolling() {
+    if (!this.projectIdValue) return
+
+    this.pollTimer = setInterval(() => this.pollStatus(), 5000)
+  }
+
+  stopPolling() {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer)
+      this.pollTimer = null
+    }
+  }
+
+  pollStatus() {
+    if (this.reloadScheduled) return
+
+    fetch(`/projects/${this.projectIdValue}/unarchive_status`, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      credentials: "same-origin"
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        return response.json()
+      })
+      .then((data) => {
+        console.log(`[UnarchiveStatus] poll project=${this.projectIdValue}`, data)
+        if (data.unarchive_status === "completed") {
+          this.applyState("completed")
+          this.scheduleReload()
+        }
+      })
+      .catch((error) => {
+        console.warn(`[UnarchiveStatus] poll failed project=${this.projectIdValue}:`, error)
+      })
   }
 
   applyState(state) {

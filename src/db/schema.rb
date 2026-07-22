@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_29_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_22_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -1100,6 +1100,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_29_130000) do
     t.integer "version_id"
     t.datetime "viewed_at", precision: nil, default: -> { "now()" }
     t.text "write_access"
+    t.index ["key"], name: "index_projects_on_key_unique", unique: true, where: "((key IS NOT NULL) AND (key <> ''::text))"
     t.index ["root_project_id"], name: "index_projects_on_root_project_id"
   end
 

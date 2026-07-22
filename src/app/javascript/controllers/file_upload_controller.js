@@ -61,6 +61,7 @@ export default class extends Controller {
     this.hasMatrixData = false  // Track if we have actual matrix/dataset data
     this.selectedDatasetIndex = null
     this.selectedDatasetName = null
+    this.showingDatasetPicker = true  // Multi-dataset list vs selected-details view
     this.selectedFileIndex = null
     this.selectedFileName = null
     this.selectedArchiveEntry = null  // Full archive member path for sel (e.g. folder/file.txt)
@@ -844,6 +845,7 @@ export default class extends Controller {
     }
     this.selectedDatasetIndex = null
     this.selectedDatasetName = null
+    this.showingDatasetPicker = true
     this.selectedFileIndex = null
     this.selectedFileName = null
     this.hasMatrixData = false
@@ -1283,7 +1285,8 @@ export default class extends Controller {
       }
     }
 
-    if (detectedFormat === 'H5AD') {
+    const datasetDetailsVisible = this.isDatasetDetailsVisible(datasets)
+    if (detectedFormat === 'H5AD' && datasetDetailsVisible) {
       html += this.buildH5adGeneCellMetadataUI(summary)
     }
 
@@ -1401,7 +1404,7 @@ export default class extends Controller {
     if (detectedFormat === 'RAW_TEXT') {
       this.setupParsingParametersHandlers()
     }
-    if (detectedFormat === 'H5AD') {
+    if (detectedFormat === 'H5AD' && this.isDatasetDetailsVisible(datasets)) {
       this.setupH5adMetadataHandlers()
       this.syncH5adMetadataHiddenFields()
     }
@@ -1595,6 +1598,32 @@ export default class extends Controller {
   }
 
   buildDatasetSelectionUI(datasets, detectedFormat) {
+    const hasSelection =
+      this.selectedDatasetIndex !== null &&
+      this.selectedDatasetIndex >= 0 &&
+      this.selectedDatasetIndex < datasets.length
+    const showPicker = !hasSelection || this.showingDatasetPicker
+
+    if (!showPicker) {
+      const selectedDataset = datasets[this.selectedDatasetIndex]
+      const title = this.getDatasetCardLabel(selectedDataset, detectedFormat, this.selectedDatasetIndex)
+      return `
+        <div class="mb-4">
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <h3 class="text-lg font-semibold text-gray-900 dark:text-white min-w-0 break-words">${this.escapeHtml(title)}</h3>
+            <button
+              type="button"
+              id="select-another-dataset-btn"
+              class="shrink-0 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+            >
+              Select another dataset
+            </button>
+          </div>
+          ${this.buildDatasetCard(selectedDataset, detectedFormat, this.selectedDatasetIndex, { hideHeader: true })}
+        </div>
+      `
+    }
+
     const isArchiveFormat = this.isArchivePreparsingFormat(detectedFormat)
     const datasetMessage = isArchiveFormat
       ? 'Multiple datasets found in this archive. Please select one to proceed:'
@@ -1661,35 +1690,13 @@ export default class extends Controller {
     
     html += `
       </div>
-      <div class="flex justify-end">
-        <button 
-          type="button"
-          class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-          id="select-dataset-btn"
-          ${this.selectedDatasetIndex === null ? 'disabled' : ''}
-        >
-          Process Selected Dataset
-        </button>
-      </div>
     `
-    
-    // Show selected dataset details if one is already selected
-    if (this.selectedDatasetIndex !== null && this.selectedDatasetIndex >= 0 && this.selectedDatasetIndex < datasets.length) {
-      html += `
-        <div class="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
-          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Selected Dataset Details</h3>
-          ${this.buildDatasetCard(datasets[this.selectedDatasetIndex], detectedFormat, this.selectedDatasetIndex)}
-        </div>
-      `
-    }
     
     return html
   }
 
   setupDatasetSelectionHandlers(datasets, detectedFormat) {
-    // Handle radio button clicks
     const radioButtons = this.preparsingResultTarget.querySelectorAll('input[name="dataset_selection"]')
-    const selectButton = this.preparsingResultTarget.querySelector('#select-dataset-btn')
     
     radioButtons.forEach(radio => {
       radio.addEventListener('change', (e) => {
@@ -1697,42 +1704,29 @@ export default class extends Controller {
         const dataset = datasets[index]
         const previousSelection = this.selectedDatasetName || this.selectedArchiveEntry
         this.selectedDatasetIndex = index
+        this.showingDatasetPicker = false
         const datasetDisplayName = this.getDatasetDisplayName(dataset)
         this.selectedDatasetName = datasetDisplayName || dataset?.name || dataset?.group || null
         this.maybeSetProjectNameFromDataset(this.selectedDatasetName, previousSelection, {
           detectedFormat,
           multipleAssays: datasets.length > 1
         })
-        
-        // Update UI to highlight selected option
-        const options = this.preparsingResultTarget.querySelectorAll('.dataset-option')
-        options.forEach((option, optIndex) => {
-          if (optIndex === index) {
-            option.classList.remove('border-gray-200', 'dark:border-gray-700')
-            option.classList.add('border-blue-500', 'bg-blue-50', 'dark:bg-blue-900/30')
-          } else {
-            option.classList.remove('border-blue-500', 'bg-blue-50', 'dark:bg-blue-900/30')
-            option.classList.add('border-gray-200', 'dark:border-gray-700')
-          }
+        this.updateHiddenDimensions({
+          nber_rows: dataset?.gene_count,
+          nber_cols: dataset?.cell_count
         })
-        
-        // Enable select button
-        if (selectButton) {
-          selectButton.disabled = false
-        }
+        this.syncSelectedDatasetInput()
 
-        if (detectedFormat === 'H5AD' && this.preparsingResultData) {
+        if (this.preparsingResultData) {
           const pr = this.preparsingResultData
           this.renderPreparsingResult(pr.summary, pr.warnings, pr.rawData)
         }
       })
     })
     
-    // Handle click on dataset option divs (not just radio buttons)
     const options = this.preparsingResultTarget.querySelectorAll('.dataset-option')
     options.forEach(option => {
       option.addEventListener('click', (e) => {
-        // Don't trigger if clicking on the radio button itself
         if (e.target.type !== 'radio') {
           const radio = option.querySelector('input[type="radio"]')
           if (radio) {
@@ -1742,31 +1736,15 @@ export default class extends Controller {
         }
       })
     })
-    
-    // Handle "Process Selected Dataset" button click
-    if (selectButton) {
-      selectButton.addEventListener('click', async () => {
-        if (this.selectedDatasetIndex === null || !this.fuId) return
-        
-        const selectedDataset = datasets[this.selectedDatasetIndex]
-        const datasetName = selectedDataset?.name
-        
-        if (!datasetName) {
-          alert('Error: Could not determine dataset name. Please try again.')
-          return
+
+    const selectAnotherBtn = this.preparsingResultTarget.querySelector('#select-another-dataset-btn')
+    if (selectAnotherBtn) {
+      selectAnotherBtn.addEventListener('click', () => {
+        this.showingDatasetPicker = true
+        if (this.preparsingResultData) {
+          const pr = this.preparsingResultData
+          this.renderPreparsingResult(pr.summary, pr.warnings, pr.rawData)
         }
-        
-        // Store selected dataset/filename without extension for dataset label
-        let selectedNameWithoutExt = datasetName
-        const lastDotIndex = selectedNameWithoutExt.lastIndexOf('.')
-        if (lastDotIndex > 0) {
-          selectedNameWithoutExt = selectedNameWithoutExt.substring(0, lastDotIndex)
-        }
-        this.originalFilename = selectedNameWithoutExt
-        
-        // Re-run preparsing with selected dataset
-        const previousSelection = this.selectedDatasetName || this.selectedArchiveEntry
-        await this.rerunPreparsingWithDataset(datasetName, previousSelection)
       })
     }
   }
@@ -1780,10 +1758,8 @@ export default class extends Controller {
     })
     this.setPreparsingStatus(`Re-running preparsing for: ${this.escapeHtml(datasetName)}...`, 'info', true)
     
-    // Disable the select button during processing (could be dataset or archive file button)
-    const selectDatasetButton = this.preparsingResultTarget.querySelector('#select-dataset-btn')
-    const selectArchiveButton = this.preparsingResultTarget.querySelector('#select-archive-file-btn')
-    const selectButton = selectDatasetButton || selectArchiveButton
+    // Disable archive file selection button during processing (if present)
+    const selectButton = this.preparsingResultTarget.querySelector('#select-archive-file-btn')
     const originalButtonText = selectButton ? selectButton.textContent : null
     
     if (selectButton) {
@@ -1904,24 +1880,11 @@ export default class extends Controller {
     return parts.length > 0 ? parts.join(' ') : '0s'
   }
 
-  buildDatasetCard(dataset, detectedFormat, index) {
+  buildDatasetCard(dataset, detectedFormat, index, options = {}) {
+    const hideHeader = options.hideHeader === true
     const datasetName = this.getDatasetDisplayName(dataset)
     const multipleAssays = detectedFormat === 'RDS' && this.rdsMultipleAssays
-
-    let label = this.datasetDisplayLabel(detectedFormat, datasetName, { multipleAssays })
-      || this.originalFilename
-      || `Dataset ${index + 1}`
-    
-    // Always remove extension from label for display
-    // Skip if it's the default "Dataset X" label
-    if (detectedFormat !== 'RDS' && label && label !== `Dataset ${index + 1}`) {
-      const hasSlash = label.includes('/')
-      const hasExtension = label.includes('.')
-      // Remove extension if it exists and there's no slash (path separator)
-      if (!hasSlash && hasExtension) {
-        label = label.replace(/\.[^.]+$/, '')
-      }
-    }
+    const label = this.getDatasetCardLabel(dataset, detectedFormat, index)
     const cells = this.formatNumber(dataset?.cell_count)
     const genes = this.formatNumber(dataset?.gene_count)
     // Preparsing preview for H5AD is always genes (rows) x cells (columns), matching /var x /obs.
@@ -2027,8 +1990,9 @@ export default class extends Controller {
     // so project name matches exactly what's displayed
     this.maybeSetProjectNameFromDataset(datasetName, null, { detectedFormat, multipleAssays })
 
-    return `
-      <div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/80 p-4">
+    const headerHtml = hideHeader
+      ? ''
+      : `
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
             <p class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Dataset</p>
@@ -2036,7 +2000,12 @@ export default class extends Controller {
           </div>
           ${this.getFileFormatIcon(detectedFormat)}
         </div>
-        <dl class="mt-4 grid grid-cols-2 gap-4 text-sm text-gray-600 dark:text-gray-300">
+      `
+
+    return `
+      <div class="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800/80 p-4">
+        ${headerHtml}
+        <dl class="${hideHeader ? '' : 'mt-4 '}grid grid-cols-2 gap-4 text-sm text-gray-600 dark:text-gray-300">
           <div>
             <dt class="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">${this.capitalizeFirst(colAxisLabel)} (columns)</dt>
             <dd class="text-base font-medium text-gray-900 dark:text-white">${cells}</dd>
@@ -2066,6 +2035,36 @@ export default class extends Controller {
         ${sampleMatrixHtml}
       </div>
     `
+  }
+
+  getDatasetCardLabel(dataset, detectedFormat, index) {
+    const datasetName = this.getDatasetDisplayName(dataset)
+    const multipleAssays = detectedFormat === 'RDS' && this.rdsMultipleAssays
+
+    let label = this.datasetDisplayLabel(detectedFormat, datasetName, { multipleAssays })
+      || this.originalFilename
+      || `Dataset ${index + 1}`
+
+    if (detectedFormat !== 'RDS' && label && label !== `Dataset ${index + 1}`) {
+      const hasSlash = label.includes('/')
+      const hasExtension = label.includes('.')
+      if (!hasSlash && hasExtension) {
+        label = label.replace(/\.[^.]+$/, '')
+      }
+    }
+
+    return label
+  }
+
+  isDatasetDetailsVisible(datasets) {
+    if (!Array.isArray(datasets) || datasets.length === 0) return false
+    if (datasets.length === 1) return true
+    return (
+      this.selectedDatasetIndex !== null &&
+      this.selectedDatasetIndex >= 0 &&
+      this.selectedDatasetIndex < datasets.length &&
+      !this.showingDatasetPicker
+    )
   }
 
   updateHiddenDimensions(dimensions) {
@@ -2914,6 +2913,7 @@ export default class extends Controller {
     this.currentDetectedFormat = null
     this.selectedDatasetIndex = null
     this.selectedDatasetName = null
+    this.showingDatasetPicker = true
     this.selectedFileIndex = null
     this.selectedFileName = null
     this.selectedArchiveEntry = null
@@ -3006,16 +3006,20 @@ export default class extends Controller {
   buildH5adGeneCellMetadataUI(summary) {
     const datasets = Array.isArray(summary?.datasets) ? summary.datasets : []
     const ds = this.getEffectiveH5adMetadataDataset(datasets)
-    const fromDataset = Array.isArray(ds?.metadata) ? ds.metadata : []
-    const fromSummary = Array.isArray(summary?.metadata) ? summary.metadata : []
-    const meta = fromDataset.length > 0 ? fromDataset : fromSummary
-    const geneOptions = meta.filter((e) => e.on === 'GENE' && e.type === 'STRING')
-    const cellOptions = meta.filter((e) => e.on === 'CELL' && e.type === 'STRING')
+    const meta = this.collectH5adMetadataEntries(ds, summary)
+    const geneOptions = meta.filter((e) => this.isH5adStringMetadata(e, 'GENE'))
+    const cellOptions = meta.filter((e) => this.isH5adStringMetadata(e, 'CELL'))
 
-    let curRow = this.parsingParams.rowname_metadata || ''
-    let curCol = this.parsingParams.colname_metadata || ''
-    const defaultRowEntry = geneOptions.find((e) => e.name === '_index')
-    const defaultColEntry = cellOptions.find((e) => e.name === '_index')
+    let curRow = this.normalizeH5adJavaMetadataPath(this.parsingParams.rowname_metadata, 'row')
+    let curCol = this.normalizeH5adJavaMetadataPath(this.parsingParams.colname_metadata, 'col')
+    if (!curRow && !this.h5adMetadataChosenByUser) {
+      curRow = this.normalizeH5adJavaMetadataPath(summary?.row_names, 'row')
+    }
+    if (!curCol && !this.h5adMetadataChosenByUser) {
+      curCol = this.normalizeH5adJavaMetadataPath(summary?.col_names, 'col')
+    }
+    const defaultRowEntry = geneOptions.find((e) => e.name === '_index') || geneOptions.find((e) => e.name === 'index')
+    const defaultColEntry = cellOptions.find((e) => e.name === '_index') || cellOptions.find((e) => e.name === 'index')
     if (!curRow && defaultRowEntry && !this.h5adMetadataChosenByUser) {
       curRow = this.h5adMetadataOptionValue(defaultRowEntry)
     }
@@ -3027,11 +3031,17 @@ export default class extends Controller {
     const rowWord = this.escapeHtml(this.capitalizeFirst(h5adRowAxis))
     const colWord = this.escapeHtml(this.capitalizeFirst(h5adColAxis))
 
-    const rowOpts = [{ value: '', label: 'Select a row metadata' }].concat(
-      geneOptions.map((e) => ({ value: this.h5adMetadataOptionValue(e), label: e.name }))
+    const rowOpts = [{ value: '', label: 'Select metadata containing row IDs' }].concat(
+      geneOptions.map((e) => ({
+        value: this.h5adMetadataOptionValue(e),
+        label: e.name || String(e.path || '').split('/').pop() || 'unnamed'
+      }))
     )
-    const colOpts = [{ value: '', label: 'Select a column metadata' }].concat(
-      cellOptions.map((e) => ({ value: this.h5adMetadataOptionValue(e), label: e.name }))
+    const colOpts = [{ value: '', label: 'Select metadata containing column IDs' }].concat(
+      cellOptions.map((e) => ({
+        value: this.h5adMetadataOptionValue(e),
+        label: e.name || String(e.path || '').split('/').pop() || 'unnamed'
+      }))
     )
 
     const rowHtml = rowOpts
@@ -3052,22 +3062,63 @@ export default class extends Controller {
       )
       .join('')
 
+    const emptyHint =
+      geneOptions.length === 0 && cellOptions.length === 0
+        ? `<p class="text-xs text-amber-800 dark:text-amber-200 mb-4">No string metadata columns were found in obs/var for this file. Re-run preparsing after upload if this persists.</p>`
+        : ''
+
     return `
       <div class="rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 p-4 mb-4">
-        <h3 class="text-base font-semibold text-indigo-900 dark:text-indigo-200 mb-3">H5AD name columns</h3>
-        <p class="text-xs text-gray-600 dark:text-gray-400 mb-4">Choose which AnnData HDF5 columns to use for ${rowWord} (matrix rows, AnnData var) and ${colWord} (matrix columns, AnnData obs) during parsing. Only 1D STRING columns matching matrix dimensions are listed.</p>
+        <h3 class="text-base font-semibold text-indigo-900 dark:text-indigo-200 mb-3">H5AD metadata containing column and row IDs</h3>
+        <p class="text-xs text-gray-600 dark:text-gray-400 mb-4">Choose which AnnData obs/var string columns provide ${colWord} IDs (matrix columns) and ${rowWord} IDs (matrix rows) during parsing.</p>
+        ${emptyHint}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label for="h5ad-rowname-metadata" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">${rowWord} names (rows)</label>
-            <select id="h5ad-rowname-metadata" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white text-sm">${rowHtml}</select>
+            <label for="h5ad-rowname-metadata" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">${rowWord} IDs (rows / var)</label>
+            <select id="h5ad-rowname-metadata" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white text-sm">${rowHtml}</select>
           </div>
           <div>
-            <label for="h5ad-colname-metadata" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">${colWord} names (columns)</label>
-            <select id="h5ad-colname-metadata" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white text-sm">${colHtml}</select>
+            <label for="h5ad-colname-metadata" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">${colWord} IDs (columns / obs)</label>
+            <select id="h5ad-colname-metadata" class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-gray-700 dark:text-white text-sm">${colHtml}</select>
           </div>
         </div>
       </div>
     `
+  }
+
+  collectH5adMetadataEntries(dataset, summary) {
+    const buckets = [
+      dataset?.metadata,
+      dataset?.existing_metadata,
+      summary?.metadata,
+      summary?.existing_metadata
+    ]
+    let entries = []
+    for (const bucket of buckets) {
+      if (!Array.isArray(bucket) || bucket.length === 0) continue
+      entries = bucket.filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+      if (entries.length > 0) break
+    }
+
+    const seen = new Set()
+    return entries.filter((entry) => {
+      const key = [
+        String(entry.on || '').toUpperCase(),
+        String(entry.path || ''),
+        String(entry.name || '')
+      ].join('|')
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+  }
+
+  isH5adStringMetadata(entry, axis) {
+    if (!entry || typeof entry !== 'object') return false
+    const on = String(entry.on || '').toUpperCase()
+    if (on !== axis) return false
+    const type = String(entry.type || '').toUpperCase()
+    return type === '' || type === 'STRING' || type === 'CATEGORICAL'
   }
 
   captureH5adMetadataSelections() {

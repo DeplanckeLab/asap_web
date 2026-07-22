@@ -54,9 +54,15 @@ module H5adPreparsingMetadata
             meta.extend(scan_group(f["var"], n_genes, "GENE"))
         if "obs" in f and isinstance(f["obs"], h5py.Group):
             meta.extend(scan_group(f["obs"], n_cells, "CELL"))
-        row_names = "/var/index" if any(e["on"] == "GENE" and e["name"] == "index" for e in meta) else None
-        row_names ||= "/var/_index" if any(e["on"] == "GENE" and e["name"] == "_index" for e in meta) else None
-        col_names = "/obs/_index" if any(e["on"] == "CELL" and e["name"] == "_index" for e in meta) else None
+
+        def pick_index_path(on, prefix):
+            for name in ("_index", "index"):
+                if any(e["on"] == on and e["name"] == name for e in meta):
+                    return f"{prefix}/{name}"
+            return None
+
+        row_names = pick_index_path("GENE", "/var")
+        col_names = pick_index_path("CELL", "/obs")
         print(json.dumps({"metadata": meta, "row_names": row_names, "col_names": col_names}))
   PYTHON
 

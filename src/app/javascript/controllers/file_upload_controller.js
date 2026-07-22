@@ -1231,7 +1231,7 @@ export default class extends Controller {
           this.renderPreparsingResult(data.summary, data.warnings, this.rawPreparsingData)
         }
         if (this.hasMatrixData) {
-          this.enterProjectInfoPhase()
+          this.syncProjectInfoPhaseWithDatasetPreview()
         }
         this.checkSubmitButton()
         break
@@ -1726,6 +1726,9 @@ export default class extends Controller {
       const cells = this.formatNumber(dataset?.cell_count)
       const genes = this.formatNumber(dataset?.gene_count)
       const isSelected = this.selectedDatasetIndex === index
+      const recommendedBadge = this.isRecommendedDatasetPath(label)
+        ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200">Recommended</span>`
+        : ''
       
       html += `
         <div class="dataset-option rounded-lg border-2 p-4 cursor-pointer transition-all ${
@@ -1746,8 +1749,9 @@ export default class extends Controller {
             />
             <label for="dataset-${index}" class="flex-1 cursor-pointer">
               <div class="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p class="text-base font-semibold text-gray-900 dark:text-white">${this.escapeHtml(label)}</p>
+                <div class="flex flex-wrap items-center gap-2 min-w-0">
+                  <p class="text-base font-semibold text-gray-900 dark:text-white break-all">${this.escapeHtml(label)}</p>
+                  ${recommendedBadge}
                 </div>
               </div>
               <dl class="mt-2 grid grid-cols-2 gap-3 text-sm text-gray-600 dark:text-gray-300">
@@ -1799,6 +1803,8 @@ export default class extends Controller {
           const pr = this.preparsingResultData
           this.renderPreparsingResult(pr.summary, pr.warnings, pr.rawData)
         }
+        this.syncProjectInfoPhaseWithDatasetPreview()
+        this.checkSubmitButton()
       })
     })
     
@@ -1819,10 +1825,15 @@ export default class extends Controller {
     if (selectAnotherBtn) {
       selectAnotherBtn.addEventListener('click', () => {
         this.showingDatasetPicker = true
+        this.selectedDatasetIndex = null
+        this.selectedDatasetName = null
+        this.syncSelectedDatasetInput()
         if (this.preparsingResultData) {
           const pr = this.preparsingResultData
           this.renderPreparsingResult(pr.summary, pr.warnings, pr.rawData)
         }
+        this.syncProjectInfoPhaseWithDatasetPreview()
+        this.checkSubmitButton()
       })
     }
   }
@@ -2143,6 +2154,30 @@ export default class extends Controller {
       this.selectedDatasetIndex < datasets.length &&
       !this.showingDatasetPicker
     )
+  }
+
+  isRecommendedDatasetPath(path) {
+    const value = String(path || '')
+    return value.includes('/raw/X') || /(^|\/)matrix(\/|$)/.test(value)
+  }
+
+  // Submit requires a concrete dataset preview (matrix card), not only a multi-dataset list.
+  hasDatasetPreviewReady() {
+    if (!this.isPreparsingComplete || !this.hasMatrixData) return false
+    const datasets = Array.isArray(this.preparsingResultData?.summary?.datasets)
+      ? this.preparsingResultData.summary.datasets
+      : []
+    if (datasets.length <= 1) return true
+    return this.isDatasetDetailsVisible(datasets)
+  }
+
+  syncProjectInfoPhaseWithDatasetPreview() {
+    if (this.isIntegrateMode()) return
+    if (this.hasDatasetPreviewReady()) {
+      this.enterProjectInfoPhase()
+    } else if (this.hasProjectInfoSectionTarget) {
+      this.projectInfoSectionTarget.classList.add('hidden')
+    }
   }
 
   updateHiddenDimensions(dimensions) {
@@ -2603,7 +2638,9 @@ export default class extends Controller {
     const hasProjectType = projectTypeNotRequired || (projectTypeField && projectTypeField.value && projectTypeField.value !== '')
 
     const hasValidUpload = isIntegrateMode ? true : this.isUploadComplete
-    const hasValidPreparsing = isIntegrateMode ? true : (this.isPreparsingComplete && this.hasMatrixData)
+    const hasValidPreparsing = isIntegrateMode
+      ? true
+      : (this.isPreparsingComplete && this.hasMatrixData && this.hasDatasetPreviewReady())
 
     const shouldEnable =
       hasProjectName &&

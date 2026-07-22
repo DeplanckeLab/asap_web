@@ -35,7 +35,12 @@ export default class extends Controller {
     "versionSelect",
     "projectTypeSelect",
     "supportedFormatsText",
-    "formatMention"
+    "formatMention",
+    "uploadSection",
+    "preparsingSection",
+    "projectInfoSection",
+    "replaceFileButton",
+    "versionSection"
   ]
 
   static values = {
@@ -105,6 +110,11 @@ export default class extends Controller {
         this.form = forms[0]
       }
     }
+
+    if (!this.isIntegrateMode()) {
+      this.enterUploadPhase()
+    }
+
     this.projectNameInputElement = this.hasProjectNameTarget
       ? this.projectNameTarget
       : (this.form?.querySelector('[name="project[name]"]') || null)
@@ -153,7 +163,7 @@ export default class extends Controller {
         this.statusTarget.classList.add('text-green-600')
       }
       this.displayUploadSuccess('uploaded', this.originalFilename || 'uploaded_file', 0)
-      this.showPreparsingPanel()
+      this.enterPreparsingPhase()
       
       // Subscribe to preparsing updates
       this.subscribeToPreparsing(this.fuId)
@@ -872,9 +882,64 @@ export default class extends Controller {
   }
 
   showPreparsingPanel() {
+    this.enterPreparsingPhase()
     if (this.hasPreparsingPanelTarget) {
       this.preparsingPanelTarget.classList.remove('hidden')
     }
+  }
+
+  isIntegrateMode() {
+    const integrateField =
+      this.form?.querySelector('[name="integrate"]') ||
+      this.element.querySelector('[name="integrate"]')
+    return Boolean(integrateField && integrateField.value === '1')
+  }
+
+  isProjectInfoVisible() {
+    if (this.isIntegrateMode()) return true
+    if (!this.hasProjectInfoSectionTarget) return true
+    return !this.projectInfoSectionTarget.classList.contains('hidden')
+  }
+
+  enterUploadPhase() {
+    if (this.isIntegrateMode()) return
+    if (this.hasUploadSectionTarget) {
+      this.uploadSectionTarget.classList.remove('hidden')
+    }
+    if (this.hasPreparsingSectionTarget) {
+      this.preparsingSectionTarget.classList.add('hidden')
+    }
+    if (this.hasProjectInfoSectionTarget) {
+      this.projectInfoSectionTarget.classList.add('hidden')
+    }
+    this.showUploadInputs()
+  }
+
+  enterPreparsingPhase() {
+    if (this.isIntegrateMode()) return
+    if (this.hasUploadSectionTarget) {
+      this.uploadSectionTarget.classList.add('hidden')
+    }
+    if (this.hasPreparsingSectionTarget) {
+      this.preparsingSectionTarget.classList.remove('hidden')
+    }
+    if (this.hasProjectInfoSectionTarget && !(this.isPreparsingComplete && this.hasMatrixData)) {
+      this.projectInfoSectionTarget.classList.add('hidden')
+    }
+  }
+
+  enterProjectInfoPhase() {
+    if (this.isIntegrateMode()) return
+    if (this.hasProjectInfoSectionTarget) {
+      this.projectInfoSectionTarget.classList.remove('hidden')
+    }
+  }
+
+  replaceFile(event) {
+    if (event) event.preventDefault()
+    this.resetForm()
+    this.enterUploadPhase()
+    this.checkSubmitButton()
   }
 
   setPreparsingStatus(message, variant = 'info', showSpinner = false) {
@@ -1119,6 +1184,10 @@ export default class extends Controller {
     switch (data.status) {
       case 'started':
         this.hasMatrixData = false  // Reset when new preparsing starts
+        this.isPreparsingComplete = false
+        if (this.hasProjectInfoSectionTarget && !this.isIntegrateMode()) {
+          this.projectInfoSectionTarget.classList.add('hidden')
+        }
         if (!this.h5adMetadataChosenByUser) {
           this.parsingParams.rowname_metadata = ''
           this.parsingParams.colname_metadata = ''
@@ -1160,6 +1229,9 @@ export default class extends Controller {
           this.syncH5adMetadataHiddenFields()
         } else {
           this.renderPreparsingResult(data.summary, data.warnings, this.rawPreparsingData)
+        }
+        if (this.hasMatrixData) {
+          this.enterProjectInfoPhase()
         }
         this.checkSubmitButton()
         break
@@ -2239,7 +2311,7 @@ export default class extends Controller {
     if (this.projectNameTouched) return
 
     const inputEl = this.projectNameInputElement ||
-      this.projectNameTarget ||
+      (this.hasProjectNameTarget ? this.projectNameTarget : null) ||
       this.form?.querySelector('[name="project[name]"]')
 
     if (!inputEl) return
@@ -2257,6 +2329,7 @@ export default class extends Controller {
     }
 
     inputEl.value = displayName
+    this.checkSubmitButton()
   }
 
   showUploadInputs() {
@@ -2509,23 +2582,21 @@ export default class extends Controller {
   checkSubmitButton() {
     if (!this.hasSubmitButtonTarget) return
 
-    // In integrate mode, only check project metadata fields (no file upload needed)
-    const integrateField = this.form?.querySelector('[name="integrate"]')
-    const isIntegrateMode = integrateField && integrateField.value === '1'
+    const isIntegrateMode = this.isIntegrateMode()
+    const projectInfoVisible = this.isProjectInfoVisible()
 
-    const hasProjectName = this.hasProjectNameTarget
-      ? this.projectNameTarget.value.trim() !== ''
-      : true
+    const nameEl =
+      (this.hasProjectNameTarget ? this.projectNameTarget : null) ||
+      this.projectNameInputElement ||
+      this.form?.querySelector('[name="project[name]"]')
+    const hasProjectName = nameEl ? nameEl.value.trim() !== '' : true
 
-    // 3. Organism is selected
     const organismField = this.form?.querySelector('[name="project[organism_id]"]')
     const hasOrganism = organismField && organismField.value && organismField.value !== ''
 
-    // 4. Release (version_id) is selected
     const versionField = this.form?.querySelector('[name="project[version_id]"]')
     const hasVersion = versionField && versionField.value && versionField.value !== ''
 
-    // 5. Project type is selected (not required for versions < 5)
     const projectTypeField = this.form?.querySelector('[name="project[project_type_id]"]')
     const versionId = this.currentVersionId()
     const projectTypeNotRequired = Number.isFinite(versionId) && versionId < 5
@@ -2545,6 +2616,7 @@ export default class extends Controller {
     this.submitButtonTarget.disabled = !shouldEnable
 
     this.updateSubmitBlockingFieldHighlights({
+      nameEl,
       hasProjectName,
       hasOrganism,
       hasVersion,
@@ -2552,11 +2624,13 @@ export default class extends Controller {
       projectTypeNotRequired,
       hasValidUpload,
       hasValidPreparsing,
-      isIntegrateMode
+      isIntegrateMode,
+      projectInfoVisible
     })
   }
 
   updateSubmitBlockingFieldHighlights({
+    nameEl,
     hasProjectName,
     hasOrganism,
     hasVersion,
@@ -2564,9 +2638,15 @@ export default class extends Controller {
     projectTypeNotRequired,
     hasValidUpload,
     hasValidPreparsing,
-    isIntegrateMode
+    isIntegrateMode,
+    projectInfoVisible
   }) {
-    this.setRequiredFieldHighlight(this.hasProjectNameTarget ? this.projectNameTarget : null, !hasProjectName)
+    const highlightIdentity = projectInfoVisible
+
+    this.setRequiredFieldHighlight(
+      nameEl || (this.hasProjectNameTarget ? this.projectNameTarget : null),
+      highlightIdentity && !hasProjectName
+    )
 
     const versionEl = this.hasVersionSelectTarget
       ? this.versionSelectTarget
@@ -2576,19 +2656,22 @@ export default class extends Controller {
     const projectTypeEl = this.hasProjectTypeSelectTarget
       ? this.projectTypeSelectTarget
       : this.form?.querySelector('select[name="project[project_type_id]"]')
-    this.setRequiredFieldHighlight(projectTypeEl, !projectTypeNotRequired && !hasProjectType)
+    this.setRequiredFieldHighlight(
+      projectTypeEl,
+      highlightIdentity && !projectTypeNotRequired && !hasProjectType
+    )
 
     const organismButton = this.element.querySelector('[data-organism-selector-target="dropdownButton"]')
-    this.setRequiredFieldHighlight(organismButton, !hasOrganism)
+    this.setRequiredFieldHighlight(organismButton, highlightIdentity && !hasOrganism)
 
     if (!isIntegrateMode) {
-      this.setRequiredFieldHighlight(
-        this.hasFileUploadContainerTarget ? this.fileUploadContainerTarget : null,
-        !hasValidUpload
-      )
+      const uploadHighlightEl = this.hasUploadSectionTarget
+        ? this.uploadSectionTarget.querySelector('[data-file-upload-target="fileUploadContainer"]') || this.fileUploadContainerTarget
+        : (this.hasFileUploadContainerTarget ? this.fileUploadContainerTarget : null)
+      this.setRequiredFieldHighlight(uploadHighlightEl, !hasValidUpload && this.hasUploadSectionTarget && !this.uploadSectionTarget.classList.contains('hidden'))
       this.setRequiredFieldHighlight(
         this.hasPreparsingPanelTarget ? this.preparsingPanelTarget : null,
-        hasValidUpload && !hasValidPreparsing
+        hasValidUpload && !hasValidPreparsing && this.hasPreparsingSectionTarget && !this.preparsingSectionTarget.classList.contains('hidden')
       )
     } else {
       this.setRequiredFieldHighlight(
@@ -3072,6 +3155,7 @@ export default class extends Controller {
     }
 
     this.showUploadInputs()
+    this.enterUploadPhase()
     // Update submit button state
     this.checkSubmitButton()
     this.updateResetButtonState()

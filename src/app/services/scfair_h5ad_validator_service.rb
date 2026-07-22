@@ -637,19 +637,33 @@ class ScfairH5adValidatorService
         if missing_declared:
           sample = ", ".join(missing_declared[:8])
           suffix = f" (+{len(missing_declared) - 8} more)" if len(missing_declared) > 8 else ""
-          errors.append({
-            "field": "obs",
-            "message": (
-              f"obs column-order lists {len(missing_declared)} column(s) not stored in the file"
-              f" (e.g. {sample}{suffix}); the H5AD obs table is inconsistent"
+          if len(missing_declared) == 1:
+            message = (
+              f"The obs column-order attribute lists {sample}, which is not stored in the file. "
+              "The obs table and column-order attribute are inconsistent."
             )
-          })
+          else:
+            message = (
+              f"The obs column-order attribute lists {len(missing_declared)} columns not stored in the file: "
+              f"{sample}{suffix}. The obs table and column-order attribute are inconsistent."
+            )
+          errors.append({"field": "obs", "message": message})
         extra = sorted(obs_present - declared) if declared else []
         if extra and declared:
-          warnings.append({
-            "field": "obs",
-            "message": f"{len(extra)} obs column(s) stored but not listed in column-order (e.g. {', '.join(extra[:5])})"
-          })
+          sample = ", ".join(extra[:15])
+          suffix = f" (+{len(extra) - 15} more)" if len(extra) > 15 else ""
+          names = f"{sample}{suffix}"
+          if len(extra) == 1:
+            message = (
+              f"The obs column {names} is stored in the file but not listed in the obs column-order attribute. "
+              "The column-order attribute should list every stored obs column."
+            )
+          else:
+            message = (
+              f"The obs columns {names} are stored in the file but not listed in the obs column-order attribute. "
+              "The column-order attribute should list every stored obs column."
+            )
+          warnings.append({"field": "obs", "message": message})
       else:
         errors.append({"field": "obs", "message": "Missing obs group"})
       emit_timing("h5py.obs_structure", obs_structure_started, {"n_obs": n_obs, "n_vars": n_vars})

@@ -84,11 +84,9 @@ module Scfair
       stored = obs_columns.to_set
       missing_declared = declared.reject { |col| stored.include?(col) }.sort
       if missing_declared.any?
-        sample = missing_declared.first(8).join(', ')
-        suffix = missing_declared.size > 8 ? " (+#{missing_declared.size - 8} more)" : ''
         errors << {
           field: 'obs',
-          message: "obs column-order lists #{missing_declared.size} column(s) not stored in the file (e.g. #{sample}#{suffix}); the H5AD obs table is inconsistent"
+          message: missing_column_order_error_message(missing_declared)
         }
       end
 
@@ -97,8 +95,40 @@ module Scfair
 
       warnings << {
         field: 'obs',
-        message: "#{extra.size} obs column(s) stored but not listed in column-order (e.g. #{extra.first(5).join(', ')})"
+        message: extra_column_order_warning_message(extra)
       }
+    end
+
+    def format_column_name_list(columns, limit: 15)
+      return '' if columns.empty?
+
+      if columns.size <= limit
+        columns.join(', ')
+      else
+        "#{columns.first(limit).join(', ')} (+#{columns.size - limit} more)"
+      end
+    end
+
+    def extra_column_order_warning_message(extra)
+      names = format_column_name_list(extra)
+      if extra.size == 1
+        "The obs column #{names} is stored in the file but not listed in the obs column-order attribute. " \
+          'The column-order attribute should list every stored obs column.'
+      else
+        "The obs columns #{names} are stored in the file but not listed in the obs column-order attribute. " \
+          'The column-order attribute should list every stored obs column.'
+      end
+    end
+
+    def missing_column_order_error_message(missing_declared)
+      names = format_column_name_list(missing_declared, limit: 8)
+      if missing_declared.size == 1
+        "The obs column-order attribute lists #{names}, which is not stored in the file. " \
+          'The obs table and column-order attribute are inconsistent.'
+      else
+        "The obs column-order attribute lists #{missing_declared.size} columns not stored in the file: #{names}. " \
+          'The obs table and column-order attribute are inconsistent.'
+      end
     end
 
     def validate_loom_structure(errors, warnings, valid_checks)

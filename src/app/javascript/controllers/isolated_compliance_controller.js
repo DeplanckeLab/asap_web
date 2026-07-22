@@ -19,6 +19,10 @@ class IsolatedComplianceController extends Controller {
     "progressTitle",
     "progressBar",
     "progressDetail",
+    "transferProgressWrap",
+    "transferProgressLabel",
+    "transferProgressBar",
+    "transferProgressDetail",
     "resultWrap",
     "resultBody",
     "detailModal",
@@ -51,6 +55,7 @@ class IsolatedComplianceController extends Controller {
     this.taskId = null
     this.fuId = null
     this.currentProgress = 0
+    this.currentTransferProgress = 0
     this.initComplianceCheckReportState()
     this.setupDropzone()
     this.applySourceMode()
@@ -240,10 +245,15 @@ class IsolatedComplianceController extends Controller {
     this.resultWrapTarget.classList.add("hidden")
     this.progressWrapTarget.classList.remove("hidden")
     this.currentProgress = 0
+    this.currentTransferProgress = 0
     this.progressBarTarget.style.width = "0%"
-    if (this.hasProgressDetailTarget) this.progressDetailTarget.classList.remove("hidden")
+    this.clearProgressDetail()
     this.setProgressTitle("Validation in progress...", { showSpinner: true })
-    this.updateProgress(2, this.sourceUploadTarget.checked ? "Uploading file..." : "Downloading file from URL...")
+
+    const transferLabel = this.sourceUploadTarget.checked
+      ? "Uploading file..."
+      : "Downloading file..."
+    this.showTransferProgress(transferLabel)
 
     try {
       const payload = this.sourceUploadTarget.checked
@@ -253,6 +263,7 @@ class IsolatedComplianceController extends Controller {
       this.taskId = payload.task_id
       this.subscribeToTask(this.taskId)
     } catch (error) {
+      this.hideTransferProgress()
       this.setProgressSpinner(false)
       this.clearProgressDetail()
       if (error.unsupportedFormat) {
@@ -290,11 +301,14 @@ class IsolatedComplianceController extends Controller {
 
       const uploadedSize = result.uploaded_size || end
       const pct = Math.round((uploadedSize / file.size) * 100)
-      const mapped = Math.max(2, Math.min(40, Math.round(2 + (pct * 38) / 100)))
-      this.updateProgress(mapped, `Uploading file... ${pct}%`)
+      this.updateTransferProgress(
+        pct,
+        `${this.formatBytes(uploadedSize)} / ${this.formatBytes(file.size)}`
+      )
 
       if (result.complete && result.task_id) {
-        this.updateProgress(45, "Upload completed. Queueing validation...")
+        this.hideTransferProgress()
+        this.updateProgress(5, "Upload completed. Queueing validation...")
         return result
       }
     }
@@ -370,7 +384,6 @@ class IsolatedComplianceController extends Controller {
     form.append("source", "url")
     form.append("data_url", this.urlValue)
     form.append("schema_id", this.schemaSelectTarget.value)
-    this.updateProgress(8, "Downloading file from URL...")
 
     const response = await fetch("/compliance/file-check", {
       method: "POST",
@@ -386,7 +399,6 @@ class IsolatedComplianceController extends Controller {
       }
       throw new Error(payload.error || "Unable to queue validation")
     }
-    this.updateProgress(45, "Download completed. Queueing validation...")
     return payload
   }
 
@@ -446,7 +458,21 @@ class IsolatedComplianceController extends Controller {
 
   handleUpdate(data) {
     if (!data) return
+    if (data.status === "downloading") {
+      this.showTransferProgress("Downloading file...")
+      this.updateTransferProgress(
+        data.transfer_progress,
+        this.transferProgressDetailText(data)
+      )
+      return
+    }
+    if (data.status === "queued") {
+      this.hideTransferProgress()
+      this.updateProgress(data.progress || 5, data.message || "Validation queued...")
+      return
+    }
     if (data.status === "progress" || data.status === "started") {
+      this.hideTransferProgress()
       const message = this.progressMessage(data)
       this.updateProgress(data.progress || 5, message)
       return
@@ -471,10 +497,91 @@ class IsolatedComplianceController extends Controller {
     }
     if (data.status === "failed") {
       this.stopStatusPoll()
+      this.hideTransferProgress()
+      if (data.error_code === "unsupported_file_format") {
+        this.showUnsupportedFormatError()
+      } else {
+        this.setStatusMessage(`Error: ${data.message || data.error || "Validation failed"}`)
+      }
       this.finishProgress(data.message || "Validation failed", "error")
       this.restoreStatusText()
       this.runButtonTarget.disabled = false
     }
+  }
+
+  transferProgressDetailText(data) {
+    const downloaded = Number(data.transfer_downloaded) || 0
+    const total = Number(data.transfer_total) || 0
+    if (total > 0) {
+      const pct = data.transfer_progress != null
+        ? data.transfer_progress
+        : Math.round((downloaded / total) * 100)
+      return `${pct}% (${this.formatBytes(downloaded)} / ${this.formatBytes(total)})`
+    }
+    if (downloaded > 0) {
+      return this.formatBytes(downloaded)
+    }
+    return ""
+  }
+
+  showTransferProgress(label) {
+    if (!this.hasTransferProgressWrapTarget) return
+    this.currentTransferProgress = 0
+    this.transferProgressWrapTarget.classList.remove("hidden")
+    if (this.hasTransferProgressLabelTarget) {
+      this.transferProgressLabelTarget.textContent = label
+    }
+    if (this.hasTransferProgressBarTarget) {
+      this.transferProgressBarTarget.style.width = "0%"
+    }
+    if (this.hasTransferProgressDetailTarget) {
+      this.transferProgressDetailTarget.textContent = ""
+    }
+  }
+
+  updateTransferProgress(value, detail = "") {
+    if (!this.hasTransferProgressWrapTarget) return
+
+    const hasPercent = value != null && !Number.isNaN(Number(value))
+    const nextValue = hasPercent
+      ? Math.max(0, Math.min(100, Math.round(Number(value))))
+      : null
+
+    if (nextValue != null) {
+      this.currentTransferProgress = Math.max(this.currentTransferProgress || 0, nextValue)
+      if (this.hasTransferProgressBarTarget) {
+        this.transferProgressBarTarget.classList.remove("animate-pulse")
+        this.transferProgressBarTarget.style.width = `${this.currentTransferProgress}%`
+      }
+    } else if (this.hasTransferProgressBarTarget) {
+      this.transferProgressBarTarget.style.width = "100%"
+      this.transferProgressBarTarget.classList.add("animate-pulse")
+    }
+
+    if (this.hasTransferProgressDetailTarget) {
+      this.transferProgressDetailTarget.textContent = detail
+    }
+  }
+
+  hideTransferProgress() {
+    if (!this.hasTransferProgressWrapTarget) return
+    this.transferProgressWrapTarget.classList.add("hidden")
+    if (this.hasTransferProgressBarTarget) {
+      this.transferProgressBarTarget.style.width = "0%"
+      this.transferProgressBarTarget.classList.remove("animate-pulse")
+    }
+    if (this.hasTransferProgressDetailTarget) {
+      this.transferProgressDetailTarget.textContent = ""
+    }
+    this.currentTransferProgress = 0
+  }
+
+  formatBytes(bytes) {
+    const value = Number(bytes) || 0
+    if (value < 1024) return `${value} B`
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+    if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(2)} MB`
+    return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`
   }
 
   progressMessage(data) {
@@ -517,6 +624,7 @@ class IsolatedComplianceController extends Controller {
   }
 
   finishProgress(title, variant = "info") {
+    this.hideTransferProgress()
     this.currentProgress = 100
     this.progressBarTarget.style.width = "100%"
     this.clearProgressDetail()

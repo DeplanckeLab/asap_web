@@ -25,6 +25,31 @@ class ProjectTest < TestBaseWithoutFixtures
     assert_match(/Unsupported archive metadata fields/, error.message)
   end
 
+  test "archive_availability_state distinguishes archived from plain missing data" do
+    project = Project.create!(name: "Archive state", key: "sta#{SecureRandom.hex(3)}")
+
+    project.archive_status_id = 1
+    project.define_singleton_method(:filesystem_project_data_missing?) { true }
+    project.define_singleton_method(:archive_restore_expected?) { false }
+    assert_equal :missing, project.archive_availability_state
+
+    project.archive_status_id = 1
+    project.define_singleton_method(:filesystem_project_data_missing?) { true }
+    project.define_singleton_method(:archive_restore_expected?) { true }
+    assert_equal :archived, project.archive_availability_state
+
+    project.archive_status_id = 3
+    project.define_singleton_method(:filesystem_project_data_missing?) { false }
+    project.define_singleton_method(:archive_restore_expected?) { false }
+    assert_equal :archived, project.archive_availability_state
+
+    project.archive_status_id = 4
+    assert_equal :unarchiving, project.archive_availability_state
+
+    project.archive_status_id = 2
+    assert_equal :archiving, project.archive_availability_state
+  end
+
   test "key must be unique" do
     key = "uniq#{SecureRandom.hex(3)}"
     Project.create!(name: "First", key: key, user_id: 1)

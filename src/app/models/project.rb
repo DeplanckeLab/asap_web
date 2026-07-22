@@ -546,6 +546,18 @@ class Project < ApplicationRecord
     end
   end
 
+  # Canonical UI state for archive-related project availability.
+  # Keeps true archive states separate from plain filesystem drift/missing data.
+  def archive_availability_state
+    return :archiving if archive_status_id == 2
+    return :unarchiving if archive_status_id == 4
+    return :archived if archive_status_id == 3
+    return :archived if filesystem_project_data_missing? && archive_restore_expected?
+    return :missing if filesystem_project_data_missing?
+
+    :available
+  end
+
   # Update archive bookkeeping fields without bumping updated_at.
   # This keeps "last updated" semantics tied to meaningful project content changes.
   def update_archive_metadata!(attrs)

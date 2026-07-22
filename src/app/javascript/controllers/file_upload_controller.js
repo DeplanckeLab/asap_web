@@ -1726,7 +1726,7 @@ export default class extends Controller {
       const cells = this.formatNumber(dataset?.cell_count)
       const genes = this.formatNumber(dataset?.gene_count)
       const isSelected = this.selectedDatasetIndex === index
-      const recommendedBadge = this.isRecommendedDatasetPath(label)
+      const recommendedBadge = this.isRecommendedDataset(label, detectedFormat)
         ? `<span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200">Recommended</span>`
         : ''
       
@@ -2156,9 +2156,17 @@ export default class extends Controller {
     )
   }
 
-  isRecommendedDatasetPath(path) {
+  isRecommendedDataset(path, detectedFormat = null) {
     const value = String(path || '')
-    return value.includes('/raw/X') || /(^|\/)matrix(\/|$)/.test(value)
+    if (!value) return false
+
+    const format = String(detectedFormat || this.currentDetectedFormat || '').toUpperCase()
+    if (format === 'H5AD' || format === 'LOOM') {
+      return value.includes('/raw/X') || /(^|\/)matrix(\/|$)/.test(value)
+    }
+
+    // Other formats: recommend datasets whose name contains "raw" (R optionally uppercase / any case).
+    return /raw/i.test(value)
   }
 
   // Submit requires a concrete dataset preview (matrix card), not only a multi-dataset list.

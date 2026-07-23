@@ -1,0 +1,16 @@
+<%# Optional note shown under guest sandbox hero CTAs when a sandbox already exists %>
+<% sandbox = guest_sandbox_project %>
+<% sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '1').to_i %>
+<% sandbox_delete_label = sandbox_idle_days == 1 ? '24 hours' : "#{sandbox_idle_days} days" %>
+
+<% if sandbox %>
+  <div class="mt-4 max-w-2xl mx-auto rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-left shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10">
+    <p class="text-sm font-medium text-gray-900 dark:text-neutral-200">
+      Your sandbox:
+      <%= link_to sandbox.display_name, project_path(sandbox), class: "text-blue-700 hover:underline dark:text-blue-400" %>
+    </p>
+    <p class="mt-1 text-sm text-gray-700 dark:text-neutral-300">
+      Creating a new sandbox project will replace this one. Sandboxes are deleted after <%= sandbox_delete_label %> without activity.
+    </p>
+  </div>
+<% end %>

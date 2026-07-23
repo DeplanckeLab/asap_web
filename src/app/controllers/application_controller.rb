@@ -16,7 +16,7 @@ class ApplicationController < ActionController::Base
   before_action :init_session
 
   # Make authorization methods available to views
-  helper_method :admin?, :authorized?, :readable?, :exportable?, :exportable_item?, :editable?, :owner?, :owner_or_admin?, :owner_or_admin_obj?, :read_only?, :clonable?, :analyzable?, :analyzable_item?, :annotable?, :annotable_item?, :cla_votable?, :downloadable?, :publication_snapshot_reader?, :annot_visible_under_publication_rules?, :run_visible_under_publication_rules?
+  helper_method :admin?, :authorized?, :readable?, :exportable?, :exportable_item?, :editable?, :owner?, :owner_or_admin?, :owner_or_admin_obj?, :read_only?, :clonable?, :analyzable?, :analyzable_item?, :annotable?, :annotable_item?, :cla_votable?, :downloadable?, :publication_snapshot_reader?, :annot_visible_under_publication_rules?, :run_visible_under_publication_rules?, :guest_sandbox_project
 
   protected
 
@@ -175,6 +175,14 @@ class ApplicationController < ActionController::Base
   # Generate a random key for sandbox sessions
   def create_sandbox_key
     Array.new(6) { [*'0'..'9', *'a'..'z'].sample }.join
+  end
+
+  # Current guest sandbox project for this browser session, if any.
+  def guest_sandbox_project
+    return nil if user_signed_in?
+    return nil if session[:sandbox].blank?
+
+    @guest_sandbox_project ||= Project.not_deleted.find_by(key: session[:sandbox], sandbox: true)
   end
 
 end

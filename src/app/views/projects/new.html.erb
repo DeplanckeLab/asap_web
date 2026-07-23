@@ -1,14 +1,21 @@
-<% content_for :title, "New project" %>
+<% content_for :title, user_signed_in? ? "New project" : "New sandbox project" %>
 
 <div class="max-w-4xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
   <div class="mb-8">
-    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">Create project</h1>
+    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">
+      <%= user_signed_in? ? "Create project" : "Create sandbox project" %>
+    </h1>
     <p class="mt-2 text-gray-600 dark:text-gray-300">
-      Create a new project to analyze your bulk or single-cell RNA-seq data.
+      <% if user_signed_in? %>
+        Create a new project to analyze your bulk or single-cell RNA-seq data.
+      <% else %>
+        Create a temporary sandbox project to analyze your bulk or single-cell RNA-seq data.
+      <% end %>
     </p>
   </div>
 
   <% unless user_signed_in? %>
+    <% sandbox = guest_sandbox_project %>
     <% sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '1').to_i %>
     <% sandbox_delete_label = sandbox_idle_days == 1 ? '24 hours' : "#{sandbox_idle_days} days" %>
     <div class="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-left shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10">
@@ -21,6 +28,17 @@
             You are in guest mode. This project will be created as a temporary sandbox and will be
             <strong>automatically deleted</strong> after <%= sandbox_delete_label %> without activity.
           </p>
+          <% if sandbox %>
+            <p class="mt-2 text-sm text-amber-900 dark:text-amber-200">
+              You already have a sandbox:
+              <%= link_to sandbox.display_name, project_path(sandbox), class: "font-medium text-blue-700 hover:underline dark:text-blue-400" %>.
+              Submitting this form will <strong>permanently replace</strong> it.
+            </p>
+            <p class="mt-2">
+              <%= link_to "Open existing sandbox instead", project_path(sandbox),
+                  class: "inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700" %>
+            </p>
+          <% end %>
           <p class="mt-2 text-sm text-gray-700 dark:text-neutral-300">
             <%= link_to "Create a free account", new_user_registration_path, class: "text-blue-700 hover:underline dark:text-blue-400" %>
             to keep your projects in a personal workspace that is not subject to sandbox auto-deletion.

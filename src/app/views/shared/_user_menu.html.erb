@@ -50,6 +50,15 @@
         <div class="px-4 py-2 border-b border-gray-200 <%= 'dark:border-gray-700' if dark_mode %>">
           <p class="text-sm font-medium text-gray-500 <%= 'dark:text-gray-400' if dark_mode %>">Guest Mode</p>
         </div>
+        <% if (sandbox = guest_sandbox_project) %>
+          <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 <%= 'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode %>"
+             href="<%= project_path(sandbox) %>">
+            Open sandbox
+          </a>
+          <p class="px-4 pb-2 text-xs text-gray-500 <%= 'dark:text-gray-400' if dark_mode %>">
+            <%= sandbox.display_name %>
+          </p>
+        <% end %>
         <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 <%= 'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode %>"
            href="<%= new_user_session_path %>">
           <i class="fas fa-sign-in-alt mr-3 text-gray-400"></i>

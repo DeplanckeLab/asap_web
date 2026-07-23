@@ -337,9 +337,27 @@
       <% else %>
         <%= link_to "Back to projects", projects_browse_url, class: "px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md font-medium transition-colors" %>
       <% end %>
-      <% submit_label = @is_resetting_parsing ? "Recreate project" : (@integrate_mode ? "Create integrated project" : "Create project") %>
+      <% existing_guest_sandbox = (!user_signed_in? && !@is_resetting_parsing && !@integrate_mode) ? guest_sandbox_project : nil %>
+      <% replace_msg = existing_guest_sandbox ? "Creating a new sandbox project will permanently replace your current sandbox (#{existing_guest_sandbox.display_name}). Continue?" : nil %>
+      <% submit_label =
+           if @is_resetting_parsing
+             "Recreate project"
+           elsif @integrate_mode
+             "Create integrated project"
+           elsif !user_signed_in?
+             "Create sandbox project"
+           else
+             "Create project"
+           end %>
       <% submit_disabled = @integrate_mode ? false : true %>
-      <%= form.submit submit_label, id: "submit-button", data: { file_upload_target: 'submitButton', guided_tour: 'project-new-submit' }, class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed", disabled: submit_disabled %>
+      <% submit_data = { file_upload_target: 'submitButton', guided_tour: 'project-new-submit' } %>
+      <% submit_data[:confirm] = replace_msg if replace_msg %>
+      <%= form.submit submit_label,
+          id: "submit-button",
+          data: submit_data,
+          onclick: (replace_msg ? "return confirm(#{replace_msg.to_json})" : nil),
+          class: "px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed",
+          disabled: submit_disabled %>
     </div>
   </div>
 <% end %>

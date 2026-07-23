@@ -36,13 +36,42 @@
              data-mobile-menu-target="menu">
           <div class="py-2">
             <!-- New Project -->
-            <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
-               href="<%= raw(new_project_path) %>"
-               data-controller="nav-item"
-               data-action="click->nav-item#navigate">
-              <i class="fas fa-plus w-4 text-center"></i>
-              New project
-            </a>
+            <% if user_signed_in? %>
+              <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                 href="<%= raw(new_project_path) %>"
+                 data-controller="nav-item"
+                 data-action="click->nav-item#navigate">
+                <i class="fas fa-plus w-4 text-center"></i>
+                New project
+              </a>
+            <% else %>
+              <% sandbox = guest_sandbox_project %>
+              <% if sandbox %>
+                <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                   href="<%= project_path(sandbox) %>"
+                   data-controller="nav-item"
+                   data-action="click->nav-item#navigate">
+                  Open sandbox
+                </a>
+                <a class="flex items-center gap-2 px-4 py-2 text-sm text-amber-800 hover:bg-amber-50 dark:text-amber-200 dark:hover:bg-amber-500/10"
+                   href="<%= raw(new_project_path) %>"
+                   data-controller="nav-item"
+                   data-action="click->nav-item#navigate"
+                   data-confirm="Creating a new sandbox project will permanently replace your current sandbox (<%= sandbox.display_name %>). Continue?"
+                   data-turbo-confirm="Creating a new sandbox project will permanently replace your current sandbox (<%= sandbox.display_name %>). Continue?">
+                  <i class="fas fa-plus w-4 text-center"></i>
+                  New sandbox project
+                </a>
+              <% else %>
+                <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+                   href="<%= raw(new_project_path) %>"
+                   data-controller="nav-item"
+                   data-action="click->nav-item#navigate">
+                  <i class="fas fa-plus w-4 text-center"></i>
+                  New sandbox project
+                </a>
+              <% end %>
+            <% end %>
             
             <!-- Search Projects -->
             <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -232,11 +261,39 @@
 
               
 
-              <a class="<%= tw_menu_item %>" 
-                 href="<%= raw(new_project_path) %>">
-                <i class="fas fa-plus me-1.5"></i>
-                New project
-              </a>
+              <% if user_signed_in? %>
+                <a class="<%= tw_menu_item %>" 
+                   href="<%= raw(new_project_path) %>">
+                  <i class="fas fa-plus me-1.5"></i>
+                  New project
+                </a>
+              <% else %>
+                <% sandbox = guest_sandbox_project %>
+                <% if sandbox %>
+                  <a class="<%= tw_menu_item %>"
+                     href="<%= project_path(sandbox) %>"
+                     data-controller="nav-item"
+                     data-action="click->nav-item#navigate"
+                     title="<%= sandbox.display_name %>">
+                    Open sandbox
+                  </a>
+                  <a class="<%= tw_menu_item %>"
+                     href="<%= raw(new_project_path) %>"
+                     title="Replaces your current sandbox project"
+                     data-confirm="Creating a new sandbox project will permanently replace your current sandbox (<%= sandbox.display_name %>). Continue?"
+                     data-turbo-confirm="Creating a new sandbox project will permanently replace your current sandbox (<%= sandbox.display_name %>). Continue?">
+                    <i class="fas fa-plus me-1.5"></i>
+                    New sandbox project
+                  </a>
+                <% else %>
+                  <a class="<%= tw_menu_item %>"
+                     href="<%= raw(new_project_path) %>"
+                     title="Creates a temporary sandbox project">
+                    <i class="fas fa-plus me-1.5"></i>
+                    New sandbox project
+                  </a>
+                <% end %>
+              <% end %>
 
               <a class="<%= tw_menu_item %>" 
                  href="<%= projects_path %>"

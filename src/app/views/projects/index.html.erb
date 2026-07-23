@@ -17,7 +17,11 @@
         <h1 class="text-3xl font-bold text-gray-900 mb-2">Search projects</h1>
         <p class="text-gray-600">Search and explore ASAP projects</p>
       </div>
-      <%= link_to "New Project", new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 whitespace-nowrap", data: { guided_tour: "projects-new-project-link" } %>
+      <% if user_signed_in? %>
+        <%= link_to "New Project", new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 whitespace-nowrap", data: { guided_tour: "projects-new-project-link" } %>
+      <% else %>
+        <%= render "shared/guest_sandbox_cta", variant: :compact %>
+      <% end %>
     </div>
 
     <!-- Search Form -->
@@ -417,7 +421,7 @@
 			    data-countdown-idle-days-value="<%= sandbox_idle_days %>"
 			    title="Sandbox project auto-delete countdown">
 			<i class="fas fa-bomb text-[11px]"></i>
-			<span class="ml-1 font-semibold" data-countdown-target="display"><%= countdown %></span>
+			<span class="ml-1 font-semibold font-mono tabular-nums" data-countdown-target="display"><%= countdown %></span>
 		      </span>
 		      <% end %>
 		    </div>
@@ -468,11 +472,17 @@
           <% if @query.present? || @filters.values.any?(&:present?) %>
             Try adjusting your search criteria or filters.
           <% else %>
-            Get started by creating a new project.
+            Get started by creating a <%= user_signed_in? ? 'new project' : 'sandbox project' %>.
           <% end %>
         </p>
         <div class="mt-6">
-          <%= link_to "New Project", new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" %>
+          <% if user_signed_in? %>
+            <%= link_to "New Project", new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" %>
+          <% else %>
+            <div class="inline-flex justify-center">
+              <%= render "shared/guest_sandbox_cta", variant: :compact, align: :center %>
+            </div>
+          <% end %>
         </div>
       </div>
     <% end %>

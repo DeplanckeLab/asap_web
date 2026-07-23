@@ -835,7 +835,7 @@ class FusController < ApplicationController
     output_json_path = fu.upload_dir + 'output.json'
     if output_json_path.exist?
       begin
-        output = JSON.parse(output_json_path.read)
+        output = FuPreparsingService.parse_preparsing_output_json(output_json_path.read)
         displayed_error = output['displayed_error']
         if displayed_error.is_a?(Array)
           first_error = displayed_error.find { |entry| entry.present? }
@@ -843,8 +843,8 @@ class FusController < ApplicationController
         elsif displayed_error.present?
           return normalize_preparsing_error_message(displayed_error.to_s)
         end
-      rescue JSON::ParserError
-        # Fall through to other sources.
+      rescue JSON::ParserError, RuntimeError => e
+        return "Preparsing produced invalid output JSON: #{e.message}"
       end
     end
 

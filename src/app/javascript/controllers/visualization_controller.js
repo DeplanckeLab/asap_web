@@ -1329,6 +1329,28 @@ export default class extends Controller {
     return null
   }
 
+  // colLabelValue comes from ProjectType via Rails col_label(@project) (plural form).
+  getColLabel({ plural = true } = {}) {
+    const stored = String(this.colLabelValue || '').trim()
+    if (!stored) {
+      throw new Error('Missing project col_label')
+    }
+    if (plural) return stored
+    return stored.endsWith('s') ? stored.slice(0, -1) : stored
+  }
+
+  capitalizeLabel(label) {
+    const text = String(label || '')
+    if (!text) return text
+    return text.charAt(0).toUpperCase() + text.slice(1)
+  }
+
+  getColSetLabel({ plural = false, capitalize = false } = {}) {
+    const entity = this.getColLabel({ plural: false })
+    const label = `${entity} ${plural ? 'sets' : 'set'}`
+    return capitalize ? this.capitalizeLabel(label) : label
+  }
+
   getEmbeddingDisplayInfo(embedding, loomFile) {
     const origin = this.getLoomDisplayLabel(loomFile)
 
@@ -15165,13 +15187,13 @@ export default class extends Controller {
     const deButton = document.getElementById('de-selection-btn')
     if (!deButton) return
 
-    const hasEnoughSelections = Array.isArray(items) && items.length >= 2
+    const hasEnoughSelections = Array.isArray(items) && items.length >= 1
     deButton.disabled = !hasEnoughSelections
     deButton.style.opacity = hasEnoughSelections ? '1' : '0.45'
     deButton.style.cursor = hasEnoughSelections ? 'pointer' : 'not-allowed'
     deButton.title = hasEnoughSelections
-      ? 'Differential expression'
-      : 'Requires at least 2 saved cell sets'
+      ? `Differential expression (selected vs complementary)`
+      : `Requires at least 1 saved ${this.getColSetLabel({ plural: false })}`
   }
 
   preventSavedSelectionRowClick(event) {
@@ -15343,7 +15365,7 @@ export default class extends Controller {
   openDeSelectionModal() {
     const loomFile = this.getCurrentLoomFileForRequest()
     const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
-    if (items.length < 2) return
+    if (items.length < 1) return
 
     window.visualizationController = this
     const overlay = document.getElementById('de-selection-overlay')
@@ -15397,6 +15419,72 @@ export default class extends Controller {
 
     operandASelect.value = firstValue
     operandBSelect.value = secondValue
+
+    const canCompareGroups = options.length >= 2
+    const modeRow = document.getElementById('de-selection-mode-row')
+    const complementaryRadio = document.getElementById('de-selection-mode-complementary')
+    const groupRadio = document.getElementById('de-selection-mode-group')
+    if (modeRow) modeRow.style.display = canCompareGroups ? 'block' : 'none'
+    if (!canCompareGroups) {
+      if (complementaryRadio) complementaryRadio.checked = true
+      if (groupRadio) groupRadio.checked = false
+    }
+    this.syncDeSelectionModeUi()
+  }
+
+  getDeSelectionMode() {
+    const groupRadio = document.getElementById('de-selection-mode-group')
+    if (groupRadio && groupRadio.checked) return 'group'
+    return 'complementary'
+  }
+
+  onDeSelectionModeChanged() {
+    this.syncDeSelectionModeUi()
+    this.updateDeSelectionPreview()
+  }
+
+  syncDeSelectionModeUi() {
+    const mode = this.getDeSelectionMode()
+    const isGroupMode = mode === 'group'
+    const colPlural = this.getColLabel({ plural: true })
+    const colSet = this.getColSetLabel({ plural: false })
+    const colSetCap = this.getColSetLabel({ plural: false, capitalize: true })
+    const operandALabel = document.getElementById('de-selection-operand-a-label')
+    const operandBWrap = document.getElementById('de-selection-operand-b-wrap')
+    const operandBSelect = document.getElementById('de-selection-operand-b')
+    const operandBLabel = document.getElementById('de-selection-operand-b-label')
+    const hint = document.getElementById('de-selection-mode-hint')
+    let complementaryDisplay = document.getElementById('de-selection-complementary-display')
+
+    if (operandALabel) {
+      operandALabel.textContent = `${colSetCap} A (reference)`
+    }
+
+    if (!complementaryDisplay && operandBWrap) {
+      complementaryDisplay = document.createElement('div')
+      complementaryDisplay.id = 'de-selection-complementary-display'
+      complementaryDisplay.style.cssText = 'width: 100%; padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 12px; color: #6b7280; background: #f9fafb;'
+      operandBWrap.appendChild(complementaryDisplay)
+    }
+    if (complementaryDisplay) {
+      complementaryDisplay.textContent = `All other ${colPlural}`
+    }
+
+    if (operandBSelect) {
+      operandBSelect.style.display = isGroupMode ? '' : 'none'
+      operandBSelect.disabled = !isGroupMode
+    }
+    if (complementaryDisplay) {
+      complementaryDisplay.style.display = isGroupMode ? 'none' : ''
+    }
+    if (operandBLabel) {
+      operandBLabel.textContent = isGroupMode ? `${colSetCap} B (compared)` : 'Compared to'
+    }
+    if (hint) {
+      hint.textContent = isGroupMode
+        ? `DE compares selected ${colPlural} in ${colSet} A against selected ${colPlural} in ${colSet} B.`
+        : `DE compares selected ${colPlural} in ${colSet} A against all other ${colPlural}.`
+    }
   }
 
   populateDeSelectionEmbeddings() {
@@ -15529,6 +15617,8 @@ export default class extends Controller {
       '[data-attr-name="group_pairs"]',
       '[data-attr-name="group_ref"]',
       '[data-attr-name="group_comp"]',
+      '[data-attr-name="group_comp_from_other_metadata"]',
+      '[data-attr-name="second_group_from_other_metadata"]',
       '[data-attr-name="or_text"]'
     ]
     selectors.forEach((selector) => {
@@ -15732,49 +15822,69 @@ export default class extends Controller {
     const preview = document.getElementById('de-selection-preview')
     const operandASelect = document.getElementById('de-selection-operand-a')
     const operandBSelect = document.getElementById('de-selection-operand-b')
-    if (!preview || !operandASelect || !operandBSelect) return
+    if (!preview || !operandASelect) return
 
-    if (!operandASelect.value || !operandBSelect.value) {
-      preview.innerHTML = '<div style="grid-column: 1 / -1; font-size: 12px; color: #6b7280; padding: 8px;">Select two saved cell sets to preview.</div>'
+    const mode = this.getDeSelectionMode()
+    const colPlural = this.getColLabel({ plural: true })
+    const colSet = this.getColSetLabel({ plural: false })
+    const colSetCap = this.getColSetLabel({ plural: false, capitalize: true })
+    const colSets = this.getColSetLabel({ plural: true })
+    if (!operandASelect.value || (mode === 'group' && (!operandBSelect || !operandBSelect.value))) {
+      preview.innerHTML = `<div style="grid-column: 1 / -1; font-size: 12px; color: #6b7280; padding: 8px;">Select ${colSet}(s) to preview.</div>`
       return
     }
 
     try {
-      const [operandA, operandB] = await Promise.all([
-        this.resolveComposeOperandSelection(operandASelect.value),
-        this.resolveComposeOperandSelection(operandBSelect.value)
-      ])
-      if (!operandA || !operandB) return
+      const operandA = await this.resolveComposeOperandSelection(operandASelect.value)
+      if (!operandA) return
 
       const embeddingId = this.getSelectedDePreviewEmbeddingId()
       const loomFile = this.getCurrentLoomFileForRequest()
       const coordinates = await this.getComposeSelectionPreviewCoordinates(embeddingId, loomFile)
       const totalCells = Array.isArray(coordinates) && coordinates.length > 0
         ? coordinates.length
-        : Math.max(operandA.cellSet.size, operandB.cellSet.size)
+        : operandA.cellSet.size
 
+      let comparedLabel = `All other ${colPlural}`
+      let comparedSet = new Set()
+      if (mode === 'group') {
+        const operandB = await this.resolveComposeOperandSelection(operandBSelect.value)
+        if (!operandB) return
+        comparedLabel = operandB.label
+        comparedSet = operandB.cellSet
+      } else {
+        for (let index = 0; index < totalCells; index++) {
+          if (!operandA.cellSet.has(index)) comparedSet.add(index)
+        }
+      }
+
+      const comparedTitle = mode === 'group' ? `${colSetCap} B` : 'Complementary'
       preview.innerHTML = [
-        this.renderComposeSelectionPreviewCard('Cell set A', operandA.label, operandA.cellSet.size, totalCells, '#2563eb', 'de-preview-canvas-a'),
-        this.renderComposeSelectionPreviewCard('Cell set B', operandB.label, operandB.cellSet.size, totalCells, '#d97706', 'de-preview-canvas-b')
+        this.renderComposeSelectionPreviewCard(`${colSetCap} A`, operandA.label, operandA.cellSet.size, totalCells, '#2563eb', 'de-preview-canvas-a'),
+        this.renderComposeSelectionPreviewCard(comparedTitle, comparedLabel, comparedSet.size, totalCells, '#d97706', 'de-preview-canvas-b')
       ].join('')
 
       this.drawComposeSelectionScatterPreview('de-preview-canvas-a', coordinates, operandA.cellSet, '#2563eb')
-      this.drawComposeSelectionScatterPreview('de-preview-canvas-b', coordinates, operandB.cellSet, '#d97706')
+      this.drawComposeSelectionScatterPreview('de-preview-canvas-b', coordinates, comparedSet, '#d97706')
     } catch (_error) {
-      preview.innerHTML = '<div style="grid-column: 1 / -1; font-size: 12px; color: #991b1b; padding: 8px;">Could not render DE preview for selected cell sets.</div>'
+      preview.innerHTML = `<div style="grid-column: 1 / -1; font-size: 12px; color: #991b1b; padding: 8px;">Could not render DE preview for selected ${colSets}.</div>`
     }
   }
 
   getDeSelectedOperandItems() {
     const operandASelect = document.getElementById('de-selection-operand-a')
     const operandBSelect = document.getElementById('de-selection-operand-b')
-    if (!operandASelect || !operandBSelect) return { itemA: null, itemB: null }
+    if (!operandASelect) return { itemA: null, itemB: null, mode: 'complementary' }
 
+    const mode = this.getDeSelectionMode()
     const selectedAId = String(operandASelect.value || '').replace('saved:', '')
-    const selectedBId = String(operandBSelect.value || '').replace('saved:', '')
     const itemA = (this.savedSelections || []).find((entry) => String(entry.id) === selectedAId) || null
-    const itemB = (this.savedSelections || []).find((entry) => String(entry.id) === selectedBId) || null
-    return { itemA, itemB }
+    let itemB = null
+    if (mode === 'group' && operandBSelect) {
+      const selectedBId = String(operandBSelect.value || '').replace('saved:', '')
+      itemB = (this.savedSelections || []).find((entry) => String(entry.id) === selectedBId) || null
+    }
+    return { itemA, itemB, mode }
   }
 
   collectDeModalAttributes() {
@@ -15817,11 +15927,12 @@ export default class extends Controller {
     }]
   }
 
-  applyDeSelectedGroupsToAttrs(attrs, itemA, itemB) {
+  applyDeSelectedGroupsToAttrs(attrs, itemA, itemB = null, mode = 'complementary') {
     const groupsAnnotId = Number(itemA?.metadataId)
     const groupsRunId = Number(itemA?.runId)
+    const colSet = this.getColSetLabel({ plural: false })
     if (!Number.isInteger(groupsAnnotId) || groupsAnnotId <= 0 || !Number.isInteger(groupsRunId) || groupsRunId <= 0) {
-      throw new Error('Missing group annotation for selected cell set.')
+      throw new Error(`Missing group annotation for selected ${colSet}.`)
     }
     attrs.groups = [{
       annot_id: groupsAnnotId,
@@ -15829,8 +15940,28 @@ export default class extends Controller {
     }]
     // Cell-selection metadata stores binary values as "1" (selected) and "0" (not selected).
     attrs.group_ref = '1'
-    attrs.group_comp = '0'
     delete attrs.group_pairs
+
+    if (mode === 'group') {
+      const groups2AnnotId = Number(itemB?.metadataId)
+      const groups2RunId = Number(itemB?.runId)
+      if (!Number.isInteger(groups2AnnotId) || groups2AnnotId <= 0 || !Number.isInteger(groups2RunId) || groups2RunId <= 0) {
+        throw new Error(`Missing group annotation for compared ${colSet}.`)
+      }
+      attrs.groups2 = [{
+        annot_id: groups2AnnotId,
+        run_id: groups2RunId
+      }]
+      attrs.group_comp = '1'
+      attrs.group_comp_from_other_metadata = true
+      attrs.second_group_from_other_metadata = true
+      return
+    }
+
+    attrs.group_comp = '0'
+    delete attrs.groups2
+    delete attrs.group_comp_from_other_metadata
+    delete attrs.second_group_from_other_metadata
   }
 
   showDeSelectionStatus(message, tone = 'info') {
@@ -15905,17 +16036,29 @@ export default class extends Controller {
     const methodId = String(methodSelect.value || '').trim()
     const stepId = Number(this.deStepIdValue)
     const projectIdentifier = this.getProjectIdentifier()
-    const { itemA, itemB } = this.getDeSelectedOperandItems()
+    const { itemA, itemB, mode } = this.getDeSelectedOperandItems()
 
     if (!methodId || !Number.isInteger(stepId) || stepId <= 0 || !projectIdentifier) {
       this.showDeSelectionStatus('Could not submit DE run: missing method or project context.', 'error')
       alert('Could not submit DE run: missing method or project context.')
       return
     }
-    if (!itemA || !itemB || String(itemA.id) === String(itemB.id)) {
-      this.showDeSelectionStatus('Please select two different cell sets.', 'error')
-      alert('Please select two different cell sets.')
+    if (!itemA) {
+      this.showDeSelectionStatus(`Please select a ${this.getColSetLabel({ plural: false })}.`, 'error')
+      alert(`Please select a ${this.getColSetLabel({ plural: false })}.`)
       return
+    }
+    if (mode === 'group') {
+      if (!itemB) {
+        this.showDeSelectionStatus(`Please select a compared ${this.getColSetLabel({ plural: false })}.`, 'error')
+        alert(`Please select a compared ${this.getColSetLabel({ plural: false })}.`)
+        return
+      }
+      if (String(itemA.id) === String(itemB.id)) {
+        this.showDeSelectionStatus(`Please select two different ${this.getColSetLabel({ plural: true })}.`, 'error')
+        alert(`Please select two different ${this.getColSetLabel({ plural: true })}.`)
+        return
+      }
     }
 
     const attrs = this.collectDeModalAttributes()
@@ -15927,7 +16070,7 @@ export default class extends Controller {
     }
     attrs.input_matrix = inputMatrix
     try {
-      this.applyDeSelectedGroupsToAttrs(attrs, itemA, itemB)
+      this.applyDeSelectedGroupsToAttrs(attrs, itemA, itemB, mode)
     } catch (error) {
       this.showDeSelectionStatus(error.message || 'Could not prepare DE grouping.', 'error')
       alert(error.message || 'Could not prepare DE grouping.')
@@ -16628,13 +16771,14 @@ export default class extends Controller {
   }
 
   renderComposeSelectionPreviewCard(title, subtitle, count, total, color, canvasId) {
+    const colPlural = this.getColLabel({ plural: true })
     return `
       <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; background: #fff;">
         <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">${this.escapeHtml(title)}</div>
         <div style="font-size: 13px; font-weight: 600; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this.escapeHtml(subtitle)}">${this.escapeHtml(subtitle)}</div>
         <div style="margin-top: 8px; border: 1px solid #e5e7eb; border-radius: 6px; background: #f9fafb; padding: 6px;">
           <canvas id="${this.escapeHtml(canvasId)}" width="250" height="140" style="display:block;width:100%;height:140px;background:#ffffff;border-radius:4px;"></canvas>
-          <div style="margin-top: 6px; font-size: 12px; color: #374151;"><span style="font-weight: 600; color: ${color};">${count.toLocaleString()}</span> / ${total.toLocaleString()} cells</div>
+          <div style="margin-top: 6px; font-size: 12px; color: #374151;"><span style="font-weight: 600; color: ${color};">${count.toLocaleString()}</span> / ${total.toLocaleString()} ${this.escapeHtml(colPlural)}</div>
         </div>
       </div>
     `

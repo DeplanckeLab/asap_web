@@ -16,19 +16,45 @@
                 style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
       </div>
 
+      <div id="de-selection-mode-row" style="margin-bottom: 12px; display: none;">
+        <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 6px;">Comparison</label>
+        <div style="display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #374151;">
+          <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="radio"
+                   name="de-selection-mode"
+                   id="de-selection-mode-complementary"
+                   value="complementary"
+                   checked
+                   onchange="if (window.visualizationController) window.visualizationController.onDeSelectionModeChanged()">
+            Selected vs complementary
+          </label>
+          <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="radio"
+                   name="de-selection-mode"
+                   id="de-selection-mode-group"
+                   value="group"
+                   onchange="if (window.visualizationController) window.visualizationController.onDeSelectionModeChanged()">
+            Group vs group
+          </label>
+        </div>
+      </div>
+
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; margin-bottom: 14px;">
         <div>
-          <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Cell set A</label>
+          <label id="de-selection-operand-a-label" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;"><%= col_label(@project, plural: false).to_s.capitalize %> set A (reference)</label>
           <select id="de-selection-operand-a"
                   onchange="if (window.visualizationController) window.visualizationController.updateDeSelectionPreview()"
                   style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
         </div>
-        <div>
-          <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Cell set B</label>
+        <div id="de-selection-operand-b-wrap">
+          <label id="de-selection-operand-b-label" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;"><%= col_label(@project, plural: false).to_s.capitalize %> set B</label>
           <select id="de-selection-operand-b"
                   onchange="if (window.visualizationController) window.visualizationController.updateDeSelectionPreview()"
                   style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
         </div>
+      </div>
+      <div id="de-selection-mode-hint" style="margin: -8px 0 14px; font-size: 11px; color: #6b7280;">
+        DE compares selected <%= col_label(@project, plural: true) %> in <%= col_label(@project, plural: false) %> set A against all other <%= col_label(@project, plural: true) %>.
       </div>
 
       <div id="de-selection-preview" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;"></div>

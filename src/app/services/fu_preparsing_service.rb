@@ -473,13 +473,26 @@ class FuPreparsingService
     @options[:delimiter] = '' unless @options.key?(:delimiter)
   end
 
+  # Python json.dumps historically emitted NaN/Infinity (invalid JSON). Normalize those
+  # tokens to null so sample matrices with empty cells remain readable.
+  def self.parse_preparsing_output_json(raw)
+    JSON.parse(raw)
+  rescue JSON::ParserError
+    sanitized = raw
+      .gsub(/(?<![A-Za-z0-9_])NaN(?![A-Za-z0-9_])/, 'null')
+      .gsub(/(?<![A-Za-z0-9_])-?Infinity(?![A-Za-z0-9_])/, 'null')
+    begin
+      JSON.parse(sanitized)
+    rescue JSON::ParserError => e
+      raise "Unable to parse preparsing output: #{e.message}"
+    end
+  end
+
   def load_output_json
     output_path = upload_dir + 'output.json'
     raise "Missing output file at #{output_path}" unless output_path.exist?
 
-    JSON.parse(output_path.read)
-  rescue JSON::ParserError => e
-    raise "Unable to parse preparsing output: #{e.message}"
+    self.class.parse_preparsing_output_json(output_path.read)
   end
 
   def load_output_with_enrichment

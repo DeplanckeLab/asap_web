@@ -882,7 +882,11 @@ export default class extends Controller {
   }
 
   showPreparsingPanel() {
-    this.enterPreparsingPhase()
+    // Progress UI lives in uploadSection. Mid-upload we still subscribe to FuChannel
+    // (first chunk returns fu_id), but must not hide the progress bar yet.
+    if (this.isUploadComplete) {
+      this.enterPreparsingPhase()
+    }
     if (this.hasPreparsingPanelTarget) {
       this.preparsingPanelTarget.classList.remove('hidden')
     }
@@ -917,6 +921,8 @@ export default class extends Controller {
 
   enterPreparsingPhase() {
     if (this.isIntegrateMode()) return
+    // Keep upload/download progress visible until the transfer has finished.
+    if (!this.isUploadComplete) return
     if (this.hasUploadSectionTarget) {
       this.uploadSectionTarget.classList.add('hidden')
     }
@@ -980,9 +986,13 @@ export default class extends Controller {
     }
 
     this.teardownPreparsingSubscription()
-    this.showPreparsingPanel()
-    this.setPreparsingStatus('Waiting for preparsing to start...', 'info', true)
-    
+    // Only switch to the preparsing UI once the file transfer is done.
+    // Subscription itself may start earlier (e.g. after the first upload chunk).
+    if (this.isUploadComplete) {
+      this.showPreparsingPanel()
+      this.setPreparsingStatus('Waiting for preparsing to start...', 'info', true)
+    }
+
     try {
       console.log(`[FileUpload] Creating websocket subscription for fu_id: ${fuId}`)
       this.preparsingSubscription = consumer.subscriptions.create(
@@ -2709,24 +2719,12 @@ export default class extends Controller {
     const organismButton = this.element.querySelector('[data-organism-selector-target="dropdownButton"]')
     this.setRequiredFieldHighlight(organismButton, highlightIdentity && !hasOrganism)
 
-    if (!isIntegrateMode) {
-      const uploadHighlightEl = this.hasUploadSectionTarget
-        ? this.uploadSectionTarget.querySelector('[data-file-upload-target="fileUploadContainer"]') || this.fileUploadContainerTarget
-        : (this.hasFileUploadContainerTarget ? this.fileUploadContainerTarget : null)
-      this.setRequiredFieldHighlight(uploadHighlightEl, !hasValidUpload && this.hasUploadSectionTarget && !this.uploadSectionTarget.classList.contains('hidden'))
-      this.setRequiredFieldHighlight(
-        this.hasPreparsingPanelTarget ? this.preparsingPanelTarget : null,
-        hasValidUpload && !hasValidPreparsing && this.hasPreparsingSectionTarget && !this.preparsingSectionTarget.classList.contains('hidden')
-      )
-    } else {
-      this.setRequiredFieldHighlight(
-        this.hasFileUploadContainerTarget ? this.fileUploadContainerTarget : null,
-        false
-      )
-      this.setRequiredFieldHighlight(
-        this.hasPreparsingPanelTarget ? this.preparsingPanelTarget : null,
-        false
-      )
+    // Upload/download and preparsing panels are visibly required by layout; skip red outline.
+    if (this.hasFileUploadContainerTarget) {
+      this.setRequiredFieldHighlight(this.fileUploadContainerTarget, false)
+    }
+    if (this.hasPreparsingPanelTarget) {
+      this.setRequiredFieldHighlight(this.preparsingPanelTarget, false)
     }
   }
 

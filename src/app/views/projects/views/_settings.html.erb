@@ -7,6 +7,52 @@
 
   <!-- Settings Sections -->
   <div class="space-y-6">
+    <% if @project.project_type_id.nil? && @project.version_id.to_i < 8 %>
+      <!-- Project Type (legacy ASAP < 8 with unknown type) -->
+      <div class="bg-gray-50 rounded-lg p-6"
+           data-controller="project-type-settings"
+           data-project-type-settings-url-value="<%= project_path(@project) %>">
+        <h3 class="text-lg font-semibold text-gray-900 mb-4">Project Type</h3>
+
+        <div class="space-y-4">
+          <div class="p-3 bg-amber-50 border border-amber-200 rounded-md">
+            <p class="text-sm text-amber-800">
+              This project was created with a version of ASAP lower than 8 and has no project type set.
+              Choose Single-cell or Bulk so this project can be integrated with other projects of the same type.
+            </p>
+          </div>
+
+          <div class="flex flex-col sm:flex-row sm:items-end gap-3">
+            <div class="flex-1 max-w-md">
+              <label for="settings_project_type_id" class="block text-sm font-medium text-gray-900 mb-2">
+                Project Type
+              </label>
+              <select id="settings_project_type_id"
+                      data-project-type-settings-target="select"
+                      data-action="change->project-type-settings#onChange"
+                      class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+                <option value="">Select project type</option>
+                <% (@project_types || []).each do |project_type| %>
+                  <option value="<%= project_type.id %>"><%= project_type.name %></option>
+                <% end %>
+              </select>
+            </div>
+            <button type="button"
+                    data-project-type-settings-target="saveButton"
+                    data-action="click->project-type-settings#save"
+                    disabled
+                    class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed">
+              Save Project Type
+            </button>
+          </div>
+
+          <div data-project-type-settings-target="message" class="hidden">
+            <p class="text-sm px-3 py-2 rounded" data-project-type-settings-target="messageText"></p>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
     <!-- Privacy Settings -->
     <div class="bg-gray-50 rounded-lg p-6" data-controller="public-toggle" 
          data-public-toggle-url-value="<%= toggle_public_project_path(@project) %>"

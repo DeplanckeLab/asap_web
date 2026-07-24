@@ -179,6 +179,10 @@ import PublicToggleController from "controllers/public_toggle_controller"
 application.register("public-toggle", PublicToggleController)
 console.log('Public toggle controller registered')
 
+import ProjectTypeSettingsController from "controllers/project_type_settings_controller"
+application.register("project-type-settings", ProjectTypeSettingsController)
+console.log('Project type settings controller registered')
+
 import ComplianceFixController from "controllers/compliance_fix_controller"
 application.register("compliance-fix", ComplianceFixController)
 console.log('Compliance fix controller registered')

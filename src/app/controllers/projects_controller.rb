@@ -1329,6 +1329,25 @@ class ProjectsController < ApplicationController
         return
       end
 
+      if project_params.key?(:project_type_id) && @project.project_type_id.nil?
+        new_project_type_id = project_params[:project_type_id].presence
+        type_set_error = if @project.version_id.to_i >= 8
+          "Project type can only be set for ASAP releases before version 8."
+        elsif new_project_type_id.blank?
+          "Project type is required."
+        elsif !ProjectType.exists?(new_project_type_id)
+          "Invalid project type."
+        end
+
+        if type_set_error
+          respond_to do |format|
+            format.html { redirect_to project_path(@project, view: 'settings'), alert: type_set_error }
+            format.json { render json: { error: type_set_error }, status: :unprocessable_entity }
+          end
+          return
+        end
+      end
+
       respond_to do |format|
         if @project.update(project_params)
           format.html { redirect_to @project, notice: "Project was successfully updated." }
@@ -1405,6 +1424,22 @@ class ProjectsController < ApplicationController
 
     project_ids = project_ids.map(&:to_i).compact
     projects = Project.where(id: project_ids).includes(:organism, :project_type)
+
+    unknown_type_projects = projects.select { |project| project.project_type_id.nil? }
+    if unknown_type_projects.any?
+      render json: {
+        success: false,
+        unknown_project_type: true,
+        projects: unknown_type_projects.map { |project|
+          {
+            id: project.id,
+            name: project.display_name,
+            settings_url: project_path(project, view: 'settings')
+          }
+        }
+      }, status: :unprocessable_entity
+      return
+    end
 
     sc_projects = projects.select(&:single_cell?)
     if sc_projects.size < 2
@@ -9753,6 +9788,7 @@ class ProjectsController < ApplicationController
 
     def load_settings_context
       @shares = @project.shares.includes(:user).to_a
+      @project_types = ProjectType.order(:name) if @project.project_type_id.nil? && @project.version_id.to_i < 8
     end
 
     def load_compliance_context

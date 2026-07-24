@@ -300,6 +300,9 @@
                            class="rounded border-gray-300 text-red-600 focus:ring-red-500"
                            value="<%= project.id %>"
                            data-single-cell="<%= project.single_cell? %>"
+                           data-project-type-unknown="<%= project.project_type_id.nil? %>"
+                           data-project-name="<%= project.display_name %>"
+                           data-settings-url="<%= project_path(project, view: 'settings') %>"
                            data-action="change->project-selection#updateSelection"
                            data-project-selection-target="checkbox">
                   </td>

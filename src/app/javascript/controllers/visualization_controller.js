@@ -11281,9 +11281,15 @@ export default class extends Controller {
   syncSelectionColorDot() {
     const dot = document.getElementById('selection-color-dot')
     if (!dot) return
+    const hasLassoSelection = !!(this.selectedCells && this.selectedCells.size > 0)
     const hex = this.getSelectionHighlightColorHex()
     dot.style.backgroundColor = hex
     dot.title = `Selection color: ${hex}. Click to change.`
+    dot.style.display = hasLassoSelection ? 'inline-block' : 'none'
+    if (!hasLassoSelection) {
+      const picker = document.getElementById('selection-color-picker-form')
+      if (picker) picker.remove()
+    }
   }
 
   selectionColorDotClicked(event) {
@@ -14134,6 +14140,7 @@ export default class extends Controller {
       const showWarning = selectionDisplay.label === 'visible cells' && selectionDisplay.showViewWarning
       viewWarningElement.style.display = showWarning ? 'inline' : 'none'
     }
+    this.syncSelectionColorDot()
   }
 
   getSelectionCountDisplayData() {

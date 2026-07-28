@@ -1567,6 +1567,9 @@ export class UIManager {
       cancelButton.style.display = hasLassoSelection ? 'inline-flex' : 'none'
       cancelButton.title = 'Cancel lasso selection'
     }
+    if (typeof this.controller.syncSelectionColorDot === 'function') {
+      this.controller.syncSelectionColorDot()
+    }
   }
 
   // Update the state of the "Add all visible cells" button

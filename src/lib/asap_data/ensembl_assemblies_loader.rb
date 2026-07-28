@@ -20,12 +20,12 @@ module AsapData
       protists: 5
     }.freeze
     DEFAULT_RELEASE_TO = {
-      vertebrates: 115,
-      bacteria: 62,
-      fungi: 62,
-      metazoa: 62,
-      plants: 62,
-      protists: 62
+      vertebrates: 116,
+      bacteria: 63,
+      fungi: 63,
+      metazoa: 63,
+      plants: 63,
+      protists: 63
     }.freeze
 
     def truncate_assemblies!(remote_db: default_remote_db)
@@ -886,6 +886,72 @@ module AsapData
 
     def assembly_cache_key(organism_id, name)
       "#{organism_id}:#{name}"
+    end
+
+    # Called from update_genes.rake after gene rows are loaded for one organism/release.
+    def upsert_assembly_for_organism_release!(
+      organism_id:,
+      ensembl_db_name:,
+      db_type:,
+      release_num:,
+      release_dir:,
+      core_folder: nil,
+      remote_db: default_remote_db,
+      download_missing_meta: default_download_missing_meta?
+    )
+      stats = { meta_downloads: 0, skipped_no_meta: 0 }
+      assembly_name = assembly_name_for_organism(
+        release_dir: Pathname(release_dir),
+        db_name: ensembl_db_name,
+        db_type: db_type,
+        release_num: release_num,
+        core_folder: core_folder,
+        download_missing_meta: download_missing_meta,
+        stats: stats
+      )
+      if assembly_name.blank?
+        return { status: :skipped, reason: :no_meta }
+      end
+
+      assemblies_by_key = {}
+      created, updated = upsert_assembly!(
+        assemblies_by_key,
+        organism_id,
+        assembly_name,
+        release_num,
+        remote_db: remote_db
+      )
+      record = assemblies_by_key[assembly_cache_key(organism_id, assembly_name)]
+      {
+        status: :ok,
+        assembly_name: assembly_name,
+        created: created,
+        updated: updated,
+        first_ensembl_release: record&.first_ensembl_release,
+        latest_ensembl_release: record&.latest_ensembl_release
+      }
+    end
+
+    def update_subdomain_latest_release!(db_type, release_num, remote_db: default_remote_db)
+      RemoteOrganism.with_remote(remote_db) do
+        conn = RemoteOrganism.connection
+        row = conn.select_one(<<~SQL.squish)
+          SELECT id, latest_ensembl_release
+          FROM ensembl_subdomains
+          WHERE name = #{conn.quote(db_type.to_s)}
+          LIMIT 1
+        SQL
+        if row
+          current = row["latest_ensembl_release"].to_i
+          if release_num.to_i > current
+            conn.execute(<<~SQL.squish)
+              UPDATE ensembl_subdomains
+              SET latest_ensembl_release = #{release_num.to_i}
+              WHERE id = #{row["id"].to_i}
+            SQL
+          end
+        end
+      end
     end
 
     def upsert_assembly!(assemblies_by_key, organism_id, name, release_num, remote_db:)

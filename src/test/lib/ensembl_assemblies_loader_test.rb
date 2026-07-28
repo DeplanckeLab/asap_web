@@ -189,6 +189,23 @@ class EnsemblAssembliesLoaderTest < TestBaseWithoutFixtures
     end
   end
 
+  test 'upsert_assembly_for_organism_release skips when meta is missing' do
+    with_tmp_ensembl_tree do |base_dir|
+      result = AsapData::EnsemblAssembliesLoader.upsert_assembly_for_organism_release!(
+        organism_id: 1,
+        ensembl_db_name: 'escherichia_coli',
+        db_type: :bacteria,
+        release_num: 10,
+        release_dir: base_dir + 'bacteria/10',
+        remote_db: 'asap_data_v8',
+        download_missing_meta: false
+      )
+
+      assert_equal :skipped, result[:status]
+      assert_equal :no_meta, result[:reason]
+    end
+  end
+
   private
 
   def with_tmp_ensembl_tree

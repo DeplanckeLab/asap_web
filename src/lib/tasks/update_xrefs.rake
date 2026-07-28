@@ -8,6 +8,39 @@ task update_xrefs: :environment do
   ActiveRecord::Base.logger = dev_null
   
   now = Time.now
+  remote_db = ENV.fetch("ASAP2_REMOTE_DB", "asap_data_v8")
+  asap_data_id = (ENV["ASAP_DATA_ID"].presence || remote_db[/\d+/] || "8").to_i
+
+  def asap_data_dir
+    if defined?(APP_CONFIG) && APP_CONFIG.respond_to?(:[])
+      APP_CONFIG[:data_dir]
+    elsif ENV["DATA_DIR"].present?
+      ENV["DATA_DIR"]
+    else
+      "/data/asap2_test"
+    end
+  end
+
+  def ensembl_data_dir
+    if ENV["ENSEMBL_DATA_DIR"].present?
+      Pathname.new(ENV["ENSEMBL_DATA_DIR"])
+    else
+      Pathname.new(asap_data_dir) + "ensembl"
+    end
+  end
+
+  def resolve_go_json_path
+    candidates = [
+      ENV["GO_JSON_PATH"],
+      File.join(asap_data_dir.to_s, "go", "go.json"),
+      ENV["PROD_DATA_DIR"].present? ? File.join(ENV["PROD_DATA_DIR"], "go", "go.json") : nil,
+      "/data/asap/go/go.json",
+      "/mnt/asap_data/go/go.json"
+    ].compact
+    path = candidates.find { |p| File.exist?(p) }
+    raise "go.json not found (tried: #{candidates.join(', ')})" unless path
+    path
+  end
 
 #  asap_data_id = 5
 #  kegg_version = '6.3.5.5'
@@ -25,6 +58,21 @@ task update_xrefs: :environment do
   list_db_xrefs_direct = ['50801', '20062', '20088'] ## the ones that are integrated straight away
   list_db_xrefs = ["1000"] + list_db_xrefs_direct
 
+  original_organism = Organism
+  original_ensembl_subdomain = EnsemblSubdomain
+
+  RemoteGene.with_remote(remote_db) do
+    Object.send(:remove_const, :Organism)
+    Object.const_set(:Organism, RemoteOrganism)
+    Object.const_set(:Gene, RemoteGene)
+    Object.send(:remove_const, :EnsemblSubdomain)
+    Object.const_set(:EnsemblSubdomain, RemoteEnsemblSubdomain)
+    Object.const_set(:DbSet, RemoteDbSet)
+    Object.const_set(:GeneSet, RemoteGeneSet)
+    Object.const_set(:GeneSetItem, RemoteGeneSetItem)
+
+    begin
+
   ## update db_sets
   list_db_xrefs_direct.each do |db_id|
     label = h_db_to_load[db_id][:name]
@@ -37,14 +85,18 @@ task update_xrefs: :environment do
       db_set = DbSet.new(h_db_set)
       db_set.save
     else
-      db_set.update_attributes(h_db_set)
+      db_set.update!(h_db_set)
     end
   end
   
-  base_url = "ftp://ftp.ensembl.org/pub/release-115/"
-  base_url2 = "ftp://ftp.ebi.ac.uk/ensemblgenomes/pub/release-62/"
+  base_url = "ftp://ftp.ensembl.org/pub/release-116/"
+  base_url2 = "ftp://ftp.ebi.ac.uk/ensemblgenomes/pub/release-63/"
   tmp_dir = Pathname.new("./tmp/")
-  data_dir = Pathname.new(APP_CONFIG[:data_dir])
+  data_dir = Pathname.new(asap_data_dir)
+  puts "remote db: #{remote_db}"
+  puts "ensembl data dir: #{ensembl_data_dir}"
+  puts "vertebrates FTP: #{base_url}"
+  puts "genomes FTP: #{base_url2}"
 
   ## get organisms
   h_organisms = {}
@@ -59,7 +111,8 @@ task update_xrefs: :environment do
   end
 
   ## get GO lineages
-  go_file = data_dir + 'go' + "go.json"
+  go_file = resolve_go_json_path
+  puts "GO lineages: #{go_file}"
   h_go = JSON.parse(File.read(go_file))
 
   ## get db names
@@ -99,21 +152,31 @@ task update_xrefs: :environment do
     
     puts "Extract #{o.ensembl_db_name}..."  
 
-    es = h_ensembl_subdomains_by_id[o.ensembl_subdomain_id].name
+    subdomain = h_ensembl_subdomains_by_id[o.ensembl_subdomain_id]
+    unless subdomain
+      puts "Skip #{o.ensembl_db_name}: missing ensembl_subdomain_id=#{o.ensembl_subdomain_id}"
+      next
+    end
+    es = subdomain.name
 
     folder_name = h_db_names[o.ensembl_db_name] #o.ensembl_db_name + '_core_97_1'
     folder_name ||=  h_db_names[o.ensembl_db_name + '_core']
     puts o.ensembl_db_name
     puts h_db_names[o.ensembl_db_name]
     
+    unless folder_name
+      puts "Skip #{o.ensembl_db_name}: not found in Ensembl FTP listing"
+      next
+    end
+
     release_num = folder_name.match(/\d+/)[0]
     
-    base_dir = Pathname.new(APP_CONFIG[:data_dir]) + 'ensembl'
+    base_dir = ensembl_data_dir
     
     base_dir += es.to_s
-    Dir.mkdir base_dir if !File.exist? base_dir
+    FileUtils.mkdir_p(base_dir) unless File.exist? base_dir
     base_dir += release_num.to_s
-    Dir.mkdir base_dir if !File.exist? base_dir
+    FileUtils.mkdir_p(base_dir) unless File.exist? base_dir
     
     ## get existing gene_sets
     
@@ -162,6 +225,11 @@ task update_xrefs: :environment do
         db_name = o.ensembl_db_name
         puts "Check archive exists: " + (tmp_dir + "#{db_name}.tgz").to_s
         puts "SIZE: " + File.size(tmp_dir + "#{db_name}.tgz").to_s if File.exist? tmp_dir + "#{db_name}.tgz"
+        mysql_base_url = if es.to_s == "vertebrates"
+          "#{base_url}mysql/"
+        else
+          "#{base_url2}#{es}/mysql/"
+        end
         if !File.exist? tmp_dir + "#{db_name}.tgz" or File.size(tmp_dir + "#{db_name}.tgz") < 350
             File.delete(tmp_dir + "#{db_name}.tgz") if File.exist?(tmp_dir + "#{db_name}.tgz")
             
@@ -177,9 +245,9 @@ task update_xrefs: :environment do
             
             puts " - Download tables..."
             ensembl_tables.each do |table_name|
-              url = base_url + folder_name + "/" + table_name + ".txt.gz"
+              url = mysql_base_url + folder_name + "/" + table_name + ".txt.gz"
               
-              if es == :vertebrates and release_num == 89
+              if es.to_s == "vertebrates" and release_num.to_i == 89
                 `wget -qO #{tmp_dir2}/#{table_name}.txt.gz.bz2 '#{url}'`
                 `bunzip2 #{tmp_dir2}/#{table_name}.txt.gz.bz2` if File.exist? "#{tmp_dir2}/#{table_name}.txt.gz.bz2"
               else
@@ -316,7 +384,7 @@ task update_xrefs: :environment do
                   ox.uniq.each do |xref_id|
                     if a = h_xref[xref_id] 
                       #   if h_db_to_load[a[:type]][:name] == 'NCBI Gene ID'
-                      g.update_attributes({:ncbi_gene_id => a[:acc]})
+                      g.update!({:ncbi_gene_id => a[:acc]})
                       i+=1
                     end
                     # end
@@ -417,7 +485,7 @@ task update_xrefs: :environment do
                 :label => db_name, 
                 :ref_id => h_db_sets[db_name].id, 
                 :user_id => 1,
-                :asap_data_id => APP_CONFIG[:asap_data_id],
+                :asap_data_id => asap_data_id,
                 :latest_ensembl_release => o.latest_ensembl_release
               }
               # gene_set = GeneSet.where(h_gene_set).first
@@ -427,7 +495,7 @@ task update_xrefs: :environment do
                 gene_set.save
                 h_gene_sets[gene_set.ref_id]= gene_set
               else
-                gene_set.update_attributes(h_gene_set)
+                gene_set.update!(h_gene_set)
               end
               # end
             end
@@ -449,7 +517,7 @@ task update_xrefs: :environment do
                 #          gene_set = GeneSet.new(h_gene_set)
                 #          gene_set.save
                 #      else
-                # gene_set.update_attributes(h_gene_set)
+                # gene_set.update!(h_gene_set)
                 # end
                 if gene_set and gene_set.id
                   gene_set_item = h_gene_set_items[gene_set.id][go_id] if h_gene_set_items[gene_set.id]
@@ -458,7 +526,7 @@ task update_xrefs: :environment do
                     :gene_set_id => gene_set.id, 
                     :identifier => go_id, 
                     :name => (name != "\\N") ? name : nil,
-                    :asap_data_id => APP_CONFIG[:asap_data_id]
+                    :asap_data_id => asap_data_id
                   }
                   #                gene_set_item = GeneSetItem.where(h_gene_set_item).first
                   ensembl_ids = h_gsi[go_type][go_id]
@@ -471,7 +539,7 @@ task update_xrefs: :environment do
                     #   puts "Add gene_set_item: " + gene_set_item.to_json
                     gene_set_item.save
                   else
-                    gene_set_item.update_attributes(h_gene_set_item)
+                    gene_set_item.update!(h_gene_set_item)
                   end
                 else
                   puts "Gene set for #{h_gene_set.to_json} is not found!"
@@ -489,7 +557,7 @@ task update_xrefs: :environment do
                 :organism_id => o.id, 
                 :label => db_name, 
                 :ref_id => h_db_sets[db_name].id, 
-                :asap_data_id => APP_CONFIG[:asap_data_id],
+                :asap_data_id => asap_data_id,
                 :latest_ensembl_release => o.latest_ensembl_release
               }
               #  gene_set = GeneSet.where(h_gene_set).first
@@ -521,7 +589,7 @@ task update_xrefs: :environment do
                 #   gene_set = GeneSet.new(h_gene_set)
                 #   gene_set.save
                 # else
-                gene_set.update_attributes(h_gene_set)
+                gene_set.update!(h_gene_set)
               end
               
               if gene_set and gene_set.id
@@ -539,7 +607,7 @@ task update_xrefs: :environment do
                     :gene_set_id => gene_set.id,
                     :identifier => identifier,
                     :name => (h_xref_names[type][gsi_id] != "\\N") ? h_xref_names[type][gsi_id] : nil,
-                    :asap_data_id => APP_CONFIG[:asap_data_id]
+                    :asap_data_id => asap_data_id
                   }
                   #        gene_set_item = GeneSetItem.where(h_gene_set_item).first
                   ensembl_ids = h_gsi[type][gsi_id]
@@ -551,7 +619,7 @@ task update_xrefs: :environment do
                     #   puts "Add gene_set_item: " + gene_set_item.to_json                                       
                     gene_set_item.save
                   else
-                    gene_set_item.update_attributes(h_gene_set_item)
+                    gene_set_item.update!(h_gene_set_item)
                     # puts "Update: " + h_gene_set_item.to_json	
                   end
                 end
@@ -574,6 +642,17 @@ task update_xrefs: :environment do
         end
         
       end
+    end
+  end
+    ensure
+      Object.send(:remove_const, :GeneSetItem) if defined?(GeneSetItem) && GeneSetItem == RemoteGeneSetItem
+      Object.send(:remove_const, :GeneSet) if defined?(GeneSet) && GeneSet == RemoteGeneSet
+      Object.send(:remove_const, :DbSet) if defined?(DbSet) && DbSet == RemoteDbSet
+      Object.send(:remove_const, :Gene) if defined?(Gene) && Gene == RemoteGene
+      Object.send(:remove_const, :Organism)
+      Object.const_set(:Organism, original_organism)
+      Object.send(:remove_const, :EnsemblSubdomain)
+      Object.const_set(:EnsemblSubdomain, original_ensembl_subdomain)
     end
   end
 end

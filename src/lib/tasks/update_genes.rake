@@ -8,6 +8,8 @@ task update_genes: :environment do
   ActiveRecord::Base.logger = dev_null
   
   start = Time.now
+  remote_db = ENV.fetch("ASAP2_REMOTE_DB", "asap_data_v8")
+  download_missing_meta = ENV.fetch("DOWNLOAD_MISSING_META", "true").to_s.strip.downcase != "false"
 
   #  last_version = Version.last
   #  h_env = JSON.parse(last_version.env_json)
@@ -28,13 +30,31 @@ task update_genes: :environment do
     return txt
   end
 
-  def extract_genes start, db_type, release_num
+  def asap_data_dir
+    if defined?(APP_CONFIG) && APP_CONFIG.respond_to?(:[])
+      APP_CONFIG[:data_dir]
+    elsif ENV["DATA_DIR"].present?
+      ENV["DATA_DIR"]
+    else
+      "/data/asap2_test"
+    end
+  end
+
+  def ensembl_data_dir
+    if ENV["ENSEMBL_DATA_DIR"].present?
+      Pathname.new(ENV["ENSEMBL_DATA_DIR"])
+    else
+      Pathname.new(asap_data_dir) + "ensembl"
+    end
+  end
+
+  def extract_genes start, db_type, release_num, remote_db, download_missing_meta
     
-    base_dir = Pathname.new(APP_CONFIG[:data_dir]) + 'ensembl'
+    base_dir = ensembl_data_dir
     base_dir += db_type.to_s
-    Dir.mkdir base_dir if !File.exist? base_dir
+    FileUtils.mkdir_p(base_dir) unless File.exist? base_dir
     base_dir += release_num.to_s
-    Dir.mkdir base_dir if !File.exist? base_dir
+    FileUtils.mkdir_p(base_dir) unless File.exist? base_dir
         
     
     h_db_types = {
@@ -97,7 +117,7 @@ task update_genes: :environment do
           o = Organism.new(h_o)
           o.save
         elsif 
-          o.update_attributes(
+          o.update!(
             :ensembl_subdomain_id => h_ensembl_subdomains[db_type].id, 
             :latest_ensembl_release => release_num
           )
@@ -569,7 +589,7 @@ task update_genes: :environment do
                     end
                   end
                   if diff == 1
-                    h_db_genes[stable_id.downcase].update_attributes(h_upd)
+                    h_db_genes[stable_id.downcase].update!(h_upd)
                     i+=1
                   else
                     same+=1
@@ -621,6 +641,32 @@ task update_genes: :environment do
             puts " => #{same} genes unchanged."
             puts " => #{j} genes have been added!"
             puts " => #{i} genes have been updated!"
+
+            puts " - #{dt(Time.now, start)} Update assembly..."
+            assembly_result = AsapData::EnsemblAssembliesLoader.upsert_assembly_for_organism_release!(
+              organism_id: o.id,
+              ensembl_db_name: o.ensembl_db_name,
+              db_type: db_type,
+              release_num: release_num,
+              release_dir: base_dir,
+              core_folder: folder_name,
+              remote_db: remote_db,
+              download_missing_meta: download_missing_meta
+            )
+            case assembly_result[:status]
+            when :ok
+              action = if assembly_result[:created]
+                "created"
+              elsif assembly_result[:updated]
+                "updated"
+              else
+                "unchanged"
+              end
+              puts " => assembly #{assembly_result[:assembly_name]} #{action} " \
+                   "(first=#{assembly_result[:first_ensembl_release]}, latest=#{assembly_result[:latest_ensembl_release]})"
+            when :skipped
+              puts " => assembly skipped (#{assembly_result[:reason]})"
+            end
             puts "================================="
           else
             puts "Not found #{o.ensembl_db_name}_core"
@@ -646,8 +692,15 @@ task update_genes: :environment do
       end
     end
 
-    h_ensembl_subdomains[db_type].update_attribute(:latest_ensembl_release, release_num)
-    
+    AsapData::EnsemblAssembliesLoader.update_subdomain_latest_release!(
+      db_type,
+      release_num,
+      remote_db: remote_db
+    )
+    if h_ensembl_subdomains[db_type] && release_num > h_ensembl_subdomains[db_type].latest_ensembl_release.to_i
+      h_ensembl_subdomains[db_type].update_attribute(:latest_ensembl_release, release_num)
+    end
+
   end
 
   #  initial_release = 97
@@ -655,18 +708,29 @@ task update_genes: :environment do
   #  initial_release = 99 #h_env_prev["tool_versions"]["ensembl_vertebrate"]
   
   #initial_release = EnsemblSubdomain.where(:name => "vertebrates").first.latest_ensembl_release + 1 #Gene.maximum("release") + 1
-  initial_release = 114 #h_env["tool_versions"]["ensembl_vertebrate"]
+  original_organism = Organism
+  original_ensembl_subdomain = EnsemblSubdomain
+
+  RemoteGene.with_remote(remote_db) do
+    Object.send(:remove_const, :Organism)
+    Object.const_set(:Organism, RemoteOrganism)
+    Object.const_set(:Gene, RemoteGene)
+    Object.send(:remove_const, :EnsemblSubdomain)
+    Object.const_set(:EnsemblSubdomain, RemoteEnsemblSubdomain)
+
+    begin
+  initial_release = 116 #h_env["tool_versions"]["ensembl_vertebrate"]
   
   #  readme = `wget -O - 'http://ftp.ensembl.org/pub/current_README'`
   #  if m = readme.match(/Ensembl Release (\d+) Databases./)
   #   final_release = m[1].to_i
-  final_release = 115
+  final_release = 116
   if initial_release <= final_release
     puts "RELEASE update : from #{initial_release} to #{final_release}"
     
     (initial_release .. final_release).to_a.each do |release_num|
          puts "Parse Vertebrates #{release_num}..."
-         extract_genes(start, :vertebrates, release_num)
+         extract_genes(start, :vertebrates, release_num, remote_db, download_missing_meta)
     end
   else
     puts "Vertebrates is ALREADY up to date! (#{initial_release} - #{final_release})"
@@ -679,20 +743,20 @@ task update_genes: :environment do
   
   #    final_release = 49 #h_env["tool_versions"]["ensembl_genomes"]
   [:bacteria, :fungi, :metazoa, :plants, :protists].each do |db_type|
-    initial_release = 61
+    initial_release = 63
     #  initial_release = EnsemblSubdomain.where(:name => db_type.to_s).first.latest_ensembl_release + 1
     
     #    readme = `wget -O - 'http://ftp.ensemblgenomes.org/pub/current_README'`
     #    if m = readme.match(/The current release is Ensembl Genomes (\d+)/)
     #      final_release = m[1].to_i
-    final_release = 62
+    final_release = 63
     if initial_release <= final_release
       
       puts "RELEASE update : from #{initial_release} to #{final_release}"
       #  exit
       (initial_release .. final_release).to_a.each do |release_num|
         puts "Parse #{db_type} #{release_num}..."
-        extract_genes(start, db_type, release_num)
+        extract_genes(start, db_type, release_num, remote_db, download_missing_meta)
       end
       
     else
@@ -701,11 +765,19 @@ task update_genes: :environment do
   end
   #end
   
-  output_json = Pathname.new(APP_CONFIG[:data_dir]) + 'tmp' + 'tool_versions.json'
+  output_json = Pathname.new(asap_data_dir) + 'tmp' + 'tool_versions.json'
   
   File.open(output_json, 'w') do |f|
     f.write({"ensembl_vertebrates" => EnsemblSubdomain.find_by_name("vertebrates").latest_ensembl_release,
              "ensembl_genomes" => EnsemblSubdomain.find_by_name("bacteria").latest_ensembl_release}.to_json)
+  end
+    ensure
+      Object.send(:remove_const, :Gene) if defined?(Gene) && Gene == RemoteGene
+      Object.send(:remove_const, :Organism)
+      Object.const_set(:Organism, original_organism)
+      Object.send(:remove_const, :EnsemblSubdomain)
+      Object.const_set(:EnsemblSubdomain, original_ensembl_subdomain)
+    end
   end
   
 end

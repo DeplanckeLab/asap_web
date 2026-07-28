@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 namespace :asap_data do
-  desc "Populate genes.first_ensembl_release from local Ensembl gene.txt (organism by organism). ENV: ASAP2_REMOTE_DB, ENSEMBL_DATA_DIR, ENSEMBL_DB_TYPES, ENSEMBL_RELEASE_FROM (default: 54 vertebrates, 1 ensembl genomes), ENSEMBL_RELEASE_TO (default: organism/subdomain latest or 115), ORGANISM_ID, DOWNLOAD_MISSING_GENE_TABLE, FORCE"
+  desc "Populate genes.first_ensembl_release from local Ensembl gene.txt (organism by organism). ENV: ASAP2_REMOTE_DB, ENSEMBL_DATA_DIR, ENSEMBL_DB_TYPES, ENSEMBL_RELEASE_FROM (default: 54 vertebrates, 1 ensembl genomes), ENSEMBL_RELEASE_TO (default: organism/subdomain latest or 116), ORGANISM_ID, DOWNLOAD_MISSING_GENE_TABLE, FORCE"
   task populate_gene_first_ensembl_release: :environment do
     dev_null = Logger.new("/dev/null")
     Rails.logger = dev_null

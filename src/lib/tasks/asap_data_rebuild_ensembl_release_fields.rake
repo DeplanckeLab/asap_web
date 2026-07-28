@@ -14,8 +14,8 @@ namespace :asap_data do
     puts "Rebuild Ensembl release fields"
     puts "  remote db: #{remote_db}"
     puts "  ensembl data dirs: #{base_dirs.map(&:to_s).join(', ')}"
-    puts "  vertebrates releases: 54-115"
-    puts "  ensembl genomes releases: 5-62"
+    puts "  vertebrates releases: 54-116"
+    puts "  ensembl genomes releases: 5-63"
     puts
 
     unless env_skip?("SKIP_META_FILES")
@@ -25,7 +25,7 @@ namespace :asap_data do
         with_env(
           "ENSEMBL_DB_TYPES" => db_type,
           "ENSEMBL_RELEASE_FROM" => db_type == "vertebrates" ? "54" : "5",
-          "ENSEMBL_RELEASE_TO" => db_type == "vertebrates" ? "115" : "62"
+          "ENSEMBL_RELEASE_TO" => db_type == "vertebrates" ? "116" : "63"
         ) do
           stats = AsapData::EnsemblAssembliesLoader.complete_local_meta_files!(remote_db: remote_db)
           puts "  #{db_type}: checked=#{stats[:organisms_checked]} meta=#{stats[:meta_downloaded]} coord=#{stats[:coord_system_downloaded]} already=#{stats[:already_complete]} (#{(Time.now - step_start).round(1)}s)"
@@ -54,7 +54,7 @@ namespace :asap_data do
         with_env(
           "ENSEMBL_DB_TYPES" => db_type,
           "ENSEMBL_RELEASE_FROM" => db_type == "vertebrates" ? "54" : "5",
-          "ENSEMBL_RELEASE_TO" => db_type == "vertebrates" ? "115" : "62"
+          "ENSEMBL_RELEASE_TO" => db_type == "vertebrates" ? "116" : "63"
         ) do
           stats = AsapData::GeneFirstEnsemblReleasePopulator.populate!(
             remote_db: remote_db,

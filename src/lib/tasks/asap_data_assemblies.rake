@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 namespace :asap_data do
-  desc "Populate assemblies from Ensembl meta.txt under ENSEMBL_DATA_DIR (default: largest local ensembl tree). ENV: ASAP2_REMOTE_DB, ENSEMBL_DATA_DIR, ENSEMBL_DB_TYPES, ENSEMBL_RELEASE_FROM (default: 54 vertebrates, 1 ensembl genomes), ENSEMBL_RELEASE_TO (default: organism/subdomain latest or 115), DOWNLOAD_MISSING_META, TRUNCATE_ASSEMBLIES"
+  desc "Populate assemblies from Ensembl meta.txt under ENSEMBL_DATA_DIR (default: largest local ensembl tree). ENV: ASAP2_REMOTE_DB, ENSEMBL_DATA_DIR, ENSEMBL_DB_TYPES, ENSEMBL_RELEASE_FROM (default: 54 vertebrates, 1 ensembl genomes), ENSEMBL_RELEASE_TO (default: organism/subdomain latest or 116), DOWNLOAD_MISSING_META, TRUNCATE_ASSEMBLIES"
   task populate_assemblies: :environment do
     dev_null = Logger.new("/dev/null")
     Rails.logger = dev_null

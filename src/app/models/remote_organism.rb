@@ -1,6 +1,9 @@
 class RemoteOrganism < Asap2RemoteRecord
   self.table_name = "organisms"
 
+  has_many :genes, class_name: "RemoteGene", foreign_key: :organism_id
+  has_many :gene_sets, class_name: "RemoteGeneSet", foreign_key: :organism_id
+
   DISPLAY_ATTRIBUTES = %w[id name short_name tax_id ensembl_subdomain_id created_at updated_at].freeze
 
   # Latest Ensembl release for gene mapping: organism record and gene table, not subdomain-wide.

@@ -556,15 +556,16 @@ export class GradientManager {
 
   // Get color from gradient at normalized position (0-1)
   getColorFromGradient(normalizedValue) {
-    // Handle invalid values
+    // Handle invalid values — never return 0 (regl treats 0 as transparent; falsy
+    // fallbacks turn it into default blue).
     if (normalizedValue < 0 || normalizedValue > 1 || isNaN(normalizedValue)) {
-      return 0x000000 // Black
+      return this.controller.getMissingNumericColor()
     }
     
     // Get active gradient (custom or auto)
     const controlPoints = this.controller.customGradientControlPoints || this.controller.gradientControlPoints
     if (!controlPoints || controlPoints.length === 0) {
-      return 0x000000 // Black fallback
+      return this.controller.getMissingNumericColor()
     }
     
     // Sort control points by position
@@ -599,8 +600,8 @@ export class GradientManager {
       return leftPoint.color
     }
     if (!leftPoint && !rightPoint) {
-      console.warn('🎨 ⚠️ getColorFromGradient: No control points found for normalizedValue', normalizedValue)
-      return 0x000000 // Black fallback
+      console.warn('getColorFromGradient: No control points found for normalizedValue', normalizedValue)
+      return this.controller.getMissingNumericColor()
     }
     
     // If leftPoint and rightPoint are the same (same position), return that color directly

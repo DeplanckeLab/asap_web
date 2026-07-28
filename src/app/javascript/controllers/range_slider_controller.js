@@ -481,10 +481,19 @@ export default class extends Controller {
   // Update checkbox color: green if full range, orange if subrange
   // Also updates the filter state icon (for both metadata and genes)
   updateCheckboxColor() {
-    // Check if current range is the full range (with small tolerance for floating point)
-    const tolerance = (this.maxValue - this.minValue) * 0.001 // 0.1% tolerance
-    const isFullRange = Math.abs(this.currentMinValue - this.minValue) < tolerance && 
-                        Math.abs(this.currentMaxValue - this.maxValue) < tolerance
+    // Check if current range is the full range (same tolerance as global filter / selectedRanges)
+    const dataManager = this.visualizationController?.dataManager
+    const isFullRange = dataManager?.isContinuousRangeFullCoverage
+      ? dataManager.isContinuousRangeFullCoverage(
+          this.currentMinValue,
+          this.currentMaxValue,
+          this.minValue,
+          this.maxValue
+        )
+      : (
+          Math.abs(this.currentMinValue - this.minValue) < Math.abs(this.maxValue - this.minValue) * 0.001 &&
+          Math.abs(this.currentMaxValue - this.maxValue) < Math.abs(this.maxValue - this.minValue) * 0.001
+        )
     
     // Update the filter state icon for metadata (new UI)
     const filterStateIcon = document.querySelector(`.metadata-filter-state-icon[data-metadata-id="${this.metadataIdValue}"]`)
@@ -807,32 +816,75 @@ export default class extends Controller {
     const colorRangeTime = performance.now() - colorRangeStart
     // console.log(`${logPrefix} updateColorRange took ${colorRangeTime.toFixed(2)}ms`)
     
-    // Check if we're showing the full range (no filtering needed)
-    const isFullRange = this.currentMinValue <= this.minValue && this.currentMaxValue >= this.maxValue
-    
-    if (isFullRange) {
+    // Check if we're showing the full range (no filtering needed).
+    // Use the same tolerance as isContinuousSelectionConstraining / checkbox color so the
+    // global filter tool never keeps a ghost entry after a visual full-range reset.
+    const dataManager = this.visualizationController?.dataManager
+    const isFullRange = dataManager?.isContinuousRangeFullCoverage
+      ? dataManager.isContinuousRangeFullCoverage(
+          this.currentMinValue,
+          this.currentMaxValue,
+          this.minValue,
+          this.maxValue
+        )
+      : (
+          this.currentMinValue <= this.minValue &&
+          this.currentMaxValue >= this.maxValue
+        )
+
+    const rangeCandidate = { min: this.currentMinValue, max: this.currentMaxValue }
+    const loadedVector =
+      this.visualizationController?.loadedMetadataVectors?.[this.metadataIdValue] ||
+      this.visualizationController?.loadedMetadataVectors?.[String(this.metadataIdValue)]
+    const knownNotConstraining = !!(
+      loadedVector?.values &&
+      dataManager?.isContinuousSelectionConstraining &&
+      dataManager.isContinuousSelectionConstraining(this.metadataIdValue, rangeCandidate) === false
+    )
+
+    if (isFullRange || knownNotConstraining) {
       // Remove from selectedRanges to disable filtering
-      if (this.visualizationController.selectedRanges) {
+      if (dataManager?.clearSelectedRange) {
+        dataManager.clearSelectedRange(this.metadataIdValue)
+      } else if (this.visualizationController.selectedRanges) {
         delete this.visualizationController.selectedRanges[this.metadataIdValue]
+        delete this.visualizationController.selectedRanges[String(this.metadataIdValue)]
+      }
+      // Fully drop saved/disabled state so the global filter tool does not keep a stale entry.
+      if (this.visualizationController.savedRanges) {
+        Object.keys(this.visualizationController.savedRanges).forEach((key) => {
+          if (String(key) === String(this.metadataIdValue)) {
+            delete this.visualizationController.savedRanges[key]
+          }
+        })
+      }
+      if (this.visualizationController.disabledFilters instanceof Set) {
+        this.visualizationController.disabledFilters.delete(this.metadataIdValue)
+        this.visualizationController.disabledFilters.delete(String(this.metadataIdValue))
+      }
+      const filterSwitch = document.querySelector(
+        `.metadata-filter-switch[data-metadata-id="${this.metadataIdValue}"]`
+      )
+      if (filterSwitch) {
+        filterSwitch.dataset.filterEnabled = 'true'
       }
       if (isGene) {
-        // console.log(`${logPrefix} Full range selected - removing from selectedRanges`)
+        const geneIdToken = this.metadataIdValue.slice(5)
+        const stableGeneId = geneIdToken.split('_')[0]
+        const geneSwitch = document.querySelector(`.gene-filter-switch[data-gene-id="${stableGeneId}"]`)
+        if (geneSwitch) {
+          geneSwitch.dataset.filterEnabled = 'true'
+        }
       }
     } else {
       // Store the range in selectedRanges for unified filtering
-      if (!this.visualizationController.selectedRanges) {
-        this.visualizationController.selectedRanges = {}
-      }
-      this.visualizationController.selectedRanges[this.metadataIdValue] = {
-        min: this.currentMinValue,
-        max: this.currentMaxValue
-      }
-      if (isGene) {
-        // console.log(`${logPrefix} Stored range in selectedRanges:`, {
-          // metadataId: this.metadataIdValue,
-          // range: this.visualizationController.selectedRanges[this.metadataIdValue],
-          // allRanges: Object.keys(this.visualizationController.selectedRanges)
-        // })
+      if (dataManager?.setSelectedRange) {
+        dataManager.setSelectedRange(this.metadataIdValue, rangeCandidate)
+      } else {
+        if (!this.visualizationController.selectedRanges) {
+          this.visualizationController.selectedRanges = {}
+        }
+        this.visualizationController.selectedRanges[this.metadataIdValue] = rangeCandidate
       }
     }
     
@@ -927,6 +979,14 @@ export default class extends Controller {
       this.dataManager.updateCellFiltering(shouldUpdateColors)
     } else {
       console.error(`❌ ${logPrefix} dataManager.updateCellFiltering is not available!`)
+    }
+    // Keep global filter tool in sync immediately when a continuous filter is added/removed.
+    if (this.visualizationController.uiManager?.updateGlobalFilterSummary) {
+      this.visualizationController.uiManager.updateGlobalFilterSummary()
+    }
+    if (this.visualizationController.globalFilterPanelVisible &&
+        this.visualizationController.uiManager?.updateGlobalFilterPanelContent) {
+      this.visualizationController.uiManager.updateGlobalFilterPanelContent()
     }
     const filterTime = performance.now() - filterStart
     // console.log(`${logPrefix} updateCellFiltering took ${filterTime.toFixed(2)}ms`)

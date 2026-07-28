@@ -1356,7 +1356,9 @@ export class CustomPlotManager {
     if (!selectedCells || selectedCells.size === 0) {
       return
     }
-    ctx.fillStyle = '#ff0000'
+    ctx.fillStyle = (typeof this.controller?.getSelectionHighlightColorHex === 'function')
+      ? this.controller.getSelectionHighlightColorHex()
+      : '#ff0000'
     for (const point of this.currentPlotPoints) {
       if (selectedCells.has(point.cellIndex)) {
         const radius = Math.max(point.radius || 2, 2)

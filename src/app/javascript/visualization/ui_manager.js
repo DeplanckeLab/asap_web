@@ -541,8 +541,8 @@ export class UIManager {
         }
       }
     } else if (isContinuous) {
-      // For continuous: check if there's a selected range
-      hasActiveFilter = this.controller.selectedRanges && this.controller.selectedRanges[metadataId]
+      // Only treat a selected range as an active filter when it actually constrains cells.
+      hasActiveFilter = this.controller.dataManager?.isContinuousSelectionConstraining?.(metadataId) === true
     }
     
     if (hasActiveFilter) {
@@ -558,8 +558,15 @@ export class UIManager {
         }
       }
     } else {
-      // Hide the switch
+      // Hide the switch and reset enabled flag so a cleared filter cannot linger as "disabled"
+      // in the global filter panel.
       filterSwitch.style.display = 'none'
+      filterSwitch.dataset.filterEnabled = 'true'
+      filterSwitch.style.backgroundColor = '#10b981'
+      const switchToggle = filterSwitch.querySelector('div')
+      if (switchToggle) {
+        switchToggle.style.transform = 'translateX(14px)'
+      }
     }
   }
 
@@ -568,8 +575,12 @@ export class UIManager {
     const filterSwitch = document.querySelector(`.gene-filter-switch[data-gene-id="${geneId}"]`)
     if (!filterSwitch) return
     
-    // Check if there's a selected range for this gene
-    const hasActiveFilter = this.controller.selectedRanges && this.controller.selectedRanges[geneMetadataId]
+    // Check if there's a constraining selected range for this gene
+    const hasActiveFilter =
+      this.controller.dataManager?.isContinuousSelectionConstraining?.(geneMetadataId) === true ||
+      this.controller.dataManager?.isContinuousSelectionConstraining?.(
+        `gene_${geneId}`
+      ) === true
     
     if (hasActiveFilter) {
       // Show the switch
@@ -584,8 +595,14 @@ export class UIManager {
         }
       }
     } else {
-      // Hide switch if no selection
+      // Hide switch if no selection and reset enabled flag
       filterSwitch.style.display = 'none'
+      filterSwitch.dataset.filterEnabled = 'true'
+      filterSwitch.style.backgroundColor = '#10b981'
+      const switchToggle = filterSwitch.querySelector('div')
+      if (switchToggle) {
+        switchToggle.style.transform = 'translateX(14px)'
+      }
     }
   }
 
@@ -1244,27 +1261,63 @@ export class UIManager {
              fallback
     }
 
+    const hasSavedContinuousConstraint = (metadataId) => {
+      const saved = this.controller.savedRanges?.[metadataId] ||
+        this.controller.savedRanges?.[String(metadataId)]
+      if (!saved) return false
+      if (dataManager?.isContinuousSelectionConstraining) {
+        return dataManager.isContinuousSelectionConstraining(metadataId, saved) === true
+      }
+      return true
+    }
+
+    const hasSavedCategoricalConstraint = (metadataId) => {
+      const saved = this.controller.savedCategorySelections?.[metadataId] ||
+        this.controller.savedCategorySelections?.[String(metadataId)]
+      if (!(saved instanceof Set)) return false
+      if (dataManager?.isDiscreteSelectionConstraining) {
+        return dataManager.isDiscreteSelectionConstraining(metadataId, saved) === true
+      }
+      return saved.size > 0
+    }
+
     document.querySelectorAll('.metadata-filter-switch[data-metadata-id][data-filter-enabled="false"]').forEach((switchEl) => {
       const metadataId = String(switchEl.dataset.metadataId || '').trim()
       if (!metadataId || seen.has(metadataId)) return
-      seen.add(metadataId)
+      // Ignore switches that were cleared/hidden after a full-range reset.
+      if (switchEl.style.display === 'none') return
 
       const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
       const hasRangeSection = !!metadataItem?.querySelector('.metadata-range-section')
       const metadataName = metadataItem?.querySelector('[data-metadata-name]')?.dataset?.metadataName || `Metadata ${metadataId}`
+      const isContinuous = hasRangeSection
 
+      // Only list disabled filters that still have a defined constraint to restore.
+      if (isContinuous && !hasSavedContinuousConstraint(metadataId)) return
+      if (!isContinuous && !hasSavedCategoricalConstraint(metadataId)) return
+
+      seen.add(metadataId)
       disabled.push({
         metadataId,
         name: resolveName(metadataId, metadataName),
-        type: hasRangeSection ? 'continuous' : 'categorical'
+        type: isContinuous ? 'continuous' : 'categorical'
       })
     })
 
     document.querySelectorAll('.gene-filter-switch[data-gene-id][data-filter-enabled="false"]').forEach((switchEl) => {
       const geneId = String(switchEl.dataset.geneId || '').trim()
       if (!geneId) return
+      if (switchEl.style.display === 'none') return
       const metadataId = `gene_${geneId}`
       if (seen.has(metadataId)) return
+      if (!hasSavedContinuousConstraint(metadataId) &&
+          !hasSavedContinuousConstraint(switchEl.dataset.metadataId || metadataId)) {
+        // Gene sliders may use annot-qualified ids in savedRanges.
+        const savedKeys = Object.keys(this.controller.savedRanges || {})
+        const hasGeneSaved = savedKeys.some((key) => String(key).startsWith(`gene_${geneId}`))
+        if (!hasGeneSaved) return
+      }
+
       seen.add(metadataId)
 
       const geneName = this.controller.geneManager?.geneTags?.find((gene) => String(gene.stableId) === geneId)?.symbol || `Gene ${geneId}`

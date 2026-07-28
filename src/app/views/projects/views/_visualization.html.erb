@@ -185,7 +185,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
             <% categorical_metadata_items = (@h_metadata[@default_loom_file]['cell']['DISCRETE'] || []).select { |metadata| metadata.data_type&.name == 'DISCRETE' } %>
             <% categorical_metadata_items.each_with_index do |metadata, idx| %>
               <% is_last_categorical_item = (idx == categorical_metadata_items.length - 1) %>
-              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: <%= is_last_categorical_item ? '20px' : '8px' %>;" data-metadata-item="<%= metadata.id %>"<%= ' data-guided-tour="visualization-sample-metadata-controls"'.html_safe if viz_tour_sample_on_categorical && idx == 0 %>>
+              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: <%= is_last_categorical_item ? '20px' : '8px' %>;" data-metadata-item="<%= metadata.id %>" data-categories-count="<%= metadata.nber_cats || 0 %>"<%= ' data-guided-tour="visualization-sample-metadata-controls"'.html_safe if viz_tour_sample_on_categorical && idx == 0 %>>
                 <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
                      onmouseover="this.style.backgroundColor='#f9fafb'" 
                      onmouseout="this.style.backgroundColor=''"
@@ -825,6 +825,7 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
     <div style="display: flex; align-items: flex-start; gap: 16px; justify-content: space-between; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
       <!-- Left side: Loom file and Metadata Selection -->
       <div style="display: flex; align-items: center; gap: 16px;">
+        <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 2px;">
         <div style="display: flex; align-items: center; gap: 6px; position: relative;">
           <a href="#"
              id="embedding-selection-link"
@@ -922,6 +923,15 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
               <div class="embedding-menu-empty" style="padding: 12px;">No embeddings available</div>
             <% end %>
           </div>
+        </div>
+        <div id="current-coloring-indicator"
+             style="display: none; font-size: 11px; color: #6b7280; line-height: 1.3; max-width: 360px;">
+          Colored by
+          <a href="#"
+             id="current-coloring-link"
+             data-action="click->visualization#focusCurrentColoringMetadata"
+             style="color: #3b82f6; text-decoration: none;"></a>
+        </div>
         </div>
         <div style="display: none;">
           <select data-visualization-target="loomFileSelect">
@@ -1807,8 +1817,14 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
           <div style="display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0;">
             <!-- Cell count with action buttons -->
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-              <div style="font-size: 14px; color: #6b7280;">
-                <span id="selected-cells-count">0</span> <span id="selected-cells-label">visible cells</span>
+              <div style="display: flex; align-items: center; gap: 8px; font-size: 14px; color: #6b7280;">
+                <button type="button"
+                        id="selection-color-dot"
+                        data-action="click->visualization#selectionColorDotClicked"
+                        title="Change selection color"
+                        aria-label="Change selection color"
+                        style="display:inline-block;width:12px;height:12px;border-radius:50%;background-color:#ff0000;border:1px solid #d1d5db;padding:0;cursor:pointer;flex-shrink:0;"></button>
+                <span><span id="selected-cells-count">0</span> <span id="selected-cells-label">visible cells</span></span>
                 <span id="selected-cells-view-warning" style="display: none; margin-left: 6px; font-size: 12px; color: #b45309; font-weight: 500;" title="Zoom/pan is active. The current view does not show all visible cells. Double click on the plot in Pick or Pan mode to reset Zoom/Pan.">view limited</span>
               </div>
               

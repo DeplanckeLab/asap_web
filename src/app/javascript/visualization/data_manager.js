@@ -137,20 +137,26 @@ export class DataManager {
   // Utility methods
   safeMin(arr) {
     if (!arr || arr.length === 0) return undefined
-    let min = arr[0]
-    for (let i = 1; i < arr.length; i++) {
-      if (arr[i] < min) min = arr[i]
+    let min = Infinity
+    for (let i = 0; i < arr.length; i++) {
+      const value = arr[i]
+      if (typeof value === 'number' && Number.isFinite(value) && value < min) {
+        min = value
+      }
     }
-    return min
+    return Number.isFinite(min) ? min : undefined
   }
 
   safeMax(arr) {
     if (!arr || arr.length === 0) return undefined
-    let max = arr[0]
-    for (let i = 1; i < arr.length; i++) {
-      if (arr[i] > max) max = arr[i]
+    let max = -Infinity
+    for (let i = 0; i < arr.length; i++) {
+      const value = arr[i]
+      if (typeof value === 'number' && Number.isFinite(value) && value > max) {
+        max = value
+      }
     }
-    return max
+    return Number.isFinite(max) ? max : undefined
   }
 
   logMemoryUsage(context = '') {
@@ -1645,53 +1651,25 @@ export class DataManager {
     
     const discreteMetadataWithConstraints = Object.keys(this.controller.selectedCategories).filter(metadataId => {
       const selections = this.controller.selectedCategories[metadataId]
-      const hasLoadedVector = this.controller.loadedMetadataVectors[metadataId] !== undefined
-      
-      // console.log(`🔍 [FILTER] Checking metadata ${metadataId}: selections.size=${selections?.size}, hasLoadedVector=${hasLoadedVector}`) */
-      
+      const hasLoadedVector = this.controller.loadedMetadataVectors[metadataId] !== undefined ||
+        this.controller.loadedMetadataVectors[String(metadataId)] !== undefined
+
       if (!selections || !hasLoadedVector) {
-        // console.log(`🔍 [FILTER] Metadata ${metadataId} skipped (no selections or no vector)`) */
         return false
       }
-      
-      // Special case: Empty Set means "show nothing" - this IS a constraint
-      if (selections.size === 0) {
-        // console.log(`🔍 [FILTER] Metadata ${metadataId} has empty selection - will show no cells`) */
-        return true // Include as a constraint (will result in 0 cells)
-      }
-      
-      // Check if all categories are selected (no constraint)
-      const metadataVector = this.controller.loadedMetadataVectors[metadataId]
-      if (metadataVector && metadataVector.values) {
-        const availableCategories = [...new Set(metadataVector.values)]
-        const allSelected = availableCategories.every(category => selections.has(category))
-        // console.log(`🔍 [FILTER] Metadata ${metadataId}: ${selections.size}/${availableCategories.length} categories selected, allSelected=${allSelected}`) */
-        return !allSelected // Only include if not all categories are selected
-      }
-      
-      return true
+
+      return this.isDiscreteSelectionConstraining(metadataId, selections)
     })
-    
-    // console.log(`🔍 [FILTER] discreteMetadataWithConstraints:`, discreteMetadataWithConstraints) */
 
     const continuousMetadataWithConstraints = Object.keys(this.controller.selectedRanges).filter(metadataId => {
       const range = this.controller.selectedRanges[metadataId]
       const hasRange = range && (range.min !== undefined && range.max !== undefined)
-      const hasLoadedVector = this.controller.loadedMetadataVectors[metadataId] !== undefined
-      
+      const hasLoadedVector = this.controller.loadedMetadataVectors[metadataId] !== undefined ||
+        this.controller.loadedMetadataVectors[String(metadataId)] !== undefined
+
       if (!hasRange || !hasLoadedVector) return false
-      
-      // Check if range covers the full range (no constraint)
-      const metadataVector = this.controller.loadedMetadataVectors[metadataId]
-      if (metadataVector && metadataVector.values) {
-        const values = metadataVector.values
-        const minVal = this.safeMin(values)
-        const maxVal = this.safeMax(values)
-        const isFullRange = range.min <= minVal && range.max >= maxVal
-        return !isFullRange // Only include if range is not full
-      }
-      
-      return true
+
+      return this.isContinuousSelectionConstraining(metadataId, range)
     })
 
     // Combine all metadata with actual constraints
@@ -1795,35 +1773,7 @@ export class DataManager {
         if (!selections) {
           return
         }
-        
-        // Empty set means "show nothing" - treat as active constraint
-        if (selections.size === 0) {
-          result.discrete.push(metadataId)
-          return
-        }
-        
-        const metadataVector = this.controller.loadedMetadataVectors ? this.controller.loadedMetadataVectors[metadataId] : null
-        if (!metadataVector) {
-          // Metadata not loaded yet - assume constraint is active
-          result.discrete.push(metadataId)
-          return
-        }
-        
-        let totalCategories = null
-        if (metadataVector.values) {
-          totalCategories = new Set(metadataVector.values).size
-        } else if (metadataVector.compression_info?.single_category) {
-          totalCategories = 1
-        } else if (metadataVector.compression_info?.categories) {
-          totalCategories = metadataVector.compression_info.categories.length
-        }
-        
-        if (totalCategories === null) {
-          result.discrete.push(metadataId)
-          return
-        }
-        
-        if (selections.size < totalCategories) {
+        if (this.isDiscreteSelectionConstraining(metadataId, selections)) {
           result.discrete.push(metadataId)
         }
       })
@@ -1831,29 +1781,158 @@ export class DataManager {
     
     if (this.controller.selectedRanges) {
       Object.keys(this.controller.selectedRanges).forEach(metadataId => {
-        const range = this.controller.selectedRanges[metadataId]
+        const range = this.getSelectedRange(metadataId)
         if (!range || range.min === undefined || range.max === undefined) {
           return
         }
-        
-        const metadataVector = this.controller.loadedMetadataVectors ? this.controller.loadedMetadataVectors[metadataId] : null
-        if (!metadataVector || !metadataVector.values) {
-          // If values aren't available yet, assume the range represents an active constraint
-          result.continuous.push(metadataId)
-          return
-        }
-        
-        const minVal = this.safeMin(metadataVector.values)
-        const maxVal = this.safeMax(metadataVector.values)
-        const isFullRange = range.min <= minVal && range.max >= maxVal
-        
-        if (!isFullRange) {
+        if (this.isContinuousSelectionConstraining(metadataId, range)) {
           result.continuous.push(metadataId)
         }
       })
     }
     
     return result
+  }
+
+  getDiscreteCategoryUniverse(metadataId, metadataVector = null) {
+    const vector = metadataVector || (
+      this.controller.loadedMetadataVectors
+        ? (this.controller.loadedMetadataVectors[metadataId] || this.controller.loadedMetadataVectors[String(metadataId)])
+        : null
+    )
+
+    if (vector?.compression_info?.categories && Array.isArray(vector.compression_info.categories) && vector.compression_info.categories.length > 0) {
+      return vector.compression_info.categories.map((category) => String(category))
+    }
+    if (vector?.compression_info?.single_category) {
+      const categories = Array.isArray(vector.compression_info.categories)
+        ? vector.compression_info.categories
+        : []
+      return categories.map((category) => String(category))
+    }
+    if (vector?.values) {
+      return Array.from(new Set(Array.from(vector.values).map((category) => String(category))))
+    }
+
+    const metadataElement = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+    if (!metadataElement) return null
+
+    const fromDomCheckboxes = Array.from(
+      metadataElement.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"][data-category]`)
+    ).map((el) => String(el.dataset.category || '')).filter((value) => value.length > 0)
+    if (fromDomCheckboxes.length > 0) {
+      return Array.from(new Set(fromDomCheckboxes))
+    }
+
+    return null
+  }
+
+  // Categories that actually appear on cells. Used to decide if a selection filters any cells.
+  // Prefer this over nber_cats / compression length: a "full" unique-value selection is not a filter
+  // even when compression lists extra zero-count categories.
+  getObservedDiscreteCategories(metadataId, metadataVector = null) {
+    const vector = metadataVector || (
+      this.controller.loadedMetadataVectors
+        ? (this.controller.loadedMetadataVectors[metadataId] || this.controller.loadedMetadataVectors[String(metadataId)])
+        : null
+    )
+    if (vector?.values) {
+      return Array.from(new Set(Array.from(vector.values).map((category) => String(category))))
+    }
+    return null
+  }
+
+  getDiscreteCategoryUniverseSize(metadataId) {
+    const universe = this.getDiscreteCategoryUniverse(metadataId)
+    if (Array.isArray(universe) && universe.length > 0) {
+      return universe.length
+    }
+    return null
+  }
+
+  isDiscreteSelectionConstraining(metadataId, selections = null) {
+    const selected = selections || this.controller.selectedCategories?.[metadataId]
+    if (!selected) return false
+    if (selected.size === 0) return true
+
+    const selectedSet = new Set(Array.from(selected).map(String))
+    const observed = this.getObservedDiscreteCategories(metadataId)
+    if (Array.isArray(observed) && observed.length > 0) {
+      return !observed.every((category) => selectedSet.has(String(category)))
+    }
+
+    // Without observed values, only treat as a filter when we know the full checkbox universe
+    // and the selection does not cover it. Do not use data-categories-count alone: unique-value
+    // initializations are smaller than nber_cats and would flash as fake filters on reload.
+    const universe = this.getDiscreteCategoryUniverse(metadataId)
+    if (!Array.isArray(universe) || universe.length === 0) return false
+    return !universe.every((category) => selectedSet.has(String(category)))
+  }
+
+  isContinuousSelectionConstraining(metadataId, range = null) {
+    const selectedRange = range || this.getSelectedRange(metadataId)
+    if (!selectedRange || selectedRange.min === undefined || selectedRange.max === undefined) return false
+    if (!Number.isFinite(Number(selectedRange.min)) || !Number.isFinite(Number(selectedRange.max))) return false
+
+    const metadataVector = this.controller.loadedMetadataVectors
+      ? (this.controller.loadedMetadataVectors[metadataId] || this.controller.loadedMetadataVectors[String(metadataId)])
+      : null
+    if (!metadataVector || !metadataVector.values) return false
+
+    const minVal = this.safeMin(metadataVector.values)
+    const maxVal = this.safeMax(metadataVector.values)
+    if (!Number.isFinite(minVal) || !Number.isFinite(maxVal)) return false
+
+    return !this.isContinuousRangeFullCoverage(selectedRange.min, selectedRange.max, minVal, maxVal)
+  }
+
+  // Shared tolerance for "full range" decisions (slider UI, selectedRanges, global filter tool).
+  // Must stay consistent: a green "full range" checkbox must not leave a ghost filter in the tool.
+  getContinuousRangeEpsilon(minVal, maxVal) {
+    const span = Math.abs(Number(maxVal) - Number(minVal))
+    if (!Number.isFinite(span) || span <= 0) return 1e-12
+    return Math.max(span * 0.001, 1e-12)
+  }
+
+  isContinuousRangeFullCoverage(rangeMin, rangeMax, fullMin, fullMax) {
+    if (![rangeMin, rangeMax, fullMin, fullMax].every((v) => Number.isFinite(Number(v)))) return false
+    const epsilon = this.getContinuousRangeEpsilon(fullMin, fullMax)
+    return Number(rangeMin) <= Number(fullMin) + epsilon && Number(rangeMax) >= Number(fullMax) - epsilon
+  }
+
+  getSelectedRange(metadataId) {
+    if (!this.controller.selectedRanges || metadataId == null || metadataId === '') return null
+    const id = String(metadataId)
+    if (this.controller.selectedRanges[id] != null) return this.controller.selectedRanges[id]
+    const asNum = Number(id)
+    if (Number.isFinite(asNum) && this.controller.selectedRanges[asNum] != null) {
+      return this.controller.selectedRanges[asNum]
+    }
+    return null
+  }
+
+  clearSelectedRange(metadataId) {
+    if (!this.controller.selectedRanges || metadataId == null || metadataId === '') return false
+    const id = String(metadataId)
+    let cleared = false
+    Object.keys(this.controller.selectedRanges).forEach((key) => {
+      if (String(key) === id) {
+        delete this.controller.selectedRanges[key]
+        cleared = true
+      }
+    })
+    return cleared
+  }
+
+  setSelectedRange(metadataId, range) {
+    if (metadataId == null || metadataId === '' || !range) return
+    const id = String(metadataId)
+    if (!this.controller.selectedRanges) this.controller.selectedRanges = {}
+    this.clearSelectedRange(id)
+    this.controller.selectedRanges[id] = {
+      min: Number(range.min),
+      max: Number(range.max)
+    }
   }
 
   // Count how many metadata have filtering constraints, regardless of global toggle state
@@ -1908,34 +1987,10 @@ export class DataManager {
     discrete.forEach(metadataId => {
       const selections = this.controller.selectedCategories?.[metadataId]
       const selectedValues = selections ? Array.from(selections) : []
-      const metadataVector = this.controller.loadedMetadataVectors?.[metadataId]
-      
-      let totalCategories = null
-      let allCategories = null
-      if (metadataVector) {
-        if (metadataVector.values) {
-          allCategories = Array.from(new Set(metadataVector.values))
-          totalCategories = allCategories.length
-        } else if (metadataVector.compression_info?.single_category) {
-          totalCategories = 1
-          allCategories = metadataVector.compression_info.categories
-        } else if (metadataVector.compression_info?.categories) {
-          allCategories = metadataVector.compression_info.categories
-          totalCategories = allCategories.length
-        }
-      }
-      
-      // Attempt to derive total categories from DOM attributes if metadata vector unavailable
-      if (totalCategories === null) {
-        const metadataElement = document.querySelector(`[data-metadata-item="${metadataId}"]`)
-        const categoriesAttr = metadataElement ? metadataElement.getAttribute('data-categories-count') : null
-        if (categoriesAttr) {
-          const parsed = parseInt(categoriesAttr, 10)
-          if (!Number.isNaN(parsed)) {
-            totalCategories = parsed
-          }
-        }
-      }
+      const allCategories = this.getDiscreteCategoryUniverse(metadataId)
+      let totalCategories = Array.isArray(allCategories) && allCategories.length > 0
+        ? allCategories.length
+        : this.getDiscreteCategoryUniverseSize(metadataId)
       
       let summaryMode = 'selected'
       let summaryCount = selectedValues.length

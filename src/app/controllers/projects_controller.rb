@@ -2922,6 +2922,7 @@ class ProjectsController < ApplicationController
     compose_steps = sanitize_compose_steps(params[:compose_steps])
     selection_source = sanitize_selection_source(params[:selection_source])
     filter_components = sanitize_filter_components(params[:filter_components])
+    plot_context = sanitize_plot_context(params[:plot_context])
 
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
     loom_path = project_dir + loom_file
@@ -3001,6 +3002,7 @@ class ProjectsController < ApplicationController
     }
     run_attrs[:compose_steps] = compose_steps if compose_steps.present?
     run_attrs[:filter_components] = filter_components if filter_components.present?
+    run_attrs[:plot_context] = plot_context if plot_context.present?
 
     run.update!(
       command_json: cmd.to_json,
@@ -3009,7 +3011,7 @@ class ProjectsController < ApplicationController
 
     cache_key = SecureRandom.uuid
     cache_data = selection_session_cache
-    cache_data[cache_key] = {
+    cache_entry = {
       id: cache_key,
       run_id: run.id,
       loom_file: loom_file,
@@ -3019,21 +3021,24 @@ class ProjectsController < ApplicationController
       selection_metadata_name: selection_metadata_name,
       selection_number: selection_number_from_metadata_name(selection_metadata_name),
       selection_source: selection_source,
-      compose_steps: compose_steps,
-      filter_components: filter_components,
       source_metadata_id: embedding_annot.id,
       status: 'queued',
       created_at: Time.current.iso8601
     }
-    session[:selection_cache] ||= {}
-    session[:selection_cache][@project.id.to_s] = cache_data
+    cache_data[cache_key] = cache_entry
+    write_selection_session_cache(cache_data)
 
     SelectionMetadataImportJob.perform_later(run.id)
     broadcast_selection_states_changed(loom_file: loom_file, reason: 'queued')
 
+    response_item = cache_entry.merge(
+      compose_steps: compose_steps,
+      filter_components: filter_components,
+      plot_context: plot_context
+    )
     render json: {
       status: 'ok',
-      item: cache_data[cache_key]
+      item: response_item
     }
   end
 
@@ -3193,8 +3198,7 @@ class ProjectsController < ApplicationController
     entry['name'] = new_name
     entry[:name] = new_name
     cache_data[key] = entry
-    session[:selection_cache] ||= {}
-    session[:selection_cache][@project.id.to_s] = cache_data
+    write_selection_session_cache(cache_data)
 
     run_id = (entry['run_id'] || entry[:run_id]).to_i
     if run_id > 0
@@ -10001,10 +10005,36 @@ class ProjectsController < ApplicationController
       StdMethod.where(docker_image_id: asap_docker_image.id, version_id: project.version_id)
     end
 
+    def selection_cache_storage_key
+      user_part = current_user&.id || 'anon'
+      "selection_cache/project_#{@project.id}/user_#{user_part}"
+    end
+
     def selection_session_cache
-      session[:selection_cache] ||= {}
-      project_cache = session[:selection_cache][@project.id.to_s]
-      project_cache.is_a?(Hash) ? project_cache : {}
+      cached = Rails.cache.read(selection_cache_storage_key)
+      cache_data = cached.is_a?(Hash) ? cached.deep_dup : {}
+
+      # One-time migration away from cookie session storage (avoids CookieOverflow).
+      legacy_root = session[:selection_cache]
+      legacy = legacy_root.is_a?(Hash) ? legacy_root[@project.id.to_s] : nil
+      if legacy.is_a?(Hash) && legacy.any?
+        cache_data = cache_data.merge(legacy)
+        write_selection_session_cache(cache_data)
+        legacy_root.delete(@project.id.to_s)
+        session.delete(:selection_cache) if legacy_root.empty?
+      end
+
+      cache_data
+    end
+
+    def write_selection_session_cache(cache_data)
+      payload = cache_data.is_a?(Hash) ? cache_data : {}
+      Rails.cache.write(selection_cache_storage_key, payload, expires_in: 24.hours)
+      # Ensure oversized selection payloads are not kept in the cookie session.
+      if session[:selection_cache].is_a?(Hash)
+        session[:selection_cache].delete(@project.id.to_s)
+        session.delete(:selection_cache) if session[:selection_cache].empty?
+      end
     end
 
     def remove_selection_from_cache_by_id(selection_id)
@@ -10016,8 +10046,7 @@ class ProjectsController < ApplicationController
       return false unless cache_key
 
       cache_data.delete(cache_key)
-      session[:selection_cache] ||= {}
-      session[:selection_cache][@project.id.to_s] = cache_data
+      write_selection_session_cache(cache_data)
       true
     end
 
@@ -10030,8 +10059,7 @@ class ProjectsController < ApplicationController
       return if keys_to_remove.empty?
 
       keys_to_remove.each { |key| cache_data.delete(key) }
-      session[:selection_cache] ||= {}
-      session[:selection_cache][@project.id.to_s] = cache_data
+      write_selection_session_cache(cache_data)
     end
 
     def broadcast_selection_states_changed(loom_file: nil, reason: nil)
@@ -10087,6 +10115,7 @@ class ProjectsController < ApplicationController
           selection_source: (entry['selection_source'] || entry[:selection_source] || run_attrs['selection_source'] || run_attrs[:selection_source] || 'lasso'),
           compose_steps: sanitize_compose_steps(entry['compose_steps'] || entry[:compose_steps]) || sanitize_compose_steps(run_attrs['compose_steps']),
           filter_components: sanitize_filter_components(entry['filter_components'] || entry[:filter_components]) || sanitize_filter_components(run_attrs['filter_components']),
+          plot_context: sanitize_plot_context(entry['plot_context'] || entry[:plot_context]) || sanitize_plot_context(run_attrs['plot_context']),
           selection_number: begin
             from_entry = entry['selection_number'] || entry[:selection_number]
             if from_entry.present?
@@ -10101,8 +10130,7 @@ class ProjectsController < ApplicationController
 
       if cleanup_completed && to_remove.any?
         to_remove.each { |key| cache_data.delete(key) }
-        session[:selection_cache] ||= {}
-        session[:selection_cache][@project.id.to_s] = cache_data
+        write_selection_session_cache(cache_data)
       end
 
       items
@@ -10158,6 +10186,10 @@ class ProjectsController < ApplicationController
           filter_components: begin
             from_annot = sanitize_filter_components(Basic.safe_parse_json(annot.attrs_json, {})['filter_components'])
             from_annot.presence || sanitize_filter_components(run_attrs_by_run_id.dig(annot.run_id, 'filter_components'))
+          end,
+          plot_context: begin
+            from_annot = sanitize_plot_context(Basic.safe_parse_json(annot.attrs_json, {})['plot_context'])
+            from_annot.presence || sanitize_plot_context(run_attrs_by_run_id.dig(annot.run_id, 'plot_context'))
           end,
           selection_number: selection_number_from_metadata_name(annot.name),
           locked: immutable_since_publication?(annot)
@@ -10254,6 +10286,62 @@ class ProjectsController < ApplicationController
       source = raw_source.to_s.strip
       return source if %w[visible lasso compose].include?(source)
       'lasso'
+    end
+
+    def sanitize_plot_context(raw_context)
+      context = normalize_selection_nested_hash(raw_context)
+      return nil unless context.is_a?(Hash)
+
+      plot = (context['plot'] || context[:plot]).to_s.strip.downcase
+      return nil unless %w[main secondary].include?(plot)
+
+      if plot == 'secondary'
+        plot_type = (context['plot_type'] || context[:plot_type]).to_s.strip.downcase
+        plot_type = 'scatter' unless %w[scatter violin].include?(plot_type)
+        x_axis = sanitize_plot_axis(context['x_axis'] || context[:x_axis])
+        y_axis = sanitize_plot_axis(context['y_axis'] || context[:y_axis])
+        x_scale = sanitize_plot_scale(context['x_scale'] || context[:x_scale])
+        y_scale = sanitize_plot_scale(context['y_scale'] || context[:y_scale])
+        {
+          plot: 'secondary',
+          plot_type: plot_type,
+          x_axis: x_axis,
+          y_axis: y_axis,
+          x_scale: x_scale,
+          y_scale: y_scale
+        }
+      else
+        embedding_raw = normalize_selection_nested_hash(context['embedding'] || context[:embedding]) || {}
+        axes_raw = normalize_selection_nested_hash(context['axes'] || context[:axes]) || {}
+        {
+          plot: 'main',
+          embedding: {
+            id: (embedding_raw['id'] || embedding_raw[:id]).to_s,
+            name: (embedding_raw['name'] || embedding_raw[:name]).to_s,
+            origin: (embedding_raw['origin'] || embedding_raw[:origin]).to_s,
+            loom_file: (embedding_raw['loom_file'] || embedding_raw[:loom_file]).to_s
+          },
+          axes: {
+            x: (axes_raw['x'] || axes_raw[:x]).presence || 'Dimension 1',
+            y: (axes_raw['y'] || axes_raw[:y]).presence || 'Dimension 2'
+          }
+        }
+      end
+    end
+
+    def sanitize_plot_axis(raw_axis)
+      axis = normalize_selection_nested_hash(raw_axis) || {}
+      {
+        name: (axis['name'] || axis[:name]).to_s,
+        metadata_id: (axis['metadata_id'] || axis[:metadata_id]).to_s,
+        is_gene: ActiveModel::Type::Boolean.new.cast(axis['is_gene'] || axis[:is_gene]) == true
+      }
+    end
+
+    def sanitize_plot_scale(raw_scale)
+      scale = raw_scale.to_s.strip.downcase
+      return scale if %w[normal log2 log10].include?(scale)
+      'normal'
     end
 
     def sanitize_filter_components(raw_components)

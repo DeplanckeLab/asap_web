@@ -543,6 +543,7 @@ export default class extends Controller {
     }
     
     this.initializeEmbeddingSelectionUI()
+    this.updateCurrentColoringIndicator()
     
     // Add click outside listener to close dropdowns
     this.boundCloseDropdowns = this.closeAllDropdowns.bind(this)
@@ -615,6 +616,9 @@ export default class extends Controller {
     // Initialize interaction mode state
     this.interactionMode = 'pick' // 'pick', 'pan', 'lasso', or 'zoom'
     this.selectedCells = new Set()
+    this.lastSelectionPlotSource = null
+    this.selectionHighlightColor = this.loadSelectionHighlightColor()
+    this.syncSelectionColorDot()
     this.savedSelections = Array.isArray(this.initialSelectionsValue) ? this.initialSelectionsValue.map((item) => this.normalizeSelectionItem(item)).filter((item) => item) : []
     this.savedSelectionsSortBy = this.savedSelectionsSortBy || 'created_at'
     this.savedSelectionsSortOrder = this.savedSelectionsSortOrder || 'desc'
@@ -5978,7 +5982,7 @@ export default class extends Controller {
         const colorMap = new Map()
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
           const cellIndex = this.displayOrder[drawPos]
-          const color = this.originalPointColors.get(cellIndex) || 0x3b82f6
+          const color = this.getOriginalPointColor(cellIndex)
           colorMap.set(drawPos, color)
         }
         this.reglRenderer.updateColors(colorMap)
@@ -6065,31 +6069,26 @@ export default class extends Controller {
         
         // console.log(`🎨 [ReGL] ${stableSortedCategories.length} categories, ${categoryColors.length} colors available`)
         
-        // Assign colors using displayOrder, hiding filtered-out cells
+        // Assign colors for every cell; transparency is draw-only (never stored in color caches).
+        // Storing 0x00000000 in caches breaks later lookups via `value || defaultBlue` because 0 is falsy.
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
           const cellIndex = this.displayOrder[drawPos]
-          const isVisible = !visibleSet || visibleSet.has(cellIndex)
-          
-          if (isVisible) {
-            const category = coloringMetadataVector.values[cellIndex]
-            const categoryIndex = categoryToIndex[category] || 0
-            const colorValue = categoryColors[categoryIndex % categoryColors.length]
+          const category = coloringMetadataVector.values[cellIndex]
+          const categoryIndex = categoryToIndex[category] || 0
+          const colorValue = categoryColors[categoryIndex % categoryColors.length]
 
-            const fallbackColor = typeof colorValue === 'string'
-              ? parseInt(colorValue.replace('#', ''), 16)
-              : colorValue
-            const metadataColor = discreteColorMap[category] !== undefined ? discreteColorMap[category] : fallbackColor
-            
-            this.originalPointColors.set(cellIndex, metadataColor) // Store by cell index
-            const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
-            const pointColor = isSelected ? 0xff0000 : metadataColor
-            colorMap[drawPos] = pointColor
-            this.cachedColorsByCellIndex.set(cellIndex, pointColor)
-          } else {
-            // Hide filtered-out points
-            colorMap[drawPos] = 0x00000000
-            this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
-          }
+          const fallbackColor = typeof colorValue === 'string'
+            ? parseInt(colorValue.replace('#', ''), 16)
+            : colorValue
+          const metadataColor = discreteColorMap[category] !== undefined ? discreteColorMap[category] : fallbackColor
+          
+          this.originalPointColors.set(cellIndex, metadataColor)
+          const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
+          const pointColor = isSelected ? this.getSelectionHighlightColorInt() : metadataColor
+          this.cachedColorsByCellIndex.set(cellIndex, pointColor)
+
+          const isVisible = !visibleSet || visibleSet.has(cellIndex)
+          colorMap[drawPos] = isVisible ? pointColor : 0x00000000
         }
         this.lastColoringMetadataId = coloringMetadataVector.id
         this.lastColorRange = null
@@ -6114,7 +6113,8 @@ export default class extends Controller {
           this._lastCategoryOrderApplied = this.categoryOrder
           
           // Reorder points in buffer (this will re-render and redraw overlay)
-          this.reorderPointsForCategoryDisplay()
+          // Pass visibleSet so filtered cells stay hidden during reordering
+          this.reorderPointsForCategoryDisplay(visibleSet)
           
           // Redraw overlay is handled by reorderPointsForCategoryDisplay
           const elapsed = performance.now() - startTime
@@ -6161,37 +6161,37 @@ export default class extends Controller {
         
         const range = maxVal - minVal
         
-        // Apply colors using displayOrder, hiding filtered-out cells
+        // Apply colors for every cell; transparency is draw-only (never stored in color caches).
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
           const cellIndex = this.displayOrder[drawPos]
-          const isVisible = !visibleSet || visibleSet.has(cellIndex)
-          
-          if (isVisible) {
-            const value = values[cellIndex]
-            
-            // Handle edge case: if range is 0 (all values same), use 0.5
-            // Otherwise normalize to 0-1 range
+          const value = values[cellIndex]
+          let metadataColor
+
+          if (typeof value !== 'number' || Number.isNaN(value)) {
+            // Missing numeric values must not use 0x000000: regl treats 0 as transparent, and
+            // `cachedColor || defaultBlue` would later turn them into default blue.
+            metadataColor = this.getMissingNumericColor()
+          } else {
             let normalizedValue
             if (range > 0) {
               normalizedValue = (value - minVal) / range
-              // Clamp to valid range to handle floating point precision issues
               normalizedValue = Math.max(0, Math.min(1, normalizedValue))
             } else {
               normalizedValue = 0.5
             }
-            
-            const metadataColor = this.gradientManager.getColorFromGradient(normalizedValue)
-            
-            this.originalPointColors.set(cellIndex, metadataColor) // Store by cell index
-            const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
-            const pointColor = isSelected ? 0xff0000 : metadataColor
-            colorMap[drawPos] = pointColor
-            this.cachedColorsByCellIndex.set(cellIndex, pointColor)
-          } else {
-            // Hide filtered-out points
-            colorMap[drawPos] = 0x00000000
-            this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
+            metadataColor = this.gradientManager.getColorFromGradient(normalizedValue)
+            if (!metadataColor || metadataColor === 0) {
+              metadataColor = this.getMissingNumericColor()
+            }
           }
+          
+          this.originalPointColors.set(cellIndex, metadataColor)
+          const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
+          const pointColor = isSelected ? this.getSelectionHighlightColorInt() : metadataColor
+          this.cachedColorsByCellIndex.set(cellIndex, pointColor)
+
+          const isVisible = !visibleSet || visibleSet.has(cellIndex)
+          colorMap[drawPos] = isVisible ? pointColor : 0x00000000
         }
         this.lastColoringMetadataId = coloringMetadataVector.id
         this.lastColorRange = effectiveRange ? { min: effectiveRange.min, max: effectiveRange.max } : null
@@ -6263,14 +6263,14 @@ export default class extends Controller {
         const cellIndex = this.displayOrder[drawPos]
         const isVisible = !visibleSet || visibleSet.has(cellIndex)
         
+        this.originalPointColors.set(cellIndex, defaultColor)
+        const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
+        const pointColor = isSelected ? this.getSelectionHighlightColorInt() : defaultColor
+        this.cachedColorsByCellIndex.set(cellIndex, pointColor)
+        colorMap[drawPos] = isVisible ? pointColor : 0x00000000
         if (isVisible) {
-          this.originalPointColors.set(cellIndex, defaultColor) // Store by cell index
-          const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
-          colorMap[drawPos] = isSelected ? 0xff0000 : defaultColor
           visibleCount++
         } else {
-          // Hide filtered-out points
-          colorMap[drawPos] = 0x00000000
           hiddenCount++
         }
       }
@@ -6971,6 +6971,26 @@ export default class extends Controller {
     }
   }
 
+  // Color for missing/NaN numeric values. Must be non-zero: regl treats 0 as transparent,
+  // and falsy fallbacks (`color || defaultBlue`) would otherwise paint default blue.
+  getMissingNumericColor() {
+    return 0x9ca3af
+  }
+
+  getOriginalPointColor(cellIndex, fallback = 0x3b82f6) {
+    if (this.originalPointColors && this.originalPointColors.has(cellIndex)) {
+      return this.originalPointColors.get(cellIndex)
+    }
+    return fallback
+  }
+
+  getCachedPointColor(cellIndex, fallback = 0x3b82f6) {
+    if (this.cachedColorsByCellIndex && this.cachedColorsByCellIndex.has(cellIndex)) {
+      return this.cachedColorsByCellIndex.get(cellIndex)
+    }
+    return this.getOriginalPointColor(cellIndex, fallback)
+  }
+
   // Get effective color range (custom or data range)
   getEffectiveColorRange() {
     if (!this.currentMetadataVector || this.currentMetadataVector.data_type !== 'NUMERIC') {
@@ -7125,6 +7145,8 @@ export default class extends Controller {
     allCanvases.forEach(canvas => {
       canvas.style.display = 'none'
     })
+
+    this.updateCurrentColoringIndicator()
     
     // console.log('🎨 Successfully cleared metadata coloring')
   }
@@ -7285,13 +7307,21 @@ export default class extends Controller {
 
   buildCheckpointState() {
     const selectedEmbedding = this.getCurrentSelectedEmbeddingState()
+    // Persist only real filter constraints. Full "all categories selected" / full-range
+    // entries are UI initialization state and must not be restored as filters on reload.
     const selectedCategories = {}
     Object.entries(this.selectedCategories || {}).forEach(([metadataId, values]) => {
+      if (!this.dataManager?.isDiscreteSelectionConstraining?.(metadataId, values)) {
+        return
+      }
       selectedCategories[metadataId] = Array.from(values || []).map(String).sort()
     })
 
     const selectedRanges = {}
     Object.entries(this.selectedRanges || {}).forEach(([metadataId, range]) => {
+      if (!this.dataManager?.isContinuousSelectionConstraining?.(metadataId, range)) {
+        return
+      }
       selectedRanges[metadataId] = {
         min: Number(range.min),
         max: Number(range.max)
@@ -8419,6 +8449,8 @@ export default class extends Controller {
       this.clearMetadataColoring()
     }
 
+    this.updateCurrentColoringIndicator()
+
     if (state.axes?.x?.metadataId) {
       const xButton = state.axes.x.isGene
         ? document.querySelector(`.gene-x-btn[data-gene-id="${state.axes.x.metadataId}"]`)
@@ -9540,6 +9572,7 @@ export default class extends Controller {
       })
       .finally(() => {
         this.uiManager.hideMetadataDropdownSpinner()
+        this.updateCurrentColoringIndicator()
         this.checkpointTrace('waterDropClicked:done', {
           metadataId: normalizedMetadataId,
           currentMetadataId: this.currentMetadataId ? String(this.currentMetadataId) : null,
@@ -9824,6 +9857,8 @@ export default class extends Controller {
     if (wasLoading) {
       this.uiManager.hideMetadataDropdownSpinner()
     }
+
+    this.updateCurrentColoringIndicator()
     
     // console.log('🧬 Gene expression coloring applied successfully', wasLoading ? '(after loading)' : '(instant from memory)')
   }
@@ -9964,6 +9999,7 @@ export default class extends Controller {
       this.updateVisualizationWithMetadataVector()
       this.dataManager.updateAllCategoryDistributions()
       this.dataManager.updateCellFiltering(true)
+      this.updateCurrentColoringIndicator()
     } catch (error) {
       if (this.moduleScoreCancellationRequested === true || error?.name === 'AbortError') {
         return
@@ -10001,6 +10037,162 @@ export default class extends Controller {
     button.style.backgroundColor = '#dbeafe'
     button.dataset.active = 'true'
     //console.log('setWaterDropButtonActive: Button now has color:', button.style.color)
+  }
+
+  findColoringButtonForMetadataId(metadataId) {
+    const id = String(metadataId || '').trim()
+    if (!id) return null
+    const escaped = this.escapeAttributeSelectorValue(id)
+
+    const geneSetInfo = this.extractGeneSetItemColoringFromMetadataId(id)
+    if (geneSetInfo?.itemId) {
+      const itemId = this.escapeAttributeSelectorValue(geneSetInfo.itemId)
+      const geneSetButton = document.querySelector(
+        `[data-action*="geneSetWaterDropClicked"][data-gene-set-item-id="${itemId}"]`
+      )
+      if (geneSetButton) return geneSetButton
+    }
+
+    return document.querySelector(
+      `[data-action*="waterDropClicked"][data-metadata-id="${escaped}"], ` +
+      `[data-action*="geneWaterDropClicked"][data-layer-metadata-id="${escaped}"], ` +
+      `[data-action*="geneWaterDropClicked"][data-metadata-id="${escaped}"]`
+    )
+  }
+
+  syncActiveColoringButtonFromState() {
+    const metadataId = String(this.currentMetadataId || this.currentMetadataVector?.id || '').trim()
+    if (!metadataId) return false
+
+    const button = this.findColoringButtonForMetadataId(metadataId)
+    if (!button) return false
+
+    this.resetAllWaterDropButtons()
+    this.setWaterDropButtonActive(button)
+
+    const dataType = String(this.currentMetadataVector?.data_type || '').toUpperCase()
+    if (dataType === 'DISCRETE' || dataType === 'STRING') {
+      const metadataContainer = button.closest('[data-metadata-item]')
+      if (metadataContainer) {
+        this.addCategoryColors(metadataContainer, metadataId)
+      }
+    }
+    return true
+  }
+
+  getCurrentColoringDisplayName() {
+    const metadataId = String(this.currentMetadataId || this.currentMetadataVector?.id || '').trim()
+    if (!metadataId) return ''
+
+    const vectorName = String(
+      this.currentMetadataVector?.display_name ||
+      this.currentMetadataVector?.name ||
+      ''
+    ).trim()
+    if (vectorName) return vectorName
+
+    const button = this.findColoringButtonForMetadataId(metadataId)
+    if (button) {
+      const fromButton = String(
+        button.dataset.metadataName ||
+        button.dataset.geneName ||
+        button.dataset.geneSetName ||
+        ''
+      ).trim()
+      if (fromButton) return fromButton
+    }
+
+    if (typeof this.dataManager?.getMetadataNameById === 'function') {
+      const fromManager = String(this.dataManager.getMetadataNameById(metadataId) || '').trim()
+      if (fromManager) return fromManager
+    }
+
+    return metadataId
+  }
+
+  updateCurrentColoringIndicator() {
+    const indicator = document.getElementById('current-coloring-indicator')
+    const link = document.getElementById('current-coloring-link')
+    if (!indicator || !link) return
+
+    const metadataId = String(this.currentMetadataId || this.currentMetadataVector?.id || '').trim()
+    const displayName = this.getCurrentColoringDisplayName()
+    if (!metadataId || !displayName) {
+      indicator.style.display = 'none'
+      link.textContent = ''
+      link.dataset.metadataId = ''
+      return
+    }
+
+    link.textContent = displayName
+    link.dataset.metadataId = metadataId
+    link.title = `Show ${displayName} in the metadata panel`
+    indicator.style.display = 'block'
+  }
+
+  async focusCurrentColoringMetadata(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const metadataId = String(
+      event?.currentTarget?.dataset?.metadataId ||
+      this.currentMetadataId ||
+      this.currentMetadataVector?.id ||
+      ''
+    ).trim()
+    if (!metadataId) return
+
+    if (metadataId.startsWith('gene_set_item_')) {
+      await this.focusGeneSetItemColoring(metadataId)
+      return
+    }
+
+    if (metadataId.startsWith('gene_')) {
+      await this.focusGeneFilterItem(metadataId)
+      return
+    }
+
+    const dataType = String(this.currentMetadataVector?.data_type || '').toUpperCase()
+    if (dataType === 'NUMERIC' || dataType === 'CONTINUOUS') {
+      const metadataName = this.getCurrentColoringDisplayName()
+      this.expandContinuousMetadataPanel(metadataId, metadataName)
+      const metadataItem = document.querySelector(
+        `[data-metadata-item="${this.escapeAttributeSelectorValue(metadataId)}"]`
+      )
+      if (metadataItem) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            metadataItem.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+          })
+        })
+      }
+      return
+    }
+
+    await this.focusMetadataFilterItem(metadataId)
+  }
+
+  async focusGeneSetItemColoring(metadataId) {
+    const geneSetInfo = this.extractGeneSetItemColoringFromMetadataId(metadataId)
+    if (!geneSetInfo?.itemId) return
+
+    this.setSelectionTab('gene-sets')
+    const itemId = this.escapeAttributeSelectorValue(geneSetInfo.itemId)
+    const button = document.querySelector(
+      `[data-action*="geneSetWaterDropClicked"][data-gene-set-item-id="${itemId}"]`
+    )
+    const row = button
+      ? (button.closest('[data-gene-set-item-row="true"]') || button.closest('[data-gene-set-item-id]') || button)
+      : null
+    if (!row) return
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+      })
+    })
   }
   
   // Reset all x buttons to inactive state
@@ -10930,6 +11122,194 @@ export default class extends Controller {
       return `#${toHex(rgbMatch[1])}${toHex(rgbMatch[2])}${toHex(rgbMatch[3])}`
     }
     return '#3b82f6'
+  }
+
+  selectionHighlightColorStorageKey() {
+    return 'visualization_selection_highlight_color'
+  }
+
+  loadSelectionHighlightColor() {
+    try {
+      const stored = String(localStorage.getItem(this.selectionHighlightColorStorageKey()) || '').trim()
+      if (/^#[0-9a-fA-F]{6}$/.test(stored)) {
+        return stored.toLowerCase()
+      }
+    } catch (_error) {
+      // Ignore storage failures.
+    }
+    return '#ff0000'
+  }
+
+  getSelectionHighlightColorHex() {
+    const value = String(this.selectionHighlightColor || '').trim()
+    if (/^#[0-9a-fA-F]{6}$/.test(value)) return value.toLowerCase()
+    return '#ff0000'
+  }
+
+  getSelectionHighlightColorInt() {
+    const hex = this.getSelectionHighlightColorHex().replace('#', '')
+    const value = parseInt(hex, 16)
+    return Number.isFinite(value) ? value : 0xff0000
+  }
+
+  setSelectionHighlightColor(colorValue) {
+    const normalized = this.normalizeColorToHex(colorValue)
+    const raw = String(colorValue || '').trim()
+    const hex = /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : normalized
+    this.selectionHighlightColor = /^#[0-9a-fA-F]{6}$/.test(hex) ? hex : '#ff0000'
+    try {
+      localStorage.setItem(this.selectionHighlightColorStorageKey(), this.selectionHighlightColor)
+    } catch (_error) {
+      // Ignore storage failures; in-memory color still applies.
+    }
+    this.syncSelectionColorDot()
+    if (this.selectedCells && this.selectedCells.size > 0) {
+      this.updateSelectedPointColors()
+      if (this.customPlotManager && typeof this.customPlotManager.drawSelectionHighlights === 'function') {
+        this.customPlotManager.drawSelectionHighlights()
+      }
+    }
+  }
+
+  syncSelectionColorDot() {
+    const dot = document.getElementById('selection-color-dot')
+    if (!dot) return
+    const hex = this.getSelectionHighlightColorHex()
+    dot.style.backgroundColor = hex
+    dot.title = `Selection color: ${hex}. Click to change.`
+  }
+
+  selectionColorDotClicked(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    const dot = event.currentTarget
+    this.showSelectionColorPicker(dot)
+  }
+
+  showSelectionColorPicker(colorDisk) {
+    const existingPicker = document.getElementById('selection-color-picker-form')
+    if (existingPicker) {
+      const previousColor = existingPicker.dataset.previousColor
+      if (previousColor && /^#[0-9a-fA-F]{6}$/.test(previousColor)) {
+        this.selectionHighlightColor = previousColor
+        this.syncSelectionColorDot()
+        if (this.selectedCells && this.selectedCells.size > 0) {
+          this.updateSelectedPointColors()
+          if (this.customPlotManager && typeof this.customPlotManager.drawSelectionHighlights === 'function') {
+            this.customPlotManager.drawSelectionHighlights()
+          }
+        }
+      }
+      existingPicker.remove()
+      return
+    }
+
+    const categoryPicker = document.getElementById('color-picker-form')
+    if (categoryPicker) categoryPicker.remove()
+
+    const currentColor = this.getSelectionHighlightColorHex()
+    const picker = document.createElement('div')
+    picker.id = 'selection-color-picker-form'
+    picker.dataset.previousColor = currentColor
+    picker.style.cssText = `
+      position: fixed;
+      background: white;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+      z-index: 1000;
+      min-width: 200px;
+    `
+    picker.innerHTML = `
+      <h4 style="margin: 0 0 12px 0; font-size: 14px; font-weight: 500;">Selection color</h4>
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <input type="color" id="selection-color-input" value="${currentColor}" style="width: 40px; height: 40px; border: none; border-radius: 4px; cursor: pointer;">
+        <input type="text" id="selection-color-text" value="${currentColor}" style="flex: 1; padding: 8px; border: 1px solid #d1d5db; border-radius: 4px; font-size: 12px;">
+      </div>
+      <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <button type="button" id="selection-color-reset" style="padding: 6px 12px; border: 1px solid #d1d5db; background: white; border-radius: 4px; cursor: pointer; font-size: 12px;">Reset</button>
+        <button type="button" id="selection-color-cancel" style="padding: 6px 12px; border: 1px solid #d1d5db; background: white; border-radius: 4px; cursor: pointer; font-size: 12px;">Cancel</button>
+        <button type="button" id="selection-color-save" style="padding: 6px 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">Save</button>
+      </div>
+    `
+
+    const rect = colorDisk.getBoundingClientRect()
+    picker.style.left = `${Math.min(rect.left, window.innerWidth - 240)}px`
+    picker.style.top = `${rect.bottom + 8}px`
+    document.body.appendChild(picker)
+
+    const colorInput = picker.querySelector('#selection-color-input')
+    const colorText = picker.querySelector('#selection-color-text')
+    const cancelBtn = picker.querySelector('#selection-color-cancel')
+    const resetBtn = picker.querySelector('#selection-color-reset')
+    const saveBtn = picker.querySelector('#selection-color-save')
+
+    const applyPreview = (hex) => {
+      this.selectionHighlightColor = hex
+      this.syncSelectionColorDot()
+      if (this.selectedCells && this.selectedCells.size > 0) {
+        this.updateSelectedPointColors()
+        if (this.customPlotManager && typeof this.customPlotManager.drawSelectionHighlights === 'function') {
+          this.customPlotManager.drawSelectionHighlights()
+        }
+      }
+    }
+
+    colorInput.addEventListener('input', () => {
+      colorText.value = colorInput.value
+      applyPreview(colorInput.value)
+    })
+
+    colorText.addEventListener('input', () => {
+      if (/^#[0-9A-F]{6}$/i.test(colorText.value)) {
+        colorInput.value = colorText.value
+        applyPreview(colorText.value)
+      }
+    })
+
+    cancelBtn.addEventListener('click', () => {
+      restorePreviousColor()
+      picker.remove()
+      document.removeEventListener('click', closePicker)
+    })
+
+    resetBtn.addEventListener('click', () => {
+      colorInput.value = '#ff0000'
+      colorText.value = '#ff0000'
+      applyPreview('#ff0000')
+    })
+
+    saveBtn.addEventListener('click', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      this.setSelectionHighlightColor(colorInput.value)
+      picker.remove()
+      document.removeEventListener('click', closePicker)
+    })
+
+    const restorePreviousColor = () => {
+      this.selectionHighlightColor = currentColor
+      this.syncSelectionColorDot()
+      if (this.selectedCells && this.selectedCells.size > 0) {
+        this.updateSelectedPointColors()
+        if (this.customPlotManager && typeof this.customPlotManager.drawSelectionHighlights === 'function') {
+          this.customPlotManager.drawSelectionHighlights()
+        }
+      }
+    }
+
+    const closePicker = (e) => {
+      if (!picker.contains(e.target) && e.target !== colorDisk) {
+        restorePreviousColor()
+        picker.remove()
+        document.removeEventListener('click', closePicker)
+      }
+    }
+
+    setTimeout(() => {
+      document.addEventListener('click', closePicker)
+    }, 0)
   }
 
   categoryDotClicked(event) {
@@ -12723,9 +13103,9 @@ export default class extends Controller {
   
   // Get color from gradient control points by interpolating
   getColorFromGradient(normalizedValue) {
-    // Handle invalid values
+    // Handle invalid values — never return 0 (see getMissingNumericColor)
     if (normalizedValue === undefined || normalizedValue === null || isNaN(normalizedValue)) {
-      return 0x3b82f6 // Default blue
+      return this.getMissingNumericColor()
     }
     
     // Use gradient control points if available
@@ -13364,6 +13744,11 @@ export default class extends Controller {
 
     this.switchToCellsTabForLassoSelection(source)
 
+    const sourceText = String(source || '').toLowerCase()
+    if (sourceText.includes('lasso')) {
+      this.lastSelectionPlotSource = sourceText.includes('custom') ? 'secondary' : 'main'
+    }
+
     const selectionSizeBefore = this.selectedCells ? this.selectedCells.size : 0
     console.log(`[SELECTION] Applying ${selectedIndices.length} indices from ${source}, current size: ${selectionSizeBefore}`)
 
@@ -13384,53 +13769,9 @@ export default class extends Controller {
     if (addTime > 10) {
       console.log(`[SELECTION] Adding ${selectedIndices.length} indices took ${addTime.toFixed(2)}ms`)
     }
-    
-    // Store the current metadata state before deactivating (for restore on cancel/save)
-    const storeMetadataStart = performance.now()
-    this.storeMetadataStateBeforeSelection()
-    const storeMetadataTime = performance.now() - storeMetadataStart
-    if (storeMetadataTime > 10) {
-      console.log(`[SELECTION] storeMetadataStateBeforeSelection took ${storeMetadataTime.toFixed(2)}ms`)
-    }
-    
-    // Store current filter state before clearing coloring
-    const filterStateBeforeClear = this.currentVisibleCells ? new Set(this.currentVisibleCells) : null
-    // console.log('[SELECTION] Storing filter state before clearMetadataColoring:', {
-      // hasFilter: !!filterStateBeforeClear,
-      // filterSize: filterStateBeforeClear ? filterStateBeforeClear.size : 'null'
-    // })
-    
-    // Deactivate the coloring button (turn blue palette button to grey)
-    const resetButtonsStart = performance.now()
-    this.resetAllWaterDropButtons()
-    const resetButtonsTime = performance.now() - resetButtonsStart
-    if (resetButtonsTime > 10) {
-      console.log(`[SELECTION] resetAllWaterDropButtons took ${resetButtonsTime.toFixed(2)}ms`)
-    }
-    
-    const removeColorsStart = performance.now()
-    this.removeAllCategoryColors()
-    const removeColorsTime = performance.now() - removeColorsStart
-    if (removeColorsTime > 10) {
-      console.log(`[SELECTION] removeAllCategoryColors took ${removeColorsTime.toFixed(2)}ms`)
-    }
-    
-    const clearMetadataStart = performance.now()
-    this.clearMetadataColoring()
-    const clearMetadataTime = performance.now() - clearMetadataStart
-    if (clearMetadataTime > 10) {
-      console.log(`[SELECTION] clearMetadataColoring took ${clearMetadataTime.toFixed(2)}ms`)
-    }
-    
-    // Verify filter state after clearMetadataColoring
-    // console.log('[SELECTION] Filter state after clearMetadataColoring:', {
-      // currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
-      // hasFilter: !!this.currentVisibleCells,
-      // filterPreserved: filterStateBeforeClear ? 
-        // (this.currentVisibleCells ? 
-          // (this.currentVisibleCells.length === filterStateBeforeClear.size) : false) : 
-        // (!this.currentVisibleCells)
-    // })
+
+    // Keep current metadata/gene coloring active so users can still read categories
+    // while building or composing selections.
     
     // Update selection count display
     const updateCountStart = performance.now()
@@ -13561,26 +13902,25 @@ export default class extends Controller {
     
     if (hasSelections) {
       // console.log(`⚡ [ReGL] Updating colors for ${this.selectedCells.size} selected cells`)
-      // Set selected cells to red, unselected to faded original color
+      // Set selected cells to selection highlight color, unselected keep original coloring
       // Use displayOrder to correctly map draw positions to cell indices
       // IMPORTANT: Respect current filter - hide filtered-out cells
+      const selectionColor = this.getSelectionHighlightColorInt()
       for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
         const cellIndex = this.displayOrder[drawPos]
         const isVisible = !visibleSet || visibleSet.has(cellIndex)
         
         if (!isVisible) {
-          // Hide filtered-out points
+          // Hide filtered-out points in the draw buffer only — keep metadata colors in caches.
           colorMap[drawPos] = 0x00000000
-          this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
           continue
         }
         
         if (this.selectedCells.has(cellIndex)) {
-          colorMap[drawPos] = 0xff0000 // Red
-          this.cachedColorsByCellIndex.set(cellIndex, 0xff0000)
+          colorMap[drawPos] = selectionColor
+          this.cachedColorsByCellIndex.set(cellIndex, selectionColor)
         } else {
-          // Keep original color but with reduced alpha (we'll handle this in the shader if needed)
-          const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
+          const originalColor = this.getOriginalPointColor(cellIndex)
           colorMap[drawPos] = originalColor
           this.cachedColorsByCellIndex.set(cellIndex, originalColor)
         }
@@ -13595,13 +13935,11 @@ export default class extends Controller {
         const isVisible = !visibleSet || visibleSet.has(cellIndex)
         
         if (!isVisible) {
-          // Hide filtered-out points
           colorMap[drawPos] = 0x00000000
-          this.cachedColorsByCellIndex.set(cellIndex, 0x00000000)
           continue
         }
         
-        const originalColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
+        const originalColor = this.getOriginalPointColor(cellIndex)
         colorMap[drawPos] = originalColor
         this.cachedColorsByCellIndex.set(cellIndex, originalColor)
       }
@@ -13944,7 +14282,7 @@ export default class extends Controller {
   
   // ReGL: Reorder display order based on category (painter's algorithm)
   // Uses displayOrder array - does NOT modify original data
-  reorderPointsForCategoryDisplay() {
+  reorderPointsForCategoryDisplay(visibleSet = null) {
     if (!this.reglRenderer || !this.currentCoordinates || !this.currentMetadataVector || !this.displayOrder) {
       // console.log('⚠️ [ReGL] Cannot reorder - missing data')
       return
@@ -14005,10 +14343,14 @@ export default class extends Controller {
       screenCoordinates[drawPos * 2] = this.interactionHandler.normalizeX(dataX, this.currentBounds)
       screenCoordinates[drawPos * 2 + 1] = this.interactionHandler.normalizeY(dataY, this.currentBounds)
       
-      // Get color for this cell
-      const baseColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
-      const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
-      colorMap[drawPos] = isSelected ? 0xff0000 : baseColor
+      const isVisible = !visibleSet || visibleSet.has(cellIndex)
+      if (isVisible) {
+        const baseColor = this.getOriginalPointColor(cellIndex)
+        const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
+        colorMap[drawPos] = isSelected ? this.getSelectionHighlightColorInt() : baseColor
+      } else {
+        colorMap[drawPos] = 0x00000000
+      }
     }
     
     // Update ReGL buffers with reordered data
@@ -14092,9 +14434,9 @@ export default class extends Controller {
       // If filtered, use transparent. Otherwise use color from originalPointColors or default blue
       const isVisible = !visibleSet || visibleSet.has(cellIndex)
       if (isVisible) {
-        const baseColor = this.originalPointColors.get(cellIndex) || 0x3b82f6
+        const baseColor = this.getOriginalPointColor(cellIndex)
         const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
-        colorMap[drawPos] = isSelected ? 0xff0000 : baseColor
+        colorMap[drawPos] = isSelected ? this.getSelectionHighlightColorInt() : baseColor
       } else {
         // Hide filtered-out points
         colorMap[drawPos] = 0x00000000
@@ -14403,6 +14745,7 @@ export default class extends Controller {
       composeSteps = this.composeBuildStepsForSave()
     }
     const filterComponents = this.buildSelectionFilterComponentsForSave(selectionSource)
+    const plotContext = this.buildSelectionPlotContextForSave(selectionSource)
     const itemId = `local-${Date.now()}-${Math.floor(Math.random() * 100000)}`
     const localItemId = String(itemId)
     const pendingItem = this.normalizeSelectionItem({
@@ -14417,7 +14760,8 @@ export default class extends Controller {
       unselected_name: 'Not selected',
       selection_source: selectionSource,
       compose_steps: composeSteps,
-      filter_components: filterComponents
+      filter_components: filterComponents,
+      plot_context: plotContext
     })
     this.savedSelections.unshift(pendingItem)
     this.recentlyCreatedSavedCellSetId = localItemId
@@ -14448,6 +14792,9 @@ export default class extends Controller {
       if (Array.isArray(filterComponents)) {
         requestBody.filter_components = filterComponents
       }
+      if (plotContext && typeof plotContext === 'object') {
+        requestBody.plot_context = plotContext
+      }
 
       const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/save_metadata_from_selection`, {
         method: 'POST',
@@ -14457,9 +14804,15 @@ export default class extends Controller {
         },
         body: JSON.stringify(requestBody)
       })
-      const payload = await response.json()
-      if (!response.ok || payload.status !== 'ok') {
-        throw new Error(payload.message || 'Failed to save selection')
+      const responseText = await response.text()
+      let payload = null
+      try {
+        payload = responseText ? JSON.parse(responseText) : null
+      } catch (_parseError) {
+        throw new Error(`Server returned a non-JSON response (HTTP ${response.status})`)
+      }
+      if (!response.ok || !payload || payload.status !== 'ok') {
+        throw new Error((payload && payload.message) || `Failed to save selection (HTTP ${response.status})`)
       }
 
       const returnedItem = this.normalizeSelectionItem(payload.item)
@@ -14498,17 +14851,15 @@ export default class extends Controller {
 
   clearCurrentSelectionAfterSave() {
     this.selectedCells.clear()
-    // Invalidate color/order caches so repaint rebuilds a clean draw order.
+    // Invalidate color/order caches so repaint builds a clean draw order.
     this.lastColorUpdateHash = null
     if (this.colorUpdateCache) this.colorUpdateCache.clear()
     this._lastCategoryOrderApplied = null
     this._lastNumericOrderApplied = null
     this._lastNumericMetadataId = null
 
-    const wasRestored = this.restoreMetadataStateAfterSelection()
-    if (!wasRestored) {
-      this.renderPointsWithCurrentColoring()
-    }
+    // Coloring was kept during selection; just repaint without selection highlight.
+    this.renderPointsWithCurrentColoring()
 
     this.uiManager.updateSelectedCellsCount()
     if (this.customPlotManager && typeof this.customPlotManager.onSelectionUpdated === 'function') {
@@ -14533,6 +14884,7 @@ export default class extends Controller {
     const filterComponents = Array.isArray(item.filter_components)
       ? item.filter_components
       : (Array.isArray(item.filterComponents) ? item.filterComponents : null)
+    const plotContextRaw = item.plot_context || item.plotContext || null
     return {
       id: String(item.id || ''),
       runId: item.run_id ? Number(item.run_id) : null,
@@ -14547,6 +14899,7 @@ export default class extends Controller {
       selectionSource: item.selection_source ? String(item.selection_source) : 'lasso',
       composeSteps: composeSteps,
       filterComponents: filterComponents,
+      plotContext: (plotContextRaw && typeof plotContextRaw === 'object') ? plotContextRaw : null,
       locked: item.locked === true
     }
   }
@@ -14776,6 +15129,119 @@ export default class extends Controller {
         selection_ref_name: selectionRefName
       }
     }).filter((entry) => entry)
+  }
+
+  buildSelectionPlotContextForSave(selectionSource) {
+    if (selectionSource === 'compose') return null
+
+    const plotSide = (selectionSource === 'lasso' && this.lastSelectionPlotSource === 'secondary')
+      ? 'secondary'
+      : 'main'
+
+    if (plotSide === 'secondary') {
+      const xButton = this.selectedXButton
+      const yButton = this.selectedYButton
+      const rawPlotType = String(this.customPlotManager?.currentPlotType || '').trim().toLowerCase()
+      const plotType = rawPlotType === 'violin' ? 'violin' : 'scatter'
+      const xName = this.customPlotManager?.getAxisLabel?.(xButton) || xButton?.metadataName || 'X'
+      const yName = this.customPlotManager?.getAxisLabel?.(yButton) || yButton?.metadataName || 'Y'
+      return {
+        plot: 'secondary',
+        plot_type: plotType,
+        x_axis: {
+          name: String(xName).replace(/\n/g, ' ').trim(),
+          metadata_id: xButton?.metadataId != null ? String(xButton.metadataId) : '',
+          is_gene: !!xButton?.isGene
+        },
+        y_axis: {
+          name: String(yName).replace(/\n/g, ' ').trim(),
+          metadata_id: yButton?.metadataId != null ? String(yButton.metadataId) : '',
+          is_gene: !!yButton?.isGene
+        },
+        x_scale: this.normalizeCustomPlotScale(this.customPlotXAxisScale),
+        y_scale: this.normalizeCustomPlotScale(this.customPlotYAxisScale)
+      }
+    }
+
+    const loomFile = this.getCurrentLoomFileForRequest() || ''
+    const embeddingId = this.metadataData?.id
+      || (this.hasMetadataSelectTarget ? this.metadataSelectTarget.value : null)
+      || document.getElementById('embedding-selection-link')?.dataset?.selectedEmbeddingId
+      || ''
+    const embeddingMatch = this.findEmbeddingById?.(embeddingId, loomFile) || null
+    const embedding = embeddingMatch?.embedding || this.metadataData || null
+    const displayInfo = this.getEmbeddingDisplayInfo(embedding, loomFile || embeddingMatch?.loomFile)
+
+    return {
+      plot: 'main',
+      embedding: {
+        id: embeddingId ? String(embeddingId) : '',
+        name: String(displayInfo?.name || embedding?.name || embedding?.label || 'Embedding'),
+        origin: String(displayInfo?.origin || ''),
+        loom_file: String(loomFile || embeddingMatch?.loomFile || '')
+      },
+      axes: {
+        x: 'Dimension 1',
+        y: 'Dimension 2'
+      }
+    }
+  }
+
+  normalizeCustomPlotScale(scale) {
+    const value = String(scale || 'normal').trim().toLowerCase()
+    if (value === 'log2' || value === 'log10') return value
+    return 'normal'
+  }
+
+  formatSelectionPlotScaleLabel(scale) {
+    const value = this.normalizeCustomPlotScale(scale)
+    if (value === 'log2') return 'log2'
+    if (value === 'log10') return 'log10'
+    return 'linear'
+  }
+
+  formatSelectionPlotTypeLabel(plotType) {
+    const value = String(plotType || '').trim().toLowerCase()
+    if (value === 'violin') return 'Violin'
+    if (value === 'scatter') return 'Scatter'
+    return value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Unknown'
+  }
+
+  renderSelectionPlotContextDetails(plotContext) {
+    if (!plotContext || typeof plotContext !== 'object') {
+      return ''
+    }
+
+    const plotSide = String(plotContext.plot || '').toLowerCase()
+    if (plotSide === 'secondary') {
+      const plotType = this.formatSelectionPlotTypeLabel(plotContext.plot_type || plotContext.plotType)
+      const xAxis = plotContext.x_axis || plotContext.xAxis || {}
+      const yAxis = plotContext.y_axis || plotContext.yAxis || {}
+      const xName = String(xAxis.name || 'X')
+      const yName = String(yAxis.name || 'Y')
+      const xScale = this.formatSelectionPlotScaleLabel(plotContext.x_scale || plotContext.xScale)
+      const yScale = this.formatSelectionPlotScaleLabel(plotContext.y_scale || plotContext.yScale)
+      return `
+        <div style="font-size:11px;color:#6b7280;margin-top:2px;">Plot: Secondary plot</div>
+        <div style="font-size:11px;color:#6b7280;margin-top:2px;">Plot type: ${this.escapeHtml(plotType)}</div>
+        <div style="font-size:11px;color:#6b7280;margin-top:2px;">X axis: ${this.escapeHtml(xName)} (${this.escapeHtml(xScale)})</div>
+        <div style="font-size:11px;color:#6b7280;margin-top:2px;">Y axis: ${this.escapeHtml(yName)} (${this.escapeHtml(yScale)})</div>
+      `
+    }
+
+    const embedding = plotContext.embedding || {}
+    const axes = plotContext.axes || {}
+    const embeddingName = String(embedding.name || 'Embedding')
+    const origin = String(embedding.origin || '').trim()
+    const embeddingLabel = origin ? `${origin} > ${embeddingName}` : embeddingName
+    const xAxis = String(axes.x || 'Dimension 1')
+    const yAxis = String(axes.y || 'Dimension 2')
+    return `
+      <div style="font-size:11px;color:#6b7280;margin-top:2px;">Plot: Main plot</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:2px;">Embedding: ${this.escapeHtml(embeddingLabel)}</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:2px;">X axis: ${this.escapeHtml(xAxis)}</div>
+      <div style="font-size:11px;color:#6b7280;margin-top:2px;">Y axis: ${this.escapeHtml(yAxis)}</div>
+    `
   }
 
   selectionHasDeletedReferences(item) {
@@ -16177,6 +16643,7 @@ export default class extends Controller {
       <div style="font-size:13px;color:#111827;font-weight:600;word-break:break-word;">${this.escapeHtml(selectionLabel)}</div>
       <div style="font-size:12px;color:#374151;margin-top:4px;">Final result: <span style="font-weight:600;color:#065f46;">${Number(item.selectedCount || 0).toLocaleString()} cells</span></div>
       <div style="font-size:11px;color:#6b7280;margin-top:2px;">Source: ${this.escapeHtml(sourceText)}</div>
+      ${item.selectionSource === 'compose' ? '' : this.renderSelectionPlotContextDetails(item.plotContext)}
       <div style="font-size:11px;color:#6b7280;margin-top:2px;">Created: ${this.escapeHtml(createdLabel)}</div>
     `
 
@@ -17202,6 +17669,9 @@ export default class extends Controller {
         this.dataManager.updateCellFiltering()
       }
       this.renderSavedSelections()
+      if (item?.metadataId) {
+        this.removeCategoricalMetadataItem(item.metadataId)
+      }
       this.refreshSelectionStates()
       this.refreshPageCategoricalMetadata()
     } catch (error) {
@@ -17318,6 +17788,11 @@ export default class extends Controller {
       }
 
       this.renderSavedSelections()
+      items.forEach((item) => {
+        if (item?.metadataId) {
+          this.removeCategoricalMetadataItem(item.metadataId)
+        }
+      })
       this.refreshSelectionStates()
       this.refreshPageCategoricalMetadata()
     } catch (error) {
@@ -17332,24 +17807,120 @@ export default class extends Controller {
     if (this.metadataRefreshInProgress) return
     this.metadataRefreshInProgress = true
     try {
-      const statusSnapshot = this.captureMetadataStatusIconSnapshot()
       const url = new URL(window.location.href)
       const response = await fetch(url.toString(), { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       if (!response.ok) return
       const html = await response.text()
       const parser = new DOMParser()
       const doc = parser.parseFromString(html, 'text/html')
-      const nextLeftPanel = doc.getElementById('left-panel')
-      const currentLeftPanel = document.getElementById('left-panel')
-      if (nextLeftPanel && currentLeftPanel) {
-        currentLeftPanel.replaceWith(nextLeftPanel)
-        this.applyMetadataStatusIconSnapshot(statusSnapshot)
+      const nextPanel = doc.querySelector('[data-checkpoint-scroll-key="categorical-metadata-panel"]')
+      const currentPanel = document.querySelector('[data-checkpoint-scroll-key="categorical-metadata-panel"]')
+      if (!nextPanel || !currentPanel) return
+
+      const syncResult = this.syncCategoricalMetadataPanelItems(currentPanel, nextPanel)
+      if (syncResult.removedIds.includes(String(this.currentMetadataId || ''))) {
+        this.resetAllWaterDropButtons()
+        this.removeAllCategoryColors()
+        this.clearMetadataColoring()
+      } else {
+        this.updateCurrentColoringIndicator()
+      }
+
+      for (const metadataId of syncResult.addedIds) {
+        this.checkSpecificMetadataStatus(metadataId)
       }
     } catch (_error) {
       // Keep interaction uninterrupted if metadata panel refresh fails.
     } finally {
       this.metadataRefreshInProgress = false
     }
+  }
+
+  getVisibleCategoricalMetadataItems(panel) {
+    if (!panel) return []
+    return Array.from(panel.querySelectorAll(':scope > [data-metadata-item]')).filter((el) => {
+      return String(el.dataset.metadataType || '').toUpperCase() !== 'STRING'
+    })
+  }
+
+  syncCategoricalMetadataPanelItems(currentPanel, nextPanel) {
+    const currentItems = this.getVisibleCategoricalMetadataItems(currentPanel)
+    const nextItems = this.getVisibleCategoricalMetadataItems(nextPanel)
+    const currentIds = new Set(currentItems.map((el) => String(el.dataset.metadataItem || '').trim()).filter(Boolean))
+    const nextIds = new Set(nextItems.map((el) => String(el.dataset.metadataItem || '').trim()).filter(Boolean))
+
+    const removedIds = []
+    currentItems.forEach((el) => {
+      const metadataId = String(el.dataset.metadataItem || '').trim()
+      if (!metadataId || nextIds.has(metadataId)) return
+      removedIds.push(metadataId)
+      el.remove()
+    })
+
+    const emptyState = currentPanel.querySelector(':scope > p')
+    const insertionPoint = currentPanel.querySelector(':scope > [data-metadata-item][data-metadata-type="STRING"]')
+    const addedIds = []
+    nextItems.forEach((el) => {
+      const metadataId = String(el.dataset.metadataItem || '').trim()
+      if (!metadataId || currentIds.has(metadataId)) return
+      const imported = document.importNode(el, true)
+      if (emptyState) emptyState.remove()
+      if (insertionPoint) {
+        currentPanel.insertBefore(imported, insertionPoint)
+      } else {
+        currentPanel.appendChild(imported)
+      }
+      addedIds.push(metadataId)
+    })
+
+    const visibleItems = this.getVisibleCategoricalMetadataItems(currentPanel)
+    this.updateCategoricalMetadataItemSpacing(visibleItems)
+    this.updateCategoricalMetadataCountBadge(visibleItems.length)
+
+    return { addedIds, removedIds }
+  }
+
+  updateCategoricalMetadataItemSpacing(visibleItems) {
+    const items = Array.isArray(visibleItems) ? visibleItems : []
+    items.forEach((el, index) => {
+      const isLast = index === items.length - 1
+      el.style.marginBottom = isLast ? '20px' : '8px'
+    })
+  }
+
+  updateCategoricalMetadataCountBadge(count) {
+    const section = document.querySelector('[data-guided-tour="visualization-categorical-metadata"]')
+    if (!section) return
+    const heading = section.querySelector('h3')
+    if (!heading || !heading.parentElement) return
+    const badge = Array.from(heading.parentElement.children).find((el) => {
+      return el !== heading && el.tagName === 'SPAN' && !el.querySelector('i')
+    })
+    if (badge) {
+      badge.textContent = String(count)
+    }
+  }
+
+  removeCategoricalMetadataItem(metadataId) {
+    const normalizedId = String(metadataId || '').trim()
+    if (!normalizedId) return false
+    const panel = document.querySelector('[data-checkpoint-scroll-key="categorical-metadata-panel"]')
+    if (!panel) return false
+    const item = panel.querySelector(`[data-metadata-item="${this.escapeAttributeSelectorValue(normalizedId)}"]`)
+    if (!item) return false
+    if (String(item.dataset.metadataType || '').toUpperCase() === 'STRING') return false
+
+    item.remove()
+    const visibleItems = this.getVisibleCategoricalMetadataItems(panel)
+    this.updateCategoricalMetadataItemSpacing(visibleItems)
+    this.updateCategoricalMetadataCountBadge(visibleItems.length)
+
+    if (String(this.currentMetadataId || '') === normalizedId) {
+      this.resetAllWaterDropButtons()
+      this.removeAllCategoryColors()
+      this.clearMetadataColoring()
+    }
+    return true
   }
 
   captureMetadataStatusIconSnapshot() {
@@ -17687,7 +18258,7 @@ export default class extends Controller {
         const screenY = this.interactionHandler.normalizeY(dataY, this.currentBounds)
         
         // Get color from originalPointColors
-        const colorInt = this.originalPointColors.get(i) || 0x3b82f6
+        const colorInt = this.getOriginalPointColor(i)
         const r = (colorInt >> 16) & 0xFF
         const g = (colorInt >> 8) & 0xFF
         const b = colorInt & 0xFF
@@ -17731,7 +18302,7 @@ export default class extends Controller {
     
     // Check for selection coloring first
     if (this.selectedCells && this.selectedCells.has(point.cellId)) {
-      color = '#ff0000' // Red for selected
+      color = this.getSelectionHighlightColorHex()
     } else if (this.currentMetadataVector && this.currentMetadataVector.values) {
       // Use current metadata coloring
       const { color: metadataColor } = this.colorManager.getColorAndAlpha(point.cellId)
@@ -17913,13 +18484,12 @@ export default class extends Controller {
       return
     }
     
-    // Store the current metadata state so we can restore it after cancel/save
+    // Store the current metadata state so we can restore it after cancel/save.
+    // Prefer metadataId over a live DOM button node: panel refreshes detach nodes.
     this.lastActiveMetadata = {
       metadataId: this.currentMetadataId,
       metadataVector: this.currentMetadataVector,
-      customColorRange: this.customColorRange,
-      // Find the currently active water drop button
-      activeButton: document.querySelector('[data-action*="waterDropClicked"][data-active="true"]')
+      customColorRange: this.customColorRange
     }
     // console.log('📦 Stored metadata state before selection:', this.lastActiveMetadata)
   }
@@ -17930,7 +18500,7 @@ export default class extends Controller {
       return false
     }
     
-    const { metadataId, metadataVector, customColorRange, activeButton } = this.lastActiveMetadata
+    const { metadataId, metadataVector, customColorRange } = this.lastActiveMetadata
     
     if (metadataId && metadataVector) {
       // console.log('🔄 Restoring metadata coloring:', metadataVector.name)
@@ -17946,18 +18516,8 @@ export default class extends Controller {
       // Update adapt color range button visibility for all range sliders
       this.updateAllRangeSliderButtonAppearances()
       
-      // Re-activate the water drop button
-      if (activeButton) {
-        this.setWaterDropButtonActive(activeButton)
-        
-        // Re-add category colors if it's discrete metadata
-        if (metadataVector.data_type === 'DISCRETE' || metadataVector.data_type === 'STRING') {
-          const metadataContainer = activeButton.closest('[data-metadata-item]')
-          if (metadataContainer) {
-            this.addCategoryColors(metadataContainer, metadataId)
-          }
-        }
-      }
+      // Re-activate the water drop button from current metadata id (DOM may have been replaced)
+      this.syncActiveColoringButtonFromState()
       
       // Update sprite colors using existing rendering logic (no sprite recreation)
       // console.log('🎨 Updating sprite colors with restored metadata')
@@ -17972,6 +18532,8 @@ export default class extends Controller {
       } else if (metadataVector.data_type === 'NUMERIC') {
         this.renderContinuousColorLegend()
       }
+
+      this.updateCurrentColoringIndicator()
       
       // console.log('✅ Metadata coloring restored successfully')
       
@@ -17982,13 +18544,12 @@ export default class extends Controller {
       // console.log('No metadata was active before selection')
       // Clear the stored state
       this.lastActiveMetadata = null
+      this.updateCurrentColoringIndicator()
       return false
     }
   }
 
   cancelSelection() {
-    // console.log('🔄 Canceling selection, reverting to previous coloring scheme')
-    
     // Clear the selected cells
     this.selectedCells.clear()
     // Invalidate color/order caches so repaint rebuilds a clean draw order.
@@ -17998,14 +18559,8 @@ export default class extends Controller {
     this._lastNumericOrderApplied = null
     this._lastNumericMetadataId = null
     
-    // Restore the metadata state from before the selection
-    const wasRestored = this.restoreMetadataStateAfterSelection()
-    
-    // If no metadata was restored, just update colors to remove selection highlighting
-    if (!wasRestored) {
-      // console.log('No metadata to restore, updating colors to default')
-      this.renderPointsWithCurrentColoring()
-    }
+    // Coloring was kept during selection; just remove the selection highlight.
+    this.renderPointsWithCurrentColoring()
     
     // Update the cell count display
     this.uiManager.updateSelectedCellsCount()
@@ -18025,8 +18580,6 @@ export default class extends Controller {
       this.lassoGraphics.clear()
       this.lassoGraphics = null
     }
-    
-    //console.log('Selection canceled, reverted to previous coloring scheme')
   }
 
 
@@ -19247,7 +19800,12 @@ export default class extends Controller {
         }
         
         // For continuous metadata: disable range selection (clear the range)
-        delete this.selectedRanges[metadataId]
+        if (this.dataManager?.clearSelectedRange) {
+          this.dataManager.clearSelectedRange(metadataId)
+        } else if (this.selectedRanges) {
+          delete this.selectedRanges[metadataId]
+          delete this.selectedRanges[String(metadataId)]
+        }
         checkbox.title = 'Enable range selection'
         
         // Disable the range slider for this metadata
@@ -19343,11 +19901,22 @@ export default class extends Controller {
                 // console.log('🔍 [CHECKBOX] Using current slider values:', currentMin, currentMax)
               }
               
-              this.selectedRanges[metadataId] = {
-                min: currentMin,
-                max: currentMax
+              // Only store constraining ranges. Full-range entries pollute the global filter tool.
+              const rangeCandidate = { min: currentMin, max: currentMax }
+              const isConstraining = this.dataManager?.isContinuousSelectionConstraining?.(metadataId, rangeCandidate) === true
+              if (isConstraining) {
+                if (this.dataManager?.setSelectedRange) {
+                  this.dataManager.setSelectedRange(metadataId, rangeCandidate)
+                } else {
+                  if (!this.selectedRanges) this.selectedRanges = {}
+                  this.selectedRanges[metadataId] = rangeCandidate
+                }
+              } else if (this.dataManager?.clearSelectedRange) {
+                this.dataManager.clearSelectedRange(metadataId)
+              } else if (this.selectedRanges) {
+                delete this.selectedRanges[metadataId]
+                delete this.selectedRanges[String(metadataId)]
               }
-              // console.log('🔍 [CHECKBOX] Set selectedRanges to:', this.selectedRanges[metadataId])
               
               // Update checkbox color based on whether it's a subrange
               // This will change it to orange if it's a subrange, or keep it green if full range
@@ -19380,7 +19949,7 @@ export default class extends Controller {
           
           // Restore each saved category
           this.savedCategorySelections[metadataId].forEach(category => {
-            this.selectedCategories[metadataId].add(category)
+            this.selectedCategories[metadataId].add(String(category))
           })
           // console.log('🔍 [CHECKBOX] Restored category selections:', Array.from(this.selectedCategories[metadataId]))
         }
@@ -19429,11 +19998,12 @@ export default class extends Controller {
       }
     }
     
-    // Update cell filtering
-    // console.log('🔍 [CHECKBOX] About to call updateCellFiltering')
-    // console.log('🔍 [CHECKBOX] Current selectedRanges:', this.selectedRanges)
+    // Update cell filtering and keep the global filter tool in sync
     this.dataManager.updateCellFiltering()
-    // console.log('🔍 [CHECKBOX] updateCellFiltering called')
+    this.uiManager.updateGlobalFilterSummary()
+    if (this.globalFilterPanelVisible) {
+      this.uiManager.updateGlobalFilterPanelContent()
+    }
   }
 
   async toggleSelectAllCategories(event) {
@@ -19735,7 +20305,7 @@ export default class extends Controller {
           this.selectedCategories[metadataId] = new Set()
         }
         this.savedCategorySelections[metadataId].forEach(category => {
-          this.selectedCategories[metadataId].add(category)
+          this.selectedCategories[metadataId].add(String(category))
         })
       }
       
@@ -19753,6 +20323,10 @@ export default class extends Controller {
     
     // Update filtering
     this.dataManager.updateCellFiltering()
+    this.uiManager.updateGlobalFilterSummary()
+    if (this.globalFilterPanelVisible) {
+      this.uiManager.updateGlobalFilterPanelContent()
+    }
   }
 
   async toggleContinuousMetadataFilter(event) {
@@ -19827,9 +20401,14 @@ export default class extends Controller {
       // Save current range and remove it from selectedRanges
       // (removing it entirely means "no constraint" = show all cells)
       if (!this.savedRanges) this.savedRanges = {}
-      if (this.selectedRanges && this.selectedRanges[metadataId]) {
-        this.savedRanges[metadataId] = { ...this.selectedRanges[metadataId] }
-        delete this.selectedRanges[metadataId]
+      const existingRange = this.dataManager?.getSelectedRange?.(metadataId) || this.selectedRanges?.[metadataId]
+      if (existingRange) {
+        this.savedRanges[metadataId] = { ...existingRange }
+        if (this.dataManager?.clearSelectedRange) {
+          this.dataManager.clearSelectedRange(metadataId)
+        } else if (this.selectedRanges) {
+          delete this.selectedRanges[metadataId]
+        }
       }
     } else {
       // Turn ON - enable filtering
@@ -19914,28 +20493,24 @@ export default class extends Controller {
           }
         }
       } else if (this.savedRanges && this.savedRanges[metadataId]) {
-        if (!this.selectedRanges) this.selectedRanges = {}
-        this.selectedRanges[metadataId] = { ...this.savedRanges[metadataId] }
-      } else {
-        // No saved range - initialize with full range from slider
-        const rangeSection = document.querySelector(`.metadata-range-section[data-metadata-id="${metadataId}"]`)
-        if (rangeSection) {
-          const rangeSliderController = this.application.getControllerForElementAndIdentifier(
-            rangeSection.querySelector('[data-controller="range-slider"]'),
-            'range-slider'
-          )
-          if (rangeSliderController) {
-            const min = rangeSliderController.minValue
-            const max = rangeSliderController.maxValue
-            if (!this.selectedRanges) this.selectedRanges = {}
-            this.selectedRanges[metadataId] = { min, max }
-          }
+        if (this.dataManager?.setSelectedRange) {
+          this.dataManager.setSelectedRange(metadataId, this.savedRanges[metadataId])
+        } else {
+          if (!this.selectedRanges) this.selectedRanges = {}
+          this.selectedRanges[metadataId] = { ...this.savedRanges[metadataId] }
         }
+      } else {
+        // No saved range: keep slider at full range, but do not store a non-constraining
+        // full range in selectedRanges (that would confuse the global filter tool).
       }
     }
     
-    // Update filtering
+    // Update filtering and refresh global filter tool immediately
     this.dataManager.updateCellFiltering()
+    this.uiManager.updateGlobalFilterSummary()
+    if (this.globalFilterPanelVisible) {
+      this.uiManager.updateGlobalFilterPanelContent()
+    }
   }
 
   updateSelectAllCheckboxState(metadataId) {
@@ -20108,7 +20683,7 @@ export default class extends Controller {
     // Add ALL unique categories from the metadata vector
     const allCategories = [...new Set(metadataVector.values)]
     allCategories.forEach(category => {
-      this.selectedCategories[metadataId].add(category)
+      this.selectedCategories[metadataId].add(String(category))
     })
     
     // Update the visual state of category checkboxes in the HTML
@@ -20160,24 +20735,15 @@ export default class extends Controller {
     if (!this.selectedCategories[metadataId]) {
       this.selectedCategories[metadataId] = new Set()
     }
-    this.selectedCategories[metadataId].add(category)
+    this.selectedCategories[metadataId].add(String(category))
   }
 
   deselectCategory(metadataId, category) {
-    // console.log(`🔄 Deselecting category: "${category}" for metadata: ${metadataId}`)
-    // console.log(`🔄 Category type:`, typeof category, `Length:`, category.length)
-    // console.log(`🔄 Before deselection - selectedCategories[${metadataId}]:`, this.selectedCategories[metadataId])
-    // console.log(`🔄 Set size before:`, this.selectedCategories[metadataId]?.size)
-    
     if (this.selectedCategories && this.selectedCategories[metadataId]) {
-      const hadCategory = this.selectedCategories[metadataId].has(category)
-      // console.log(`🔄 Did the Set contain "${category}"?`, hadCategory)
-      
+      const key = String(category)
+      this.selectedCategories[metadataId].delete(key)
+      // Also remove a non-string twin if an older path stored the raw vector value.
       this.selectedCategories[metadataId].delete(category)
-      // console.log(`🔄 After deselection - selectedCategories[${metadataId}]:`, this.selectedCategories[metadataId])
-      // console.log(`🔄 Set size after:`, this.selectedCategories[metadataId]?.size)
-    } else {
-      // console.log(`🔄 No selectedCategories found for metadata: ${metadataId}`)
     }
   }
 
@@ -20221,44 +20787,36 @@ export default class extends Controller {
 
 
   async initializeCheckboxesForMetadata(metadataId) {
-    // console.log(`🔍 [INIT] Initializing checkboxes for metadata: ${metadataId}`)
-    
     // Ensure metadata is loaded (from memory or disk)
     let metadataVector = this.dataManager.getMetadataVectorById(metadataId)
     if (!metadataVector) {
-      // console.log(`💾 [DISK] Metadata ${metadataId} not in memory, loading from disk...`)
       metadataVector = await this.loadMetadataVectorFromDisk(metadataId)
       if (!metadataVector) {
-        console.error(`💾 [DISK] Failed to load metadata ${metadataId} from disk`)
+        console.error(`Failed to load metadata ${metadataId} from disk`)
         return
       }
     }
     
     // Only initialize for discrete metadata
     if (!metadataVector || (metadataVector.data_type !== 'DISCRETE' && metadataVector.data_type !== 'STRING')) {
-      // console.log(`Skipping checkbox initialization for non-discrete metadata: ${metadataId}`)
       return
     }
     
     // Only initialize if not already initialized
     if (this.selectedCategories[metadataId]) {
-      // console.log(`🔍 [INIT] Checkboxes already initialized for metadata ${metadataId}, skipping`)
       return
     }
     
-    // Initialize the selected categories for this metadata
-    // Get ALL unique categories from the actual metadata vector, not just from HTML
+    // Prefer compression_info.categories as the full universe. Unique values alone can
+    // omit categories with zero cells and make a full UI selection look like a filter.
     this.selectedCategories[metadataId] = new Set()
-    
-    if (metadataVector.values && Array.isArray(metadataVector.values)) {
-      // Get all unique categories from the metadata values
-      const allCategories = [...new Set(metadataVector.values)]
-      allCategories.forEach(category => {
-        this.selectedCategories[metadataId].add(category)
+    const universe = this.dataManager.getDiscreteCategoryUniverse(metadataId, metadataVector)
+    if (Array.isArray(universe) && universe.length > 0) {
+      universe.forEach((category) => {
+        this.selectedCategories[metadataId].add(String(category))
       })
-      // console.log(`🔍 [INIT] Initialized ${this.selectedCategories[metadataId].size} categories from metadata vector for ${metadataId}`)
     } else {
-      console.error(`🔍 [INIT] No values found in metadata vector for ${metadataId}`)
+      console.error(`No category universe found in metadata vector for ${metadataId}`)
     }
     
     // Update point count display after initializing checkboxes
@@ -20577,16 +21135,16 @@ export default class extends Controller {
       const shouldBeVisible = !filteredSet || filteredSet.has(cellIndex)
       
       if (shouldBeVisible) {
-        // Use cached color (much faster than recalculating)
-        const cachedColor = this.cachedColorsByCellIndex.get(cellIndex) || 0x3b82f6
-        colorMap[drawPos] = cachedColor
+        // Use cached color (much faster than recalculating). Use .has() — color 0 is falsy
+        // and must not fall through to default blue.
+        colorMap[drawPos] = this.getCachedPointColor(cellIndex)
         visibleCount++
         
         if (samplePositions.includes(drawPos)) {
-          // console.log(`🎨 [ReGL] Sample drawPos ${drawPos}: cellIndex=${cellIndex}, VISIBLE, color=0x${cachedColor.toString(16)}`)
+          // console.log(`🎨 [ReGL] Sample drawPos ${drawPos}: cellIndex=${cellIndex}, VISIBLE`)
         }
       } else {
-        // Hide point by making it fully transparent
+        // Hide point by making it fully transparent (do not overwrite color caches)
         colorMap[drawPos] = 0x00000000
         hiddenCount++
         
@@ -20772,9 +21330,10 @@ export default class extends Controller {
     const cellIndices = []
     const values = metadataVector.values
     
-    // Use for loop instead of forEach for better performance
+    // Use for loop instead of forEach for better performance.
+    // selectedCategories stores string keys (DOM data-category is always a string).
     for (let index = 0; index < values.length; index++) {
-      if (selectedCategories.has(values[index])) {
+      if (selectedCategories.has(String(values[index]))) {
         cellIndices.push(index)
       }
     }

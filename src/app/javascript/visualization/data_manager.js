@@ -358,12 +358,10 @@ export class DataManager {
       }
     }
     
-    // Check if currently loading
+    // Check if currently loading — wait for the owner request; never clear its loading flag.
     if (this.controller.loadingMetadataVectors.has(metadataId)) {
       const waitStart = Date.now()
-      const maxWaitMs = 1200
-      while (this.controller.loadingMetadataVectors.has(metadataId) && Date.now() - waitStart < maxWaitMs) {
-        // If another async path already materialized this vector, consume it immediately.
+      while (this.controller.loadingMetadataVectors.has(metadataId)) {
         const inMemoryVector = this.controller.loadedMetadataVectors[metadataId]
         if (inMemoryVector) {
           this.perfLog('metadata_wait_short_circuit', {
@@ -375,17 +373,22 @@ export class DataManager {
         await new Promise(resolve => setTimeout(resolve, 50))
       }
 
-      if (!this.controller.loadingMetadataVectors.has(metadataId)) {
+      if (this.controller.loadedMetadataVectors[metadataId]) {
         return this.ensureMetadataVectorValues(metadataId, this.controller.loadedMetadataVectors[metadataId])
       }
 
-      // The metadata stayed "loading" for too long; do not block user-driven coloring.
-      this.perfLog('metadata_loading_flag_timeout', {
-        metadataId: metadataId ? String(metadataId) : null,
-        waitedMs: Date.now() - waitStart
-      })
-      console.warn(`Metadata ${metadataId} remained in loading state; resetting loading flag to avoid UI stall`)
-      this.controller.loadingMetadataVectors.delete(metadataId)
+      // Concurrent attempt finished without memory data; try disk once more, then fall through to network.
+      const diskDataAfterWait = await this.controller.memoryManager.loadMetadataFromIndexedDB(metadataId)
+      if (diskDataAfterWait) {
+        const cleanData = { ...diskDataAfterWait }
+        delete cleanData.loomFile
+        delete cleanData.timestamp
+        this.controller.loadedMetadataVectors[metadataId] = cleanData
+        this.bumpMemoryLoadCounter(metadataId, 'disk')
+        const enrichedData = this.ensureMetadataVectorValues(metadataId, cleanData)
+        this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+        return enrichedData
+      }
     }
     
     // Mark as loading and update status icon to show downloading
@@ -393,8 +396,12 @@ export class DataManager {
     this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'downloading')
     
     try {
-      // Get the current loom file
-      const loomFile = options.loomFile || (this.controller.hasLoomFileSelectTarget ? this.controller.loomFileSelectTarget.value : this.controller.defaultLoomFileValue)
+      // Prefer explicit loom for this metadata; do not guess from a stale selector.
+      const loomFile = options.loomFile
+        || (typeof this.controller.getLoomFileForMetadataRequest === 'function'
+          ? this.controller.getLoomFileForMetadataRequest(metadataId)
+          : null)
+        || (this.controller.hasLoomFileSelectTarget ? this.controller.loomFileSelectTarget.value : this.controller.defaultLoomFileValue)
       
       // Build the URL for the single metadata vector endpoint
       // Extract project identifier from URL (supports ID, key, or public_id)

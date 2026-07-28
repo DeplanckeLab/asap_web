@@ -2469,8 +2469,14 @@ export default class extends Controller {
           autoPreloadMetadata: this.autoPreloadMetadata === true
         })
         await this.preloadAllMetadata({ forceMemoryPromotion: true })
+        await this.flushPendingExpandedMetadataAfterPreload()
       } catch (_error) {
         // Keep background preload best-effort only.
+        try {
+          await this.flushPendingExpandedMetadataAfterPreload()
+        } catch (_flushError) {
+          // Expand flush is best-effort after preload failure.
+        }
       }
     }, 200)
   }
@@ -4479,7 +4485,58 @@ export default class extends Controller {
     }
   }
 
-  // Load a single metadata vector silently (for preloading)
+  // Checkpoint fold-restore expand loads must not race the scheduled metadata preload.
+  shouldDeferMetadataExpandLoad() {
+    return this.currentCheckpointLoadInProgress === true || this.isApplyingCheckpointState === true
+  }
+
+  queueExpandedMetadataForPostPreload(metadataId) {
+    const normalizedMetadataId = String(metadataId || '').trim()
+    if (!normalizedMetadataId) return
+    if (!this._pendingExpandedMetadataIds) this._pendingExpandedMetadataIds = new Set()
+    this._pendingExpandedMetadataIds.add(normalizedMetadataId)
+  }
+
+  async waitUntilMetadataNotLoading(metadataId) {
+    const normalizedMetadataId = String(metadataId || '').trim()
+    if (!normalizedMetadataId) return
+    while (this.loadingMetadataVectors.has(normalizedMetadataId)) {
+      const inMemory = this.loadedMetadataVectors[normalizedMetadataId]
+      if (inMemory) return inMemory
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+    return this.loadedMetadataVectors[normalizedMetadataId] || null
+  }
+
+  async flushPendingExpandedMetadataAfterPreload() {
+    const pendingIds = Array.from(this._pendingExpandedMetadataIds || [])
+    this._pendingExpandedMetadataIds = new Set()
+    if (pendingIds.length === 0) return
+
+    for (const metadataId of pendingIds) {
+      try {
+        if (!this.loadedMetadataVectors[metadataId]) {
+          const metadataLoomFile = this.getLoomFileForMetadataRequest(metadataId)
+          await this.dataManager.loadSingleMetadataVector(metadataId, { loomFile: metadataLoomFile })
+        }
+        if (!this.loadedMetadataVectors[metadataId]) continue
+
+        const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+        const isContinuous = !!(metadataItem && metadataItem.querySelector('.metadata-range-section'))
+        if (!isContinuous) {
+          await this.initializeCheckboxesForMetadata(metadataId)
+          this.drawCategoryDistributions(metadataId)
+          if (this.selectedCategories[metadataId] && this.selectedCategories[metadataId].size > 0) {
+            this.dataManager.updateCellFiltering()
+          }
+        }
+      } catch (error) {
+        console.error(`Failed to finish expanded metadata ${metadataId} after preload:`, error)
+      }
+    }
+  }
+
+  // Load a single metadata vector silently (for expand / opportunistic preload)
   async loadSingleMetadataVectorSilently(metadataId) {
     //console.log(`=== LOADING SINGLE METADATA VECTOR SILENTLY: ${metadataId} ===`)
     
@@ -4488,23 +4545,48 @@ export default class extends Controller {
       //console.log(`💾 Metadata ${metadataId} already in memory`)
       return this.loadedMetadataVectors[metadataId]
     }
+
+    // Prefer disk before starting a competing network fetch (preload may already have stored it).
+    if (!this.loadingMetadataVectors.has(metadataId) && this.memoryManager?.loadMetadataFromIndexedDB) {
+      const diskData = await this.memoryManager.loadMetadataFromIndexedDB(metadataId)
+      if (diskData) {
+        const cleanData = { ...diskData }
+        delete cleanData.loomFile
+        delete cleanData.timestamp
+        this.loadedMetadataVectors[metadataId] = cleanData
+        this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+        this.uiManager.showCheckboxesForMetadata(metadataId)
+        return cleanData
+      }
+    }
     
     // Check if currently loading
     if (this.loadingMetadataVectors.has(metadataId)) {
       //console.log(`Metadata vector ${metadataId} is currently loading, waiting...`)
-      // Wait for the loading to complete
-      while (this.loadingMetadataVectors.has(metadataId)) {
-        await new Promise(resolve => setTimeout(resolve, 100))
+      const waited = await this.waitUntilMetadataNotLoading(metadataId)
+      if (waited) return waited
+
+      // Concurrent attempt finished without memory data; try disk once, then fall through to fetch.
+      if (this.memoryManager?.loadMetadataFromIndexedDB) {
+        const diskData = await this.memoryManager.loadMetadataFromIndexedDB(metadataId)
+        if (diskData) {
+          const cleanData = { ...diskData }
+          delete cleanData.loomFile
+          delete cleanData.timestamp
+          this.loadedMetadataVectors[metadataId] = cleanData
+          this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+          this.uiManager.showCheckboxesForMetadata(metadataId)
+          return cleanData
+        }
       }
-      return this.loadedMetadataVectors[metadataId]
     }
     
     // Mark as loading (but don't show spinner)
     this.loadingMetadataVectors.add(metadataId)
     
     try {
-      // Get the current loom file
-      const loomFile = this.getCurrentLoomFileForRequest()
+      // Resolve the metadata-specific loom file (same as preload), not only the current selector.
+      const loomFile = this.getLoomFileForMetadataRequest(metadataId)
       
       // Special debugging for sex and age metadata
       const metadataName = this.dataManager.getMetadataNameById(metadataId)
@@ -4795,10 +4877,12 @@ export default class extends Controller {
     // Check if currently loading
     if (this.loadingMetadataVectors.has(metadataId)) {
       // console.log(`💾 [DISK] Metadata ${metadataId} is currently loading, waiting...`)
-      while (this.loadingMetadataVectors.has(metadataId)) {
-        await new Promise(resolve => setTimeout(resolve, 100))
+      await this.waitUntilMetadataNotLoading(metadataId)
+      const existingAfterWait = await this.memoryManager.loadMetadataFromIndexedDB(metadataId)
+      if (existingAfterWait || this.loadedMetadataVectors[metadataId]) {
+        return { success: true, cached: true }
       }
-      return { success: true, cached: true }
+      // Concurrent attempt finished without usable data; continue and fetch ourselves.
     }
     
     // Mark as loading
@@ -5600,8 +5684,12 @@ export default class extends Controller {
           const metadataId = batch[batchIndex]
           const metadataStartTime = performance.now()
           // console.log(`🔍 [TIMING] Starting processing metadata ${metadataId} at ${metadataStartTime.toFixed(2)}ms`)
-          // Skip if already loaded in memory or currently loading
-          if (this.loadedMetadataVectors[metadataId] || this.loadingMetadataVectors.has(metadataId)) {
+          // If another path is already loading this vector, wait for it.
+          // Do not skip forever: a failed expand-load must still be retried by preload.
+          if (this.loadingMetadataVectors.has(metadataId)) {
+            await this.waitUntilMetadataNotLoading(metadataId)
+          }
+          if (this.loadedMetadataVectors[metadataId]) {
             // Special logging for sex and age
             const metadataName = this.dataManager.getMetadataNameById(metadataId)
             if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
@@ -8369,6 +8457,14 @@ export default class extends Controller {
         switchEl.click()
       }
     })
+
+    // Entry-time restore defers expand loads to scheduleAutoMetadataPreload.
+    // Mid-session checkpoint apply (preload already done) must flush immediately.
+    const pendingCount = this._pendingExpandedMetadataIds?.size || 0
+    const preloadWillHandle = this.autoPreloadMetadata === true && this._autoPreloadStarted !== true
+    if (pendingCount > 0 && !preloadWillHandle) {
+      await this.flushPendingExpandedMetadataAfterPreload()
+    }
   }
 
   async restoreColoringAndAxisState(state) {
@@ -8661,12 +8757,18 @@ export default class extends Controller {
           // console.log(`⏱️ [TOGGLE] Memory check: ${(performance.now() - memCheckTime).toFixed(2)}ms, In memory: ${isInMemory}`)
           
           if (!isInMemory) {
-            // Not in memory - load it silently
-            const loadTime = performance.now()
-            // console.log(`⏱️ [TOGGLE] Preloading continuous metadata from disk/network...`)
-            this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
-              // console.log(`Failed to preload continuous metadata vector ${metadataId}:`, error.message)
-            })
+            if (this.shouldDeferMetadataExpandLoad()) {
+              // Checkpoint restore expands UI first; let the scheduled preload own the network load
+              // so we do not race and leave a permanent error icon.
+              this.queueExpandedMetadataForPostPreload(metadataId)
+            } else {
+              // Not in memory - load it silently
+              const loadTime = performance.now()
+              // console.log(`⏱️ [TOGGLE] Preloading continuous metadata from disk/network...`)
+              this.loadSingleMetadataVectorSilently(metadataId).catch(error => {
+                // console.log(`Failed to preload continuous metadata vector ${metadataId}:`, error.message)
+              })
+            }
           }
         }
       } else {
@@ -8729,11 +8831,16 @@ export default class extends Controller {
               
               // console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
             })
+          } else if (this.shouldDeferMetadataExpandLoad()) {
+            // Checkpoint restore expands UI first; let the scheduled preload own the network load
+            // so we do not race and leave a permanent error icon.
+            this.queueExpandedMetadataForPostPreload(metadataId)
           } else {
             // Not in memory - load it first (immediate loading for click)
             const loadTime = performance.now()
             // console.log(`⏱️ [TOGGLE] Loading metadata from disk/network...`)
-            this.loadSingleMetadataVectorSilently(metadataId).then(() => {
+            this.loadSingleMetadataVectorSilently(metadataId).then((vectorData) => {
+              if (!vectorData) return
               // console.log(`⏱️ [TOGGLE] Load time: ${(performance.now() - loadTime).toFixed(2)}ms`)
               
               const checkboxTime = performance.now()

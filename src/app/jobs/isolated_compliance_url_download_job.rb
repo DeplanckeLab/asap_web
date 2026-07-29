@@ -7,10 +7,12 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
 
   PROGRESS_MIN_INTERVAL = 0.5
 
-  def perform(task_id, url, schema_id)
+  def perform(task_id, url, schema_id, user_id: nil)
     tmp_path = download_remote_file!(task_id, url)
     detected_format = ComplianceFileCheckQueueService.validate_downloaded_file!(tmp_path)
     final_path = rename_downloaded_file!(tmp_path, task_id, detected_format)
+
+    fu = create_fu_for_downloaded_file!(final_path, url, user_id: user_id)
 
     queued_payload = {
       status: 'queued',
@@ -22,9 +24,10 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
 
     IsolatedComplianceValidationJob.perform_later(
       task_id,
-      final_path,
+      fu.file_path.to_s,
       schema_id,
-      File.basename(final_path)
+      fu.name,
+      fu_id: fu.id
     )
   rescue ComplianceFileCheckQueueService::UnsupportedFormatError => e
     fail_task(task_id, e.message, error_code: ComplianceFileCheckQueueService::UNSUPPORTED_FORMAT_ERROR_CODE)
@@ -35,6 +38,27 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
   end
 
   private
+
+  def create_fu_for_downloaded_file!(current_path, source_url, user_id: nil)
+    original_filename = File.basename(URI.parse(source_url.to_s).path).presence ||
+                        File.basename(current_path)
+    original_filename = File.basename(current_path) if original_filename.blank?
+
+    upload_type_id = UploadType.id_for('compliance_file_check')
+    fu = Fu.create!(
+      upload_file_name: File.basename(current_path),
+      upload_file_size: File.size(current_path),
+      name: original_filename,
+      status: 'validating',
+      upload_type: upload_type_id,
+      user_id: user_id
+    )
+
+    fu_dir = fu.upload_dir.to_s
+    FileUtils.mkdir_p(fu_dir)
+    FileUtils.mv(current_path, File.join(fu_dir, fu.upload_file_name))
+    fu
+  end
 
   def temp_dir
     shared_root = ENV['UPLOAD_DATA_DIR'].presence || ENV['USER_DATA_DIR'].presence || '/data/asap2/fus'

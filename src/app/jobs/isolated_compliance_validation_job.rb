@@ -35,8 +35,9 @@ class IsolatedComplianceValidationJob < ApplicationJob
       task_id: task_id,
       progress: 100,
       message: result[:valid] ? 'Validation completed successfully' : 'Validation completed with issues',
-      result: result
-    }
+      result: result,
+      fu_id: fu_id
+    }.compact
     write_status(task_id, completed_payload)
     broadcast(task_id, completed_payload)
     mark_fu_validated(fu_id)
@@ -53,7 +54,10 @@ class IsolatedComplianceValidationJob < ApplicationJob
     Rails.logger.error("[IsolatedComplianceValidationJob] #{e.class}: #{e.message}")
     Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
   ensure
-    cleanup_file(file_path)
+    # When a Fu record tracks the file, keep it so the user can create a project
+    # from the validated file without re-uploading. Orphaned temp files (no fu_id)
+    # are cleaned up immediately.
+    cleanup_file(file_path) if fu_id.blank?
   end
 
   private

@@ -414,9 +414,10 @@
                 Distribution
               </h4>
               <label class="flex items-center gap-2 text-sm text-gray-600">
-                <span>Y-axis scale</span>
-                <select class="annot-y-scale-select border border-gray-300 rounded px-2 py-1 text-sm bg-white text-gray-700 cursor-pointer"
-                        data-plot-group="expression">
+                <span>X-axis scale</span>
+                <select class="annot-scale-select border border-gray-300 rounded px-2 py-1 text-sm bg-white text-gray-700 cursor-pointer"
+                        data-plot-group="expression"
+                        data-scale-axis="x">
                   <option value="linear">Linear</option>
                   <option value="log" selected>Log</option>
                 </select>
@@ -424,7 +425,8 @@
             </div>
             <div class="space-y-6">
               <% @h_sums.each_key do |k| %>
-                <% if @h_sums[k][:bin_counts] %>
+                <% linear_bins = @h_sums[k].dig(:linear, :bin_counts) %>
+                <% if linear_bins.present? %>
                   <div>
                     <h5 class="text-sm font-medium text-gray-700 mb-2">
                       <%= (k == :sum) ? 'Distribution of total counts by ' + row_label(@project, plural: false) : 'Distribution of total counts by ' + col_label(@project, plural: false) %>
@@ -436,7 +438,7 @@
             </div>
           </div>
         <% end %>
-      <% elsif @annot.data_type && (@annot.data_type.name == 'NUMERIC' || @annot.data_type_id == 1) && @bin_counts && @bin_counts.any? %>
+      <% elsif @annot.data_type && (@annot.data_type.name == 'NUMERIC' || @annot.data_type_id == 1) && @histogram&.dig(:linear, :bin_counts).present? %>
         <%# Numerical Metadata Histogram %>
         <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
           <div class="flex items-center justify-between mb-4">
@@ -445,9 +447,10 @@
               Distribution
             </h4>
             <label class="flex items-center gap-2 text-sm text-gray-600">
-              <span>Y-axis scale</span>
-              <select class="annot-y-scale-select border border-gray-300 rounded px-2 py-1 text-sm bg-white text-gray-700 cursor-pointer"
-                      data-plot-group="numeric">
+              <span>X-axis scale</span>
+              <select class="annot-scale-select border border-gray-300 rounded px-2 py-1 text-sm bg-white text-gray-700 cursor-pointer"
+                      data-plot-group="numeric"
+                      data-scale-axis="x">
                 <option value="linear">Linear</option>
                 <option value="log" selected>Log</option>
               </select>
@@ -466,8 +469,9 @@
             </h4>
             <label class="flex items-center gap-2 text-sm text-gray-600">
               <span>Y-axis scale</span>
-              <select class="annot-y-scale-select border border-gray-300 rounded px-2 py-1 text-sm bg-white text-gray-700 cursor-pointer"
-                      data-plot-group="categorical">
+              <select class="annot-scale-select border border-gray-300 rounded px-2 py-1 text-sm bg-white text-gray-700 cursor-pointer"
+                      data-plot-group="categorical"
+                      data-scale-axis="y">
                 <option value="linear">Linear</option>
                 <option value="log" selected>Log</option>
               </select>
@@ -523,7 +527,7 @@ function formatTickValue(val, maxCount) {
   return Math.round(val).toString();
 }
 
-function generateLogYTicks(min, max, base) {
+function generateLogTicks(min, max, base) {
   if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max <= 0 || min >= max) {
     return [min, max].filter(function(v) { return v > 0; });
   }
@@ -559,7 +563,17 @@ function getYTickValues(maxCount, yLogScale, numYTicks) {
     }
     return linearTicks;
   }
-  return generateLogYTicks(1, maxCount, 10);
+  return generateLogTicks(1, maxCount, 10);
+}
+
+function formatAxisValue(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return String(value);
+  if (value === 0) return '0';
+  var abs = Math.abs(value);
+  if (abs < 0.01 || abs >= 10000) return value.toExponential(1);
+  if (abs >= 100) return Math.round(value).toString();
+  if (abs >= 10) return value.toFixed(1);
+  return value.toFixed(2);
 }
 
 function drawYAxis(ctx, options) {
@@ -608,9 +622,39 @@ function drawYAxis(ctx, options) {
   ctx.restore();
 }
 
-function renderHistogram(canvasId, binCenters, binCounts, title, xLabel, yLogScale) {
-  var canvas = document.getElementById(canvasId);
+function valueToXPosition(value, minVal, maxVal, plotWidth, xLogScale) {
+  if (!Number.isFinite(value) || !Number.isFinite(minVal) || !Number.isFinite(maxVal)) return null;
+  if (!xLogScale) {
+    if (maxVal === minVal) return plotWidth / 2;
+    return ((value - minVal) / (maxVal - minVal)) * plotWidth;
+  }
+  if (value <= 0 || minVal <= 0 || maxVal <= 0) return null;
+  var logMin = Math.log10(minVal);
+  var logMax = Math.log10(maxVal);
+  if (logMax === logMin) return plotWidth / 2;
+  return ((Math.log10(value) - logMin) / (logMax - logMin)) * plotWidth;
+}
+
+function selectHistogramSeries(plot, xLogScale) {
+  if (xLogScale && plot.log && plot.log.binCounts && plot.log.binCounts.length > 0 && plot.log.min > 0) {
+    return { series: plot.log, xLogScale: true };
+  }
+  return { series: plot.linear, xLogScale: false };
+}
+
+function renderHistogram(plot, xLogScale) {
+  var canvas = document.getElementById(plot.canvasId);
   if (!canvas) return;
+
+  var selected = selectHistogramSeries(plot, xLogScale);
+  var series = selected.series;
+  if (!series || !series.binCounts || !series.binCounts.length) return;
+  xLogScale = selected.xLogScale;
+
+  var binCounts = series.binCounts;
+  var binRanges = series.binRanges || [];
+  var xMin = series.min;
+  var xMax = series.max;
 
   var ctx = canvas.getContext('2d');
   var width = canvas.width = canvas.offsetWidth;
@@ -633,12 +677,13 @@ function renderHistogram(canvasId, binCenters, binCounts, title, xLabel, yLogSca
   ctx.fillStyle = '#374151';
   ctx.font = '14px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(title, width / 2, 20);
+  ctx.fillText(plot.title, width / 2, 20);
 
   var axisStroke = '#9ca3af';
   ctx.strokeStyle = axisStroke;
   ctx.lineWidth = 1;
 
+  // Match visualization: equal-width bars; log/linear only changes how bins were built and tick labels.
   drawYAxis(ctx, {
     leftPadding: leftPadding,
     topPadding: topPadding,
@@ -646,7 +691,7 @@ function renderHistogram(canvasId, binCenters, binCounts, title, xLabel, yLogSca
     bottomPadding: bottomPadding,
     plotHeight: plotHeight,
     maxCount: maxCount,
-    yLogScale: yLogScale
+    yLogScale: false
   });
 
   ctx.beginPath();
@@ -654,45 +699,53 @@ function renderHistogram(canvasId, binCenters, binCounts, title, xLabel, yLogSca
   ctx.lineTo(width - rightPadding, height - bottomPadding);
   ctx.stroke();
 
-  var barWidth = plotWidth / binCenters.length;
+  var barWidth = plotWidth / binCounts.length;
   ctx.fillStyle = '#3b82f6';
   ctx.strokeStyle = '#2563eb';
   ctx.lineWidth = 0.5;
 
-  binCenters.forEach(function(center, i) {
-    if (binCounts[i] > 0) {
-      var barHeight = valueToBarHeight(binCounts[i], maxCount, plotHeight, yLogScale);
-      var x = leftPadding + i * barWidth;
-      var y = height - bottomPadding - barHeight;
-
-      ctx.fillRect(x, y, barWidth, barHeight);
-      ctx.strokeRect(x, y, barWidth, barHeight);
-    }
+  binCounts.forEach(function(count, i) {
+    if (!(count > 0)) return;
+    var barHeight = valueToBarHeight(count, maxCount, plotHeight, false);
+    var x = leftPadding + i * barWidth;
+    var y = height - bottomPadding - barHeight;
+    ctx.fillRect(x, y, Math.max(1, barWidth - 1), barHeight);
+    ctx.strokeRect(x, y, Math.max(1, barWidth - 1), barHeight);
   });
 
   ctx.fillStyle = '#374151';
   ctx.font = '13px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(xLabel, width / 2, height - bottomPadding + 28);
+  ctx.fillText(plot.xLabel + (xLogScale ? ' (log)' : ''), width / 2, height - bottomPadding + 40);
 
   ctx.font = '11px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
+  ctx.strokeStyle = axisStroke;
 
-  var numXTicks = Math.min(10, binCenters.length);
-  for (var i = 0; i < numXTicks; i++) {
-    var idx = Math.floor((i / (numXTicks - 1)) * (binCenters.length - 1));
-    var x = leftPadding + idx * barWidth + barWidth / 2;
-    var value = binCenters[idx];
-    var label = typeof value === 'number' ? (value < 0.01 ? value.toExponential(1) : value.toFixed(2)) : value.toString();
+  var xTickValues = xLogScale
+    ? generateLogTicks(xMin, xMax, 10)
+    : (function() {
+        var ticks = [];
+        var numXTicks = 6;
+        for (var i = 0; i < numXTicks; i++) {
+          ticks.push(xMin + (i / (numXTicks - 1)) * (xMax - xMin));
+        }
+        return ticks;
+      })();
+
+  xTickValues.forEach(function(value) {
+    var xPos = valueToXPosition(value, xMin, xMax, plotWidth, xLogScale);
+    if (xPos == null) return;
+    var x = leftPadding + xPos;
 
     ctx.beginPath();
     ctx.moveTo(x, height - bottomPadding);
     ctx.lineTo(x, height - bottomPadding + 5);
     ctx.stroke();
 
-    ctx.fillText(label, x, height - bottomPadding + 8);
-  }
+    ctx.fillText(formatAxisValue(value), x, height - bottomPadding + 8);
+  });
 }
 
 function renderBarChart(canvasId, categories, counts, title, xLabel, yLogScale) {
@@ -785,19 +838,22 @@ function registerAnnotPlot(group, plotConfig) {
   annotPlotRegistry[group].push(plotConfig);
 }
 
-function renderAnnotPlotGroup(group, yLogScale) {
+function renderAnnotPlotGroup(group, logScale) {
   var plots = annotPlotRegistry[group] || [];
   plots.forEach(function(plot) {
     if (plot.type === 'histogram') {
-      renderHistogram(plot.canvasId, plot.binCenters, plot.binCounts, plot.title, plot.xLabel, yLogScale);
+      // Continuous value distributions: switch between pre-binned linear/log series
+      // (same approach as visualization range-slider histograms).
+      renderHistogram(plot, logScale);
     } else if (plot.type === 'bar') {
-      renderBarChart(plot.canvasId, plot.categories, plot.counts, plot.title, plot.xLabel, yLogScale);
+      // Categorical bars: log belongs on the y (frequency) axis.
+      renderBarChart(plot.canvasId, plot.categories, plot.counts, plot.title, plot.xLabel, logScale);
     }
   });
 }
 
-function initAnnotYScaleControls() {
-  document.querySelectorAll('.annot-y-scale-select').forEach(function(select) {
+function initAnnotScaleControls() {
+  document.querySelectorAll('.annot-scale-select').forEach(function(select) {
     var group = select.getAttribute('data-plot-group');
     renderAnnotPlotGroup(group, select.value === 'log');
     select.addEventListener('change', function() {
@@ -809,34 +865,54 @@ function initAnnotYScaleControls() {
 <% if @annot.dim == 3 %>
   <%# Expression Matrix Distribution Plots %>
   <% @h_sums.each_key do |k| %>
-    <% if @h_sums[k][:bin_counts] %>
+    <% linear = @h_sums[k][:linear] %>
+    <% log = @h_sums[k][:log] %>
+    <% if linear && linear[:bin_counts].present? %>
       (function() {
-        var binCenters = <%= raw (0..@h_sums[k][:bin_counts].size - 1).map { |bin_i| @h_sums[k][:min] + bin_i * @h_sums[k][:bin_size] }.to_json %>;
-        var binCounts = <%= raw @h_sums[k][:bin_counts].to_json %>;
         var title = '<%= (k == :sum) ? "Distribution of total counts by " + row_label(@project, plural: false) : "Distribution of total counts by " + col_label(@project, plural: false) %>';
         registerAnnotPlot('expression', {
           type: 'histogram',
           canvasId: 'plotly_histo_<%= k %>',
-          binCenters: binCenters,
-          binCounts: binCounts,
           title: title,
-          xLabel: 'Count'
+          xLabel: 'Count',
+          linear: {
+            binCounts: <%= raw linear[:bin_counts].to_json %>,
+            binRanges: <%= raw (linear[:bin_ranges] || []).to_json %>,
+            min: <%= raw linear[:min].to_json %>,
+            max: <%= raw linear[:max].to_json %>
+          },
+          log: {
+            binCounts: <%= raw (log && log[:bin_counts] ? log[:bin_counts] : []).to_json %>,
+            binRanges: <%= raw (log && log[:bin_ranges] ? log[:bin_ranges] : []).to_json %>,
+            min: <%= raw (log && log[:min] ? log[:min] : nil).to_json %>,
+            max: <%= raw (log && log[:max] ? log[:max] : nil).to_json %>
+          }
         });
       })();
     <% end %>
   <% end %>
-<% elsif @annot.data_type && (@annot.data_type.name == 'NUMERIC' || @annot.data_type_id == 1) && @bin_counts && @bin_counts.any? %>
+<% elsif @annot.data_type && (@annot.data_type.name == 'NUMERIC' || @annot.data_type_id == 1) && @histogram&.dig(:linear, :bin_counts).present? %>
   <%# Numerical Metadata Histogram %>
+  <% linear = @histogram[:linear] %>
+  <% log = @histogram[:log] %>
   (function() {
-    var binCenters = <%= raw (0..@bin_counts.size - 1).map { |bin_i| @min + bin_i * @bin_size }.to_json %>;
-    var binCounts = <%= raw @bin_counts.to_json %>;
     registerAnnotPlot('numeric', {
       type: 'histogram',
       canvasId: 'plotly_histo',
-      binCenters: binCenters,
-      binCounts: binCounts,
       title: 'Value Distribution',
-      xLabel: '<%= format_annot_name(@annot.name) %>'
+      xLabel: '<%= format_annot_name(@annot.name) %>',
+      linear: {
+        binCounts: <%= raw linear[:bin_counts].to_json %>,
+        binRanges: <%= raw (linear[:bin_ranges] || []).to_json %>,
+        min: <%= raw linear[:min].to_json %>,
+        max: <%= raw linear[:max].to_json %>
+      },
+      log: {
+        binCounts: <%= raw (log && log[:bin_counts] ? log[:bin_counts] : []).to_json %>,
+        binRanges: <%= raw (log && log[:bin_ranges] ? log[:bin_ranges] : []).to_json %>,
+        min: <%= raw (log && log[:min] ? log[:min] : nil).to_json %>,
+        max: <%= raw (log && log[:max] ? log[:max] : nil).to_json %>
+      }
     });
   })();
 <% elsif @annot.data_type && (@annot.data_type.name == 'CATEGORICAL' || @annot.data_type_id == 3) && @h_counts && @h_counts.any? %>
@@ -856,7 +932,7 @@ function initAnnotYScaleControls() {
   })();
 <% end %>
 
-initAnnotYScaleControls();
+initAnnotScaleControls();
 
 <% if @sim_step_options && @annot.imported? %>
 (function() {

@@ -60,13 +60,45 @@ export default class extends Controller {
     this.menu.style.top = '0px'
     this.menu.style.visibility = 'hidden'
     this.menu.classList.remove(this.hiddenClassValue)
-    
-    // Use requestAnimationFrame to ensure layout is calculated
-    requestAnimationFrame(() => {
-      this.repositionMenu()
-      this.menu.style.visibility = 'visible'
-      this.toggleButton.setAttribute("aria-expanded", "true")
+
+    const refreshUrl = this.menu.dataset.refreshUrl
+    if (refreshUrl) {
+      this.refreshMenuContent(refreshUrl).finally(() => {
+        requestAnimationFrame(() => {
+          this.repositionMenu()
+          this.menu.style.visibility = 'visible'
+          this.toggleButton.setAttribute("aria-expanded", "true")
+        })
+      })
+    } else {
+      // Use requestAnimationFrame to ensure layout is calculated
+      requestAnimationFrame(() => {
+        this.repositionMenu()
+        this.menu.style.visibility = 'visible'
+        this.toggleButton.setAttribute("aria-expanded", "true")
+      })
+    }
+  }
+
+  refreshMenuContent(url) {
+    return fetch(url, {
+      method: 'GET',
+      headers: {
+        'Accept': 'text/html',
+        'X-Requested-With': 'XMLHttpRequest'
+      },
+      credentials: 'same-origin'
     })
+      .then(response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        return response.text()
+      })
+      .then(html => {
+        this.menu.innerHTML = html
+      })
+      .catch(error => {
+        console.warn('[NavDropdown] Failed to refresh menu content:', error)
+      })
   }
 
   repositionMenu() {

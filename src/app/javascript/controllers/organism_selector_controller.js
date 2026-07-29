@@ -90,6 +90,7 @@ export default class extends Controller {
     if (this.isOpen) {
       console.log('[OrganismSelector] Opening dropdown')
       this.dropdownMenuTarget.classList.remove('hidden')
+      this.positionDropdown()
       console.log('[OrganismSelector] Dropdown menu classes after remove:', this.dropdownMenuTarget.className)
       if (this.hasChevronTarget) {
         this.chevronTarget.classList.add('rotate-180')
@@ -236,6 +237,33 @@ export default class extends Controller {
       this.searchInputTarget.value = ''
     }
     this.filterOptions()
+  }
+
+  positionDropdown() {
+    const menu = this.dropdownMenuTarget
+    const button = this.dropdownButtonTarget
+    const buttonRect = button.getBoundingClientRect()
+    const viewportHeight = window.innerHeight
+    const spaceBelow = viewportHeight - buttonRect.bottom
+    const spaceAbove = buttonRect.top
+    const menuMaxHeight = 240 // matches max-h-60 (15rem = 240px)
+
+    // Reset any previously set positioning overrides
+    menu.style.top = ''
+    menu.style.bottom = ''
+    menu.style.maxHeight = ''
+
+    if (spaceBelow >= menuMaxHeight || spaceBelow >= spaceAbove) {
+      // Open downward
+      menu.style.top = 'calc(100% + 4px)'
+      menu.style.bottom = ''
+      menu.style.maxHeight = `${Math.min(menuMaxHeight, spaceBelow - 8)}px`
+    } else {
+      // Not enough space below — open upward
+      menu.style.top = ''
+      menu.style.bottom = 'calc(100% + 4px)'
+      menu.style.maxHeight = `${Math.min(menuMaxHeight, spaceAbove - 8)}px`
+    }
   }
 
   closeOnOutsideClick(event) {

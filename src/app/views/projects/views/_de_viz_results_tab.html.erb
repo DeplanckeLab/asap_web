@@ -1,0 +1,91 @@
+<% completed_runs = @runs&.select { |r| r.status_id == 3 } || [] %>
+<% de_rows = Basic.de_table_rows_for_runs(completed_runs) %>
+
+<% if de_rows.empty? %>
+  <div style="color: #9ca3af; font-size: 13px; text-align: center; padding: 24px 0;">No completed DE runs found.</div>
+<% else %>
+
+<% unless @h_std_methods %>
+  <% asap_docker_image = Basic.get_asap_docker(@project.version) %>
+  <% @h_std_methods = {} %>
+  <% StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s } if asap_docker_image %>
+<% end %>
+
+<div style="overflow-x: auto;">
+  <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+    <thead>
+      <tr style="background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
+        <th style="padding: 8px 10px; text-align: left; font-weight: 600; color: #6b7280; white-space: nowrap;">#</th>
+        <th style="padding: 8px 10px; text-align: left; font-weight: 600; color: #6b7280; white-space: nowrap;">Method</th>
+        <th style="padding: 8px 10px; text-align: left; font-weight: 600; color: #6b7280;">Reference group</th>
+        <th style="padding: 8px 10px; text-align: left; font-weight: 600; color: #6b7280; white-space: nowrap;">Up-regulated</th>
+        <th style="padding: 8px 10px; text-align: left; font-weight: 600; color: #6b7280; white-space: nowrap;">Down-regulated</th>
+        <th style="padding: 8px 10px; text-align: left; font-weight: 600; color: #6b7280; white-space: nowrap;">Export gene set</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% de_rows.each do |row| %>
+        <% run = row[:run] %>
+        <% stats_key = row[:stats_key].to_s %>
+        <% badge_key = stats_key.tr('_', '-') %>
+        <% ref_cell = row[:reference_group].presence || (row[:contrast_index].nil? ? '-' : "index #{row[:contrast_index]}") %>
+        <% std_method = @h_std_methods && run.std_method_id ? @h_std_methods[run.std_method_id] : nil %>
+        <% method_label = std_method ? (std_method.label.presence || std_method.name.presence || 'N/A') : 'N/A' %>
+        <% up_count = (@h_stats && @h_stats[stats_key]) ? @h_stats[stats_key]['up'].to_i : -1 %>
+        <% down_count = (@h_stats && @h_stats[stats_key]) ? @h_stats[stats_key]['down'].to_i : -1 %>
+        <% up_display = up_count >= 0 ? up_count : 0 %>
+        <% down_display = down_count >= 0 ? down_count : 0 %>
+        <% annot_id_param = row[:annot] ? row[:annot].id.to_s : '' %>
+        <tr style="border-bottom: 1px solid #f3f4f6;">
+          <td style="padding: 8px 10px; color: #111827; font-weight: 600;">#<%= run.num || run.id %></td>
+          <td style="padding: 8px 10px; color: #374151;"><%= method_label %></td>
+          <td style="padding: 8px 10px; color: #6b7280; font-size: 11px;"><%= ref_cell %></td>
+          <td style="padding: 8px 10px;">
+            <span id="de-viz-up-badge-<%= badge_key %>"
+                  style="display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; <%= up_display > 0 ? 'background:#dcfce7;color:#166534;' : 'background:#f3f4f6;color:#9ca3af;' %>">
+              <%= up_display %> genes
+            </span>
+          </td>
+          <td style="padding: 8px 10px;">
+            <span id="de-viz-down-badge-<%= badge_key %>"
+                  style="display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; <%= down_display > 0 ? 'background:#fee2e2;color:#991b1b;' : 'background:#f3f4f6;color:#9ca3af;' %>">
+              <%= down_display %> genes
+            </span>
+          </td>
+          <td style="padding: 8px 10px;">
+            <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+              <button type="button"
+                      class="de-viz-export-btn"
+                      data-run-id="<%= run.id %>"
+                      data-annot-id="<%= annot_id_param %>"
+                      data-direction="up"
+                      data-badge-key="<%= badge_key %>"
+                      data-ref-group="<%= CGI.escapeHTML(ref_cell.to_s) %>"
+                      data-method="<%= CGI.escapeHTML(method_label.to_s) %>"
+                      data-run-num="<%= run.num || run.id %>"
+                      onclick="if(window.visualizationController) window.visualizationController.openDeVizExportDialog(this)"
+                      style="padding: 3px 8px; font-size: 11px; font-weight: 500; background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; border-radius: 4px; cursor: pointer; white-space: nowrap;">
+                Save up as gene set
+              </button>
+              <button type="button"
+                      class="de-viz-export-btn"
+                      data-run-id="<%= run.id %>"
+                      data-annot-id="<%= annot_id_param %>"
+                      data-direction="down"
+                      data-badge-key="<%= badge_key %>"
+                      data-ref-group="<%= CGI.escapeHTML(ref_cell.to_s) %>"
+                      data-method="<%= CGI.escapeHTML(method_label.to_s) %>"
+                      data-run-num="<%= run.num || run.id %>"
+                      onclick="if(window.visualizationController) window.visualizationController.openDeVizExportDialog(this)"
+                      style="padding: 3px 8px; font-size: 11px; font-weight: 500; background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; border-radius: 4px; cursor: pointer; white-space: nowrap;">
+                Save down as gene set
+              </button>
+            </div>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</div>
+
+<% end %>

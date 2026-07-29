@@ -15,13 +15,15 @@ class SlurmService
     
     cores = run.nber_cores || options[:cores] || 1
     # pred_max_ram is stored in KB (prediction output), while max_ram is stored in MB.
+    # nil means no --mem directive: SLURM imposes no memory cap on the job.
     memory_mb = if run.pred_max_ram.present?
       (run.pred_max_ram.to_f / 1024.0).ceil
     elsif run.max_ram.present?
       run.max_ram.to_f.ceil
     else
-      (options[:memory_mb] || 4096).to_i
+      options[:memory_mb].presence&.to_i
     end
+
     time_limit = (run.pred_process_duration || options[:time_limit] || 3600).to_i
 
     # Add 5 minutes (300 seconds) buffer to predicted time to account for variability
@@ -33,7 +35,7 @@ class SlurmService
 
     @logger.info("[SlurmService] Resource requirements for Run##{run_id}:")
     @logger.info("  - CPUs: #{cores} (from nber_cores: #{run.nber_cores})")
-    @logger.info("  - Memory: #{memory_mb}MB (predicted_kb: #{run.pred_max_ram}, actual_mb: #{run.max_ram})")
+    @logger.info("  - Memory: #{memory_mb ? "#{memory_mb}MB" : "uncapped (no prediction)"} (predicted_kb: #{run.pred_max_ram}, actual_mb: #{run.max_ram})")
     @logger.info("  - Time limit: #{time_limit}s (#{time_limit / 60}min) (predicted: #{run.pred_process_duration}, min #{min_walltime}s)")
     
     if options[:check_resources] != false
@@ -378,6 +380,20 @@ class SlurmService
     nil
   end
 
+  # Returns true if at least 10% of total node memory is still free.
+  # Used as the submission gate when no RAM prediction is available.
+  def node_has_free_memory_headroom?
+    free_result  = `sinfo -h -o "%e" 2>&1`
+    total_result = `sinfo -h -o "%m" 2>&1`
+    return true unless $?.success?
+    free_mb  = free_result.strip.split("\n").map(&:to_i).max.to_i
+    total_mb = total_result.strip.split("\n").map(&:to_i).max.to_i
+    return true if total_mb == 0
+    free_mb.to_f / total_mb >= 0.10
+  rescue StandardError
+    true
+  end
+
   def check_resource_availability(cores:, memory_mb:, time_limit:)
     begin
       result = `sinfo -h -o "%P|%C|%m|%l" 2>&1`
@@ -403,7 +419,8 @@ class SlurmService
         mem_available = parse_memory_availability(mem_info)
         time_ok = check_time_limit(time_info, time_limit)
         
-        if cpu_available >= cores && mem_available >= memory_mb && time_ok
+        mem_ok = memory_mb ? mem_available >= memory_mb : node_has_free_memory_headroom?
+        if cpu_available >= cores && mem_ok && time_ok
           available_partitions << partition
         end
       end
@@ -411,7 +428,7 @@ class SlurmService
       if available_partitions.empty?
         return {
           available: false,
-          message: "No partitions have sufficient resources (need #{cores} CPUs, #{memory_mb}MB RAM, #{time_limit}s)"
+          message: "No partitions have sufficient resources (need #{cores} CPUs, #{memory_mb ? "#{memory_mb}MB" : "free headroom"} RAM, #{time_limit}s)"
         }
       else
         return {
@@ -573,7 +590,7 @@ class SlurmService
       #SBATCH --error=#{options[:error_file]}
       #SBATCH --ntasks=1
       #SBATCH --cpus-per-task=#{options[:cores]}
-      #SBATCH --mem=#{options[:memory_mb]}M
+      #{options[:memory_mb] ? "#SBATCH --mem=#{options[:memory_mb]}M" : ""}
       #SBATCH --time=#{format_time_limit(options[:time_limit])}
       #SBATCH --signal=B:USR1@60
       #SBATCH --chdir=#{workdir}

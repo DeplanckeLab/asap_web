@@ -17,10 +17,10 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states spatial_data spatial_image]
-  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states spatial_data spatial_image]
+  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
   GENE_DETAILS_CACHE_TTL = 24.hours
@@ -2096,6 +2096,32 @@ class ProjectsController < ApplicationController
     end
   end
 
+  # GET/POST /projects/:id/viz_de_results
+  def viz_de_results
+    @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+
+    asap_docker_image = Basic.get_asap_docker(@project.version)
+    de_step = Step.where(docker_image_id: asap_docker_image.id, name: 'de').first
+    @runs = apply_publication_snapshot_to_runs(@project.runs.where(step_id: de_step.id)).includes(:annots).order(created_at: :desc)
+    annots = Annot.where(run_id: @runs.map(&:id)).to_a
+
+    fdr_cutoff = params[:fdr_cutoff].to_f
+    fc_cutoff  = params[:fc_cutoff].to_f
+    fdr_cutoff = 0.05 if fdr_cutoff <= 0
+    fc_cutoff  = 2.0  if fc_cutoff  <= 0
+    @h_de_filter = { 'fdr_cutoff' => fdr_cutoff, 'fc_cutoff' => fc_cutoff }
+
+    @h_std_methods = {}
+    StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s }
+
+    @h_stats = run_de_filter(annots, @h_de_filter, de_runs: @runs)
+
+    respond_to do |format|
+      format.json { render json: { h_stats: @h_stats } }
+      format.html { render partial: 'projects/views/de_viz_results_tab', layout: false }
+    end
+  end
+
   # POST /projects/1/filter_ge_results
   def filter_ge_results
     @project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
@@ -3304,6 +3330,109 @@ class ProjectsController < ApplicationController
   rescue StandardError => e
     Rails.logger.error("save_manual_gene_set failed: #{e.class} - #{e.message}")
     render json: { status: 'error', message: "Failed to save manual gene set: #{e.message}" }, status: :unprocessable_entity
+  end
+
+  # POST /projects/:id/save_de_gene_set
+  def save_de_gene_set
+    run_id    = params[:run_id].to_i
+    annot_id  = params[:annot_id].presence
+    direction = params[:direction].to_s.strip
+    name      = params[:name].to_s.strip
+    fdr_cutoff = params[:fdr_cutoff].to_f
+    fc_cutoff  = params[:fc_cutoff].to_f
+
+    unless %w[up down].include?(direction)
+      render json: { status: 'error', message: 'Invalid direction' }, status: :unprocessable_entity
+      return
+    end
+    if name.blank?
+      render json: { status: 'error', message: 'Missing gene set name' }, status: :unprocessable_entity
+      return
+    end
+
+    run = @project.runs.find_by(id: run_id)
+    unless run
+      render json: { status: 'error', message: 'DE run not found' }, status: :unprocessable_entity
+      return
+    end
+
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    de_list_dir = Basic.de_filter_gene_list_dir(project_dir, run.id, annot_id)
+    output_txt  = de_list_dir + 'output.txt'
+
+    unless File.exist?(output_txt)
+      render json: { status: 'error', message: 'DE output file not found' }, status: :unprocessable_entity
+      return
+    end
+
+    fdr_cutoff = 0.05 if fdr_cutoff <= 0
+    fc_cutoff  = 2.0  if fc_cutoff  <= 0
+
+    Basic.de_filter_write_filtered_json!(output_txt, fdr_cutoff, fc_cutoff)
+    filtered_json = de_list_dir + "filtered.#{direction}.json"
+    filtered_rows = Basic.safe_parse_json(File.read(filtered_json), [])
+    h_filtered = {}
+    filtered_rows.each { |i| h_filtered[i.to_i] = true }
+
+    tmp_data = File.readlines(output_txt)
+    genes = []
+    tmp_data.each_with_index do |line, i|
+      next unless h_filtered[i]
+      cols = line.chomp.split("\t")
+      ensembl_id = cols[1].to_s.strip
+      symbol     = cols[2].to_s.split(',').first.to_s.strip
+      genes << { symbol: symbol, ensembl_id: ensembl_id, stable_id: '' }
+    end
+
+    if genes.empty?
+      render json: { status: 'error', message: 'No genes pass the current thresholds' }, status: :unprocessable_entity
+      return
+    end
+
+    h_env = Basic.safe_parse_json(@project.version.env_json, {})
+    db_version = asap_data_db_name_for_env(h_env, context: 'save_de_gene_set')
+    genes_with_ids = resolve_manual_gene_ids(genes, db_version)
+
+    timestamp  = Time.now.utc.iso8601
+    file_key   = "gene_set_collection_de_#{SecureRandom.hex(12)}"
+    collection = GeneSetCollection.create!(
+      project_id: @project.id,
+      user_id:    current_user&.id,
+      name:       name,
+      file_key:   file_key,
+      source_kind: 'from_de',
+      gene_set_collection_type_id: gene_set_collection_type_id_for!(GENE_SET_COLLECTION_TYPE_FROM_DE)
+    )
+
+    item_identifier = "de_#{SecureRandom.hex(6)}"
+    item_id = "#{local_gene_set_collection_id(collection)}:#{item_identifier}"
+    payload = {
+      'collection'  => name,
+      'items'       => [{
+        'id'         => item_id,
+        'identifier' => item_identifier,
+        'name'       => name,
+        'genes'      => genes_with_ids,
+        'created_at' => timestamp,
+        'updated_at' => timestamp
+      }],
+      'created_at'  => timestamp,
+      'updated_at'  => timestamp
+    }
+    write_local_gene_set_collection_payload(file_key, payload)
+
+    render json: {
+      status: 'ok',
+      gene_count: genes_with_ids.length,
+      collection: {
+        id:       local_gene_set_collection_id(collection),
+        label:    collection.name.to_s,
+        nb_items: 1
+      }
+    }
+  rescue StandardError => e
+    Rails.logger.error("save_de_gene_set failed: #{e.class} - #{e.message}")
+    render json: { status: 'error', message: "Failed to save gene set: #{e.message}" }, status: :unprocessable_entity
   end
 
   # POST /projects/:id/import_gene_set_collection
@@ -6726,6 +6855,90 @@ class ProjectsController < ApplicationController
     }
 
     render json: counts
+  end
+
+  # GET /projects/:id/run_list?status=failed
+  # Returns the refreshed HTML for a run-status dropdown popup. Called by
+  # nav_dropdown_controller when the user opens the popup so the list always
+  # reflects the latest runs rather than the snapshot rendered at page load.
+  def run_list
+    status_key = params[:status].to_s.to_sym
+    allowed_keys = %i[pending running success failed]
+    unless allowed_keys.include?(status_key)
+      render plain: '', status: :bad_request
+      return
+    end
+
+    visible_ids = Step.where.not(hidden: true).pluck(:id)
+    h_status_ids = Status.where(name: %w[pending running success failed stopped]).pluck(:name, :id).to_h.symbolize_keys
+    status_id_scopes = {
+      pending: [h_status_ids[:pending]].compact,
+      running: [h_status_ids[:running]].compact,
+      success: [h_status_ids[:success]].compact,
+      failed:  [h_status_ids[:failed], h_status_ids[:stopped]].compact
+    }
+
+    scope_ids = status_id_scopes[status_key]
+    run_list =
+      if scope_ids.any?
+        scope = @project.runs.includes(:step, :std_method).where(status_id: scope_ids, step_id: visible_ids)
+        scope = scope.where('runs.created_at < ?', @project.public_at) if publication_snapshot_reader?(@project)
+        scope.order(created_at: :desc)
+      else
+        []
+      end
+
+    count = run_list.respond_to?(:count) ? run_list.count : run_list.size
+
+    # Pre-load dataset parameter display data
+    header_annot_ids = []
+    header_run_ids   = []
+    run_list.limit(20).each do |run|
+      next unless run.attrs_json.present?
+      h_attrs = Basic.safe_parse_json(run.attrs_json, {})
+      h_attrs.each_value do |v|
+        if v.is_a?(Hash)
+          header_annot_ids << v['annot_id'] if v['annot_id']
+          header_run_ids   << v['run_id']   if v['run_id']
+        elsif v.is_a?(Array)
+          v.each do |item|
+            next unless item.is_a?(Hash)
+            header_annot_ids << item['annot_id'] if item['annot_id']
+            header_run_ids   << item['run_id']   if item['run_id']
+          end
+        end
+      end
+    end
+
+    header_h_annots   = {}
+    header_h_ori_runs = {}
+    header_h_steps    = {}
+    if header_annot_ids.any?
+      Annot.where(id: header_annot_ids.uniq).each do |a|
+        header_h_annots[a.id] = a
+        header_run_ids << a.ori_run_id if a.ori_run_id
+      end
+    end
+    if header_run_ids.any?
+      Run.includes(:step).where(id: header_run_ids.uniq).each do |r|
+        header_h_ori_runs[r.id] = r
+        header_h_steps[r.step_id] = r.step if r.step
+      end
+    end
+
+    header_h_statuses = Status.all.index_by(&:id)
+    summary_label     = helpers.run_summary_tooltip_label(status_key)
+
+    render partial: 'shared/run_status_dropdown_list',
+           locals: {
+             run_list:,
+             count:,
+             summary_label:,
+             header_h_statuses:,
+             header_h_annots:,
+             header_h_ori_runs:,
+             header_h_steps:
+           }
   end
 
   # GET /projects/:id/unarchive_status

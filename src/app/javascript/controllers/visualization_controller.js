@@ -8998,10 +8998,32 @@ export default class extends Controller {
       })
       .then((html) => {
         this.metadataInfoContent.innerHTML = html
+        // innerHTML does not execute <script>; annot distribution plots depend on those scripts.
+        // Wait one frame so canvases have a non-zero layout width before drawing.
+        requestAnimationFrame(() => {
+          this.executeScriptsInContainer(this.metadataInfoContent)
+        })
       })
       .catch((error) => {
         this.metadataInfoContent.innerHTML = `<div style="padding:16px;color:#b91c1c;font-size:13px;">Failed to load metadata information: ${this.escapeHtml(error.message)}</div>`
       })
+  }
+
+  executeScriptsInContainer(container) {
+    if (!container) return
+    const scripts = Array.from(container.querySelectorAll('script'))
+    scripts.forEach((oldScript) => {
+      const newScript = document.createElement('script')
+      Array.from(oldScript.attributes).forEach((attr) => {
+        newScript.setAttribute(attr.name, attr.value)
+      })
+      if (oldScript.src) {
+        newScript.src = oldScript.src
+      } else {
+        newScript.textContent = oldScript.textContent
+      }
+      oldScript.parentNode.replaceChild(newScript, oldScript)
+    })
   }
 
   closeMetadataInfoPopup() {
@@ -15967,6 +15989,126 @@ export default class extends Controller {
     const overlay = document.getElementById('de-selection-overlay')
     if (!overlay) return
     overlay.style.display = 'none'
+  }
+
+  switchDeModalTab(tab) {
+    const tabs = ['run', 'results']
+    tabs.forEach(function(t) {
+      const btn = document.getElementById('de-modal-tab-' + t)
+      const panel = document.getElementById('de-modal-panel-' + t)
+      if (!btn || !panel) return
+      if (t === tab) {
+        btn.style.borderBottomColor = '#2563eb'
+        btn.style.color = '#2563eb'
+        panel.style.display = 'flex'
+      } else {
+        btn.style.borderBottomColor = 'transparent'
+        btn.style.color = '#6b7280'
+        panel.style.display = 'none'
+      }
+    })
+    if (tab === 'results') {
+      this.loadDeVizResults()
+    }
+  }
+
+  _deVizBaseUrl() {
+    const pid = this.getProjectIdentifier()
+    return '/projects/' + encodeURIComponent(pid)
+  }
+
+  loadDeVizResults() {
+    const area = document.getElementById('de-viz-results-area')
+    if (!area) return
+    area.innerHTML = '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:24px 0;">Loading...</div>'
+    const fdr = (document.getElementById('de-viz-fdr-cutoff') || {}).value || '0.05'
+    const fc  = (document.getElementById('de-viz-fc-cutoff')  || {}).value || '2'
+    const url = this._deVizBaseUrl() + '/viz_de_results?fdr_cutoff=' + encodeURIComponent(fdr) + '&fc_cutoff=' + encodeURIComponent(fc)
+    fetch(url, {
+      headers: { 'Accept': 'text/html' },
+      credentials: 'same-origin'
+    })
+    .then(function(r) { return r.text() })
+    .then(function(html) { area.innerHTML = html })
+    .catch(function() {
+      area.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:12px;">Failed to load DE results.</div>'
+    })
+  }
+
+  scheduleDeVizFilter() {
+    if (this._deVizFilterTimer) clearTimeout(this._deVizFilterTimer)
+    this._deVizFilterTimer = setTimeout(() => { this.runDeVizFilter() }, 400)
+  }
+
+  runDeVizFilter() {
+    if (this._deVizFilterTimer) { clearTimeout(this._deVizFilterTimer); this._deVizFilterTimer = null }
+    const area = document.getElementById('de-viz-results-area')
+    if (!area) return
+    const fdr = (document.getElementById('de-viz-fdr-cutoff') || {}).value || '0.05'
+    const fc  = (document.getElementById('de-viz-fc-cutoff')  || {}).value || '2'
+    const spinner = document.getElementById('de-viz-filter-spinner')
+    if (spinner) spinner.style.display = 'inline'
+    const url = this._deVizBaseUrl() + '/viz_de_results?fdr_cutoff=' + encodeURIComponent(fdr) + '&fc_cutoff=' + encodeURIComponent(fc)
+    fetch(url, {
+      headers: { 'Accept': 'text/html' },
+      credentials: 'same-origin'
+    })
+    .then(function(r) { return r.text() })
+    .then(function(html) { area.innerHTML = html })
+    .catch(function() {
+      area.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:12px;">Failed to load DE results.</div>'
+    })
+    .then(function() { if (spinner) spinner.style.display = 'none' })
+  }
+
+  openDeVizExportDialog(btn) {
+    const runId     = btn.getAttribute('data-run-id')
+    const annotId   = btn.getAttribute('data-annot-id') || ''
+    const direction = btn.getAttribute('data-direction')
+    const runNum    = btn.getAttribute('data-run-num')
+    const method    = btn.getAttribute('data-method') || ''
+    const refGroup  = btn.getAttribute('data-ref-group') || ''
+    const fdr = (document.getElementById('de-viz-fdr-cutoff') || {}).value || '0.05'
+    const fc  = (document.getElementById('de-viz-fc-cutoff')  || {}).value || '2'
+
+    const dirLabel = direction === 'up' ? 'up-regulated' : 'down-regulated'
+    const defaultName = ['DE', '#' + runNum, method, refGroup, dirLabel].filter(Boolean).join(' - ')
+
+    const name = window.prompt('Name for the new gene set:', defaultName)
+    if (!name || !name.trim()) return
+
+    this.saveDeVizGeneSet({ runId, annotId, direction, name: name.trim(), fdr, fc, btn })
+  }
+
+  saveDeVizGeneSet({ runId, annotId, direction, name, fdr, fc, btn }) {
+    if (btn) btn.disabled = true
+    const csrfMeta = document.querySelector('meta[name="csrf-token"]')
+    const formData = new FormData()
+    formData.append('run_id', runId)
+    if (annotId) formData.append('annot_id', annotId)
+    formData.append('direction', direction)
+    formData.append('name', name)
+    formData.append('fdr_cutoff', fdr)
+    formData.append('fc_cutoff', fc)
+    fetch(this._deVizBaseUrl() + '/save_de_gene_set', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'X-CSRF-Token': csrfMeta ? csrfMeta.getAttribute('content') : ''
+      },
+      body: formData,
+      credentials: 'same-origin'
+    })
+    .then(function(r) { return r.json() })
+    .then(function(data) {
+      if (data.status === 'ok') {
+        alert('Gene set "' + name + '" saved successfully (' + data.gene_count + ' genes).')
+      } else {
+        alert('Error: ' + (data.message || 'Unknown error'))
+      }
+    })
+    .catch(function(e) { alert('Request failed: ' + e.message) })
+    .then(function() { if (btn) btn.disabled = false })
   }
 
   populateDeSelectionOperands() {

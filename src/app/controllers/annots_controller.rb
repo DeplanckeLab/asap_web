@@ -81,6 +81,7 @@ class AnnotsController < ApplicationController
     @bin_counts = []
     @bin_size = nil
     @min = nil
+    @histogram = nil
     @h_sums = {}
     @matrix_preview = nil
 
@@ -132,7 +133,7 @@ class AnnotsController < ApplicationController
               if values.any?
                 numeric_values = values.map { |v| v.to_f rescue nil }.compact
                 if numeric_values.any?
-                  @h_sums[k] = compute_bins(numeric_values, h_nber_bins[k].to_i)
+                  @h_sums[k] = compute_histogram_pair(numeric_values, h_nber_bins[k].to_i)
                 end
               end
             end
@@ -282,10 +283,10 @@ class AnnotsController < ApplicationController
               # Numerical data - compute bins for histogram
               numeric_values = @h_results['values'].map { |v| v.to_f rescue nil }.compact
               if numeric_values.any?
-                h_res_bins = compute_bins(numeric_values, 100)
-                @bin_size = h_res_bins[:bin_size]
-                @min = h_res_bins[:min]
-                @bin_counts = h_res_bins[:bin_counts]
+                @histogram = compute_histogram_pair(numeric_values, 100)
+                @bin_counts = @histogram[:linear][:bin_counts]
+                @bin_size = @histogram[:linear][:bin_size]
+                @min = @histogram[:linear][:min]
               end
             end
           end
@@ -714,30 +715,99 @@ class AnnotsController < ApplicationController
     raw.map(&:to_s)
   end
 
-  # Compute bins for histogram
-  def compute_bins(values, nber_bins)
-    return { bin_counts: [], min: 0, max: 0, bin_size: 0 } if values.empty?
-    
-    min = values.min
-    max = values.max
-    return { bin_counts: [], min: min, max: max, bin_size: 0 } if min == max
-    
-    h = { bin_counts: [], min: min, max: max }
-    (0..nber_bins - 1).each { |bin_i| h[:bin_counts][bin_i] = 0 }
-    bin_size = (max - min).to_f / nber_bins
-    
-    values.each do |e|
-      if bin_size > 0
-        bin_i = ((e - min) / bin_size).to_i
-        bin_i = nber_bins - 1 if bin_i >= nber_bins
-        bin_i = 0 if bin_i < 0
-        h[:bin_counts][bin_i] ||= 0
-        h[:bin_counts][bin_i] += 1
+  # Compute histogram bins (linear or log10-spaced), matching visualization buildHistogramBins.
+  def compute_bins(values, nber_bins, scale: :linear, ignore_zeros: true)
+    numeric_values = Array(values).map { |v|
+      begin
+        Float(v)
+      rescue ArgumentError, TypeError
+        nil
+      end
+    }.compact.select { |v| v.finite? }
+
+    numeric_values = numeric_values.reject { |v| v == 0.0 } if ignore_zeros
+
+    if scale.to_sym == :log
+      numeric_values = numeric_values.select { |v| v > 0.0 }
+    end
+
+    return { bin_counts: [], bin_ranges: [], min: nil, max: nil, bin_size: 0, scale: scale.to_s } if numeric_values.empty?
+
+    min = numeric_values.min
+    max = numeric_values.max
+    nber_bins = [nber_bins.to_i, 1].max
+
+    if min == max
+      return {
+        bin_counts: [numeric_values.length],
+        bin_ranges: [{ min: min, max: max }],
+        min: min,
+        max: max,
+        bin_size: 0,
+        scale: scale.to_s
+      }
+    end
+
+    bin_counts = Array.new(nber_bins, 0)
+    bin_ranges = Array.new(nber_bins)
+
+    if scale.to_sym == :log && min > 0 && max > 0
+      log_min = Math.log10(min)
+      log_max = Math.log10(max)
+      span = log_max - log_min
+      if span > 0
+        nber_bins.times do |i|
+          t0 = log_min + (i.to_f / nber_bins) * span
+          t1 = log_min + ((i + 1).to_f / nber_bins) * span
+          bin_ranges[i] = { min: 10.0**t0, max: 10.0**t1 }
+        end
+        inv_span = nber_bins / span
+        numeric_values.each do |value|
+          next if value <= 0
+          bin_i = ((Math.log10(value) - log_min) * inv_span).floor
+          bin_i = 0 if bin_i.negative?
+          bin_i = nber_bins - 1 if bin_i >= nber_bins
+          bin_counts[bin_i] += 1
+        end
+      else
+        bin_ranges[0] = { min: min, max: max }
+        bin_counts[0] = numeric_values.length
+      end
+      bin_size = 0
+    else
+      bin_size = (max - min).to_f / nber_bins
+      nber_bins.times do |i|
+        bin_ranges[i] = {
+          min: min + i * bin_size,
+          max: min + (i + 1) * bin_size
+        }
+      end
+      if bin_size.positive?
+        inv_bin_size = 1.0 / bin_size
+        numeric_values.each do |value|
+          bin_i = ((value - min) * inv_bin_size).floor
+          bin_i = 0 if bin_i.negative?
+          bin_i = nber_bins - 1 if bin_i >= nber_bins
+          bin_counts[bin_i] += 1
+        end
       end
     end
-    
-    h[:bin_size] = bin_size
-    h
+
+    {
+      bin_counts: bin_counts,
+      bin_ranges: bin_ranges,
+      min: min,
+      max: max,
+      bin_size: bin_size,
+      scale: scale.to_s
+    }
+  end
+
+  def compute_histogram_pair(values, nber_bins)
+    {
+      linear: compute_bins(values, nber_bins, scale: :linear, ignore_zeros: true),
+      log: compute_bins(values, nber_bins, scale: :log, ignore_zeros: true)
+    }
   end
 end
 

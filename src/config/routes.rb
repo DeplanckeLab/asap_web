@@ -47,6 +47,7 @@ Rails.application.routes.draw do
       get :reset_parsing
       get :run_status
       get :run_counts
+      get :run_list
       get :unarchive_status
       get :graph
       get :pipeline_runs
@@ -59,10 +60,13 @@ Rails.application.routes.draw do
       post :cancel_gene_set_item_module_score
       get :download_gene_set_collection
       post :save_manual_gene_set
+      post :save_de_gene_set
       post :import_gene_set_collection
       post :delete_manual_gene_set
       post :cluster_comparison
       post :filter_de_results
+      get  :viz_de_results
+      post :viz_de_results
       post :filter_ge_results
       post :filter_doublet_results
       get :get_annot_info

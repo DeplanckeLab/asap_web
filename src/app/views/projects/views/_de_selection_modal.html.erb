@@ -1,88 +1,139 @@
 <div id="de-selection-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.45); z-index: 12110; justify-content: center; align-items: center;" onclick="if (event.target === this && window.visualizationController) window.visualizationController.closeDeSelectionModal()">
-  <div style="width: 920px; max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 10px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); display: flex; flex-direction: column; overflow: hidden;">
+  <div style="width: 960px; max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 10px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); display: flex; flex-direction: column; overflow: hidden;">
     <div style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #e5e7eb; background: #f9fafb;">
       <div style="font-size: 16px; font-weight: 600; color: #111827;">Differential expression</div>
       <button type="button"
               style="background: none; border: none; color: #6b7280; cursor: pointer; font-size: 18px; line-height: 1;"
               onclick="if (window.visualizationController) window.visualizationController.closeDeSelectionModal()">
-        ×
+        &times;
       </button>
     </div>
-    <div style="padding: 16px; overflow-y: auto; min-height: 0;">
-      <div style="margin-bottom: 12px;">
-        <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Embedding for preview</label>
-        <select id="de-selection-embedding"
-                onchange="if (window.visualizationController) window.visualizationController.updateDeSelectionPreview()"
-                style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
-      </div>
 
-      <div id="de-selection-mode-row" style="margin-bottom: 12px; display: none;">
-        <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 6px;">Comparison</label>
-        <div style="display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #374151;">
-          <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
-            <input type="radio"
-                   name="de-selection-mode"
-                   id="de-selection-mode-complementary"
-                   value="complementary"
-                   checked
-                   onchange="if (window.visualizationController) window.visualizationController.onDeSelectionModeChanged()">
-            Selected vs complementary
-          </label>
-          <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
-            <input type="radio"
-                   name="de-selection-mode"
-                   id="de-selection-mode-group"
-                   value="group"
-                   onchange="if (window.visualizationController) window.visualizationController.onDeSelectionModeChanged()">
-            Group vs group
-          </label>
-        </div>
-      </div>
-
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; margin-bottom: 14px;">
-        <div>
-          <label id="de-selection-operand-a-label" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;"><%= col_label(@project, plural: false).to_s.capitalize %> set A (reference)</label>
-          <select id="de-selection-operand-a"
-                  onchange="if (window.visualizationController) window.visualizationController.updateDeSelectionPreview()"
-                  style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
-        </div>
-        <div id="de-selection-operand-b-wrap">
-          <label id="de-selection-operand-b-label" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;"><%= col_label(@project, plural: false).to_s.capitalize %> set B</label>
-          <select id="de-selection-operand-b"
-                  onchange="if (window.visualizationController) window.visualizationController.updateDeSelectionPreview()"
-                  style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
-        </div>
-      </div>
-      <div id="de-selection-mode-hint" style="margin: -8px 0 14px; font-size: 11px; color: #6b7280;">
-        DE compares selected <%= col_label(@project, plural: true) %> in <%= col_label(@project, plural: false) %> set A against all other <%= col_label(@project, plural: true) %>.
-      </div>
-
-      <div id="de-selection-preview" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;"></div>
-
-      <div style="display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 12px;">
-        <div>
-          <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Method</label>
-          <select id="de-selection-method"
-                  onchange="if (window.visualizationController) window.visualizationController.onDeSelectionMethodChanged()"
-                  style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
-        </div>
-      </div>
-
-      <div id="de-selection-status" style="display: none; margin-bottom: 12px; padding: 8px 10px; border-radius: 6px; font-size: 12px;"></div>
-      <div id="de-selection-attrs" style="border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 10px;"></div>
-    </div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid #e5e7eb;background:#f9fafb;">
-      <button id="de-selection-run-btn"
+    <%# Tab bar %>
+    <div style="display: flex; border-bottom: 1px solid #e5e7eb; background: #f9fafb; padding: 0 16px;">
+      <button id="de-modal-tab-run"
               type="button"
-              style="padding: 8px 12px; background: #2563eb; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;"
-              onclick="if (window.visualizationController) window.visualizationController.submitDeSelectionRun(event)">
+              onclick="if (window.visualizationController) window.visualizationController.switchDeModalTab('run')"
+              style="padding: 10px 16px; font-size: 13px; font-weight: 500; border: none; border-bottom: 2px solid #2563eb; background: none; color: #2563eb; cursor: pointer; margin-bottom: -1px;">
         Run DE
       </button>
-      <button type="button"
-              style="padding: 8px 12px; background: #6b7280; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;"
-              onclick="if (window.visualizationController) window.visualizationController.closeDeSelectionModal()">
-        Close
+      <button id="de-modal-tab-results"
+              type="button"
+              onclick="if (window.visualizationController) window.visualizationController.switchDeModalTab('results')"
+              style="padding: 10px 16px; font-size: 13px; font-weight: 500; border: none; border-bottom: 2px solid transparent; background: none; color: #6b7280; cursor: pointer; margin-bottom: -1px;">
+        Existing DE results
       </button>
+    </div>
+
+    <%# Tab: Run DE %>
+    <div id="de-modal-panel-run" style="display: flex; flex-direction: column; overflow: hidden; flex: 1; min-height: 0;">
+      <div style="padding: 16px; overflow-y: auto; min-height: 0; flex: 1;">
+        <div style="margin-bottom: 12px;">
+          <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Embedding for preview</label>
+          <select id="de-selection-embedding"
+                  onchange="if (window.visualizationController) window.visualizationController.updateDeSelectionPreview()"
+                  style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+        </div>
+
+        <div id="de-selection-mode-row" style="margin-bottom: 12px; display: none;">
+          <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 6px;">Comparison</label>
+          <div style="display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: #374151;">
+            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="radio"
+                     name="de-selection-mode"
+                     id="de-selection-mode-complementary"
+                     value="complementary"
+                     checked
+                     onchange="if (window.visualizationController) window.visualizationController.onDeSelectionModeChanged()">
+              Selected vs complementary
+            </label>
+            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+              <input type="radio"
+                     name="de-selection-mode"
+                     id="de-selection-mode-group"
+                     value="group"
+                     onchange="if (window.visualizationController) window.visualizationController.onDeSelectionModeChanged()">
+              Group vs group
+            </label>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; margin-bottom: 14px;">
+          <div>
+            <label id="de-selection-operand-a-label" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;"><%= col_label(@project, plural: false).to_s.capitalize %> set A (reference)</label>
+            <select id="de-selection-operand-a"
+                    onchange="if (window.visualizationController) window.visualizationController.updateDeSelectionPreview()"
+                    style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+          </div>
+          <div id="de-selection-operand-b-wrap">
+            <label id="de-selection-operand-b-label" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;"><%= col_label(@project, plural: false).to_s.capitalize %> set B</label>
+            <select id="de-selection-operand-b"
+                    onchange="if (window.visualizationController) window.visualizationController.updateDeSelectionPreview()"
+                    style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+          </div>
+        </div>
+        <div id="de-selection-mode-hint" style="margin: -8px 0 14px; font-size: 11px; color: #6b7280;">
+          DE compares selected <%= col_label(@project, plural: true) %> in <%= col_label(@project, plural: false) %> set A against all other <%= col_label(@project, plural: true) %>.
+        </div>
+
+        <div id="de-selection-preview" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;"></div>
+
+        <div style="display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 12px;">
+          <div>
+            <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Method</label>
+            <select id="de-selection-method"
+                    onchange="if (window.visualizationController) window.visualizationController.onDeSelectionMethodChanged()"
+                    style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+          </div>
+        </div>
+
+        <div id="de-selection-status" style="display: none; margin-bottom: 12px; padding: 8px 10px; border-radius: 6px; font-size: 12px;"></div>
+        <div id="de-selection-attrs" style="border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 10px;"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid #e5e7eb;background:#f9fafb;">
+        <button id="de-selection-run-btn"
+                type="button"
+                style="padding: 8px 12px; background: #2563eb; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;"
+                onclick="if (window.visualizationController) window.visualizationController.submitDeSelectionRun(event)">
+          Run DE
+        </button>
+        <button type="button"
+                style="padding: 8px 12px; background: #6b7280; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;"
+                onclick="if (window.visualizationController) window.visualizationController.closeDeSelectionModal()">
+          Close
+        </button>
+      </div>
+    </div>
+
+    <%# Tab: Existing DE results %>
+    <div id="de-modal-panel-results" style="display: none; flex-direction: column; overflow: hidden; flex: 1; min-height: 0;">
+      <%# Threshold controls %>
+      <div style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb; background: #fff; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+        <span style="font-size: 12px; color: #374151; font-weight: 500;">FDR &lt;=</span>
+        <input type="text" id="de-viz-fdr-cutoff" value="0.05"
+               style="width: 70px; padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 5px; font-size: 12px;"
+               oninput="if(window.visualizationController) window.visualizationController.scheduleDeVizFilter()"
+               onkeydown="if(event.key==='Enter' && window.visualizationController) window.visualizationController.runDeVizFilter()">
+        <span style="font-size: 12px; color: #374151; font-weight: 500; margin-left: 8px;">|FC| &gt;=</span>
+        <input type="text" id="de-viz-fc-cutoff" value="2"
+               style="width: 70px; padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 5px; font-size: 12px;"
+               oninput="if(window.visualizationController) window.visualizationController.scheduleDeVizFilter()"
+               onkeydown="if(event.key==='Enter' && window.visualizationController) window.visualizationController.runDeVizFilter()">
+        <span id="de-viz-filter-spinner" style="display: none; font-size: 12px; color: #6b7280; margin-left: 8px;">Refreshing...</span>
+      </div>
+
+      <%# Scrollable results area %>
+      <div id="de-viz-results-area" style="flex: 1; overflow-y: auto; padding: 12px 16px; min-height: 0;">
+        <div style="color: #9ca3af; font-size: 13px; text-align: center; padding: 24px 0;">Loading DE results...</div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 16px;border-top:1px solid #e5e7eb;background:#f9fafb;">
+        <button type="button"
+                style="padding: 8px 12px; background: #6b7280; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;"
+                onclick="if (window.visualizationController) window.visualizationController.closeDeSelectionModal()">
+          Close
+        </button>
+      </div>
     </div>
   </div>
 </div>

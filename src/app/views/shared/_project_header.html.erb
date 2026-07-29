@@ -182,149 +182,18 @@
                         <span class="text-[9px] leading-tight text-gray-400 mt-0.5" data-header-run-status-target="statusCount" data-status-key="<%= status_icon[:key] %>"><%= count %></span>
                       </button>
                       <div class="hidden w-max max-h-96 flex flex-col bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-[9999]"
-                           data-nav-menu>
-                          <div class="sticky top-0 bg-white rounded-t-lg px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide border-b border-gray-100 flex items-center justify-between z-10">
-                            <span><%= summary_label %> Runs (<%= count %>)</span>
-                            <button type="button" 
-                                    class="ml-4 text-gray-400 hover:text-gray-600 transition-colors"
-                                    data-action="click->nav-dropdown#closeMenu"
-                                    title="Close">
-                              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                              </svg>
-                            </button>
-                          </div>
-                          <div class="py-1 overflow-y-auto flex-1">
-                            <% if runs_list.any? %>
-                              <% runs_list.limit(20).each do |run| %>
-                              <% 
-                                step = run.step
-                                step_label = step&.label.presence || step&.name.presence || "Run"
-                                method_label = run.std_method ? (run.std_method.label.presence || run.std_method.name.presence) : nil
-                                # Build display title based on multiple_runs flag
-                                if step&.multiple_runs
-                                  # multiple_runs true: Step #N - Method
-                                  display_title = step_label
-                                  display_title += " ##{run.num || run.id}"
-                                  display_title += " - #{method_label}" if method_label
-                                else
-                                  # multiple_runs false: just Method label, no run number
-                                  display_title = method_label || step_label
-                                end
-                                # Parse run attributes for parameters display
-                                h_run_attrs = run.attrs_json.present? ? Basic.safe_parse_json(run.attrs_json, {}) : {}
-                                h_method_attrs = (run.std_method && step) ? (Basic.get_std_method_attrs(run.std_method, step)[:h_attrs] rescue Basic.safe_parse_json(run.std_method.attrs_json, {})) : {}
-                                params_array = h_run_attrs.to_a
-                              %>
-                              <% run_status_badge = run_status_badge_for(run, header_h_statuses) %>
-                              <%= link_to run_view_url(run, @project, step), 
-                                  class: "block px-3 py-2 text-sm hover:bg-gray-100 transition-colors",
-                                  data: { turbo: false } do %>
-                                <div class="flex items-center justify-between gap-2">
-                                  <span class="font-medium text-gray-700 min-w-0 truncate">
-                                    <%= display_title %>
-                                  </span>
-                                  <span class="flex items-center gap-2 whitespace-nowrap ml-2 flex-shrink-0">
-                                    <% if run_status_badge[:ui_label].present? %>
-                                      <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium <%= run_status_badge[:bg] %> <%= run_status_badge[:text] %>">
-                                        <%= run_status_badge[:ui_label] %>
-                                      </span>
-                                    <% end %>
-                                    <span class="text-xs text-gray-400">
-                                      <%= time_ago_in_words(run.created_at) %> ago
-                                    </span>
-                                  </span>
-                                </div>
-                                <% if params_array.any? %>
-                                  <div class="flex flex-nowrap gap-1 mt-1">
-                                    <% params_array.each do |key, value| %>
-                                      <% 
-                                        # Check if value is a dataset reference
-                                        annot_id = nil
-                                        direct_run_id = nil
-                                        if value.is_a?(Hash)
-                                          annot_id = value['annot_id'] || value[:annot_id]
-                                          direct_run_id = value['run_id'] || value[:run_id]
-                                        end
-                                      %>
-                                      <% if annot_id.present? %>
-                                        <% annot = header_h_annots[annot_id.to_i] %>
-                                        <% if annot %>
-                                          <% ori_run = header_h_ori_runs[annot.ori_run_id] if annot.ori_run_id.present? %>
-                                          <% ori_step = ori_run ? header_h_steps[ori_run.step_id] : nil %>
-                                          <% step_name = ori_step ? (ori_step.label.presence || ori_step.name.presence || 'N/A') : 'N/A' %>
-                                          <% if ori_step && ori_step.multiple_runs && ori_run %>
-                                            <% run_num = ori_run.num || ori_run.id %>
-                                            <% dataset_display = "#{step_name} ##{run_num} #{annot.name}" %>
-                                          <% else %>
-                                            <% dataset_display = "#{step_name} #{annot.name}" %>
-                                          <% end %>
-                                          <% truncated_dataset = dataset_display.length > 20 ? dataset_display[0..16] + "..." : dataset_display %>
-                                          <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap cursor-help"
-                                                title="<%= param_tooltip(key, h_method_attrs) %>">
-                                            <span class="font-semibold text-blue-800"><%= key %>:</span>
-                                            <span class="text-blue-600"><%= truncated_dataset %></span>
-                                          </span>
-                                        <% else %>
-                                          <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-gray-100 text-gray-600 border border-gray-200 whitespace-nowrap cursor-help" title="<%= param_tooltip(key, h_method_attrs) %>">
-                                            <span class="font-semibold"><%= key %>:</span>
-                                            <span>dataset</span>
-                                          </span>
-                                        <% end %>
-                                      <% elsif direct_run_id.present? %>
-                                        <% direct_run = header_h_ori_runs[direct_run_id.to_i] %>
-                                        <% if direct_run %>
-                                          <% direct_step = header_h_steps[direct_run.step_id] %>
-                                          <% step_name = direct_step ? (direct_step.label.presence || direct_step.name.presence || 'N/A') : 'N/A' %>
-                                          <% dataset_name = value['output_dataset'] || value[:output_dataset] || '/matrix' %>
-                                          <% if direct_step && direct_step.multiple_runs %>
-                                            <% run_num = direct_run.num || direct_run.id %>
-                                            <% dataset_display = "#{step_name} ##{run_num} #{dataset_name}" %>
-                                          <% else %>
-                                            <% dataset_display = "#{step_name} #{dataset_name}" %>
-                                          <% end %>
-                                          <% truncated_dataset = dataset_display.length > 20 ? dataset_display[0..16] + "..." : dataset_display %>
-                                          <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap cursor-help"
-                                                title="<%= param_tooltip(key, h_method_attrs) %>">
-                                            <span class="font-semibold text-blue-800"><%= key %>:</span>
-                                            <span class="text-blue-600"><%= truncated_dataset %></span>
-                                          </span>
-                                        <% else %>
-                                          <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-gray-100 text-gray-600 border border-gray-200 whitespace-nowrap cursor-help" title="<%= param_tooltip(key, h_method_attrs) %>">
-                                            <span class="font-semibold"><%= key %>:</span>
-                                            <span>dataset</span>
-                                          </span>
-                                        <% end %>
-                                      <% elsif value.is_a?(Array) && value.first.is_a?(Hash) %>
-                                        <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap cursor-help" title="<%= param_tooltip(key, h_method_attrs) %>">
-                                          <span class="font-semibold text-blue-800"><%= key %>:</span>
-                                          <span class="text-blue-600"><%= value.size %> datasets</span>
-                                        </span>
-                                      <% else %>
-                                        <% display_value = value.to_s %>
-                                        <% display_value = display_value[0..10] + "..." if display_value.length > 13 %>
-                                        <span class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-gray-100 text-gray-600 border border-gray-200 whitespace-nowrap cursor-help"
-                                              title="<%= param_tooltip(key, h_method_attrs) %>">
-                                          <span class="font-semibold"><%= key %>:</span>
-                                          <span><%= display_value %></span>
-                                        </span>
-                                      <% end %>
-                                    <% end %>
-                                  </div>
-                                <% end %>
-                              <% end %>
-                              <% end %>
-                              <% if count > 20 %>
-                                <div class="px-3 py-2 text-xs text-gray-400 text-center border-t border-gray-100">
-                                  ... and <%= count - 20 %> more
-                                </div>
-                              <% end %>
-                            <% else %>
-                              <div class="px-3 py-2 text-sm text-gray-500">
-                                No runs available in this list.
-                              </div>
-                            <% end %>
-                          </div>
+                           data-nav-menu
+                           data-refresh-url="<%= run_list_project_path(@project, status: status_icon[:key]) %>">
+                          <%= render partial: 'shared/run_status_dropdown_list',
+                                     locals: {
+                                       run_list: runs_list,
+                                       count: count,
+                                       summary_label: summary_label,
+                                       header_h_statuses: header_h_statuses,
+                                       header_h_annots: header_h_annots,
+                                       header_h_ori_runs: header_h_ori_runs,
+                                       header_h_steps: header_h_steps
+                                     } %>
                         </div>
                     </div>
                   <% end %>

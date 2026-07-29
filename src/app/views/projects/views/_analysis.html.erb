@@ -102,8 +102,8 @@
         <% end %>
 
         <button id="analysis-pipeline-toggle-button"
-                type="button" 
-                class="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-medium transition-colors cursor-pointer inline-block"
+                type="button"
+                class="h-9 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-medium transition-colors cursor-pointer"
                 data-mode="graph"
                 onclick="openPipelineGraphOrRunDetails()">
           Pipeline Graph
@@ -486,9 +486,10 @@
 
     if (mode === 'details') {
       button.dataset.mode = 'details'
-      button.textContent = 'Run details'
+      button.classList.add('hidden')
     } else {
       button.dataset.mode = 'graph'
+      button.classList.remove('hidden')
       button.textContent = 'Pipeline Graph'
     }
     updateStepPipelineColorDots()

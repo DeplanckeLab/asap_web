@@ -255,8 +255,11 @@ export class DownloadManager {
     const filteredValues = coloringMetadataVector.values.filter((v, idx) => {
       return v !== null && v !== undefined && !isNaN(v) && (!filteredSet || filteredSet.has(idx))
     })
-    const globalMin = Math.min(...filteredValues)
-    const globalMax = Math.max(...filteredValues)
+    const globalMin = this.controller.dataManager.safeMin(filteredValues)
+    const globalMax = this.controller.dataManager.safeMax(filteredValues)
+    if (!Number.isFinite(globalMin) || !Number.isFinite(globalMax)) {
+      return
+    }
     const numBins = 20
     const binWidth = (globalMax - globalMin) / numBins
     
@@ -330,8 +333,8 @@ export class DownloadManager {
       }
       
       // Calculate statistics
-      const min = Math.min(...validValues)
-      const max = Math.max(...validValues)
+      const min = this.controller.dataManager.safeMin(validValues)
+      const max = this.controller.dataManager.safeMax(validValues)
       const mean = validValues.reduce((a, b) => a + b, 0) / validValues.length
       const sortedValues = [...validValues].sort((a, b) => a - b)
       const median = sortedValues[Math.floor(sortedValues.length / 2)]

@@ -846,8 +846,8 @@ export class MemoryManager {
     const annotId = String(payload.annotId || 'base').trim() || 'base'
     const key = this.buildGeneSetItemModuleScoreKey(normalizedItemId, annotId, dataset)
     const loomFile = this.controller.currentLoomFile || this.controller.getCurrentLoomFileForRequest?.() || 'parsing/output.loom'
-    const minVal = Number.isFinite(Number(payload.minVal)) ? Number(payload.minVal) : Math.min(...values)
-    const maxVal = Number.isFinite(Number(payload.maxVal)) ? Number(payload.maxVal) : Math.max(...values)
+    const minVal = Number.isFinite(Number(payload.minVal)) ? Number(payload.minVal) : this.controller.dataManager.safeMin(values)
+    const maxVal = Number.isFinite(Number(payload.maxVal)) ? Number(payload.maxVal) : this.controller.dataManager.safeMax(values)
     const durationMs = Number.isFinite(Number(payload.durationMs)) ? Math.max(0, Number(payload.durationMs)) : null
 
     try {
@@ -900,8 +900,8 @@ export class MemoryManager {
       itemId: normalizedItemId,
       name: String(record.name || '').trim() || null,
       values,
-      minVal: Number.isFinite(Number(record.minVal)) ? Number(record.minVal) : Math.min(...values),
-      maxVal: Number.isFinite(Number(record.maxVal)) ? Number(record.maxVal) : Math.max(...values),
+      minVal: Number.isFinite(Number(record.minVal)) ? Number(record.minVal) : this.controller.dataManager.safeMin(values),
+      maxVal: Number.isFinite(Number(record.maxVal)) ? Number(record.maxVal) : this.controller.dataManager.safeMax(values),
       durationMs: Number.isFinite(Number(record.durationMs)) ? Number(record.durationMs) : null,
       dataset: String(record.dataset || dataset),
       annotId: String(record.annotId || annotId)

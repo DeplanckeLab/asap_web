@@ -293,8 +293,9 @@ export class ColorManager {
         minVal = compression_info.min_val
         maxVal = compression_info.max_val
       } else {
-        minVal = Math.min(...values)
-        maxVal = Math.max(...values)
+        // Never use Math.min/max(...values): large embeddings blow the call stack.
+        minVal = this.controller.dataManager.safeMin(values)
+        maxVal = this.controller.dataManager.safeMax(values)
       }
       
       const range = maxVal - minVal

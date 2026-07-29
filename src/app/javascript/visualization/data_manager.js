@@ -101,10 +101,6 @@ export class DataManager {
 
 
   // Data storage and caching
-  storeBinaryMetadataData(data) {
-    return this.controller.storeBinaryMetadataData(data)
-  }
-
   clearMetadataData() {
     return this.controller.clearMetadataData()
   }

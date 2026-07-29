@@ -1905,6 +1905,15 @@ export default class extends Controller {
     const embeddingId = item.dataset.embeddingId
     const loomFile = item.dataset.loomFile
 
+    const currentId = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '').trim() : ''
+    const currentLoom = this.getCurrentLoomFile()
+    const sameEmbedding = String(embeddingId || '').trim() === currentId
+    const sameLoom = !loomFile || !currentLoom || String(loomFile) === String(currentLoom)
+    if (sameEmbedding && sameLoom && Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0) {
+      this.closeAllDropdowns()
+      return
+    }
+
     this.applyEmbeddingSelection(embeddingId, loomFile)
     this.closeAllDropdowns()
   }
@@ -23373,12 +23382,16 @@ export default class extends Controller {
       globalMin = coloringMetadataVector.compression_info.min_val
       globalMax = coloringMetadataVector.compression_info.max_val
     } else {
-      // Fallback: calculate from filtered values
+      // Fallback: calculate from filtered values (loop — never Math.min/max spread)
       const filteredColoringValues = coloringMetadataVector.values.filter((v, idx) => {
         return v !== null && v !== undefined && !isNaN(v) && (!filteredSet || filteredSet.has(idx))
       })
-      globalMin = Math.min(...filteredColoringValues)
-      globalMax = Math.max(...filteredColoringValues)
+      globalMin = this.dataManager.safeMin(filteredColoringValues)
+      globalMax = this.dataManager.safeMax(filteredColoringValues)
+    }
+
+    if (!Number.isFinite(globalMin) || !Number.isFinite(globalMax)) {
+      return
     }
     
     canvases.forEach(canvas => {
@@ -23414,8 +23427,8 @@ export default class extends Controller {
         return
       }
       
-      const min = Math.min(...validValues)
-      const max = Math.max(...validValues)
+      const min = this.dataManager.safeMin(validValues)
+      const max = this.dataManager.safeMax(validValues)
       const mean = validValues.reduce((a, b) => a + b, 0) / validValues.length
       const sortedValues = [...validValues].sort((a, b) => a - b)
       const median = sortedValues[Math.floor(sortedValues.length / 2)]
@@ -23642,8 +23655,13 @@ export default class extends Controller {
     
     // Calculate statistics
     const stats = expressionData.stats || {}
-    const minVal = Math.min(...values.filter(v => !isNaN(v) && isFinite(v)))
-    const maxVal = Math.max(...values.filter(v => !isNaN(v) && isFinite(v)))
+    const finiteValues = values.filter(v => !isNaN(v) && isFinite(v))
+    const minVal = this.dataManager.safeMin(finiteValues)
+    const maxVal = this.dataManager.safeMax(finiteValues)
+    if (!Number.isFinite(minVal) || !Number.isFinite(maxVal)) {
+      alert('No finite expression values available for this gene.')
+      return
+    }
     const meanVal = stats.mean || 0
     const medianVal = stats.median || 0
     const stdDevVal = stats.stdDev || 0
@@ -23939,8 +23957,11 @@ export default class extends Controller {
     const filteredValues = coloringMetadataVector.values.filter((v, idx) => {
       return v !== null && v !== undefined && !isNaN(v) && (!filteredSet || filteredSet.has(idx))
     })
-    const globalMin = Math.min(...filteredValues)
-    const globalMax = Math.max(...filteredValues)
+    const globalMin = this.dataManager.safeMin(filteredValues)
+    const globalMax = this.dataManager.safeMax(filteredValues)
+    if (!Number.isFinite(globalMin) || !Number.isFinite(globalMax)) {
+      return
+    }
     const numBins = 20
     const binWidth = (globalMax - globalMin) / numBins
     
@@ -24014,8 +24035,8 @@ export default class extends Controller {
       }
       
       // Calculate statistics
-      const min = Math.min(...validValues)
-      const max = Math.max(...validValues)
+      const min = this.dataManager.safeMin(validValues)
+      const max = this.dataManager.safeMax(validValues)
       const mean = validValues.reduce((a, b) => a + b, 0) / validValues.length
       const sortedValues = [...validValues].sort((a, b) => a - b)
       const median = sortedValues[Math.floor(sortedValues.length / 2)]

@@ -204,6 +204,7 @@ class IsolatedComplianceController extends Controller {
   newProjectLinkUrl() {
     const base = this.hasNewProjectUrlValue ? this.newProjectUrlValue : "/projects/new"
     const params = new URLSearchParams()
+    params.set("from", "scfair_validation")
     if (this.sourceUrlTarget?.checked && this.urlValue) {
       params.set("file_url", this.urlValue)
     } else if (this.fuId) {

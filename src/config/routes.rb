@@ -90,6 +90,9 @@ Rails.application.routes.draw do
       get :sample_identifiers
       get :project_data_files
       get :data_file_metadata_catalog
+      get :fix_compliance, to: 'compliance#fix_project'
+      post :apply_compliance_fix, to: 'compliance#apply_project_fix'
+      get :compliance_metadata_fields, to: 'compliance#project_metadata_fields'
     end
   end
   
@@ -204,9 +207,10 @@ Rails.application.routes.draw do
       post 'validate', action: :validate_project, as: :compliance_project_validate
       get 'result', action: :show_project_result, as: :compliance_project_result
       get 'status', action: :project_status, as: :compliance_project_status
-      get 'fix', action: :fix_project, as: :compliance_project_fix
+      # Legacy URLs (prefer /projects/:key/fix_compliance and related member routes)
+      get 'fix', to: redirect { |path_params, _req| "/projects/#{path_params[:id]}/fix_compliance" }
       post 'apply_fix', action: :apply_project_fix, as: :compliance_project_apply_fix
-      get 'metadata_fields', action: :project_metadata_fields, as: :compliance_project_metadata_fields
+      get 'metadata_fields', to: redirect { |path_params, _req| "/projects/#{path_params[:id]}/compliance_metadata_fields" }
     end
     get 'ontology_autocomplete', action: :ontology_autocomplete, as: :compliance_ontology_autocomplete
     post 'resolve_ontology_terms', action: :resolve_ontology_terms, as: :compliance_resolve_ontology_terms

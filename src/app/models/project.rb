@@ -20,9 +20,11 @@ class Project < ApplicationRecord
   belongs_to :project_cell_set, optional: true
   belongs_to :version, optional: true
   belongs_to :archive_status, optional: true
+  belongs_to :project_origin
   belongs_to :cloned_project, class_name: 'Project', foreign_key: 'cloned_project_id', optional: true
   belongs_to :root_project, class_name: 'Project', foreign_key: 'root_project_id', optional: true, inverse_of: :lineage_clone_projects
   has_many :lineage_clone_projects, class_name: 'Project', foreign_key: 'root_project_id', dependent: :nullify, inverse_of: :root_project
+  before_validation :ensure_default_project_origin
   has_many :annots, dependent: :destroy
   has_many :annot_cell_sets, inverse_of: :project
   has_many :ot_projects, dependent: :destroy
@@ -881,6 +883,27 @@ class Project < ApplicationRecord
     [true, nil]
   end
 
+  def from_scfair_validation?
+    project_origin&.name == ProjectOrigin::SCFAIR_VALIDATION
+  end
+
+  def from_integration?
+    project_origin&.name == ProjectOrigin::INTEGRATION
+  end
+
+  def from_clone?
+    project_origin&.name == ProjectOrigin::CLONE
+  end
+
+  def from_upload?
+    project_origin&.name == ProjectOrigin::UPLOAD
+  end
+
+  def compliance_validation_run?
+    return true if cxg_validation_result.present?
+    ComplianceValidation.for_project(id).exists?
+  end
+
   # Ensure ProjectStep records exist for all steps associated with this project's docker image
   # Called lazily when needed for display (show, step_results, refresh_steps_panel)
   # Only creates ProjectStep records for steps that match the project's project type
@@ -915,6 +938,12 @@ class Project < ApplicationRecord
   end
 
   private
+
+  def ensure_default_project_origin
+    return if project_origin_id.present?
+
+    self.project_origin_id = ProjectOrigin.id_for(ProjectOrigin::UPLOAD)
+  end
 
   def purge_fus_for_project_destroy!
     Fu.where(project_id: id).delete_all

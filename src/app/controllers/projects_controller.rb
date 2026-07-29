@@ -714,8 +714,9 @@ class ProjectsController < ApplicationController
         # Pre-fill organism from the integration projects
         @project.organism_id = @integrate_projects.first.organism_id
         # Pre-fill project type (single-cell transcriptomics by default)
-        sc_type = @project_types.find { |pt| pt.name&.downcase&.include?('single') } || @project_types.first
+        sc_type = single_cell_transcriptomics_project_type || @project_types.first
         @project.project_type_id = sc_type&.id
+        @lock_project_type = true
 
         @integrate_annots = {}
         @integrate_projects.each do |p|
@@ -729,6 +730,16 @@ class ProjectsController < ApplicationController
     end
 
     @prefill_file_url = params[:file_url].to_s.strip.presence
+    @project_origin_name = resolve_project_origin_name_for_new(
+      params[:from],
+      params[:fu_id],
+      integrate: @integrate_mode
+    )
+    if @project_origin_name == ProjectOrigin::SCFAIR_VALIDATION
+      sc_type = single_cell_transcriptomics_project_type
+      @project.project_type_id = sc_type.id if sc_type
+      @lock_project_type = true
+    end
     adopt_upload_fu_for_new_project(params[:fu_id])
   end
 
@@ -827,6 +838,8 @@ class ProjectsController < ApplicationController
     @project.status_id ||= 1
     @project.sandbox = current_user ? false : true
     @project.modified_at = Time.now
+    assign_project_origin_on_create!(@project)
+    enforce_locked_project_type_on_create!(@project)
     
     # Generate unique project key only for signed-in users if not provided.
     unless @project.key.present?
@@ -7639,7 +7652,7 @@ class ProjectsController < ApplicationController
     # Check if project is fully ready (parsing and metadata complete)
     if status_info[:parsing_complete] && status_info[:metadata_complete]
       status_info[:all_complete] = true
-      status_info[:redirect_url] = project_path(@project)
+      status_info[:redirect_url] = creation_complete_redirect_url(@project)
     end
     
     respond_to do |format|
@@ -7967,6 +7980,10 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def creation_complete_redirect_url(project)
+      project_path(project, view: 'analysis')
+    end
+
     def adopt_upload_fu_for_new_project(fu_id)
       return if fu_id.blank?
 
@@ -7994,6 +8011,49 @@ class ProjectsController < ApplicationController
       }
       @existing_fu_id = fu.id
       @existing_filename = fu.name.presence || fu.upload_file_name
+    end
+
+    def resolve_project_origin_name_for_new(from_param, fu_id, integrate: false)
+      return ProjectOrigin::INTEGRATION if integrate
+
+      from_name = from_param.to_s.strip
+      return from_name if ProjectOrigin::NAMES.include?(from_name)
+
+      if fu_id.present?
+        fu = find_upload_fu_for_new_project(fu_id)
+        if fu && UploadType.name_for(fu.upload_type) == 'compliance_file_check'
+          return ProjectOrigin::SCFAIR_VALIDATION
+        end
+      end
+
+      ProjectOrigin::UPLOAD
+    end
+
+    def assign_project_origin_on_create!(project)
+      name =
+        if params[:integrate].to_s == '1'
+          ProjectOrigin::INTEGRATION
+        else
+          requested = params[:project_origin].to_s.strip
+          ProjectOrigin::NAMES.include?(requested) ? requested : ProjectOrigin::UPLOAD
+        end
+      origin_id = ProjectOrigin.id_for(name)
+      project.project_origin_id = origin_id if origin_id.present?
+    end
+
+    def enforce_locked_project_type_on_create!(project)
+      return unless project.from_scfair_validation? || params[:integrate].to_s == '1'
+
+      sc_type = single_cell_transcriptomics_project_type
+      return unless sc_type
+
+      project.project_type_id = sc_type.id
+    end
+
+    def single_cell_transcriptomics_project_type
+      types = @project_types || ProjectType.order(:name)
+      types.find { |pt| pt.tag.to_s == 'sc' } ||
+        types.find { |pt| pt.name.to_s.downcase.include?('single') }
     end
 
     def find_upload_fu_for_new_project(fu_id)
@@ -8424,8 +8484,15 @@ class ProjectsController < ApplicationController
     end
 
     def authorize_requested_view_access!(view_type)
-      if view_type == 'access' || view_type == 'compliance'
+      if view_type == 'access'
         return true if admin?
+
+        handle_project_unauthorized_access
+        return false
+      end
+
+      if view_type == 'compliance'
+        return true if editable?(@project)
 
         handle_project_unauthorized_access
         return false

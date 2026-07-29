@@ -1,6 +1,6 @@
 <div class="max-w-6xl mx-auto px-4 py-8"
      data-controller="compliance-fix"
-     data-compliance-fix-metadata-url-value="<%= compliance_project_metadata_fields_path(@project) %>"
+     data-compliance-fix-metadata-url-value="<%= compliance_metadata_fields_project_path(@project) %>"
      data-compliance-fix-autocomplete-url-value="<%= compliance_ontology_autocomplete_path %>"
      data-compliance-fix-resolve-url-value="<%= compliance_resolve_ontology_terms_path %>"
      data-compliance-fix-project-id-value="<%= @project.id %>"
@@ -46,7 +46,7 @@
           class: 'inline-flex items-center mt-4 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors' %>
     </div>
   <% else %>
-    <%= form_tag compliance_project_apply_fix_path(@project), method: :post, class: 'space-y-4',
+    <%= form_tag apply_compliance_fix_project_path(@project), method: :post, class: 'space-y-4',
         data: { action: 'submit->compliance-fix#submitForm' } do %>
 
       <!-- Global Attributes Section -->

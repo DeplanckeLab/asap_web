@@ -229,6 +229,10 @@ import GuidedTourPlayerController from "controllers/guided_tour_player_controlle
 application.register("guided-tour-player", GuidedTourPlayerController)
 console.log('Guided tour player controller registered')
 
+import ComplianceNavHintController from "controllers/compliance_nav_hint_controller"
+application.register("compliance-nav-hint", ComplianceNavHintController)
+console.log('Compliance nav hint controller registered')
+
 import TableRowFilterController from "controllers/table_row_filter_controller"
 application.register("table-row-filter", TableRowFilterController)
 console.log('Table row filter controller registered')

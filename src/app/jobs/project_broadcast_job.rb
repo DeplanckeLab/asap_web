@@ -29,8 +29,16 @@ class ProjectBroadcastJob < ApplicationJob
     h_data = get_results(project, step_id)
 
     # Determine stage based on step_id - parsing step means we're in creation/parsing stage
-    parsing_step = Step.where(name: 'parsing').first
-    stage = (parsing_step && step_id == parsing_step.id) ? 'creation' : 'normal'
+    parsing_step = Step.find_by(id: step_id)
+    unless parsing_step&.name == 'parsing'
+      asap_docker_image = Basic.get_asap_docker(project.version)
+      parsing_step = if asap_docker_image
+                       Step.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
+                     else
+                       Step.where(name: 'parsing').order(:id).last
+                     end
+    end
+    stage = (parsing_step && step_id.to_i == parsing_step.id) ? 'creation' : 'normal'
 
     # Aggregate run counts across all project steps for header display.
     # Stopped runs (status_id 5) are folded into the `failed` bucket so the
@@ -214,7 +222,7 @@ class ProjectBroadcastJob < ApplicationJob
     # Check if project is fully ready
     if status_info[:parsing_complete] && status_info[:metadata_complete]
       status_info[:all_complete] = true
-      status_info[:redirect_url] = Rails.application.routes.url_helpers.project_path(project)
+      status_info[:redirect_url] = Rails.application.routes.url_helpers.project_path(project, view: 'analysis')
     end
     
     status_info

@@ -366,7 +366,7 @@ class ComplianceController < ApplicationController
     unless loom_path && File.exist?(loom_path)
       respond_to do |format|
         format.json { render json: { status: 'error', message: 'No loom file found.' }, status: :not_found }
-        format.html { redirect_to compliance_project_fix_path(@project), alert: 'No loom file found.' }
+        format.html { redirect_to fix_compliance_project_path(@project), alert: 'No loom file found.' }
       end
       return
     end
@@ -408,7 +408,7 @@ class ComplianceController < ApplicationController
     if loom_ops.blank?
       respond_to do |format|
         format.json { render json: { status: 'error', message: 'No changes were applied.', redirect_url: result_url } }
-        format.html { redirect_to compliance_project_fix_path(@project), alert: 'No changes were applied.' }
+        format.html { redirect_to fix_compliance_project_path(@project), alert: 'No changes were applied.' }
       end
       return
     end
@@ -430,7 +430,7 @@ class ComplianceController < ApplicationController
     unless batch_results
       respond_to do |format|
         format.json { render json: { status: 'error', message: 'LOOM batch operation failed.', redirect_url: result_url } }
-        format.html { redirect_to compliance_project_fix_path(@project), alert: 'LOOM batch operation failed.' }
+        format.html { redirect_to fix_compliance_project_path(@project), alert: 'LOOM batch operation failed.' }
       end
       return
     end
@@ -481,7 +481,7 @@ class ComplianceController < ApplicationController
     unless applied.any?
       respond_to do |format|
         format.json { render json: { status: 'error', message: 'No changes were applied.', redirect_url: result_url } }
-        format.html { redirect_to compliance_project_fix_path(@project), alert: 'No changes were applied.' }
+        format.html { redirect_to fix_compliance_project_path(@project), alert: 'No changes were applied.' }
       end
       return
     end
@@ -1099,7 +1099,7 @@ class ComplianceController < ApplicationController
   end
 
   def authorize_project_compliance!
-    return if admin?
+    return if editable?(@project)
 
     respond_to do |format|
       format.html { redirect_to unauthorized_path }

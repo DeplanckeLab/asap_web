@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_22_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_29_163000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -990,6 +990,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_100000) do
     t.text "value"
   end
 
+  create_table "project_origins", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "label"
+    t.text "name", null: false
+    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_project_origins_on_name", unique: true
+  end
+
   create_table "project_steps", id: :serial, force: :cascade do |t|
     t.datetime "created_at", precision: nil
     t.text "error_message"
@@ -1080,6 +1088,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_100000) do
     t.integer "pid"
     t.integer "pmid"
     t.integer "project_cell_set_id"
+    t.integer "project_origin_id", default: 1, null: false
     t.integer "project_type_id"
     t.boolean "public", default: false
     t.datetime "public_at", precision: nil
@@ -1101,6 +1110,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_100000) do
     t.datetime "viewed_at", precision: nil, default: -> { "now()" }
     t.text "write_access"
     t.index ["key"], name: "index_projects_on_key_unique", unique: true, where: "((key IS NOT NULL) AND (key <> ''::text))"
+    t.index ["project_origin_id"], name: "index_projects_on_project_origin_id"
     t.index ["root_project_id"], name: "index_projects_on_root_project_id"
   end
 
@@ -1612,6 +1622,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_22_100000) do
   add_foreign_key "projects", "norms", name: "projects_norm_id_fkey"
   add_foreign_key "projects", "organisms", name: "fk_organism_id"
   add_foreign_key "projects", "project_cell_sets", name: "projects_project_cell_set_id_fkey"
+  add_foreign_key "projects", "project_origins"
   add_foreign_key "projects", "project_types", name: "projects_project_type_id_fkey"
   add_foreign_key "projects", "projects", column: "root_project_id", on_delete: :nullify
   add_foreign_key "projects", "statuses", name: "projects_status_id_fkey"

@@ -83,7 +83,8 @@ class ProjectCloneService
       frozen_at: nil,
       public_at: nil,
       public_id: nil,
-      landing_page_json: '{}'
+      landing_page_json: '{}',
+      project_origin_id: ProjectOrigin.id_for(ProjectOrigin::CLONE)
     )
     
     @new_project.save!

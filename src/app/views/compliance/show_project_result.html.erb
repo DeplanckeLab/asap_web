@@ -67,13 +67,15 @@
             <% end %>
           <% end %>
         <% end %>
-        <%= button_to "Re-run Validation", 
-                      compliance_project_validate_path(@project), 
-                      method: :post,
-                      class: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" %>
+        <% if @validation_result %>
+          <%= button_to "Re-run Validation", 
+                        compliance_project_validate_path(@project), 
+                        method: :post,
+                        class: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" %>
+        <% end %>
         <% if @validation_result && !@validation_result[:valid] %>
           <%= link_to "Fix Compliance Issues",
-                      compliance_project_fix_path(@project),
+                      fix_compliance_project_path(@project),
                       class: "px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600" %>
         <% end %>
         <%= render 'compliance/validation_history_modal', project: @project %>
@@ -250,7 +252,7 @@
       <p class="mt-2 text-gray-500">This project has not been validated yet, or validation is in progress.</p>
       
       <div class="mt-6">
-        <%= button_to "Start Validation", 
+        <%= button_to "Run Validation", 
                       compliance_project_validate_path(@project), 
                       method: :post,
                       class: "px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700" %>

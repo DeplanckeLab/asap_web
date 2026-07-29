@@ -77,19 +77,21 @@
             <% end %>
           <% end %>
         <% end %>
-        <button type="button"
-                data-action="click->metadata-validation#runValidation"
-                data-metadata-validation-target="validateButton"
-                data-guided-tour="compliance-validate-button"
-                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Re-run Validation</button>
-        <% if !@project.is_public? || admin? %>
-          <% if @validation_result && @validation_result[:valid] %>
+        <% if @validation_result %>
+          <button type="button"
+                  data-action="click->metadata-validation#runValidation"
+                  data-metadata-validation-target="validateButton"
+                  data-guided-tour="compliance-validate-button"
+                  class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Re-run Validation</button>
+        <% end %>
+        <% if (!@project.is_public? || admin?) && @validation_result %>
+          <% if @validation_result[:valid] %>
             <%= link_to "Edit Metadata",
-                        compliance_project_fix_path(@project),
+                        fix_compliance_project_path(@project),
                         class: "px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700" %>
           <% else %>
             <%= link_to "Fix Compliance Issues",
-                        compliance_project_fix_path(@project),
+                        fix_compliance_project_path(@project),
                         class: "px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600" %>
           <% end %>
         <% end %>
@@ -191,7 +193,8 @@
         <button type="button"
                 data-action="click->metadata-validation#runValidation"
                 data-metadata-validation-target="validateButton"
-                class="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700">Start Validation</button>
+                data-guided-tour="compliance-validate-button"
+                class="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700">Run Validation</button>
       </div>
     </div>
   <% end %>

@@ -197,12 +197,24 @@
         <!-- Project Type -->
         <div class="md:col-span-2 md:max-w-md">
           <%= form.label :project_type_id, "Project Type", class: "block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2" %>
-          <% if @integrate_mode %>
+          <%
+            origin_name = @project_origin_name.presence || params[:project_origin].presence
+            lock_project_type = @integrate_mode || @lock_project_type || origin_name == ProjectOrigin::SCFAIR_VALIDATION
+            if lock_project_type && project.project_type_id.blank?
+              sc_type = (@project_types || ProjectType.order(:name)).find { |pt| pt.tag.to_s == 'sc' } ||
+                        (@project_types || []).find { |pt| pt.name.to_s.downcase.include?('single') }
+              project.project_type_id = sc_type.id if sc_type
+            end
+          %>
+          <% if lock_project_type %>
             <%= form.select :project_type_id,
                   options_from_collection_for_select(@project_types || [], :id, :name, project.project_type_id),
                   {},
                   { class: "w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed", disabled: true } %>
             <%= form.hidden_field :project_type_id %>
+            <% if origin_name == ProjectOrigin::SCFAIR_VALIDATION && !@integrate_mode %>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Fixed for projects created from the standalone scFAIR validator.</p>
+            <% end %>
           <% else %>
             <%= form.select :project_type_id,
                   options_from_collection_for_select(@project_types || [], :id, :name, project.project_type_id),
@@ -325,6 +337,8 @@
     <%= form.hidden_field :key, value: project.key || '' %>
     <%= form.hidden_field :step_id, value: project.step_id || 1 %>
     <%= form.hidden_field :status_id, value: project.status_id || 1 %>
+    <% origin_name = @project_origin_name.presence || params[:project_origin].presence || ProjectOrigin::UPLOAD %>
+    <%= hidden_field_tag :project_origin, origin_name %>
     <% if @is_resetting_parsing %>
       <%= hidden_field_tag :reset_parsing, '1' %>
     <% end %>

@@ -1,5 +1,33 @@
 <!-- Top Bar -->
-<div id="project-page-header" class="bg-black shadow-sm border-b border-gray-200 sticky top-0 z-50 overflow-visible">
+<%
+  show_compliance_nav_hint =
+    @project.from_scfair_validation? &&
+    editable?(@project) &&
+    @project.compliance_schemas.any? &&
+    !@project.compliance_validation_run?
+  compliance_hint_parsing_complete = false
+  if show_compliance_nav_hint
+    asap_docker_image = Basic.get_asap_docker(@project.version)
+    hint_parsing_step =
+      if asap_docker_image
+        Step.where(docker_image_id: asap_docker_image.id, name: 'parsing').first
+      else
+        Step.where(name: 'parsing').order(:id).last
+      end
+    hint_project_step =
+      hint_parsing_step && ProjectStep.find_by(project_id: @project.id, step_id: hint_parsing_step.id)
+    compliance_hint_parsing_complete = hint_project_step.present? && hint_project_step.status_id.to_i == 3
+  end
+%>
+<div id="project-page-header"
+     class="bg-black shadow-sm border-b border-gray-200 sticky top-0 z-50 overflow-visible"
+     <% if show_compliance_nav_hint %>
+       data-controller="compliance-nav-hint"
+       data-compliance-nav-hint-active-value="true"
+       data-compliance-nav-hint-project-id-value="<%= @project.id %>"
+       data-compliance-nav-hint-parsing-complete-value="<%= compliance_hint_parsing_complete %>"
+       data-compliance-nav-hint-icon-url-value="<%= asset_path('scfair.svg') %>"
+     <% end %>>
   <div class="px-4 sm:px-6 lg:px-8 w-full overflow-visible">
     <div class="flex items-center justify-between h-16 overflow-visible">
       <!-- Left side: Logo and Project Info -->
@@ -384,10 +412,10 @@
             <% end %>
             
             <!-- Compliance -->
-            <% if admin? && @project.compliance_schemas.any? %>
+            <% if editable?(@project) && @project.compliance_schemas.any? %>
               <%= link_to project_path(@project, view: 'compliance'), 
                   class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'compliance' ? 'bg-gray-100 font-medium' : ''}",
-                  data: { guided_tour: "project-nav-compliance" } do %>
+                  data: { guided_tour: "project-nav-compliance", compliance_nav_hint_target: "navLink" } do %>
                 <i class="fas fa-check-circle text-lg mr-3 text-emerald-500"></i>
                 Compliance
               <% end %>
@@ -510,9 +538,9 @@
           <%= link_to project_path(@project, view: 'settings'),
               class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'settings' ? 'bg-gray-700' : ''}", title: "Settings", data: { guided_tour: "project-nav-settings" } do %><i class="fas fa-cog text-lg"></i><% end %>
         <% end %>
-        <% if admin? && @project.compliance_schemas.any? %>
+        <% if editable?(@project) && @project.compliance_schemas.any? %>
           <%= link_to project_path(@project, view: 'compliance'),
-              class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'compliance' ? 'bg-gray-700' : ''}", title: "Compliance", data: { guided_tour: "project-nav-compliance" } do %><i class="fas fa-check-circle text-lg"></i><% end %>
+              class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'compliance' ? 'bg-gray-700' : ''}", title: "Compliance", data: { guided_tour: "project-nav-compliance", compliance_nav_hint_target: "navLink" }, id: "project-nav-compliance" do %><i class="fas fa-check-circle text-lg"></i><% end %>
         <% end %>
         <% if admin? %>
           <%= link_to project_path(@project, view: 'access'),

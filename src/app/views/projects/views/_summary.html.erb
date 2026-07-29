@@ -243,7 +243,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
       <span class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= summary_shared_users_count.to_i.positive? ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-600' %>" data-guided-tour="summary-sharing-badge">Shared with <span class="font-semibold mx-1"><%= number_with_delimiter(summary_shared_users_count) %></span> users</span>
     </div>
   </div>
-<% if admin?%>
+<% if editable?(@project) %>
   <% if @project.compliance_schemas.any? %>
     <%= link_to project_path(@project, view: 'compliance'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors", data: { guided_tour: "summary-compliance-card" } do %>
       <p class="dashboard-card-title text-gray-900 flex items-center gap-2"><i class="fas fa-check-circle text-gray-500"></i><span>Compliance</span></p>
@@ -252,7 +252,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
   <% else %>
     <div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3" data-guided-tour="summary-compliance-card"><p class="dashboard-card-title text-gray-900 flex items-center gap-2"><i class="fas fa-check-circle text-gray-500"></i><span>Compliance</span></p><p class="italic text-gray-500 mt-2">No available schema</p></div>
   <% end %>
-    <% end %>
+<% end %>
 </div>
 
 <%# Row 2: Info Boxes %>
@@ -269,8 +269,20 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
         </div>
         <div class="flex items-center gap-4 min-h-[1.5em]" data-guided-tour="summary-identity-type-row"><span class="w-24 shrink-0 text-gray-500">Type</span><span class="text-gray-900 font-medium"><%= @project_type&.name || 'Unknown' %></span></div>
         <div class="flex items-start gap-4 min-h-[1.5em]" data-guided-tour="summary-identity-origin-row"><span class="w-24 shrink-0 text-gray-500 mt-0.5">Origin</span><div class="text-gray-700 flex-1">
-          <% if @project.cloned_project_id.present? %>Cloned from <%= link_to Project.find_by(id: @project.cloned_project_id)&.key || 'deleted', project_path(id: @project.cloned_project_id), class: "text-blue-600 underline font-semibold" %> <% if summary_clone_lineage_projects.any? %><button id="summary-lineage-toggle-button" type="button" class="badge-text bg-gray-200 text-gray-700 px-1.5 rounded ml-1">Full lineage</button><% end %>
-          <% else %>New project<% end %>
+          <% if @project.cloned_project_id.present? %>
+            Cloned from <%= link_to Project.find_by(id: @project.cloned_project_id)&.key || 'deleted', project_path(id: @project.cloned_project_id), class: "text-blue-600 underline font-semibold" %>
+            <% if summary_clone_lineage_projects.any? %>
+              <button id="summary-lineage-toggle-button" type="button" class="badge-text bg-gray-200 text-gray-700 px-1.5 rounded ml-1">Full lineage</button>
+            <% end %>
+          <% elsif @project.from_scfair_validation? %>
+            <%= @project.project_origin.display_label %>
+          <% elsif @project.from_integration? %>
+            <%= @project.project_origin.display_label %>
+          <% elsif @project.project_origin.present? && !@project.from_upload? %>
+            <%= @project.project_origin.display_label %>
+          <% else %>
+            New project
+          <% end %>
         </div></div>
       </div>
     </div>

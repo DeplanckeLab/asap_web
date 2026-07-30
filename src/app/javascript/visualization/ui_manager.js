@@ -344,14 +344,7 @@ export class UIManager {
         // Only initialize state if checkbox hasn't been initialized before
         // This preserves the checkbox state when clicking the waterdrop button
         if (!hasExistingState) {
-          // Initialize as checked with white background
-          selectAllCheckbox.style.backgroundColor = 'white'
-          selectAllCheckbox.style.borderColor = '#d1d5db'
-          const icon = selectAllCheckbox.querySelector('i')
-          if (icon) {
-            icon.style.display = 'block'
-            icon.style.color = '#10b981' // green checkmark
-          }
+          this.controller.syncCategoryCheckboxUiForMetadata?.(metadataId)
         }
         
         // Check if there's only one category - if so, disable the checkbox
@@ -366,37 +359,10 @@ export class UIManager {
         }
       }
       
-      // Show ON/OFF switch only if there are selected categories AND not all are selected
+      // Show ON/OFF switch only when the discrete selection actually constrains cells
       const filterSwitch = document.querySelector(`.metadata-filter-switch[data-metadata-id="${metadataId}"]`)
       if (filterSwitch) {
-        let hasActiveFilter = false
-        
-        if (this.controller.selectedCategories && 
-            this.controller.selectedCategories[metadataId] &&
-            this.controller.selectedCategories[metadataId].size > 0) {
-          
-          // Get total number of categories from metadata vector
-          let totalCount = 0
-          
-          if (metadataVector) {
-            if (metadataVector.values) {
-              // Normal case: count unique values
-              const allCategories = new Set(metadataVector.values)
-              totalCount = allCategories.size
-            } else if (metadataVector.compression_info?.single_category) {
-              // Single category compression: only 1 category
-              totalCount = 1
-            } else if (metadataVector.compression_info?.categories) {
-              // Compressed data: use categories array
-              totalCount = metadataVector.compression_info.categories.length
-            }
-            
-            const selectedCount = this.controller.selectedCategories[metadataId].size
-            
-            // Only show switch if not all categories are selected (i.e., there's actual filtering)
-            hasActiveFilter = selectedCount < totalCount
-          }
-        }
+        const hasActiveFilter = this.controller.dataManager?.isDiscreteSelectionConstraining?.(metadataId) === true
         
         if (hasActiveFilter) {
           filterSwitch.style.display = 'flex'
@@ -412,11 +378,9 @@ export class UIManager {
           filterSwitch.style.display = 'none'
         }
       }
-      
-      // Note: Don't initialize selectedCategories here!
-      // The HTML only shows a subset of categories, not all of them.
-      // selectedCategories will be initialized when the user unfolds the metadata
-      // (in initializeCheckboxesForMetadata), which loads the full metadata vector.
+
+      // Keep individual category checks aligned with selectedCategories (including restored filters)
+      this.controller.syncCategoryCheckboxUiForMetadata?.(metadataId)
     } else if (isContinuous) {
       // For continuous metadata, show the new UI elements (status icon, filter state icon, and filter switch)
       // console.log(`🔍 [UI] Processing continuous metadata ${metadataId}`)
@@ -513,33 +477,8 @@ export class UIManager {
     let hasActiveFilter = false
     
     if (isCategorical) {
-      // For categorical: check if there are selected categories AND not all are selected
-      if (this.controller.selectedCategories && 
-          this.controller.selectedCategories[metadataId] &&
-          this.controller.selectedCategories[metadataId].size > 0) {
-        
-        // Get total number of categories from metadata vector
-        let totalCount = 0
-        
-        if (metadataVector) {
-          if (metadataVector.values) {
-            // Normal case: count unique values
-            const allCategories = new Set(metadataVector.values)
-            totalCount = allCategories.size
-          } else if (metadataVector.compression_info?.single_category) {
-            // Single category compression: only 1 category
-            totalCount = 1
-          } else if (metadataVector.compression_info?.categories) {
-            // Compressed data: use categories array
-            totalCount = metadataVector.compression_info.categories.length
-          }
-          
-          const selectedCount = this.controller.selectedCategories[metadataId].size
-          
-          // Only show switch if not all categories are selected (i.e., there's actual filtering)
-          hasActiveFilter = selectedCount < totalCount
-        }
-      }
+      // Same rule as cell filtering: only active when the selection constrains cells.
+      hasActiveFilter = this.controller.dataManager?.isDiscreteSelectionConstraining?.(metadataId) === true
     } else if (isContinuous) {
       // Only treat a selected range as an active filter when it actually constrains cells.
       hasActiveFilter = this.controller.dataManager?.isContinuousSelectionConstraining?.(metadataId) === true
@@ -811,24 +750,12 @@ export class UIManager {
   // Enable category checkboxes for a metadata
   enableCategoryCheckboxesForMetadata(metadataId) {
     const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
-    const selectedSet = this.controller.selectedCategories?.[metadataId] || null
     categoryCheckboxes.forEach(checkbox => {
       checkbox.style.pointerEvents = 'auto'
       checkbox.style.opacity = '1'
       checkbox.style.cursor = 'pointer'
-
-      const icon = checkbox.querySelector('i')
-      if (!icon) return
-
-      const category = checkbox.dataset.category
-      const isSelected = !!(selectedSet && selectedSet.has(category))
-      if (isSelected) {
-        icon.style.display = 'block'
-        icon.style.color = '#10b981'
-      } else {
-        icon.style.display = 'none'
-      }
     })
+    this.controller.syncCategoryCheckboxUiForMetadata?.(metadataId)
   }
 
   // Disable category checkboxes for a metadata

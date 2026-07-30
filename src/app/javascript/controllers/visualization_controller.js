@@ -2655,6 +2655,7 @@ export default class extends Controller {
     if (!projectIdentifier) return false
 
     this.currentCheckpointLoadInProgress = true
+    this.isApplyingCheckpointState = true
     this.setCheckpointViewLoading(true, 'Loading checkpoint')
     try {
       const sessionEntry = this.readCurrentVisualizationStateEntryFromSession()
@@ -2736,6 +2737,8 @@ export default class extends Controller {
       })
       return false
     } finally {
+      this.syncAllCategoryCheckboxUiFromSelections('loadCurrentCheckpointOnEntry:finally')
+      this.isApplyingCheckpointState = false
       this.setCheckpointViewLoading(false)
       this.currentCheckpointLoadInProgress = false
     }
@@ -3526,9 +3529,16 @@ export default class extends Controller {
     const draftState = this.checkpointCommentDraftState
     if (draftState) {
       if (!this.isCheckpointStateAlreadyApplied(draftState)) {
-        this.applyCheckpointState(draftState).catch((error) => {
-          console.error('[CheckpointComments] failed to restore draft state on close', error)
-        })
+        this.setCheckpointViewLoading(true, 'Loading checkpoint')
+        this.isApplyingCheckpointState = true
+        this.applyCheckpointState(draftState)
+          .catch((error) => {
+            console.error('[CheckpointComments] failed to restore draft state on close', error)
+          })
+          .finally(() => {
+            this.isApplyingCheckpointState = false
+            this.setCheckpointViewLoading(false)
+          })
       }
     }
     this.checkpointCommentVisitedExisting = false
@@ -4528,24 +4538,34 @@ export default class extends Controller {
     if (pendingIds.length === 0) return
 
     for (const metadataId of pendingIds) {
+      const mid = String(metadataId || '').trim()
       try {
-        if (!this.loadedMetadataVectors[metadataId]) {
-          const metadataLoomFile = this.getLoomFileForMetadataRequest(metadataId)
-          await this.dataManager.loadSingleMetadataVector(metadataId, { loomFile: metadataLoomFile })
+        // Checkbox UI never waits on vector I/O.
+        if (this.selectedCategories?.[mid] || this.selectedCategories?.[metadataId]) {
+          this.syncCategoryCheckboxUiForMetadata(mid, { reveal: true })
+        } else {
+          this.revealCategoryCheckboxesForMetadata(mid)
         }
-        if (!this.loadedMetadataVectors[metadataId]) continue
 
-        const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
+        if (!this.loadedMetadataVectors[metadataId] && !this.loadedMetadataVectors[mid]) {
+          const metadataLoomFile = this.getLoomFileForMetadataRequest(mid)
+          await this.dataManager.loadSingleMetadataVector(mid, { loomFile: metadataLoomFile })
+        }
+        if (!this.loadedMetadataVectors[metadataId] && !this.loadedMetadataVectors[mid]) continue
+
+        const metadataItem = document.querySelector(`[data-metadata-item="${mid}"]`)
         const isContinuous = !!(metadataItem && metadataItem.querySelector('.metadata-range-section'))
         if (!isContinuous) {
-          await this.initializeCheckboxesForMetadata(metadataId)
-          this.drawCategoryDistributions(metadataId)
-          if (this.selectedCategories[metadataId] && this.selectedCategories[metadataId].size > 0) {
+          await this.initializeCheckboxesForMetadata(mid)
+          this.scheduleDrawCategoryDistributions(mid)
+          if (this.selectedCategories[mid] || this.selectedCategories[metadataId]) {
             this.dataManager.updateCellFiltering()
           }
         }
       } catch (error) {
         console.error(`Failed to finish expanded metadata ${metadataId} after preload:`, error)
+      } finally {
+        this.setMetadataFilterRestoreLoading(mid, false)
       }
     }
   }
@@ -8159,6 +8179,52 @@ export default class extends Controller {
     this.uncheckedMetadata = new Set()
     this.disabledFilters = new Set()
 
+    // Restore filter selections FIRST and paint checkboxes before any slow embedding/gene work.
+    // Category UI is server-rendered; it must not wait on metadata vector I/O.
+    this.selectedCategories = {}
+    const rawSelectedCategories = state.filters?.selectedCategories || {}
+    Object.entries(rawSelectedCategories).forEach(([metadataId, values]) => {
+      this.selectedCategories[String(metadataId)] = new Set((values || []).map(String))
+    })
+    this.selectedRanges = {}
+    Object.entries(state.filters?.selectedRanges || {}).forEach(([metadataId, range]) => {
+      this.selectedRanges[String(metadataId)] = {
+        min: Number(range.min),
+        max: Number(range.max)
+      }
+    })
+    this.filterRestoreLog('applyCheckpoint raw filters', {
+      hasFiltersObject: !!state.filters,
+      rawSelectedCategoryKeys: Object.keys(rawSelectedCategories),
+      rawSelectedCategorySizes: Object.fromEntries(
+        Object.entries(rawSelectedCategories).map(([id, values]) => [id, Array.isArray(values) ? values.length : -1])
+      ),
+      rawSelectedRangeKeys: Object.keys(state.filters?.selectedRanges || {}),
+      filterSwitchKeys: Object.keys(state.filters?.metadataFilterSwitches || {})
+    })
+    this.syncAllCategoryCheckboxUiFromSelections('applyCheckpoint:after-selectedCategories-restore')
+    const pendingFilterMetadataIds = this.getPendingFilterMetadataIds()
+    pendingFilterMetadataIds.forEach((metadataId) => {
+      this.setMetadataFilterRestoreLoading(metadataId, true)
+    })
+    this.filterRestoreLog('applyCheckpoint filter snapshot', {
+      pendingVectors: pendingFilterMetadataIds.length,
+      pendingVectorIds: pendingFilterMetadataIds,
+      selectedCategoryMetaCount: Object.keys(this.selectedCategories).length,
+      selectedCategoryMetaIds: Object.keys(this.selectedCategories),
+      selectedCategorySizes: Object.fromEntries(
+        Object.entries(this.selectedCategories).map(([id, set]) => [id, set?.size || 0])
+      )
+    })
+    // Font Awesome may replace <i> with <svg> after first paint; re-apply class-based state.
+    ;[50, 200, 500, 1000].forEach((delayMs) => {
+      window.setTimeout(() => {
+        this.syncAllCategoryCheckboxUiFromSelections(`applyCheckpoint:delayed-resync-${delayMs}ms`)
+      }, delayMs)
+    })
+    // Start filter vector loads immediately; await before fold restore (runs in parallel with embedding).
+    const filterVectorsPromise = this.ensureFilterMetadataVectorsLoaded()
+
     const checkpointEmbeddingId = state.embedding?.id || state.visualizationEmbedding?.id
     const checkpointEmbeddingLoomFile = state.embedding?.loomFile || state.visualizationEmbedding?.loomFile || state.loomFile || null
     const checkpointEmbeddingName = state.visualizationEmbedding?.name || null
@@ -8286,19 +8352,6 @@ export default class extends Controller {
       this.geneManager.currentMatrixAnnotId = state.matrix.annotId || this.geneManager.currentMatrixAnnotId
     }
 
-    this.selectedCategories = {}
-    Object.entries(state.filters?.selectedCategories || {}).forEach(([metadataId, values]) => {
-      this.selectedCategories[metadataId] = new Set((values || []).map(String))
-    })
-
-    this.selectedRanges = {}
-    Object.entries(state.filters?.selectedRanges || {}).forEach(([metadataId, range]) => {
-      this.selectedRanges[metadataId] = {
-        min: Number(range.min),
-        max: Number(range.max)
-      }
-    })
-
     this.adaptColorRangeByMetadataId = { ...(state.adaptColorRangeByMetadataId || {}) }
     this.setGlobalFiltersEnabled(state.filters?.globalFiltersEnabled !== false)
 
@@ -8406,11 +8459,19 @@ export default class extends Controller {
       }
     }
 
+    // Wait for filter vectors started at the beginning of apply (parallel with embedding/genes).
+    await filterVectorsPromise
+    this.filterRestoreLog('filter vectors promise settled')
+    this.syncAllCategoryCheckboxUiFromSelections('applyCheckpoint:after-filter-vectors')
+
     try {
       await this.restoreFoldAndSwitchState(state)
     } catch (foldRestoreError) {
+      this.filterRestoreWarn('fold restore failed', { error: String(foldRestoreError?.message || foldRestoreError) })
       console.error('[FoldRestore] failed', foldRestoreError)
     }
+    // Fold/switch restore must not leave checkbox UI waiting on barplots or deferred loads.
+    this.syncAllCategoryCheckboxUiFromSelections('applyCheckpoint:after-fold-restore')
     if (state.bottomRightPanel && typeof state.bottomRightPanel === 'object') {
       await this.restoreBottomRightPanelState(state)
     } else {
@@ -8449,6 +8510,8 @@ export default class extends Controller {
       this.updateSelectedPointColors()
     }
 
+    this.syncAllCategoryCheckboxUiFromSelections('applyCheckpoint:before-filtering-update')
+    this.clearAllMetadataFilterRestoreLoading()
     this.dataManager.updateCellFiltering(true)
     if (this.metadataData?.id) {
       this.syncEmbeddingUiToLoadedEmbedding(this.metadataData.id, this.metadataData.name || null)
@@ -8477,7 +8540,7 @@ export default class extends Controller {
   async restoreFoldAndSwitchState(state) {
     const metadataFoldState = state.foldState?.metadata || {}
     const totalHeadersInDom = this.getMetadataFoldHeaders().length
-    console.info('[FoldRestore] start', {
+    this.filterRestoreLog('fold restore start', {
       metadataFoldStateKeys: Object.keys(metadataFoldState).length,
       expandedKeys: Object.entries(metadataFoldState).filter(([, v]) => v === true).map(([k]) => k),
       totalHeadersInDom
@@ -8486,20 +8549,20 @@ export default class extends Controller {
       const header = this.getMetadataFoldHeaderById(metadataId)
       if (!header) {
         if (shouldBeExpanded) {
-          console.warn('[FoldRestore] header not found for expanded metadata', { metadataId })
+          this.filterRestoreWarn('fold restore header not found', { metadataId })
         }
         continue
       }
       const chevron = header.querySelector('.fa-chevron-right')
       const isExpanded = !!(chevron && chevron.style.transform === 'rotate(90deg)')
       if (isExpanded !== !!shouldBeExpanded) {
-        console.info('[FoldRestore] toggling metadata', { metadataId, from: isExpanded, to: !!shouldBeExpanded })
+        this.filterRestoreLog('fold restore toggling metadata', { metadataId, from: isExpanded, to: !!shouldBeExpanded })
         await this.toggleMetadata({ currentTarget: header, timeStamp: performance.now() })
         const chevronAfter = header.querySelector('.fa-chevron-right')
         const isExpandedAfter = !!(chevronAfter && chevronAfter.style.transform === 'rotate(90deg)')
         const nextSibling = header.nextElementSibling
         const nextDisplay = nextSibling ? nextSibling.style.display : null
-        console.info('[FoldRestore] after toggleMetadata', {
+        this.filterRestoreLog('fold restore after toggleMetadata', {
           metadataId,
           targetExpanded: !!shouldBeExpanded,
           actualExpanded: isExpandedAfter,
@@ -8524,10 +8587,32 @@ export default class extends Controller {
     Object.entries(metadataSwitches).forEach(([metadataId, enabled]) => {
       const switchEl = document.querySelector(`.metadata-filter-switch[data-metadata-id="${metadataId}"]`)
       if (!switchEl) return
+      const shouldEnable = !!enabled
       const current = switchEl.dataset.filterEnabled === 'true'
-      if (current !== !!enabled) {
-        switchEl.click()
+      if (current === shouldEnable) return
+
+      // Apply switch state directly — switchEl.click() runs toggleMetadataFilter which
+      // deletes selectedCategories when turning OFF and races checkbox restore.
+      const switchToggle = switchEl.querySelector('div')
+      if (shouldEnable) {
+        switchEl.dataset.filterEnabled = 'true'
+        switchEl.style.backgroundColor = '#10b981'
+        if (switchToggle) switchToggle.style.transform = 'translateX(14px)'
+        this.uiManager.enableCategoryCheckboxesForMetadata(metadataId)
+      } else {
+        switchEl.dataset.filterEnabled = 'false'
+        switchEl.style.backgroundColor = '#ef4444'
+        if (switchToggle) switchToggle.style.transform = 'translateX(0px)'
+        if (!this.savedCategorySelections) this.savedCategorySelections = {}
+        const liveSet = this.selectedCategories?.[metadataId] || this.selectedCategories?.[String(metadataId)]
+        if (liveSet) {
+          this.savedCategorySelections[metadataId] = new Set(liveSet)
+          delete this.selectedCategories[metadataId]
+          delete this.selectedCategories[String(metadataId)]
+        }
+        this.uiManager.disableCategoryCheckboxesForMetadata(metadataId)
       }
+      this.updateSelectAllCheckboxState(metadataId)
     })
 
     const geneSwitches = state.filters?.geneFilterSwitches || {}
@@ -8622,6 +8707,8 @@ export default class extends Controller {
         currentMetadataId: this.currentMetadataId || null,
         currentMetadataVectorId: this.currentMetadataVector?.id || null
       })
+      // Barplots need coloring vector; draw after paint for already-expanded panels.
+      this.scheduleDrawCategoryDistributionsForExpandedMetadata()
     } else {
       this.resetAllWaterDropButtons()
       this.clearMetadataColoring()
@@ -8856,30 +8943,41 @@ export default class extends Controller {
       } else {
         // Handle categorical metadata - show categories with smooth transition
         const displayTime = performance.now()
+        const skipExpandAnimation = this.shouldDeferMetadataExpandLoad()
         categoriesDiv.style.display = 'block'
-        categoriesDiv.style.maxHeight = '0px'
-        categoriesDiv.style.opacity = '0'
-        categoriesDiv.style.overflow = 'hidden'
-        categoriesDiv.style.transition = 'max-height 0.3s ease-out, opacity 0.2s ease-out'
-        
-        // Trigger reflow to ensure transition works
-        categoriesDiv.offsetHeight
-        
-        // Expand with animation to the element's natural height
-        const targetHeight = categoriesDiv.scrollHeight
-        categoriesDiv.style.maxHeight = `${targetHeight}px`
-        categoriesDiv.style.opacity = '1'
-        this.updateMetadataClaColumns()
-        
-        const handleExpandTransitionEnd = (event) => {
-          if (event.propertyName === 'max-height') {
-            categoriesDiv.style.maxHeight = 'none'
-            categoriesDiv.style.overflow = 'visible'
-            categoriesDiv.removeEventListener('transitionend', handleExpandTransitionEnd)
-            this.refreshMetadataCategoriesJumpListeners()
+        if (skipExpandAnimation) {
+          // Checkpoint restore: do not flash opacity 0 (looks like checkboxes vanishing).
+          categoriesDiv.style.transition = ''
+          categoriesDiv.style.maxHeight = 'none'
+          categoriesDiv.style.opacity = '1'
+          categoriesDiv.style.overflow = 'visible'
+          this.updateMetadataClaColumns()
+          this.refreshMetadataCategoriesJumpListeners()
+        } else {
+          categoriesDiv.style.maxHeight = '0px'
+          categoriesDiv.style.opacity = '0'
+          categoriesDiv.style.overflow = 'hidden'
+          categoriesDiv.style.transition = 'max-height 0.3s ease-out, opacity 0.2s ease-out'
+
+          // Trigger reflow to ensure transition works
+          categoriesDiv.offsetHeight
+
+          // Expand with animation to the element's natural height
+          const targetHeight = categoriesDiv.scrollHeight
+          categoriesDiv.style.maxHeight = `${targetHeight}px`
+          categoriesDiv.style.opacity = '1'
+          this.updateMetadataClaColumns()
+
+          const handleExpandTransitionEnd = (event) => {
+            if (event.propertyName === 'max-height') {
+              categoriesDiv.style.maxHeight = 'none'
+              categoriesDiv.style.overflow = 'visible'
+              categoriesDiv.removeEventListener('transitionend', handleExpandTransitionEnd)
+              this.refreshMetadataCategoriesJumpListeners()
+            }
           }
+          categoriesDiv.addEventListener('transitionend', handleExpandTransitionEnd)
         }
-        categoriesDiv.addEventListener('transitionend', handleExpandTransitionEnd)
         // console.log(`⏱️ [TOGGLE] Display change: ${(performance.now() - displayTime).toFixed(2)}ms`)
         
         // Load metadata vector when expanding categories (for future coloring)
@@ -8893,56 +8991,46 @@ export default class extends Controller {
           const isInMemory = !!metadataVector
           // console.log(`⏱️ [TOGGLE] Memory check: ${(performance.now() - memCheckTime).toFixed(2)}ms, In memory: ${isInMemory}`)
           
+          // Checkbox UI is independent from vector load / barplots.
+          this.revealCategoryCheckboxesForMetadata(metadataId)
+          if (this.selectedCategories?.[metadataId] || this.selectedCategories?.[String(metadataId)]) {
+            this.filterRestoreLog('expand sync', {
+              metadataId,
+              isInMemory,
+              setSize: (this.selectedCategories?.[metadataId] || this.selectedCategories?.[String(metadataId)])?.size || 0
+            })
+            this.syncCategoryCheckboxUiForMetadata(metadataId, { reveal: true })
+            this.uiManager.updateFilterSwitchVisibility(metadataId)
+          }
+
           if (isInMemory) {
-            // Already in memory - just initialize checkboxes (no loading needed)
-            const checkboxTime = performance.now()
             this.initializeCheckboxesForMetadata(metadataId).then(() => {
-              // console.log(`⏱️ [TOGGLE] Checkbox init: ${(performance.now() - checkboxTime).toFixed(2)}ms`)
-              
-              // Draw category distribution bar plots
-              this.drawCategoryDistributions(metadataId)
-              
-              // Only update filtering if there are active selections
-              if (this.selectedCategories[metadataId] && this.selectedCategories[metadataId].size > 0) {
-                const filterTime = performance.now()
+              this.scheduleDrawCategoryDistributions(metadataId)
+              if (this.selectedCategories[metadataId] || this.selectedCategories[String(metadataId)]) {
                 this.dataManager.updateCellFiltering()
-                // console.log(`⏱️ [TOGGLE] Filtering: ${(performance.now() - filterTime).toFixed(2)}ms`)
-              } else {
-                // console.log(`⏱️ [TOGGLE] Skipped filtering (no active selections)`)
               }
-              
-              // console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
             })
           } else if (this.shouldDeferMetadataExpandLoad()) {
-            // Checkpoint restore expands UI first; let the scheduled preload own the network load
-            // so we do not race and leave a permanent error icon.
+            // Keep checkbox UI already painted; only defer network/vector work.
+            if (this.selectedCategories?.[metadataId] || this.selectedCategories?.[String(metadataId)]) {
+              this.setMetadataFilterRestoreLoading(metadataId, true)
+            }
             this.queueExpandedMetadataForPostPreload(metadataId)
           } else {
-            // Not in memory - load it first (immediate loading for click)
-            const loadTime = performance.now()
-            // console.log(`⏱️ [TOGGLE] Loading metadata from disk/network...`)
+            if (this.selectedCategories?.[metadataId] || this.selectedCategories?.[String(metadataId)]) {
+              this.setMetadataFilterRestoreLoading(metadataId, true)
+            }
             this.loadSingleMetadataVectorSilently(metadataId).then((vectorData) => {
+              this.setMetadataFilterRestoreLoading(metadataId, false)
               if (!vectorData) return
-              // console.log(`⏱️ [TOGGLE] Load time: ${(performance.now() - loadTime).toFixed(2)}ms`)
-              
-              const checkboxTime = performance.now()
               this.initializeCheckboxesForMetadata(metadataId).then(() => {
-                // console.log(`⏱️ [TOGGLE] Checkbox init: ${(performance.now() - checkboxTime).toFixed(2)}ms`)
-                
-                // Draw category distribution bar plots
-                this.drawCategoryDistributions(metadataId)
-                
-                if (this.selectedCategories[metadataId] && this.selectedCategories[metadataId].size > 0) {
-                  const filterTime = performance.now()
+                this.scheduleDrawCategoryDistributions(metadataId)
+                if (this.selectedCategories[metadataId] || this.selectedCategories[String(metadataId)]) {
                   this.dataManager.updateCellFiltering()
-                  // console.log(`⏱️ [TOGGLE] Filtering: ${(performance.now() - filterTime).toFixed(2)}ms`)
                 }
-                
-                // console.log(`⏱️ [TOGGLE] ✅ Total time: ${(performance.now() - perfStart).toFixed(2)}ms`)
               })
-            }).catch(error => {
-              // console.log(`Failed to load metadata vector ${metadataId} on expansion:`, error.message)
-              // console.log(`⏱️ [TOGGLE] ❌ Failed after: ${(performance.now() - perfStart).toFixed(2)}ms`)
+            }).catch(() => {
+              this.setMetadataFilterRestoreLoading(metadataId, false)
             })
           }
         }
@@ -10268,10 +10356,12 @@ export default class extends Controller {
     }
   }
   
-  // Reset all water drop buttons to grey (including gene buttons)
+  // Reset all water drop buttons to grey (including gene buttons and selection shortcuts)
   resetAllWaterDropButtons() {
     //console.log('resetAllWaterDropButtons: Starting...')
-    const allButtons = document.querySelectorAll('[data-action*="waterDropClicked"], [data-action*="geneWaterDropClicked"], [data-action*="geneSetWaterDropClicked"]')
+    const allButtons = document.querySelectorAll(
+      '[data-action*="waterDropClicked"], [data-action*="geneWaterDropClicked"], [data-action*="geneSetWaterDropClicked"], [data-role="saved-selection-color"]'
+    )
     //console.log('resetAllWaterDropButtons: Found', allButtons.length, 'buttons')
     allButtons.forEach((button, index) => {
       //console.log(`resetAllWaterDropButtons: Resetting button ${index}:`, button)
@@ -10285,10 +10375,50 @@ export default class extends Controller {
   // Set a water drop button to active (blue)
   setWaterDropButtonActive(button) {
     //console.log('setWaterDropButtonActive: Setting button as active:', button)
+    if (!button) return
     button.style.color = '#3b82f6'
     button.style.backgroundColor = '#dbeafe'
     button.dataset.active = 'true'
+    const metadataId = String(button.dataset.metadataId || '').trim()
+    if (metadataId) {
+      this.setSavedSelectionColorButtonsActiveForMetadata(metadataId, true)
+    }
     //console.log('setWaterDropButtonActive: Button now has color:', button.style.color)
+  }
+
+  setSavedSelectionColorButtonsActiveForMetadata(metadataId, active) {
+    const id = String(metadataId || '').trim()
+    if (!id) return
+    const escaped = this.escapeAttributeSelectorValue(id)
+    document.querySelectorAll(`[data-role="saved-selection-color"][data-metadata-id="${escaped}"]`).forEach((button) => {
+      button.dataset.active = active ? 'true' : 'false'
+      button.style.color = active ? '#3b82f6' : '#9ca3af'
+      button.style.backgroundColor = active ? '#dbeafe' : ''
+    })
+  }
+
+  // Color by a saved cell set: same as metadata palette, then focus that metadata in the left panel.
+  async savedSelectionColorClicked(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const button = event.currentTarget
+    const metadataId = String(button?.dataset?.metadataId || '').trim()
+    if (!metadataId) return
+
+    const metadataButton = this.findColoringButtonForMetadataId(metadataId)
+    if (!metadataButton) {
+      console.warn('No metadata coloring button found for saved selection metadata:', metadataId)
+      return
+    }
+
+    this.waterDropClicked({
+      preventDefault() {},
+      stopPropagation() {},
+      currentTarget: metadataButton
+    })
+
+    await this.focusMetadataFilterItem(metadataId)
   }
 
   findColoringButtonForMetadataId(metadataId) {
@@ -15567,6 +15697,7 @@ export default class extends Controller {
     const lockBadge = node.querySelector('[data-role="saved-selection-lock"]')
     const countLabel = node.querySelector('[data-role="saved-selection-count"]')
     const statusSlot = node.querySelector('[data-role="saved-selection-status"]')
+    const colorBtn = node.querySelector('[data-role="saved-selection-color"]')
     const deleteBtn = node.querySelector('[data-role="saved-selection-delete"]')
     const isLocked = item.locked === true
 
@@ -15613,6 +15744,18 @@ export default class extends Controller {
     }
     if (statusSlot) {
       statusSlot.innerHTML = this.selectionStatusBadgeHtml(item.status)
+    }
+    if (colorBtn) {
+      const metadataId = item.metadataId ? String(item.metadataId) : ''
+      const canColor = metadataId.length > 0 && String(item.status || '') === 'completed'
+      colorBtn.dataset.selectionId = String(item.id)
+      colorBtn.dataset.metadataId = metadataId
+      colorBtn.style.display = canColor ? 'inline-flex' : 'none'
+      const currentColoringId = this.currentMetadataId ? String(this.currentMetadataId) : ''
+      const isColorActive = canColor && currentColoringId === metadataId
+      colorBtn.dataset.active = isColorActive ? 'true' : 'false'
+      colorBtn.style.color = isColorActive ? '#3b82f6' : '#9ca3af'
+      colorBtn.style.backgroundColor = isColorActive ? '#dbeafe' : ''
     }
     if (deleteBtn) {
       deleteBtn.dataset.selectionId = String(item.id)
@@ -20389,44 +20532,8 @@ export default class extends Controller {
         // Re-enable the category checkboxes
         this.uiManager.enableCategoryCheckboxesForMetadata(metadataId)
         
-        // Determine checkbox color based on whether all categories are selected
-        if (this.selectedCategories && this.selectedCategories[metadataId]) {
-          const allCategoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
-          const totalCategories = allCategoryCheckboxes.length
-          const selectedCount = this.selectedCategories[metadataId].size
-          
-          if (selectedCount === totalCategories) {
-            // All categories selected - green
-            checkbox.style.backgroundColor = 'white'
-            if (icon) {
-              icon.style.display = 'block'
-              icon.style.color = '#10b981'
-            }
-            // console.log(`🔍 [CHECKBOX] All ${totalCategories} categories selected - white with green check`)
-          } else if (selectedCount > 0) {
-            // Some categories selected - orange
-            checkbox.style.backgroundColor = '#f59e0b'
-            if (icon) {
-              icon.style.display = 'block'
-              icon.style.color = 'white'
-            }
-            // console.log(`🔍 [CHECKBOX] ${selectedCount}/${totalCategories} categories selected - orange`)
-          } else {
-            // No categories selected - should not happen, but default to green
-            checkbox.style.backgroundColor = '#10b981'
-            if (icon) {
-              icon.style.display = 'block'
-              icon.style.color = 'white'
-            }
-          }
-        } else {
-          // No categories selected or not initialized - default to green
-          checkbox.style.backgroundColor = '#10b981'
-          if (icon) {
-            icon.style.display = 'block'
-            icon.style.color = 'white'
-          }
-        }
+        // Select-all state from the same constraining rule as filtering
+        this.updateSelectAllCheckboxState(metadataId)
       }
     }
     
@@ -20444,6 +20551,8 @@ export default class extends Controller {
     
     const metadataId = event.currentTarget.dataset.metadataId
     const checkbox = event.currentTarget
+    const metadataItem = checkbox.closest('[data-metadata-item]')
+    if (metadataItem?.dataset?.filterRestoreLoading === 'true') return
     
     // Check if filtering is enabled
     const filterSwitch = document.querySelector(`.metadata-filter-switch[data-metadata-id="${metadataId}"]`)
@@ -20949,21 +21058,21 @@ export default class extends Controller {
     const selectAllCheckbox = document.querySelector(`.metadata-select-all-checkbox[data-metadata-id="${metadataId}"]`)
     if (!selectAllCheckbox) return
     
-    const allCategoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
-    const totalCategories = allCategoryCheckboxes.length
-    const selectedCount = this.selectedCategories && this.selectedCategories[metadataId] ? this.selectedCategories[metadataId].size : 0
+    const selected = this.selectedCategories?.[metadataId]
+    const selectedCount = selected ? selected.size : 0
+    const isConstraining = this.dataManager?.isDiscreteSelectionConstraining?.(metadataId) === true
     
     const icon = selectAllCheckbox.querySelector('i')
     
-    if (selectedCount === 0) {
+    if (!selected || selectedCount === 0) {
       // None selected - white background, no checkmark
       selectAllCheckbox.style.backgroundColor = 'white'
       selectAllCheckbox.style.borderColor = '#d1d5db'
       if (icon) {
         icon.style.display = 'none'
       }
-    } else if (selectedCount === totalCategories) {
-      // All selected - white background, green checkmark
+    } else if (!isConstraining) {
+      // All selected (not constraining) - white background, green checkmark
       selectAllCheckbox.style.backgroundColor = 'white'
       selectAllCheckbox.style.borderColor = '#d1d5db'
       if (icon) {
@@ -20971,7 +21080,7 @@ export default class extends Controller {
         icon.style.color = '#10b981' // green
       }
     } else {
-      // Some selected - orange background, white checkmark
+      // Partial / empty-constraint selection - orange background, white checkmark
       selectAllCheckbox.style.backgroundColor = '#f59e0b' // orange
       selectAllCheckbox.style.borderColor = '#f59e0b'
       if (icon) {
@@ -20988,6 +21097,8 @@ export default class extends Controller {
     const metadataId = event.currentTarget.dataset.metadataId
     const category = event.currentTarget.dataset.category
     const checkbox = event.currentTarget
+    const metadataItem = checkbox.closest('[data-metadata-item]')
+    if (metadataItem?.dataset?.filterRestoreLoading === 'true') return
     
     // Check if filtering is enabled
     const filterSwitch = document.querySelector(`.metadata-filter-switch[data-metadata-id="${metadataId}"]`)
@@ -20998,11 +21109,13 @@ export default class extends Controller {
       return
     }
     
-    // Check if selected by looking at the checkmark visibility and color
-    const icon = checkbox.querySelector('i')
+    // Check if selected by looking at stable class first (survives Font Awesome SVG swap),
+    // then fall back to checkmark visibility/color.
+    const icon = checkbox.querySelector('i, svg')
     const iconDisplay = icon ? (icon.style.display || window.getComputedStyle(icon).display) : 'none'
     const iconColor = icon ? (icon.style.color || window.getComputedStyle(icon).color) : ''
-    const isSelected = iconDisplay !== 'none' && (iconColor === '#10b981' || iconColor === 'rgb(16, 185, 129)') // #10b981
+    const isSelected = checkbox.classList.contains('is-selected')
+      || (!checkbox.classList.contains('is-deselected') && iconDisplay !== 'none' && (iconColor === '#10b981' || iconColor === 'rgb(16, 185, 129)'))
     
     // console.log(`🔄 Toggle category selection: ${category}, isSelected: ${isSelected}`)
     
@@ -21035,16 +21148,22 @@ export default class extends Controller {
       // Deselect this category
       // console.log(`🔄 About to deselect category: ${category}`)
       checkbox.style.backgroundColor = 'white'
-      const icon = checkbox.querySelector('i')
-      icon.style.display = 'none'
+      checkbox.classList.add('is-deselected')
+      checkbox.classList.remove('is-selected')
+      const mark = checkbox.querySelector('i, svg')
+      if (mark) mark.style.display = 'none'
       this.deselectCategory(metadataId, category)
     } else {
       // Select this category
       // console.log(`🔄 About to select category: ${category}`)
       checkbox.style.backgroundColor = 'white'
-      const icon = checkbox.querySelector('i')
-      icon.style.display = 'block'
-      icon.style.color = '#10b981' // green checkmark
+      checkbox.classList.add('is-selected')
+      checkbox.classList.remove('is-deselected')
+      const mark = checkbox.querySelector('i, svg')
+      if (mark) {
+        mark.style.display = 'block'
+        mark.style.color = '#10b981' // green checkmark
+      }
       this.selectCategory(metadataId, category)
     }
     
@@ -21112,22 +21231,25 @@ export default class extends Controller {
       this.selectedCategories[metadataId] = new Set()
     }
     
-    // Add ALL unique categories from the metadata vector
-    const allCategories = [...new Set(metadataVector.values)]
-    allCategories.forEach(category => {
-      this.selectedCategories[metadataId].add(String(category))
-    })
+    // Add the full category universe (same as initializeCheckboxesForMetadata).
+    // Unique values alone can omit zero-cell categories and leave a false active filter.
+    this.selectedCategories[metadataId] = new Set()
+    const universe = this.dataManager.getDiscreteCategoryUniverse(metadataId, metadataVector)
+    if (Array.isArray(universe) && universe.length > 0) {
+      universe.forEach((category) => {
+        this.selectedCategories[metadataId].add(String(category))
+      })
+    } else {
+      ;[...new Set(metadataVector.values)].forEach((category) => {
+        this.selectedCategories[metadataId].add(String(category))
+      })
+    }
     
     // Update the visual state of category checkboxes in the HTML
-    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
-    categoryCheckboxes.forEach(checkbox => {
-      checkbox.style.backgroundColor = 'white'
-      const icon = checkbox.querySelector('i')
-      icon.style.display = 'block'
-      icon.style.color = '#10b981' // green checkmark
-    })
+    this.syncCategoryCheckboxUiForMetadata(metadataId, { reveal: true })
     
-    // Update filter switch visibility (hide when all selected)
+    // Update select-all checkbox and filter switch (hide when all selected)
+    this.updateSelectAllCheckboxState(metadataId)
     this.uiManager.updateFilterSwitchVisibility(metadataId)
     
     // Update cell filtering (which will re-render labels in ReGL mode)
@@ -21144,13 +21266,7 @@ export default class extends Controller {
     }
     
     // Update the visual state of category checkboxes in the HTML
-    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
-    categoryCheckboxes.forEach(checkbox => {
-      checkbox.style.backgroundColor = 'white'
-      checkbox.querySelector('i').style.display = 'none'
-    })
-    
-    // console.log(`🔍 [DESELECT ALL] Updated ${categoryCheckboxes.length} visible checkboxes`)
+    this.syncCategoryCheckboxUiForMetadata(metadataId, { reveal: true })
     
     // Update filter switch visibility (show when not all selected)
     this.uiManager.updateFilterSwitchVisibility(metadataId)
@@ -21219,12 +21335,40 @@ export default class extends Controller {
 
 
   async initializeCheckboxesForMetadata(metadataId) {
-    // Ensure metadata is loaded (from memory or disk)
-    let metadataVector = this.dataManager.getMetadataVectorById(metadataId)
+    const mid = String(metadataId || '').trim()
+    if (!mid) return
+
+    const existingSelection =
+      (this.selectedCategories?.[mid] instanceof Set && this.selectedCategories[mid]) ||
+      (this.selectedCategories?.[metadataId] instanceof Set && this.selectedCategories[metadataId]) ||
+      null
+
+    // Paint immediately from an existing selection (including empty Set = all deselected).
+    if (existingSelection) {
+      this.syncCategoryCheckboxUiForMetadata(mid, { reveal: true })
+      this.uiManager.updateFilterSwitchVisibility(mid)
+    } else {
+      // No selection yet: initialize from DOM categories without waiting for vector I/O.
+      const domUniverse = this.dataManager.getDiscreteCategoryUniverse(mid)
+      if (Array.isArray(domUniverse) && domUniverse.length > 0) {
+        this.selectedCategories[mid] = new Set(domUniverse.map((category) => String(category)))
+        this.syncCategoryCheckboxUiForMetadata(mid, { reveal: true })
+        this.uiManager.updateFilterSwitchVisibility(mid)
+        this.filterRestoreLog('initializeCheckboxes from DOM (no vector wait)', {
+          metadataId: mid,
+          size: this.selectedCategories[mid].size
+        })
+      } else {
+        this.revealCategoryCheckboxesForMetadata(mid)
+      }
+    }
+
+    // Ensure metadata is loaded (from memory or disk) for filtering / distributions.
+    let metadataVector = this.dataManager.getMetadataVectorById(mid)
     if (!metadataVector) {
-      metadataVector = await this.loadMetadataVectorFromDisk(metadataId)
+      metadataVector = await this.loadMetadataVectorFromDisk(mid)
       if (!metadataVector) {
-        console.error(`Failed to load metadata ${metadataId} from disk`)
+        console.error(`Failed to load metadata ${mid} from disk`)
         return
       }
     }
@@ -21234,28 +21378,281 @@ export default class extends Controller {
       return
     }
     
-    // Only initialize if not already initialized
-    if (this.selectedCategories[metadataId]) {
+    // Already have a selection: never overwrite it after vector load.
+    if (this.selectedCategories[mid] instanceof Set || this.selectedCategories[metadataId] instanceof Set) {
+      this.syncCategoryCheckboxUiForMetadata(mid, { reveal: true })
+      this.uiManager.updateFilterSwitchVisibility(mid)
       return
     }
     
     // Prefer compression_info.categories as the full universe. Unique values alone can
     // omit categories with zero cells and make a full UI selection look like a filter.
-    this.selectedCategories[metadataId] = new Set()
-    const universe = this.dataManager.getDiscreteCategoryUniverse(metadataId, metadataVector)
+    this.selectedCategories[mid] = new Set()
+    const universe = this.dataManager.getDiscreteCategoryUniverse(mid, metadataVector)
     if (Array.isArray(universe) && universe.length > 0) {
       universe.forEach((category) => {
-        this.selectedCategories[metadataId].add(String(category))
+        this.selectedCategories[mid].add(String(category))
       })
     } else {
-      console.error(`No category universe found in metadata vector for ${metadataId}`)
+      console.error(`No category universe found in metadata vector for ${mid}`)
     }
+
+    this.syncCategoryCheckboxUiForMetadata(mid, { reveal: true })
     
     // Update point count display after initializing checkboxes
     this.dataManager.updateCellFiltering()
     
     // Show the filter switch now that we have a selection
-    this.uiManager.updateFilterSwitchVisibility(metadataId)
+    this.uiManager.updateFilterSwitchVisibility(mid)
+  }
+
+  // Paint category / select-all checkboxes from selectedCategories (DOM defaults are "checked").
+  // Also reveal checkboxes: they start as display:none until a vector load used to call
+  // showCheckboxesForMetadata — that made restore look slow even when selection Sets were ready.
+  revealCategoryCheckboxesForMetadata(metadataId) {
+    const mid = String(metadataId || '').trim()
+    if (!mid) return
+    const selectAllCheckbox = document.querySelector(`.metadata-select-all-checkbox[data-metadata-id="${mid}"]`)
+    if (selectAllCheckbox) selectAllCheckbox.style.display = 'flex'
+    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${mid}"]`)
+    for (let i = 0; i < categoryCheckboxes.length; i++) {
+      categoryCheckboxes[i].style.display = 'flex'
+    }
+  }
+
+  scheduleDrawCategoryDistributions(metadataId) {
+    const mid = String(metadataId || '').trim()
+    if (!mid) return
+    // Barplots are expensive; never block checkbox paint on the same turn.
+    window.setTimeout(() => {
+      try {
+        this.drawCategoryDistributions(mid)
+      } catch (error) {
+        console.warn(`Failed to draw category distributions for ${mid}:`, error)
+      }
+    }, 0)
+  }
+
+  scheduleDrawCategoryDistributionsForExpandedMetadata() {
+    this.getMetadataFoldHeaders().forEach((header) => {
+      const metadataId = header.dataset.metadataId
+      if (!metadataId) return
+      const chevron = header.querySelector('.fa-chevron-right')
+      const isExpanded = !!(chevron && chevron.style.transform === 'rotate(90deg)')
+      if (!isExpanded) return
+      const metadataItem = header.closest('[data-metadata-item]')
+      if (metadataItem?.querySelector('.metadata-range-section')) return
+      this.scheduleDrawCategoryDistributions(metadataId)
+    })
+  }
+
+  syncCategoryCheckboxUiForMetadata(metadataId, { reveal = true } = {}) {
+    const mid = String(metadataId || '').trim()
+    if (!mid) return
+
+    const selected = this.selectedCategories?.[mid] || this.selectedCategories?.[metadataId] || null
+    // Missing selection means "not initialized yet" — keep server-rendered defaults.
+    // An empty Set is intentional (all categories deselected / zero cells).
+    if (!(selected instanceof Set)) {
+      if (reveal) this.revealCategoryCheckboxesForMetadata(mid)
+      this.filterRestoreLog('syncCategoryCheckboxUi skipped — no selection set', {
+        metadataId: mid,
+        reveal
+      })
+      return
+    }
+
+    const selectedSet = new Set(Array.from(selected).map((value) => String(value)))
+
+    if (reveal) {
+      this.revealCategoryCheckboxesForMetadata(mid)
+    }
+
+    let selectedCount = 0
+    let deselectedCount = 0
+    let firstDomCategory = null
+    let matchedCount = 0
+    const firstSelectedSample = selectedSet.size > 0 ? Array.from(selectedSet)[0] : null
+    const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${mid}"]`)
+    for (let i = 0; i < categoryCheckboxes.length; i++) {
+      const checkbox = categoryCheckboxes[i]
+      const category = String(checkbox.dataset.category ?? '')
+      if (firstDomCategory == null) firstDomCategory = category
+      const isSelected = selectedSet.has(category)
+      if (isSelected) matchedCount += 1
+      checkbox.classList.toggle('is-selected', isSelected)
+      checkbox.classList.toggle('is-deselected', !isSelected)
+      if (isSelected) selectedCount += 1
+      else deselectedCount += 1
+    }
+
+    this.updateSelectAllCheckboxState(mid)
+    this.filterRestoreLog('syncCategoryCheckboxUi', {
+      metadataId: mid,
+      boxes: categoryCheckboxes.length,
+      on: selectedCount,
+      off: deselectedCount,
+      setSize: selectedSet.size,
+      matchedInDom: matchedCount,
+      firstDomCategory,
+      firstSelectedSample,
+      reveal
+    })
+  }
+
+  syncAllCategoryCheckboxUiFromSelections(reason = 'unspecified') {
+    const startedAt = performance.now()
+    const ids = Object.keys(this.selectedCategories || {})
+    let totalBoxes = 0
+    let totalOn = 0
+    let totalOff = 0
+    ids.forEach((metadataId) => {
+      const mid = String(metadataId || '').trim()
+      const selected = this.selectedCategories?.[mid] || this.selectedCategories?.[metadataId] || null
+      const selectedSet = selected
+        ? new Set(Array.from(selected).map((value) => String(value)))
+        : null
+      this.syncCategoryCheckboxUiForMetadata(metadataId, { reveal: true })
+      this.uiManager.updateFilterSwitchVisibility(metadataId)
+      const boxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${mid}"]`)
+      totalBoxes += boxes.length
+      boxes.forEach((checkbox) => {
+        const category = String(checkbox.dataset.category ?? '')
+        if (selectedSet && selectedSet.has(category)) totalOn += 1
+        else totalOff += 1
+      })
+    })
+    this.filterRestoreLog('syncAllCategoryCheckboxUiFromSelections', {
+      reason,
+      metas: ids.length,
+      metadataIds: ids,
+      boxes: totalBoxes,
+      on: totalOn,
+      off: totalOff,
+      elapsedMs: Number((performance.now() - startedAt).toFixed(2))
+    })
+  }
+
+  filterRestoreLog(eventName, payload = null) {
+    if (payload == null) {
+      console.info(`ASAP_FILTER_RESTORE ${eventName}`)
+      return
+    }
+    console.info(`ASAP_FILTER_RESTORE ${eventName}`, payload)
+  }
+
+  filterRestoreWarn(eventName, payload = null) {
+    if (payload == null) {
+      console.warn(`ASAP_FILTER_RESTORE ${eventName}`)
+      return
+    }
+    console.warn(`ASAP_FILTER_RESTORE ${eventName}`, payload)
+  }
+
+  getPendingFilterMetadataIds() {
+    const ids = new Set([
+      ...Object.keys(this.selectedCategories || {}),
+      ...Object.keys(this.selectedRanges || {})
+    ])
+    return Array.from(ids).filter((metadataId) => {
+      const existing = this.dataManager.getMetadataVectorById(metadataId)
+      return !(existing && existing.values)
+    })
+  }
+
+  setMetadataFilterRestoreLoading(metadataId, isLoading) {
+    const mid = String(metadataId || '').trim()
+    if (!mid) return
+    const item = document.querySelector(`[data-metadata-item="${mid}"]`)
+    if (item) {
+      // Do not cover checkmarks with an opaque overlay — that looked like checkboxes
+      // "disappearing". Block interaction only, and show the panel banner.
+      const categoryCheckboxes = item.querySelectorAll('.category-checkbox, .metadata-select-all-checkbox')
+      if (isLoading) {
+        item.dataset.filterRestoreLoading = 'true'
+        categoryCheckboxes.forEach((checkbox) => {
+          checkbox.style.pointerEvents = 'none'
+          checkbox.dataset.filterRestoreBlocked = 'true'
+        })
+      } else {
+        delete item.dataset.filterRestoreLoading
+        categoryCheckboxes.forEach((checkbox) => {
+          if (checkbox.dataset.filterRestoreBlocked === 'true') {
+            checkbox.style.pointerEvents = ''
+            delete checkbox.dataset.filterRestoreBlocked
+          }
+        })
+        const overlay = item.querySelector('[data-role="metadata-filter-restore-overlay"]')
+        if (overlay) overlay.remove()
+      }
+    }
+
+    this.updateMetadataFilterRestoreBanner()
+  }
+
+  updateMetadataFilterRestoreBanner() {
+    const banner = document.querySelector('[data-role="metadata-filter-restore-banner"]')
+    if (!banner) return
+    const loadingItems = document.querySelectorAll('[data-metadata-item][data-filter-restore-loading="true"]')
+    const pendingCount = loadingItems.length
+    if (pendingCount > 0) {
+      const textEl = banner.querySelector('[data-role="metadata-filter-restore-banner-text"]')
+      if (textEl) {
+        textEl.textContent = pendingCount === 1
+          ? 'Loading filter data for 1 metadata...'
+          : `Loading filter data for ${pendingCount} metadata...`
+      }
+      banner.style.display = 'flex'
+    } else {
+      banner.style.display = 'none'
+    }
+  }
+
+  clearAllMetadataFilterRestoreLoading() {
+    document.querySelectorAll('[data-role="metadata-filter-restore-overlay"]').forEach((overlay) => {
+      const item = overlay.closest('[data-metadata-item]')
+      overlay.remove()
+      if (item) delete item.dataset.filterRestoreLoading
+    })
+    document.querySelectorAll('[data-metadata-item][data-filter-restore-loading="true"]').forEach((item) => {
+      delete item.dataset.filterRestoreLoading
+    })
+    this.updateMetadataFilterRestoreBanner()
+  }
+
+  async ensureFilterMetadataVectorsLoaded() {
+    const metadataIds = this.getPendingFilterMetadataIds()
+    this.filterRestoreLog('ensureFilterMetadataVectorsLoaded start', {
+      count: metadataIds.length,
+      metadataIds
+    })
+    if (metadataIds.length === 0) return
+
+    metadataIds.forEach((metadataId) => {
+      this.setMetadataFilterRestoreLoading(metadataId, true)
+    })
+
+    await Promise.all(metadataIds.map(async (metadataId) => {
+      const startedAt = performance.now()
+      try {
+        const loomFile = this.getLoomFileForMetadataRequest?.(metadataId)
+        await this.dataManager.loadSingleMetadataVector(metadataId, loomFile ? { loomFile } : {})
+        this.filterRestoreLog('vector loaded', {
+          metadataId,
+          elapsedMs: Number((performance.now() - startedAt).toFixed(2))
+        })
+      } catch (error) {
+        this.filterRestoreWarn('vector load failed', {
+          metadataId,
+          error: String(error?.message || error)
+        })
+      } finally {
+        this.setMetadataFilterRestoreLoading(metadataId, false)
+        this.syncCategoryCheckboxUiForMetadata(metadataId)
+        this.uiManager.updateFilterSwitchVisibility(metadataId)
+      }
+    }))
+    this.filterRestoreLog('ensureFilterMetadataVectorsLoaded done')
   }
 
 
@@ -21742,21 +22139,13 @@ export default class extends Controller {
 
   // Get cell indices that belong to the specified categories for a given metadata
   getCellsForMetadataCategories(metadataId, selectedCategories) {
-    // console.log(`🔍 getCellsForMetadataCategories called for metadata ${metadataId}`)
-    // console.log(`🔍 Selected categories:`, selectedCategories)
-    // console.log(`🔍 Selected categories type:`, typeof selectedCategories)
-    // console.log(`🔍 Selected categories size:`, selectedCategories?.size)
-    
     // Find the metadata vector for this metadata ID
     let metadataVector = this.dataManager.getMetadataVectorById(metadataId)
     if (!metadataVector || !metadataVector.values) {
-      console.warn(`No metadata vector found for metadata ID: ${metadataId}`)
-      // console.log(`💾 Metadata ${metadataId} not in memory - selections will be ignored for now`)
-      // console.log(`💡 Tip: Load this metadata to apply the filtering`)
-      return []
+      console.warn(`No metadata vector values found for metadata ID: ${metadataId}`)
+      // Missing values must not be treated as "match zero cells" (that wipes the plot on reload).
+      return null
     }
-    
-    // console.log(`🔍 Metadata vector found, values length:`, metadataVector.values.length)
 
     const startTime = performance.now()
     const cellIndices = []
@@ -22001,58 +22390,76 @@ export default class extends Controller {
 
   // Load metadata vector from disk (IndexedDB) when needed
   async loadMetadataVectorFromDisk(metadataId) {
+    const mid = String(metadataId || '').trim()
+    if (!mid) return null
+
+    // Memory hit first — skip IndexedDB and loading-lock races when apply/preload already fetched.
+    const memoryHit =
+      this.loadedMetadataVectors[mid] ||
+      this.loadedMetadataVectors[metadataId] ||
+      this.dataManager?.getMetadataVectorById?.(mid) ||
+      null
+    if (memoryHit) return memoryHit
+
     // Safety check to prevent infinite loops
     if (!this.loadingCallCount) {
       this.loadingCallCount = new Map()
     }
     
-    const currentCount = this.loadingCallCount.get(metadataId) || 0
+    const currentCount = this.loadingCallCount.get(mid) || 0
     if (currentCount > 5) {
-      console.error(`🚨 INFINITE LOOP DETECTED for metadata ${metadataId}! Stopping to prevent browser crash.`)
+      console.error(`INFINITE LOOP DETECTED for metadata ${mid}! Stopping to prevent browser crash.`)
       console.error(`Call stack:`, new Error().stack)
       return null
     }
     
-    this.loadingCallCount.set(metadataId, currentCount + 1)
-    // console.log(`💾 [DISK] loadMetadataVectorFromDisk called for ${metadataId} (call #${currentCount + 1})`)
+    this.loadingCallCount.set(mid, currentCount + 1)
     
     // Check if already loading to prevent duplicate requests
-    if (this.loadingMetadataVectors.has(metadataId)) {
-      // console.log(`💾 [DISK] Metadata ${metadataId} already loading, waiting...`)
-      while (this.loadingMetadataVectors.has(metadataId)) {
+    if (this.loadingMetadataVectors.has(mid)) {
+      while (this.loadingMetadataVectors.has(mid)) {
+        const ready =
+          this.loadedMetadataVectors[mid] ||
+          this.loadedMetadataVectors[metadataId] ||
+          this.dataManager?.getMetadataVectorById?.(mid)
+        if (ready) return ready
         await new Promise(resolve => setTimeout(resolve, 100))
       }
-      const result = this.loadedMetadataVectors[metadataId]
+      const result =
+        this.loadedMetadataVectors[mid] ||
+        this.loadedMetadataVectors[metadataId] ||
+        this.dataManager?.getMetadataVectorById?.(mid) ||
+        null
       if (!result) {
-        console.error(`💾 [DISK] RACE CONDITION: Metadata ${metadataId} finished loading but not found in loadedMetadataVectors!`)
-        console.error(`💾 [DISK] loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors))
+        console.error(`[DISK] Metadata ${mid} finished loading but not found in loadedMetadataVectors`)
+        console.error(`[DISK] loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors || {}))
       }
       return result
     }
     
     // Mark as loading to prevent race conditions
-    this.loadingMetadataVectors.add(metadataId)
+    this.loadingMetadataVectors.add(mid)
     
     try {
       // Load from IndexedDB
-      const vectorData = await this.memoryManager.loadMetadataFromIndexedDB(metadataId)
+      const vectorData = await this.memoryManager.loadMetadataFromIndexedDB(mid)
       
       if (!vectorData) {
-        console.warn(`💾 [DISK] Metadata vector not found on disk for ID: ${metadataId}`)
-        // console.log(`💾 [DISK] Attempting to load metadata ${metadataId} from server as fallback...`)
-        
-        // Fallback: Try to load from server directly
+        console.warn(`[DISK] Metadata vector not found on disk for ID: ${mid}`)
+
+        // Release this lock BEFORE network load. loadSingleMetadataVectorSilently /
+        // dataManager.loadSingleMetadataVector wait on loadingMetadataVectors — calling
+        // them while we still hold mid deadlocks and leaves the checkpoint overlay stuck.
+        this.loadingMetadataVectors.delete(mid)
         try {
-          const fallbackData = await this.loadSingleMetadataVectorSilently(metadataId)
-          if (fallbackData) {
-            // console.log(`💾 [DISK] Loaded metadata ${metadataId} from server`)
-            return fallbackData
+          if (this.dataManager?.loadSingleMetadataVector) {
+            return await this.dataManager.loadSingleMetadataVector(mid)
           }
+          return await this.loadSingleMetadataVectorSilently(mid)
         } catch (error) {
-          console.error(`💾 [DISK] Fallback loading failed for metadata ${metadataId}:`, error)
+          console.error(`[DISK] Network load failed for metadata ${mid}:`, error)
+          return null
         }
-        
-        return null
       }
       
       // console.log(`💾 [DISK] Loaded metadata ${metadataId} from disk`)
@@ -22065,13 +22472,13 @@ export default class extends Controller {
         } else if (vectorData.data_type === 'NUMERIC') {
           values = this.dataManager.decompressContinuousMetadataVector(vectorData.compressed_data, vectorData.compression_info)
         } else {
-          console.warn(`Unknown data type for metadata ${metadataId}: ${vectorData.data_type}`)
+          console.warn(`Unknown data type for metadata ${mid}: ${vectorData.data_type}`)
           return null
         }
         
         // Create a fully loaded metadata vector object
         const decompressedVector = {
-          id: metadataId,
+          id: mid,
           name: vectorData.name,
           data_type: vectorData.data_type,
           values: values,
@@ -22079,27 +22486,26 @@ export default class extends Controller {
         }
         
         // Store in memory for future use (but will be cleaned up by memory optimization)
-        this.loadedMetadataVectors[metadataId] = decompressedVector
+        this.loadedMetadataVectors[mid] = decompressedVector
         
         // Status icon already updated during initial status check - no need to update again
         
         // Update usage tracker
-        this.memoryManager.updateMetadataUsage(metadataId)
+        this.memoryManager.updateMetadataUsage(mid)
         
         // Trigger cleanup if we have too many metadata in memory
         this.memoryManager.cleanupUnusedMetadata()
         
-        // console.log(`💾 [DISK] Decompressed and cached metadata ${metadataId}: ${values.length} values`)
         return decompressedVector
       }
       
       // If already decompressed, store in memory and return
-      this.loadedMetadataVectors[metadataId] = vectorData
+      this.loadedMetadataVectors[mid] = vectorData
       
       // Status icon already updated during initial status check - no need to update again
       
       // Update usage tracker
-      this.memoryManager.updateMetadataUsage(metadataId)
+      this.memoryManager.updateMetadataUsage(mid)
       
       // Trigger cleanup if we have too many metadata in memory
       this.memoryManager.cleanupUnusedMetadata()
@@ -22107,11 +22513,11 @@ export default class extends Controller {
       return vectorData
       
     } catch (error) {
-      console.error(`💾 [DISK] Error loading metadata vector ${metadataId} from disk:`, error)
+      console.error(`[DISK] Error loading metadata vector ${mid} from disk:`, error)
       return null
     } finally {
       // Always remove from loading set, even if there was an error
-      this.loadingMetadataVectors.delete(metadataId)
+      this.loadingMetadataVectors.delete(mid)
     }
   }
 

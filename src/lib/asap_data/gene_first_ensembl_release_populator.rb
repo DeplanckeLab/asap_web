@@ -9,7 +9,8 @@ module AsapData
     module_function
 
     BATCH_SIZE = 50_000
-    ENSEMBL_ID_PATTERN = /\A[A-Za-z]+[0-9A-Za-z._-]+\z/
+    # Allow ':' for older metazoa IDs such as TCOGS2:TC000001
+    ENSEMBL_ID_PATTERN = /\A[A-Za-z]+[0-9A-Za-z._:-]+\z/
 
     def populate!(remote_db: default_remote_db, download_missing_gene_table: default_download_missing_gene_table?, force: default_force?)
       base_dirs = EnsemblAssembliesLoader.all_ensembl_base_dirs

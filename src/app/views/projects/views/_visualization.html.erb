@@ -191,6 +191,12 @@ project_type_tag = @project&.project_type&.tag.to_s
           </div>
         </div>
         <div data-checkpoint-scroll-key="categorical-metadata-panel" style="flex: 1; padding: 16px; overflow-y: auto; min-height: 0;">
+          <div id="metadata-filter-restore-banner"
+               data-role="metadata-filter-restore-banner"
+               style="display: none; align-items: center; gap: 8px; margin-bottom: 12px; padding: 8px 10px; border: 1px solid #fcd34d; border-radius: 8px; background: #fffbeb; color: #92400e; font-size: 12px;">
+            <i class="fas fa-spinner fa-spin" style="font-size: 13px; color: #d97706;"></i>
+            <span data-role="metadata-filter-restore-banner-text">Loading filter data...</span>
+          </div>
           <% if @h_metadata[@default_loom_file] %>
             <%# Visible DISCRETE metadata %>
             <% categorical_metadata_items = (@h_metadata[@default_loom_file]['cell']['DISCRETE'] || []).select { |metadata| metadata.data_type&.name == 'DISCRETE' } %>
@@ -219,7 +225,7 @@ project_type_tag = @project&.project_type&.tag.to_s
                   <div class="metadata-select-all-checkbox" 
                        data-metadata-id="<%= metadata.id %>"
                        data-action="click->visualization#toggleSelectAllCategories"
-                       style="margin-right: 8px; cursor: pointer; display: none; align-items: center; justify-content: center; width: 20px; height: 20px; border: 2px solid #d1d5db; border-radius: 4px; background-color: white; transition: all 0.2s;"
+                       style="margin-right: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border: 2px solid #d1d5db; border-radius: 4px; background-color: white; transition: all 0.2s;"
                        onmouseover="this.style.borderColor='#059669'"
                        onmouseout="this.style.borderColor='#d1d5db'"
                        title="Select/Deselect all categories"
@@ -395,7 +401,7 @@ project_type_tag = @project&.project_type&.tag.to_s
                                      data-metadata-id="<%= metadata.id %>"
                                      data-category="<%= category %>"
                                      data-action="click->visualization#toggleCategorySelection"
-                                     style="cursor: pointer; display: none; align-items: center; justify-content: center; width: 16px; height: 16px; border: 2px solid #d1d5db; border-radius: 3px; background-color: white; transition: all 0.2s;"
+                                     style="cursor: pointer; display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 2px solid #d1d5db; border-radius: 3px; background-color: white; transition: all 0.2s;"
                                      onmouseover="this.style.borderColor='#059669'"
                                      onmouseout="this.style.borderColor='#d1d5db'">
                                   <i class="fas fa-check" style="color: #10b981; font-size: 10px; display: block;"></i>
@@ -473,7 +479,7 @@ project_type_tag = @project&.project_type&.tag.to_s
                                      data-metadata-id="<%= metadata.id %>"
                                      data-category="<%= category %>"
                                      data-action="click->visualization#toggleCategorySelection"
-                                     style="cursor: pointer; display: none; align-items: center; justify-content: center; width: 16px; height: 16px; border: 2px solid #d1d5db; border-radius: 3px; background-color: white; transition: all 0.2s;"
+                                     style="cursor: pointer; display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; border: 2px solid #d1d5db; border-radius: 3px; background-color: white; transition: all 0.2s;"
                                      onmouseover="this.style.borderColor='#059669'"
                                      onmouseout="this.style.borderColor='#d1d5db'">
                                   <i class="fas fa-check" style="color: #10b981; font-size: 10px; display: block;"></i>
@@ -1029,6 +1035,20 @@ project_type_tag = @project&.project_type&.tag.to_s
           @keyframes spin {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
+          }
+          /* Keep FA checkmarks; class state survives <i> -> <svg> replacement. */
+          .category-checkbox.is-deselected > i,
+          .category-checkbox.is-deselected > svg {
+            display: none !important;
+          }
+          .category-checkbox.is-selected > i,
+          .category-checkbox.is-selected > svg {
+            display: block !important;
+            color: #10b981 !important;
+          }
+          .metadata-select-all-checkbox.is-deselected > i,
+          .metadata-select-all-checkbox.is-deselected > svg {
+            display: none !important;
           }
           .embedding-selection-menu .embedding-menu-card {
             border-bottom: 1px solid #f3f4f6;

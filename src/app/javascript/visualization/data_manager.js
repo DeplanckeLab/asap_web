@@ -1459,41 +1459,28 @@ export class DataManager {
       return null
     }
 
-    // Get all metadata that have selections AND have loaded vectors (categorical)
+    // Get all metadata that have actual constraining selections AND have loaded vectors (categorical)
     const discreteMetadataWithSelections = hasDiscreteSelections 
       ? Object.keys(this.controller.selectedCategories).filter(metadataId => {
       const selections = this.controller.selectedCategories[metadataId]
-      const hasLoadedVector = this.controller.loadedMetadataVectors[metadataId] !== undefined
-      
-      // Important: Empty Set (size === 0) is a valid constraint meaning "show nothing"
-      // Don't filter it out or delete it
       if (!selections) {
         return false
       }
+      if (!this.hasUsableMetadataVectorValues(metadataId)) {
+        return false
+      }
       
-      return hasLoadedVector
+      return this.isDiscreteSelectionConstraining(metadataId, selections)
     })
       : []
     
-    // Get all metadata that have range selections AND have loaded vectors (continuous)
+    // Get all metadata that have constraining range selections AND have loaded vectors (continuous)
     const continuousMetadataWithSelections = hasContinuousSelections
       ? Object.keys(this.controller.selectedRanges).filter(metadataId => {
           const range = this.controller.selectedRanges[metadataId]
           const hasRange = range && (range.min !== undefined && range.max !== undefined)
-          const hasLoadedVector = this.controller.loadedMetadataVectors[metadataId] !== undefined
-          
-          // Debug logging for gene filtering
-          if (metadataId && metadataId.startsWith('gene_')) {
-            // console.log(`🔍 [FILTER] Gene filtering check for ${metadataId}:`, {
-             // hasRange,
-             // hasLoadedVector,
-             // range,
-             // loadedMetadataVectorsKeys: Object.keys(this.controller.loadedMetadataVectors || {}),
-             // selectedRangesKeys: Object.keys(this.controller.selectedRanges || {})
-             // }) */
-          }
-          
-          return hasRange && hasLoadedVector
+          if (!hasRange || !this.hasUsableMetadataVectorValues(metadataId)) return false
+          return this.isContinuousSelectionConstraining(metadataId, range)
         })
       : []
 
@@ -1654,10 +1641,7 @@ export class DataManager {
     
     const discreteMetadataWithConstraints = Object.keys(this.controller.selectedCategories).filter(metadataId => {
       const selections = this.controller.selectedCategories[metadataId]
-      const hasLoadedVector = this.controller.loadedMetadataVectors[metadataId] !== undefined ||
-        this.controller.loadedMetadataVectors[String(metadataId)] !== undefined
-
-      if (!selections || !hasLoadedVector) {
+      if (!selections || !this.hasUsableMetadataVectorValues(metadataId)) {
         return false
       }
 
@@ -1667,10 +1651,7 @@ export class DataManager {
     const continuousMetadataWithConstraints = Object.keys(this.controller.selectedRanges).filter(metadataId => {
       const range = this.controller.selectedRanges[metadataId]
       const hasRange = range && (range.min !== undefined && range.max !== undefined)
-      const hasLoadedVector = this.controller.loadedMetadataVectors[metadataId] !== undefined ||
-        this.controller.loadedMetadataVectors[String(metadataId)] !== undefined
-
-      if (!hasRange || !hasLoadedVector) return false
+      if (!hasRange || !this.hasUsableMetadataVectorValues(metadataId)) return false
 
       return this.isContinuousSelectionConstraining(metadataId, range)
     })
@@ -1696,12 +1677,22 @@ export class DataManager {
     // Start with cells that match the first metadata's constraints
     const firstMetadataId = allMetadataWithConstraints[0]
     let filteredIndices = this.controller.getCellsForMetadata(firstMetadataId)
+    if (!Array.isArray(filteredIndices)) {
+      console.warn(`⚠️ FILTERING ISSUE: first metadata ${firstMetadataId} has no usable values; skipping filter pass`)
+      this.controller.lastFilteredIndices = null
+      this.controller.lastFilterStateHash = currentFilterHash
+      return null
+    }
     // console.log(`🔍 First metadata ${firstMetadataId} filtered indices:`, filteredIndices ? filteredIndices.length : 'null') */
 
     // Intersect with each subsequent metadata's constraints using Set for O(1) lookups
     for (let i = 1; i < allMetadataWithConstraints.length; i++) {
       const metadataId = allMetadataWithConstraints[i]
       const cellsForThisMetadata = this.controller.getCellsForMetadata(metadataId)
+      if (!Array.isArray(cellsForThisMetadata)) {
+        console.warn(`⚠️ FILTERING ISSUE: metadata ${metadataId} has no usable values; skipping this constraint`)
+        continue
+      }
       // console.log(`🔍 Metadata ${metadataId} filtered indices:`, cellsForThisMetadata ? cellsForThisMetadata.length : 'null') */
       
       // Convert to Set for O(1) lookup instead of O(n) includes()
@@ -1851,6 +1842,11 @@ export class DataManager {
       return universe.length
     }
     return null
+  }
+
+  hasUsableMetadataVectorValues(metadataId) {
+    const vector = this.getMetadataVectorById(metadataId)
+    return !!(vector && vector.values)
   }
 
   isDiscreteSelectionConstraining(metadataId, selections = null) {

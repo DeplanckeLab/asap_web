@@ -2,6 +2,7 @@ desc '####################### Clean'
 task update_xrefs: :environment do
 
   puts 'Executing...'
+  require "set"
 
   dev_null = Logger.new("/dev/null")
   Rails.logger = dev_null
@@ -76,29 +77,49 @@ task update_xrefs: :environment do
       GeneSetItem.upsert_all(
         slice.map { |row| row.merge(updated_at: now) },
         unique_by: :id,
-        update_only: [:name, :content, :asap_data_id],
+        update_only: [:name, :content, :asap_data_id, :latest_ensembl_release, :obsolete],
         record_timestamps: false
       )
     end
     [inserts.size, updates.size]
   end
 
+  # Present in latest release: insert or update content when needed; clear obsolete;
+  # stamp latest_ensembl_release. Missing identifiers are marked obsolete separately.
   def queue_gene_set_item_write!(inserts, updates, existing_item, attrs)
     if existing_item
-      if existing_item.name.to_s != attrs[:name].to_s || existing_item.content.to_s != attrs[:content].to_s ||
-         existing_item.asap_data_id.to_i != attrs[:asap_data_id].to_i
+      content_changed =
+        existing_item.name.to_s != attrs[:name].to_s ||
+        existing_item.content.to_s != attrs[:content].to_s ||
+        existing_item.asap_data_id.to_i != attrs[:asap_data_id].to_i
+      latest_changed =
+        existing_item.latest_ensembl_release.to_i != attrs[:latest_ensembl_release].to_i
+      obsolete_changed = existing_item.obsolete != false
+      if content_changed || latest_changed || obsolete_changed
         updates << {
           id: existing_item.id,
           gene_set_id: attrs[:gene_set_id],
           identifier: attrs[:identifier],
           name: attrs[:name],
           content: attrs[:content],
-          asap_data_id: attrs[:asap_data_id]
+          asap_data_id: attrs[:asap_data_id],
+          latest_ensembl_release: attrs[:latest_ensembl_release],
+          obsolete: false
         }
       end
     else
-      inserts << attrs
+      inserts << attrs.merge(obsolete: false)
     end
+  end
+
+  def mark_missing_gene_set_items_obsolete!(gene_set_id, present_identifiers)
+    return 0 unless gene_set_id
+    # Never mark everything obsolete when the present set is empty (failed/empty parse).
+    return 0 if present_identifiers.nil? || present_identifiers.empty?
+
+    GeneSetItem.where(gene_set_id: gene_set_id, obsolete: false)
+      .where.not(identifier: present_identifiers.to_a)
+      .update_all(obsolete: true, updated_at: Time.now)
   end
 
   def ensure_gene_set!(h_gene_sets, h_db_sets, o, db_name, asap_data_id)
@@ -203,7 +224,7 @@ task update_xrefs: :environment do
   puts "GO lineages: #{go_file}"
   h_go = JSON.parse(File.read(go_file))
 
-  ## get db names
+  ## get db names (core schemas only; ignore rnaseq/otherfeatures/variation/...)
   h_db_names = {}
   list_folders = [`wget -O - #{base_url}/mysql/`]
   list_kingdoms = ['plants', 'metazoa', 'fungi', 'protists']
@@ -213,14 +234,15 @@ task update_xrefs: :environment do
   list_folders.join("\n").split("\n").each do |l|
 
     puts l
-    if m = l.match(/>(\w+)\/</)
-      #   puts m[1]
-      t = m[1].split("_")
-      
-      ensembl_db_name = (0 .. t.size-4).map{|i| t[i]}.join("_") 
-      h_db_names[ensembl_db_name] = m[1]
-    end
-    #    puts l.chomp
+    next unless (m = l.match(/>(\w+)\/</))
+
+    folder = m[1]
+    # e.g. homo_sapiens_core_116_38 or foo_bar_core_63_1
+    next unless (m_core = folder.match(/\A(.+)_core_(\d+)_\d+\z/))
+
+    ensembl_db_name = m_core[1]
+    # Prefer an existing core entry only if somehow duplicated; last core wins.
+    h_db_names[ensembl_db_name] = folder
   end
 
   puts h_db_names.to_json
@@ -247,17 +269,26 @@ task update_xrefs: :environment do
     end
     es = subdomain.name
 
-    folder_name = h_db_names[o.ensembl_db_name] #o.ensembl_db_name + '_core_97_1'
-    folder_name ||=  h_db_names[o.ensembl_db_name + '_core']
+    folder_name = h_db_names[o.ensembl_db_name]
     puts o.ensembl_db_name
-    puts h_db_names[o.ensembl_db_name]
+    puts folder_name
     
     unless folder_name
-      puts "Skip #{o.ensembl_db_name}: not found in Ensembl FTP listing"
+      puts "Skip #{o.ensembl_db_name}: not found in Ensembl core FTP listing"
       next
     end
 
-    release_num = folder_name.match(/\d+/)[0]
+    # Release from *_core_<release>_<assembly>, never the first digit in the species name
+    # (e.g. cricetulus_griseus_chok1gshd_core_116_1 -> 116, not 1).
+    release_num = folder_name[/_core_(\d+)_\d+\z/, 1]
+    release_num ||= o.latest_ensembl_release.to_s
+    unless release_num.present? && release_num.to_i > 0
+      puts "Skip #{o.ensembl_db_name}: cannot determine Ensembl release from #{folder_name}"
+      next
+    end
+    if o.latest_ensembl_release.to_i > 0 && release_num.to_i != o.latest_ensembl_release.to_i
+      puts "Note #{o.ensembl_db_name}: core folder release #{release_num} vs organism.latest_ensembl_release #{o.latest_ensembl_release}; using core folder release"
+    end
     
     base_dir = ensembl_data_dir
     
@@ -578,22 +609,28 @@ task update_xrefs: :environment do
           puts "Load GO in DB..."
           go_inserts = []
           go_updates = []
+          present_go_by_gene_set_id = Hash.new { |h, k| h[k] = Set.new }
           h_gsi[go_type].each_key do |go_id|
             if h_go[go_id] 
               db_name = h_go[go_id]["db_name"]
               gene_set = h_gene_sets[h_db_sets[db_name].id]
               if gene_set and gene_set.id
                 gene_set_item = h_gene_set_items[gene_set.id][go_id] if h_gene_set_items[gene_set.id]
-                name = h_xref_names[go_type][go_id] || h_go[go_id]['name']
+                ensembl_name = h_xref_names[go_type][go_id]
+                ensembl_name = nil if ensembl_name.blank? || ensembl_name == "\\N"
+                name = ensembl_name.presence || h_go[go_id]['name']
                 ensembl_ids = h_gsi[go_type][go_id]
                 content = ensembl_ids.select{|ensembl_id| h_genes[ensembl_id]}.map{|ensembl_id| h_genes[ensembl_id][:id]}.uniq.sort.join(",")
                 attrs = {
                   gene_set_id: gene_set.id,
                   identifier: go_id,
-                  name: (name != "\\N") ? name : nil,
+                  name: name.presence,
                   asap_data_id: asap_data_id,
-                  content: content
+                  content: content,
+                  latest_ensembl_release: o.latest_ensembl_release,
+                  obsolete: false
                 }
+                present_go_by_gene_set_id[gene_set.id] << go_id
                 queue_gene_set_item_write!(go_inserts, go_updates, gene_set_item, attrs)
               else
                 puts "Gene set for #{db_name} is not found!"
@@ -608,6 +645,8 @@ task update_xrefs: :environment do
             next unless h_db_sets[db_name]
             gene_set = h_gene_sets[h_db_sets[db_name].id]
             next unless gene_set&.id
+            n_obs = mark_missing_gene_set_items_obsolete!(gene_set.id, present_go_by_gene_set_id[gene_set.id])
+            puts "  #{db_name}: marked obsolete=#{n_obs}"
             stamp_gene_set_release!(gene_set, o, asap_data_id)
           end
           
@@ -627,6 +666,7 @@ task update_xrefs: :environment do
             if gene_set and gene_set.id
               type_inserts = []
               type_updates = []
+              present_identifiers = Set.new
               h_gsi[type].each_key do |gsi_id|
                 identifier = gsi_id
                 gene_set_item = h_gene_set_items[gene_set.id][identifier] if h_gene_set_items[gene_set.id]
@@ -637,12 +677,17 @@ task update_xrefs: :environment do
                   identifier: identifier,
                   name: (h_xref_names[type][gsi_id] != "\\N") ? h_xref_names[type][gsi_id] : nil,
                   asap_data_id: asap_data_id,
-                  content: content
+                  content: content,
+                  latest_ensembl_release: o.latest_ensembl_release,
+                  obsolete: false
                 }
+                present_identifiers << identifier
                 queue_gene_set_item_write!(type_inserts, type_updates, gene_set_item, attrs)
               end
               inserted, updated = flush_gene_set_item_writes!(type_inserts, type_updates, xref_batch_size)
               puts "  #{db_name} gene_set_items inserted=#{inserted} updated=#{updated}"
+              n_obs = mark_missing_gene_set_items_obsolete!(gene_set.id, present_identifiers)
+              puts "  #{db_name}: marked obsolete=#{n_obs}"
               stamp_gene_set_release!(gene_set, o, asap_data_id)
             elsif h_gsi[type].keys.size > 0
               puts "Gene set for #{db_name} not found!"

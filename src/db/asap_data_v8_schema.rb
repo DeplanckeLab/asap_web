@@ -82,6 +82,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_30_140000) do
     t.text "identifier"
     t.integer "latest_ensembl_release"
     t.text "name"
+    t.boolean "obsolete", default: false, null: false
     t.datetime "updated_at", precision: nil
     t.index "gene_set_id, lower(COALESCE(name, ''::text))", name: "idx_gene_set_items_gene_set_lower_name"
     t.index "lower(COALESCE(name, ''::text)) gin_trgm_ops", name: "idx_gene_set_items_name_gin_trgm", using: :gin
@@ -89,6 +90,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_30_140000) do
     t.index ["gene_set_id", "identifier"], name: "gene_set_id_identifier_gene_set_items"
     t.index ["gene_set_id", "latest_ensembl_release"], name: "gene_set_items_gs_id_latest_release_idx"
     t.index ["gene_set_id", "name"], name: "gene_set_items_gene_set_id_name"
+    t.index ["gene_set_id", "obsolete"], name: "gene_set_items_gs_id_obsolete_idx"
     t.index ["gene_set_id"], name: "gene_set_id_gene_set_items"
   end
 

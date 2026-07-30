@@ -2348,17 +2348,34 @@ class ProjectsController < ApplicationController
     @genes = []
     @h_all_genes = {}
     @h_enriched_genes = {}
+    @gsi_redirected_from = nil
 
     ge_run = Run.find_by(id: params[:ge_run_id])
     h_ge_run_attrs = ge_run ? Basic.safe_parse_json(ge_run.attrs_json, {}) : {}
     gene_set_id = params[:gene_set_id] || h_ge_run_attrs['gene_set_id']
+    requested_identifier = params[:identifier].to_s.strip
+    resolved = AsapData::GoTermReplacement.chain_resolve(requested_identifier)
+    lookup_identifier = resolved[:identifier]
+    @gsi_redirected_from = resolved[:redirected_from]
 
-    if gene_set_id.present? && params[:identifier].present?
+    if gene_set_id.present? && lookup_identifier.present?
       RemoteGene.with_remote(db_version) do
         conn = RemoteGene.connection
         gsi_rows = conn.select_all(
-          "SELECT * FROM gene_set_items WHERE gene_set_id = #{gene_set_id.to_i} AND identifier = #{conn.quote(params[:identifier])}"
+          "SELECT * FROM gene_set_items WHERE gene_set_id = #{gene_set_id.to_i} AND identifier = #{conn.quote(lookup_identifier)}"
         )
+        # If replacement is in another GO split gene_set for this organism, resolve via identifier only.
+        if gsi_rows.empty? && @gsi_redirected_from.present?
+          gsi_rows = conn.select_all(<<~SQL)
+            SELECT gsi.*
+            FROM gene_set_items gsi
+            JOIN gene_sets gs ON gs.id = gsi.gene_set_id
+            WHERE gs.organism_id = #{@project.organism_id.to_i}
+              AND gsi.identifier = #{conn.quote(lookup_identifier)}
+              AND gs.label IN ('GO Biological Processes','GO Cellular Components','GO Molecular Functions')
+            LIMIT 1
+          SQL
+        end
         if gsi_rows.any?
           @gsi = OpenStruct.new(gsi_rows.first)
           if @gsi.content.present?
@@ -3955,33 +3972,100 @@ class ProjectsController < ApplicationController
       end
 
       where_clause = "gene_set_id = #{collection_id}"
-      if query.present?
+      has_item_obsolete = conn.select_value(<<~SQL).present?
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_name = 'gene_set_items' AND column_name = 'obsolete'
+        LIMIT 1
+      SQL
+
+      # Exact GO id search keeps the requested term (including obsolete);
+      # replacement metadata is attached below for UI linking.
+      redirected_from = nil
+      if query.present? && query.match?(/\AGO:\d+\z/i)
+        where_clause += " AND identifier = #{conn.quote(query.upcase)}"
+      elsif query.present?
         escaped_query = conn.quote("%#{query.downcase}%")
-        where_clause += " AND LOWER(COALESCE(name, '')) LIKE #{escaped_query}"
+        where_clause += " AND (LOWER(COALESCE(name, '')) LIKE #{escaped_query} OR LOWER(COALESCE(identifier, '')) LIKE #{escaped_query})"
       end
 
       t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       total_count = conn.select_value("SELECT COUNT(*) FROM gene_set_items WHERE #{where_clause}").to_i
       perf_db[:count_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
 
-      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      rows = conn.select_all(<<~SQL)
-        SELECT
-          id,
-          identifier,
-          name,
-          content,
-          COALESCE(NULLIF(TRIM(name), ''), NULLIF(TRIM(identifier), ''), 'Unnamed gene set') AS display_name,
-          CASE
-            WHEN content IS NULL OR TRIM(content) = '' THEN 0
-            ELSE array_length(string_to_array(content, ','), 1)
-          END AS gene_count
-        FROM gene_set_items
-        WHERE #{where_clause}
-        ORDER BY LOWER(COALESCE(name, ''))
-        LIMIT #{limit}
+      obsolete_select = has_item_obsolete ? "obsolete" : "FALSE AS obsolete"
+      item_select_sql = <<~SQL.squish
+        id,
+        identifier,
+        name,
+        content,
+        #{obsolete_select},
+        COALESCE(NULLIF(TRIM(name), ''), NULLIF(TRIM(identifier), ''), 'Unnamed gene set') AS display_name,
+        CASE
+          WHEN content IS NULL OR TRIM(content) = '' THEN 0
+          ELSE array_length(string_to_array(content, ','), 1)
+        END AS gene_count
       SQL
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      # Unfiltered list is capped at `limit` and sorted by name; obsolete terms often
+      # start far past that window, so reserve a slice so badges are visible by default.
+      if query.blank? && has_item_obsolete
+        obsolete_limit = [15, (limit / 5)].max
+        active_limit = limit - obsolete_limit
+        rows = conn.select_all(<<~SQL)
+          SELECT * FROM (
+            (
+              SELECT #{item_select_sql}
+              FROM gene_set_items
+              WHERE #{where_clause} AND COALESCE(obsolete, FALSE) = FALSE
+              ORDER BY LOWER(COALESCE(name, ''))
+              LIMIT #{active_limit}
+            )
+            UNION ALL
+            (
+              SELECT #{item_select_sql}
+              FROM gene_set_items
+              WHERE #{where_clause} AND obsolete = TRUE
+              ORDER BY LOWER(COALESCE(name, ''))
+              LIMIT #{obsolete_limit}
+            )
+          ) gene_set_item_rows
+          ORDER BY LOWER(COALESCE(name, ''))
+        SQL
+      else
+        rows = conn.select_all(<<~SQL)
+          SELECT #{item_select_sql}
+          FROM gene_set_items
+          WHERE #{where_clause}
+          ORDER BY LOWER(COALESCE(name, ''))
+          LIMIT #{limit}
+        SQL
+      end
       perf_db[:rows_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
+
+      replacement_by_identifier = {}
+      replacement_ids = rows.filter_map do |row|
+        next unless ActiveModel::Type::Boolean.new.cast(row['obsolete'])
+
+        AsapData::GoTermReplacement.resolve(row['identifier'].to_s)
+      end.uniq
+      if replacement_ids.any?
+        quoted = replacement_ids.map { |id| conn.quote(id) }.join(",")
+        replacement_scope = has_item_obsolete ? "AND COALESCE(obsolete, FALSE) = FALSE" : ""
+        conn.select_all(<<~SQL).each do |rep_row|
+          SELECT id, identifier, name
+          FROM gene_set_items
+          WHERE gene_set_id = #{collection_id}
+            AND identifier IN (#{quoted})
+            #{replacement_scope}
+        SQL
+          replacement_by_identifier[rep_row['identifier'].to_s] = {
+            id: rep_row['id'].to_i,
+            identifier: rep_row['identifier'].to_s,
+            name: rep_row['name'].to_s
+          }
+        end
+      end
 
       t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       all_gene_ids = rows.flat_map do |row|
@@ -4008,6 +4092,7 @@ class ProjectsController < ApplicationController
       end
       perf_db[:gene_lookup_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
 
+      ontology_by_tag = AsapData::OntologyIdentifierUrl.ontology_by_tag_index
       t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       payload = {
         status: 'ok',
@@ -4015,6 +4100,7 @@ class ProjectsController < ApplicationController
           id: collection_row['id'].to_i,
           label: collection_row['label'].to_s
         },
+        redirected_from: redirected_from,
         items: rows.map do |row|
           gene_ids = row['content'].to_s.split(',').map { |v| v.to_i }.select { |v| v > 0 }
           in_dataset_count = gene_ids.count do |gene_id|
@@ -4026,11 +4112,30 @@ class ProjectsController < ApplicationController
               (symbol_key.present? && dataset_stable_by_symbol.key?(symbol_key))
           end
 
+          identifier = row['identifier'].to_s
+          obsolete = ActiveModel::Type::Boolean.new.cast(row['obsolete'])
+          replaced_by_identifier = obsolete ? AsapData::GoTermReplacement.resolve(identifier) : nil
+          replaced_by_item = replaced_by_identifier.present? ? replacement_by_identifier[replaced_by_identifier] : nil
+          identifier_url = AsapData::OntologyIdentifierUrl.url_for(
+            identifier,
+            ontology_by_tag: ontology_by_tag
+          )
+          replaced_by_url = replaced_by_identifier.present? ? AsapData::OntologyIdentifierUrl.url_for(
+            replaced_by_identifier,
+            ontology_by_tag: ontology_by_tag
+          ) : nil
+
           {
             id: row['id'].to_i,
-            identifier: row['identifier'].to_s,
+            identifier: identifier,
+            identifier_url: identifier_url,
             name: row['name'].to_s,
             display_name: row['display_name'].to_s,
+            obsolete: obsolete,
+            replaced_by_identifier: replaced_by_identifier,
+            replaced_by_item_id: replaced_by_item && replaced_by_item[:id],
+            replaced_by_name: replaced_by_item && replaced_by_item[:name],
+            replaced_by_url: replaced_by_url,
             gene_count: row['gene_count'].to_i,
             in_dataset_count: in_dataset_count,
             supports_module_score: true

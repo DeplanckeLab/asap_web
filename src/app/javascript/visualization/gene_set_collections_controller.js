@@ -4,6 +4,7 @@ export class GeneSetCollectionsController {
     this.projectIdentifier = this.resolveProjectIdentifier()
     this.selectedCollectionId = null
     this.detailFilterTimer = null
+    this.itemsFilterHistory = []
     this.geneSetGenesCache = new Map()
     this.activeGenesPopover = null
     this.geneDetailsModal = null
@@ -32,6 +33,7 @@ export class GeneSetCollectionsController {
     this.detailTitle = document.getElementById('gene-set-collection-detail-title')
     this.detailBackBtn = document.getElementById('gene-set-collection-back-btn')
     this.itemsFilterInput = document.getElementById('gene-set-items-name-filter-input')
+    this.itemsFilterHistoryBtn = document.getElementById('gene-set-items-filter-history-btn')
     this.itemsCountLabel = document.getElementById('gene-set-items-count-label')
     this.itemsList = document.getElementById('gene-set-items-list')
     this.itemsEmptyMessage = document.getElementById('gene-set-items-empty-message')
@@ -42,6 +44,7 @@ export class GeneSetCollectionsController {
     this.bindCollectionRowClicks()
     this.bindBackButton()
     this.bindDetailFilter()
+    this.bindFilterHistoryButton()
     this.bindCollectionRenameTriggers()
     this.bindCollectionRenameInputs()
     this.bindDeleteButtons()
@@ -307,19 +310,66 @@ export class GeneSetCollectionsController {
           createdAtLabel = parsedDate.toLocaleString()
         }
       }
-      const identifierLabel = this.escapeHtml(item.identifier || '-')
+      const identifierRaw = String(item.identifier || '').trim()
+      const identifierLabel = this.escapeHtml(identifierRaw || '-')
+      const identifierUrl = String(item.identifier_url || '').trim()
+      const identifierHtml = identifierUrl
+        ? `<a href="${this.escapeHtml(identifierUrl)}" target="_blank" rel="noopener noreferrer"
+              style="color:#2563eb;text-decoration:underline;"
+              onclick="event.stopPropagation()"
+              title="Open ontology term">${identifierLabel}</a>`
+        : identifierLabel
+      const isObsolete = item.obsolete === true
+      const replacedByIdentifier = String(item.replaced_by_identifier || '').trim()
+      const replacedByItemId = String(item.replaced_by_item_id || '').trim()
+      const replacedByName = String(item.replaced_by_name || '').trim()
+      const replacedByUrl = String(item.replaced_by_url || '').trim()
+      let obsoleteLine = ''
+      if (isObsolete) {
+        let replacementHtml = ''
+        if (replacedByIdentifier) {
+          const replacedLabel = this.escapeHtml(replacedByIdentifier)
+          if (replacedByItemId) {
+            const title = replacedByName
+              ? `${replacedByIdentifier} ${replacedByName}`
+              : replacedByIdentifier
+            replacementHtml = `<span style="color:#6b7280;">Replaced by</span>
+              <button type="button"
+              data-gene-set-replaced-by-btn="true"
+              data-gene-set-item-id="${this.escapeHtml(replacedByItemId)}"
+              data-gene-set-identifier="${this.escapeHtml(replacedByIdentifier)}"
+              style="border:none;background:none;padding:0;margin:0;color:#b91c1c;font-size:11px;line-height:1.2;cursor:pointer;text-decoration:underline;"
+              title="${this.escapeHtml(title)}"
+              onclick="event.stopPropagation()">${replacedLabel}</button>`
+          } else if (replacedByUrl) {
+            replacementHtml = `<span style="color:#6b7280;">Replaced by
+              <a href="${this.escapeHtml(replacedByUrl)}" target="_blank" rel="noopener noreferrer"
+                 style="color:#b91c1c;text-decoration:underline;"
+                 onclick="event.stopPropagation()"
+                 title="Open ontology term">${replacedLabel}</a>
+              (not in this collection)</span>`
+          } else {
+            replacementHtml = `<span style="color:#6b7280;">Replaced by <span style="color:#b91c1c;">${replacedLabel}</span> (not in this collection)</span>`
+          }
+        }
+        obsoleteLine = `<div style="font-size:11px;line-height:1.2;margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span title="Not in latest Ensembl" style="display:inline-flex;align-items:center;padding:1px 6px;border-radius:999px;background:#fee2e2;color:#b91c1c;font-weight:600;cursor:help;">Obsolete</span>
+          ${replacementHtml}
+        </div>`
+      }
 
       return `
         <div id="${this.buildCollectionItemRowElementId(itemId)}"
              data-gene-set-item-row="true"
              data-gene-set-item-id="${itemId}"
+             data-gene-set-identifier="${this.escapeHtml(identifierRaw)}"
              style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;gap:8px;">
           <div style="flex:1;min-width:0;">
             <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">
               ${titleHtml}
             </div>
             <div style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">
-              ${identifierLabel} |
+              ${identifierHtml} |
               <button type="button"
                       data-gene-set-genes-preview-btn="true"
                       data-gene-set-item-id="${itemId}"
@@ -331,6 +381,7 @@ export class GeneSetCollectionsController {
                 ${countLabel}
               </button>
             </div>
+            ${obsoleteLine}
             ${createdAtLabel ? `<div style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">Created: ${this.escapeHtml(createdAtLabel)}</div>` : ''}
           </div>
           <div style="display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;">
@@ -366,6 +417,117 @@ export class GeneSetCollectionsController {
     this.bindGeneSetItemClicks()
     this.bindGeneSetCountPreviewButtons()
     this.bindManualGeneSetDeleteButtons()
+    this.bindReplacedByButtons()
+  }
+
+  bindReplacedByButtons() {
+    if (!this.itemsList) return
+    this.itemsList.querySelectorAll('[data-gene-set-replaced-by-btn="true"]').forEach((button) => {
+      if (button.dataset.boundReplacedBy === 'true') return
+      button.dataset.boundReplacedBy = 'true'
+      button.addEventListener('click', async (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        const targetItemId = String(button.dataset.geneSetItemId || '').trim()
+        const targetIdentifier = String(button.dataset.geneSetIdentifier || '').trim()
+        if (!targetItemId && !targetIdentifier) return
+
+        const sourceRow = button.closest('[data-gene-set-item-row="true"]')
+        const sourceItemId = String(sourceRow?.dataset.geneSetItemId || '').trim()
+        const sourceIdentifier = String(sourceRow?.dataset.geneSetIdentifier || '').trim()
+
+        let row = targetItemId
+          ? this.itemsList.querySelector(`[data-gene-set-item-row="true"][data-gene-set-item-id="${CSS.escape(targetItemId)}"]`)
+          : null
+        if (!row && targetIdentifier && this.itemsFilterInput) {
+          await this.applyAutoItemsFilter(targetIdentifier, {
+            focusItemId: sourceItemId,
+            focusIdentifier: sourceIdentifier
+          })
+          row = this.itemsList.querySelector(`[data-gene-set-item-row="true"][data-gene-set-identifier="${CSS.escape(targetIdentifier)}"]`)
+            || this.itemsList.querySelector(`[data-gene-set-item-row="true"][data-gene-set-item-id="${CSS.escape(targetItemId)}"]`)
+        }
+        if (!row) return
+        this.highlightGeneSetItemRow(row)
+        row.click()
+      })
+    })
+  }
+
+  highlightGeneSetItemRow(row) {
+    if (!row) return
+    row.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    row.style.outline = '2px solid #fca5a5'
+    window.setTimeout(() => { row.style.outline = '' }, 1200)
+  }
+
+  findGeneSetItemRow({ itemId = '', identifier = '' } = {}) {
+    if (!this.itemsList) return null
+    const id = String(itemId || '').trim()
+    const ident = String(identifier || '').trim()
+    if (id) {
+      const byId = this.itemsList.querySelector(`[data-gene-set-item-row="true"][data-gene-set-item-id="${CSS.escape(id)}"]`)
+      if (byId) return byId
+    }
+    if (ident) {
+      return this.itemsList.querySelector(`[data-gene-set-item-row="true"][data-gene-set-identifier="${CSS.escape(ident)}"]`)
+    }
+    return null
+  }
+
+  async applyAutoItemsFilter(nextQuery, focus = {}) {
+    if (!this.itemsFilterInput || !this.selectedCollectionId) return
+    const nextValue = String(nextQuery || '')
+    const currentValue = String(this.itemsFilterInput.value || '')
+    if (currentValue === nextValue) {
+      await this.fetchCollectionItems(this.selectedCollectionId, nextValue)
+      return
+    }
+    this.itemsFilterHistory.push({
+      query: currentValue,
+      focusItemId: String(focus.focusItemId || '').trim(),
+      focusIdentifier: String(focus.focusIdentifier || '').trim()
+    })
+    this.itemsFilterInput.value = nextValue
+    this.updateFilterHistoryButton()
+    await this.fetchCollectionItems(this.selectedCollectionId, nextValue)
+  }
+
+  clearItemsFilterHistory() {
+    this.itemsFilterHistory = []
+    this.updateFilterHistoryButton()
+  }
+
+  updateFilterHistoryButton() {
+    if (!this.itemsFilterHistoryBtn) return
+    const hasHistory = this.itemsFilterHistory.length > 0
+    this.itemsFilterHistoryBtn.style.display = hasHistory ? 'inline-flex' : 'none'
+    this.itemsFilterHistoryBtn.disabled = !hasHistory
+  }
+
+  bindFilterHistoryButton() {
+    if (!this.itemsFilterHistoryBtn || this.itemsFilterHistoryBtn.dataset.bound === 'true') return
+    this.itemsFilterHistoryBtn.dataset.bound = 'true'
+    this.itemsFilterHistoryBtn.addEventListener('click', async (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (!this.itemsFilterInput || !this.selectedCollectionId) return
+      if (this.itemsFilterHistory.length === 0) return
+      const previous = this.itemsFilterHistory.pop()
+      const previousValue = typeof previous === 'string' ? previous : String(previous?.query || '')
+      const focusItemId = typeof previous === 'string' ? '' : String(previous?.focusItemId || '').trim()
+      const focusIdentifier = typeof previous === 'string' ? '' : String(previous?.focusIdentifier || '').trim()
+      this.itemsFilterInput.value = previousValue
+      this.updateFilterHistoryButton()
+      if (this.detailFilterTimer) clearTimeout(this.detailFilterTimer)
+      try {
+        await this.fetchCollectionItems(this.selectedCollectionId, previousValue)
+        const row = this.findGeneSetItemRow({ itemId: focusItemId, identifier: focusIdentifier })
+        if (row) this.highlightGeneSetItemRow(row)
+      } catch (error) {
+        alert(error.message || 'Failed to load gene sets')
+      }
+    })
   }
 
   async loadGeneSetItemIntoGenePanel(itemId) {
@@ -406,6 +568,7 @@ export class GeneSetCollectionsController {
       row.addEventListener('click', async (event) => {
         if (event.target.closest('.gene-set-color-btn')) return
         if (event.target.closest('[data-gene-set-genes-preview-btn="true"]')) return
+        if (event.target.closest('[data-gene-set-replaced-by-btn="true"]')) return
         const itemId = String(row.dataset.geneSetItemId || '').trim()
         if (!itemId) return
         try {
@@ -894,6 +1057,7 @@ export class GeneSetCollectionsController {
 
   async openCollectionDetail(collectionId, collectionLabel) {
     this.selectedCollectionId = collectionId
+    this.clearItemsFilterHistory()
     if (this.itemsFilterInput) this.itemsFilterInput.value = ''
     if (this.detailTitle) this.detailTitle.textContent = collectionLabel || ''
 
@@ -906,6 +1070,7 @@ export class GeneSetCollectionsController {
   closeCollectionDetail() {
     this.closeGeneSetGenesPopover()
     this.selectedCollectionId = null
+    this.clearItemsFilterHistory()
     if (this.itemsFilterInput) this.itemsFilterInput.value = ''
     if (this.itemsCountLabel) {
       this.itemsCountLabel.style.display = 'none'
@@ -1268,6 +1433,7 @@ export class GeneSetCollectionsController {
     this.itemsFilterInput.dataset.bound = 'true'
     this.itemsFilterInput.addEventListener('input', () => {
       if (!this.selectedCollectionId) return
+      this.clearItemsFilterHistory()
       if (this.detailFilterTimer) clearTimeout(this.detailFilterTimer)
       this.detailFilterTimer = setTimeout(async () => {
         try {

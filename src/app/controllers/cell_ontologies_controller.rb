@@ -58,7 +58,7 @@ class CellOntologiesController < ApplicationController
   end
 
   def cell_ontology_params
-    params.require(:cell_ontology).permit(:name, :tag, :format, :latest_version, :url, :file_url, :tax_ids, :obsolete)
+    params.require(:cell_ontology).permit(:name, :tag, :format, :latest_version, :url, :file_url, :url_mask, :tax_ids, :obsolete)
   end
 
   def fetch_organisms_by_tax_id(cell_ontologies)

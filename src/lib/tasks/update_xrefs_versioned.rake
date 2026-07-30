@@ -29,12 +29,17 @@ require "set"
 #   RELEASE_TO        max release (vertebrates default 116, genomes default 63)
 #   ORGANISM          optional ensembl_db_name filter (comma-separated)
 #   RESET_ITEMS       if 1/true, delete Ensembl-sourced gene_set_items before rebuild
+#                     and reset gene_set_items_id_seq (to 1 if table empty, else max(id)+1)
 #   DOWNLOAD_MISSING  if 1/true, wget missing mysql tables from Ensembl FTP
 #   XREF_BATCH_SIZE   batch size for inserts/updates (default 5000)
 #   UPDATE_NCBI       if 1/true, also update genes.ncbi_gene_id from latest release only
+#
+# Existing rows are never content-updated: same identifier+content only bumps
+# latest_ensembl_release; content/name change always inserts a new row.
 
 desc "Load Ensembl xrefs into gene_set_items with first/latest_ensembl_release (oldest to newest)"
 task update_xrefs_versioned: :environment do
+  $stdout.sync = true
   puts "Executing update_xrefs_versioned..."
 
   Rails.logger = Logger.new("/dev/null")
@@ -149,16 +154,23 @@ task update_xrefs_versioned: :environment do
     12
   end
 
+  # transcript is required: Ensembl GO (and most other) object_xrefs hang off Transcript,
+  # not Gene. Without transcript.txt, older releases resolve zero annotations and every
+  # gene_set_item incorrectly gets first_ensembl_release = first release that has transcripts.
   def required_ensembl_tables
-    %w[gene xref object_xref]
+    %w[gene xref object_xref transcript]
   end
 
   def optional_ensembl_tables
-    %w[transcript translation]
+    %w[translation]
   end
 
   def organism_tables_ready?(organism_dir)
     required_ensembl_tables.all? { |t| File.exist?(File.join(organism_dir.to_s, "#{t}.txt")) }
+  end
+
+  def missing_ensembl_tables(organism_dir, table_names)
+    table_names.reject { |t| File.exist?(File.join(organism_dir.to_s, "#{t}.txt")) }
   end
 
   def ensure_organism_tables!(release_dir, db_name, folder_name, subdomain, release_num, ensembl_tables, download_missing)
@@ -168,14 +180,19 @@ task update_xrefs_versioned: :environment do
 
     return organism_dir if organism_tables_ready?(organism_dir)
 
+    # Partial extracts are common (gene/xref/object_xref only). Always try the local tgz
+    # for missing required tables before giving up or downloading.
     if File.exist?(archive) && File.size(archive) >= 350
-      puts "  Unzipping #{archive}..."
-      system("cd #{release_dir} && tar -zxf #{db_name}.tgz")
+      missing = missing_ensembl_tables(organism_dir, required_ensembl_tables + optional_ensembl_tables)
+      if missing.any?
+        puts "  Unzipping #{archive} (missing: #{missing.join(', ')})..."
+        system("cd #{release_dir} && tar -zxf #{db_name}.tgz")
+      end
       return organism_dir if organism_tables_ready?(organism_dir)
     end
 
     unless download_missing && folder_name
-      puts "  Skip #{db_name} @ #{release_num}: tables not local (set DOWNLOAD_MISSING=1 to fetch)"
+      puts "  Skip #{db_name} @ #{release_num}: tables not local (need #{missing_ensembl_tables(organism_dir, required_ensembl_tables).join(', ')}; set DOWNLOAD_MISSING=1 to fetch)"
       return nil
     end
 
@@ -198,11 +215,17 @@ task update_xrefs_versioned: :environment do
   end
 
   def parse_xref_bundle(organism_dir, h_db_to_load, organism_tag, known_ensembl_ids)
+    # Ensembl mysql dumps are latin1/binary-ish; never assume UTF-8.
+    read_tsv = lambda do |path, &block|
+      File.foreach(path, mode: "r:ASCII-8BIT") do |line|
+        block.call(line.chomp.split("\t"))
+      end
+    end
+
     h_transcript = {}
     transcript_path = File.join(organism_dir.to_s, "transcript.txt")
     if File.exist?(transcript_path)
-      File.foreach(transcript_path) do |line|
-        t = line.chomp.split("\t")
+      read_tsv.call(transcript_path) do |t|
         h_transcript[t[0]] = t[1]
       end
     end
@@ -210,16 +233,14 @@ task update_xrefs_versioned: :environment do
     h_translation = {}
     translation_path = File.join(organism_dir.to_s, "translation.txt")
     if File.exist?(translation_path)
-      File.foreach(translation_path) do |line|
-        t = line.chomp.split("\t")
+      read_tsv.call(translation_path) do |t|
         h_translation[t[0]] = t[1]
       end
     end
 
     h_xref = {}
     h_xref_names = Hash.new { |h, k| h[k] = {} }
-    File.foreach(File.join(organism_dir.to_s, "xref.txt")) do |line|
-      t = line.chomp.split("\t")
+    read_tsv.call(File.join(organism_dir.to_s, "xref.txt")) do |t|
       next unless h_db_to_load.key?(t[1])
 
       xref_acc = if t[1] == "50801"
@@ -233,8 +254,7 @@ task update_xrefs_versioned: :environment do
 
     h_object_xref = {}
     h_db_to_load.each_key { |k| h_object_xref[k] = {} }
-    File.foreach(File.join(organism_dir.to_s, "object_xref.txt")) do |line|
-      t = line.chomp.split("\t")
+    read_tsv.call(File.join(organism_dir.to_s, "object_xref.txt")) do |t|
       xref = h_xref[t[3]]
       next unless xref
 
@@ -253,8 +273,7 @@ task update_xrefs_versioned: :environment do
 
     h_gene_internal = {}
     stable_idx = nil
-    File.foreach(File.join(organism_dir.to_s, "gene.txt")) do |line|
-      t = line.chomp.split("\t")
+    read_tsv.call(File.join(organism_dir.to_s, "gene.txt")) do |t|
       stable_idx ||= detect_gene_stable_id_index(t, known_ensembl_ids)
       stable_id = t[stable_idx]
       next if stable_id.blank? || stable_id == '\N'
@@ -498,7 +517,19 @@ task update_xrefs_versioned: :environment do
         end
         deleted = GeneSetItem.where(gene_set_id: gs_ids).delete_all
         GeneSet.where(id: gs_ids).update_all(latest_ensembl_release: nil)
-        puts "RESET_ITEMS: deleted #{deleted} gene_set_items across #{gs_ids.size} gene_sets"
+
+        max_id = GeneSetItem.maximum(:id)
+        if max_id.nil?
+          ActiveRecord::Base.connection.execute(
+            "SELECT setval(pg_get_serial_sequence('gene_set_items', 'id'), 1, false)"
+          )
+          puts "RESET_ITEMS: deleted #{deleted} gene_set_items across #{gs_ids.size} gene_sets; sequence reset to 1"
+        else
+          ActiveRecord::Base.connection.execute(
+            "SELECT setval(pg_get_serial_sequence('gene_set_items', 'id'), #{max_id.to_i}, true)"
+          )
+          puts "RESET_ITEMS: deleted #{deleted} gene_set_items across #{gs_ids.size} gene_sets; sequence set to #{max_id} (next=#{max_id.to_i + 1})"
+        end
       end
 
       organisms = Organism.all.to_a

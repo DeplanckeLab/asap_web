@@ -2193,6 +2193,13 @@ project_type_tag = @project&.project_type&.tag.to_s
                        type="text"
                        placeholder="Filter gene sets by name"
                        style="flex:1;min-width:0;width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#111827;background:#fff;" />
+                <button id="gene-set-items-filter-history-btn"
+                        type="button"
+                        style="display:none;flex:0 0 auto;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:white;color:#374151;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;"
+                        title="Restore previous filter"
+                        aria-label="Restore previous filter">
+                  <i class="fas fa-rotate-left" style="font-size:12px;"></i>
+                </button>
                 <span id="gene-set-items-count-label" style="display:none;font-size:11px;color:#6b7280;white-space:nowrap;"></span>
               </div>
               <div id="gene-set-items-list" style="flex:1;min-height:0;overflow-y:auto;box-sizing:border-box;width:100%;padding:0 16px;display:flex;flex-direction:column;gap:4px;"></div>

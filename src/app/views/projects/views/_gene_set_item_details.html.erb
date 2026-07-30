@@ -1,8 +1,24 @@
 <% if @gsi %>
+<%
+  identifier = @gsi.identifier.to_s
+  is_obsolete = ActiveModel::Type::Boolean.new.cast(@gsi.obsolete)
+  redirected_from = @gsi_redirected_from.to_s.presence
+%>
 <div class="space-y-4">
-  <div class="flex items-center gap-2">
+  <% if redirected_from.present? %>
+  <div class="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+    Redirected from obsolete term
+    <span class="font-mono font-medium"><%= redirected_from %></span>
+    to current term
+    <span class="font-mono font-medium"><%= identifier %></span>.
+  </div>
+  <% end %>
+  <div class="flex items-center gap-2 flex-wrap">
     <span class="text-sm text-gray-500 w-28 flex-shrink-0">Identifier</span>
-    <span class="inline-flex items-center px-2.5 py-0.5 rounded text-sm font-medium bg-gray-800 text-white"><%= @gsi.identifier %></span>
+    <span class="inline-flex items-center px-2.5 py-0.5 rounded text-sm font-medium bg-gray-800 text-white"><%= identifier %></span>
+    <% if is_obsolete && redirected_from.blank? %>
+      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800" title="Not present in the latest Ensembl annotation for this organism">Obsolete in latest Ensembl</span>
+    <% end %>
   </div>
   <div class="flex items-start gap-2">
     <span class="text-sm text-gray-500 w-28 flex-shrink-0">Description</span>

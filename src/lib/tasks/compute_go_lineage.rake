@@ -9,6 +9,7 @@ task compute_go_lineage: :environment do
 
   data_dir = Pathname.new(APP_CONFIG[:data_dir])
   go_dir = data_dir + 'go'
+  FileUtils.mkdir_p(go_dir)
 
   h_go_db_names = {'biological_process' => 'GO Biological Processes', 'cellular_component' => 'GO Cellular Components', 'molecular_function' => 'GO Molecular Functions'}
 
@@ -25,12 +26,13 @@ task compute_go_lineage: :environment do
   
   #load in memory adjacency tables                                                                                                                                                     
   h_go = {}
+  h_replacements = {}
 #  h_adj = {}                                                                                                                                                                          
   
   url = "http://purl.obolibrary.org/obo/go.obo"
   `wget -O #{go_dir + 'go.obo'} #{url}`
   version = ''
-  cur = {:is_a => [], :lineage => []}
+  cur = {:is_a => [], :lineage => [], :replaced_by => [], :consider => [], :obsolete => false}
   File.open(go_dir + 'go.obo', "r") do |f|
     while (l = f.gets) do
       if m = l.match(/^data-version: releases\/([\-\d]+)/)
@@ -44,16 +46,38 @@ task compute_go_lineage: :environment do
         cur[:name] = m[1]
       elsif  m = l.match(/^is_a\: (GO\:\d+)/)
         cur[:is_a].push m[1]
+      elsif m = l.match(/^replaced_by\: (GO\:\d+)/)
+        cur[:replaced_by].push m[1]
+      elsif m = l.match(/^consider\: (GO\:\d+)/)
+        cur[:consider].push m[1]
+      elsif l.match?(/^is_obsolete:\s*true/)
+        cur[:obsolete] = true
       elsif l.chomp == '[Term]'
-        if cur[:is_a] and cur[:is_a].size > 0
-          h_go[cur[:id]] = cur
+        if cur[:id]
+          if cur[:obsolete]
+            h_replacements[cur[:id]] = {
+              name: cur[:name],
+              db_name: cur[:db_name],
+              replaced_by: cur[:replaced_by],
+              consider: cur[:consider]
+            }
+          elsif cur[:is_a] and cur[:is_a].size > 0
+            h_go[cur[:id]] = {
+              id: cur[:id],
+              name: cur[:name],
+              db_name: cur[:db_name],
+              is_a: cur[:is_a],
+              lineage: []
+            }
+          end
         end
-        cur = {:is_a => [], :lineage => []}
+        cur = {:is_a => [], :lineage => [], :replaced_by => [], :consider => [], :obsolete => false}
       end
     end
   end
   
   puts "#{h_go.keys.size} go terms loaded"
+  puts "#{h_replacements.keys.size} obsolete GO terms with replacement metadata"
   puts "adding lineage recursively..."
   h_go.keys.each do |k|
     #  puts k    
@@ -65,6 +89,11 @@ task compute_go_lineage: :environment do
   puts "write GO..."
   File.open(go_dir + "go.json", 'w') do |f|
     f.write(h_go.to_json)
+  end
+
+  puts "write GO replacements..."
+  File.open(go_dir + "go_replacements.json", 'w') do |f|
+    f.write(h_replacements.to_json)
   end
 
   output_json = Pathname.new(APP_CONFIG[:data_dir]) + 'tmp' + 'tool_versions.json'

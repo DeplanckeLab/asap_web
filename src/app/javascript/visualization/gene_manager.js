@@ -3280,6 +3280,9 @@ this.currentMatches = allMatches.filter(item => {
     const modal = overlay.querySelector('#gene-set-collection-modal-content')
     const form = overlay.querySelector('#add-gene-set-collection-form')
     const nameInput = overlay.querySelector('#gene-set-collection-name-input')
+    const emptyCheckbox = overlay.querySelector('#gene-set-collection-empty-checkbox')
+    const fileSection = overlay.querySelector('#gene-set-collection-file-section')
+    const fileRequiredMark = overlay.querySelector('#gene-set-collection-file-required-mark')
     const fileInput = overlay.querySelector('#gene-set-collection-file-input')
     const dropzone = overlay.querySelector('#gene-set-collection-dropzone')
     const browseBtn = overlay.querySelector('#gene-set-collection-browse-btn')
@@ -3297,6 +3300,25 @@ this.currentMatches = allMatches.filter(item => {
     if (!modal || !form || !nameInput || !fileInput || !submitBtn) {
       console.error('GeneManager: add gene set collection modal elements are missing')
       return
+    }
+
+    const isEmptyCollectionMode = () => Boolean(emptyCheckbox?.checked)
+
+    const syncEmptyCollectionMode = () => {
+      const emptyMode = isEmptyCollectionMode()
+      if (fileSection) fileSection.style.display = emptyMode ? 'none' : 'block'
+      if (fileRequiredMark) fileRequiredMark.style.display = emptyMode ? 'none' : 'inline'
+      fileInput.required = !emptyMode
+      if (emptyMode) {
+        selectedCollectionFile = null
+        fileInput.value = ''
+        updateSelectedFile(null)
+        setFeedback('')
+        setUploadProgress(0, false)
+      }
+      if (!submitBtn.disabled) {
+        submitBtn.textContent = emptyMode ? 'Create' : 'Upload'
+      }
     }
 
     const setFeedback = (message = '', isError = false) => {
@@ -3346,14 +3368,17 @@ this.currentMatches = allMatches.filter(item => {
 
     const setSubmitting = (isSubmitting) => {
       submitBtn.disabled = Boolean(isSubmitting)
-      submitBtn.textContent = isSubmitting ? 'Uploading...' : 'Upload'
-      if (!isSubmitting) return
-      setFeedback('')
+      if (isSubmitting) {
+        submitBtn.textContent = isEmptyCollectionMode() ? 'Creating...' : 'Uploading...'
+        setFeedback('')
+        return
+      }
+      submitBtn.textContent = isEmptyCollectionMode() ? 'Create' : 'Upload'
     }
 
     const setSubmitButtonLabel = (label) => {
       if (!submitBtn) return
-      submitBtn.textContent = String(label || '').trim() || 'Upload'
+      submitBtn.textContent = String(label || '').trim() || (isEmptyCollectionMode() ? 'Create' : 'Upload')
     }
 
     const setUploadProgress = (percent, visible = true) => {
@@ -3361,6 +3386,29 @@ this.currentMatches = allMatches.filter(item => {
       if (progressWrapEl) progressWrapEl.style.display = visible ? 'block' : 'none'
       if (progressBarEl) progressBarEl.style.width = `${normalized}%`
       if (progressTextEl) progressTextEl.textContent = `${normalized}%`
+    }
+
+    const upsertCreatedCollection = (collection) => {
+      if (!collection) return
+      const collectionsController = this.controller?.geneSetCollectionsController
+      if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function') {
+        collectionsController.upsertCollectionFromPayload(collection)
+      }
+      const collectionId = String(collection.id || '').trim()
+      const label = String(collection.label || '').trim()
+      if (!collectionId || !label) return
+      if (String(collection.type_key || '').trim() !== 'manual') return
+
+      const modalTemplate = document.getElementById('save-manual-gene-set-modal-template')
+      const select = modalTemplate?.content?.querySelector('#gene-set-collection-select')
+      if (!select) return
+      let option = Array.from(select.options || []).find((entry) => String(entry.value || '').trim() === collectionId)
+      if (!option) {
+        option = document.createElement('option')
+        option.value = collectionId
+        select.appendChild(option)
+      }
+      option.textContent = label
     }
 
     const uploadGeneSetCollectionWithProgress = ({ projectIdentifier, csrfToken, formData, onProgress }) => (
@@ -3415,6 +3463,28 @@ this.currentMatches = allMatches.filter(item => {
       })
     )
 
+    const createEmptyGeneSetCollection = async ({ projectIdentifier, csrfToken, collectionName }) => {
+      const headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      }
+      if (csrfToken) headers['X-CSRF-Token'] = csrfToken
+      const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/import_gene_set_collection`, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers,
+        body: JSON.stringify({
+          name: collectionName,
+          empty: true
+        })
+      })
+      const payload = await response.json()
+      if (!response.ok || payload.status !== 'ok') {
+        throw new Error(payload.message || 'Failed to create gene set collection')
+      }
+      return payload
+    }
+
     const closeModal = () => {
       if (activeUploadXhr) {
         activeUploadXhr.abort()
@@ -3424,6 +3494,13 @@ this.currentMatches = allMatches.filter(item => {
     }
 
     document.body.appendChild(overlay)
+    syncEmptyCollectionMode()
+
+    if (emptyCheckbox) {
+      emptyCheckbox.addEventListener('change', () => {
+        syncEmptyCollectionMode()
+      })
+    }
 
     if (closeBtn) {
       closeBtn.addEventListener('click', (event) => {
@@ -3513,6 +3590,36 @@ this.currentMatches = allMatches.filter(item => {
         return
       }
 
+      const projectIdentifier = this.controller?.getProjectIdentifier?.() || this.projectIdentifier
+      if (!projectIdentifier) {
+        setFeedback('Project context is missing.', true)
+        return
+      }
+
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+      const emptyMode = isEmptyCollectionMode()
+
+      if (emptyMode) {
+        setSubmitting(true)
+        try {
+          const payload = await createEmptyGeneSetCollection({
+            projectIdentifier,
+            csrfToken,
+            collectionName
+          })
+          upsertCreatedCollection(payload.collection)
+          if (this.controller && typeof this.controller.setSelectionTab === 'function') {
+            this.controller.setSelectionTab('gene-sets')
+          }
+          closeModal()
+        } catch (error) {
+          setFeedback(error.message || 'Failed to create gene set collection', true)
+        } finally {
+          setSubmitting(false)
+        }
+        return
+      }
+
       const file = selectedCollectionFile || (fileInput.files && fileInput.files[0])
       if (!file) {
         setFeedback('Please choose a GMT file to upload.', true)
@@ -3523,13 +3630,6 @@ this.currentMatches = allMatches.filter(item => {
         return
       }
 
-      const projectIdentifier = this.controller?.getProjectIdentifier?.() || this.projectIdentifier
-      if (!projectIdentifier) {
-        setFeedback('Project context is missing.', true)
-        return
-      }
-
-      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
       const currentLoomFile = this.controller?.getCurrentLoomFileForRequest?.() || this.controller?.currentLoomFile || ''
       if (!currentLoomFile) {
         setFeedback('Loom file context is missing.', true)
@@ -3560,10 +3660,7 @@ this.currentMatches = allMatches.filter(item => {
           const importId = String(payload.import_id || '').trim()
           if (importId) this.pendingCollectionImportIds.add(importId)
           if (payload.collection) {
-            const collectionsController = this.controller?.geneSetCollectionsController
-            if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function') {
-              collectionsController.upsertCollectionFromPayload(payload.collection)
-            }
+            upsertCreatedCollection(payload.collection)
             this.startCollectionImportPolling(String(payload.collection.id || ''))
           }
           if (this.controller && typeof this.controller.setSelectionTab === 'function') {
@@ -3573,12 +3670,7 @@ this.currentMatches = allMatches.filter(item => {
           return
         }
 
-        if (payload.collection) {
-          const collectionsController = this.controller?.geneSetCollectionsController
-          if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function') {
-            collectionsController.upsertCollectionFromPayload(payload.collection)
-          }
-        }
+        upsertCreatedCollection(payload.collection)
         closeModal()
       } catch (error) {
         setFeedback(error.message || 'Failed to import gene set collection', true)
@@ -3629,20 +3721,33 @@ this.currentMatches = allMatches.filter(item => {
 
     const collectionSelect = overlay.querySelector('#gene-set-collection-select')
     if (collectionSelect) {
-      const rowsById = new Map(
-        Array.from(document.querySelectorAll('[data-gene-set-collection-row="true"]')).map((row) => [
-          String(row.dataset.collectionId || '').trim(),
-          String(row.dataset.collectionLabel || '').trim()
-        ])
-      )
-      Array.from(collectionSelect.options || []).forEach((option) => {
-        const optionId = String(option.value || '').trim()
-        if (!optionId) return
-        const updatedLabel = rowsById.get(optionId)
-        if (updatedLabel) {
-          option.textContent = updatedLabel
-        }
-      })
+      const manualRows = Array.from(document.querySelectorAll('[data-gene-set-collection-row="true"]'))
+        .filter((row) => String(row.dataset.collectionTypeKey || '').trim() === 'manual')
+        .map((row) => ({
+          id: String(row.dataset.collectionId || '').trim(),
+          label: String(row.dataset.collectionLabel || '').trim()
+        }))
+        .filter((entry) => entry.id && entry.label)
+
+      if (manualRows.length > 0) {
+        collectionSelect.innerHTML = ''
+        manualRows.forEach((entry) => {
+          const option = document.createElement('option')
+          option.value = entry.id
+          option.textContent = entry.label
+          collectionSelect.appendChild(option)
+        })
+      } else {
+        Array.from(collectionSelect.options || []).forEach((option) => {
+          const optionId = String(option.value || '').trim()
+          if (!optionId) return
+          const matchingRow = Array.from(document.querySelectorAll('[data-gene-set-collection-row="true"]'))
+            .find((row) => String(row.dataset.collectionId || '').trim() === optionId)
+          if (matchingRow) {
+            option.textContent = String(matchingRow.dataset.collectionLabel || '').trim() || option.textContent
+          }
+        })
+      }
     }
 
     const escapeHtml = (value) => String(value || '')
@@ -3653,22 +3758,60 @@ this.currentMatches = allMatches.filter(item => {
       .replace(/'/g, '&#39;')
 
     const genesCountEl = overlay.querySelector('#gene-set-genes-count')
-    if (genesCountEl) genesCountEl.textContent = String(genes.length)
     const genesTableBody = overlay.querySelector('#gene-set-genes-table-body')
     if (genesTableBody) {
       genesTableBody.innerHTML = genes.map((gene, index) => {
         const rowBg = index % 2 === 0 ? '#ffffff' : '#f9fafb'
+        const symbol = escapeHtml(gene?.symbol)
+        const ensemblId = escapeHtml(gene?.ensemblId || gene?.ensembl_id)
+        const stableId = escapeHtml(gene?.stableId || gene?.stable_id)
         return `
           <tr style="border-bottom:1px solid #f3f4f6;background-color:${rowBg};">
-            <td style="padding:12px;font-size:13px;color:#111827;">${escapeHtml(gene?.symbol)}</td>
-            <td style="padding:12px;font-size:13px;color:#6b7280;font-family:monospace;">${escapeHtml(gene?.ensemblId || gene?.ensembl_id)}</td>
-            <td style="padding:12px;font-size:13px;color:#6b7280;font-family:monospace;">${escapeHtml(gene?.stableId || gene?.stable_id)}</td>
+            <td style="padding:12px;text-align:center;">
+              <input
+                type="checkbox"
+                class="gene-set-gene-checkbox"
+                checked
+                data-symbol="${symbol}"
+                data-ensembl-id="${ensemblId}"
+                data-stable-id="${stableId}"
+                style="width:14px;height:14px;cursor:pointer;"
+              />
+            </td>
+            <td style="padding:12px;font-size:13px;color:#111827;">${symbol}</td>
+            <td style="padding:12px;font-size:13px;color:#6b7280;font-family:monospace;">${ensemblId}</td>
+            <td style="padding:12px;font-size:13px;color:#6b7280;font-family:monospace;">${stableId}</td>
           </tr>
         `
       }).join('')
     }
 
+    const updateSelectedGenesCount = () => {
+      const checkedCount = overlay.querySelectorAll('.gene-set-gene-checkbox:checked').length
+      if (genesCountEl) genesCountEl.textContent = String(checkedCount)
+      const selectAllCheckbox = overlay.querySelector('#gene-set-select-all-checkbox')
+      const allCheckboxes = overlay.querySelectorAll('.gene-set-gene-checkbox')
+      if (selectAllCheckbox && allCheckboxes.length > 0) {
+        selectAllCheckbox.checked = checkedCount === allCheckboxes.length
+        selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < allCheckboxes.length
+      }
+    }
+    updateSelectedGenesCount()
+
     document.body.appendChild(overlay)
+
+    const selectAllCheckbox = overlay.querySelector('#gene-set-select-all-checkbox')
+    if (selectAllCheckbox) {
+      selectAllCheckbox.addEventListener('change', () => {
+        overlay.querySelectorAll('.gene-set-gene-checkbox').forEach((checkbox) => {
+          checkbox.checked = selectAllCheckbox.checked
+        })
+        updateSelectedGenesCount()
+      })
+    }
+    overlay.querySelectorAll('.gene-set-gene-checkbox').forEach((checkbox) => {
+      checkbox.addEventListener('change', updateSelectedGenesCount)
+    })
     
     // Simple close function
     const closeModal = () => {
@@ -3749,10 +3892,18 @@ this.currentMatches = allMatches.filter(item => {
         return
       }
       
-      const normalizedGenes = genes.map((gene) => ({
-        symbol: String(gene?.symbol || '').trim(),
-        ensembl_id: String(gene?.ensemblId || gene?.ensembl_id || '').trim(),
-        stable_id: String(gene?.stableId || gene?.stable_id || '').trim()
+      const checkedCheckboxes = Array.from(
+        document.querySelectorAll('#gene-set-genes-table-body .gene-set-gene-checkbox:checked')
+      )
+      if (checkedCheckboxes.length === 0) {
+        alert('Please select at least one gene.')
+        return
+      }
+
+      const normalizedGenes = checkedCheckboxes.map((checkbox) => ({
+        symbol: String(checkbox.dataset.symbol || '').trim(),
+        ensembl_id: String(checkbox.dataset.ensemblId || '').trim(),
+        stable_id: String(checkbox.dataset.stableId || '').trim()
       }))
 
       const projectIdentifier = this.controller?.getProjectIdentifier?.() || this.projectIdentifier

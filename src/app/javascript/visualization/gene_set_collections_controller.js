@@ -1324,6 +1324,18 @@ export class GeneSetCollectionsController {
           if (row) row.remove()
           this.applyListFilter()
 
+          const modalTemplate = document.getElementById('save-manual-gene-set-modal-template')
+          if (modalTemplate) {
+            const select = modalTemplate.content?.querySelector('#gene-set-collection-select')
+            if (select) {
+              Array.from(select.options || []).forEach((option) => {
+                if (String(option.value || '').trim() === String(collectionId)) {
+                  option.remove()
+                }
+              })
+            }
+          }
+
           if (this.selectedCollectionId && String(this.selectedCollectionId) === String(collectionId)) {
             this.closeCollectionDetail()
           }

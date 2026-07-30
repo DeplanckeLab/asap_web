@@ -3456,6 +3456,23 @@ class ProjectsController < ApplicationController
       return
     end
 
+    create_empty = ActiveModel::Type::Boolean.new.cast(params[:empty])
+    if create_empty
+      collection_record = create_manual_gene_set_collection!(name: collection_name)
+      render json: {
+        status: 'ok',
+        collection: {
+          id: local_gene_set_collection_id(collection_record),
+          label: collection_record.name.to_s,
+          nb_items: 0,
+          custom: true,
+          locked: immutable_since_publication?(collection_record),
+          import_pending: false
+        }
+      }.deep_merge(collection_type_presentation_for_collection(collection_record))
+      return
+    end
+
     uploaded_file = params[:file]
     unless uploaded_file.respond_to?(:read)
       render json: { status: 'error', message: 'Missing file to import' }, status: :unprocessable_entity
@@ -3664,11 +3681,14 @@ class ProjectsController < ApplicationController
       items = Array(payload['items']).map { |item| normalize_manual_gene_set_item(item) }.compact
       deleted_runs_count = items.sum { |item| delete_related_manual_module_score_runs(item) }
 
-      payload['items'] = []
-      payload['updated_at'] = Time.now.utc.iso8601
-      write_manual_gene_set_collection_payload(payload)
+      legacy_path = manual_gene_set_collection_file_path
+      File.delete(legacy_path) if File.exist?(legacy_path)
 
-      manual_collection&.destroy
+      if manual_collection
+        local_path = local_gene_set_collection_file_path(manual_collection.file_key)
+        File.delete(local_path) if File.exist?(local_path)
+        manual_collection.destroy!
+      end
 
       render json: { status: 'ok', collection_id: collection_id_raw, deleted_runs_count: deleted_runs_count }
       return
@@ -8815,7 +8835,6 @@ class ProjectsController < ApplicationController
       end
 
       legacy_manual_payload_items = Array(load_manual_gene_set_collection_payload['items'])
-      ensure_default_manual_gene_set_collection_record!
       local_collections = GeneSetCollection.where(project_id: @project.id).includes(:gene_set_collection_type).order(created_at: :desc)
       manual_local_payloads = []
       non_manual_local_payloads = []

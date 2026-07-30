@@ -25,8 +25,19 @@
         </div>
 
         <div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:14px;font-weight:500;color:#374151;cursor:pointer;">
+            <input
+              type="checkbox"
+              id="gene-set-collection-empty-checkbox"
+              style="width:14px;height:14px;cursor:pointer;"
+            />
+            Create empty collection (no GMT file)
+          </label>
+        </div>
+
+        <div id="gene-set-collection-file-section">
           <label style="display:block;font-size:14px;font-weight:500;color:#374151;margin-bottom:8px;">
-            File <span style="color:#dc2626;">*</span>
+            File <span id="gene-set-collection-file-required-mark" style="color:#dc2626;">*</span>
           </label>
           <input
             type="file"

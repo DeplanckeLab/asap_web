@@ -374,6 +374,8 @@ export default class extends Controller {
     this.histogramScale = 'normal'
     this.histogramIgnoreZeros = true
     this.metadataHistogramOptions = {}
+    // Continuous distribution bar plots (category rows + selection): value-bin scale
+    this.barplotBinScale = 'normal'
 
     // Initialize custom plot axis scale preferences
     this.customPlotXAxisScale = 'normal'
@@ -7245,6 +7247,7 @@ export default class extends Controller {
     allCanvases.forEach(canvas => {
       canvas.style.display = 'none'
     })
+    this.hideSelectionDistributionCanvas()
 
     this.updateCurrentColoringIndicator()
     
@@ -7602,6 +7605,7 @@ export default class extends Controller {
         numericalOrder: this.numericalOrder,
         histogramScale: this.histogramScale === 'log' ? 'log' : 'normal',
         histogramIgnoreZeros: this.histogramIgnoreZeros !== false,
+        barplotBinScale: this.barplotBinScale === 'log' ? 'log' : 'normal',
         metadataHistogramOptions: this.buildMetadataHistogramOptionsCheckpointState(),
         showGrid: !!document.getElementById('show-grid-checkbox')?.checked,
         showAxes: !!document.getElementById('show-axes-checkbox')?.checked,
@@ -8317,6 +8321,9 @@ export default class extends Controller {
       if (Object.prototype.hasOwnProperty.call(state.display, 'histogramIgnoreZeros')) {
         this.histogramIgnoreZeros = state.display.histogramIgnoreZeros !== false
       }
+      if (state.display.barplotBinScale === 'log' || state.display.barplotBinScale === 'normal') {
+        this.barplotBinScale = state.display.barplotBinScale
+      }
       this.metadataHistogramOptions = {}
       if (state.display.metadataHistogramOptions && typeof state.display.metadataHistogramOptions === 'object') {
         Object.entries(state.display.metadataHistogramOptions).forEach(([metadataId, options]) => {
@@ -8331,10 +8338,17 @@ export default class extends Controller {
       if (histogramIgnoreZerosCheckbox) {
         histogramIgnoreZerosCheckbox.checked = this.histogramIgnoreZeros !== false
       }
+      const barplotBinScaleSelect = document.getElementById('barplot-bin-scale-select')
+      if (barplotBinScaleSelect) {
+        barplotBinScaleSelect.value = this.barplotBinScale === 'log' ? 'log' : 'normal'
+      }
       if (Object.prototype.hasOwnProperty.call(state.display, 'histogramScale') ||
           Object.prototype.hasOwnProperty.call(state.display, 'histogramIgnoreZeros') ||
           Object.prototype.hasOwnProperty.call(state.display, 'metadataHistogramOptions')) {
         this.refreshHistogramsAfterGlobalHistogramOptionsChanged()
+      }
+      if (Object.prototype.hasOwnProperty.call(state.display, 'barplotBinScale')) {
+        this.refreshBarplotsAfterBinScaleChanged()
       }
       document.querySelectorAll('[data-controller~="range-slider"]').forEach((element) => {
         const rangeSliderController = this.application?.getControllerForElementAndIdentifier(element, 'range-slider')
@@ -14272,6 +14286,7 @@ export default class extends Controller {
       viewWarningElement.style.display = showWarning ? 'inline' : 'none'
     }
     this.syncSelectionColorDot()
+    this.drawSelectionDistribution()
   }
 
   getSelectionCountDisplayData() {
@@ -22631,6 +22646,22 @@ export default class extends Controller {
     }
   }
 
+  // Recompute continuous distribution bars after Normal/Log bin scale changes in settings.
+  refreshBarplotsAfterBinScaleChanged() {
+    this.refreshAllDistributionBarplots()
+  }
+
+  refreshAllDistributionBarplots() {
+    document.querySelectorAll('[data-metadata-item]').forEach((section) => {
+      const metadataId = Number(section.dataset.metadataItem)
+      if (!Number.isFinite(metadataId)) return
+      const canvases = section.querySelectorAll('.category-distribution-canvas')
+      if (canvases.length === 0) return
+      this.drawCategoryDistributions(metadataId)
+    })
+    this.drawSelectionDistribution()
+  }
+
   resolveHistogramOptions(options = null) {
     const fallbackScale = this.histogramScale === 'log' ? 'log' : 'normal'
     const scale = options && Object.prototype.hasOwnProperty.call(options, 'scale')
@@ -23545,6 +23576,13 @@ export default class extends Controller {
     if (!Number.isFinite(globalMin) || !Number.isFinite(globalMax)) {
       return
     }
+
+    const { binMin, binMax } = this.resolveBarplotBinEdges(
+      globalMin,
+      globalMax,
+      coloringMetadataVector,
+      filteredSet
+    )
     
     canvases.forEach(canvas => {
       const displayedCategory = canvas.dataset.category
@@ -23588,27 +23626,40 @@ export default class extends Controller {
       // Store stats for download
       canvas.dataset.stats = JSON.stringify({ min, max, mean, median, count: validValues.length })
       
-      // Create bins for histogram (use 20 bins across the global range)
+      // Create bins for histogram (20 bins across the global range; normal or log per settings)
       const numBins = 20
-      const binWidth = (globalMax - globalMin) / numBins
-      const bins = Array(numBins).fill(0)
-      
-      validValues.forEach(value => {
-        const binIndex = Math.min(Math.floor((value - globalMin) / binWidth), numBins - 1)
-        bins[binIndex]++
+      const histogramOptions = this.getBarplotBinHistogramOptions()
+      const { bins, binRanges, sourceCount } = this.buildHistogramBins(
+        validValues,
+        binMin,
+        binMax,
+        numBins,
+        histogramOptions
+      )
+      const binTotal = sourceCount > 0 ? sourceCount : validValues.length
+      canvas.dataset.stats = JSON.stringify({
+        min,
+        max,
+        mean,
+        median,
+        count: validValues.length,
+        binTotal
       })
       
-      // Store bin information for tooltip
+      // Store bin information for tooltip (equal visual widths; scale only changes value edges)
+      const rect = canvas.getBoundingClientRect()
+      const segmentWidth = rect.width / numBins
       const binData = bins.map((count, index) => ({
-        start: globalMin + index * binWidth,
-        end: globalMin + (index + 1) * binWidth,
+        start: binRanges[index].min,
+        end: binRanges[index].max,
         count: count,
-        percentage: (count / validValues.length) * 100
+        percentage: binTotal > 0 ? (count / binTotal) * 100 : 0,
+        startX: index * segmentWidth,
+        endX: (index + 1) * segmentWidth
       }))
       canvas.dataset.bins = JSON.stringify(binData)
       
       // Set canvas size
-      const rect = canvas.getBoundingClientRect()
       canvas.width = rect.width * window.devicePixelRatio
       canvas.height = rect.height * window.devicePixelRatio
       
@@ -23658,25 +23709,15 @@ export default class extends Controller {
         return `rgb(${r}, ${g}, ${b})`
       }
       
-      // Draw histogram bars with proportional widths
-      let currentX = 0
+      // Draw equal-width bins (normal/log only changes value boundaries)
+      const span = globalMax - globalMin
       bins.forEach((count, index) => {
-        if (count > 0) {
-          // Calculate width proportional to the number of cells in this bin
-          const proportion = count / validValues.length
-          const segmentWidth = proportion * rect.width
-          
-          // Get color for this bin based on its actual value position in the selected range
-          // The gradient maps globalMin to 0 and globalMax to 1
-          const binCenterValue = globalMin + (index + 0.5) * binWidth
-          const binPosition = (binCenterValue - globalMin) / (globalMax - globalMin)
-          const color = getColorAtPosition(binPosition)
-          
-          ctx.fillStyle = color
-          ctx.fillRect(currentX, 0, segmentWidth, rect.height)
-          
-          currentX += segmentWidth
-        }
+        if (count <= 0) return
+        const range = binRanges[index]
+        const binCenterValue = (range.min + range.max) / 2
+        const binPosition = span > 0 ? (binCenterValue - globalMin) / span : 0
+        ctx.fillStyle = getColorAtPosition(Math.min(1, Math.max(0, binPosition)))
+        ctx.fillRect(index * segmentWidth, 0, segmentWidth, rect.height)
       })
       
       // Add mousemove event listener for tooltip
@@ -23711,24 +23752,17 @@ export default class extends Controller {
       
       // Create tooltip handler for continuous data
       const tooltipHandler = (e) => {
-        const rect = canvas.getBoundingClientRect()
-        const x = e.clientX - rect.left
-        const bins = JSON.parse(canvas.dataset.bins || '[]')
+        const tipRect = canvas.getBoundingClientRect()
+        const x = e.clientX - tipRect.left
+        const tipBins = JSON.parse(canvas.dataset.bins || '[]')
         const stats = JSON.parse(canvas.dataset.stats || '{}')
-        
-        // Calculate cumulative widths to find which bin was hovered
-        let cumulativeWidth = 0
         let hoveredBin = null
-        
-        for (const bin of bins) {
-          if (bin.count > 0) {
-            const segmentWidth = (bin.count / stats.count) * rect.width
-            if (x >= cumulativeWidth && x < cumulativeWidth + segmentWidth) {
-              hoveredBin = bin
-              break
-            }
-            cumulativeWidth += segmentWidth
-          }
+        if (tipBins.length > 0 && tipRect.width > 0) {
+          const binIndex = Math.min(
+            tipBins.length - 1,
+            Math.max(0, Math.floor((x / tipRect.width) * tipBins.length))
+          )
+          hoveredBin = tipBins[binIndex]
         }
         
         if (hoveredBin) {
@@ -23757,6 +23791,520 @@ export default class extends Controller {
       // Store handlers for later removal (using object properties, not dataset)
       canvas._tooltipHandler = tooltipHandler
       canvas._tooltipLeaveHandler = leaveHandler
+    })
+  }
+
+  getBarplotBinHistogramOptions() {
+    const scale = this.barplotBinScale === 'log' ? 'log' : 'normal'
+    return {
+      scale,
+      // Log bins skip non-positive values; exclude them from the denominator as well.
+      ignoreZeros: scale === 'log'
+    }
+  }
+
+  // Log-spaced bins need a positive lower edge; when the color range includes 0/negatives,
+  // use the smallest positive value in the (filtered) coloring vector so log bins can apply.
+  resolveBarplotBinEdges(globalMin, globalMax, coloringMetadataVector, filteredSet) {
+    let binMin = globalMin
+    let binMax = globalMax
+    if (this.barplotBinScale !== 'log') {
+      return { binMin, binMax }
+    }
+    if (binMin > 0 && binMax > 0) {
+      return { binMin, binMax }
+    }
+    let minPositive = Infinity
+    const values = coloringMetadataVector.values
+    for (let i = 0; i < values.length; i++) {
+      if (filteredSet && !filteredSet.has(i)) continue
+      const v = values[i]
+      if (v > 0 && Number.isFinite(v) && v < minPositive) {
+        minPositive = v
+      }
+    }
+    if (!Number.isFinite(minPositive) || minPositive === Infinity) {
+      return { binMin, binMax }
+    }
+    binMin = minPositive
+    if (!(binMax > 0)) {
+      binMax = minPositive
+    }
+    return { binMin, binMax }
+  }
+
+  hideSelectionDistributionCanvas() {
+    const wrap = document.getElementById('selection-distribution-wrap')
+    if (wrap) wrap.style.display = 'none'
+    const complementRow = document.getElementById('complement-distribution-row')
+    if (complementRow) complementRow.style.display = 'none'
+    ;['selection-distribution-canvas', 'complement-distribution-canvas'].forEach((id) => {
+      const canvas = document.getElementById(id)
+      if (!canvas) return
+      canvas.dataset.segments = ''
+      canvas.dataset.bins = ''
+      canvas.dataset.stats = ''
+    })
+  }
+
+  ensureCategoryBarTooltip() {
+    let tooltip = document.getElementById('category-bar-tooltip')
+    if (!tooltip) {
+      tooltip = document.createElement('div')
+      tooltip.id = 'category-bar-tooltip'
+      tooltip.style.cssText = `
+        position: fixed;
+        background-color: rgba(0, 0, 0, 0.85);
+        color: white;
+        padding: 6px 10px;
+        border-radius: 4px;
+        font-size: 12px;
+        pointer-events: none;
+        z-index: 10000;
+        display: none;
+        white-space: nowrap;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      `
+      document.body.appendChild(tooltip)
+    }
+    return tooltip
+  }
+
+  // Keep the category/selection bar tooltip inside the viewport.
+  positionCategoryBarTooltip(tooltip, clientX, clientY) {
+    if (!tooltip) return
+    const margin = 8
+    const offset = 10
+    tooltip.style.display = 'block'
+    tooltip.style.left = `${clientX + offset}px`
+    tooltip.style.top = `${clientY + offset}px`
+
+    const tipRect = tooltip.getBoundingClientRect()
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+
+    let left = clientX + offset
+    let top = clientY + offset
+
+    if (left + tipRect.width > vw - margin) {
+      left = clientX - tipRect.width - offset
+    }
+    if (left < margin) {
+      left = margin
+    }
+    if (left + tipRect.width > vw - margin) {
+      left = Math.max(margin, vw - tipRect.width - margin)
+    }
+
+    if (top + tipRect.height > vh - margin) {
+      top = clientY - tipRect.height - offset
+    }
+    if (top < margin) {
+      top = margin
+    }
+    if (top + tipRect.height > vh - margin) {
+      top = Math.max(margin, vh - tipRect.height - margin)
+    }
+
+    tooltip.style.left = `${left}px`
+    tooltip.style.top = `${top}px`
+  }
+
+  bindCanvasBarTooltip(canvas, tooltipHandler) {
+    if (canvas._tooltipHandler) {
+      canvas.removeEventListener('mousemove', canvas._tooltipHandler)
+      canvas.removeEventListener('mouseleave', canvas._tooltipLeaveHandler)
+    }
+    const tooltip = this.ensureCategoryBarTooltip()
+    const leaveHandler = () => {
+      tooltip.style.display = 'none'
+    }
+    canvas.style.cursor = 'pointer'
+    canvas.addEventListener('mousemove', tooltipHandler)
+    canvas.addEventListener('mouseleave', leaveHandler)
+    canvas._tooltipHandler = tooltipHandler
+    canvas._tooltipLeaveHandler = leaveHandler
+  }
+
+  getGradientColorAtPosition(position) {
+    const controlPoints = this.customGradientControlPoints || this.gradientControlPoints || [
+      { position: 0, color: 0x0000ff },
+      { position: 0.5, color: 0x00ff00 },
+      { position: 1, color: 0xff0000 }
+    ]
+    const normalizedControlPoints = controlPoints.map(cp => ({
+      position: cp.position,
+      color: typeof cp.color === 'number' ? `#${cp.color.toString(16).padStart(6, '0')}` : cp.color
+    }))
+    let lowerPoint = normalizedControlPoints[0]
+    let upperPoint = normalizedControlPoints[normalizedControlPoints.length - 1]
+    for (let i = 0; i < normalizedControlPoints.length - 1; i++) {
+      if (position >= normalizedControlPoints[i].position && position <= normalizedControlPoints[i + 1].position) {
+        lowerPoint = normalizedControlPoints[i]
+        upperPoint = normalizedControlPoints[i + 1]
+        break
+      }
+    }
+    const denom = upperPoint.position - lowerPoint.position
+    const t = denom !== 0 ? (position - lowerPoint.position) / denom : 0
+    const lower = this.hexToRgb(lowerPoint.color)
+    const upper = this.hexToRgb(upperPoint.color)
+    const r = Math.round(lower.r + (upper.r - lower.r) * t)
+    const g = Math.round(lower.g + (upper.g - lower.g) * t)
+    const b = Math.round(lower.b + (upper.b - lower.b) * t)
+    return `rgb(${r}, ${g}, ${b})`
+  }
+
+  resolveContinuousColoringRange(coloringMetadataVector, filteredSet) {
+    const effectiveRange = this.getEffectiveColorRange()
+    let globalMin
+    let globalMax
+
+    if (effectiveRange && coloringMetadataVector.id === this.currentMetadataVector?.id) {
+      globalMin = effectiveRange.min
+      globalMax = effectiveRange.max
+    } else if (coloringMetadataVector.compression_info) {
+      globalMin = coloringMetadataVector.compression_info.min_val
+      globalMax = coloringMetadataVector.compression_info.max_val
+    } else {
+      const filteredColoringValues = coloringMetadataVector.values.filter((v, idx) => {
+        return v !== null && v !== undefined && !isNaN(v) && (!filteredSet || filteredSet.has(idx))
+      })
+      globalMin = this.dataManager.safeMin(filteredColoringValues)
+      globalMax = this.dataManager.safeMax(filteredColoringValues)
+    }
+
+    if (!Number.isFinite(globalMin) || !Number.isFinite(globalMax)) {
+      return null
+    }
+    return { globalMin, globalMax }
+  }
+
+  // All cells in the current embedding form the universe for selection vs complement.
+  getSelectionDistributionUniverseIndices() {
+    if (!this.currentCoordinates || this.currentCoordinates.length === 0) {
+      return []
+    }
+    return Array.from({ length: this.currentCoordinates.length }, (_, index) => index)
+  }
+
+  getComplementarySelectionIndices(selectionIndices) {
+    const selectedSet = new Set(selectionIndices || [])
+    return this.getSelectionDistributionUniverseIndices().filter((index) => !selectedSet.has(index))
+  }
+
+  // Distribution of the current (unsaved) selection and its complement across active coloring
+  drawSelectionDistribution() {
+    const wrap = document.getElementById('selection-distribution-wrap')
+    const selectionCanvas = document.getElementById('selection-distribution-canvas')
+    const complementCanvas = document.getElementById('complement-distribution-canvas')
+    const complementRow = document.getElementById('complement-distribution-row')
+    if (!wrap || !selectionCanvas) return
+
+    const coloringMetadataVector =
+      (this.colorManager && this.colorManager.getColoringMetadataVector()) || this.currentMetadataVector
+    if (!coloringMetadataVector || !coloringMetadataVector.values) {
+      this.hideSelectionDistributionCanvas()
+      return
+    }
+
+    const selectionIndices = this.getEffectiveSelectionIndices()
+    if (!selectionIndices || selectionIndices.length === 0) {
+      this.hideSelectionDistributionCanvas()
+      return
+    }
+
+    const dataType = coloringMetadataVector.data_type
+    const isContinuous = dataType === 'NUMERIC'
+    const isDiscrete = dataType === 'DISCRETE' || dataType === 'STRING'
+    if (!isContinuous && !isDiscrete) {
+      this.hideSelectionDistributionCanvas()
+      return
+    }
+
+    // Show complement only when the selection is a proper subset of all cells.
+    const complementIndices = this.getComplementarySelectionIndices(selectionIndices)
+    const showComplement = complementIndices.length > 0 && !!complementCanvas && !!complementRow
+
+    wrap.style.display = 'flex'
+    if (complementRow) {
+      complementRow.style.display = showComplement ? 'flex' : 'none'
+    }
+
+    if (isContinuous) {
+      const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
+      const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+      const range = this.resolveContinuousColoringRange(coloringMetadataVector, filteredSet)
+      if (!range) {
+        this.hideSelectionDistributionCanvas()
+        return
+      }
+      const { globalMin, globalMax } = range
+      const { binMin, binMax } = this.resolveBarplotBinEdges(
+        globalMin,
+        globalMax,
+        coloringMetadataVector,
+        filteredSet
+      )
+      this.drawSelectionContinuousDistribution(
+        selectionCanvas,
+        coloringMetadataVector,
+        selectionIndices,
+        { globalMin, globalMax, binMin, binMax }
+      )
+      if (showComplement) {
+        this.drawSelectionContinuousDistribution(
+          complementCanvas,
+          coloringMetadataVector,
+          complementIndices,
+          { globalMin, globalMax, binMin, binMax }
+        )
+      }
+      return
+    }
+
+    const sharedCategoryOrder = this.getSharedSelectionDistributionCategoryOrder(
+      coloringMetadataVector,
+      selectionIndices,
+      showComplement ? complementIndices : []
+    )
+    this.drawSelectionDiscreteDistribution(
+      selectionCanvas,
+      coloringMetadataVector,
+      selectionIndices,
+      sharedCategoryOrder
+    )
+    if (showComplement) {
+      this.drawSelectionDiscreteDistribution(
+        complementCanvas,
+        coloringMetadataVector,
+        complementIndices,
+        sharedCategoryOrder
+      )
+    }
+  }
+
+  getSharedSelectionDistributionCategoryOrder(coloringMetadataVector, selectionIndices, complementIndices) {
+    const combinedCounts = {}
+    const addCounts = (indices) => {
+      for (let s = 0; s < indices.length; s++) {
+        const category = coloringMetadataVector.values[indices[s]]
+        combinedCounts[category] = (combinedCounts[category] || 0) + 1
+      }
+    }
+    addCounts(selectionIndices || [])
+    addCounts(complementIndices || [])
+    return Object.keys(combinedCounts).sort((a, b) => {
+      const diff = (combinedCounts[b] || 0) - (combinedCounts[a] || 0)
+      if (diff !== 0) return diff
+      return String(a).localeCompare(String(b))
+    })
+  }
+
+  drawSelectionDiscreteDistribution(canvas, coloringMetadataVector, selectionIndices, sharedCategoryOrder = null) {
+    const coloringCategoryCounts = {}
+    for (let s = 0; s < selectionIndices.length; s++) {
+      const i = selectionIndices[s]
+      const category = coloringMetadataVector.values[i]
+      coloringCategoryCounts[category] = (coloringCategoryCounts[category] || 0) + 1
+    }
+
+    let allCategories
+    if (coloringMetadataVector.compression_info && coloringMetadataVector.compression_info.categories) {
+      allCategories = [...coloringMetadataVector.compression_info.categories]
+    } else {
+      allCategories = [...new Set(coloringMetadataVector.values)]
+    }
+
+    const stableSortedCategories = this.getStableSortedCategories(coloringMetadataVector.values, allCategories)
+    const rawColoringMetaId = coloringMetadataVector.id
+    const coloringMetaId = Number.isFinite(Number(rawColoringMetaId)) ? Number(rawColoringMetaId) : rawColoringMetaId
+
+    const sortedColoringCategories = Array.isArray(sharedCategoryOrder) && sharedCategoryOrder.length > 0
+      ? sharedCategoryOrder
+      : Object.keys(coloringCategoryCounts).sort((a, b) => {
+        return (coloringCategoryCounts[b] || 0) - (coloringCategoryCounts[a] || 0)
+      })
+
+    const totalSelected = selectionIndices.length
+    const rect = canvas.getBoundingClientRect()
+    const segments = []
+    let currentX = 0
+
+    sortedColoringCategories.forEach((coloringCategory) => {
+      const count = coloringCategoryCounts[coloringCategory] || 0
+      if (count <= 0) return
+
+      let paletteSlot = this.getStablePaletteIndexForCategory(coloringMetaId, coloringCategory)
+      if (paletteSlot < 0) {
+        const j = stableSortedCategories.findIndex((c) => String(c) === String(coloringCategory))
+        paletteSlot = j >= 0 ? j : 0
+      }
+      const colorHex = this.getCategoryColor(coloringCategory, paletteSlot, coloringMetaId)
+      const percentage = totalSelected > 0 ? (count / totalSelected) * 100 : 0
+      const segmentWidth = (percentage / 100) * rect.width
+
+      segments.push({
+        category: coloringCategory,
+        count: count,
+        percentage: percentage,
+        startX: currentX,
+        endX: currentX + segmentWidth,
+        color: colorHex
+      })
+      currentX += segmentWidth
+    })
+
+    canvas.dataset.segments = JSON.stringify(segments)
+    canvas.dataset.bins = ''
+    canvas.dataset.stats = JSON.stringify({ count: totalSelected })
+
+    canvas.width = rect.width * window.devicePixelRatio
+    canvas.height = rect.height * window.devicePixelRatio
+    const ctx = canvas.getContext('2d')
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
+    ctx.fillStyle = '#f3f4f6'
+    ctx.fillRect(0, 0, rect.width, rect.height)
+
+    segments.forEach(segment => {
+      const colorValue = segment.color
+      const color =
+        typeof colorValue === 'string'
+          ? colorValue
+          : `#${((colorValue >>> 0) & 0xffffff).toString(16).padStart(6, '0')}`
+      ctx.fillStyle = color
+      ctx.fillRect(segment.startX, 0, segment.endX - segment.startX, rect.height)
+    })
+
+    const tooltip = this.ensureCategoryBarTooltip()
+    this.bindCanvasBarTooltip(canvas, (e) => {
+      const canvasRect = canvas.getBoundingClientRect()
+      const x = e.clientX - canvasRect.left
+      const segs = JSON.parse(canvas.dataset.segments || '[]')
+      const hoveredSegment = segs.find(seg => x >= seg.startX && x < seg.endX)
+      if (hoveredSegment) {
+        tooltip.textContent = `${hoveredSegment.category} (${hoveredSegment.count} cells, ${hoveredSegment.percentage.toFixed(1)}%)`
+        this.positionCategoryBarTooltip(tooltip, e.clientX, e.clientY)
+      } else {
+        tooltip.style.display = 'none'
+      }
+    })
+  }
+
+  drawSelectionContinuousDistribution(canvas, coloringMetadataVector, selectionIndices, sharedRange = null) {
+    let globalMin
+    let globalMax
+    let binMin
+    let binMax
+
+    if (sharedRange) {
+      globalMin = sharedRange.globalMin
+      globalMax = sharedRange.globalMax
+      binMin = sharedRange.binMin
+      binMax = sharedRange.binMax
+    } else {
+      const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
+      const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+      const range = this.resolveContinuousColoringRange(coloringMetadataVector, filteredSet)
+      if (!range) {
+        return
+      }
+      globalMin = range.globalMin
+      globalMax = range.globalMax
+      const edges = this.resolveBarplotBinEdges(
+        globalMin,
+        globalMax,
+        coloringMetadataVector,
+        filteredSet
+      )
+      binMin = edges.binMin
+      binMax = edges.binMax
+    }
+
+    const values = []
+    for (let s = 0; s < selectionIndices.length; s++) {
+      const v = coloringMetadataVector.values[selectionIndices[s]]
+      if (v !== null && v !== undefined && !isNaN(v)) {
+        values.push(v)
+      }
+    }
+
+    const rect = canvas.getBoundingClientRect()
+    canvas.width = rect.width * window.devicePixelRatio
+    canvas.height = rect.height * window.devicePixelRatio
+    const ctx = canvas.getContext('2d')
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
+    ctx.fillStyle = '#f3f4f6'
+    ctx.fillRect(0, 0, rect.width, rect.height)
+
+    if (values.length === 0) {
+      canvas.dataset.bins = JSON.stringify([])
+      canvas.dataset.segments = ''
+      canvas.dataset.stats = JSON.stringify({ min: 0, max: 0, mean: 0, median: 0, count: 0, binTotal: 0 })
+      return
+    }
+
+    const min = this.dataManager.safeMin(values)
+    const max = this.dataManager.safeMax(values)
+    const mean = values.reduce((a, b) => a + b, 0) / values.length
+    const sortedValues = [...values].sort((a, b) => a - b)
+    const median = sortedValues[Math.floor(sortedValues.length / 2)]
+
+    const numBins = 20
+    const histogramOptions = this.getBarplotBinHistogramOptions()
+    const { bins, binRanges, sourceCount } = this.buildHistogramBins(
+      values,
+      binMin,
+      binMax,
+      numBins,
+      histogramOptions
+    )
+    const binTotal = sourceCount > 0 ? sourceCount : values.length
+    canvas.dataset.stats = JSON.stringify({ min, max, mean, median, count: values.length, binTotal })
+    canvas.dataset.segments = ''
+
+    const segmentWidth = rect.width / numBins
+    const binData = bins.map((count, index) => ({
+      start: binRanges[index].min,
+      end: binRanges[index].max,
+      count: count,
+      percentage: binTotal > 0 ? (count / binTotal) * 100 : 0,
+      startX: index * segmentWidth,
+      endX: (index + 1) * segmentWidth
+    }))
+    canvas.dataset.bins = JSON.stringify(binData)
+
+    const span = globalMax - globalMin
+    bins.forEach((count, index) => {
+      if (count <= 0) return
+      const binRange = binRanges[index]
+      const binCenterValue = (binRange.min + binRange.max) / 2
+      const binPosition = span > 0 ? (binCenterValue - globalMin) / span : 0
+      ctx.fillStyle = this.getGradientColorAtPosition(Math.min(1, Math.max(0, binPosition)))
+      ctx.fillRect(index * segmentWidth, 0, segmentWidth, rect.height)
+    })
+
+    const tooltip = this.ensureCategoryBarTooltip()
+    this.bindCanvasBarTooltip(canvas, (e) => {
+      const canvasRect = canvas.getBoundingClientRect()
+      const x = e.clientX - canvasRect.left
+      const binList = JSON.parse(canvas.dataset.bins || '[]')
+      const stats = JSON.parse(canvas.dataset.stats || '{}')
+      let hoveredBin = null
+      if (binList.length > 0 && canvasRect.width > 0) {
+        const binIndex = Math.min(
+          binList.length - 1,
+          Math.max(0, Math.floor((x / canvasRect.width) * binList.length))
+        )
+        hoveredBin = binList[binIndex]
+      }
+
+      if (hoveredBin) {
+        tooltip.textContent = `Range: ${hoveredBin.start.toFixed(2)} - ${hoveredBin.end.toFixed(2)} (${hoveredBin.count} cells, ${hoveredBin.percentage.toFixed(1)}%)`
+      } else {
+        tooltip.textContent = `Min: ${stats.min?.toFixed(2)}, Max: ${stats.max?.toFixed(2)}, Mean: ${stats.mean?.toFixed(2)}, Median: ${stats.median?.toFixed(2)} (${stats.count} cells)`
+      }
+      this.positionCategoryBarTooltip(tooltip, e.clientX, e.clientY)
     })
   }
   
@@ -24247,10 +24795,7 @@ export default class extends Controller {
         }
       })
       
-      // Refresh all barplots (category distributions)
-      if (this.dataManager && typeof this.dataManager.updateAllCategoryDistributions === 'function') {
-        this.dataManager.updateAllCategoryDistributions()
-      }
+      this.refreshAllDistributionBarplots()
     })
   }
 

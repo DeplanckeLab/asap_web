@@ -2509,6 +2509,10 @@ export class DataManager {
         this.controller.drawCategoryDistributions(metadataId)
       }
     })
+
+    if (typeof this.controller.drawSelectionDistribution === 'function') {
+      this.controller.drawSelectionDistribution()
+    }
   }
   
   // Redraw all density plots (histograms in range sliders) to reflect filtered cells

@@ -1570,6 +1570,9 @@ export class UIManager {
     if (typeof this.controller.syncSelectionColorDot === 'function') {
       this.controller.syncSelectionColorDot()
     }
+    if (typeof this.controller.drawSelectionDistribution === 'function') {
+      this.controller.drawSelectionDistribution()
+    }
   }
 
   // Update the state of the "Add all visible cells" button
@@ -1778,6 +1781,19 @@ export class UIManager {
         histogramIgnoreZerosCheckbox.addEventListener('change', (e) => {
           this.controller.histogramIgnoreZeros = !!e.target.checked
           this.controller.refreshHistogramsAfterGlobalHistogramOptionsChanged()
+        })
+      }
+    }
+
+    const barplotBinScaleSelect = document.getElementById('barplot-bin-scale-select')
+    if (barplotBinScaleSelect) {
+      barplotBinScaleSelect.value = this.controller.barplotBinScale === 'log' ? 'log' : 'normal'
+      if (!barplotBinScaleSelect.dataset.barplotBinScaleBound) {
+        barplotBinScaleSelect.dataset.barplotBinScaleBound = '1'
+        barplotBinScaleSelect.addEventListener('change', (e) => {
+          const v = e.target.value
+          this.controller.barplotBinScale = v === 'log' ? 'log' : 'normal'
+          this.controller.refreshBarplotsAfterBinScaleChanged()
         })
       }
     }

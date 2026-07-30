@@ -353,7 +353,7 @@ export class GeneSetCollectionsController {
                     data-manual-gene-set-delete-btn="true"
                     data-gene-set-item-id="${itemId}"
                     style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#dc2626;background:none;border:none;cursor:pointer;padding:0;margin-left:4px;"
-                    title="Delete manual gene set"
+                    title="Delete gene set"
                     onclick="event.stopPropagation()">
               <i class="fas fa-trash" style="font-size:12px;"></i>
             </button>
@@ -450,7 +450,7 @@ export class GeneSetCollectionsController {
         const itemId = String(button.dataset.geneSetItemId || '').trim()
         if (!itemId || !this.projectIdentifier) return
 
-        const shouldDelete = await this.confirmDestructiveAction('Delete this manual gene set?')
+        const shouldDelete = await this.confirmDestructiveAction('Delete this gene set?')
         if (!shouldDelete) return
 
         button.disabled = true
@@ -470,7 +470,7 @@ export class GeneSetCollectionsController {
           })
           const payload = await response.json()
           if (!response.ok || payload.status !== 'ok') {
-            throw new Error(payload.message || 'Failed to delete manual gene set')
+            throw new Error(payload.message || 'Failed to delete gene set')
           }
 
           if (this.selectedCollectionId) {

@@ -2370,28 +2370,10 @@ this.currentMatches = allMatches.filter(item => {
     
     // Setup button handlers
     this.setupGeneButtonHandlers(gene.stableId)
-    
-    // Check gene status and update icon
-    this.checkGeneStatus(gene.stableId)
-    
-    // Load expression data immediately
-    this.loadGeneExpressionData(gene, container)
-    
-    // Ensure slider data is initialized when gene expression data is loaded
-    // This will be called again when data loads, but also try to initialize if data is already available
-    const existingData = this.geneExpressionData[geneIdStr] || 
-                         this.geneExpressionData[geneIdNum] || 
-                         this.geneExpressionData[String(geneIdNum)]
-    if (existingData && existingData.values && this.controller) {
-      // Data already available, initialize slider data
-      if (this.controller.initializeInlineRangeSlider) {
-        this.controller.initializeInlineRangeSlider(
-          layerMetadataId,
-          existingData.values,
-          this.controller.loadedMetadataVectors?.[layerMetadataId]
-        )
-      }
-    }
+
+    // Expression loading is owned by the caller (processAllGenes / addGene / etc.).
+    // Do not start a second concurrent load here — it races with the caller and can
+    // overwrite a successful in-memory status with a stale error icon.
   }
 
   // Check gene expression status (in memory, in DB, or not loaded)
@@ -2440,6 +2422,9 @@ this.currentMatches = allMatches.filter(item => {
     const { baseKey: baseMetadataId, layerKey: geneMetadataId } = this.getGeneMetadataKeys(geneId, this.currentMatrixAnnotId)
     const statusIcon = document.querySelector(`.gene-status-icon[data-gene-id="${geneId}"]`)
     const loadingDiv = document.getElementById(`gene-expression-loading-${gene.stableId}`)
+    if (!this._geneExpressionLoadTokens) this._geneExpressionLoadTokens = {}
+    const loadToken = (this._geneExpressionLoadTokens[geneId] = (this._geneExpressionLoadTokens[geneId] || 0) + 1)
+    const isCurrentLoad = () => this._geneExpressionLoadTokens[geneId] === loadToken
     
     // console.log('GeneManager: load request', {
       // geneId,
@@ -2717,6 +2702,21 @@ this.currentMatches = allMatches.filter(item => {
       }
     } catch (error) {
       console.error(`GeneManager: Error loading expression data for ${gene.symbol}:`, error)
+
+      // Ignore stale failures from an older concurrent request for the same gene.
+      if (!isCurrentLoad()) return
+
+      // If a newer/parallel request already populated memory, keep the success icon.
+      const recovered = this.geneExpressionData[geneId] ||
+                        this.geneExpressionData[parseInt(geneId)] ||
+                        this.geneExpressionData[String(parseInt(geneId))]
+      if (recovered && recovered.values && recovered.values.length > 0 && recovered.metadataId === geneMetadataId) {
+        if (this.controller && this.controller.uiManager) {
+          this.controller.uiManager.updateGeneStatusIcon(geneId, 'in-memory')
+        }
+        if (loadingDiv) loadingDiv.style.display = 'none'
+        return
+      }
       
       // Update status icon to error
       if (this.controller && this.controller.uiManager) {

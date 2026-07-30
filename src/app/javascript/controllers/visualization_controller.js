@@ -10208,7 +10208,7 @@ export default class extends Controller {
     event.stopPropagation()
 
     const button = event.currentTarget
-    const itemId = Number(button.dataset.geneSetItemId || 0)
+    const itemId = String(button.dataset.geneSetItemId || '').trim()
     const geneSetName = button.dataset.geneSetName || 'Gene set'
     if (!itemId) return
 
@@ -16258,6 +16258,7 @@ export default class extends Controller {
     const overlay = document.getElementById('de-selection-overlay')
     if (!overlay) return
     overlay.style.display = 'none'
+    this._deVizGeneListState = null
   }
 
   switchDeModalTab(tab) {
@@ -16277,7 +16278,7 @@ export default class extends Controller {
       }
     })
     if (tab === 'results') {
-      this.loadDeVizResults()
+      this.backToDeVizResults()
     }
   }
 
@@ -16286,9 +16287,25 @@ export default class extends Controller {
     return '/projects/' + encodeURIComponent(pid)
   }
 
-  loadDeVizResults() {
+  _setDeVizResultsAreaMode(mode) {
     const area = document.getElementById('de-viz-results-area')
     if (!area) return
+    if (mode === 'gene-list') {
+      area.style.overflowY = 'hidden'
+      area.style.display = 'flex'
+      area.style.flexDirection = 'column'
+    } else {
+      area.style.overflowY = 'auto'
+      area.style.display = 'block'
+      area.style.flexDirection = ''
+    }
+  }
+
+  loadDeVizResults() {
+    this._deVizGeneListState = null
+    const area = document.getElementById('de-viz-results-area')
+    if (!area) return
+    this._setDeVizResultsAreaMode('list')
     area.innerHTML = '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:24px 0;">Loading...</div>'
     const fdr = (document.getElementById('de-viz-fdr-cutoff') || {}).value || '0.05'
     const fc  = (document.getElementById('de-viz-fc-cutoff')  || {}).value || '2'
@@ -16301,6 +16318,53 @@ export default class extends Controller {
     .then(function(html) { area.innerHTML = html })
     .catch(function() {
       area.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:12px;">Failed to load DE results.</div>'
+    })
+  }
+
+  backToDeVizResults() {
+    this._deVizGeneListState = null
+    this.loadDeVizResults()
+  }
+
+  openDeVizGeneList(el) {
+    if (!el) return
+    const url = el.getAttribute('data-gene-list-url')
+    if (!url) return
+    this._deVizGeneListState = {
+      url: url,
+      runId: el.getAttribute('data-run-id') || '',
+      annotId: el.getAttribute('data-annot-id') || '',
+      direction: el.getAttribute('data-direction') || '',
+      runNum: el.getAttribute('data-run-num') || '',
+      method: el.getAttribute('data-method') || '',
+      refGroup: el.getAttribute('data-ref-group') || ''
+    }
+    this._loadDeVizGeneListHtml()
+  }
+
+  _loadDeVizGeneListHtml() {
+    const state = this._deVizGeneListState
+    const area = document.getElementById('de-viz-results-area')
+    if (!state || !state.url || !area) return Promise.resolve()
+    this._setDeVizResultsAreaMode('gene-list')
+    area.innerHTML = '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:24px 0;">Loading gene list...</div>'
+    return fetch(state.url, {
+      headers: { 'Accept': 'text/html' },
+      credentials: 'same-origin'
+    })
+    .then(function(r) { return r.text() })
+    .then((html) => {
+      area.innerHTML = html
+      this.executeScriptsInContainer(area)
+      const exportBtn = area.querySelector('.de-viz-export-btn')
+      if (exportBtn) {
+        if (state.method) exportBtn.setAttribute('data-method', state.method)
+        if (state.refGroup) exportBtn.setAttribute('data-ref-group', state.refGroup)
+        if (state.runNum) exportBtn.setAttribute('data-run-num', state.runNum)
+      }
+    })
+    .catch(function() {
+      area.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:12px;">Failed to load gene list.</div>'
     })
   }
 
@@ -16317,7 +16381,28 @@ export default class extends Controller {
     const fc  = (document.getElementById('de-viz-fc-cutoff')  || {}).value || '2'
     const spinner = document.getElementById('de-viz-filter-spinner')
     if (spinner) spinner.style.display = 'inline'
+    const geneListState = this._deVizGeneListState
     const url = this._deVizBaseUrl() + '/viz_de_results?fdr_cutoff=' + encodeURIComponent(fdr) + '&fc_cutoff=' + encodeURIComponent(fc)
+
+    if (geneListState) {
+      const filterUrl = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'format=json'
+      fetch(filterUrl, {
+        headers: { 'Accept': 'application/json' },
+        credentials: 'same-origin'
+      })
+      .then((r) => {
+        if (!r.ok) throw new Error('filter failed')
+        return r.json()
+      })
+      .then(() => this._loadDeVizGeneListHtml())
+      .catch(() => {
+        area.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:12px;">Failed to refresh gene list.</div>'
+      })
+      .then(() => { if (spinner) spinner.style.display = 'none' })
+      return
+    }
+
+    this._setDeVizResultsAreaMode('list')
     fetch(url, {
       headers: { 'Accept': 'text/html' },
       credentials: 'same-origin'
@@ -16331,25 +16416,161 @@ export default class extends Controller {
   }
 
   openDeVizExportDialog(btn) {
-    const runId     = btn.getAttribute('data-run-id')
-    const annotId   = btn.getAttribute('data-annot-id') || ''
-    const direction = btn.getAttribute('data-direction')
-    const runNum    = btn.getAttribute('data-run-num')
-    const method    = btn.getAttribute('data-method') || ''
-    const refGroup  = btn.getAttribute('data-ref-group') || ''
+    const state = this._deVizGeneListState || {}
+    const runId     = btn.getAttribute('data-run-id') || state.runId || ''
+    const annotId   = btn.getAttribute('data-annot-id') || state.annotId || ''
+    const direction = btn.getAttribute('data-direction') || state.direction || ''
+    const runNum    = btn.getAttribute('data-run-num') || state.runNum || ''
+    const method    = (btn.getAttribute('data-method') || state.method || '').trim()
+    const refGroup  = (btn.getAttribute('data-ref-group') || state.refGroup || '').trim()
     const fdr = (document.getElementById('de-viz-fdr-cutoff') || {}).value || '0.05'
     const fc  = (document.getElementById('de-viz-fc-cutoff')  || {}).value || '2'
 
     const dirLabel = direction === 'up' ? 'up-regulated' : 'down-regulated'
-    const defaultName = ['DE', '#' + runNum, method, refGroup, dirLabel].filter(Boolean).join(' - ')
+    const nameParts = [
+      'DE',
+      runNum ? '#' + runNum : '',
+      method && method !== 'N/A' ? method : '',
+      refGroup && refGroup !== '-' ? refGroup : '',
+      'FDR<=' + fdr,
+      '|FC|>=' + fc,
+      dirLabel
+    ].filter(function(part) { return part && String(part).trim() !== '' })
+    const defaultName = nameParts.join(' - ')
 
-    const name = window.prompt('Name for the new gene set:', defaultName)
-    if (!name || !name.trim()) return
-
-    this.saveDeVizGeneSet({ runId, annotId, direction, name: name.trim(), fdr, fc, btn })
+    this._showDeGeneSetExportModal({
+      runId,
+      annotId,
+      direction,
+      fdr,
+      fc,
+      defaultName,
+      btn
+    })
   }
 
-  saveDeVizGeneSet({ runId, annotId, direction, name, fdr, fc, btn }) {
+  _getDeGeneSetCollectionOptionsFromDom() {
+    const rows = document.querySelectorAll('[data-gene-set-collection-row="true"][data-collection-type-key="from_de"]')
+    return Array.from(rows).map(function(row) {
+      return {
+        id: row.getAttribute('data-collection-id') || '',
+        label: row.getAttribute('data-collection-label') || ''
+      }
+    }).filter(function(opt) { return opt.id })
+  }
+
+  _showDeGeneSetExportModal({ runId, annotId, direction, fdr, fc, defaultName, btn }) {
+    const existing = document.getElementById('de-gene-set-modal-overlay')
+    if (existing) existing.remove()
+
+    const template = document.getElementById('save-de-gene-set-modal-template')
+    if (!template) {
+      alert('Export dialog template is missing.')
+      return
+    }
+
+    const overlay = template.content.firstElementChild.cloneNode(true)
+    document.body.appendChild(overlay)
+
+    const nameInput = overlay.querySelector('#de-gene-set-name-input')
+    const collectionSelect = overlay.querySelector('#de-gene-set-collection-select')
+    const newWrap = overlay.querySelector('#de-gene-set-new-collection-wrap')
+    const newInput = overlay.querySelector('#de-gene-set-new-collection-input')
+    const form = overlay.querySelector('#save-de-gene-set-form')
+    const closeBtn = overlay.querySelector('#close-de-gene-set-modal')
+    const cancelBtn = overlay.querySelector('#cancel-de-gene-set-btn')
+    const submitBtn = overlay.querySelector('#submit-de-gene-set-btn')
+
+    if (nameInput) nameInput.value = defaultName || ''
+
+    const newCollectionValue = '__new_de_collection__'
+    const liveOptions = this._getDeGeneSetCollectionOptionsFromDom()
+    if (collectionSelect && liveOptions.length) {
+      const createOpt = collectionSelect.querySelector('option[value="' + newCollectionValue + '"]')
+      collectionSelect.innerHTML = ''
+      liveOptions.forEach(function(opt) {
+        const option = document.createElement('option')
+        option.value = opt.id
+        option.textContent = opt.label
+        collectionSelect.appendChild(option)
+      })
+      if (createOpt) {
+        collectionSelect.appendChild(createOpt)
+      } else {
+        const option = document.createElement('option')
+        option.value = newCollectionValue
+        option.textContent = 'Create new collection...'
+        collectionSelect.appendChild(option)
+      }
+      collectionSelect.value = liveOptions[0].id
+    } else if (collectionSelect) {
+      collectionSelect.value = newCollectionValue
+    }
+
+    const syncNewCollectionVisibility = function() {
+      const isNew = collectionSelect && collectionSelect.value === newCollectionValue
+      if (newWrap) newWrap.style.display = isNew ? 'block' : 'none'
+      if (isNew && newInput && !newInput.value.trim()) {
+        newInput.value = 'DE results'
+      }
+    }
+    if (collectionSelect) {
+      collectionSelect.addEventListener('change', syncNewCollectionVisibility)
+    }
+    syncNewCollectionVisibility()
+
+    const closeModal = function() {
+      if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay)
+    }
+
+    if (closeBtn) closeBtn.addEventListener('click', closeModal)
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModal)
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) closeModal()
+    })
+
+    if (form) {
+      form.addEventListener('submit', (e) => {
+        e.preventDefault()
+        const name = (nameInput && nameInput.value || '').trim()
+        if (!name) {
+          alert('Please enter a gene set name.')
+          return
+        }
+        const collectionId = collectionSelect ? collectionSelect.value : newCollectionValue
+        let newCollectionName = ''
+        if (collectionId === newCollectionValue) {
+          newCollectionName = (newInput && newInput.value || '').trim()
+          if (!newCollectionName) {
+            alert('Please enter a name for the new collection.')
+            return
+          }
+        }
+        if (submitBtn) submitBtn.disabled = true
+        closeModal()
+        this.saveDeVizGeneSet({
+          runId,
+          annotId,
+          direction,
+          name,
+          fdr,
+          fc,
+          collectionId,
+          newCollectionName,
+          btn
+        })
+      })
+    }
+
+    setTimeout(function() {
+      if (nameInput) {
+        nameInput.focus()
+        nameInput.select()
+      }
+    }, 50)
+  }
+
+  saveDeVizGeneSet({ runId, annotId, direction, name, fdr, fc, collectionId, newCollectionName, btn }) {
     if (btn) btn.disabled = true
     const csrfMeta = document.querySelector('meta[name="csrf-token"]')
     const formData = new FormData()
@@ -16359,6 +16580,8 @@ export default class extends Controller {
     formData.append('name', name)
     formData.append('fdr_cutoff', fdr)
     formData.append('fc_cutoff', fc)
+    if (collectionId) formData.append('collection_id', collectionId)
+    if (newCollectionName) formData.append('new_collection_name', newCollectionName)
     fetch(this._deVizBaseUrl() + '/save_de_gene_set', {
       method: 'POST',
       headers: {
@@ -16369,9 +16592,14 @@ export default class extends Controller {
       credentials: 'same-origin'
     })
     .then(function(r) { return r.json() })
-    .then(function(data) {
+    .then((data) => {
       if (data.status === 'ok') {
-        alert('Gene set "' + name + '" saved successfully (' + data.gene_count + ' genes).')
+        const collectionsController = this.geneSetCollectionsController
+        if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function' && data.collection) {
+          collectionsController.upsertCollectionFromPayload(data.collection)
+        }
+        const collectionLabel = (data.collection && data.collection.label) ? data.collection.label : 'collection'
+        alert('Gene set "' + name + '" saved in "' + collectionLabel + '" (' + data.gene_count + ' genes). Open the Gene set collections tab to find it.')
       } else {
         alert('Error: ' + (data.message || 'Unknown error'))
       }

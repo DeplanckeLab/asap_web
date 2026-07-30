@@ -1,8 +1,70 @@
 <% if @step && @run %>
-<% numeric_fields = ['Gene index', 'logFC', 'P-value', 'FDR', 'Avg group1', 'Avg group2'] %>
 <% is_up_regulated = params[:type].to_s == 'up' %>
-<% gene_badge_cls = is_up_regulated ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-red-100 text-red-800 hover:bg-red-200' %>
+<% is_viz = params[:from].to_s == 'viz' %>
+<% dir_label = is_up_regulated ? 'up' : 'down' %>
 
+<% if is_viz %>
+<div id="de-viz-gene-list-root"
+     data-run-id="<%= @run.id %>"
+     data-annot-id="<%= @de_gene_list_annot_id.to_s %>"
+     data-direction="<%= dir_label %>"
+     data-run-num="<%= @run.num || @run.id %>"
+     style="display: flex; flex-direction: column; min-height: 0; height: 100%;">
+  <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
+    <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+      <button type="button"
+              onclick="if(window.visualizationController) window.visualizationController.backToDeVizResults()"
+              style="display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; font-size: 12px; font-weight: 500; background: #fff; color: #374151; border: 1px solid #d1d5db; border-radius: 5px; cursor: pointer; white-space: nowrap;">
+        &larr; Back
+      </button>
+      <div style="font-size: 13px; font-weight: 600; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+        #<%= @run.num || @run.id %> - <%= @nber_genes %> <%= dir_label %>-regulated genes
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+      <% if exportable?(@project) %>
+        <button type="button"
+                onclick="downloadDeGeneList('json')"
+                style="padding: 5px 10px; font-size: 12px; font-weight: 500; background: #fff; color: #374151; border: 1px solid #d1d5db; border-radius: 5px; cursor: pointer; white-space: nowrap;">
+          JSON
+        </button>
+        <button type="button"
+                onclick="downloadDeGeneList('tsv')"
+                style="padding: 5px 10px; font-size: 12px; font-weight: 500; background: #fff; color: #374151; border: 1px solid #d1d5db; border-radius: 5px; cursor: pointer; white-space: nowrap;">
+          TSV
+        </button>
+      <% end %>
+      <button type="button"
+              class="de-viz-export-btn"
+              data-run-id="<%= @run.id %>"
+              data-annot-id="<%= @de_gene_list_annot_id.to_s %>"
+              data-direction="<%= dir_label %>"
+              data-run-num="<%= @run.num || @run.id %>"
+              data-method=""
+              data-ref-group=""
+              onclick="if(window.visualizationController) window.visualizationController.openDeVizExportDialog(this)"
+              style="padding: 5px 10px; font-size: 12px; font-weight: 500; background: <%= is_up_regulated ? '#dcfce7' : '#fee2e2' %>; color: <%= is_up_regulated ? '#166534' : '#991b1b' %>; border: 1px solid <%= is_up_regulated ? '#bbf7d0' : '#fecaca' %>; border-radius: 5px; cursor: pointer; white-space: nowrap;">
+        Export to gene set
+      </button>
+    </div>
+  </div>
+
+  <% if @limit < @nber_genes %>
+    <div style="margin-bottom: 8px; padding: 6px 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 5px; color: #92400e; font-size: 12px;">
+      Only <%= @limit %> genes with highest fold change displayed
+    </div>
+  <% end %>
+
+  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+    <input type="text" id="de-genelist-search" placeholder="Filter by any value"
+           style="width: 220px; padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 5px; font-size: 12px;"
+           oninput="(function(input){var q=input.value.toLowerCase();var c=document.getElementById('de-genelist-container');if(!c)return;var rows=c.querySelectorAll('tbody tr');var count=0;rows.forEach(function(r){var txt=r.textContent.toLowerCase();var show=!q||txt.indexOf(q)!==-1;r.style.display=show?'':'none';if(show)count++;});var info=document.getElementById('de-genelist-count');if(info)info.textContent=count+' / '+rows.length+' genes';})(this)">
+    <span id="de-genelist-count" style="font-size: 11px; color: #6b7280;"></span>
+  </div>
+
+  <%= render 'runs/de_gene_list_table', compact: true %>
+</div>
+<% else %>
 <div class="bg-white rounded-lg shadow-sm flex flex-col"
      style="max-height: calc(100vh - 200px);"
      data-analysis-direct-link-path="<%= project_path(@project, { view: 'analysis', step_id: @step.id, sub_view: 'de_filter', gene_list_run_id: @run.id, gene_list_type: params[:type].to_s, gene_list_de_annot_id: @de_gene_list_annot_id }.compact) %>">
@@ -46,47 +108,11 @@
     <span id="de-genelist-count" class="text-xs text-gray-500"></span>
   </div>
 
-  <div id="de-genelist-container" class="flex-1 overflow-y-auto">
-    <table class="min-w-full divide-y divide-gray-200 text-sm">
-      <thead class="bg-gray-50 sticky top-0">
-        <tr>
-          <% @fields.each_with_index do |f, idx| %>
-            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none"
-                data-col="<%= idx %>"
-                data-numeric="<%= numeric_fields.include?(f) %>"
-                onclick="(function(th){var c=document.getElementById('de-genelist-container');if(!c)return;var tbody=c.querySelector('tbody');if(!tbody)return;var col=parseInt(th.dataset.col);var num=th.dataset.numeric==='true';var rows=Array.from(tbody.querySelectorAll('tr'));var cur=th.dataset.sortDir||'none';var asc=(cur!=='asc');th.dataset.sortDir=asc?'asc':'desc';c.querySelectorAll('th[data-col]').forEach(function(h){if(h!==th){h.dataset.sortDir='none';var si=h.querySelector('.sort-indicator');if(si)si.textContent='';}});var si=th.querySelector('.sort-indicator');if(si)si.textContent=asc?' \u25B2':' \u25BC';rows.sort(function(a,b){var av=a.cells[col]?a.cells[col].textContent.trim():'';var bv=b.cells[col]?b.cells[col].textContent.trim():'';if(num){var an=parseFloat(av)||0;var bn=parseFloat(bv)||0;return asc?an-bn:bn-an;}return asc?av.localeCompare(bv):bv.localeCompare(av);});rows.forEach(function(r){tbody.appendChild(r);});})(this)">
-              <%= f %> <span class="sort-indicator"></span>
-            </th>
-          <% end %>
-        </tr>
-      </thead>
-      <tbody class="bg-white divide-y divide-gray-200">
-        <% @data.each do |e| %>
-          <tr class="hover:bg-gray-50">
-            <% @fields.each_index do |i| %>
-              <td class="px-3 py-1.5 text-gray-700 whitespace-nowrap">
-                <% if @fields[i] == 'EnsemblID' && e[i].present? %>
-                  <span class="text-blue-600 cursor-pointer hover:underline gene-link" data-ensembl-id="<%= e[i] %>"><%= e[i] %></span>
-                <% elsif @fields[i] == 'Gene name' %>
-                  <% gene_name = e[i].presence || e[1] %>
-                  <% ensembl_id = e[1].to_s %>
-                  <span class="gene-badge cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= gene_badge_cls %>"
-                        data-ensembl-id="<%= ensembl_id %>"
-                        <% if gene_name.present? && gene_name != ensembl_id %>data-gene-symbol="<%= gene_name %>"<% end %>
-                        title="<%= ensembl_id.presence || gene_name %>"><%= gene_name %></span>
-                <% else %>
-                  <%= e[i] %>
-                <% end %>
-              </td>
-            <% end %>
-          </tr>
-        <% end %>
-      </tbody>
-    </table>
-  </div>
+  <%= render 'runs/de_gene_list_table', compact: false %>
 </div>
 
 <%= render 'projects/views/annotation_popup' %>
+<% end %>
 
 <script>
 (function() {

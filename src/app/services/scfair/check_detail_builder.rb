@@ -421,8 +421,11 @@ module Scfair
       if Rules.var_index_field?(@field) || category_id == 'var.index'
         cfg = Rules.var_index_config
         rows << { label: 'AnnData schema', value: cfg[:schema] }
-        rows << { label: 'H5AD logical path', value: "#{cfg[:h5ad][:logical]} (file: #{cfg[:h5ad][:path]})" }
-        rows << { label: 'Loom logical path', value: "#{cfg[:loom][:logical]} (file: #{cfg[:loom][:path]} or anndata_mapping #{cfg[:loom][:manifest_key]})" }
+        rows << { label: 'H5AD file path', value: cfg[:h5ad][:path] }
+        rows << {
+          label: 'Loom file path',
+          value: "#{cfg[:loom][:path]} (or anndata_mapping #{cfg[:loom][:manifest_key]})"
+        }
       end
 
       if category_id == 'schema.version'
@@ -1584,8 +1587,7 @@ module Scfair
     end
 
     def var_index_storage_path?(field)
-      field.to_s == Rules.var_index_schema_field ||
-        field.to_s.match?(/\A(var\/_index|var\/index|\/row_attrs\/(_index|index|feature_id))\z/)
+      Rules.var_index_field?(field)
     end
 
     def var_field_summary(field_name)

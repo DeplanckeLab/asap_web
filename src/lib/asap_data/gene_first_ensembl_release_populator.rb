@@ -228,6 +228,42 @@ module AsapData
     def accumulate_ensembl_releases!(release_dir:, db_name:, db_type:, release_num:, core_folders_cache:, stable_id_map_cache:, archive_members_cache:, download_missing_gene_table:, target_ensembl_ids:, first_release_by_ensembl:, latest_release_by_ensembl:, stats:)
       return false if release_dir.nil?
 
+      stream = lambda do |ensembl_id|
+        record_ensembl_release!(
+          first_release_by_ensembl,
+          latest_release_by_ensembl,
+          ensembl_id,
+          release_num,
+          target_ensembl_ids: target_ensembl_ids
+        )
+      end
+
+      # Early Ensembl schemas keep stable IDs in gene_stable_id.txt (gene.txt has \\N).
+      # Prefer that table when present or downloadable — also avoids parsing full gene.txt.
+      stable_id_source = if download_missing_gene_table
+        resolve_gene_stable_id_source(
+          release_dir: release_dir,
+          db_name: db_name,
+          db_type: db_type,
+          release_num: release_num,
+          core_folders_cache: core_folders_cache,
+          archive_members_cache: archive_members_cache,
+          download_missing_gene_table: download_missing_gene_table,
+          stats: stats
+        )
+      else
+        find_gene_stable_id_source(
+          release_dir: release_dir,
+          db_name: db_name,
+          archive_members_cache: archive_members_cache
+        )
+      end
+
+      if stable_id_source
+        stream_ensembl_ids_from_stable_id_table(stable_id_source, stats: stats, &stream)
+        return true
+      end
+
       source = resolve_gene_table_source(
         release_dir: release_dir,
         db_name: db_name,
@@ -240,41 +276,27 @@ module AsapData
       )
       return false unless source
 
-      stream = lambda do |ensembl_id|
-        record_ensembl_release!(
-          first_release_by_ensembl,
-          latest_release_by_ensembl,
-          ensembl_id,
-          release_num,
-          target_ensembl_ids: target_ensembl_ids
-        )
+      column = ensembl_id_column(db_type, release_num)
+      unless column
+        puts "  WARN skipping release #{release_num} for #{db_name}: no gene table column mapping"
+        return false
       end
 
-      stable_id_source = find_gene_stable_id_source(
-        release_dir: release_dir,
-        db_name: db_name,
-        archive_members_cache: archive_members_cache
-      )
-      if stable_id_source
-        stable_id_map = cached_gene_stable_id_map(
-          cache: stable_id_map_cache,
-          source: stable_id_source,
-          release_dir: release_dir,
-          db_name: db_name,
-          stats: stats
-        )
-        stream_ensembl_ids(source, db_type: db_type, release_num: release_num, stable_id_map: stable_id_map, stats: stats, &stream)
-      else
-        column = ensembl_id_column(db_type, release_num)
-        unless column
-          puts "  WARN skipping release #{release_num} for #{db_name}: no gene table column mapping"
-          return false
-        end
-
-        stream_ensembl_ids(source, column: column, stats: stats, &stream)
-      end
-
+      stream_ensembl_ids(source, column: column, stats: stats, &stream)
       true
+    end
+
+    def stream_ensembl_ids_from_stable_id_table(source, stats: nil)
+      each_gene_table_line(source, stats: stats) do |line|
+        parts = line.chomp.split("\t", 3)
+        next if parts.size < 2
+
+        ensembl_id = parts[1].to_s.strip
+        next if ensembl_id.blank? || ensembl_id == "\\N"
+        next unless valid_ensembl_id?(ensembl_id)
+
+        yield ensembl_id
+      end
     end
 
     def record_ensembl_release!(first_release_by_ensembl, latest_release_by_ensembl, ensembl_id, release_num, target_ensembl_ids:)

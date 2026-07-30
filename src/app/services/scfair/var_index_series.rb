@@ -24,8 +24,11 @@ module Scfair
 
     def candidate_paths(format, field_values)
       paths = []
-      paths << Rules.var_index_logical_path(format)
+      # Prefer on-disk file paths used by extractors.
       paths << Rules.var_index_file_path(format)
+      # Older extracts may still key series under the logical @ path.
+      logical = Rules.var_index_logical_path(format)
+      paths << logical if logical.present? && !paths.include?(logical)
       Rules.var_index_column_keys(format).each do |column|
         path = Rules.field_path(format, :var, column)
         paths << path unless paths.include?(path)

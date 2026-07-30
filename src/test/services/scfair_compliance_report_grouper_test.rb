@@ -225,7 +225,7 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
     valid_checks = [
       { field: 'var.index', status: 'passed', message: 'Var index present' },
       { field: 'var.index.uniqueness', status: 'passed', message: 'Unique' },
-      { field: '/row_attrs/feature_id', status: 'passed', message: 'Loom feature_id present' }
+      { field: '/row_attrs/Accession', status: 'passed', message: 'Loom Accession present' }
     ]
 
     groups = Scfair::ComplianceReportGrouper.call(

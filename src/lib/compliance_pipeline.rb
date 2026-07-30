@@ -19,30 +19,40 @@ module CompliancePipeline
   end
 
   # Project compliance report uses the same validator as file-check.
-  def validate_project_loom(loom_path, _project = nil, logger: Rails.logger, schema_id: nil)
+  def validate_project_loom(loom_path, project = nil, logger: Rails.logger, schema_id: nil, &progress_cb)
     validate_loom_file_check(
       loom_path,
       logger: logger,
       schema_id: schema_id || DEFAULT_SCHEMA_ID,
-      project_compliance: true
+      project_compliance: true,
+      remote_db: asap_data_db_name_for_project(project),
+      &progress_cb
     )
   end
 
-  def validate_loom_file(loom_path, project: nil, logger: Rails.logger, schema_id: nil)
+  def validate_loom_file(loom_path, project: nil, logger: Rails.logger, schema_id: nil, &progress_cb)
     if use_extract_pipeline?
       resolved = schema_id || DEFAULT_SCHEMA_ID
-      validate_loom_file_check(loom_path, logger: logger, schema_id: resolved)
+      validate_loom_file_check(
+        loom_path,
+        logger: logger,
+        schema_id: resolved,
+        remote_db: asap_data_db_name_for_project(project),
+        &progress_cb
+      )
     else
       ScfairLoomValidatorService.new(loom_path, project: project, logger: logger).validate
     end
   end
 
-  def validate_loom_file_check(loom_path, logger: Rails.logger, schema_id: DEFAULT_SCHEMA_ID, project_compliance: false)
+  def validate_loom_file_check(loom_path, logger: Rails.logger, schema_id: DEFAULT_SCHEMA_ID, project_compliance: false, remote_db: nil, &progress_cb)
     core = ScfairComplianceService.new(
       file_path: loom_path,
       schema_id: schema_id,
       logger: logger,
-      project_compliance: project_compliance
+      project_compliance: project_compliance,
+      remote_db: remote_db,
+      &progress_cb
     ).validate
     wrap_file_check_result(core)
   rescue StandardError => e
@@ -86,5 +96,17 @@ module CompliancePipeline
       status = (check[:status] || check['status']).to_s.strip.downcase
       status == 'failed' || status == 'warning'
     end
+  end
+
+  def asap_data_db_name_for_project(project)
+    return nil unless project
+
+    version = project.respond_to?(:version_for_catalog) ? project.version_for_catalog : project.try(:version)
+    return nil unless version
+
+    env = version.env_data
+    env['asap_data_db_name'].presence ||
+      (env['asap_data_db_version'].present? && "asap_data_v#{env['asap_data_db_version']}") ||
+      nil
   end
 end

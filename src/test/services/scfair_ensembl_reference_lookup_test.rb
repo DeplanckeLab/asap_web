@@ -85,4 +85,50 @@ class ScfairEnsemblReferenceLookupTest < TestBaseWithoutFixtures
     assert_equal 115, release
     assert_equal 'GRCh38.p14', lookup.assembly_for_gene_reference(feature_reference: 'NCBITaxon:9606')
   end
+
+  test 'remote_organism_for_tax_id prefers reference ensembl_db_name over strain databases' do
+    lookup = Scfair::EnsemblReferenceLookup.new(remote_db: 'asap_data_v8')
+    skip 'ASAP reference genes unavailable' unless lookup.remote_available?
+
+    organism = lookup.remote_organism_for_tax_id(10090)
+    skip 'Mus musculus reference organism unavailable' unless organism
+
+    assert_equal 'mus_musculus', organism.ensembl_db_name
+    assert_equal 2, organism.id
+  end
+
+  test 'gene_status_at_release finds mouse genes in asap_data_v8 at release 113' do
+    lookup = Scfair::EnsemblReferenceLookup.new(remote_db: 'asap_data_v8')
+    skip 'ASAP reference genes unavailable' unless lookup.remote_available?
+
+    organism = lookup.remote_organism_for_tax_id(10090)
+    skip 'Mus musculus reference organism unavailable' unless organism
+
+    status = lookup.gene_status_at_release(
+      organism_id: organism.id,
+      release: 113,
+      ensembl_id: 'ENSMUSG00000109644'
+    )
+    assert_equal :ok, status
+  end
+
+  test 'gene_statuses_at_release batches mouse gene lookups' do
+    lookup = Scfair::EnsemblReferenceLookup.new(remote_db: 'asap_data_v8')
+    skip 'ASAP reference genes unavailable' unless lookup.remote_available?
+
+    organism = lookup.remote_organism_for_tax_id(10090)
+    skip 'Mus musculus reference organism unavailable' unless organism
+
+    ids = %w[ENSMUSG00000109644 ENSMUSG00000108652 ENSMUSG00000086714 MISSINGGENE0001]
+    statuses = lookup.gene_statuses_at_release(
+      organism_id: organism.id,
+      release: 113,
+      ensembl_ids: ids
+    )
+
+    assert_equal :ok, statuses['ENSMUSG00000109644']
+    assert_equal :ok, statuses['ENSMUSG00000108652']
+    assert_equal :ok, statuses['ENSMUSG00000086714']
+    assert_equal :not_found, statuses['MISSINGGENE0001']
+  end
 end

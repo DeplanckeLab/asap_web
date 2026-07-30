@@ -518,9 +518,10 @@ module AsapData
       false
     end
 
-    def core_folders_for_release(cache, db_type, release_num)
-      cache_key = "#{db_type}:#{release_num}"
-      cache[cache_key] ||= fetch_core_folder_names(db_type, release_num)
+    def core_folders_for_release(cache, db_type, release_num, only_db_names: nil)
+      wanted = Array(only_db_names).map(&:to_s).reject(&:empty?).sort
+      cache_key = wanted.any? ? "#{db_type}:#{release_num}:#{wanted.join(',')}" : "#{db_type}:#{release_num}"
+      cache[cache_key] ||= fetch_core_folder_names(db_type, release_num, only_db_names: wanted)
     end
 
     def assembly_name_for_organism(release_dir:, db_name:, db_type:, release_num:, core_folder:, download_missing_meta:, stats:)
@@ -691,7 +692,7 @@ module AsapData
       Dir.glob(File.join(tmpdir, "**", basename)).first
     end
 
-    TABLE_DOWNLOAD_SUFFIXES = [".txt.gz", ".txt.gz.bz2", ".txt"].freeze
+    TABLE_DOWNLOAD_SUFFIXES = [".txt.gz", ".txt.table.gz", ".txt.gz.bz2", ".txt"].freeze
 
     def download_ensembl_table(db_type:, release_num:, core_folder:, table_name:, destination_dir:)
       destination_txt = destination_dir + "#{table_name}.txt"
@@ -718,7 +719,7 @@ module AsapData
     end
 
     def fetch_ftp_file(url, destination_path)
-      _stdout, stderr, status = Open3.capture3("curl", "-s", "-f", "-o", destination_path.to_s, url)
+      _stdout, stderr, status = Open3.capture3("curl", "-sL", "-f", "-o", destination_path.to_s, url)
       unless status.success? && destination_path.file? && destination_path.size.positive?
         FileUtils.rm_f(destination_path)
         Rails.logger.debug("[EnsemblAssembliesLoader] curl failed for #{url}: #{stderr.strip}")
@@ -732,6 +733,12 @@ module AsapData
       case suffix
       when ".txt.gz"
         gunzip_file(archive_path)
+      when ".txt.table.gz"
+        # Pre-47 Ensembl dumps use *.txt.table.gz
+        gunzip_file(archive_path)
+        table_path = destination_dir + "#{table_name}.txt.table"
+        dest_path = destination_dir + "#{table_name}.txt"
+        FileUtils.mv(table_path, dest_path) if table_path.file? && !dest_path.file?
       when ".txt.gz.bz2"
         bunzip2_file(archive_path)
         gunzip_file(destination_dir + "#{table_name}.txt.gz")
@@ -744,7 +751,13 @@ module AsapData
     end
 
     def cleanup_partial_table_download(destination_dir, table_name)
-      %W[#{table_name}.txt #{table_name}.txt.gz #{table_name}.txt.gz.bz2].each do |name|
+      %W[
+        #{table_name}.txt
+        #{table_name}.txt.gz
+        #{table_name}.txt.gz.bz2
+        #{table_name}.txt.table
+        #{table_name}.txt.table.gz
+      ].each do |name|
         FileUtils.rm_f(destination_dir + name)
       end
     end
@@ -811,18 +824,20 @@ module AsapData
       line.to_s.dup.force_encoding("iso-8859-1").encode("utf-8")
     end
 
-    def fetch_core_folder_names(db_type, release_num)
+    def fetch_core_folder_names(db_type, release_num, only_db_names: nil)
+      if db_type == :vertebrates && release_num.to_i < 47
+        return fetch_early_vertebrate_core_folder_names(release_num, only_db_names: only_db_names)
+      end
+
       url = mysql_base_url(db_type, release_num)
-      stdout, stderr, status = Open3.capture3("curl", "-s", "--list-only", url)
+      stdout, stderr, status = Open3.capture3("curl", "-sL", url)
       unless status.success?
         Rails.logger.warn("[EnsemblAssembliesLoader] cannot list #{url}: #{stderr.strip}")
         return {}
       end
 
       names = {}
-      stdout.each_line do |line|
-        folder = line.strip
-        next if folder.blank?
+      extract_directory_hrefs(stdout).each do |folder|
         next if folder.end_with?(".gz")
         next unless (core_match = folder.match(/\A(.+?)_core_/))
 
@@ -831,11 +846,64 @@ module AsapData
       names
     end
 
+    # Pre-47 vertebrates: release-N/<species_folder>/data/mysql/<species>_core_*/
+    # optional only_db_names: limit HTTP probes to those species (much faster for backfill).
+    def fetch_early_vertebrate_core_folder_names(release_num, only_db_names: nil)
+      root_url = "https://ftp.ensembl.org/pub/release-#{release_num}/"
+      stdout, stderr, status = Open3.capture3("curl", "-sL", root_url)
+      unless status.success?
+        Rails.logger.warn("[EnsemblAssembliesLoader] cannot list #{root_url}: #{stderr.strip}")
+        return {}
+      end
+
+      wanted = Array(only_db_names).map(&:to_s).reject(&:empty?)
+      names = {}
+      extract_directory_hrefs(stdout).each do |species_folder|
+        next unless species_folder.match?(/\A[A-Za-z0-9_]+_\d+/)
+        if wanted.any?
+          next unless wanted.any? { |db_name| species_folder == db_name || species_folder.start_with?("#{db_name}_") }
+        end
+
+        mysql_url = "#{root_url}#{species_folder}/data/mysql/"
+        mysql_stdout, _mysql_stderr, mysql_status = Open3.capture3("curl", "-sL", "-f", mysql_url)
+        next unless mysql_status.success?
+
+        extract_directory_hrefs(mysql_stdout).each do |core_folder|
+          next unless (core_match = core_folder.match(/\A(.+?)_core_/))
+
+          names[core_match[1]] = "#{species_folder}/data/mysql/#{core_folder}"
+        end
+      end
+      names
+    end
+
+    def extract_directory_hrefs(html_or_text)
+      hrefs = []
+      html_or_text.to_s.each_line do |line|
+        if (match = line.match(/\bhref=["']([^"'\/]+)\/?["']/i))
+          folder = match[1]
+        else
+          folder = line.strip
+        end
+        next if folder.blank?
+        next if folder.start_with?("?") || folder == ".." || folder == "../"
+
+        hrefs << folder
+      end
+      hrefs.uniq
+    end
+
     def mysql_base_url(db_type, release_num)
       if db_type == :vertebrates
-        "ftp://ftp.ensembl.org/pub/release-#{release_num}/mysql/"
+        if release_num.to_i >= 47
+          "https://ftp.ensembl.org/pub/release-#{release_num}/mysql/"
+        else
+          # Pre-47: species dumps under release-N/<species>_<N>_*/data/mysql/<core>/
+          "https://ftp.ensembl.org/pub/release-#{release_num}/"
+        end
       else
-        "ftp://ftp.ensemblgenomes.org/pub/release-#{release_num}/#{db_type}/mysql/"
+        # ensemblgenomes.org is unreliable for older trees; EBI mirror is stable.
+        "https://ftp.ebi.ac.uk/ensemblgenomes/pub/release-#{release_num}/#{db_type}/mysql/"
       end
     end
 

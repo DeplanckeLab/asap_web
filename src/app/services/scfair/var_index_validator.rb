@@ -42,13 +42,12 @@ module Scfair
 
     def validate_presence_missing(errors, valid_checks)
       report_field = Rules.var_index_schema_field
-      logical = Rules.var_index_logical_path(@format)
       file_path = Rules.var_index_file_path(@format)
       manifest_key = Rules.var_index_manifest_key
       hint = if @format == 'loom'
-               " (see #{logical}; Loom file: #{file_path} or anndata_mapping #{manifest_key})"
+               " (Loom file: #{file_path} or anndata_mapping #{manifest_key})"
              else
-               " (see #{logical}; H5AD file: #{file_path})"
+               " (H5AD file: #{file_path})"
              end
       record_failure(errors, valid_checks, field: report_field, message: "Var index identifiers are missing#{hint}")
     end

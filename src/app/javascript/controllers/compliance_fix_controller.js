@@ -14,6 +14,7 @@ export default class extends Controller {
     "selectedTerms", "termValue", "labelValue",
     "mapSelect", "mapBadges", "mapStatus",
     "mapFixPanel", "mapFixOriginal", "mapFixInput", "mapFixResults", "mapFixSelected", "mapFixConfirm", "mapFixHint",
+    "multiEnumGroup", "multiEnumOption",
     "submitButton", "fixedBadge"
   ]
   static values = {
@@ -206,6 +207,41 @@ export default class extends Controller {
 
   joinMultiValue(values) {
     return values.map((v) => v.toString()).filter(Boolean).join(this.multiValueDelimiter)
+  }
+
+  onMultiEnumChange(event) {
+    const checkbox = event.currentTarget
+    const groupId = checkbox.dataset.groupId
+    if (!groupId) return
+
+    const groupEl = this.multiEnumGroupTargets.find((el) => el.dataset.groupId === groupId)
+    const exclusiveValue = groupEl?.dataset.exclusiveValue || null
+    const options = this.multiEnumOptionTargets.filter((el) => el.dataset.groupId === groupId)
+
+    if (exclusiveValue && checkbox.value === exclusiveValue && checkbox.checked) {
+      options.forEach((el) => {
+        if (el !== checkbox) el.checked = false
+      })
+    } else if (exclusiveValue && checkbox.checked) {
+      options.forEach((el) => {
+        if (el.value === exclusiveValue) el.checked = false
+      })
+    }
+
+    let selected = options.filter((el) => el.checked).map((el) => el.value)
+    if (exclusiveValue && selected.includes(exclusiveValue)) {
+      selected = [exclusiveValue]
+    } else if (this.isSortedMultiValueGroup(groupId)) {
+      selected = [...selected].sort((a, b) => a.localeCompare(b))
+    }
+
+    const termInput = this.termValueTargets.find((el) => el.dataset.groupId === groupId)
+    if (termInput) {
+      termInput.value = selected.length <= 1 ? (selected[0] || '') : this.joinMultiValue(selected)
+      termInput.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+
+    this.updateFixedBadge(groupId)
   }
 
   // Get the current unique LOOM values for a field path.
@@ -649,15 +685,17 @@ export default class extends Controller {
         this.updateOverlay(data.message || 'Applying fixes...')
         break
       case 'validating':
-        this.updateOverlay(data.message || 'Running compliance validation...')
+      case 'progress':
+      case 'started':
+        this.updateOverlay(data.message || 'Running compliance validation...', data.progress)
         break
       case 'completed': {
         const resultUrl = this.hasResultUrlValue ? this.resultUrlValue : null
         if (data.valid) {
-          this.updateOverlay('Validation passed. Redirecting...')
+          this.updateOverlay('Validation passed. Redirecting...', 100)
         } else {
           const count = data.errors_count || 0
-          this.updateOverlay(`Validation complete (${count} error(s)). Redirecting...`)
+          this.updateOverlay(`Validation complete (${count} error(s)). Redirecting...`, 100)
         }
         // Redirect to the compliance result page
         setTimeout(() => {
@@ -687,34 +725,43 @@ export default class extends Controller {
 
   showOverlay(message) {
     this.removeOverlay()
+    this.overlayProgress = 0
 
     const overlay = document.createElement('div')
     overlay.id = 'compliance-fix-overlay'
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background-color:rgba(0,0,0,0.5);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;'
     overlay.innerHTML = `
-      <div style="background:white;border-radius:12px;padding:32px 48px;text-align:center;max-width:480px;">
-        <svg style="width:48px;height:48px;margin:0 auto 16px;color:#3b82f6;" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2" opacity="0.2"/>
-          <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="1s" repeatCount="indefinite"/>
-          </path>
-        </svg>
-        <p id="compliance-fix-overlay-msg" style="font-size:16px;font-weight:500;color:#1f2937;margin:0;">${this.escapeHtml(message)}</p>
-        <p style="font-size:13px;color:#6b7280;margin-top:8px;">Please wait, this may take a few minutes for large datasets.</p>
+      <div style="background:white;border-radius:12px;padding:32px 40px;text-align:left;max-width:480px;width:90%;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;">
+          <p id="compliance-fix-overlay-msg" style="font-size:16px;font-weight:500;color:#1f2937;margin:0;">${this.escapeHtml(message)}</p>
+          <span id="compliance-fix-overlay-pct" style="font-size:13px;color:#6b7280;font-variant-numeric:tabular-nums;">0%</span>
+        </div>
+        <div style="height:8px;background:#e5e7eb;border-radius:9999px;overflow:hidden;">
+          <div id="compliance-fix-overlay-bar" style="height:8px;width:0%;background:#2563eb;border-radius:9999px;transition:width 0.3s ease;"></div>
+        </div>
+        <p style="font-size:13px;color:#6b7280;margin-top:12px;margin-bottom:0;">Please wait, this may take a few minutes for large datasets.</p>
       </div>
     `
     document.body.appendChild(overlay)
     this.overlay = overlay
   }
 
-  updateOverlay(message) {
+  updateOverlay(message, progress = null) {
     const msgEl = document.getElementById('compliance-fix-overlay-msg')
-    if (msgEl) {
-      msgEl.textContent = message
-    } else {
-      // Overlay might not exist yet (e.g., websocket arrived before overlay was created)
+    if (!msgEl) {
       this.showOverlay(message)
+    } else if (message) {
+      msgEl.textContent = message
     }
+
+    if (progress == null) return
+
+    const next = Math.max(this.overlayProgress || 0, Math.max(0, Math.min(100, Math.round(Number(progress) || 0))))
+    this.overlayProgress = next
+    const bar = document.getElementById('compliance-fix-overlay-bar')
+    const pct = document.getElementById('compliance-fix-overlay-pct')
+    if (bar) bar.style.width = `${next}%`
+    if (pct) pct.textContent = `${next}%`
   }
 
   removeOverlay() {

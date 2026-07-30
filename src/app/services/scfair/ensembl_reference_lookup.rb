@@ -25,7 +25,7 @@ module Scfair
       return nil unless remote_available?
 
       RemoteOrganism.with_remote(@remote_db) do
-        RemoteOrganism.find_by(tax_id: tax_id.to_i)
+        prefer_reference_organism(RemoteOrganism.where(tax_id: tax_id.to_i).to_a)
       end
     rescue StandardError
       nil
@@ -90,15 +90,40 @@ module Scfair
       gene = lookup_gene(organism_id:, symbol:, ensembl_id:)
       return :not_found if gene.nil?
 
-      first = gene.first_ensembl_release.to_i
-      return :too_new if first.positive? && release.to_i < first
-
-      latest = gene.latest_ensembl_release.to_i
-      return :deprecated if latest.positive? && release.to_i > latest
-
-      :ok
+      status_for_release_window(
+        first_ensembl_release: gene.first_ensembl_release,
+        latest_ensembl_release: gene.latest_ensembl_release,
+        release: release
+      )
     rescue StandardError
       :unavailable
+    end
+
+    # Batch variant of gene_status_at_release for var-index checks.
+    # Returns { normalized_ensembl_id => :ok|:not_found|:too_new|:deprecated|:unavailable }
+    def gene_statuses_at_release(organism_id:, release:, ensembl_ids:)
+      normalized_ids = Array(ensembl_ids).map { |value| normalize_ensembl_id(value) }.compact
+      return {} if normalized_ids.empty?
+      return normalized_ids.index_with { :unavailable } unless remote_available?
+
+      windows = RemoteGene.find_release_windows_by_organism_and_ensembls(
+        organism_id,
+        normalized_ids,
+        version: @remote_db
+      )
+
+      normalized_ids.index_with do |ensembl_id|
+        window = windows[ensembl_id.downcase]
+        next :not_found unless window
+
+        status_for_release_window(
+          first_ensembl_release: window[:first_ensembl_release],
+          latest_ensembl_release: window[:latest_ensembl_release],
+          release: release
+        )
+      end
+    rescue StandardError
+      normalized_ids.index_with { :unavailable }
     end
 
     def normalize_ensembl_id(value)
@@ -300,6 +325,27 @@ module Scfair
       nil
     end
 
+    # Prefer the reference Ensembl species DB (e.g. mus_musculus) over strain DBs
+    # that share the same NCBI tax_id (e.g. mus_musculus_balbcj).
+    def prefer_reference_organism(organisms)
+      return nil if organisms.blank?
+      return organisms.first if organisms.size == 1
+
+      reference = organisms.select { |organism| organism.ensembl_db_name.to_s.split('_').size == 2 }
+      (reference.presence || organisms).min_by(&:id)
+    end
+
+    def status_for_release_window(first_ensembl_release:, latest_ensembl_release:, release:)
+      release_i = release.to_i
+      first = first_ensembl_release.to_i
+      return :too_new if first.positive? && release_i < first
+
+      latest = latest_ensembl_release.to_i
+      return :deprecated if latest.positive? && release_i > latest
+
+      :ok
+    end
+
     def lookup_gene(organism_id:, symbol: nil, ensembl_id: nil)
       if ensembl_id.present?
         return RemoteGene.find_by_organism_and_ensembl(organism_id, ensembl_id, version: @remote_db)
@@ -367,7 +413,7 @@ module Scfair
     def assemblies_for_tax_id_any_version(tax_id)
       RemoteOrganism.remote_versions.reverse_each do |version|
         result = RemoteAssembly.with_remote(version) do
-          organism = RemoteOrganism.find_by(tax_id: tax_id.to_i)
+          organism = prefer_reference_organism(RemoteOrganism.where(tax_id: tax_id.to_i).to_a)
           next [] unless organism
 
           RemoteAssembly.where(organism_id: organism.id).order(:name).to_a

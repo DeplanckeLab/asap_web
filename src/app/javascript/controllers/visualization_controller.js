@@ -57,7 +57,9 @@ export default class extends Controller {
     deUnavailableMethods: Object,
     geneCount: Number,
     rowLabel: String,
-    colLabel: String
+    colLabel: String,
+    projectTypeTag: String,
+    cellIdAnnotIdsByLoom: Object
   }
   
   // Optional targets - manually check with querySelector
@@ -633,6 +635,7 @@ export default class extends Controller {
     this.selectionStatusPollingTimer = null
     this.selectionStatesSubscription = null
     this.selectionStatesRefreshTimer = null
+    this.selectionStatesRefreshGeneration = 0
     this.lastSelectionCompletionSignature = null
     this.originalPointColors = new Map() // Store original colors for reset functionality
     this.draggingLabel = null // Track which label is being dragged
@@ -7382,6 +7385,8 @@ export default class extends Controller {
       menu.classList.add('hidden')
     })
 
+    this.closeAllDownloadMenus()
+
     const embeddingMenu = document.getElementById('embedding-selection-menu')
     if (embeddingMenu) {
       embeddingMenu.style.display = 'none'
@@ -7391,6 +7396,60 @@ export default class extends Controller {
     if (saveMenu) {
       saveMenu.style.display = 'none'
     }
+  }
+
+  closeAllDownloadMenus() {
+    document.querySelectorAll('.metadata-download-menu').forEach(menu => {
+      menu.style.display = 'none'
+      menu.style.top = ''
+      menu.style.bottom = ''
+      menu.style.left = ''
+      menu.style.right = ''
+    })
+  }
+
+  toggleDownloadMenu(event) {
+    event.stopPropagation()
+
+    const button = event.currentTarget
+    const menu = button.nextElementSibling
+    if (!menu || !menu.classList.contains('metadata-download-menu')) {
+      return
+    }
+
+    const isOpen = menu.style.display === 'block'
+    this.closeAllDownloadMenus()
+    if (isOpen) {
+      return
+    }
+
+    const buttonRect = button.getBoundingClientRect()
+    const menuWidth = Math.max(menu.offsetWidth || 180, 180)
+    const estimatedMenuHeight = 80
+    const gap = 4
+    const viewportPadding = 8
+
+    let left = buttonRect.right - menuWidth
+    left = Math.max(viewportPadding, Math.min(left, window.innerWidth - menuWidth - viewportPadding))
+
+    const spaceBelow = window.innerHeight - buttonRect.bottom - gap
+    const openUpward = spaceBelow < estimatedMenuHeight && buttonRect.top > spaceBelow
+
+    menu.style.position = 'fixed'
+    menu.style.zIndex = '10000'
+    menu.style.left = `${left}px`
+    menu.style.right = 'auto'
+
+    if (openUpward) {
+      const bottom = window.innerHeight - buttonRect.top + gap
+      menu.style.top = 'auto'
+      menu.style.bottom = `${bottom}px`
+    } else {
+      menu.style.bottom = 'auto'
+      menu.style.top = `${buttonRect.bottom + gap}px`
+    }
+
+    menu.style.display = 'block'
   }
 
   escapeHtml(value) {
@@ -8991,10 +9050,40 @@ export default class extends Controller {
     event.preventDefault()
     event.stopPropagation()
 
-    const infoUrl = String(event.currentTarget?.dataset?.metadataInfoUrl || '').trim()
+    const button = event.currentTarget
+    const infoUrl = String(button?.dataset?.metadataInfoUrl || '').trim()
     if (!infoUrl) return
 
+    const metadataName = String(button?.dataset?.metadataName || '').trim() || 'Metadata'
+    const tsvDownloadUrl = String(
+      button?.dataset?.metadataDownloadTsvUrl || button?.dataset?.metadataDownloadUrl || ''
+    ).trim()
+    const jsonDownloadUrl = String(button?.dataset?.metadataDownloadJsonUrl || '').trim()
+
     this.ensureMetadataInfoModal()
+    if (this.metadataInfoTitle) {
+      this.metadataInfoTitle.textContent = metadataName
+      this.metadataInfoTitle.title = metadataName
+    }
+    if (this.metadataInfoDownloadTsv) {
+      if (tsvDownloadUrl) {
+        this.metadataInfoDownloadTsv.href = tsvDownloadUrl
+        this.metadataInfoDownloadTsv.style.display = 'inline-flex'
+      } else {
+        this.metadataInfoDownloadTsv.removeAttribute('href')
+        this.metadataInfoDownloadTsv.style.display = 'none'
+      }
+    }
+    if (this.metadataInfoDownloadJson) {
+      if (jsonDownloadUrl) {
+        this.metadataInfoDownloadJson.href = jsonDownloadUrl
+        this.metadataInfoDownloadJson.style.display = 'inline-flex'
+      } else {
+        this.metadataInfoDownloadJson.removeAttribute('href')
+        this.metadataInfoDownloadJson.style.display = 'none'
+      }
+    }
+
     this.metadataInfoOverlay.style.display = 'flex'
     this.metadataInfoContent.innerHTML = '<div style="padding:16px;color:#6b7280;font-size:13px;"><i class="fas fa-spinner fa-spin" style="margin-right:6px;"></i>Loading metadata information...</div>'
 
@@ -9053,11 +9142,19 @@ export default class extends Controller {
     const dialog = document.createElement('div')
     dialog.style.cssText = 'width:1100px;max-width:96vw;height:82vh;max-height:92vh;background:#fff;border-radius:12px;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);display:flex;flex-direction:column;overflow:hidden;'
     dialog.innerHTML = `
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #e5e7eb;background:#f9fafb;">
-        <div style="font-size:14px;font-weight:600;color:#111827;">Metadata information</div>
-        <button type="button" data-role="close" style="background:none;border:none;color:#6b7280;cursor:pointer;padding:4px;border-radius:4px;" title="Close">
-          <i class="fas fa-times" style="font-size:16px;"></i>
-        </button>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-bottom:1px solid #e5e7eb;background:#f9fafb;">
+        <div data-role="title" style="font-size:14px;font-weight:600;color:#111827;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Metadata</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+          <a data-role="download-tsv" href="#" style="display:none;align-items:center;padding:4px 8px;font-size:12px;font-weight:500;color:#4b5563;background:#fff;border:1px solid #d1d5db;border-radius:4px;text-decoration:none;" title="Download as TSV.gz">
+            <i class="fas fa-download" style="margin-right:4px;"></i>TSV
+          </a>
+          <a data-role="download-json" href="#" style="display:none;align-items:center;padding:4px 8px;font-size:12px;font-weight:500;color:#4b5563;background:#fff;border:1px solid #d1d5db;border-radius:4px;text-decoration:none;" title="Download as JSON">
+            <i class="fas fa-download" style="margin-right:4px;"></i>JSON
+          </a>
+          <button type="button" data-role="close" style="background:none;border:none;color:#6b7280;cursor:pointer;padding:4px;border-radius:4px;" title="Close">
+            <i class="fas fa-times" style="font-size:16px;"></i>
+          </button>
+        </div>
       </div>
       <div data-role="content" style="flex:1;overflow:auto;background:#f9fafb;"></div>
     `
@@ -9068,6 +9165,9 @@ export default class extends Controller {
     this.metadataInfoOverlay = overlay
     this.metadataInfoContent = dialog.querySelector('[data-role="content"]')
     this.metadataInfoClose = dialog.querySelector('[data-role="close"]')
+    this.metadataInfoTitle = dialog.querySelector('[data-role="title"]')
+    this.metadataInfoDownloadTsv = dialog.querySelector('[data-role="download-tsv"]')
+    this.metadataInfoDownloadJson = dialog.querySelector('[data-role="download-json"]')
 
     this.metadataInfoClose.addEventListener('click', () => this.closeMetadataInfoPopup())
     overlay.addEventListener('click', (e) => {
@@ -14980,7 +15080,9 @@ export default class extends Controller {
         this.recentlyCreatedSavedCellSetRunId = Number.isInteger(returnedItem.runId) && returnedItem.runId > 0 ? returnedItem.runId : null
       }
       this.renderSavedSelections()
-      this.refreshSelectionStates()
+      // Status updates arrive via websocket/polling; avoid an immediate full replace
+      // that can race the optimistic row and flash it out of the list.
+      this.scheduleSelectionStatesRefresh(100)
     } catch (error) {
       const idx = this.savedSelections.findIndex((item) => item.id === itemId)
       if (idx >= 0) {
@@ -17859,22 +17961,72 @@ export default class extends Controller {
     }, Math.max(0, Number(delayMs) || 0))
   }
 
+  serverItemsMatchPendingSelection(pendingItem, serverItems) {
+    if (!pendingItem || !Array.isArray(serverItems) || serverItems.length === 0) return false
+
+    const pendingRunId = Number(pendingItem.runId)
+    if (Number.isInteger(pendingRunId) && pendingRunId > 0) {
+      if (serverItems.some((item) => Number(item.runId) === pendingRunId)) return true
+    }
+
+    const pendingName = String(pendingItem.name || '').trim()
+    if (!pendingName) return false
+    const pendingCount = Number(pendingItem.selectedCount)
+    const sameName = serverItems.filter((item) => String(item.name || '').trim() === pendingName)
+    if (sameName.length === 0) return false
+    if (!Number.isFinite(pendingCount) || pendingCount < 0) return true
+    return sameName.some((item) => Number(item.selectedCount || 0) === pendingCount)
+  }
+
+  mergeSavedSelectionsWithServer(serverItems) {
+    const previousItems = Array.isArray(this.savedSelections) ? this.savedSelections : []
+    const merged = Array.isArray(serverItems) ? [...serverItems] : []
+    const mergedIds = new Set(merged.map((item) => String(item.id || '')))
+
+    // Keep optimistic local rows until the server payload includes a match.
+    for (const previous of previousItems) {
+      const previousId = String(previous?.id || '')
+      if (!previousId.startsWith('local-')) continue
+      if (mergedIds.has(previousId)) continue
+      if (this.serverItemsMatchPendingSelection(previous, merged)) continue
+      merged.unshift(previous)
+      mergedIds.add(previousId)
+    }
+
+    // Keep a just-saved server row if a stale refresh omitted it.
+    const recentId = String(this.recentlyCreatedSavedCellSetId || '').trim()
+    if (recentId && !recentId.startsWith('local-') && !mergedIds.has(recentId)) {
+      const previousRecent = previousItems.find((item) => String(item?.id || '') === recentId)
+      if (previousRecent && !this.serverItemsMatchPendingSelection(previousRecent, merged)) {
+        merged.unshift(previousRecent)
+      }
+    }
+
+    return merged
+  }
+
   async refreshSelectionStates() {
     const renameInProgress = String(this.editingSavedSelectionId || '').trim().length > 0
     if (renameInProgress) {
       return
     }
 
+    const generation = (this.selectionStatesRefreshGeneration || 0) + 1
+    this.selectionStatesRefreshGeneration = generation
+
     try {
       const projectIdentifier = this.getProjectIdentifier()
       if (!projectIdentifier) return
       const loomFile = this.getCurrentLoomFileForRequest()
       const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/selection_states?loom_file=${encodeURIComponent(loomFile || '')}`)
+      if (generation !== this.selectionStatesRefreshGeneration) return
       if (!response.ok) return
       const payload = await response.json()
+      if (generation !== this.selectionStatesRefreshGeneration) return
       if (!payload || payload.status !== 'ok' || !Array.isArray(payload.items)) return
 
-      this.savedSelections = payload.items.map((item) => this.normalizeSelectionItem(item)).filter((item) => item)
+      const serverItems = payload.items.map((item) => this.normalizeSelectionItem(item)).filter((item) => item)
+      this.savedSelections = this.mergeSavedSelectionsWithServer(serverItems)
       if (this.recentlyCreatedSavedCellSetId) {
         const resolvedRecentItem = this.resolveRecentlyCreatedSavedCellSetId(this.savedSelections)
         if (resolvedRecentItem) {
@@ -23622,89 +23774,16 @@ export default class extends Controller {
     return this.downloadManager.downloadGlobalDistribution(event)
   }
 
-  async downloadGeneExpression(event) {
-    event.preventDefault()
-    event.stopPropagation()
-    
-    const button = event.currentTarget
-    const geneId = button.dataset.geneId
-    const geneMetadataId = button.dataset.metadataId || `gene_${geneId}`
-    
-    // console.log('🧬 Download gene expression:', { geneId, geneMetadataId })
-    
-    // Get gene expression data from GeneManager
-    const geneManager = this.geneManager
-    if (!geneManager || !geneManager.geneExpressionData || !geneManager.geneExpressionData[geneId]) {
-      console.error('❌ Gene expression data not available for gene:', geneId)
-      alert('Expression data not available for this gene.')
-      return
-    }
-    
-    const expressionData = geneManager.geneExpressionData[geneId]
-    const values = expressionData.values
-    
-    if (!values || values.length === 0) {
-      alert('No expression values available for this gene.')
-      return
-    }
-    
-    // Get filtered cell indices (if any filters are active)
-    const filteredIndices = this.dataManager.getFilteredCellIndices()
-    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
-    const hasFilters = filteredSet !== null
-    
-    // Calculate statistics
-    const stats = expressionData.stats || {}
-    const finiteValues = values.filter(v => !isNaN(v) && isFinite(v))
-    const minVal = this.dataManager.safeMin(finiteValues)
-    const maxVal = this.dataManager.safeMax(finiteValues)
-    if (!Number.isFinite(minVal) || !Number.isFinite(maxVal)) {
-      alert('No finite expression values available for this gene.')
-      return
-    }
-    const meanVal = stats.mean || 0
-    const medianVal = stats.median || 0
-    const stdDevVal = stats.stdDev || 0
-    
-    // Find gene symbol
-    const geneTag = geneManager.geneTags.find(g => String(g.stableId) === String(geneId))
-    const geneSymbol = geneTag?.symbol || geneId
-    
-    // Create CSV content
-    let csvContent = `Gene Expression Data: ${geneSymbol}\n`
-    csvContent += `Gene ID: ${geneId}\n`
-    csvContent += `Total Cells: ${values.length}\n`
-    csvContent += `Min: ${minVal.toFixed(4)}\n`
-    csvContent += `Max: ${maxVal.toFixed(4)}\n`
-    csvContent += `Mean: ${meanVal.toFixed(4)}\n`
-    csvContent += `Median: ${medianVal.toFixed(4)}\n`
-    csvContent += `Std Dev: ${stdDevVal.toFixed(4)}\n\n`
-    
-    if (hasFilters) {
-      csvContent += `Filtered Cells: ${filteredIndices.length}\n\n`
-    }
-    
-    csvContent += `Cell Index,Expression Value${hasFilters ? ',Filtered' : ''}\n`
-    
-    values.forEach((value, index) => {
-      const isFiltered = hasFilters ? filteredSet.has(index) : true
-      if (!hasFilters || isFiltered) {
-        csvContent += `${index},${value.toFixed(6)}${hasFilters ? `,${isFiltered ? 'Yes' : 'No'}` : ''}\n`
-      }
-    })
-    
-    // Download file
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', `gene_${geneId}_expression.csv`)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    
-    // console.log('🧬 Gene expression data downloaded')
+  async downloadRawMetadata(event) {
+    return this.downloadManager.downloadRawMetadata(event)
+  }
+
+  async downloadGeneExpressionSummary(event) {
+    return this.downloadManager.downloadGeneExpressionSummary(event)
+  }
+
+  async downloadGeneExpressionRaw(event) {
+    return this.downloadManager.downloadGeneExpressionRaw(event)
   }
 
   // Old implementation moved to DownloadManager

@@ -375,15 +375,17 @@ class AnnotsController < ApplicationController
     render json: { error: 'Failed to load annotation categories' }, status: :internal_server_error
   end
 
-  # GET /annots/:id/download?format_type=tsv|json
+  # GET /annots/:id/download?format_type=tsv|tsv.gz|json
   def download
     project = @annot.project
     user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
     project_dir = Pathname.new(user_data_dir) + project.user_id.to_s + project.key
     loom_path = project_dir + @annot.filepath
-    format_type = params[:format_type] || 'tsv'
+    format_type = params[:format_type].presence || 'tsv'
+    want_gzip = format_type.to_s.in?(%w[tsv.gz tsv_gz gzip])
 
     annot_label = @annot.name.split('/').last || @annot.name
+    safe_label = annot_label.to_s.gsub(/[^\w.\-]+/, '_')
 
     unless File.exist?(loom_path)
       render plain: 'Loom file not found', status: :not_found
@@ -408,7 +410,7 @@ class AnnotsController < ApplicationController
 
       if format_type == 'json'
         send_data data.to_json,
-                  filename: "#{annot_label}.json",
+                  filename: "#{safe_label}.json",
                   type: 'application/json',
                   disposition: 'attachment'
       else
@@ -420,27 +422,25 @@ class AnnotsController < ApplicationController
             tsv_lines << row.to_s
           end
         end
-        send_data tsv_lines.join("\n"),
-                  filename: "#{annot_label}.tsv",
-                  type: 'text/tab-separated-values',
-                  disposition: 'attachment'
+        send_tsv_download(tsv_lines.join("\n"), safe_label, want_gzip: want_gzip)
       end
     else
-      values = H5DataService.get_metadata_vector(loom_path.to_s, @annot.name)
+      begin
+        values = H5DataService.get_metadata_vector(loom_path.to_s, @annot.name)
+      rescue StandardError => e
+        render plain: "Failed to extract data: #{e.message}", status: :internal_server_error
+        return
+      end
 
       if format_type == 'json'
         json_output = { name: @annot.name, values: values }.to_json
         send_data json_output,
-                  filename: "#{annot_label}.json",
+                  filename: "#{safe_label}.json",
                   type: 'application/json',
                   disposition: 'attachment'
       else
-        tsv_lines = [annot_label]
-        values.each { |v| tsv_lines << v.to_s }
-        send_data tsv_lines.join("\n"),
-                  filename: "#{annot_label}.tsv",
-                  type: 'text/tab-separated-values',
-                  disposition: 'attachment'
+        tsv_content = build_annot_vector_tsv(loom_path.to_s, values, annot_label)
+        send_tsv_download(tsv_content, safe_label, want_gzip: want_gzip)
       end
     end
   end
@@ -556,6 +556,70 @@ class AnnotsController < ApplicationController
   end
 
   private
+
+  def send_tsv_download(tsv_content, label, want_gzip:)
+    if want_gzip
+      send_data ActiveSupport::Gzip.compress(tsv_content),
+                filename: "#{label}.tsv.gz",
+                type: 'application/gzip',
+                disposition: 'attachment'
+    else
+      send_data tsv_content,
+                filename: "#{label}.tsv",
+                type: 'text/tab-separated-values',
+                disposition: 'attachment'
+    end
+  end
+
+  def build_annot_vector_tsv(loom_path, values, annot_label)
+    values = Array(values)
+    header = ['index']
+    extra_columns = []
+
+    if @annot.name.to_s.start_with?('/col_attrs/')
+      begin
+        cell_ids = H5DataService.get_metadata_vector(loom_path, '/col_attrs/CellID')
+      rescue StandardError
+        cell_ids = nil
+      end
+      if cell_ids.is_a?(Array) && cell_ids.length == values.length
+        header << 'cell_barcode'
+        extra_columns << cell_ids
+      end
+    elsif @annot.name.to_s.start_with?('/row_attrs/')
+      begin
+        gene_symbols = H5DataService.get_metadata_vector(loom_path, '/row_attrs/Gene')
+      rescue StandardError
+        gene_symbols = nil
+      end
+      begin
+        accessions = H5DataService.get_metadata_vector(loom_path, '/row_attrs/Accession')
+      rescue StandardError
+        accessions = nil
+      end
+      if gene_symbols.is_a?(Array) && gene_symbols.length == values.length
+        header << 'gene_symbol'
+        extra_columns << gene_symbols
+      end
+      if accessions.is_a?(Array) && accessions.length == values.length
+        header << 'ensembl_id'
+        extra_columns << accessions
+      end
+    end
+
+    header << annot_label.to_s
+    lines = [header.join("\t")]
+    values.each_with_index do |value, i|
+      row = [i.to_s]
+      extra_columns.each do |col|
+        cell = col[i]
+        row << (cell.nil? ? '' : cell.to_s)
+      end
+      row << (value.nil? ? '' : value.to_s)
+      lines << row.join("\t")
+    end
+    lines.join("\n")
+  end
 
   def update_sim_step_mapping
     unless @annot.imported?

@@ -16,10 +16,18 @@ class ScfairRulesMultiValueFieldsTest < TestBaseWithoutFixtures
     assert_includes names, 'perturbation_types'
     assert_includes names, 'cell_type_ontology_term_id'
     assert_includes names, 'cell_type'
+    assert_includes names, 'development_stage_ontology_term_id'
+    assert_includes names, 'development_stage'
     assert_includes names, 'tissue_ontology_term_id'
     assert_includes names, 'tissue'
 
     refute_includes names, 'assay_ontology_term_id'
+  end
+
+  test 'development_stage ontology semantics require sorted multi-value ordering' do
+    rules = Scfair::OntologySemanticRules.rules_for('development_stage_ontology_term_id')
+
+    assert rules[:sorted_multi]
   end
 
   test 'cell_type ontology semantics require sorted multi-value ordering' do

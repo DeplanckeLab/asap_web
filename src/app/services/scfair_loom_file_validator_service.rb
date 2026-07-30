@@ -148,7 +148,7 @@ class ScfairLoomFileValidatorService
               vals.append(str(v))
           if vals:
             out[f"/row_attrs/{field}#series"] = vals
-        var_index_keys = ["feature_id", "index", "_index"]
+        var_index_keys = %<var_index_keys>s
         if "/attrs/anndata_mapping" in f:
           try:
             raw = f["/attrs/anndata_mapping"][()]
@@ -177,11 +177,12 @@ class ScfairLoomFileValidatorService
           if not isinstance(itr, list):
             itr = [itr]
           vals = []
-          for v in itr[:500]:
+          for v in itr:
             if isinstance(v, bytes):
               vals.append(v.decode("utf-8", "replace"))
             else:
               vals.append(str(v))
+          vals = [v for v in vals if v and v != "None"]
           if vals:
             out[f"/row_attrs/{index_key}#series"] = vals
             out[f"/row_attrs/{index_key}"] = sorted(list(set(vals)))[:200]
@@ -319,6 +320,7 @@ class ScfairLoomFileValidatorService
       FIELD_VALUES_PY_TEMPLATE,
       fields: LOOM_FIELD_VALUE_PATHS.to_json,
       var_series_fields: Scfair::Rules.required_var_fields.to_json,
+      var_index_keys: Scfair::Rules.var_index_column_keys('loom').to_json,
       label_pairs: Scfair::Rules.label_pairs.to_json
     )
     cmd = ['docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-', @loom_path]

@@ -6,11 +6,15 @@ class ScfairFixFormFieldGroupsBuilderTest < TestBaseWithoutFixtures
   test 'loads all fix_form field groups from rules.yaml' do
     groups = Scfair::FixFormFieldGroupsBuilder.call
 
-    assert_equal 25, groups.size
+    assert_equal 29, groups.size
     ids = groups.map { |g| g[:id] }
     assert_includes ids, 'assay'
     assert_includes ids, 'schema_version'
     assert_includes ids, 'is_primary_data'
+    assert_includes ids, 'experimental_condition'
+    assert_includes ids, 'genetic_perturbation_id'
+    assert_includes ids, 'perturbation_types'
+    assert_includes ids, 'genetic_perturbation_strategy'
   end
 
   test 'builds paired ontology group with paths and prefixes from rules' do
@@ -76,10 +80,48 @@ class ScfairFixFormFieldGroupsBuilderTest < TestBaseWithoutFixtures
     assert sex[:allowed_terms].any? { |t| t[:identifier] == 'PATO:0000383' }
   end
 
+  test 'builds experimental_condition as multi-value paired free-text (no ontology prefixes)' do
+    groups = Scfair::FixFormFieldGroupsBuilder.call
+    experimental = groups.find { |g| g[:id] == 'experimental_condition' }
+
+    assert_equal :ontology_pair, experimental[:field_kind]
+    assert experimental[:multi_value]
+    assert experimental[:multi_value_sorted]
+    assert_equal '/col_attrs/experimental_condition_ontology_term_id', experimental[:term_path]
+    assert_equal '/col_attrs/experimental_condition', experimental[:label_path]
+    refute experimental.key?(:term_ontology_prefixes)
+  end
+
+  test 'builds multi-value perturbation_types enum including no perturbations' do
+    groups = Scfair::FixFormFieldGroupsBuilder.call
+    types = groups.find { |g| g[:id] == 'perturbation_types' }
+
+    assert_equal :enum, types[:field_kind]
+    assert types[:multi_value]
+    assert_includes types[:term_valid_values], 'no perturbations'
+    assert_includes types[:term_valid_values], 'chemical'
+  end
+
+  test 'builds genetic_perturbation_id as multi-value free text' do
+    groups = Scfair::FixFormFieldGroupsBuilder.call
+    genetic = groups.find { |g| g[:id] == 'genetic_perturbation_id' }
+
+    assert_equal :free_text, genetic[:field_kind]
+    assert genetic[:multi_value]
+  end
+
+  test 'marks development_stage as multi-value from rules' do
+    groups = Scfair::FixFormFieldGroupsBuilder.call
+    development_stage = groups.find { |g| g[:id] == 'development_stage' }
+
+    assert development_stage[:multi_value]
+    assert development_stage[:multi_value_sorted]
+  end
+
   test 'Rules.fix_form_field_groups delegates to builder' do
     groups = Scfair::Rules.fix_form_field_groups
 
-    assert_equal 25, groups.size
+    assert_equal 29, groups.size
     assert groups.first[:id].present?
   end
 

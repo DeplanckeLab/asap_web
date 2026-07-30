@@ -142,9 +142,10 @@ module Scfair
       var = @extract['var'] || {}
       index_values = Array(var.dig('index', 'per_feature_values')).map(&:to_s)
       if index_values.any?
-        index_path = @format == 'h5ad' ? 'var/_index' : field_path(:var, 'feature_id')
+        index_path = Rules.var_index_file_path(@format)
         out[index_path] = index_values.uniq.reject(&:blank?).first(DISTINCT_LIMIT)
-        out["#{index_path}#series"] = index_values.first(SERIES_LIMIT)
+        # Keep the full ordered index series: uniqueness/format/release checks need all rows.
+        out["#{index_path}#series"] = index_values
       end
 
       (var['columns'] || {}).each do |name, block|

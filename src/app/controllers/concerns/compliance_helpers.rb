@@ -86,9 +86,26 @@ module ComplianceHelpers
 
   private
 
-  def run_project_compliance_validation(loom_path, project, logger: Rails.logger)
+  def run_project_compliance_validation(loom_path, project, logger: Rails.logger, &progress_cb)
     schema_id = resolve_project_schema_id(project)
-    CompliancePipeline.validate_project_loom(loom_path, project, logger: logger, schema_id: schema_id)
+    CompliancePipeline.validate_project_loom(loom_path, project, logger: logger, schema_id: schema_id, &progress_cb)
+  end
+
+  def broadcast_project_compliance_progress(project_id, evt)
+    ActionCable.server.broadcast(
+      "compliance_#{project_id}",
+      {
+        project_id: project_id,
+        status: 'progress',
+        stage: evt[:stage],
+        message: evt[:message],
+        progress: evt[:progress],
+        format: evt[:format],
+        current: evt[:current],
+        total: evt[:total],
+        timestamp: Time.current.iso8601
+      }.compact
+    )
   end
 
   def loom_compliance_result(loom_path, project: nil, logger: Rails.logger)

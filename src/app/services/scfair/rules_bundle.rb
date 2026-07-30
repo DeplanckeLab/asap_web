@@ -308,9 +308,15 @@ module Scfair
     end
 
     def var_index_field?(field)
-      field.to_s == var_index_schema_field ||
-        field.to_s.start_with?('var.index') ||
-        field.to_s.match?(/\A(var\/_index|var\/index|var@_index|\/row_attrs\/(_index|index|feature_id))\z/)
+      name = field.to_s
+      return true if name == var_index_schema_field
+      return true if name.start_with?('var.index')
+      return true if %w[var/_index var/index var@_index].include?(name)
+      return true if name == var_index_file_path('h5ad') || name == var_index_logical_path('h5ad')
+      return true if name == var_index_file_path('loom') || name == var_index_logical_path('loom')
+
+      var_index_column_keys('h5ad').any? { |key| name == "var/#{key}" } ||
+        var_index_column_keys('loom').any? { |key| name == "/row_attrs/#{key}" }
     end
 
     def ensembl_database_values

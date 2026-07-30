@@ -45,6 +45,14 @@ multi_value_fields:
       layer: obs
       paired_id: cell_type_ontology_term_id
       sorted: true
+    development_stage_ontology_term_id:
+      layer: obs
+      paired_label: development_stage
+      sorted: true
+    development_stage:
+      layer: obs
+      paired_id: development_stage_ontology_term_id
+      sorted: true
     tissue_ontology_term_id:
       layer: obs
       paired_label: tissue
@@ -284,9 +292,9 @@ anndata_indices:
       path: var/_index
       storage_keys: [_index, index]
     loom:
-      logical: /row_attrs@feature_id
-      path: /row_attrs/feature_id
-      storage_keys: [feature_id, index, _index]
+      logical: /row_attrs@Accession
+      path: /row_attrs/Accession
+      storage_keys: [Accession, index, _index]
       manifest_key: var_index_key
     validation:
       ensembl_prefix: ENS
@@ -607,6 +615,7 @@ semantic_rules:
     any_roots: [UBERON:0000105]
     forbidden_branches: [UBERON:0000071]
     allowed_special_values: [na, unknown]
+    sorted_multi: true
   tissue_ontology_term_id:
     any_roots: [UBERON:0001062]
     sorted_multi: true
@@ -775,33 +784,65 @@ fix_form:
       display_order: 9
       field_kind: ontology_pair
       term_format_hint: UBERON:XXXXXXX
+    - id: experimental_condition
+      layer: obs
+      term_field: experimental_condition_ontology_term_id
+      label_field: experimental_condition
+      label: Experimental Condition
+      description: 'Optional experimental condition IDs (CHEBI, EFO, uniprot, anti-uniprot) or "na"; multiple values use " || "'
+      display_order: 10
+      field_kind: ontology_pair
+      term_format_hint: 'CHEBI:16412 || EFO:0001702 or "na"'
+    - id: genetic_perturbation_id
+      layer: obs
+      term_field: genetic_perturbation_id
+      label: Genetic Perturbation ID
+      description: 'Perturbation extension identifiers matching uns genetic_perturbations keys, or "na"; multiple values use " || "'
+      display_order: 11
+      field_kind: free_text
+    - id: perturbation_types
+      layer: obs
+      term_field: perturbation_types
+      label: Perturbation Types
+      description: 'Required when experimental_condition or genetic_perturbation_id is present; "no perturbations" or sorted multi-value types'
+      display_order: 12
+      field_kind: enum
+      allowed_values: ['no perturbations', 'chemical', 'diet', 'genetic', 'protein', 'temperature']
+    - id: genetic_perturbation_strategy
+      layer: obs
+      term_field: genetic_perturbation_strategy
+      label: Genetic Perturbation Strategy
+      description: Required when genetic_perturbation_id is present
+      display_order: 13
+      field_kind: enum
+      allowed_values: ['no perturbations', 'control', 'CRISPR activation screen', 'CRISPR interference screen', 'CRISPR knockout mutant', 'CRISPR knockout screen']
     - id: tissue_type
       layer: obs
       term_field: tissue_type
       label: Tissue Type
       description: Type of tissue sample
-      display_order: 10
+      display_order: 14
       field_kind: enum
     - id: suspension_type
       layer: obs
       term_field: suspension_type
       label: Suspension Type
       description: Type of cell suspension
-      display_order: 11
+      display_order: 15
       field_kind: enum
     - id: donor_id
       layer: obs
       term_field: donor_id
       label: Donor ID
       description: Unique donor identifier
-      display_order: 12
+      display_order: 16
       field_kind: free_text
     - id: is_primary_data
       layer: obs
       term_field: is_primary_data
       label: Is Primary Data
       description: Whether this is the canonical instance of this data (True/False)
-      display_order: 13
+      display_order: 17
       field_kind: boolean
       allowed_values: ['True', 'False']
     - id: feature_is_filtered
@@ -1351,7 +1392,7 @@ checks:
     summary: 'Var pandas.DataFrame index: unique feature identifiers (Ensembl gene_id
       or ERCC spike-in).'
     rollup:
-    - AnnData var.index must be present (H5AD var/_index; Loom /row_attrs/feature_id
+    - AnnData var.index must be present (H5AD var/_index; Loom /row_attrs/Accession
       or manifest var_index_key)
     - Identifiers must be unique across all features
     - ERCC spike-in and Ensembl gene_id format rules (version suffix stripped for
@@ -1366,7 +1407,7 @@ checks:
         - 'AnnData schema: var.index (feature identifiers / var_names)'
         - 'H5AD file translation: var/_index (HDF5 encoding of the pandas DataFrame
           index)'
-        - 'Loom file translation: /row_attrs/feature_id (typical ASAP), or anndata_mapping
+        - 'Loom file translation: /row_attrs/Accession (ASAP Loom gene accession), or anndata_mapping
           var_index_key'
         - Identifiers must be non-empty across all features
       uniqueness:

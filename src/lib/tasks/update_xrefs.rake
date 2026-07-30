@@ -42,6 +42,94 @@ task update_xrefs: :environment do
     path
   end
 
+  xref_batch_size = (ENV["XREF_BATCH_SIZE"].presence || 5000).to_i
+
+  def flush_ncbi_gene_updates!(rows, batch_size)
+    return 0 if rows.empty?
+
+    rows.each_slice(batch_size) do |slice|
+      Gene.upsert_all(slice, unique_by: :id, update_only: [:ncbi_gene_id])
+    end
+    rows.size
+  end
+
+  ensembl_gene_set_labels = [
+    "GO Biological Processes",
+    "GO Cellular Components",
+    "GO Molecular Functions",
+    "KEGG pathways",
+    "DrugBank",
+    "Reactome"
+  ].freeze
+
+  def flush_gene_set_item_writes!(inserts, updates, batch_size)
+    now = Time.now
+    inserts.each_slice(batch_size) do |slice|
+      GeneSetItem.insert_all(
+        slice.map { |row| row.merge(created_at: now, updated_at: now) },
+        record_timestamps: false
+      )
+    end
+    updates.each_slice(batch_size) do |slice|
+      # Do not put updated_at in update_only: Rails would also timestamp it and
+      # Postgres rejects multiple assignments to the same column.
+      GeneSetItem.upsert_all(
+        slice.map { |row| row.merge(updated_at: now) },
+        unique_by: :id,
+        update_only: [:name, :content, :asap_data_id],
+        record_timestamps: false
+      )
+    end
+    [inserts.size, updates.size]
+  end
+
+  def queue_gene_set_item_write!(inserts, updates, existing_item, attrs)
+    if existing_item
+      if existing_item.name.to_s != attrs[:name].to_s || existing_item.content.to_s != attrs[:content].to_s ||
+         existing_item.asap_data_id.to_i != attrs[:asap_data_id].to_i
+        updates << {
+          id: existing_item.id,
+          gene_set_id: attrs[:gene_set_id],
+          identifier: attrs[:identifier],
+          name: attrs[:name],
+          content: attrs[:content],
+          asap_data_id: attrs[:asap_data_id]
+        }
+      end
+    else
+      inserts << attrs
+    end
+  end
+
+  def ensure_gene_set!(h_gene_sets, h_db_sets, o, db_name, asap_data_id)
+    ref_id = h_db_sets[db_name].id
+    gene_set = h_gene_sets[ref_id]
+    attrs = {
+      organism_id: o.id,
+      label: db_name,
+      ref_id: ref_id,
+      user_id: 1,
+      asap_data_id: asap_data_id
+    }
+    if gene_set
+      gene_set.update!(attrs)
+    else
+      gene_set = GeneSet.new(attrs)
+      gene_set.save!
+      h_gene_sets[ref_id] = gene_set
+    end
+    gene_set
+  end
+
+  def stamp_gene_set_release!(gene_set, o, asap_data_id)
+    return unless gene_set
+
+    gene_set.update!(
+      asap_data_id: asap_data_id,
+      latest_ensembl_release: o.latest_ensembl_release
+    )
+  end
+
 #  asap_data_id = 5
 #  kegg_version = '6.3.5.5'
 
@@ -178,10 +266,10 @@ task update_xrefs: :environment do
     base_dir += release_num.to_s
     FileUtils.mkdir_p(base_dir) unless File.exist? base_dir
     
-    ## get existing gene_sets
-    
+    ## get existing Ensembl-sourced gene_sets only (ignore PanglaoDB / Gene Atlas / Flybase)
+    ensembl_gs = o.gene_sets.select { |gs| ensembl_gene_set_labels.include?(gs.label) }
     todo_flag = 0
-    if o.gene_sets.size == 0 or o.gene_sets.select{|gs| gs.latest_ensembl_release and gs.latest_ensembl_release < o.latest_ensembl_release }.size > 0
+    if ensembl_gs.empty? || ensembl_gs.any? { |gs| gs.latest_ensembl_release.to_i < o.latest_ensembl_release.to_i }
       todo_flag = 1
     end
 
@@ -195,9 +283,9 @@ task update_xrefs: :environment do
       ###load genes
       puts "Load genes from DB..."
       h_genes = {}
-      
-      o.genes.each do |g|
-        h_genes[g.ensembl_id] = g #{:id => g.id, :organism_id => g.organism_id}
+      Gene.where(organism_id: o.id).pluck(:id, :ensembl_id, :ncbi_gene_id).each do |gene_id, ensembl_id, ncbi_gene_id|
+        next if ensembl_id.blank?
+        h_genes[ensembl_id] = { id: gene_id, ensembl_id: ensembl_id, ncbi_gene_id: ncbi_gene_id }
       end
       
       #      puts "Folder name" + folder_name.to_s
@@ -376,23 +464,29 @@ task update_xrefs: :environment do
           puts "Update NCBI genes..."
           i = 0      
           j = 0
-          ActiveRecord::Base.transaction do
-            h_gene.each_key do |stable_id|
-              if g = h_genes[stable_id] #Gene.where(:ensembl_id => stable_id).first
-                if ox = h_object_xref['1300'][h_gene[stable_id]]
-                  j+=1
-                  ox.uniq.each do |xref_id|
-                    if a = h_xref[xref_id] 
-                      #   if h_db_to_load[a[:type]][:name] == 'NCBI Gene ID'
-                      g.update!({:ncbi_gene_id => a[:acc]})
-                      i+=1
-                    end
-                    # end
-                  end
-                end
-              end
+          ncbi_updates = []
+          h_gene.each_key do |stable_id|
+            g = h_genes[stable_id]
+            next unless g
+            ox = h_object_xref['1300'][h_gene[stable_id]]
+            next unless ox
+
+            j += 1
+            new_ncbi = nil
+            ox.uniq.each do |xref_id|
+              a = h_xref[xref_id]
+              next unless a
+              new_ncbi = a[:acc]
             end
+            next if new_ncbi.nil?
+            next if g[:ncbi_gene_id].to_s == new_ncbi.to_s
+
+            ncbi_updates << { id: g[:id], ncbi_gene_id: new_ncbi }
+            g[:ncbi_gene_id] = new_ncbi
+            i += 1
           end
+          flush_ncbi_gene_updates!(ncbi_updates, xref_batch_size)
+          puts "  queued NCBI updates: #{ncbi_updates.size}"
           
           #	puts  h_gene.to_json
           #	puts h_object_xref['1000']['458384']
@@ -475,160 +569,86 @@ task update_xrefs: :environment do
           ActiveRecord::Base.transaction do
             puts "Save new GO in DB..."
             
-            list_db_names = h_gsi[go_type].keys.select{|go_id| h_go[go_id]}.map{|go_id| h_go[go_id]["db_name"]}.uniq #.each_key do |go_id|
-            #   a = h_xref[xref_id]                                                                                                                                                                                                         
+            list_db_names = h_gsi[go_type].keys.select{|go_id| h_go[go_id]}.map{|go_id| h_go[go_id]["db_name"]}.uniq
             list_db_names.each do |db_name|
-              # if h_go[go_id]
-              #   db_name = h_go[go_id]["db_name"]
-            h_gene_set = {
-                :organism_id => o.id, 
-                :label => db_name, 
-                :ref_id => h_db_sets[db_name].id, 
-                :user_id => 1,
-                :asap_data_id => asap_data_id,
-                :latest_ensembl_release => o.latest_ensembl_release
-              }
-              # gene_set = GeneSet.where(h_gene_set).first
-              gene_set = h_gene_sets[h_db_sets[db_name].id]#[db_name]
-              if !gene_set
-                gene_set = GeneSet.new(h_gene_set)
-                gene_set.save
-                h_gene_sets[gene_set.ref_id]= gene_set
-              else
-                gene_set.update!(h_gene_set)
-              end
-              # end
+              ensure_gene_set!(h_gene_sets, h_db_sets, o, db_name, asap_data_id)
             end
           end
           
-          ActiveRecord::Base.transaction do
-            puts "Load GO in DB..."
-            
-            h_gsi[go_type].each_key do |go_id|
-              #   a = h_xref[xref_id]
-              if h_go[go_id] 
-                db_name = h_go[go_id]["db_name"]
-                # h_gene_set = {:organism_id => o.id, :label => db_name, :ref_id => h_db_sets[db_name].id}
-                #  gene_set = GeneSet.where(h_gene_set).first
-                gene_set = h_gene_sets[h_db_sets[db_name].id]
-                # if gene_set
-                #   h_gene_set[:user_id] = 1
-                #          #   puts	"Not found gene set for organism  #{o.name}, #{db_name}!"
-                #          gene_set = GeneSet.new(h_gene_set)
-                #          gene_set.save
-                #      else
-                # gene_set.update!(h_gene_set)
-                # end
-                if gene_set and gene_set.id
-                  gene_set_item = h_gene_set_items[gene_set.id][go_id] if h_gene_set_items[gene_set.id]
-                  name = h_xref_names[go_type][go_id] || h_go[go_id]['name']
-                  h_gene_set_item = {
-                    :gene_set_id => gene_set.id, 
-                    :identifier => go_id, 
-                    :name => (name != "\\N") ? name : nil,
-                    :asap_data_id => asap_data_id
-                  }
-                  #                gene_set_item = GeneSetItem.where(h_gene_set_item).first
-                  ensembl_ids = h_gsi[go_type][go_id]
-                  #  h_go[go_id]["lineage"].each do |lineage_go_id|
-                  #    ensembl_ids |= h_gsi[go_type][go_id]
-                  #  end
-                  h_gene_set_item[:content]= ensembl_ids.select{|ensembl_id| h_genes[ensembl_id]}.map{|ensembl_id| h_genes[ensembl_id][:id]}.uniq.sort.join(",")
-                  if !gene_set_item
-                    gene_set_item = GeneSetItem.new(h_gene_set_item)
-                    #   puts "Add gene_set_item: " + gene_set_item.to_json
-                    gene_set_item.save
-                  else
-                    gene_set_item.update!(h_gene_set_item)
-                  end
-                else
-                  puts "Gene set for #{h_gene_set.to_json} is not found!"
-                end
+          puts "Load GO in DB..."
+          go_inserts = []
+          go_updates = []
+          h_gsi[go_type].each_key do |go_id|
+            if h_go[go_id] 
+              db_name = h_go[go_id]["db_name"]
+              gene_set = h_gene_sets[h_db_sets[db_name].id]
+              if gene_set and gene_set.id
+                gene_set_item = h_gene_set_items[gene_set.id][go_id] if h_gene_set_items[gene_set.id]
+                name = h_xref_names[go_type][go_id] || h_go[go_id]['name']
+                ensembl_ids = h_gsi[go_type][go_id]
+                content = ensembl_ids.select{|ensembl_id| h_genes[ensembl_id]}.map{|ensembl_id| h_genes[ensembl_id][:id]}.uniq.sort.join(",")
+                attrs = {
+                  gene_set_id: gene_set.id,
+                  identifier: go_id,
+                  name: (name != "\\N") ? name : nil,
+                  asap_data_id: asap_data_id,
+                  content: content
+                }
+                queue_gene_set_item_write!(go_inserts, go_updates, gene_set_item, attrs)
+              else
+                puts "Gene set for #{db_name} is not found!"
               end
             end
+          end
+          inserted, updated = flush_gene_set_item_writes!(go_inserts, go_updates, xref_batch_size)
+          puts "  GO gene_set_items inserted=#{inserted} updated=#{updated}"
+
+          go_labels = ["GO Biological Processes", "GO Cellular Components", "GO Molecular Functions"]
+          go_labels.each do |db_name|
+            next unless h_db_sets[db_name]
+            gene_set = h_gene_sets[h_db_sets[db_name].id]
+            next unless gene_set&.id
+            stamp_gene_set_release!(gene_set, o, asap_data_id)
           end
           
           ActiveRecord::Base.transaction do
             list_db_xrefs_direct.select{|type| h_gsi[type].keys.size > 0}.each do |type|
               puts "Save new #{type} in DB..."            
               db_name = h_db_to_load[type][:name]
-              h_gene_set = {
-                :user_id => 1, 
-                :organism_id => o.id, 
-                :label => db_name, 
-                :ref_id => h_db_sets[db_name].id, 
-                :asap_data_id => asap_data_id,
-                :latest_ensembl_release => o.latest_ensembl_release
-              }
-              #  gene_set = GeneSet.where(h_gene_set).first
-              gene_set = h_gene_sets[h_db_sets[db_name].id]
-              if !gene_set
-                #   puts  "Not found gene set for organism  #{o.name}, #{db_name}!"                                                              
-                gene_set = GeneSet.new(h_gene_set)
-                gene_set.save
-                h_gene_sets[gene_set.ref_id]= gene_set
-              end
+              ensure_gene_set!(h_gene_sets, h_db_sets, o, db_name, asap_data_id)
             end
           end
           
-          ActiveRecord::Base.transaction do
-            
-            list_db_xrefs_direct.each do |type|
-              puts "Load #{type} in DB..."            
-              db_name = h_db_to_load[type][:name]
-              h_gene_set = {
-                :user_id => 1, 
-                :organism_id => o.id, 
-                :label => db_name, 
-                :ref_id => h_db_sets[db_name].id,
-                :latest_ensembl_release => o.latest_ensembl_release
-              }
-              gene_set = GeneSet.where(h_gene_set).first
-              if gene_set
-                #   #   puts  "Not found gene set for organism  #{o.name}, #{db_name}!"                         
-                #   gene_set = GeneSet.new(h_gene_set)
-                #   gene_set.save
-                # else
-                gene_set.update!(h_gene_set)
+          list_db_xrefs_direct.each do |type|
+            puts "Load #{type} in DB..."            
+            db_name = h_db_to_load[type][:name]
+            gene_set = h_gene_sets[h_db_sets[db_name].id]
+
+            if gene_set and gene_set.id
+              type_inserts = []
+              type_updates = []
+              h_gsi[type].each_key do |gsi_id|
+                identifier = gsi_id
+                gene_set_item = h_gene_set_items[gene_set.id][identifier] if h_gene_set_items[gene_set.id]
+                ensembl_ids = h_gsi[type][gsi_id]
+                content = ensembl_ids.select{|ensembl_id| h_genes[ensembl_id]}.map{|ensembl_id| h_genes[ensembl_id][:id]}.uniq.join(",")
+                attrs = {
+                  gene_set_id: gene_set.id,
+                  identifier: identifier,
+                  name: (h_xref_names[type][gsi_id] != "\\N") ? h_xref_names[type][gsi_id] : nil,
+                  asap_data_id: asap_data_id,
+                  content: content
+                }
+                queue_gene_set_item_write!(type_inserts, type_updates, gene_set_item, attrs)
               end
-              
-              if gene_set and gene_set.id
-                
-                h_gsi[type].each_key do |gsi_id|
-                  identifier = gsi_id
-                  #                identifier_splitted = identifier.split("+")
-                  #     if type != '50801' or identifier_splitted[1] == kegg_version
-                  #                if type == '50801'
-                  #                  identifier = (o.tag || '') + identifier_splitted[0] #gsi_id.gsub(/(\+.+?)$/, '')
-                  #                end
-                  gene_set_item = h_gene_set_items[gene_set.id][identifier] if h_gene_set_items[gene_set.id]
-                  
-                  h_gene_set_item = {
-                    :gene_set_id => gene_set.id,
-                    :identifier => identifier,
-                    :name => (h_xref_names[type][gsi_id] != "\\N") ? h_xref_names[type][gsi_id] : nil,
-                    :asap_data_id => asap_data_id
-                  }
-                  #        gene_set_item = GeneSetItem.where(h_gene_set_item).first
-                  ensembl_ids = h_gsi[type][gsi_id]
-                  
-                  h_gene_set_item[:content]= ensembl_ids.select{|ensembl_id| h_genes[ensembl_id]}.map{|ensembl_id| h_genes[ensembl_id][:id]}.uniq.join(",")
-                  
-                  if !gene_set_item
-                    gene_set_item = GeneSetItem.new(h_gene_set_item)
-                    #   puts "Add gene_set_item: " + gene_set_item.to_json                                       
-                    gene_set_item.save
-                  else
-                    gene_set_item.update!(h_gene_set_item)
-                    # puts "Update: " + h_gene_set_item.to_json	
-                  end
-                end
-                #   end
-              else
-                puts "Gene set for #{h_gene_set.to_json} not found!"
-              end
+              inserted, updated = flush_gene_set_item_writes!(type_inserts, type_updates, xref_batch_size)
+              puts "  #{db_name} gene_set_items inserted=#{inserted} updated=#{updated}"
+              stamp_gene_set_release!(gene_set, o, asap_data_id)
+            elsif h_gsi[type].keys.size > 0
+              puts "Gene set for #{db_name} not found!"
+            elsif gene_set&.id
+              stamp_gene_set_release!(gene_set, o, asap_data_id)
             end
-            # end
           end
           puts "#{j} genes found"
           puts "#{i} genes have been updated!"

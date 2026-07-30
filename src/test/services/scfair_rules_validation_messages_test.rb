@@ -35,8 +35,9 @@ class ScfairRulesValidationMessagesTest < TestBaseWithoutFixtures
     assert_equal 'var.index', var[:schema]
     assert_equal 'var/_index', var[:h5ad][:path]
     assert_equal %w[_index index], var[:h5ad][:storage_keys]
-    assert_equal '/row_attrs/feature_id', var[:loom][:path]
+    assert_equal '/row_attrs/Accession', var[:loom][:path]
     assert_equal 'var_index_key', var[:loom][:manifest_key]
+    assert_equal %w[Accession index _index], var[:loom][:storage_keys]
 
     obs = Scfair::Rules.anndata_index(:obs)
     assert_equal 'obs.index', obs[:schema]

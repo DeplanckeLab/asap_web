@@ -115,6 +115,9 @@ class ScfairFixFormCrossFieldConstraintsTest < TestBaseWithoutFixtures
     assert multi['by_group_id']['tissue'].present?
     assert multi['by_group_id']['disease'].present?
     assert multi['by_group_id']['cell_type'].present?
+    assert multi['by_group_id']['development_stage'].present?
+    assert_equal 'development_stage_ontology_term_id', multi['by_group_id']['development_stage']['obs_field']
+    assert multi['by_group_id']['development_stage']['sorted']
     assert_equal 'cell_type_ontology_term_id', multi['by_group_id']['cell_type']['obs_field']
   end
 

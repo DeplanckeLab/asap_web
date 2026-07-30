@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require_relative 'test_base_without_fixtures'
+require_relative '../services/test_base_without_fixtures'
 
 class CompliancePipelineTest < TestBaseWithoutFixtures
   test 'use_extract_pipeline defaults to true' do
@@ -65,16 +65,19 @@ class CompliancePipelineTest < TestBaseWithoutFixtures
       format: 'loom'
     }
 
-    service = Minitest::Mock.new
-    service.expect(:validate, fake_core)
+    result = CompliancePipeline.wrap_file_check_result(fake_core)
+    refute result.valid?
+    assert_equal 1, result.errors.size
+  end
 
-    ScfairComplianceService.stub(:new, service) do
-      result = CompliancePipeline.validate_project_loom(loom_path, nil)
-      refute result.valid?
-      assert_equal 1, result.errors.size
-    end
+  test 'asap_data_db_name_for_project reads version env_json' do
+    version = Struct.new(:env_data).new(
+      { 'asap_data_db_name' => 'asap_data_v8', 'asap_data_db_version' => 8 }
+    )
+    project = Struct.new(:version_for_catalog).new(version)
 
-    service.verify
+    assert_equal 'asap_data_v8', CompliancePipeline.asap_data_db_name_for_project(project)
+    assert_nil CompliancePipeline.asap_data_db_name_for_project(nil)
   end
 
   private

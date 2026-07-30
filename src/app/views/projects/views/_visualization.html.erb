@@ -118,6 +118,15 @@ elsif default_genes.present?
   default_dimension_label = "#{number_with_delimiter(default_genes)} #{row_label(@project)}"
 end
 default_origin_label = default_group_key.present? ? (default_group_key.split('/').first || default_group_key).to_s.capitalize : ''
+
+cell_id_annot_ids_by_loom = {}
+(@h_metadata || {}).each do |filepath, dims|
+  (dims.dig('cell', 'STRING') || []).each do |metadata|
+    next unless metadata.name == '/col_attrs/CellID'
+    cell_id_annot_ids_by_loom[filepath] = metadata.id
+  end
+end
+project_type_tag = @project&.project_type&.tag.to_s
 %>
 
 <div data-controller="visualization"
@@ -132,6 +141,8 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
      data-visualization-gene-count-value="<%= @project&.gene_count || 0 %>"
      data-visualization-row-label-value="<%= row_label(@project) %>"
      data-visualization-col-label-value="<%= col_label(@project) %>"
+     data-visualization-project-type-tag-value="<%= project_type_tag %>"
+     data-visualization-cell-id-annot-ids-by-loom-value="<%= cell_id_annot_ids_by_loom.to_json %>"
      data-is-admin="<%= admin? ? 'true' : 'false' %>"
      style="display: flex; flex-direction: row; height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden;">
   
@@ -241,6 +252,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                           class="inline-flex items-center justify-center"
                           data-action="click->visualization#openMetadataInfoPopup"
                           data-metadata-info-url="<%= annot_path(metadata, from: 'visualization', embedded: 1) %>"
+                          data-metadata-name="<%= metadata.display_name %>"
+                          data-metadata-download-tsv-url="<%= download_annot_path(metadata, format_type: 'tsv.gz') %>"
+                          data-metadata-download-json-url="<%= download_annot_path(metadata, format_type: 'json') %>"
                           style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;"
                           onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
                           onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
@@ -249,17 +263,35 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                     <i class="fas fa-info-circle" style="font-size: 14px;"></i>
                   </button>
                   
-                  <!-- Global Download Button -->
-                  <button class="global-download-btn"
-                          data-metadata-id="<%= metadata.id %>"
-                          data-action="click->visualization#downloadGlobalDistribution"
-                          style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;"
-                          onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
-                          onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
-                          title="Download all categories distribution"
-                          onclick="event.stopPropagation()">
-                    <i class="fas fa-file-download" style="font-size: 14px;"></i>
-                  </button>
+                  <!-- Global Download Menu -->
+                  <div class="metadata-download-wrapper" style="position: relative; margin-right: 4px;" onclick="event.stopPropagation()">
+                    <button class="global-download-btn"
+                            data-action="click->visualization#toggleDownloadMenu"
+                            style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;"
+                            onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
+                            onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                            title="Download metadata">
+                      <i class="fas fa-file-download" style="font-size: 14px;"></i>
+                    </button>
+                    <div class="metadata-download-menu" style="display: none; position: fixed; min-width: 180px; padding: 6px; background-color: white; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12); z-index: 10000;">
+                      <button type="button"
+                              data-metadata-id="<%= metadata.id %>"
+                              data-action="click->visualization#downloadGlobalDistribution"
+                              style="display: block; width: 100%; text-align: left; padding: 8px 10px; border: none; background: none; border-radius: 4px; cursor: pointer; font-size: 12px; color: #374151;"
+                              onmouseover="this.style.backgroundColor='#f3f4f6'"
+                              onmouseout="this.style.backgroundColor=''">
+                        Summary (Excel)
+                      </button>
+                      <button type="button"
+                              data-metadata-id="<%= metadata.id %>"
+                              data-action="click->visualization#downloadRawMetadata"
+                              style="display: block; width: 100%; text-align: left; padding: 8px 10px; border: none; background: none; border-radius: 4px; cursor: pointer; font-size: 12px; color: #374151;"
+                              onmouseover="this.style.backgroundColor='#f3f4f6'"
+                              onmouseout="this.style.backgroundColor=''">
+                        Raw data (TSV.gz)
+                      </button>
+                    </div>
+                  </div>
                   
                   <!-- Button Group: X button and Coloring -->
                   <div style="display: flex; flex-direction: row; gap: 4px; align-items: center;">
@@ -545,6 +577,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                           class="inline-flex items-center justify-center"
                           data-action="click->visualization#openMetadataInfoPopup"
                           data-metadata-info-url="<%= annot_path(metadata, from: 'visualization', embedded: 1) %>"
+                          data-metadata-name="<%= metadata.display_name %>"
+                          data-metadata-download-tsv-url="<%= download_annot_path(metadata, format_type: 'tsv.gz') %>"
+                          data-metadata-download-json-url="<%= download_annot_path(metadata, format_type: 'json') %>"
                           style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;"
                           onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
                           onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
@@ -657,6 +692,9 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                           class="inline-flex items-center justify-center"
                           data-action="click->visualization#openMetadataInfoPopup"
                           data-metadata-info-url="<%= annot_path(metadata, from: 'visualization', embedded: 1) %>"
+                          data-metadata-name="<%= metadata.display_name %>"
+                          data-metadata-download-tsv-url="<%= download_annot_path(metadata, format_type: 'tsv.gz') %>"
+                          data-metadata-download-json-url="<%= download_annot_path(metadata, format_type: 'json') %>"
                           style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;"
                           onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
                           onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
@@ -665,17 +703,35 @@ default_origin_label = default_group_key.present? ? (default_group_key.split('/'
                     <i class="fas fa-info-circle" style="font-size: 14px;"></i>
                   </button>
                   
-                  <!-- Global Download Button -->
-                  <button class="global-download-btn"
-                          data-metadata-id="<%= metadata.id %>"
-                          data-action="click->visualization#downloadGlobalDistribution"
-                          style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;"
-                          onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
-                          onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
-                          title="Download all categories distribution"
-                          onclick="event.stopPropagation()">
-                    <i class="fas fa-file-download" style="font-size: 14px;"></i>
-                  </button>
+                  <!-- Global Download Menu -->
+                  <div class="metadata-download-wrapper" style="position: relative; margin-right: 4px;" onclick="event.stopPropagation()">
+                    <button class="global-download-btn"
+                            data-action="click->visualization#toggleDownloadMenu"
+                            style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;"
+                            onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
+                            onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                            title="Download metadata">
+                      <i class="fas fa-file-download" style="font-size: 14px;"></i>
+                    </button>
+                    <div class="metadata-download-menu" style="display: none; position: fixed; min-width: 180px; padding: 6px; background-color: white; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12); z-index: 10000;">
+                      <button type="button"
+                              data-metadata-id="<%= metadata.id %>"
+                              data-action="click->visualization#downloadGlobalDistribution"
+                              style="display: block; width: 100%; text-align: left; padding: 8px 10px; border: none; background: none; border-radius: 4px; cursor: pointer; font-size: 12px; color: #374151;"
+                              onmouseover="this.style.backgroundColor='#f3f4f6'"
+                              onmouseout="this.style.backgroundColor=''">
+                        Summary (Excel)
+                      </button>
+                      <button type="button"
+                              data-metadata-id="<%= metadata.id %>"
+                              data-action="click->visualization#downloadRawMetadata"
+                              style="display: block; width: 100%; text-align: left; padding: 8px 10px; border: none; background: none; border-radius: 4px; cursor: pointer; font-size: 12px; color: #374151;"
+                              onmouseover="this.style.backgroundColor='#f3f4f6'"
+                              onmouseout="this.style.backgroundColor=''">
+                        Raw data (TSV.gz)
+                      </button>
+                    </div>
+                  </div>
                   
                   <!-- Button Group: X, Y buttons and Coloring -->
                   <div style="display: flex; flex-direction: row; gap: 4px; align-items: center;">

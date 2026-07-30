@@ -31,11 +31,22 @@ class ScfairValidationJob < ApplicationJob
     end
 
     Rails.logger.info("[ScfairValidationJob] Validating loom file: #{loom_path}")
-    broadcast(project_id, status: 'validating', message: "Validating #{File.basename(loom_path)}...")
+    broadcast(project_id, status: 'validating', message: "Validating #{File.basename(loom_path)}...", progress: 1)
 
     # Run validation
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    result = CompliancePipeline.validate_project_loom(loom_path, project, logger: Rails.logger)
+    result = CompliancePipeline.validate_project_loom(loom_path, project, logger: Rails.logger) do |evt|
+      broadcast(
+        project_id,
+        status: 'progress',
+        message: evt[:message],
+        progress: evt[:progress],
+        stage: evt[:stage],
+        format: evt[:format],
+        current: evt[:current],
+        total: evt[:total]
+      )
+    end
     Rails.logger.info("[ScfairValidationJob TIMING] Validation: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
 
     # Save results
@@ -56,6 +67,7 @@ class ScfairValidationJob < ApplicationJob
         status: 'completed',
         valid: true,
         message: 'Validation passed! File is compliant with scFAIR schema 7.1.0',
+        progress: 100,
         errors_count: 0,
         warnings_count: result.warnings.count,
         valid_checks_count: result.valid_checks.count,
@@ -66,6 +78,7 @@ class ScfairValidationJob < ApplicationJob
         status: 'completed',
         valid: false,
         message: "Validation found #{result.errors.count} error(s)",
+        progress: 100,
         errors_count: result.errors.count,
         warnings_count: result.warnings.count,
         valid_checks_count: result.valid_checks.count,

@@ -2171,19 +2171,39 @@ this.currentMatches = allMatches.filter(item => {
           <i class="fas fa-info-circle" style="font-size: 14px;"></i>
         </button>
 
-        <!-- Download Button -->
-        <button class="gene-download-btn"
-                data-action="click->visualization#downloadGeneExpression"
-                data-gene-id="${gene.stableId}"
-                data-metadata-id="${baseMetadataId}"
-                data-layer-metadata-id="${layerMetadataId}"
-                style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;"
-                onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
-                onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
-                title="Download expression distribution"
-                onclick="event.stopPropagation()">
-          <i class="fas fa-file-download" style="font-size: 14px;"></i>
-        </button>
+        <!-- Download Menu -->
+        <div class="metadata-download-wrapper" style="position: relative; margin-right: 4px;" onclick="event.stopPropagation()">
+          <button class="gene-download-btn"
+                  data-action="click->visualization#toggleDownloadMenu"
+                  style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s;"
+                  onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
+                  onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
+                  title="Download gene expression">
+            <i class="fas fa-file-download" style="font-size: 14px;"></i>
+          </button>
+          <div class="metadata-download-menu" style="display: none; position: fixed; min-width: 180px; padding: 6px; background-color: white; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12); z-index: 10000;">
+            <button type="button"
+                    data-gene-id="${gene.stableId}"
+                    data-metadata-id="${baseMetadataId}"
+                    data-layer-metadata-id="${layerMetadataId}"
+                    data-action="click->visualization#downloadGeneExpressionSummary"
+                    style="display: block; width: 100%; text-align: left; padding: 8px 10px; border: none; background: none; border-radius: 4px; cursor: pointer; font-size: 12px; color: #374151;"
+                    onmouseover="this.style.backgroundColor='#f3f4f6'"
+                    onmouseout="this.style.backgroundColor=''">
+              Summary (Excel)
+            </button>
+            <button type="button"
+                    data-gene-id="${gene.stableId}"
+                    data-metadata-id="${baseMetadataId}"
+                    data-layer-metadata-id="${layerMetadataId}"
+                    data-action="click->visualization#downloadGeneExpressionRaw"
+                    style="display: block; width: 100%; text-align: left; padding: 8px 10px; border: none; background: none; border-radius: 4px; cursor: pointer; font-size: 12px; color: #374151;"
+                    onmouseover="this.style.backgroundColor='#f3f4f6'"
+                    onmouseout="this.style.backgroundColor=''">
+              Raw data (TSV.gz)
+            </button>
+          </div>
+        </div>
         
         <!-- Button Group: X, Y buttons and Coloring -->
         <div style="display: flex; flex-direction: row; gap: 4px; align-items: center; margin-right: 4px;">

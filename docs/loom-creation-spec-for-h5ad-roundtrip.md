@@ -28,7 +28,7 @@ ASAP internal Loom orientation is genes x cells.
 | `obs` columns | `/col_attrs/{field}` |
 | `var` columns | `/row_attrs/{field}` |
 | `obs.index` | `/col_attrs/CellID` (or declared equivalent) |
-| `var.index` | `/row_attrs/feature_id` (or declared equivalent) |
+| `var.index` | `/row_attrs/Accession` (or declared equivalent) |
 
 ## Mandatory global manifest
 
@@ -46,7 +46,7 @@ This manifest is the single source of truth used by the conversion tool.
 - `obs_path` (string): path prefix for obs columns, normally `"/col_attrs"`
 - `var_path` (string): path prefix for var columns, normally `"/row_attrs"`
 - `obs_index_key` (string): e.g. `"CellID"`
-- `var_index_key` (string): e.g. `"feature_id"`
+- `var_index_key` (string): e.g. `"Accession"`
 
 ### Required when data exists
 
@@ -155,7 +155,7 @@ Case A: raw selected as primary during Loom creation (`/matrix` stores raw matri
   "obs_path": "/col_attrs",
   "var_path": "/row_attrs",
   "obs_index_key": "CellID",
-  "var_index_key": "feature_id",
+  "var_index_key": "Accession",
   "raw_x_path": "/matrix",
   "layers": {
     "X": "/layers/X"
@@ -189,7 +189,7 @@ Case B: normalized `X` selected as primary (`/matrix` stores normalized matrix, 
   "obs_path": "/col_attrs",
   "var_path": "/row_attrs",
   "obs_index_key": "CellID",
-  "var_index_key": "feature_id",
+  "var_index_key": "Accession",
   "layers": {},
   "obsm": {
     "X_umap": "/col_attrs/X_umap"

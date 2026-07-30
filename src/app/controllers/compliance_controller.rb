@@ -94,13 +94,42 @@ class ComplianceController < ApplicationController
       return
     end
 
-    # Run validation synchronously
+    ActionCable.server.broadcast(
+      "compliance_#{@project.id}",
+      {
+        project_id: @project.id,
+        status: 'started',
+        message: 'Starting compliance validation...',
+        progress: 1,
+        timestamp: Time.current.iso8601
+      }
+    )
+
+    # Run validation synchronously; progress ticks are pushed over ActionCable.
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    result = run_project_compliance_validation(loom_path, @project, logger: Rails.logger)
+    result = run_project_compliance_validation(loom_path, @project, logger: Rails.logger) do |evt|
+      broadcast_project_compliance_progress(@project.id, evt)
+    end
     Rails.logger.info("[Compliance TIMING] Synchronous validation: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
 
     validation_data = project_validation_payload(@project, result, loom_path, schema_config)
     save_validation_result(@project, validation_data)
+
+    ActionCable.server.broadcast(
+      "compliance_#{@project.id}",
+      {
+        project_id: @project.id,
+        status: 'completed',
+        valid: result.valid?,
+        message: result.valid? ? 'Validation passed' : "Validation found #{result.errors.count} error(s)",
+        progress: 100,
+        errors_count: result.errors.count,
+        warnings_count: result.warnings.count,
+        valid_checks_count: result.valid_checks.count,
+        redirect_url: project_path(@project, view: 'compliance'),
+        timestamp: Time.current.iso8601
+      }
+    )
 
     respond_to do |format|
       format.html do

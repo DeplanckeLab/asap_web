@@ -23,6 +23,13 @@ class ScfairVarCrossFieldValidatorTest < TestBaseWithoutFixtures
       gene_statuses.fetch(key, :ok)
     end
 
+    def gene_statuses_at_release(organism_id:, release:, ensembl_ids:)
+      Array(ensembl_ids).each_with_object({}) do |ensembl_id, memo|
+        key = normalize_ensembl_id(ensembl_id)
+        memo[key] = gene_status_at_release(organism_id: organism_id, release: release, ensembl_id: key)
+      end
+    end
+
     ALLOWED_GENE_REFERENCES = %w[NCBITaxon:9606 NCBITaxon:10090 NCBITaxon:7159].freeze
 
     def known_gene_reference_taxon?(reference)

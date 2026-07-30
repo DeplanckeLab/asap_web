@@ -5,22 +5,24 @@ module Scfair
   class ComplianceValidationCore
     include ComplianceReportEnrichment
 
-    def self.call(file_path:, schema_id:, logger: Rails.logger, progress_cb: nil, project_compliance: false)
+    def self.call(file_path:, schema_id:, logger: Rails.logger, progress_cb: nil, project_compliance: false, remote_db: nil)
       new(
         file_path: file_path,
         schema_id: schema_id,
         logger: logger,
         progress_cb: progress_cb,
-        project_compliance: project_compliance
+        project_compliance: project_compliance,
+        remote_db: remote_db
       ).call
     end
 
-    def initialize(file_path:, schema_id:, logger: Rails.logger, progress_cb: nil, project_compliance: false)
+    def initialize(file_path:, schema_id:, logger: Rails.logger, progress_cb: nil, project_compliance: false, remote_db: nil)
       @file_path = file_path
       @schema_id = schema_id
       @logger = logger
       @progress_cb = progress_cb
       @project_compliance = project_compliance
+      @remote_db = remote_db.presence
     end
 
     def validate
@@ -58,6 +60,7 @@ module Scfair
         format: format,
         organism_term_id: first_organism(field_values, format)
       ).run
+      tick('constraints', 'Checking cross-field and organism constraints', 78, format: format)
       cross_field = CrossFieldConstraintEvaluator.new(field_values: field_values, format: format).call
       obs_label_pairs = ObsLabelPairConstraintEvaluator.new(field_values: field_values, format: format).call
       organism_specific = OrganismSpecificConstraintEvaluator.new(field_values: field_values, format: format).call
@@ -67,13 +70,16 @@ module Scfair
         project_compliance: @project_compliance
       ).call
       metadata_general = MetadataGeneralValidator.new(field_values: field_values, format: format).call
+      tick('ensembl', 'Checking Ensembl metadata', 84, format: format)
       schema_version_check = schema_version_evaluation(field_values, format)
       schema_reference_check = schema_reference_evaluation(field_values, format)
       uns_ensembl_check = uns_ensembl_evaluation(field_values, format)
       experimental_condition_check = experimental_condition_evaluation(field_values, format)
+      tick('var', 'Checking feature metadata and gene identifiers', 88, format: format)
       var_metadata_check = var_metadata_evaluation(field_values, format)
       var_index_check = var_index_evaluation(field_values, format)
       var_cross_field_check = var_cross_field_evaluation(field_values, format)
+      tick('labels', 'Checking organism label pairs', 93, format: format)
       uns_ensembl_cross_field_check = uns_ensembl_cross_field_evaluation(field_values, format)
       organism_label_check = organism_label_pair_evaluation(field_values, format)
 
@@ -251,11 +257,15 @@ module Scfair
     end
 
     def var_cross_field_evaluation(field_values, format)
-      VarCrossFieldValidator.new(field_values: field_values, format: format).call
+      VarCrossFieldValidator.new(field_values: field_values, format: format, lookup: ensembl_lookup).call
     end
 
     def uns_ensembl_cross_field_evaluation(field_values, format)
-      UnsEnsemblCrossFieldValidator.new(field_values: field_values, format: format).call
+      UnsEnsemblCrossFieldValidator.new(field_values: field_values, format: format, lookup: ensembl_lookup).call
+    end
+
+    def ensembl_lookup
+      @ensembl_lookup ||= EnsemblReferenceLookup.new(remote_db: @remote_db)
     end
 
     def reconcile_rollup_metadata_checks(errors, valid_checks, warnings, format)

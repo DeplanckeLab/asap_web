@@ -13,6 +13,8 @@ class ScfairMinimalExtractService
 
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
   REPO_ROOT = ENV.fetch('SCFAIR_EXTRACT_REPO_ROOT', '/data/asap2_test').freeze
+  # Canonical parser lives in the Rails app; synced into REPO_ROOT so asap_run can read it.
+  APP_PARSER_SCRIPT = Rails.root.join('lib/scfair/scfair_loom_h5ad_extract_parser.py').freeze
   PARSER_SCRIPT = File.join(REPO_ROOT, 'scripts/scfair_loom_h5ad_extract_parser.py').freeze
 
   def initialize(file_path:, logger: Rails.logger)
@@ -24,6 +26,7 @@ class ScfairMinimalExtractService
     container_path = resolve_container_path(@file_path)
     raise ExtractionError, "File not found: #{@file_path}" unless File.exist?(container_path)
 
+    sync_parser_script!
     output_path = File.join(REPO_ROOT, 'tmp', "extract_#{SecureRandom.hex(8)}.json")
     ensure_output_dir!(output_path)
 
@@ -49,6 +52,14 @@ class ScfairMinimalExtractService
   end
 
   private
+
+  def sync_parser_script!
+    raise ExtractionError, "Extract parser missing: #{APP_PARSER_SCRIPT}" unless File.exist?(APP_PARSER_SCRIPT)
+
+    dest_dir = File.dirname(PARSER_SCRIPT)
+    FileUtils.mkdir_p(dest_dir) unless File.directory?(dest_dir)
+    FileUtils.cp(APP_PARSER_SCRIPT, PARSER_SCRIPT)
+  end
 
   def resolve_container_path(path)
     abs = File.expand_path(path)

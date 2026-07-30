@@ -14,7 +14,7 @@ module Scfair
       @field_values = field_values || {}
       @format = format.to_s
       @lookup = lookup
-      @reference_policy = FeatureReferenceTaxonPolicy.new
+      @reference_policy = FeatureReferenceTaxonPolicy.new(remote_lookup: lookup)
     end
 
     def call
@@ -220,13 +220,15 @@ module Scfair
       end
 
       issues = []
+      statuses = @lookup.gene_statuses_at_release(
+        organism_id: remote_organism.id,
+        release: release,
+        ensembl_ids: gene_ids
+      )
+
       gene_ids.each do |feature_id|
         ensembl_id = @lookup.normalize_ensembl_id(feature_id)
-        status = @lookup.gene_status_at_release(
-          organism_id: remote_organism.id,
-          release: release,
-          ensembl_id: ensembl_id
-        )
+        status = statuses[ensembl_id] || :not_found
         case status
         when :not_found
           issues << "#{feature_id} (not in ASAP genes)"

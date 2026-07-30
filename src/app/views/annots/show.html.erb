@@ -26,6 +26,18 @@
         </h3>
       </div>
       <div class="flex items-center gap-3">
+        <div class="flex items-center gap-1">
+          <%= link_to download_annot_path(@annot, format_type: 'tsv.gz'),
+                      class: 'inline-flex items-center px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 hover:text-gray-900 transition-colors',
+                      title: 'Download as TSV.gz' do %>
+            <i class="fas fa-download mr-1"></i>TSV
+          <% end %>
+          <%= link_to download_annot_path(@annot, format_type: 'json'),
+                      class: 'inline-flex items-center px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 hover:text-gray-900 transition-colors',
+                      title: 'Download as JSON' do %>
+            <i class="fas fa-download mr-1"></i>JSON
+          <% end %>
+        </div>
         <% if @from == 'run' && @back_run_id && @back_step_id %>
           <% back_url = project_path(@project, view: 'analysis', step_id: @back_step_id, run_id: @back_run_id) %>
           <%= link_to back_url, class: 'inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium transition-colors cursor-pointer' do %>

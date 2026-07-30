@@ -72,9 +72,7 @@ module Scfair
                                             experimental_condition_obs_path?(field)
       return 'var.cross_field' if field.start_with?('var.cross_field')
       return 'cross-field.uns_ensembl' if field.start_with?('cross-field.uns_ensembl')
-      return 'var.index' if field == Rules.var_index_schema_field ||
-                            field.start_with?('var.index') ||
-                            field.match?(/\A(var\/_index|var\/index|\/row_attrs\/(_index|index|feature_id))\z/)
+      return 'var.index' if Rules.var_index_field?(field)
       return 'var.required' if field.start_with?('var.required') || field.start_with?('var/') || field.start_with?('/row_attrs/')
       return 'obs.label_pairs' if field.start_with?('obs.label_pairs.')
       return 'cross-field.constraints' if field.start_with?('cross-field')

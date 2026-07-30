@@ -1,9 +1,10 @@
 class ScfairComplianceService
-  def initialize(file_path:, schema_id:, logger: Rails.logger, project_compliance: false, &progress_cb)
+  def initialize(file_path:, schema_id:, logger: Rails.logger, project_compliance: false, remote_db: nil, &progress_cb)
     @file_path = file_path
     @schema_id = schema_id
     @logger = logger
     @project_compliance = project_compliance
+    @remote_db = remote_db
     @progress_cb = progress_cb
   end
 
@@ -13,7 +14,8 @@ class ScfairComplianceService
       schema_id: @schema_id,
       logger: @logger,
       progress_cb: @progress_cb,
-      project_compliance: @project_compliance
+      project_compliance: @project_compliance,
+      remote_db: @remote_db
     )
   end
 end

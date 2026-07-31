@@ -378,8 +378,8 @@ export default class extends Controller {
     this.histogramScale = 'normal'
     this.histogramIgnoreZeros = true
     this.metadataHistogramOptions = {}
-    // Continuous distribution bar plots (category rows + selection): value-bin scale
-    this.barplotBinScale = 'normal'
+    // Continuous coloring: linear or log10 mapping from data values to gradient positions
+    this.gradientScale = 'normal'
 
     // Initialize custom plot axis scale preferences
     this.customPlotXAxisScale = 'normal'
@@ -612,7 +612,7 @@ export default class extends Controller {
     if (!this.loadedMetadataVectors) this.loadedMetadataVectors = {}
     if (!this.loadingMetadataVectors) this.loadingMetadataVectors = new Set() // Track which vectors are currently loading
     
-    // Store gradients per metadata ID (metadataId -> { gradientControlPoints, customGradientControlPoints })
+    // Store gradients per metadata ID (metadataId -> { gradientControlPoints, customGradientControlPoints, gradientScale })
     this.metadataGradients = new Map()
     
     // Memory management for metadata vectors
@@ -6286,8 +6286,6 @@ export default class extends Controller {
           // console.log(`🎨 [ReGL] Calculated range from values: [${minVal}, ${maxVal}]`)
         }
         
-        const range = maxVal - minVal
-        
         // Apply colors for every cell; transparency is draw-only (never stored in color caches).
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
           const cellIndex = this.displayOrder[drawPos]
@@ -6298,14 +6296,10 @@ export default class extends Controller {
             // Missing numeric values must not use 0x000000: regl treats 0 as transparent, and
             // `cachedColor || defaultBlue` would later turn them into default blue.
             metadataColor = this.getMissingNumericColor()
+          } else if (this.getEffectiveGradientScale(minVal, maxVal) === 'log' && value <= 0) {
+            metadataColor = this.getMissingNumericColor()
           } else {
-            let normalizedValue
-            if (range > 0) {
-              normalizedValue = (value - minVal) / range
-              normalizedValue = Math.max(0, Math.min(1, normalizedValue))
-            } else {
-              normalizedValue = 0.5
-            }
+            const normalizedValue = this.valueToGradientPosition(value, minVal, maxVal)
             metadataColor = this.gradientManager.getColorFromGradient(normalizedValue)
             if (!metadataColor || metadataColor === 0) {
               metadataColor = this.getMissingNumericColor()
@@ -6322,6 +6316,7 @@ export default class extends Controller {
         }
         this.lastColoringMetadataId = coloringMetadataVector.id
         this.lastColorRange = effectiveRange ? { min: effectiveRange.min, max: effectiveRange.max } : null
+        this.lastGradientScale = this.getEffectiveGradientScale(minVal, maxVal)
         
         // console.log(`🎨 [ReGL] Applied continuous colors to ${colorMap.size} points (including hidden ones)`)
         
@@ -6779,6 +6774,7 @@ export default class extends Controller {
     }
     
     this.customColorRange = { min, max }
+    this.ensureGradientScaleMatchesRange(min, max)
     
     // If we have continuous metadata active, re-render the visualization and legend
     if (this.currentMetadataVector && this.currentMetadataVector.data_type === 'NUMERIC') {
@@ -6792,6 +6788,10 @@ export default class extends Controller {
   // Reset color range to auto (use data min/max)
   resetColorRange() {
     this.customColorRange = null
+    const range = this.getEffectiveColorRange()
+    if (range) {
+      this.ensureGradientScaleMatchesRange(range.min, range.max)
+    }
     
     // If we have continuous metadata active, re-render the visualization and legend
     if (this.currentMetadataVector && this.currentMetadataVector.data_type === 'NUMERIC') {
@@ -6818,10 +6818,15 @@ export default class extends Controller {
     if (shouldAdaptColorRange) {
       // Set the custom color range to adapt to the selected range
       this.customColorRange = { min, max }
+      this.ensureGradientScaleMatchesRange(min, max)
       // console.log('🎨 Color range adapted to selected range:', { min, max })
     } else {
       // Clear the custom color range to use the full data range
       this.customColorRange = null
+      const range = this.getEffectiveColorRange()
+      if (range) {
+        this.ensureGradientScaleMatchesRange(range.min, range.max)
+      }
       // console.log('🎨 Color range reset to full data range')
     }
     
@@ -6830,6 +6835,17 @@ export default class extends Controller {
     if (this.currentMetadataVector?.data_type === 'NUMERIC') {
       this.dataManager.updateAllCategoryDistributions()
     }
+  }
+
+  // If log scale is active but the current color range is not strictly positive, drop to linear.
+  ensureGradientScaleMatchesRange(minVal, maxVal) {
+    if (this.gradientScale !== 'log') return
+    if (this.canUseLogGradientScale(minVal, maxVal)) return
+    this.gradientScale = 'normal'
+    if (this.currentMetadataId) {
+      this.gradientManager?.saveGradientForMetadata(this.currentMetadataId)
+    }
+    this.gradientManager?.syncGradientScaleSelect?.()
   }
 
   // Redraw the entire visualization (used by inline range slider)
@@ -7647,7 +7663,6 @@ export default class extends Controller {
         numericalOrder: this.numericalOrder,
         histogramScale: this.histogramScale === 'log' ? 'log' : 'normal',
         histogramIgnoreZeros: this.histogramIgnoreZeros !== false,
-        barplotBinScale: this.barplotBinScale === 'log' ? 'log' : 'normal',
         metadataHistogramOptions: this.buildMetadataHistogramOptionsCheckpointState(),
         showGrid: !!document.getElementById('show-grid-checkbox')?.checked,
         showAxes: !!document.getElementById('show-axes-checkbox')?.checked,
@@ -8396,9 +8411,6 @@ export default class extends Controller {
       if (Object.prototype.hasOwnProperty.call(state.display, 'histogramIgnoreZeros')) {
         this.histogramIgnoreZeros = state.display.histogramIgnoreZeros !== false
       }
-      if (state.display.barplotBinScale === 'log' || state.display.barplotBinScale === 'normal') {
-        this.barplotBinScale = state.display.barplotBinScale
-      }
       this.metadataHistogramOptions = {}
       if (state.display.metadataHistogramOptions && typeof state.display.metadataHistogramOptions === 'object') {
         Object.entries(state.display.metadataHistogramOptions).forEach(([metadataId, options]) => {
@@ -8413,17 +8425,10 @@ export default class extends Controller {
       if (histogramIgnoreZerosCheckbox) {
         histogramIgnoreZerosCheckbox.checked = this.histogramIgnoreZeros !== false
       }
-      const barplotBinScaleSelect = document.getElementById('barplot-bin-scale-select')
-      if (barplotBinScaleSelect) {
-        barplotBinScaleSelect.value = this.barplotBinScale === 'log' ? 'log' : 'normal'
-      }
       if (Object.prototype.hasOwnProperty.call(state.display, 'histogramScale') ||
           Object.prototype.hasOwnProperty.call(state.display, 'histogramIgnoreZeros') ||
           Object.prototype.hasOwnProperty.call(state.display, 'metadataHistogramOptions')) {
         this.refreshHistogramsAfterGlobalHistogramOptionsChanged()
-      }
-      if (Object.prototype.hasOwnProperty.call(state.display, 'barplotBinScale')) {
-        this.refreshBarplotsAfterBinScaleChanged()
       }
       document.querySelectorAll('[data-controller~="range-slider"]').forEach((element) => {
         const rangeSliderController = this.application?.getControllerForElementAndIdentifier(element, 'range-slider')
@@ -13822,22 +13827,81 @@ export default class extends Controller {
     }
   }
   
-  // Convert position (0-1) to actual data value
+  // Convert position (0-1) to actual data value (respects gradient linear/log scale)
   positionToActualValue(position) {
     if (this.gradientMinValue === undefined || this.gradientMaxValue === undefined) {
       return position
     }
-    return this.gradientMinValue + (position * (this.gradientMaxValue - this.gradientMinValue))
+    const minVal = this.gradientMinValue
+    const maxVal = this.gradientMaxValue
+    if (this.getEffectiveGradientScale(minVal, maxVal) === 'log') {
+      const logMin = Math.log10(minVal)
+      const logMax = Math.log10(maxVal)
+      return Math.pow(10, logMin + position * (logMax - logMin))
+    }
+    return minVal + (position * (maxVal - minVal))
   }
   
-  // Convert actual data value to position (0-1)
+  // Convert actual data value to position (0-1) (respects gradient linear/log scale)
   actualValueToPosition(actualValue) {
     if (this.gradientMinValue === undefined || this.gradientMaxValue === undefined) {
       return actualValue
     }
-    const range = this.gradientMaxValue - this.gradientMinValue
-    if (range === 0) return 0
-    return (actualValue - this.gradientMinValue) / range
+    return this.valueToGradientPosition(actualValue, this.gradientMinValue, this.gradientMaxValue)
+  }
+
+  canUseLogGradientScale(minVal, maxVal) {
+    return Number.isFinite(minVal) && Number.isFinite(maxVal) && minVal > 0 && maxVal > 0
+  }
+
+  getEffectiveGradientScale(minVal = null, maxVal = null) {
+    if (this.gradientScale !== 'log') return 'normal'
+    let min = minVal
+    let max = maxVal
+    if (min === null || max === null) {
+      const range = this.getEffectiveColorRange()
+      if (range) {
+        min = range.min
+        max = range.max
+      } else if (this.gradientMinValue !== undefined && this.gradientMaxValue !== undefined) {
+        min = this.gradientMinValue
+        max = this.gradientMaxValue
+      }
+    }
+    return this.canUseLogGradientScale(min, max) ? 'log' : 'normal'
+  }
+
+  // Map a data value to a gradient position in [0, 1] using the active gradient scale.
+  valueToGradientPosition(value, minVal, maxVal) {
+    if (!Number.isFinite(value) || !Number.isFinite(minVal) || !Number.isFinite(maxVal)) {
+      return 0
+    }
+    if (this.getEffectiveGradientScale(minVal, maxVal) === 'log') {
+      if (value <= 0) return 0
+      const logMin = Math.log10(minVal)
+      const logMax = Math.log10(maxVal)
+      const span = logMax - logMin
+      if (span <= 0) return 0
+      const t = (Math.log10(value) - logMin) / span
+      return Math.min(1, Math.max(0, t))
+    }
+    const span = maxVal - minVal
+    if (span === 0) return 0
+    return Math.min(1, Math.max(0, (value - minVal) / span))
+  }
+
+  setGradientScale(scale) {
+    const next = scale === 'log' ? 'log' : 'normal'
+    if (next === 'log') {
+      const range = this.getEffectiveColorRange()
+      const minVal = range?.min ?? this.gradientMinValue
+      const maxVal = range?.max ?? this.gradientMaxValue
+      if (!this.canUseLogGradientScale(minVal, maxVal)) {
+        return false
+      }
+    }
+    this.gradientScale = next
+    return true
   }
   
   // Get color from gradient control points by interpolating
@@ -14157,6 +14221,7 @@ export default class extends Controller {
     // console.log('🎨 Resetting gradient to default')
     this.customGradientControlPoints = null
     this.selectedControlPointIndex = undefined
+    this.gradientScale = 'normal'
     
     // Reinitialize default gradient
     this.colorManager.initializeDefaultGradient()
@@ -14165,9 +14230,11 @@ export default class extends Controller {
     this.gradientManager.saveGradientForMetadata(this.currentMetadataId)
     
     this.closeControlPointEditor()
+    this.gradientManager.syncGradientScaleSelect()
     this.rendererManager.renderModalGradientPreview()
     this.rendererManager.renderModalControlPointMarkers()
     this.rendererManager.renderControlPointsList()
+    this.gradientManager.renderGradientDistributionHistogram()
     this.reapplyColorsWithNewGradient()
   }
   
@@ -23795,8 +23862,8 @@ export default class extends Controller {
     }
   }
 
-  // Recompute continuous distribution bars after Normal/Log bin scale changes in settings.
-  refreshBarplotsAfterBinScaleChanged() {
+  // Recompute continuous distribution bars after gradient value-scale changes.
+  refreshBarplotsAfterGradientScaleChanged() {
     this.refreshAllDistributionBarplots()
   }
 
@@ -24726,12 +24793,8 @@ export default class extends Controller {
       return
     }
 
-    const { binMin, binMax } = this.resolveBarplotBinEdges(
-      globalMin,
-      globalMax,
-      coloringMetadataVector,
-      filteredSet
-    )
+    const binMin = globalMin
+    const binMax = globalMax
     
     canvases.forEach(canvas => {
       const displayedCategory = canvas.dataset.category
@@ -24865,12 +24928,14 @@ export default class extends Controller {
         return `rgb(${r}, ${g}, ${b})`
       }
       
-      // Draw bins with width ∝ cell count (color from bin range midpoint; scale sets value edges)
-      const span = globalMax - globalMin
+      // Draw bins with width ∝ cell count (color from bin range midpoint in gradient space)
       binData.forEach((bin) => {
-        const binCenterValue = (bin.start + bin.end) / 2
-        const binPosition = span > 0 ? (binCenterValue - globalMin) / span : 0
-        ctx.fillStyle = getColorAtPosition(Math.min(1, Math.max(0, binPosition)))
+        const useLog = this.getEffectiveGradientScale(globalMin, globalMax) === 'log'
+        const binCenterValue = useLog && bin.start > 0 && bin.end > 0
+          ? Math.sqrt(bin.start * bin.end)
+          : (bin.start + bin.end) / 2
+        const binPosition = this.valueToGradientPosition(binCenterValue, globalMin, globalMax)
+        ctx.fillStyle = getColorAtPosition(binPosition)
         ctx.fillRect(bin.startX, 0, bin.endX - bin.startX, rect.height)
       })
       
@@ -24942,42 +25007,12 @@ export default class extends Controller {
   }
 
   getBarplotBinHistogramOptions() {
-    const scale = this.barplotBinScale === 'log' ? 'log' : 'normal'
+    const scale = this.getEffectiveGradientScale()
     return {
       scale,
       // Log bins skip non-positive values; exclude them from the denominator as well.
       ignoreZeros: scale === 'log'
     }
-  }
-
-  // Log-spaced bins need a positive lower edge; when the color range includes 0/negatives,
-  // use the smallest positive value in the (filtered) coloring vector so log bins can apply.
-  resolveBarplotBinEdges(globalMin, globalMax, coloringMetadataVector, filteredSet) {
-    let binMin = globalMin
-    let binMax = globalMax
-    if (this.barplotBinScale !== 'log') {
-      return { binMin, binMax }
-    }
-    if (binMin > 0 && binMax > 0) {
-      return { binMin, binMax }
-    }
-    let minPositive = Infinity
-    const values = coloringMetadataVector.values
-    for (let i = 0; i < values.length; i++) {
-      if (filteredSet && !filteredSet.has(i)) continue
-      const v = values[i]
-      if (v > 0 && Number.isFinite(v) && v < minPositive) {
-        minPositive = v
-      }
-    }
-    if (!Number.isFinite(minPositive) || minPositive === Infinity) {
-      return { binMin, binMax }
-    }
-    binMin = minPositive
-    if (!(binMax > 0)) {
-      binMax = minPositive
-    }
-    return { binMin, binMax }
   }
 
   hideSelectionDistributionCanvas() {
@@ -25205,24 +25240,18 @@ export default class extends Controller {
         return
       }
       const { globalMin, globalMax } = range
-      const { binMin, binMax } = this.resolveBarplotBinEdges(
-        globalMin,
-        globalMax,
-        coloringMetadataVector,
-        filteredSet
-      )
       this.drawSelectionContinuousDistribution(
         selectionCanvas,
         coloringMetadataVector,
         selectionIndices,
-        { globalMin, globalMax, binMin, binMax }
+        { globalMin, globalMax, binMin: globalMin, binMax: globalMax }
       )
       if (showComplement) {
         this.drawSelectionContinuousDistribution(
           complementCanvas,
           coloringMetadataVector,
           complementIndices,
-          { globalMin, globalMax, binMin, binMax }
+          { globalMin, globalMax, binMin: globalMin, binMax: globalMax }
         )
       }
       return
@@ -25376,14 +25405,8 @@ export default class extends Controller {
       }
       globalMin = range.globalMin
       globalMax = range.globalMax
-      const edges = this.resolveBarplotBinEdges(
-        globalMin,
-        globalMax,
-        coloringMetadataVector,
-        filteredSet
-      )
-      binMin = edges.binMin
-      binMax = edges.binMax
+      binMin = range.globalMin
+      binMax = range.globalMax
     }
 
     const values = []
@@ -25447,11 +25470,13 @@ export default class extends Controller {
     })
     canvas.dataset.bins = JSON.stringify(binData)
 
-    const span = globalMax - globalMin
+    const useLog = this.getEffectiveGradientScale(globalMin, globalMax) === 'log'
     binData.forEach((bin) => {
-      const binCenterValue = (bin.start + bin.end) / 2
-      const binPosition = span > 0 ? (binCenterValue - globalMin) / span : 0
-      ctx.fillStyle = this.getGradientColorAtPosition(Math.min(1, Math.max(0, binPosition)))
+      const binCenterValue = useLog && bin.start > 0 && bin.end > 0
+        ? Math.sqrt(bin.start * bin.end)
+        : (bin.start + bin.end) / 2
+      const binPosition = this.valueToGradientPosition(binCenterValue, globalMin, globalMax)
+      ctx.fillStyle = this.getGradientColorAtPosition(binPosition)
       ctx.fillRect(bin.startX, 0, bin.endX - bin.startX, rect.height)
     })
 

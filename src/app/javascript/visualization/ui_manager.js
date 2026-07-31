@@ -1712,19 +1712,6 @@ export class UIManager {
       }
     }
 
-    const barplotBinScaleSelect = document.getElementById('barplot-bin-scale-select')
-    if (barplotBinScaleSelect) {
-      barplotBinScaleSelect.value = this.controller.barplotBinScale === 'log' ? 'log' : 'normal'
-      if (!barplotBinScaleSelect.dataset.barplotBinScaleBound) {
-        barplotBinScaleSelect.dataset.barplotBinScaleBound = '1'
-        barplotBinScaleSelect.addEventListener('change', (e) => {
-          const v = e.target.value
-          this.controller.barplotBinScale = v === 'log' ? 'log' : 'normal'
-          this.controller.refreshBarplotsAfterBinScaleChanged()
-        })
-      }
-    }
-
     const discretePaletteSelect = document.getElementById('discrete-palette-select')
     if (discretePaletteSelect) {
       const labels = getDiscretePaletteSelectLabels()

@@ -29,17 +29,24 @@ export class GradientManager {
       const values = this.controller.currentMetadataVector.values
       this.controller.gradientMinValue = this.controller.dataManager.safeMin(values)
       this.controller.gradientMaxValue = this.controller.dataManager.safeMax(values)
-      // console.log('🎨 Gradient value range:', { 
-        // min: this.controller.gradientMinValue, 
-        // max: this.controller.gradientMaxValue,
-        // valuesLength: values.length
-      // })
+      // Prefer the effective coloring range when available (respects adapted/custom range)
+      const effectiveRange = this.controller.getEffectiveColorRange?.()
+      if (effectiveRange && Number.isFinite(effectiveRange.min) && Number.isFinite(effectiveRange.max)) {
+        this.controller.gradientMinValue = effectiveRange.min
+        this.controller.gradientMaxValue = effectiveRange.max
+      }
     } else {
       console.warn('🎨 ⚠️ No metadata vector or values found:', {
         hasMetadataVector: !!this.controller.currentMetadataVector,
         hasValues: !!(this.controller.currentMetadataVector && this.controller.currentMetadataVector.values),
         dataType: this.controller.currentMetadataVector?.data_type
       })
+    }
+
+    if (this.controller.gradientScale === 'log' &&
+        !this.controller.canUseLogGradientScale(this.controller.gradientMinValue, this.controller.gradientMaxValue)) {
+      this.controller.gradientScale = 'normal'
+      this.saveGradientForMetadata(this.controller.currentMetadataId)
     }
 
     // Get the control points that will be used
@@ -55,17 +62,20 @@ export class GradientManager {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         // Initialize gradient editor with current gradient
+        this.syncGradientScaleSelect()
         this.controller.rendererManager.renderModalGradientPreview()
         this.controller.rendererManager.renderModalControlPointMarkers()
         this.controller.rendererManager.renderControlPointsList()
+        this.renderGradientDistributionHistogram()
         
         // Attach event listeners to buttons since the modal is outside the controller scope
         this.attachModalButtonListeners()
         
-        // Attach click listener to gradient canvas
+        // Attach click/hover listeners to gradient and histogram canvases
         this.attachGradientCanvasListener()
+        this.attachGradientEditorHoverListeners()
         
-        // console.log('🎨 Modal opened and rendered')
+        // console.log('Modal opened and rendered')
       })
     })
   }
@@ -83,10 +93,22 @@ export class GradientManager {
       
       // Attach click listener
       newCanvas.addEventListener('click', (event) => {
-        // console.log('🎨 Gradient canvas clicked')
         this.gradientBarClicked(event)
       })
     }
+  }
+
+  attachGradientEditorHoverListeners() {
+    const wrap = document.getElementById('gradient-editor-preview-wrap')
+    if (!wrap) return
+    if (wrap.dataset.hoverBound === '1') return
+    wrap.dataset.hoverBound = '1'
+    wrap.addEventListener('mousemove', (event) => {
+      this.handleGradientEditorHover(event)
+    })
+    wrap.addEventListener('mouseleave', () => {
+      this.clearGradientEditorHover()
+    })
   }
   
   // Attach event listeners to modal buttons
@@ -152,6 +174,62 @@ export class GradientManager {
         this.removeControlPoint()
       })
     }
+
+    const scaleSelect = document.getElementById('gradient-scale-select')
+    if (scaleSelect && !scaleSelect.dataset.gradientScaleBound) {
+      scaleSelect.dataset.gradientScaleBound = '1'
+      scaleSelect.addEventListener('change', (e) => {
+        this.handleGradientScaleChange(e.target.value)
+      })
+    }
+    this.syncGradientScaleSelect()
+  }
+
+  syncGradientScaleSelect() {
+    const scaleSelect = document.getElementById('gradient-scale-select')
+    const hint = document.getElementById('gradient-scale-hint')
+    if (!scaleSelect) return
+
+    const minVal = this.controller.gradientMinValue
+    const maxVal = this.controller.gradientMaxValue
+    const canUseLog = this.controller.canUseLogGradientScale(minVal, maxVal)
+    const logOption = scaleSelect.querySelector('option[value="log"]')
+    if (logOption) {
+      logOption.disabled = !canUseLog
+    }
+
+    const effective = this.controller.getEffectiveGradientScale(minVal, maxVal)
+    scaleSelect.value = effective === 'log' ? 'log' : 'normal'
+    scaleSelect.disabled = false
+
+    if (hint) {
+      if (!canUseLog) {
+        hint.textContent = 'Log10 requires a strictly positive value range.'
+      } else if (effective === 'log') {
+        hint.textContent = 'Data values are mapped to the gradient in log10 space (also used by distribution bar plots).'
+      } else {
+        hint.textContent = 'Maps data values to the gradient (also used by distribution bar plots).'
+      }
+    }
+  }
+
+  handleGradientScaleChange(scale) {
+    const applied = this.controller.setGradientScale(scale)
+    if (!applied) {
+      this.syncGradientScaleSelect()
+      return
+    }
+    this.saveGradientForMetadata(this.controller.currentMetadataId)
+    this.syncGradientScaleSelect()
+
+    // Refresh control-point value labels (positions stay the same; displayed values change with scale)
+    if (this.controller.selectedControlPointIndex !== undefined) {
+      this.selectControlPoint(this.controller.selectedControlPointIndex)
+    }
+    this.controller.rendererManager.renderModalControlPointMarkers()
+    this.controller.rendererManager.renderControlPointsList()
+    this.renderGradientDistributionHistogram()
+    this.controller.reapplyColorsWithNewGradient()
   }
   
   // Apply any pending changes from the control point editor inputs
@@ -220,17 +298,18 @@ export class GradientManager {
 
   // Close gradient editor modal
   closeGradientEditorModal() {
-    // console.log('🎨 closeGradientEditorModal called')
+    // console.log('closeGradientEditorModal called')
     
     // Before closing, ensure any pending color/position changes are applied
     const editor = document.getElementById('gradient-control-point-editor')
     if (editor && editor.style.display !== 'none') {
-      // console.log('🎨 closeGradientEditorModal: Applying pending changes before closing')
+      // console.log('closeGradientEditorModal: Applying pending changes before closing')
       this.applyPendingControlPointChanges()
     }
     
     // Save gradient for current metadata before closing
     this.saveGradientForMetadata(this.controller.currentMetadataId)
+    this.clearGradientEditorHover()
     
     const modal = document.getElementById('gradient-editor-modal')
     if (modal) {
@@ -467,14 +546,15 @@ export class GradientManager {
     
     this.controller.rendererManager.renderModalGradientPreview()
     this.controller.rendererManager.renderModalControlPointMarkers()
+    this.renderGradientDistributionHistogram()
     
     // Restore control points if they got lost - prefer custom, fallback to default
     if (!this.controller.customGradientControlPoints) {
       if (preservedCustomPoints) {
-        console.warn('🎨 ⚠️ Control points were lost during rendering! Restoring custom...')
+        console.warn('Control points were lost during rendering! Restoring custom...')
         this.controller.customGradientControlPoints = preservedCustomPoints
       } else if (preservedDefaultPoints) {
-        console.warn('🎨 ⚠️ Control points were lost during rendering! Restoring default...')
+        console.warn('Control points were lost during rendering! Restoring default...')
         this.controller.gradientControlPoints = preservedDefaultPoints
       }
     }
@@ -509,6 +589,7 @@ export class GradientManager {
     // CRITICAL: Clear existing gradient values first to avoid using previous metadata's gradient
     this.controller.gradientControlPoints = null
     this.controller.customGradientControlPoints = null
+    this.controller.gradientScale = 'normal'
     
     // Check if we have a stored gradient for this metadata
     const storedGradient = this.controller.metadataGradients.get(metadataId)
@@ -520,16 +601,25 @@ export class GradientManager {
         JSON.parse(JSON.stringify(storedGradient.gradientControlPoints)) : null
       this.controller.customGradientControlPoints = storedGradient.customGradientControlPoints ? 
         JSON.parse(JSON.stringify(storedGradient.customGradientControlPoints)) : null
-      // console.log('🎨 Restored gradient - gradientControlPoints:', this.controller.gradientControlPoints)
-      // console.log('🎨 Restored gradient - customGradientControlPoints:', this.controller.customGradientControlPoints)
+      this.controller.gradientScale = storedGradient.gradientScale === 'log' ? 'log' : 'normal'
     } else {
       // No stored gradient - initialize default
       // console.log('🎨 No stored gradient found - initializing default gradient')
       this.controller.colorManager.initializeDefaultGradient()
-      // console.log('🎨 After initialization, gradientControlPoints:', this.controller.gradientControlPoints)
+      this.controller.gradientScale = 'normal'
       
       // Save the default gradient for this metadata
       this.saveGradientForMetadata(metadataId)
+    }
+
+    const range = this.controller.getEffectiveColorRange?.()
+    if (range) {
+      this.controller.ensureGradientScaleMatchesRange?.(range.min, range.max)
+    } else if (this.controller.currentMetadataVector?.values) {
+      const values = this.controller.currentMetadataVector.values
+      const minVal = this.controller.dataManager.safeMin(values)
+      const maxVal = this.controller.dataManager.safeMax(values)
+      this.controller.ensureGradientScaleMatchesRange?.(minVal, maxVal)
     }
   }
   
@@ -547,7 +637,8 @@ export class GradientManager {
       gradientControlPoints: this.controller.gradientControlPoints ? 
         JSON.parse(JSON.stringify(this.controller.gradientControlPoints)) : null,
       customGradientControlPoints: this.controller.customGradientControlPoints ? 
-        JSON.parse(JSON.stringify(this.controller.customGradientControlPoints)) : null
+        JSON.parse(JSON.stringify(this.controller.customGradientControlPoints)) : null,
+      gradientScale: this.controller.gradientScale === 'log' ? 'log' : 'normal'
     }
     
     this.controller.metadataGradients.set(metadataId, gradientState)
@@ -803,6 +894,245 @@ export class GradientManager {
     
     ctx.fillStyle = gradient
     ctx.fillRect(0, 0, width, height)
+  }
+
+  formatGradientEditorValue(value) {
+    if (!Number.isFinite(value)) return 'n/a'
+    const abs = Math.abs(value)
+    if (abs !== 0 && (abs < 0.001 || abs >= 10000)) {
+      return value.toExponential(2)
+    }
+    if (Number.isInteger(value)) return String(value)
+    return value.toFixed(Math.abs(value) >= 100 ? 1 : 3)
+  }
+
+  colorIntToCss(colorInt) {
+    const n = (colorInt >>> 0) & 0xffffff
+    return `#${n.toString(16).padStart(6, '0')}`
+  }
+
+  getGradientEditorHistogramValues() {
+    const vector = this.controller.currentMetadataVector
+    if (!vector?.values || vector.data_type !== 'NUMERIC') return []
+
+    const filteredIndices = this.controller.dataManager?.getIncrementalFilteredIndices?.()
+    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+    const values = []
+    for (let i = 0; i < vector.values.length; i++) {
+      if (filteredSet && !filteredSet.has(i)) continue
+      const v = vector.values[i]
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        values.push(v)
+      }
+    }
+    return values
+  }
+
+  getGradientEditorRange() {
+    const effectiveRange = this.controller.getEffectiveColorRange?.()
+    if (effectiveRange && Number.isFinite(effectiveRange.min) && Number.isFinite(effectiveRange.max)) {
+      return { min: effectiveRange.min, max: effectiveRange.max }
+    }
+    const min = this.controller.gradientMinValue
+    const max = this.controller.gradientMaxValue
+    if (Number.isFinite(min) && Number.isFinite(max)) {
+      return { min, max }
+    }
+    return null
+  }
+
+  // Colored histogram under the gradient preview (same value axis / scale as coloring).
+  renderGradientDistributionHistogram() {
+    const canvas = document.getElementById('gradient-editor-histogram-canvas')
+    if (!canvas) return
+
+    const ctx = canvas.getContext('2d')
+    const width = canvas.width
+    const height = canvas.height
+    ctx.clearRect(0, 0, width, height)
+    ctx.fillStyle = '#f9fafb'
+    ctx.fillRect(0, 0, width, height)
+
+    const range = this.getGradientEditorRange()
+    const minLabel = document.getElementById('gradient-editor-hist-min')
+    const maxLabel = document.getElementById('gradient-editor-hist-max')
+    if (!range || !(range.max > range.min)) {
+      this._gradientHistogramBins = []
+      if (minLabel) minLabel.textContent = ''
+      if (maxLabel) maxLabel.textContent = ''
+      ctx.fillStyle = '#9ca3af'
+      ctx.font = '12px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.fillText('No numeric range available', width / 2, height / 2)
+      return
+    }
+
+    if (minLabel) minLabel.textContent = this.formatGradientEditorValue(range.min)
+    if (maxLabel) maxLabel.textContent = this.formatGradientEditorValue(range.max)
+
+    const values = this.getGradientEditorHistogramValues()
+    const numBins = 40
+    const scale = this.controller.getEffectiveGradientScale(range.min, range.max)
+    const { bins, maxCount, binRanges } = this.controller.buildHistogramBins(
+      values,
+      range.min,
+      range.max,
+      numBins,
+      { scale, ignoreZeros: scale === 'log' }
+    )
+
+    const binMeta = []
+    const denom = maxCount > 0 ? maxCount : 1
+    const barGap = 1
+    const barWidth = width / numBins
+
+    for (let i = 0; i < numBins; i++) {
+      const count = bins[i] || 0
+      const start = binRanges[i]?.min
+      const end = binRanges[i]?.max
+      const useLog = scale === 'log'
+      const center = useLog && start > 0 && end > 0
+        ? Math.sqrt(start * end)
+        : (start + end) / 2
+      const position = this.controller.valueToGradientPosition(center, range.min, range.max)
+      const colorInt = this.getColorFromGradient(position)
+      const colorCss = this.colorIntToCss(colorInt)
+      const barHeight = (count / denom) * (height - 4)
+      const x = i * barWidth
+      const y = height - barHeight
+
+      ctx.fillStyle = colorCss
+      ctx.fillRect(x, y, Math.max(1, barWidth - barGap), barHeight)
+
+      binMeta.push({
+        index: i,
+        start,
+        end,
+        center,
+        count,
+        position,
+        color: colorCss,
+        x0: x / width,
+        x1: (x + barWidth) / width
+      })
+    }
+
+    this._gradientHistogramBins = binMeta
+  }
+
+  findGradientHistogramBinAtFraction(fraction) {
+    const bins = this._gradientHistogramBins || []
+    if (bins.length === 0) return null
+    const t = Math.min(1, Math.max(0, fraction))
+    const index = Math.min(bins.length - 1, Math.floor(t * bins.length))
+    return bins[index] || null
+  }
+
+  ensureGradientEditorHoverTooltip() {
+    let tooltip = document.getElementById('gradient-editor-hover-tooltip')
+    if (!tooltip) {
+      tooltip = document.createElement('div')
+      tooltip.id = 'gradient-editor-hover-tooltip'
+      tooltip.style.cssText = `
+        display: none; position: fixed; z-index: 12050; pointer-events: none;
+        background: rgba(17, 24, 39, 0.95); color: white; padding: 8px 10px;
+        border-radius: 6px; font-size: 12px; line-height: 1.4;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.25); white-space: nowrap;
+      `
+      document.body.appendChild(tooltip)
+    }
+    return tooltip
+  }
+
+  setGradientEditorHoverLine(fraction) {
+    const line = document.getElementById('gradient-editor-hover-line')
+    if (!line) return
+    const t = Math.min(1, Math.max(0, fraction))
+    line.style.display = 'block'
+    line.style.left = `${t * 100}%`
+  }
+
+  clearGradientEditorHover() {
+    const line = document.getElementById('gradient-editor-hover-line')
+    if (line) line.style.display = 'none'
+    const tooltip = document.getElementById('gradient-editor-hover-tooltip')
+    if (tooltip) tooltip.style.display = 'none'
+    const hadHover = this._gradientHistogramHoverIndex !== null && this._gradientHistogramHoverIndex !== undefined
+    this._gradientHistogramHoverIndex = null
+    if (hadHover) {
+      this.renderGradientDistributionHistogram()
+    }
+  }
+
+  handleGradientEditorHover(event) {
+    const wrap = document.getElementById('gradient-editor-preview-wrap')
+    if (!wrap) return
+    const rect = wrap.getBoundingClientRect()
+    if (rect.width <= 0) return
+
+    const fraction = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+    const range = this.getGradientEditorRange()
+    if (!range) {
+      this.clearGradientEditorHover()
+      return
+    }
+
+    // Keep controller min/max aligned so position <-> value conversion matches the histogram axis
+    this.controller.gradientMinValue = range.min
+    this.controller.gradientMaxValue = range.max
+
+    const value = this.controller.positionToActualValue(fraction)
+    const colorInt = this.getColorFromGradient(fraction)
+    const colorCss = this.colorIntToCss(colorInt)
+    const bin = this.findGradientHistogramBinAtFraction(fraction)
+
+    this.setGradientEditorHoverLine(fraction)
+
+    if (bin && bin.index !== this._gradientHistogramHoverIndex) {
+      this._gradientHistogramHoverIndex = bin.index
+      this.renderGradientDistributionHistogram()
+      this.drawGradientHistogramHoverOverlay(bin.index)
+    }
+
+    const tooltip = this.ensureGradientEditorHoverTooltip()
+    const scaleLabel = this.controller.getEffectiveGradientScale(range.min, range.max) === 'log' ? 'log10' : 'linear'
+    let html = `<div style="display:flex;align-items:center;gap:8px;">`
+    html += `<span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:${colorCss};border:1px solid rgba(255,255,255,0.35);"></span>`
+    html += `<span>Value: <strong>${this.formatGradientEditorValue(value)}</strong> (${scaleLabel})</span>`
+    html += `</div>`
+    if (bin) {
+      html += `<div style="margin-top:4px;color:#d1d5db;">`
+      html += `Bin: ${this.formatGradientEditorValue(bin.start)} – ${this.formatGradientEditorValue(bin.end)}`
+      html += ` · ${bin.count.toLocaleString()} cells`
+      html += `</div>`
+    }
+    tooltip.innerHTML = html
+    tooltip.style.display = 'block'
+
+    const tipWidth = tooltip.offsetWidth || 180
+    const tipHeight = tooltip.offsetHeight || 40
+    let left = event.clientX + 12
+    let top = event.clientY + 12
+    if (left + tipWidth > window.innerWidth - 8) left = event.clientX - tipWidth - 12
+    if (top + tipHeight > window.innerHeight - 8) top = event.clientY - tipHeight - 12
+    tooltip.style.left = `${Math.max(8, left)}px`
+    tooltip.style.top = `${Math.max(8, top)}px`
+  }
+
+  drawGradientHistogramHoverOverlay(binIndex) {
+    const canvas = document.getElementById('gradient-editor-histogram-canvas')
+    const bins = this._gradientHistogramBins || []
+    const bin = bins[binIndex]
+    if (!canvas || !bin) return
+    const ctx = canvas.getContext('2d')
+    const width = canvas.width
+    const height = canvas.height
+    const barWidth = width / bins.length
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.28)'
+    ctx.fillRect(binIndex * barWidth, 0, barWidth, height)
+    ctx.strokeStyle = 'rgba(17, 24, 39, 0.7)'
+    ctx.lineWidth = 1
+    ctx.strokeRect(binIndex * barWidth + 0.5, 0.5, Math.max(1, barWidth - 1), height - 1)
   }
   
   // Render control point markers on the gradient bar in modal

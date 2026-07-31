@@ -82,16 +82,10 @@ export class ColorManager {
         
         if (typeof value !== 'number' || Number.isNaN(value)) {
           baseColor = this.controller.getMissingNumericColor()
+        } else if (this.controller.getEffectiveGradientScale(minVal, maxVal) === 'log' && value <= 0) {
+          baseColor = this.controller.getMissingNumericColor()
         } else {
-          const range = maxVal - minVal
-          let normalizedValue
-          if (range > 0) {
-            normalizedValue = (value - minVal) / range
-            // Clamp to valid range
-            normalizedValue = Math.max(0, Math.min(1, normalizedValue))
-          } else {
-            normalizedValue = 0.5
-          }
+          const normalizedValue = this.controller.valueToGradientPosition(value, minVal, maxVal)
           
           // Use gradient manager to get color
           baseColor = this.controller.gradientManager.getColorFromGradient(normalizedValue)
@@ -179,6 +173,9 @@ export class ColorManager {
       } else if (this.controller.lastColorRange !== currentRange) {
         return true
       }
+      if (this.controller.lastGradientScale !== this.controller.getEffectiveGradientScale()) {
+        return true
+      }
     }
     
     return false
@@ -231,6 +228,7 @@ export class ColorManager {
       
       this.controller.lastColoringMetadataId = null
       this.controller.lastColorRange = null
+      this.controller.lastGradientScale = null
       return
     }
     
@@ -298,8 +296,8 @@ export class ColorManager {
         maxVal = this.controller.dataManager.safeMax(values)
       }
       
-      const range = maxVal - minVal
       const missingColor = this.controller.getMissingNumericColor()
+      const useLog = this.controller.getEffectiveGradientScale(minVal, maxVal) === 'log'
       
       // Cache colors for all points
       for (let i = 0; i < values.length; i++) {
@@ -307,8 +305,10 @@ export class ColorManager {
         let color
         if (typeof value !== 'number' || Number.isNaN(value)) {
           color = missingColor
+        } else if (useLog && value <= 0) {
+          color = missingColor
         } else {
-          const normalizedValue = range > 0 ? Math.max(0, Math.min(1, (value - minVal) / range)) : 0.5
+          const normalizedValue = this.controller.valueToGradientPosition(value, minVal, maxVal)
           color = this.controller.gradientManager.getColorFromGradient(normalizedValue)
           if (!color || color === 0) {
             color = missingColor
@@ -323,6 +323,7 @@ export class ColorManager {
       
       // Cache the color range for future comparisons
       this.controller.lastColorRange = effectiveRange ? { min: effectiveRange.min, max: effectiveRange.max } : null
+      this.controller.lastGradientScale = this.controller.getEffectiveGradientScale(minVal, maxVal)
     }
     
     // Cache the metadata ID for future comparisons
@@ -341,6 +342,7 @@ export class ColorManager {
     this.controller.cachedColorsByCellIndex = new Map()
     this.controller.lastColoringMetadataId = null
     this.controller.lastColorRange = null
+    this.controller.lastGradientScale = null
   }
 
   // Create discrete color map for categories

@@ -408,7 +408,11 @@
 			    clone_project_path(project),
 			    method: :post,
 			    class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-gray-700 bg-gray-100 hover:bg-gray-200 border-0 cursor-pointer",
-			    data: { controller: "clone-overlay", action: "click->clone-overlay#handleClick", clone_overlay_confirm_value: "Clone this project?" },
+			    data: {
+			      controller: "clone-overlay",
+			      action: "click->clone-overlay#handleClick",
+			      clone_overlay_confirm_value: "Clone project \"#{project.name.presence || project.key}\"?"
+			    },
 			    form: { class: "inline-block" } %>
 			<% end %>
 		      </div>

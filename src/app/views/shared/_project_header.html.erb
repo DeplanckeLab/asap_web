@@ -433,7 +433,11 @@
               <%= button_to clone_project_path(@project), 
                   method: :post,
                   class: "flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100",
-                  data: { controller: "clone-overlay", action: "click->clone-overlay#handleClick", clone_overlay_skip_confirm: "true" },
+                  data: {
+                    controller: "clone-overlay",
+                    action: "click->clone-overlay#handleClick",
+                    clone_overlay_confirm_value: "Clone project \"#{@project.name.presence || @project.key}\"?"
+                  },
                   form: { data: { skip_visualization_leave_guard: "true" } } do %>
                 <i class="fas fa-clone text-lg mr-3 text-emerald-500"></i>
                 Clone
@@ -551,7 +555,11 @@
               method: :post,
               class: "p-2 rounded-lg #{nav_available_icon_class} hover:bg-gray-700",
               title: "Clone Project",
-              data: { controller: "clone-overlay", action: "click->clone-overlay#handleClick", clone_overlay_skip_confirm: "true" },
+              data: {
+                controller: "clone-overlay",
+                action: "click->clone-overlay#handleClick",
+                clone_overlay_confirm_value: "Clone project \"#{@project.name.presence || @project.key}\"?"
+              },
               form: { data: { skip_visualization_leave_guard: "true" } } do %><i class="fas fa-clone text-lg"></i><% end %>
         <% end %>
         

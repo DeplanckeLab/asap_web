@@ -11,6 +11,7 @@ class Run < ApplicationRecord
 
   has_many :annots, dependent: :destroy
   has_many :fos, dependent: :destroy
+  has_many :checkpoints, dependent: :nullify
   has_one :active_run, dependent: :destroy
 
   scope :dimension_reduction, -> { joins(:step).where(steps: { name: Step::EMBEDDING_STEP_NAMES }) }

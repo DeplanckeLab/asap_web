@@ -29,7 +29,7 @@
             <%= link_to "Start guided tour",
                         guided_tour_start_url(tour.id),
                         class: "inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:hover:bg-gray-800",
-                        data: { controller: "nav-item", action: "click->nav-item#navigate" } %>
+                        data: { controller: "nav-item", action: "click->nav-item#navigate", guided_tour_start_id: tour.id } %>
           </div>
         </section>
       <% end %>

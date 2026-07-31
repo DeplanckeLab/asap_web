@@ -1,5 +1,10 @@
 class CheckpointsController < ApplicationController
   CURRENT_VISUALIZATION_CHECKPOINT_TITLE = '__current_visualization_view__'.freeze
+  CURRENT_HEATMAP_CHECKPOINT_TITLE = '__current_heatmap_view__'.freeze
+  CURRENT_CHECKPOINT_TITLES = [
+    CURRENT_VISUALIZATION_CHECKPOINT_TITLE,
+    CURRENT_HEATMAP_CHECKPOINT_TITLE
+  ].freeze
 
   before_action :set_project
   before_action :set_checkpoint, only: [:show, :update, :destroy]
@@ -8,8 +13,8 @@ class CheckpointsController < ApplicationController
     return if performed?
     return unless ensure_readable!
 
-    checkpoints = @project.checkpoints
-      .where.not(title: CURRENT_VISUALIZATION_CHECKPOINT_TITLE)
+    checkpoints = scoped_checkpoints
+      .where.not(title: CURRENT_CHECKPOINT_TITLES)
       .includes(:user)
       .order(created_at: :desc)
     render json: {
@@ -28,7 +33,9 @@ class CheckpointsController < ApplicationController
     return if performed?
     return unless ensure_readable!
 
-    checkpoint = @project.checkpoints.find_by(title: CURRENT_VISUALIZATION_CHECKPOINT_TITLE)
+    checkpoint = find_current_checkpoint
+    return if performed?
+
     render json: {
       checkpoint: checkpoint ? checkpoint_payload(checkpoint, include_state: true) : nil
     }
@@ -38,22 +45,32 @@ class CheckpointsController < ApplicationController
     return if performed?
     return unless ensure_analyzable!
 
-    if checkpoint_title == CURRENT_VISUALIZATION_CHECKPOINT_TITLE
+    if CURRENT_CHECKPOINT_TITLES.include?(checkpoint_title)
       render json: { error: 'Checkpoint title is reserved.' }, status: :unprocessable_entity
       return
     end
+
+    kind = requested_kind
+    run = resolve_heatmap_run!(kind)
+    return if performed?
 
     checkpoint = @project.checkpoints.new
     checkpoint.user = current_user
     checkpoint.title = checkpoint_title
     checkpoint.state = checkpoint_state
     checkpoint.comments = []
-    checkpoint.is_landing_page = checkpoint_is_landing_page if checkpoint_is_landing_page_param_present?
+    checkpoint.kind = kind
+    checkpoint.run = run
+    if checkpoint.heatmap?
+      checkpoint.is_landing_page = false
+    elsif checkpoint_is_landing_page_param_present?
+      checkpoint.is_landing_page = checkpoint_is_landing_page
+    end
 
     saved = false
     Checkpoint.transaction do
       if checkpoint.is_landing_page?
-        @project.checkpoints.where(is_landing_page: true).update_all(is_landing_page: false)
+        @project.checkpoints.visualization.where(is_landing_page: true).update_all(is_landing_page: false)
       end
       saved = checkpoint.save
       raise ActiveRecord::Rollback unless saved
@@ -70,7 +87,7 @@ class CheckpointsController < ApplicationController
     return if performed?
     return unless ensure_analyzable!
 
-    if checkpoint_title == CURRENT_VISUALIZATION_CHECKPOINT_TITLE
+    if CURRENT_CHECKPOINT_TITLES.include?(checkpoint_title)
       render json: { error: 'Checkpoint title is reserved.' }, status: :unprocessable_entity
       return
     end
@@ -83,10 +100,10 @@ class CheckpointsController < ApplicationController
       @checkpoint.state = checkpoint_state
     end
 
-    if checkpoint_is_landing_page_param_present?
+    if @checkpoint.visualization? && checkpoint_is_landing_page_param_present?
       is_landing_page = checkpoint_is_landing_page
       if is_landing_page
-        @project.checkpoints.where(is_landing_page: true).where.not(id: @checkpoint.id).update_all(is_landing_page: false)
+        @project.checkpoints.visualization.where(is_landing_page: true).where.not(id: @checkpoint.id).update_all(is_landing_page: false)
       end
       @checkpoint.is_landing_page = is_landing_page
     end
@@ -139,11 +156,27 @@ class CheckpointsController < ApplicationController
     return if performed?
     return unless ensure_analyzable!
 
-    checkpoint = @project.checkpoints.find_or_initialize_by(title: CURRENT_VISUALIZATION_CHECKPOINT_TITLE)
+    kind = requested_kind
+    run = resolve_heatmap_run!(kind)
+    return if performed?
+
+    checkpoint = if kind == Checkpoint::KIND_HEATMAP
+                   @project.checkpoints.heatmap.find_or_initialize_by(
+                     title: CURRENT_HEATMAP_CHECKPOINT_TITLE,
+                     run_id: run.id
+                   )
+                 else
+                   @project.checkpoints.visualization.find_or_initialize_by(
+                     title: CURRENT_VISUALIZATION_CHECKPOINT_TITLE
+                   )
+                 end
+
     checkpoint.user = current_user
     checkpoint.state = checkpoint_state
     checkpoint.comments = []
     checkpoint.is_landing_page = false
+    checkpoint.kind = kind
+    checkpoint.run = run
 
     if checkpoint.save
       render json: { checkpoint: checkpoint_payload(checkpoint, include_state: true) }
@@ -153,6 +186,18 @@ class CheckpointsController < ApplicationController
   end
 
   private
+
+  def find_current_checkpoint
+    kind = requested_kind
+    if kind == Checkpoint::KIND_HEATMAP
+      run = resolve_heatmap_run!(kind)
+      return nil if performed?
+
+      @project.checkpoints.heatmap.find_by(title: CURRENT_HEATMAP_CHECKPOINT_TITLE, run_id: run.id)
+    else
+      @project.checkpoints.visualization.find_by(title: CURRENT_VISUALIZATION_CHECKPOINT_TITLE)
+    end
+  end
 
   def set_project
     project_identifier = params[:project_id].to_s
@@ -168,8 +213,58 @@ class CheckpointsController < ApplicationController
     return if performed?
 
     @checkpoint = @project.checkpoints.find(params[:id])
+    if requested_kind == Checkpoint::KIND_HEATMAP && requested_run_id.present?
+      unless @checkpoint.heatmap? && @checkpoint.run_id.to_i == requested_run_id.to_i
+        render json: { error: 'Checkpoint not found for this heatmap run' }, status: :not_found
+        return
+      end
+    end
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'Checkpoint not found' }, status: :not_found
+  end
+
+  def scoped_checkpoints
+    kind = requested_kind
+    run_id = requested_run_id
+
+    if kind == Checkpoint::KIND_HEATMAP
+      scope = @project.checkpoints.heatmap
+      return scope.where(run_id: run_id) if run_id.present?
+
+      scope
+    else
+      @project.checkpoints.visualization
+    end
+  end
+
+  def requested_kind
+    raw = params[:kind].presence || params.dig(:checkpoint, :kind).presence
+    return Checkpoint::KIND_HEATMAP if raw.to_s == Checkpoint::KIND_HEATMAP
+
+    Checkpoint::KIND_VISUALIZATION
+  end
+
+  def requested_run_id
+    raw = params[:run_id].presence || params.dig(:checkpoint, :run_id).presence
+    raw.present? ? raw.to_i : nil
+  end
+
+  def resolve_heatmap_run!(kind)
+    return nil unless kind == Checkpoint::KIND_HEATMAP
+
+    run_id = requested_run_id
+    if run_id.blank?
+      render json: { error: 'run_id is required for heatmap checkpoints' }, status: :unprocessable_entity
+      return nil
+    end
+
+    run = @project.runs.find_by(id: run_id)
+    unless run
+      render json: { error: 'Heatmap run not found' }, status: :not_found
+      return nil
+    end
+
+    run
   end
 
   def checkpoint_title
@@ -231,6 +326,8 @@ class CheckpointsController < ApplicationController
       id: checkpoint.id,
       title: checkpoint.title,
       project_id: checkpoint.project_id,
+      run_id: checkpoint.run_id,
+      kind: checkpoint.kind,
       user_id: checkpoint.user_id,
       user_name: checkpoint.user&.displayed_name.presence || checkpoint.user&.email,
       comments: comments,

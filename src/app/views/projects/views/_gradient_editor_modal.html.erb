@@ -1,0 +1,131 @@
+<!-- Gradient Editor Modal -->
+<div id="gradient-editor-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); z-index: 11000; justify-content: center; align-items: center;">
+  <div style="background: white; border-radius: 12px; padding: 24px; width: 500px; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);">
+    <!-- Header -->
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <i class="fas fa-palette" style="color: #6b7280;"></i>
+        <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #111827;">Customize Color Gradient</h3>
+      </div>
+      <button id="close-gradient-editor"
+              style="background: none; border: none; font-size: 20px; color: #6b7280; cursor: pointer; padding: 4px;" 
+              title="Close">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    
+    <!-- Instructions -->
+    <div style="padding: 12px; background-color: #f0f9ff; border-left: 3px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
+      <p style="margin: 0; font-size: 12px; color: #1e40af; line-height: 1.5;">
+        Click on the gradient bar to add control points. Drag control points to change their position, or click them to edit their color and value.
+      </p>
+    </div>
+    
+    <!-- Gradient value scale -->
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px;">
+      <div>
+        <label for="gradient-scale-select" style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 2px;">
+          Value scale
+        </label>
+        <p id="gradient-scale-hint" style="margin: 0; font-size: 11px; color: #6b7280; line-height: 1.4;">
+          Maps data values to the gradient.
+        </p>
+      </div>
+      <select id="gradient-scale-select"
+              style="width: 140px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer; flex-shrink: 0;">
+        <option value="normal" selected>Linear</option>
+        <option value="log">Log10</option>
+      </select>
+    </div>
+
+    <!-- Gradient Preview Bar -->
+    <div style="margin-bottom: 20px;">
+      <label style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 8px;">
+        Gradient Preview - Click to add control points
+      </label>
+      <div id="gradient-editor-preview-wrap" style="position: relative;">
+        <canvas id="gradient-editor-preview-canvas" 
+                width="450" 
+                height="40" 
+                style="width: 100%; height: 40px; border: 2px solid #d1d5db; border-radius: 6px 6px 0 0; cursor: crosshair; display: block; border-bottom: none;"></canvas>
+        <!-- Control points will be positioned absolutely over the canvas -->
+        <div id="gradient-editor-control-points" style="position: absolute; top: 0; left: 0; width: 100%; height: 40px; pointer-events: none;"></div>
+
+        <div id="gradient-editor-histogram-wrap" style="position: relative;">
+          <canvas id="gradient-editor-histogram-canvas"
+                  width="450"
+                  height="80"
+                  style="width: 100%; height: 80px; border: 2px solid #d1d5db; border-radius: 0 0 6px 6px; cursor: crosshair; display: block; background: #f9fafb;"></canvas>
+        </div>
+
+        <div id="gradient-editor-hover-line"
+             style="display: none; position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(17, 24, 39, 0.75); pointer-events: none; z-index: 5;"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px; gap: 8px;">
+        <span id="gradient-editor-hist-min" style="font-size: 11px; color: #6b7280; font-variant-numeric: tabular-nums;"></span>
+        <span id="gradient-editor-hist-label" style="font-size: 11px; color: #9ca3af;">Value distribution</span>
+        <span id="gradient-editor-hist-max" style="font-size: 11px; color: #6b7280; font-variant-numeric: tabular-nums;"></span>
+      </div>
+      <p style="margin: 8px 0 0 0; font-size: 11px; color: #6b7280;">
+        Click the gradient to add a control point. Hover the gradient or histogram to see value, color, and counts.
+      </p>
+    </div>
+
+    <div id="gradient-editor-hover-tooltip"
+         style="display: none; position: fixed; z-index: 12050; pointer-events: none; background: rgba(17, 24, 39, 0.95); color: white; padding: 8px 10px; border-radius: 6px; font-size: 12px; line-height: 1.4; box-shadow: 0 4px 12px rgba(0,0,0,0.25); white-space: nowrap;"></div>
+    
+    <!-- Selected Control Point Editor -->
+    <div id="gradient-control-point-editor" style="display: none; padding: 16px; background-color: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb; margin-bottom: 20px;">
+      <div style="font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 12px;">
+        Edit Control Point
+      </div>
+      
+      <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+        <div style="flex: 1;">
+          <label style="display: block; font-size: 11px; color: #6b7280; margin-bottom: 4px;">Data Value</label>
+          <input id="gradient-control-point-position" 
+                 type="number" 
+                 step="any"
+                 style="width: 100%; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px;">
+        </div>
+        <div style="flex: 1;">
+          <label style="display: block; font-size: 11px; color: #6b7280; margin-bottom: 4px;">Color</label>
+          <input id="gradient-control-point-color" 
+                 type="color"
+                 style="width: 100%; height: 32px; padding: 2px; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer;">
+        </div>
+      </div>
+      
+      <div style="display: flex; gap: 8px;">
+        <button id="gradient-remove-control-point-btn"
+                style="flex: 1; padding: 8px; font-size: 12px; color: #dc2626; background: white; border: 1px solid #fecaca; border-radius: 4px; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.backgroundColor='#fef2f2';"
+                onmouseout="this.style.backgroundColor='white';">
+          <i class="fas fa-trash"></i> Remove Point
+        </button>
+        <button id="gradient-close-control-point-editor-btn"
+                style="flex: 1; padding: 8px; font-size: 12px; color: #374151; background: white; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: all 0.2s;"
+                onmouseover="this.style.backgroundColor='#f9fafb';"
+                onmouseout="this.style.backgroundColor='white';">
+          Done
+        </button>
+      </div>
+    </div>
+    
+    <!-- Actions -->
+    <div style="display: flex; gap: 12px; justify-content: flex-end; padding-top: 16px; border-top: 1px solid #e5e7eb;">
+      <button id="gradient-reset-btn"
+              style="padding: 8px 16px; font-size: 13px; color: #6b7280; background: white; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer; transition: all 0.2s;"
+              onmouseover="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#9ca3af';"
+              onmouseout="this.style.backgroundColor='white'; this.style.borderColor='#d1d5db';">
+        <i class="fas fa-undo"></i> Reset to Default
+      </button>
+      <button id="gradient-apply-btn"
+              style="padding: 8px 16px; font-size: 13px; color: white; background: #3b82f6; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-weight: 500;"
+              onmouseover="this.style.backgroundColor='#2563eb';"
+              onmouseout="this.style.backgroundColor='#3b82f6';">
+          Apply & Close
+        </button>
+    </div>
+  </div>
+</div>

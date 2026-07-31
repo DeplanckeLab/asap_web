@@ -1,9 +1,22 @@
 class Checkpoint < ApplicationRecord
+  KIND_VISUALIZATION = "visualization".freeze
+  KIND_HEATMAP = "heatmap".freeze
+  KINDS = [KIND_VISUALIZATION, KIND_HEATMAP].freeze
+
   belongs_to :project
   belongs_to :user, optional: true
+  belongs_to :run, optional: true
 
   validates :project_id, presence: true
   validates :title, presence: true
+  validates :kind, inclusion: { in: KINDS }
+  validate :heatmap_requires_run
+  validate :visualization_forbids_run
+  validate :run_belongs_to_project
+
+  scope :visualization, -> { where(kind: KIND_VISUALIZATION) }
+  scope :heatmap, -> { where(kind: KIND_HEATMAP) }
+  scope :for_run, ->(run_id) { where(run_id: run_id) }
 
   def state
     JSON.parse(state_json.presence || "{}")
@@ -23,5 +36,37 @@ class Checkpoint < ApplicationRecord
 
   def comments=(value)
     self.comments_json = (value || []).to_json
+  end
+
+  def heatmap?
+    kind == KIND_HEATMAP
+  end
+
+  def visualization?
+    kind == KIND_VISUALIZATION
+  end
+
+  private
+
+  def heatmap_requires_run
+    return unless heatmap?
+    return if run_id.present?
+
+    errors.add(:run_id, "is required for heatmap checkpoints")
+  end
+
+  def visualization_forbids_run
+    return unless visualization?
+    return if run_id.blank?
+
+    errors.add(:run_id, "must be blank for visualization checkpoints")
+  end
+
+  def run_belongs_to_project
+    return if run_id.blank?
+    return unless run
+    return if run.project_id == project_id
+
+    errors.add(:run_id, "does not belong to this project")
   end
 end

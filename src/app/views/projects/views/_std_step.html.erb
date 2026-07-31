@@ -654,12 +654,14 @@
               <p class="text-blue-800 mb-0">
                 <% if @missing_single_run_in_loom_context %>
                   No <%= @step.label.presence || @step.name.humanize %> job found in the context of LOOM file <%= loom_file_label(@selected_loom_file) %>.
-                <% else %>
+                <% elsif @available_loom_files.present? && @available_loom_files.size > 1 %>
                   No runs found for this step.
                   <br><br>
                   Some runs may be associated to other LOOM file.
                   <br><br>
                   If you want to access them please change accordingly the LOOM file filter at the top of this page.
+                <% else %>
+                  No runs found for this step.
                 <% end %>
               </p>
             </div>

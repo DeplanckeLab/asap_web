@@ -39,10 +39,13 @@ export default class extends Controller {
     this.autoAdvanceCountdownInterval = null
     this.pendingTourId = null
     this.tryItBar = null
+    this.tourDrivenNavigation = false
 
     this.onTurboLoad = this.handleTurboLoad.bind(this)
+    this.onTurboBeforeVisit = this.handleTurboBeforeVisit.bind(this)
     this.onKeydown = this.handleKeydown.bind(this)
     document.addEventListener("turbo:load", this.onTurboLoad)
+    document.addEventListener("turbo:before-visit", this.onTurboBeforeVisit)
     document.addEventListener("keydown", this.onKeydown)
 
     this.gtLog("connect")
@@ -58,6 +61,7 @@ export default class extends Controller {
   disconnect() {
     this.gtLog("disconnect")
     document.removeEventListener("turbo:load", this.onTurboLoad)
+    document.removeEventListener("turbo:before-visit", this.onTurboBeforeVisit)
     document.removeEventListener("keydown", this.onKeydown)
     this.clearAutoAdvance()
     this.teardownOverlay()
@@ -66,6 +70,7 @@ export default class extends Controller {
   }
 
   handleTurboLoad() {
+    this.tourDrivenNavigation = false
     const queryTourId = this.takeQueryParamTourId()
     if (queryTourId !== null) {
       this.startTour(queryTourId)
@@ -74,8 +79,53 @@ export default class extends Controller {
     this.resumeIfNeeded()
   }
 
+  /**
+   * User left the step page: pause and show Resume / Exit bar.
+   * Tour-driven visits (Next/Back/Resume) are skipped.
+   */
+  handleTurboBeforeVisit(event) {
+    if (this.tourDrivenNavigation) {
+      return
+    }
+    const state = this.readState()
+    if (!state || state.tourId == null || state.tryIt) {
+      return
+    }
+    if (!this.tourOverlayActive() && !this.tour) {
+      return
+    }
+
+    let destPath = ""
+    try {
+      const dest = new URL(event.detail.url, window.location.origin)
+      destPath = dest.pathname + dest.search
+    } catch {
+      return
+    }
+
+    const step = this.tour?.steps?.[this.stepIndex]
+    if (step && this.pathsMatch(step.page_url, destPath)) {
+      return
+    }
+
+    this.gtLog("before-visit: pause tour", { destPath })
+    this.pauseTourForOffPathNavigation()
+  }
+
+  pauseTourForOffPathNavigation() {
+    const state = this.readState()
+    if (!state || state.tourId == null) {
+      return
+    }
+    this.clearAutoAdvance()
+    this.teardownOverlay()
+    this.removeHighlight()
+    const stepIndex = this.tour ? this.stepIndex : state.stepIndex
+    this.writeState(state.tourId, stepIndex, true)
+  }
+
   handleKeydown(event) {
-    if (event.key === "Escape" && this.tourOverlayActive()) {
+    if (event.key === "Escape" && (this.tourOverlayActive() || this.tryItBar)) {
       event.preventDefault()
       this.endTour()
     }
@@ -129,6 +179,16 @@ export default class extends Controller {
     sessionStorage.removeItem(STORAGE_KEY)
   }
 
+  enterPausedMode(tour, stepIndex) {
+    this.clearAutoAdvance()
+    this.teardownOverlay()
+    this.removeHighlight()
+    this.tour = tour
+    this.stepIndex = stepIndex
+    this.writeState(tour.id, stepIndex, true)
+    this.showTryItBar()
+  }
+
   resumeIfNeeded() {
     if (this.pendingTourId) {
       this.gtLog("resumeIfNeeded skip: pendingTourId set")
@@ -141,6 +201,10 @@ export default class extends Controller {
     }
     if (this.tourOverlayActive()) {
       this.gtLog("resumeIfNeeded skip: overlay already active")
+      return
+    }
+    if (this.tryItBar) {
+      this.gtLog("resumeIfNeeded skip: tryIt bar already active")
       return
     }
 
@@ -156,6 +220,7 @@ export default class extends Controller {
         }
         this.tour = tour
         this.stepIndex = Math.min(Math.max(0, state.stepIndex), tour.steps.length - 1)
+        this.writeState(tour.id, this.stepIndex, true)
         this.showTryItBar()
       }).catch(() => {
         this.clearState()
@@ -164,15 +229,15 @@ export default class extends Controller {
       return
     }
 
-      this.fetchTour(state.tourId).then((tour) => {
-        if (!this.isPlayerConnected()) {
-          this.gtLog("resumeIfNeeded fetch done: player not connected, abort")
-          return
-        }
-        if (!tour || !tour.steps || !tour.steps.length) {
-          this.gtLog("resumeIfNeeded: tour empty, clearState")
-          this.clearState()
-          return
+    this.fetchTour(state.tourId).then((tour) => {
+      if (!this.isPlayerConnected()) {
+        this.gtLog("resumeIfNeeded fetch done: player not connected, abort")
+        return
+      }
+      if (!tour || !tour.steps || !tour.steps.length) {
+        this.gtLog("resumeIfNeeded: tour empty, clearState")
+        this.clearState()
+        return
       }
       const idx = Math.min(Math.max(0, state.stepIndex), tour.steps.length - 1)
       const step = tour.steps[idx]
@@ -183,17 +248,19 @@ export default class extends Controller {
       }
       const here = window.location.pathname + window.location.search
       if (!this.pathsMatch(step.page_url, here)) {
-        this.gtLog("resumeIfNeeded skip: pathsMismatch", {
+        this.gtLog("resumeIfNeeded: pathsMismatch, enter paused mode", {
           stepIndex: idx,
           stepTitle: step.title,
           stepPageUrl: step.page_url,
           location: here
         })
+        this.enterPausedMode(tour, idx)
         return
       }
       this.gtLog("resumeIfNeeded: opening step", { idx, title: step.title, here })
       this.tour = tour
       this.stepIndex = idx
+      this.writeState(tour.id, idx, false)
       void this.openTourAtCurrentStep({ fromResume: true })
     }).catch((err) => {
       this.gtLog("resumeIfNeeded fetch failed", err)
@@ -267,18 +334,23 @@ export default class extends Controller {
     const match = this.pathsMatch(step.page_url, here)
     this.gtLog("goToStep", { index, title: step.title, stepPageUrl: step.page_url, here, pathsMatch: match })
     if (!match) {
-      const target = this.normalizeUrl(step.page_url)
       this.teardownOverlay()
       this.removeHighlight()
-      this.gtLog("goToStep Turbo.visit", target)
-      if (window.Turbo && typeof window.Turbo.visit === "function") {
-        window.Turbo.visit(target)
-      } else {
-        window.location.href = target
-      }
+      this.visitForTour(step.page_url)
       return
     }
     void this.openTourAtCurrentStep({ skipPriorPageReplay: true })
+  }
+
+  visitForTour(pathRaw) {
+    this.tourDrivenNavigation = true
+    const target = this.normalizeUrl(pathRaw)
+    this.gtLog("visitForTour", target)
+    if (window.Turbo && typeof window.Turbo.visit === "function") {
+      window.Turbo.visit(target)
+    } else {
+      window.location.href = target
+    }
   }
 
   async replayPriorSamePageStepActions(currentLocation) {
@@ -467,6 +539,7 @@ export default class extends Controller {
       document.addEventListener("turbo:load", onTurboLoad)
       window.addEventListener("load", onWinLoad, { once: true })
       const tid = window.setTimeout(done, timeoutMs)
+      this.tourDrivenNavigation = true
       if (window.Turbo && typeof window.Turbo.visit === "function") {
         window.Turbo.visit(path)
       } else {
@@ -545,6 +618,22 @@ export default class extends Controller {
   }
 
   resumeFromTryIt() {
+    const continueResume = () => {
+      if (!this.tour || !this.tour.steps?.[this.stepIndex]) {
+        this.endTour()
+        return
+      }
+      this.writeState(this.tour.id, this.stepIndex, false)
+      this.removeTryItBar()
+      const step = this.tour.steps[this.stepIndex]
+      const here = window.location.pathname + window.location.search
+      if (!this.pathsMatch(step.page_url, here)) {
+        this.visitForTour(step.page_url)
+        return
+      }
+      void this.openTourAtCurrentStep({ fromResume: true })
+    }
+
     if (!this.tour) {
       const state = this.readState()
       if (!state || !state.tourId) {
@@ -561,41 +650,67 @@ export default class extends Controller {
         }
         this.tour = tour
         this.stepIndex = Math.min(Math.max(0, state.stepIndex), tour.steps.length - 1)
-        this.writeState(this.tour.id, this.stepIndex, false)
-        this.removeTryItBar()
-        void this.openTourAtCurrentStep({ fromResume: true })
+        continueResume()
       }).catch(() => {
         this.clearState()
         this.removeTryItBar()
       })
       return
     }
-    this.writeState(this.tour.id, this.stepIndex, false)
-    this.removeTryItBar()
-    void this.openTourAtCurrentStep({ fromResume: true })
+    continueResume()
+  }
+
+  tryItStatusText() {
+    const step = this.tour?.steps?.[this.stepIndex]
+    const stepNum = this.stepIndex + 1
+    const stepTotal = this.tour?.steps?.length
+    const tourName = this.tour?.name
+    let statusText = "Tour paused"
+    if (tourName) {
+      statusText += ` — ${tourName}`
+    }
+    if (stepTotal) {
+      statusText += ` (step ${stepNum} of ${stepTotal}`
+      if (step?.title) {
+        statusText += `: ${step.title}`
+      }
+      statusText += ")"
+    }
+    return statusText
   }
 
   showTryItBar() {
     this.removeTryItBar()
     const bar = document.createElement("div")
     bar.className = "guided-tour-try-bar"
-    bar.setAttribute("role", "toolbar")
-    bar.setAttribute("aria-label", "Guided tour paused")
+    bar.setAttribute("role", "status")
+    bar.setAttribute("aria-live", "polite")
+
+    const status = document.createElement("div")
+    status.className = "guided-tour-try-bar-status"
+    status.textContent = this.tryItStatusText()
+
+    const actions = document.createElement("div")
+    actions.className = "guided-tour-try-bar-actions"
+    actions.setAttribute("role", "toolbar")
+    actions.setAttribute("aria-label", "Guided tour paused")
 
     const resume = document.createElement("button")
     resume.type = "button"
     resume.className = "guided-tour-try-bar-btn guided-tour-try-bar-btn-primary"
-    resume.textContent = "Resume guided tour"
+    resume.textContent = "Resume"
     resume.addEventListener("click", () => this.resumeFromTryIt())
 
     const exit = document.createElement("button")
     exit.type = "button"
     exit.className = "guided-tour-try-bar-btn guided-tour-try-bar-btn-secondary"
-    exit.textContent = "Exit guided tour"
+    exit.textContent = "Exit"
     exit.addEventListener("click", () => this.endTour())
 
-    bar.appendChild(resume)
-    bar.appendChild(exit)
+    actions.appendChild(resume)
+    actions.appendChild(exit)
+    bar.appendChild(status)
+    bar.appendChild(actions)
     document.body.appendChild(bar)
     this.tryItBar = bar
   }

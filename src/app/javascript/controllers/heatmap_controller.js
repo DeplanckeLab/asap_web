@@ -1,22 +1,40 @@
 import { Controller } from "@hotwired/stimulus"
 import { ReglHeatmap } from "visualization/regl_heatmap"
+import { GradientManager } from "visualization/gradient_manager"
+import { ColorManager } from "visualization/color_manager"
 
 // Interactive expression heatmap viewer.
 //
 // Renders the precomputed genes x columns matrix (WebGL) with a Canvas 2D
 // overlay for collapsible row/column dendrograms, categorical/numerical
-// annotation tracks, axis labels and a colormap legend. Supports wheel zoom,
-// drag pan, reset, and per-branch collapse (which aggregates the matrix).
+// annotation tracks, axis labels and a colormap legend. Supports Shift+scroll
+// zoom, drag pan, reset, and per-branch collapse (which aggregates the matrix).
+// Clicking the colormap or continuous-track legends opens the shared gradient editor modal.
 export default class extends Controller {
   static values = {
     projectKey: String,
     runId: String,
-    dataUrl: String
+    dataUrl: String,
+    canAnalyze: { type: Boolean, default: false }
   }
 
   static targets = [
     "webgl", "overlay", "status", "tooltip",
-    "colTrackSelect", "rowTrackSelect", "activeTracks", "legendPanel"
+    "colTrackList", "rowTrackList", "colTrackListEmpty", "rowTrackListEmpty",
+    "addColTrackBtn", "addRowTrackBtn",
+    "trackModal", "trackModalTitle", "trackModalSelect",
+    "trackModalSize", "trackModalShowLegend", "trackModalLegendWrap", "trackModalHint",
+    "editTrackModal", "editTrackModalTitle", "editTrackModalName",
+    "editTrackType", "editTrackTypeWrap", "editTrackTypeHint",
+    "editTrackDisplayMode", "editTrackDisplayModeWrap",
+    "editTrackSize", "editTrackShowLegend", "editTrackLegendWrap", "editTrackGradientBtn",
+    "colTreeToggle", "rowTreeToggle", "labelsToggle",
+    "colTreeState", "rowTreeState", "labelsState",
+    "settingsBtn", "settingsMenu", "legendWidthSlider", "legendWidthValue",
+    "checkpointHistoryOverlay", "checkpointHistoryList", "checkpointHistoryBtn",
+    "checkpointCommentsOverlay", "checkpointCommentsTitle", "checkpointCommentsList",
+    "checkpointCommentSelect", "checkpointCommentInput", "checkpointCommentsBtn",
+    "checkpointLoadingOverlay", "checkpointLoadingMessage"
   ]
 
   connect() {
@@ -32,6 +50,43 @@ export default class extends Controller {
     this.loomFile = null
     this.metadataCatalog = { column_metadata: [], row_metadata: [] }
     this.legendMaxCategories = 12
+    this.legendBounds = null
+    this.trackLegendBounds = []
+    this.isHoveringLegend = false
+    this.hoveringTrackLegendKey = null
+    this.editingGradientTarget = { type: "expression" }
+    this.expressionCustomColorRange = null
+    this.checkpointHistory = []
+    this.lastLoadedCheckpointId = null
+    this.checkpointCommentsFocusId = null
+    this.currentCheckpointLoadInProgress = false
+    this.currentCheckpointReadyForOverwrite = false
+
+    // Shared gradient-editor host state (same modal as visualization).
+    this.currentMetadataId = "heatmap_expression"
+    this.currentMetadataVector = null
+    this.metadataGradients = new Map()
+    this.gradientControlPoints = null
+    this.customGradientControlPoints = null
+    this.gradientScale = "normal"
+    this.gradientMinValue = undefined
+    this.gradientMaxValue = undefined
+    this.selectedControlPointIndex = undefined
+    this.customColorRange = null
+    this.histogramScale = "normal"
+    this.histogramIgnoreZeros = true
+    this.gradientManager = new GradientManager(this)
+    this.colorManager = new ColorManager(this)
+    this.dataManager = {
+      safeMin: (values) => this.safeMin(values),
+      safeMax: (values) => this.safeMax(values),
+      getIncrementalFilteredIndices: () => null
+    }
+    this.rendererManager = {
+      renderModalGradientPreview: () => this.gradientManager.renderModalGradientPreview(),
+      renderModalControlPointMarkers: () => this.gradientManager.renderModalControlPointMarkers(),
+      renderControlPointsList: () => this.gradientManager.renderControlPointsList()
+    }
 
     this.layout = {
       colTreeH: 90,
@@ -39,20 +94,43 @@ export default class extends Controller {
       trackW: 16,
       trackH: 16,
       trackGap: 3,
+      trackRefW: 18,
+      trackRefH: 14,
       rowLabelW: 150,
       colLabelH: 90,
-      legendW: 70,
+      legendW: 220,
+      legendWMin: 140,
+      legendWMax: 360,
       pad: 8
     }
+    this.legendWidthPx = this.layout.legendW
+    this.trackSizePx = { thin: 10, normal: 16, thick: 24 }
+    this.pendingTrackAxis = null
 
     this.boundResize = this.handleResize.bind(this)
+    this.boundPersistCurrent = () => this.persistCurrentCheckpointBeforeTeardown("beforeunload")
+    this.boundPersistCurrentTurboCache = () => this.persistCurrentCheckpointBeforeTeardown("turbo:before-cache")
+    this.boundPersistCurrentTurboVisit = () => this.persistCurrentCheckpointBeforeTeardown("turbo:before-visit")
     window.addEventListener("resize", this.boundResize)
+    window.addEventListener("beforeunload", this.boundPersistCurrent)
+    document.addEventListener("turbo:before-cache", this.boundPersistCurrentTurboCache)
+    document.addEventListener("turbo:before-visit", this.boundPersistCurrentTurboVisit)
 
+    this.syncToggleButtons()
+    this.syncLegendWidthControls()
     this.loadData()
   }
 
   disconnect() {
+    this.persistCurrentCheckpointBeforeTeardown("disconnect")
     window.removeEventListener("resize", this.boundResize)
+    window.removeEventListener("beforeunload", this.boundPersistCurrent)
+    document.removeEventListener("turbo:before-cache", this.boundPersistCurrentTurboCache)
+    document.removeEventListener("turbo:before-visit", this.boundPersistCurrentTurboVisit)
+    if (this._settingsOutsideCloseBound) {
+      document.removeEventListener("mousedown", this._settingsOutsideCloseBound)
+      this._settingsOutsideCloseBound = null
+    }
     if (this.renderer) {
       this.renderer.destroy()
       this.renderer = null
@@ -112,6 +190,7 @@ export default class extends Controller {
       this.colTree = this.prepareTree(this.meta.col_tree, this.nOrigCols)
       this.loomFile = this.meta.loom_file || null
 
+      this.setupExpressionGradient()
       this.setStatus("")
       this.setupRenderer()
       this.rebuildDisplay()
@@ -119,9 +198,16 @@ export default class extends Controller {
       this.bindEvents()
       await this.loadMetadataCatalog()
       this.handleResize()
+      await this.fetchCheckpointHistory()
+      const loadedFromUrl = await this.loadCheckpointFromUrlIfPresent()
+      if (!loadedFromUrl) {
+        await this.loadCurrentCheckpointOnEntry()
+      }
+      this.currentCheckpointReadyForOverwrite = true
     } catch (e) {
       console.error("[heatmap] load failed", e)
       this.setStatus("Failed to load heatmap: " + e.message)
+      this.currentCheckpointReadyForOverwrite = true
     }
   }
 
@@ -185,7 +271,87 @@ export default class extends Controller {
 
   setupRenderer() {
     this.renderer = new ReglHeatmap(this.webglTarget)
-    this.renderer.setColormap(this.diverging)
+    this.applyActiveColormap()
+  }
+
+  setupExpressionGradient() {
+    this.currentMetadataVector = {
+      data_type: "NUMERIC",
+      values: this.baseMatrix,
+      compression_info: { min_val: this.vmin, max_val: this.vmax }
+    }
+    this.gradientMinValue = this.vmin
+    this.gradientMaxValue = this.vmax
+    this.customColorRange = null
+    this.gradientScale = "normal"
+    this.customGradientControlPoints = null
+    this.colorManager.initializeDefaultGradient()
+    if (!this.gradientControlPoints || !this.gradientControlPoints.length) {
+      this.gradientControlPoints = this.defaultHeatmapControlPoints()
+    }
+    this.gradientManager.saveGradientForMetadata(this.currentMetadataId)
+    this.editingGradientTarget = { type: "expression" }
+    this.expressionCustomColorRange = null
+  }
+
+  defaultHeatmapControlPoints() {
+    if (this.diverging) {
+      const zeroPos = (0 - this.vmin) / ((this.vmax - this.vmin) || 1)
+      const clampedZero = Math.min(1, Math.max(0, zeroPos))
+      return [
+        { position: 0, color: 0x3b4dbf },
+        { position: clampedZero, color: 0xf7f7f7 },
+        { position: 1, color: 0xb5171a }
+      ]
+    }
+    return [
+      { position: 0, color: 0x450a54 },
+      { position: 0.5, color: 0x21918c },
+      { position: 1, color: 0xfce728 }
+    ]
+  }
+
+  activeControlPoints() {
+    return this.customGradientControlPoints || this.gradientControlPoints || this.defaultHeatmapControlPoints()
+  }
+
+  expressionGradientState() {
+    const stored = this.metadataGradients.get("heatmap_expression")
+    if (stored) return stored
+    return {
+      gradientControlPoints: this.defaultHeatmapControlPoints(),
+      customGradientControlPoints: null,
+      gradientScale: "normal"
+    }
+  }
+
+  applyActiveColormap() {
+    if (!this.renderer) return
+    const stored = this.expressionGradientState()
+    const prevCustom = this.customGradientControlPoints
+    const prevDefault = this.gradientControlPoints
+    const prevScale = this.gradientScale
+    this.customGradientControlPoints = stored.customGradientControlPoints
+      ? JSON.parse(JSON.stringify(stored.customGradientControlPoints))
+      : null
+    this.gradientControlPoints = stored.gradientControlPoints
+      ? JSON.parse(JSON.stringify(stored.gradientControlPoints))
+      : this.defaultHeatmapControlPoints()
+    this.gradientScale = stored.gradientScale === "log" ? "log" : "normal"
+    const points = this.activeControlPoints()
+    this.renderer.setColormapFromControlPoints(points, (t) => this.gradientManager.getColorFromGradient(t))
+    this.customGradientControlPoints = prevCustom
+    this.gradientControlPoints = prevDefault
+    this.gradientScale = prevScale
+  }
+
+  normalizeExpressionValue(value, vmin, vmax) {
+    const stored = this.expressionGradientState()
+    const prevScale = this.gradientScale
+    this.gradientScale = stored.gradientScale === "log" ? "log" : "normal"
+    const position = this.valueToGradientPosition(value, vmin, vmax)
+    this.gradientScale = prevScale
+    return position
   }
 
   async loadMetadataCatalog() {
@@ -205,13 +371,18 @@ export default class extends Controller {
   }
 
   populateTrackSelects() {
-    this.fillTrackSelect(this.colTrackSelectTarget, this.metadataCatalog.column_metadata || [], this.colTracks)
-    this.fillTrackSelect(this.rowTrackSelectTarget, this.metadataCatalog.row_metadata || [], this.rowTracks)
+    // Track selects now live in the add-track modal; refresh if it is open.
+    if (this.pendingTrackAxis) this.fillTrackModalSelect(this.pendingTrackAxis)
   }
 
-  fillTrackSelect(selectEl, options, activeTracks) {
-    if (!selectEl) return
+  fillTrackModalSelect(axis) {
+    if (!this.hasTrackModalSelectTarget) return
+    const options = axis === "column"
+      ? (this.metadataCatalog.column_metadata || [])
+      : (this.metadataCatalog.row_metadata || [])
+    const activeTracks = axis === "column" ? this.colTracks : this.rowTracks
     const activeIds = new Set(activeTracks.map((t) => String(t.id)))
+    const selectEl = this.trackModalSelectTarget
     selectEl.innerHTML = ""
     const placeholder = document.createElement("option")
     placeholder.value = ""
@@ -222,45 +393,133 @@ export default class extends Controller {
       const option = document.createElement("option")
       option.value = String(opt.id)
       option.textContent = opt.name
+      option.dataset.dataType = opt.data_type || ""
       selectEl.appendChild(option)
+    })
+    this.trackModalMetadataChanged()
+  }
+
+  openAddColTrackModal() {
+    this.openTrackModal("column")
+  }
+
+  openAddRowTrackModal() {
+    this.openTrackModal("row")
+  }
+
+  openTrackModal(axis) {
+    this.pendingTrackAxis = axis
+    if (this.hasTrackModalTitleTarget) {
+      this.trackModalTitleTarget.textContent = axis === "column"
+        ? "Add cell metadata track"
+        : "Add gene metadata track"
+    }
+    if (this.hasTrackModalSizeTarget) this.trackModalSizeTarget.value = "normal"
+    if (this.hasTrackModalShowLegendTarget) this.trackModalShowLegendTarget.checked = true
+    this.fillTrackModalSelect(axis)
+    if (this.hasTrackModalTarget) {
+      this.trackModalTarget.style.display = "flex"
+    }
+  }
+
+  closeTrackModal() {
+    this.pendingTrackAxis = null
+    if (this.hasTrackModalTarget) this.trackModalTarget.style.display = "none"
+  }
+
+  trackModalBackdropClick(event) {
+    if (event.target === this.trackModalTarget) this.closeTrackModal()
+  }
+
+  stopModalPropagation(event) {
+    event.stopPropagation()
+  }
+
+  trackModalMetadataChanged() {
+    if (!this.hasTrackModalSelectTarget) return
+    const selected = this.trackModalSelectTarget.selectedOptions[0]
+    const dataType = (selected?.dataset?.dataType || "").toUpperCase()
+    const isCategorical = dataType !== "NUMERIC" && dataType !== "CONTINUOUS"
+    if (this.hasTrackModalLegendWrapTarget) {
+      this.trackModalLegendWrapTarget.style.display = isCategorical ? "flex" : "none"
+    }
+    if (this.hasTrackModalHintTarget) {
+      if (!selected || !selected.value) {
+        this.trackModalHintTarget.textContent = "Choose a metadata annotation to display beside the heatmap."
+      } else if (isCategorical) {
+        this.trackModalHintTarget.textContent = "Categorical tracks are colored by category. Enable the legend when there are few levels."
+      } else {
+        this.trackModalHintTarget.textContent = "Numerical tracks use a light-to-dark blue scale from low to high values."
+      }
+    }
+  }
+
+  async confirmAddTrack() {
+    const axis = this.pendingTrackAxis
+    const id = this.trackModalSelectTarget?.value
+    if (!axis || !id) return
+    const sizeKey = this.trackModalSizeTarget?.value || "normal"
+    const selected = this.trackModalSelectTarget.selectedOptions[0]
+    const dataType = (selected?.dataset?.dataType || "").toUpperCase()
+    const isCategorical = dataType !== "NUMERIC" && dataType !== "CONTINUOUS"
+    const showLegend = isCategorical && !!(this.trackModalShowLegendTarget?.checked)
+    this.closeTrackModal()
+    await this.addTrack(id, axis, {
+      thickness: this.trackSizePx[sizeKey] || this.layout.trackH,
+      showLegend
     })
   }
 
   async addColTrack() {
-    const id = this.colTrackSelectTarget?.value
-    if (!id) return
-    await this.addTrack(id, "column")
+    this.openAddColTrackModal()
   }
 
   async addRowTrack() {
-    const id = this.rowTrackSelectTarget?.value
-    if (!id) return
-    await this.addTrack(id, "row")
+    this.openAddRowTrackModal()
   }
 
-  async addTrack(metadataId, axis) {
+  async addTrack(metadataId, axis, options = {}) {
     const list = axis === "column" ? this.colTracks : this.rowTracks
     if (list.some((t) => String(t.id) === String(metadataId))) return
 
-    const loading = { id: metadataId, name: "Loading...", type: "categorical", values: [], loading: true }
+    const loading = {
+      id: metadataId,
+      name: "Loading...",
+      type: "categorical",
+      values: [],
+      loading: true,
+      thickness: options.thickness || this.layout.trackH
+    }
     list.push(loading)
-    this.renderActiveTracksList()
+    this.renderTrackLists()
     this.handleResize()
 
     try {
       const track = await this.fetchTrack(metadataId, axis)
+      const prepared = this.prepareTrack(track, options)
       const idx = list.findIndex((t) => String(t.id) === String(metadataId) && t.loading)
-      if (idx >= 0) list[idx] = this.prepareTrack(track)
-      else list.push(this.prepareTrack(track))
+      if (idx >= 0) list[idx] = prepared
+      else list.push(prepared)
     } catch (e) {
       const idx = list.findIndex((t) => String(t.id) === String(metadataId) && t.loading)
       if (idx >= 0) list.splice(idx, 1)
       console.error("[heatmap] add track failed", e)
     }
     this.populateTrackSelects()
-    this.renderActiveTracksList()
-    this.renderTrackLegends()
+    this.renderTrackLists()
     this.handleResize()
+    const added = (axis === "column" ? this.colTracks : this.rowTracks)
+      .find((t) => !t.loading && String(t.id) === String(metadataId))
+    if (added?.type === "numerical") {
+      this.metadataGradients.set(this.trackGradientMetadataId(added), {
+        gradientControlPoints: JSON.parse(JSON.stringify(added.gradientControlPoints || this.defaultNumericalTrackControlPoints())),
+        customGradientControlPoints: added.customGradientControlPoints
+          ? JSON.parse(JSON.stringify(added.customGradientControlPoints))
+          : null,
+        gradientScale: added.gradientScale === "log" ? "log" : "normal"
+      })
+    }
+    this.persistCurrentCheckpointOnServer("add-track")
   }
 
   removeColTrack(event) {
@@ -277,9 +536,9 @@ export default class extends Controller {
     if (idx < 0) return
     list.splice(idx, 1)
     this.populateTrackSelects()
-    this.renderActiveTracksList()
-    this.renderTrackLegends()
+    this.renderTrackLists()
     this.handleResize()
+    this.persistCurrentCheckpointOnServer("remove-track")
   }
 
   async fetchTrack(metadataId, axis) {
@@ -296,86 +555,546 @@ export default class extends Controller {
     return body
   }
 
-  prepareTrack(track) {
+  prepareTrack(track, options = {}) {
+    const nativeType = track.type === "numerical" ? "numerical" : "categorical"
+    const values = Array.isArray(track.values) ? track.values.slice() : []
     const prepared = {
       id: track.id,
       name: track.name,
-      type: track.type,
-      values: Array.isArray(track.values) ? track.values : [],
+      nativeType,
+      type: nativeType,
+      values,
+      _sourceValues: values.slice(),
       min: track.min,
       max: track.max,
-      categories: Array.isArray(track.categories) ? track.categories : [],
-      showLegend: track.show_legend !== false && track.type === "categorical" &&
-        Array.isArray(track.categories) && track.categories.length <= this.legendMaxCategories,
+      categories: Array.isArray(track.categories) ? track.categories.slice() : [],
+      thickness: options.thickness || this.layout.trackH,
+      showLegend: false,
+      displayMode: options.displayMode === "barplot" ? "barplot" : "color",
       _catIndex: {}
     }
-    if (prepared.type === "categorical") {
-      prepared.categories.forEach((cat, i) => { prepared._catIndex[cat] = i })
+    if (Object.prototype.hasOwnProperty.call(options, "type") &&
+        (options.type === "numerical" || options.type === "categorical")) {
+      prepared.type = options.type
+    }
+    this.applyLocalTrackType(prepared, prepared.type)
+    const legendAllowed = prepared.type === "categorical" &&
+      Array.isArray(prepared.categories) &&
+      prepared.categories.length > 0 &&
+      prepared.categories.length <= this.legendMaxCategories
+    if (Object.prototype.hasOwnProperty.call(options, "showLegend")) {
+      prepared.showLegend = !!options.showLegend && legendAllowed
+    } else {
+      prepared.showLegend = track.show_legend !== false && legendAllowed
+    }
+    if (prepared.type === "numerical") {
+      this.applyGradientOptionsToTrack(prepared, options.gradient)
+      this.ensureTrackGradient(prepared)
     }
     return prepared
   }
 
-  renderActiveTracksList() {
-    if (!this.hasActiveTracksTarget) return
-    const chips = []
-    this.colTracks.filter((t) => !t.loading).forEach((t) => {
-      chips.push(`<span class="badge bg-light text-dark border" style="font-weight:normal;">
-        Col: ${this.escape(t.name)}
-        <button type="button" class="btn-close btn-close-sm ms-1" style="font-size:0.55rem;"
-          data-action="heatmap#removeColTrack" data-heatmap-id-param="${t.id}" aria-label="Remove"></button>
-      </span>`)
-    })
-    this.rowTracks.filter((t) => !t.loading).forEach((t) => {
-      chips.push(`<span class="badge bg-light text-dark border" style="font-weight:normal;">
-        Row: ${this.escape(t.name)}
-        <button type="button" class="btn-close btn-close-sm ms-1" style="font-size:0.55rem;"
-          data-action="heatmap#removeRowTrack" data-heatmap-id-param="${t.id}" aria-label="Remove"></button>
-      </span>`)
-    })
-    this.activeTracksTarget.innerHTML = chips.join("")
+  trackValuesAreNumeric(track) {
+    const values = track?._sourceValues || track?.values
+    if (!track || !Array.isArray(values)) return false
+    let seen = 0
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i]
+      if (v === null || v === undefined || v === "") continue
+      const n = Number(v)
+      if (!Number.isFinite(n)) return false
+      seen++
+    }
+    return seen > 0
   }
 
-  renderTrackLegends() {
-    if (!this.hasLegendPanelTarget) return
-    const blocks = []
-    const allTracks = [
+  canUseTrackType(track, type) {
+    if (!track) return false
+    if (type === "categorical") return true
+    if (type === "numerical") {
+      return track.nativeType === "numerical" || this.trackValuesAreNumeric(track)
+    }
+    return false
+  }
+
+  applyLocalTrackType(track, type) {
+    if (!track || (type !== "categorical" && type !== "numerical")) return
+    if (!this.canUseTrackType(track, type)) return
+    track.type = type
+    const source = Array.isArray(track._sourceValues) ? track._sourceValues : track.values
+    if (type === "categorical") {
+      track.values = source.slice()
+      const cats = []
+      const seen = new Set()
+      track.values.forEach((v) => {
+        if (v === null || v === undefined || v === "") return
+        const key = String(v)
+        if (seen.has(key)) return
+        seen.add(key)
+        cats.push(key)
+      })
+      cats.sort()
+      track.categories = cats
+      track._catIndex = {}
+      cats.forEach((cat, i) => { track._catIndex[cat] = i })
+      if (track.categories.length > this.legendMaxCategories) track.showLegend = false
+      return
+    }
+    const nums = source.map((v) => {
+      if (v === null || v === undefined || v === "") return null
+      const n = Number(v)
+      return Number.isFinite(n) ? n : null
+    })
+    track.values = nums
+    const finite = nums.filter((v) => v !== null)
+    track.min = finite.length ? Math.min(...finite) : 0
+    track.max = finite.length ? Math.max(...finite) : 1
+    track._catIndex = {}
+    this.ensureTrackGradient(track)
+  }
+
+  sizeKeyForThickness(thickness) {
+    const t = Number(thickness) || this.layout.trackH
+    const entries = Object.entries(this.trackSizePx)
+    let best = "normal"
+    let bestDist = Infinity
+    entries.forEach(([key, px]) => {
+      const d = Math.abs(px - t)
+      if (d < bestDist) {
+        bestDist = d
+        best = key
+      }
+    })
+    return best
+  }
+
+  trackGradientMetadataId(track) {
+    return `heatmap_track_${track.id}`
+  }
+
+  defaultNumericalTrackControlPoints() {
+    return [
+      { position: 0, color: 0xffffff },
+      { position: 1, color: 0x0000ff }
+    ]
+  }
+
+  ensureTrackGradient(track) {
+    if (!track || track.type !== "numerical") return
+    if (!Array.isArray(track.gradientControlPoints) || !track.gradientControlPoints.length) {
+      track.gradientControlPoints = this.defaultNumericalTrackControlPoints()
+    }
+    if (!track.gradientScale) track.gradientScale = "normal"
+    if (!Object.prototype.hasOwnProperty.call(track, "customColorRange")) {
+      track.customColorRange = null
+    }
+    if (!Object.prototype.hasOwnProperty.call(track, "customGradientControlPoints")) {
+      track.customGradientControlPoints = null
+    }
+  }
+
+  applyGradientOptionsToTrack(track, gradient) {
+    if (!gradient || typeof gradient !== "object") return
+    if (Array.isArray(gradient.controlPoints) && gradient.controlPoints.length) {
+      const points = gradient.controlPoints.map((p) => ({
+        position: Number(p.position),
+        color: Number(p.color)
+      }))
+      track.customGradientControlPoints = points
+      track.gradientControlPoints = points
+    }
+    if (Object.prototype.hasOwnProperty.call(gradient, "customColorRange")) {
+      track.customColorRange = gradient.customColorRange
+        ? { min: Number(gradient.customColorRange.min), max: Number(gradient.customColorRange.max) }
+        : null
+    }
+    if (gradient.gradientScale) {
+      track.gradientScale = gradient.gradientScale === "log" ? "log" : "normal"
+    }
+  }
+
+  activeTrackControlPoints(track) {
+    this.ensureTrackGradient(track)
+    return track.customGradientControlPoints || track.gradientControlPoints || this.defaultNumericalTrackControlPoints()
+  }
+
+  findTrackById(trackId, axis = null) {
+    const lists = []
+    if (!axis || axis === "column") lists.push(["column", this.colTracks])
+    if (!axis || axis === "row") lists.push(["row", this.rowTracks])
+    for (const [axisName, list] of lists) {
+      const track = list.find((t) => !t.loading && String(t.id) === String(trackId))
+      if (track) return { track, axis: axisName }
+    }
+    return null
+  }
+
+  colorIntToCss(colorInt) {
+    const n = (Number(colorInt) >>> 0) & 0xffffff
+    return `#${n.toString(16).padStart(6, "0")}`
+  }
+
+  interpolateGradientColor(points, normalizedValue) {
+    if (normalizedValue < 0 || normalizedValue > 1 || Number.isNaN(normalizedValue)) {
+      return this.getMissingNumericColor()
+    }
+    if (!Array.isArray(points) || !points.length) return this.getMissingNumericColor()
+    const sorted = [...points].sort((a, b) => a.position - b.position)
+    for (let i = 0; i < sorted.length; i++) {
+      if (Math.abs(sorted[i].position - normalizedValue) < 0.0001) return sorted[i].color
+    }
+    let left = sorted[0]
+    let right = sorted[sorted.length - 1]
+    for (let i = 0; i < sorted.length - 1; i++) {
+      if (normalizedValue >= sorted[i].position && normalizedValue <= sorted[i + 1].position) {
+        left = sorted[i]
+        right = sorted[i + 1]
+        break
+      }
+    }
+    if (normalizedValue <= left.position) return left.color
+    if (normalizedValue >= right.position) return right.color
+    const span = right.position - left.position
+    const t = span > 0 ? (normalizedValue - left.position) / span : 0
+    const lr = (left.color >> 16) & 255
+    const lg = (left.color >> 8) & 255
+    const lb = left.color & 255
+    const rr = (right.color >> 16) & 255
+    const rg = (right.color >> 8) & 255
+    const rb = right.color & 255
+    const r = Math.round(lr + (rr - lr) * t)
+    const g = Math.round(lg + (rg - lg) * t)
+    const b = Math.round(lb + (rb - lb) * t)
+    return (r << 16) | (g << 8) | b
+  }
+
+  trackValueRange(track) {
+    if (track.customColorRange &&
+        Number.isFinite(Number(track.customColorRange.min)) &&
+        Number.isFinite(Number(track.customColorRange.max))) {
+      return {
+        min: Number(track.customColorRange.min),
+        max: Number(track.customColorRange.max)
+      }
+    }
+    return { min: Number(track.min), max: Number(track.max) }
+  }
+
+  trackNormalizedPosition(track, value) {
+    const range = this.trackValueRange(track)
+    const minVal = range.min
+    const maxVal = range.max
+    if (!Number.isFinite(minVal) || !Number.isFinite(maxVal)) return 0.5
+    if (track.gradientScale === "log" && this.canUseLogGradientScale(minVal, maxVal) && value > 0) {
+      const logMin = Math.log10(minVal)
+      const logMax = Math.log10(maxVal)
+      const span = logMax - logMin
+      if (span === 0) return 0
+      return Math.min(1, Math.max(0, (Math.log10(value) - logMin) / span))
+    }
+    const span = maxVal - minVal
+    if (span === 0) return 0
+    return Math.min(1, Math.max(0, (value - minVal) / span))
+  }
+
+  renderTrackLists() {
+    this.renderTrackListAxis("column")
+    this.renderTrackListAxis("row")
+  }
+
+  renderTrackListAxis(axis) {
+    const listTarget = axis === "column"
+      ? (this.hasColTrackListTarget ? this.colTrackListTarget : null)
+      : (this.hasRowTrackListTarget ? this.rowTrackListTarget : null)
+    const emptyTarget = axis === "column"
+      ? (this.hasColTrackListEmptyTarget ? this.colTrackListEmptyTarget : null)
+      : (this.hasRowTrackListEmptyTarget ? this.rowTrackListEmptyTarget : null)
+    if (!listTarget) return
+
+    const tracks = (axis === "column" ? this.colTracks : this.rowTracks).filter((t) => !t.loading)
+    if (emptyTarget) emptyTarget.style.display = tracks.length ? "none" : "block"
+
+    listTarget.innerHTML = tracks.map((track, index) => {
+      const ref = axis === "column" ? `c${index + 1}` : `r${index + 1}`
+      return `<div class="heatmap-track-row"
+                  draggable="true"
+                  data-heatmap-axis-param="${axis}"
+                  data-heatmap-index-param="${index}"
+                  data-action="dragstart->heatmap#trackDragStart dragover->heatmap#trackDragOver drop->heatmap#trackDrop dragend->heatmap#trackDragEnd">
+        <span class="heatmap-track-ref">${this.escape(ref)}</span>
+        <span class="heatmap-track-name" title="${this.escape(track.name)}">${this.escape(track.name)}</span>
+        <button type="button"
+                class="inline-flex items-center justify-center px-2 py-1 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-xs transition-colors cursor-pointer border border-gray-300 shadow-sm"
+                data-action="heatmap#openEditTrackModal"
+                data-heatmap-id-param="${track.id}"
+                data-heatmap-axis-param="${axis}">Edit</button>
+      </div>`
+    }).join("")
+  }
+
+  trackDragStart(event) {
+    if (event.target.closest("button")) {
+      event.preventDefault()
+      return
+    }
+    const axis = event.params.axis
+    const index = Number(event.params.index)
+    if (!axis || !Number.isFinite(index)) return
+    this._trackDrag = { axis, index }
+    event.currentTarget.classList.add("heatmap-track-dragging")
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = "move"
+      event.dataTransfer.setData("text/plain", `${axis}:${index}`)
+    }
+  }
+
+  trackDragOver(event) {
+    event.preventDefault()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move"
+    if (!this._trackDrag || this._trackDrag.axis !== event.params.axis) return
+    const list = event.currentTarget.parentElement
+    if (list) {
+      list.querySelectorAll(".heatmap-track-drag-over").forEach((el) => {
+        if (el !== event.currentTarget) el.classList.remove("heatmap-track-drag-over")
+      })
+    }
+    event.currentTarget.classList.add("heatmap-track-drag-over")
+  }
+
+  trackDrop(event) {
+    event.preventDefault()
+    event.currentTarget.classList.remove("heatmap-track-drag-over")
+    if (!this._trackDrag) return
+    const axis = event.params.axis
+    const toIndex = Number(event.params.index)
+    const fromIndex = this._trackDrag.index
+    if (axis !== this._trackDrag.axis || !Number.isFinite(toIndex) || fromIndex === toIndex) return
+    this.reorderTrack(axis, fromIndex, toIndex)
+  }
+
+  trackDragEnd(event) {
+    event.currentTarget.classList.remove("heatmap-track-dragging")
+    const list = this._trackDrag?.axis === "column"
+      ? (this.hasColTrackListTarget ? this.colTrackListTarget : null)
+      : (this.hasRowTrackListTarget ? this.rowTrackListTarget : null)
+    if (list) {
+      list.querySelectorAll(".heatmap-track-drag-over").forEach((el) => el.classList.remove("heatmap-track-drag-over"))
+    }
+    this._trackDrag = null
+  }
+
+  reorderTrack(axis, fromIndex, toIndex) {
+    const list = axis === "column" ? this.colTracks : this.rowTracks
+    const ready = list.filter((t) => !t.loading)
+    if (fromIndex < 0 || toIndex < 0 || fromIndex >= ready.length || toIndex >= ready.length) return
+
+    // Map filtered indices back onto the live list (skip loading placeholders).
+    const liveIndexes = []
+    list.forEach((t, i) => { if (!t.loading) liveIndexes.push(i) })
+    const fromLive = liveIndexes[fromIndex]
+    const toLive = liveIndexes[toIndex]
+    if (fromLive == null || toLive == null || fromLive === toLive) return
+    const [item] = list.splice(fromLive, 1)
+    list.splice(toLive, 0, item)
+    this.renderTrackLists()
+    this.handleResize()
+    this.persistCurrentCheckpointOnServer("reorder-track")
+  }
+
+  openEditTrackModal(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const id = event?.params?.id
+    const axis = event?.params?.axis
+    const found = this.findTrackById(id, axis)
+    if (!found?.track || found.track.loading) return
+    this.editingTrackTarget = { id: found.track.id, axis: found.axis }
+    const track = found.track
+    const ref = this.trackRefFor(found.axis, track)
+    if (this.hasEditTrackModalTitleTarget) {
+      this.editTrackModalTitleTarget.textContent = `Edit ${ref}`
+    }
+    if (this.hasEditTrackModalNameTarget) {
+      this.editTrackModalNameTarget.textContent = track.name
+    }
+    if (this.hasEditTrackTypeTarget) {
+      this.editTrackTypeTarget.value = track.type === "numerical" ? "numerical" : "categorical"
+      const canNum = this.canUseTrackType(track, "numerical")
+      const canCat = this.canUseTrackType(track, "categorical")
+      Array.from(this.editTrackTypeTarget.options).forEach((opt) => {
+        if (opt.value === "numerical") opt.disabled = !canNum
+        if (opt.value === "categorical") opt.disabled = !canCat
+      })
+    }
+    if (this.hasEditTrackDisplayModeTarget) {
+      this.editTrackDisplayModeTarget.value = track.displayMode === "barplot" ? "barplot" : "color"
+    }
+    if (this.hasEditTrackSizeTarget) {
+      this.editTrackSizeTarget.value = this.sizeKeyForThickness(track.thickness)
+    }
+    if (this.hasEditTrackShowLegendTarget) {
+      this.editTrackShowLegendTarget.checked = !!track.showLegend
+    }
+    this.syncEditTrackFormVisibility()
+    if (this.hasEditTrackModalTarget) this.editTrackModalTarget.style.display = "flex"
+  }
+
+  syncEditTrackFormVisibility() {
+    const type = this.hasEditTrackTypeTarget ? this.editTrackTypeTarget.value : "categorical"
+    const isNumerical = type === "numerical"
+    if (this.hasEditTrackDisplayModeWrapTarget) {
+      this.editTrackDisplayModeWrapTarget.style.display = isNumerical ? "block" : "none"
+    }
+    if (this.hasEditTrackLegendWrapTarget) {
+      this.editTrackLegendWrapTarget.style.display = isNumerical ? "none" : "flex"
+    }
+    if (this.hasEditTrackGradientBtnTarget) {
+      this.editTrackGradientBtnTarget.style.display = isNumerical ? "inline-flex" : "none"
+    }
+    if (this.hasEditTrackTypeHintTarget) {
+      if (isNumerical) {
+        this.editTrackTypeHintTarget.textContent = "Continuous tracks can be shown as a colored band or a barplot."
+      } else {
+        this.editTrackTypeHintTarget.textContent = "Categorical tracks are colored by category."
+      }
+    }
+  }
+
+  editTrackFormChanged() {
+    this.syncEditTrackFormVisibility()
+  }
+
+  closeEditTrackModal() {
+    this.editingTrackTarget = null
+    if (this.hasEditTrackModalTarget) this.editTrackModalTarget.style.display = "none"
+  }
+
+  editTrackModalBackdropClick(event) {
+    if (event.target === this.editTrackModalTarget) this.closeEditTrackModal()
+  }
+
+  confirmEditTrack() {
+    if (!this.editingTrackTarget) return
+    const found = this.findTrackById(this.editingTrackTarget.id, this.editingTrackTarget.axis)
+    if (!found?.track) {
+      this.closeEditTrackModal()
+      return
+    }
+    const track = found.track
+    const nextType = this.hasEditTrackTypeTarget ? this.editTrackTypeTarget.value : track.type
+    if (nextType !== track.type) this.applyLocalTrackType(track, nextType)
+
+    if (track.type === "numerical") {
+      track.displayMode = this.hasEditTrackDisplayModeTarget &&
+        this.editTrackDisplayModeTarget.value === "barplot" ? "barplot" : "color"
+      this.ensureTrackGradient(track)
+    } else {
+      track.displayMode = "color"
+      const legendAllowed = Array.isArray(track.categories) &&
+        track.categories.length > 0 &&
+        track.categories.length <= this.legendMaxCategories
+      track.showLegend = legendAllowed && !!(this.hasEditTrackShowLegendTarget && this.editTrackShowLegendTarget.checked)
+    }
+
+    const sizeKey = this.hasEditTrackSizeTarget ? this.editTrackSizeTarget.value : "normal"
+    track.thickness = this.trackSizePx[sizeKey] || this.layout.trackH
+
+    this.closeEditTrackModal()
+    this.renderTrackLists()
+    this.handleResize()
+    this.persistCurrentCheckpointOnServer("edit-track")
+  }
+
+  editTrackRemove() {
+    if (!this.editingTrackTarget) return
+    const { id, axis } = this.editingTrackTarget
+    this.closeEditTrackModal()
+    this.removeTrack(id, axis)
+  }
+
+  editTrackOpenGradient() {
+    if (!this.editingTrackTarget) return
+    const { id, axis } = this.editingTrackTarget
+    this.confirmEditTrack()
+    const found = this.findTrackById(id, axis)
+    if (!found?.track || found.track.type !== "numerical") return
+    this.openTrackGradientEditor(found.track, found.axis)
+  }
+
+  // Kept for any leftover callers; delegates to the below-plot lists.
+  renderActiveTracksList() {
+    this.renderTrackLists()
+  }
+
+  tracksWithInPlotLegends(axis = null) {
+    const list = [
       ...this.colTracks.map((t) => ({ ...t, axis: "column" })),
       ...this.rowTracks.map((t) => ({ ...t, axis: "row" }))
-    ].filter((t) => !t.loading)
-
-    allTracks.forEach((track) => {
-      if (track.type === "numerical") {
-        blocks.push(`<div class="heatmap-track-legend" style="font-size:11px;">
-          <div class="text-gray-600 mb-1">${this.escape(track.axis === "column" ? "Col" : "Row")}: ${this.escape(track.name)}</div>
-          <div style="display:flex;align-items:center;gap:4px;">
-            <span>${Number(track.min).toPrecision(3)}</span>
-            <div style="width:48px;height:10px;background:linear-gradient(to right,#fff,#00f);border:1px solid #cbd5e1;"></div>
-            <span>${Number(track.max).toPrecision(3)}</span>
-          </div>
-        </div>`)
-        return
-      }
-      if (!track.showLegend) {
-        blocks.push(`<div class="heatmap-track-legend text-gray-500" style="font-size:11px;">
-          ${this.escape(track.axis === "column" ? "Col" : "Row")}: ${this.escape(track.name)}
-          <span class="text-gray-400"> (hover for values)</span>
-        </div>`)
-        return
-      }
-      const items = track.categories.map((cat) => {
-        const color = this.categoricalPalette(track._catIndex[cat] ?? 0)
-        return `<span style="display:inline-flex;align-items:center;gap:3px;margin-right:8px;">
-          <span style="width:10px;height:10px;background:${color};border:1px solid #94a3b8;display:inline-block;"></span>
-          <span>${this.escape(cat)}</span>
-        </span>`
-      }).join("")
-      blocks.push(`<div class="heatmap-track-legend" style="font-size:11px;">
-        <div class="text-gray-600 mb-1">${this.escape(track.axis === "column" ? "Col" : "Row")}: ${this.escape(track.name)}</div>
-        <div>${items}</div>
-      </div>`)
+    ].filter((t) => {
+      if (t.loading) return false
+      if (axis && t.axis !== axis) return false
+      if (t.type === "numerical") return true
+      return !!t.showLegend && Array.isArray(t.categories) && t.categories.length > 0
     })
-    this.legendPanelTarget.innerHTML = blocks.join("")
-    this.legendPanelTarget.style.display = blocks.length ? "flex" : "none"
+    return list
+  }
+
+  estimateRightLegendWidth() {
+    const minW = this.layout.legendWMin
+    const maxW = this.layout.legendWMax
+    const preferred = Number(this.legendWidthPx) || this.layout.legendW
+    return Math.min(maxW, Math.max(minW, Math.round(preferred)))
+  }
+
+  syncLegendWidthControls() {
+    const width = this.estimateRightLegendWidth()
+    if (this.hasLegendWidthSliderTarget) this.legendWidthSliderTarget.value = String(width)
+    if (this.hasLegendWidthValueTarget) this.legendWidthValueTarget.textContent = `${width}px`
+  }
+
+  toggleSettingsMenu(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    if (!this.hasSettingsMenuTarget) return
+    const opening = this.settingsMenuTarget.style.display === "none" || !this.settingsMenuTarget.style.display
+    if (opening) {
+      this.syncLegendWidthControls()
+      this.settingsMenuTarget.style.display = "block"
+      this.ensureSettingsMenuOutsideCloseBound()
+    } else {
+      this.closeSettingsMenu()
+    }
+  }
+
+  closeSettingsMenu() {
+    if (!this.hasSettingsMenuTarget) return
+    this.settingsMenuTarget.style.display = "none"
+  }
+
+  ensureSettingsMenuOutsideCloseBound() {
+    if (this._settingsOutsideCloseBound) return
+    this._settingsOutsideCloseBound = (event) => {
+      if (!this.hasSettingsMenuTarget) return
+      const menu = this.settingsMenuTarget
+      const btn = this.hasSettingsBtnTarget ? this.settingsBtnTarget : null
+      if (menu.contains(event.target) || (btn && btn.contains(event.target))) return
+      this.closeSettingsMenu()
+    }
+    document.addEventListener("mousedown", this._settingsOutsideCloseBound)
+  }
+
+  legendWidthChanged() {
+    if (!this.hasLegendWidthSliderTarget) return
+    const value = Number(this.legendWidthSliderTarget.value)
+    if (!Number.isFinite(value)) return
+    this.legendWidthPx = value
+    this.syncLegendWidthControls()
+    this.handleResize()
+    this.persistCurrentCheckpointOnServer("legend-width")
   }
 
   // Build display groups (contiguous leaf ranges) honoring collapsed nodes,
@@ -422,7 +1141,16 @@ export default class extends Controller {
 
     this.nDispRows = nDispRows
     this.nDispCols = nDispCols
-    this.renderer.setMatrix(finalMat, nDispRows, nDispCols, this.vmin, this.vmax)
+    this.displayMatrix = finalMat
+    this.applyActiveColormap()
+    this.renderer.setMatrix(
+      finalMat,
+      nDispRows,
+      nDispCols,
+      this.vmin,
+      this.vmax,
+      (v, vmin, vmax) => this.normalizeExpressionValue(v, vmin, vmax)
+    )
   }
 
   buildGroups(tree, nLeaves, collapsed) {
@@ -471,13 +1199,46 @@ export default class extends Controller {
   reset() {
     this.showRowTree = true
     this.showColTree = true
+    this.showLabels = true
+    this.syncToggleButtons()
     this.resetView(true)
     this.handleResize()
   }
 
-  toggleRowTree() { this.showRowTree = !this.showRowTree; this.handleResize() }
-  toggleColTree() { this.showColTree = !this.showColTree; this.handleResize() }
-  toggleLabels() { this.showLabels = !this.showLabels; this.render() }
+  toggleRowTree() {
+    this.showRowTree = !this.showRowTree
+    this.syncToggleButtons()
+    this.handleResize()
+  }
+
+  toggleColTree() {
+    this.showColTree = !this.showColTree
+    this.syncToggleButtons()
+    this.handleResize()
+  }
+
+  toggleLabels() {
+    this.showLabels = !this.showLabels
+    this.syncToggleButtons()
+    this.handleResize()
+  }
+
+  syncToggleButtons() {
+    this.applyToggleState(this.hasColTreeToggleTarget ? this.colTreeToggleTarget : null,
+      this.hasColTreeStateTarget ? this.colTreeStateTarget : null,
+      this.showColTree)
+    this.applyToggleState(this.hasRowTreeToggleTarget ? this.rowTreeToggleTarget : null,
+      this.hasRowTreeStateTarget ? this.rowTreeStateTarget : null,
+      this.showRowTree)
+    this.applyToggleState(this.hasLabelsToggleTarget ? this.labelsToggleTarget : null,
+      this.hasLabelsStateTarget ? this.labelsStateTarget : null,
+      this.showLabels)
+  }
+
+  applyToggleState(button, stateLabel, isOn) {
+    if (button) button.setAttribute("aria-pressed", isOn ? "true" : "false")
+    if (stateLabel) stateLabel.textContent = isOn ? "On" : "Off"
+  }
 
   handleResize() {
     if (!this.renderer) return
@@ -515,22 +1276,116 @@ export default class extends Controller {
 
   computeLayout() {
     const L = this.layout
-    const nColTracks = this.colTracks.filter((t) => !t.loading).length
-    const nRowTracks = this.rowTracks.filter((t) => !t.loading).length
+    const colTracks = this.colTracks.filter((t) => !t.loading)
+    const rowTracks = this.rowTracks.filter((t) => !t.loading)
 
     const colTreeH = this.showColTree && this.colTree ? L.colTreeH : 0
     const rowTreeW = this.showRowTree && this.rowTree ? L.rowTreeW : 0
 
-    this.leftTracksW = nRowTracks * (L.trackW + L.trackGap)
-    this.topTracksH = nColTracks * (L.trackH + L.trackGap)
+    this.colTrackOffsets = []
+    let colTracksH = 0
+    colTracks.forEach((track, ti) => {
+      this.colTrackOffsets.push(colTracksH)
+      colTracksH += (track.thickness || L.trackH)
+      if (ti < colTracks.length - 1) colTracksH += L.trackGap
+    })
+
+    this.rowTrackOffsets = []
+    let rowTracksW = 0
+    rowTracks.forEach((track, ti) => {
+      this.rowTrackOffsets.push(rowTracksW)
+      rowTracksW += (track.thickness || L.trackW)
+      if (ti < rowTracks.length - 1) rowTracksW += L.trackGap
+    })
+
+    // Track bands only — + buttons and c/r refs are overlays and must not open a gap
+    // between tracks and the heatmap matrix.
+    this.leftTracksW = rowTracksW
+    this.topTracksH = colTracksH
+    this.trackRefW = colTracks.length ? L.trackRefW : 0
+    this.trackRefH = rowTracks.length ? L.trackRefH : 0
 
     this.mx = L.pad + rowTreeW + this.leftTracksW
     this.my = L.pad + colTreeH + this.topTracksH
     this.colTreeH = colTreeH
     this.rowTreeW = rowTreeW
+    this.rightLegendW = this.estimateRightLegendWidth()
 
-    this.mw = Math.max(20, this.containerW - this.mx - L.rowLabelW - L.legendW - L.pad)
-    this.mh = Math.max(20, this.containerH - this.my - L.colLabelH - L.pad)
+    const labelH = this.showLabels ? L.colLabelH : 0
+    this.mw = Math.max(20, this.containerW - this.mx - L.rowLabelW - this.rightLegendW - L.pad)
+    this.mh = Math.max(20, this.containerH - this.my - labelH - L.pad)
+    this.positionAddTrackButtons()
+  }
+
+  positionAddTrackButtons() {
+    // Place + controls on the dendrogram corners, clear of heatmap cells, tracks, and refs.
+    const size = 22
+    const gap = 4
+
+    // Cell metadata +: right of the horizontal (column) tree, bottom of the tree band.
+    const colTreeBottom = this.layout.pad + this.colTreeH
+    const colLeft = this.mx + this.mw + gap
+    const colTop = this.colTreeH > 0
+      ? colTreeBottom - size - gap
+      : Math.max(2, this.my - size - gap)
+
+    // Gene metadata +: above the right side of the vertical (row) tree.
+    const rowTreeRight = this.layout.pad + this.rowTreeW
+    const rowLeft = this.rowTreeW > 0
+      ? rowTreeRight - size
+      : Math.max(2, this.mx - this.leftTracksW - size - gap)
+    const rowTop = Math.max(2, this.my - size - gap)
+
+    if (this.hasAddColTrackBtnTarget) {
+      const btn = this.addColTrackBtnTarget
+      btn.style.display = "block"
+      btn.style.left = `${Math.max(2, Math.min(colLeft, this.containerW - size - 2))}px`
+      btn.style.top = `${Math.max(2, colTop)}px`
+    }
+
+    if (this.hasAddRowTrackBtnTarget) {
+      const btn = this.addRowTrackBtnTarget
+      btn.style.display = "block"
+      btn.style.left = `${Math.max(2, Math.min(rowLeft, this.containerW - size - 2))}px`
+      btn.style.top = `${Math.max(2, rowTop)}px`
+    }
+  }
+
+  exportSvg() {
+    if (!this.renderer || !this.hasWebglTarget || !this.hasOverlayTarget) return
+
+    this.render()
+
+    const w = this.containerW
+    const h = this.containerH
+    const dpr = this.dpr
+    const composite = document.createElement("canvas")
+    composite.width = Math.max(1, Math.round(w * dpr))
+    composite.height = Math.max(1, Math.round(h * dpr))
+    const ctx = composite.getContext("2d")
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.fillStyle = "#ffffff"
+    ctx.fillRect(0, 0, w, h)
+    ctx.drawImage(this.webglTarget, this.mx, this.my, this.mw, this.mh)
+    ctx.drawImage(this.overlayTarget, 0, 0, w, h)
+
+    const png = composite.toDataURL("image/png")
+    const svg = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`,
+      `<image width="${w}" height="${h}" xlink:href="${png}"/>`,
+      "</svg>"
+    ].join("")
+
+    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `heatmap_${this.runIdValue || "export"}.svg`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
   }
 
   bindEvents() {
@@ -573,9 +1428,11 @@ export default class extends Controller {
   }
 
   onWheel(e) {
-    e.preventDefault()
+    // Plain scroll keeps page scrolling; Shift+scroll zooms the heatmap.
+    if (!e.shiftKey) return
     const p = this.localPoint(e)
     if (!this.inMatrix(p)) return
+    e.preventDefault()
     const factor = e.deltaY < 0 ? 0.85 : 1.176
     const v = this.view
     const cx = this.colForX(p.x)
@@ -620,6 +1477,23 @@ export default class extends Controller {
       this.render()
       return
     }
+
+    const hoveringTarget = this.hitTestEditableLegend(p)
+    const hoveringLegend = !!hoveringTarget
+    const hoverKey = hoveringTarget?.type === "track"
+      ? `${hoveringTarget.axis}:${hoveringTarget.track.id}`
+      : (hoveringTarget ? "expression" : null)
+    if (hoveringLegend !== this.isHoveringLegend || hoverKey !== this.hoveringTrackLegendKey) {
+      this.isHoveringLegend = hoveringLegend
+      this.hoveringTrackLegendKey = hoverKey
+      this.overlayTarget.style.cursor = hoveringLegend ? "pointer" : "default"
+      this.drawOverlay()
+    }
+    if (hoveringLegend) {
+      this.hideTooltip()
+      return
+    }
+
     const trackHit = this.hitTestTracks(p)
     if (trackHit) {
       this.updateTrackTooltip(p, trackHit)
@@ -647,9 +1521,15 @@ export default class extends Controller {
     if (v.rowEnd > this.nDispRows) { v.rowEnd = this.nDispRows; v.rowStart = this.nDispRows - rowSpan }
   }
 
-  // Click on a dendrogram internal node toggles collapse of that subtree.
+  // Click on expression or continuous-track legend opens the shared gradient editor.
   onClick(e) {
     const p = this.localPoint(e)
+    const legendHit = this.hitTestEditableLegend(p)
+    if (legendHit) {
+      if (legendHit.type === "expression") this.openExpressionGradientEditor()
+      else this.openTrackGradientEditor(legendHit.track, legendHit.axis)
+      return
+    }
     let changed = false
     if (this.showColTree && this.colTree && p.y >= this.layout.pad && p.y <= this.layout.pad + this.colTreeH) {
       const node = this.hitTestTree(this.colTree, p, "col")
@@ -663,6 +1543,24 @@ export default class extends Controller {
       this.clampView()
       this.render()
     }
+  }
+
+  inLegend(p) {
+    return !!this.hitTestEditableLegend(p)
+  }
+
+  hitTestEditableLegend(p) {
+    const b = this.legendBounds
+    if (b && p.x >= b.x && p.x <= b.x + b.width && p.y >= b.y && p.y <= b.y + b.height) {
+      return { type: "expression" }
+    }
+    for (const entry of (this.trackLegendBounds || [])) {
+      const bb = entry.bounds
+      if (p.x >= bb.x && p.x <= bb.x + bb.width && p.y >= bb.y && p.y <= bb.y + bb.height) {
+        return { type: "track", track: entry.track, axis: entry.axis }
+      }
+    }
+    return null
   }
 
   toggleCollapse(set, id) {
@@ -724,6 +1622,7 @@ export default class extends Controller {
     this.drawTracks(ctx)
     if (this.showLabels) this.drawLabels(ctx)
     this.drawLegend(ctx)
+    this.drawTrackLegends(ctx)
   }
 
   drawDendrogram(ctx, tree, axis) {
@@ -819,11 +1718,9 @@ export default class extends Controller {
       return "#e5e7eb"
     }
     if (track.type === "numerical") {
-      const min = track.min
-      const max = track.max
-      const t = max > min ? (value - min) / (max - min) : 0.5
-      const c = Math.round(255 * (1 - Math.max(0, Math.min(1, t))))
-      return `rgb(${c},${c},255)`
+      const t = this.trackNormalizedPosition(track, Number(value))
+      const colorInt = this.interpolateGradientColor(this.activeTrackControlPoints(track), t)
+      return this.colorIntToCss(colorInt)
     }
     if (!track._catIndex) {
       track._catIndex = {}
@@ -860,6 +1757,13 @@ export default class extends Controller {
     return bestVal
   }
 
+  trackRefFor(axis, track) {
+    const list = (axis === "column" ? this.colTracks : this.rowTracks).filter((t) => !t.loading)
+    const idx = list.findIndex((t) => String(t.id) === String(track.id))
+    if (idx < 0) return ""
+    return axis === "column" ? `c${idx + 1}` : `r${idx + 1}`
+  }
+
   drawTracks(ctx) {
     const L = this.layout
     const colTracks = this.colTracks.filter((t) => !t.loading)
@@ -868,44 +1772,90 @@ export default class extends Controller {
     ctx.save()
     ctx.beginPath(); ctx.rect(this.mx, L.pad, this.mw, this.containerH); ctx.clip()
     colTracks.forEach((track, ti) => {
-      const y = L.pad + this.colTreeH + ti * (L.trackH + L.trackGap)
+      const thickness = track.thickness || L.trackH
+      const y = L.pad + this.colTreeH + (this.colTrackOffsets?.[ti] || 0)
+      const barplot = track.type === "numerical" && track.displayMode === "barplot"
       for (let d = 0; d < this.nDispCols; d++) {
         const x0 = this.xForCol(d)
         const x1 = this.xForCol(d + 1)
         if (x1 < this.mx || x0 > this.mx + this.mw) continue
-        ctx.fillStyle = this.trackColor(track, this.aggregateTrack(track, this.colGroups[d]))
-        ctx.fillRect(x0, y, Math.max(1, x1 - x0), L.trackH)
+        const w = Math.max(1, x1 - x0)
+        const value = this.aggregateTrack(track, this.colGroups[d])
+        if (barplot) {
+          ctx.fillStyle = "#f1f5f9"
+          ctx.fillRect(x0, y, w, thickness)
+          if (value === null || value === undefined || Number.isNaN(Number(value))) continue
+          const t = this.trackNormalizedPosition(track, Number(value))
+          const barH = Math.max(1, thickness * t)
+          ctx.fillStyle = this.trackColor(track, value)
+          ctx.fillRect(x0, y + thickness - barH, w, barH)
+        } else {
+          ctx.fillStyle = this.trackColor(track, value)
+          ctx.fillRect(x0, y, w, thickness)
+        }
       }
-      ctx.fillStyle = "#334155"
-      ctx.font = "10px sans-serif"
-      ctx.textAlign = "right"
-      ctx.textBaseline = "middle"
-      ctx.fillText(this.truncate(track.name, 18), this.mx - 4, y + L.trackH / 2)
     })
     ctx.restore()
+
+    // Column track refs sit aside (right of tracks), without shifting the heatmap.
+    if (colTracks.length && this.trackRefW > 0) {
+      ctx.save()
+      ctx.fillStyle = "#334155"
+      ctx.font = "10px sans-serif"
+      ctx.textAlign = "left"
+      ctx.textBaseline = "middle"
+      colTracks.forEach((track, ti) => {
+        const thickness = track.thickness || L.trackH
+        const y = L.pad + this.colTreeH + (this.colTrackOffsets?.[ti] || 0)
+        const ref = this.trackRefFor("column", track)
+        ctx.fillText(ref, this.mx + this.mw + 3, y + thickness / 2)
+      })
+      ctx.restore()
+    }
 
     ctx.save()
     ctx.beginPath(); ctx.rect(L.pad, this.my, this.containerW, this.mh); ctx.clip()
     rowTracks.forEach((track, ti) => {
-      const x = this.mx - this.leftTracksW + ti * (L.trackW + L.trackGap)
+      const thickness = track.thickness || L.trackW
+      const x = this.mx - this.leftTracksW + (this.rowTrackOffsets?.[ti] || 0)
+      const barplot = track.type === "numerical" && track.displayMode === "barplot"
       for (let d = 0; d < this.nDispRows; d++) {
         const y0 = this.yForRow(d)
         const y1 = this.yForRow(d + 1)
         if (y1 < this.my || y0 > this.my + this.mh) continue
-        ctx.fillStyle = this.trackColor(track, this.aggregateTrack(track, this.rowGroups[d]))
-        ctx.fillRect(x, y0, L.trackW, Math.max(1, y1 - y0))
+        const h = Math.max(1, y1 - y0)
+        const value = this.aggregateTrack(track, this.rowGroups[d])
+        if (barplot) {
+          ctx.fillStyle = "#f1f5f9"
+          ctx.fillRect(x, y0, thickness, h)
+          if (value === null || value === undefined || Number.isNaN(Number(value))) continue
+          const t = this.trackNormalizedPosition(track, Number(value))
+          const barW = Math.max(1, thickness * t)
+          ctx.fillStyle = this.trackColor(track, value)
+          ctx.fillRect(x, y0, barW, h)
+        } else {
+          ctx.fillStyle = this.trackColor(track, value)
+          ctx.fillRect(x, y0, thickness, h)
+        }
       }
+    })
+    ctx.restore()
+
+    // Row track refs sit aside (above matrix), without shifting the heatmap.
+    if (rowTracks.length && this.trackRefH > 0) {
+      ctx.save()
       ctx.fillStyle = "#334155"
       ctx.font = "10px sans-serif"
       ctx.textAlign = "center"
       ctx.textBaseline = "bottom"
-      ctx.save()
-      ctx.translate(x + L.trackW / 2, this.my - 3)
-      ctx.rotate(-Math.PI / 2)
-      ctx.fillText(this.truncate(track.name, 14), 0, 0)
+      rowTracks.forEach((track, ti) => {
+        const thickness = track.thickness || L.trackW
+        const x = this.mx - this.leftTracksW + (this.rowTrackOffsets?.[ti] || 0)
+        const ref = this.trackRefFor("row", track)
+        ctx.fillText(ref, x + thickness / 2, this.my - 2)
+      })
       ctx.restore()
-    })
-    ctx.restore()
+    }
   }
 
   hitTestTracks(p) {
@@ -914,8 +1864,9 @@ export default class extends Controller {
     const rowTracks = this.rowTracks.filter((t) => !t.loading)
 
     for (let ti = 0; ti < colTracks.length; ti++) {
-      const y0 = L.pad + this.colTreeH + ti * (L.trackH + L.trackGap)
-      const y1 = y0 + L.trackH
+      const thickness = colTracks[ti].thickness || L.trackH
+      const y0 = L.pad + this.colTreeH + (this.colTrackOffsets?.[ti] || 0)
+      const y1 = y0 + thickness
       if (p.y < y0 || p.y > y1 || p.x < this.mx || p.x > this.mx + this.mw) continue
       const d = Math.floor(this.colForX(p.x))
       if (d < 0 || d >= this.nDispCols) continue
@@ -923,14 +1874,14 @@ export default class extends Controller {
     }
 
     for (let ti = 0; ti < rowTracks.length; ti++) {
-      const x0 = this.mx - this.leftTracksW + ti * (L.trackW + L.trackGap)
-      const x1 = x0 + L.trackW
+      const thickness = rowTracks[ti].thickness || L.trackW
+      const x0 = this.mx - this.leftTracksW + (this.rowTrackOffsets?.[ti] || 0)
+      const x1 = x0 + thickness
       if (p.x < x0 || p.x > x1 || p.y < this.my || p.y > this.my + this.mh) continue
       const d = Math.floor(this.rowForY(p.y))
       if (d < 0 || d >= this.nDispRows) continue
       return { axis: "row", track: rowTracks[ti], displayIndex: d }
     }
-
     return null
   }
 
@@ -941,7 +1892,8 @@ export default class extends Controller {
     const displayValue = value === null || value === undefined || (typeof value === "number" && Number.isNaN(value))
       ? "n/a"
       : (typeof value === "number" ? value.toPrecision(4) : String(value))
-    const html = `<strong>${this.escape(hit.track.name)}</strong><br>${this.escape(label)}<br>${this.escape(displayValue)}`
+    const ref = this.trackRefFor(hit.axis, hit.track)
+    const html = `<strong>${this.escape(ref ? `${ref}  ${hit.track.name}` : hit.track.name)}</strong><br>${this.escape(label)}<br>${this.escape(displayValue)}`
     if (this.hasTooltipTarget) {
       this.tooltipTarget.innerHTML = html
       this.tooltipTarget.style.display = "block"
@@ -1003,31 +1955,179 @@ export default class extends Controller {
   }
 
   drawLegend(ctx) {
-    const x = this.containerW - this.layout.legendW + 12
-    const y = this.layout.pad + 4
-    const h = 120
-    const w = 14
-    const grad = ctx.createLinearGradient(0, y, 0, y + h)
-    if (this.diverging) {
-      grad.addColorStop(0, "#b5171a")
+    const x0 = this.containerW - this.rightLegendW + 8
+    const maxW = Math.max(40, this.rightLegendW - 16)
+    let y = this.layout.pad + 4
+
+    ctx.fillStyle = "#334155"
+    ctx.font = "bold 11px sans-serif"
+    ctx.textAlign = "left"
+    ctx.textBaseline = "top"
+    ctx.fillText("Gene expression level", x0, y)
+    y += 16
+
+    const barH = 12
+    const barW = maxW
+    const stored = this.expressionGradientState()
+    const points = [...(stored.customGradientControlPoints || stored.gradientControlPoints || this.defaultHeatmapControlPoints())]
+      .sort((a, b) => a.position - b.position)
+    const grad = ctx.createLinearGradient(x0, 0, x0 + barW, 0)
+    if (points.length) {
+      points.forEach((point) => {
+        grad.addColorStop(Math.min(1, Math.max(0, point.position)), this.colorIntToCss(point.color))
+      })
+    } else if (this.diverging) {
+      grad.addColorStop(0, "#3b4dbf")
       grad.addColorStop(0.5, "#f7f7f7")
-      grad.addColorStop(1, "#3b4dbf")
+      grad.addColorStop(1, "#b5171a")
     } else {
-      grad.addColorStop(0, "#fce728")
+      grad.addColorStop(0, "#450a54")
       grad.addColorStop(0.5, "#21918c")
-      grad.addColorStop(1, "#450a54")
+      grad.addColorStop(1, "#fce728")
     }
     ctx.fillStyle = grad
-    ctx.fillRect(x, y, w, h)
-    ctx.strokeStyle = "#94a3b8"
-    ctx.strokeRect(x, y, w, h)
+    ctx.fillRect(x0, y, barW, barH)
+    ctx.strokeStyle = (this.isHoveringLegend && this.hoveringTrackLegendKey === "expression") ? "#2563eb" : "#94a3b8"
+    ctx.lineWidth = (this.isHoveringLegend && this.hoveringTrackLegendKey === "expression") ? 2 : 1
+    ctx.strokeRect(x0, y, barW, barH)
+    this.legendBounds = { x: x0, y, width: barW, height: barH }
+
+    y += barH + 2
     ctx.fillStyle = "#334155"
     ctx.font = "9px sans-serif"
+    ctx.textBaseline = "top"
+    const mid = ((this.vmax + this.vmin) / 2).toFixed(1)
+    const maxText = this.vmax.toFixed(1)
     ctx.textAlign = "left"
-    ctx.textBaseline = "middle"
-    ctx.fillText(this.vmax.toFixed(1), x + w + 3, y + 4)
-    ctx.fillText(((this.vmax + this.vmin) / 2).toFixed(1), x + w + 3, y + h / 2)
-    ctx.fillText(this.vmin.toFixed(1), x + w + 3, y + h - 4)
+    ctx.fillText(this.vmin.toFixed(1), x0, y)
+    ctx.textAlign = "center"
+    ctx.fillText(mid, x0 + barW / 2, y)
+    ctx.textAlign = "right"
+    ctx.fillText(maxText, x0 + barW, y)
+
+    this._legendTracksStartY = y + 16
+  }
+
+  drawTrackLegends(ctx) {
+    const geneTracks = this.tracksWithInPlotLegends("row")
+    const cellTracks = this.tracksWithInPlotLegends("column")
+    this.trackLegendBounds = []
+    if (!geneTracks.length && !cellTracks.length) return
+
+    const x0 = this.containerW - this.rightLegendW + 8
+    const maxX = this.containerW - this.layout.pad
+    const maxW = Math.max(40, maxX - x0)
+    let y = this._legendTracksStartY || (this.layout.pad + 4 + 50)
+
+    // Shared gradient column so continuous-track bars align vertically.
+    ctx.font = "9px sans-serif"
+    let minLabelW = 0
+    let maxLabelW = 0
+    ;[...geneTracks, ...cellTracks].forEach((track) => {
+      if (track.type !== "numerical") return
+      const range = this.trackValueRange(track)
+      minLabelW = Math.max(minLabelW, ctx.measureText(Number(range.min).toPrecision(3)).width)
+      maxLabelW = Math.max(maxLabelW, ctx.measureText(Number(range.max).toPrecision(3)).width)
+    })
+    const barX = x0 + minLabelW + 4
+    const barW = Math.max(28, Math.min(maxW - minLabelW - maxLabelW - 12, maxW * 0.7))
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(x0 - 2, y - 4, maxW + 4, this.containerH - (y - 4) - this.layout.pad)
+    ctx.clip()
+
+    const drawSection = (title, tracks) => {
+      if (!tracks.length) return
+      ctx.font = "bold 11px sans-serif"
+      ctx.fillStyle = "#1f2937"
+      ctx.textAlign = "left"
+      ctx.textBaseline = "top"
+      ctx.fillText(title, x0, y)
+      y += 16
+
+      tracks.forEach((track) => {
+        const ref = this.trackRefFor(track.axis, track)
+        const title = ref ? `${ref}  ${track.name}` : track.name
+        ctx.font = "10px sans-serif"
+        ctx.fillStyle = "#475569"
+        ctx.textAlign = "left"
+        ctx.textBaseline = "top"
+        ctx.fillText(this.fitTextToWidth(ctx, title, maxW), x0, y)
+        y += 14
+
+        if (track.type === "numerical") {
+          const range = this.trackValueRange(track)
+          const minText = Number(range.min).toPrecision(3)
+          const maxText = Number(range.max).toPrecision(3)
+          ctx.font = "9px sans-serif"
+          ctx.fillStyle = "#334155"
+          ctx.textBaseline = "middle"
+          ctx.textAlign = "right"
+          ctx.fillText(minText, barX - 4, y + 5)
+          const points = [...this.activeTrackControlPoints(track)].sort((a, b) => a.position - b.position)
+          const grad = ctx.createLinearGradient(barX, 0, barX + barW, 0)
+          if (points.length) {
+            points.forEach((point) => {
+              grad.addColorStop(
+                Math.min(1, Math.max(0, point.position)),
+                this.colorIntToCss(point.color)
+              )
+            })
+          } else {
+            grad.addColorStop(0, "#ffffff")
+            grad.addColorStop(1, "#0000ff")
+          }
+          ctx.fillStyle = grad
+          ctx.fillRect(barX, y, barW, 10)
+          const hoverKey = `${track.axis}:${track.id}`
+          const hovered = this.isHoveringLegend && this.hoveringTrackLegendKey === hoverKey
+          ctx.strokeStyle = hovered ? "#2563eb" : "#cbd5e1"
+          ctx.lineWidth = hovered ? 2 : 1
+          ctx.strokeRect(barX, y, barW, 10)
+          this.trackLegendBounds.push({
+            axis: track.axis,
+            track,
+            bounds: { x: barX, y, width: barW, height: 10 }
+          })
+          ctx.fillStyle = "#334155"
+          ctx.textAlign = "left"
+          ctx.fillText(maxText, barX + barW + 4, y + 5)
+          y += 18
+          return
+        }
+
+        let x = x0
+        const rowH = 14
+        ctx.font = "10px sans-serif"
+        ctx.textBaseline = "middle"
+        track.categories.forEach((cat) => {
+          const label = String(cat)
+          const labelW = ctx.measureText(label).width
+          const itemW = 12 + labelW + 8
+          if (x > x0 && x + itemW > maxX) {
+            x = x0
+            y += rowH
+          }
+          const color = this.categoricalPalette(track._catIndex[cat] ?? 0)
+          ctx.fillStyle = color
+          ctx.fillRect(x, y + 2, 10, 10)
+          ctx.strokeStyle = "#94a3b8"
+          ctx.lineWidth = 1
+          ctx.strokeRect(x, y + 2, 10, 10)
+          ctx.fillStyle = "#334155"
+          ctx.fillText(label, x + 12, y + 7)
+          x += itemW
+        })
+        y += rowH + 8
+      })
+      y += 4
+    }
+
+    drawSection("Gene metadata tracks", geneTracks)
+    drawSection("Cell metadata tracks", cellTracks)
+
+    ctx.restore()
   }
 
   updateTooltip(p, e) {
@@ -1036,7 +2136,10 @@ export default class extends Controller {
     if (c < 0 || c >= this.nDispCols || r < 0 || r >= this.nDispRows) { this.hideTooltip(); return }
     const gene = this.displayRowLabel(r)
     const col = this.displayColLabel(c)
-    const html = `<strong>${this.escape(gene)}</strong><br>${this.escape(col)}`
+    const valueText = this.formatExpressionValue(
+      this.displayMatrix ? this.displayMatrix[r * this.nDispCols + c] : NaN
+    )
+    const html = `<strong>${this.escape(gene)}</strong><br>${this.escape(col)}<br>Expression: ${this.escape(valueText)}`
     if (this.hasTooltipTarget) {
       this.tooltipTarget.innerHTML = html
       this.tooltipTarget.style.display = "block"
@@ -1044,6 +2147,13 @@ export default class extends Controller {
       this.tooltipTarget.style.left = (p.x + 12) + "px"
       this.tooltipTarget.style.top = (p.y + 12) + "px"
     }
+  }
+
+  formatExpressionValue(value) {
+    if (value === null || value === undefined || Number.isNaN(value)) return "NA"
+    const abs = Math.abs(value)
+    if (abs !== 0 && (abs < 0.001 || abs >= 10000)) return value.toExponential(3)
+    return Number(value.toPrecision(4)).toString()
   }
 
   hideTooltip() {
@@ -1055,9 +2165,1153 @@ export default class extends Controller {
     return s.length > n ? s.slice(0, n - 1) + "\u2026" : s
   }
 
+  fitTextToWidth(ctx, text, maxWidth) {
+    const raw = String(text == null ? "" : text)
+    if (!(maxWidth > 0)) return ""
+    if (ctx.measureText(raw).width <= maxWidth) return raw
+    const ellipsis = "\u2026"
+    const ellipsisWidth = ctx.measureText(ellipsis).width
+    if (ellipsisWidth >= maxWidth) return ellipsis
+    let low = 0
+    let high = raw.length
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2)
+      const candidate = raw.slice(0, mid) + ellipsis
+      if (ctx.measureText(candidate).width <= maxWidth) low = mid
+      else high = mid - 1
+    }
+    return low > 0 ? raw.slice(0, low) + ellipsis : ellipsis
+  }
+
   escape(s) {
     const div = document.createElement("div")
     div.textContent = String(s == null ? "" : s)
     return div.innerHTML
+  }
+
+  // --- Shared gradient editor host API (used by GradientManager / ColorManager) ---
+
+  copyControlPoints(points) {
+    return (points || []).map((p) => ({
+      position: Number(p.position),
+      color: Number(p.color)
+    }))
+  }
+
+  // Seed controller + metadataGradients so the modal loads the gradient currently shown.
+  seedGradientEditorState(points, scale, metadataId) {
+    const copied = this.copyControlPoints(points)
+    this.customGradientControlPoints = this.copyControlPoints(copied)
+    this.gradientControlPoints = this.copyControlPoints(copied)
+    this.gradientScale = scale === "log" ? "log" : "normal"
+    this.metadataGradients.set(metadataId, {
+      gradientControlPoints: this.copyControlPoints(copied),
+      customGradientControlPoints: this.copyControlPoints(copied),
+      gradientScale: this.gradientScale
+    })
+  }
+
+  stashCurrentGradientEditorTarget() {
+    // Persist only the active editor target from controller state — never overwrite
+    // another metadata entry with unrelated controller points.
+    if (!this.editingGradientTarget) return
+
+    if (this.editingGradientTarget.type === "expression") {
+      if (this.currentMetadataId === "heatmap_expression") {
+        this.gradientManager.saveGradientForMetadata("heatmap_expression")
+      }
+      this.expressionCustomColorRange = this.customColorRange
+        ? { min: this.customColorRange.min, max: this.customColorRange.max }
+        : null
+      return
+    }
+
+    const found = this.findTrackById(this.editingGradientTarget.id, this.editingGradientTarget.axis)
+    if (found?.track) this.applyControllerGradientToTrack(found.track)
+  }
+
+  applyControllerGradientToTrack(track) {
+    if (!track || track.type !== "numerical") return
+    const points = this.activeControlPoints().map((p) => ({
+      position: Number(p.position),
+      color: Number(p.color)
+    }))
+    track.customGradientControlPoints = this.customGradientControlPoints
+      ? this.customGradientControlPoints.map((p) => ({ position: Number(p.position), color: Number(p.color) }))
+      : points
+    track.gradientControlPoints = points
+    track.gradientScale = this.gradientScale === "log" ? "log" : "normal"
+    track.customColorRange = this.customColorRange
+      ? { min: Number(this.customColorRange.min), max: Number(this.customColorRange.max) }
+      : null
+    this.gradientManager.saveGradientForMetadata(this.trackGradientMetadataId(track))
+  }
+
+  openGradientEditorModal() {
+    this.openExpressionGradientEditor()
+  }
+
+  openExpressionGradientEditor() {
+    // Capture the legend's gradient before stash/load can replace controller state.
+    const displayed = this.expressionGradientState()
+    const points = displayed.customGradientControlPoints ||
+      displayed.gradientControlPoints ||
+      this.defaultHeatmapControlPoints()
+    const scale = displayed.gradientScale === "log" ? "log" : "normal"
+
+    this.stashCurrentGradientEditorTarget()
+    this.editingGradientTarget = { type: "expression" }
+    this.currentMetadataId = "heatmap_expression"
+    if (!this.currentMetadataVector) this.setupExpressionGradient()
+    const values = this.displayMatrix || this.baseMatrix
+    if (values) {
+      this.currentMetadataVector = {
+        data_type: "NUMERIC",
+        values,
+        compression_info: { min_val: this.vmin, max_val: this.vmax }
+      }
+    }
+    this.customColorRange = this.expressionCustomColorRange
+      ? { ...this.expressionCustomColorRange }
+      : null
+    this.gradientMinValue = this.customColorRange?.min ?? this.vmin
+    this.gradientMaxValue = this.customColorRange?.max ?? this.vmax
+    this.seedGradientEditorState(points, scale, this.currentMetadataId)
+    const histLabel = document.getElementById("gradient-editor-hist-label")
+    if (histLabel) histLabel.textContent = "Gene expression distribution"
+    this.gradientManager.openGradientEditorModal()
+  }
+
+  openTrackGradientEditor(track, axis) {
+    if (!track || track.type !== "numerical") return
+    this.ensureTrackGradient(track)
+    const points = this.activeTrackControlPoints(track)
+    const scale = track.gradientScale === "log" ? "log" : "normal"
+
+    this.stashCurrentGradientEditorTarget()
+    this.editingGradientTarget = { type: "track", id: track.id, axis }
+    this.currentMetadataId = this.trackGradientMetadataId(track)
+    this.customColorRange = track.customColorRange
+      ? { min: Number(track.customColorRange.min), max: Number(track.customColorRange.max) }
+      : null
+    const range = this.trackValueRange(track)
+    this.gradientMinValue = range.min
+    this.gradientMaxValue = range.max
+    this.currentMetadataVector = {
+      data_type: "NUMERIC",
+      values: track.values,
+      compression_info: { min_val: track.min, max_val: track.max }
+    }
+    this.seedGradientEditorState(points, scale, this.currentMetadataId)
+    const histLabel = document.getElementById("gradient-editor-hist-label")
+    if (histLabel) histLabel.textContent = `${track.name} distribution`
+    this.gradientManager.openGradientEditorModal()
+  }
+
+  closeGradientEditorModal() {
+    this.stashCurrentGradientEditorTarget()
+    this.gradientManager.closeGradientEditorModal()
+    this.persistCurrentCheckpointOnServer("close-gradient-editor")
+  }
+
+  closeControlPointEditor() {
+    const editor = document.getElementById("gradient-control-point-editor")
+    if (editor) editor.style.display = "none"
+    this.selectedControlPointIndex = undefined
+    this.rendererManager.renderModalGradientPreview()
+    this.rendererManager.renderModalControlPointMarkers()
+    this.rendererManager.renderControlPointsList()
+    this.reapplyColorsWithNewGradient()
+  }
+
+  resetGradient() {
+    this.customGradientControlPoints = null
+    this.selectedControlPointIndex = undefined
+    this.gradientScale = "normal"
+    if (this.editingGradientTarget?.type === "track") {
+      this.gradientControlPoints = this.defaultNumericalTrackControlPoints()
+      this.customColorRange = null
+    } else {
+      this.colorManager.initializeDefaultGradient()
+      if (!this.gradientControlPoints || !this.gradientControlPoints.length) {
+        this.gradientControlPoints = this.defaultHeatmapControlPoints()
+      }
+      this.customColorRange = null
+      this.expressionCustomColorRange = null
+    }
+    this.gradientManager.saveGradientForMetadata(this.currentMetadataId)
+    this.closeControlPointEditor()
+    this.gradientManager.syncGradientScaleSelect()
+    this.rendererManager.renderModalGradientPreview()
+    this.rendererManager.renderModalControlPointMarkers()
+    this.rendererManager.renderControlPointsList()
+    this.gradientManager.renderGradientDistributionHistogram()
+    this.reapplyColorsWithNewGradient()
+  }
+
+  reapplyColorsWithNewGradient() {
+    if (this.currentMetadataId) {
+      this.gradientManager.saveGradientForMetadata(this.currentMetadataId)
+    }
+
+    if (this.editingGradientTarget?.type === "track") {
+      const found = this.findTrackById(this.editingGradientTarget.id, this.editingGradientTarget.axis)
+      if (found?.track) this.applyControllerGradientToTrack(found.track)
+      this.render()
+    } else {
+      this.expressionCustomColorRange = this.customColorRange
+        ? { min: this.customColorRange.min, max: this.customColorRange.max }
+        : null
+      this.applyActiveColormap()
+      if (this.displayMatrix && this.renderer) {
+        this.renderer.setMatrix(
+          this.displayMatrix,
+          this.nDispRows,
+          this.nDispCols,
+          this.vmin,
+          this.vmax,
+          (v, vmin, vmax) => this.normalizeExpressionValue(v, vmin, vmax)
+        )
+      }
+      this.render()
+    }
+    this.persistCurrentCheckpointOnServer("gradient-edit")
+  }
+
+  getMissingNumericColor() {
+    return 0x9ca3af
+  }
+
+  getEffectiveColorRange() {
+    if (this.customColorRange) return this.customColorRange
+    if (this.editingGradientTarget?.type === "track") {
+      const found = this.findTrackById(this.editingGradientTarget.id, this.editingGradientTarget.axis)
+      if (found?.track) {
+        return { min: Number(found.track.min), max: Number(found.track.max) }
+      }
+    }
+    if (Number.isFinite(this.vmin) && Number.isFinite(this.vmax)) {
+      return { min: this.vmin, max: this.vmax }
+    }
+    return null
+  }
+
+  canUseLogGradientScale(minVal, maxVal) {
+    return Number.isFinite(minVal) && Number.isFinite(maxVal) && minVal > 0 && maxVal > 0
+  }
+
+  getEffectiveGradientScale(minVal = null, maxVal = null) {
+    if (this.gradientScale !== "log") return "normal"
+    let min = minVal
+    let max = maxVal
+    if (min === null || max === null) {
+      const range = this.getEffectiveColorRange()
+      if (range) {
+        min = range.min
+        max = range.max
+      } else {
+        min = this.gradientMinValue
+        max = this.gradientMaxValue
+      }
+    }
+    return this.canUseLogGradientScale(min, max) ? "log" : "normal"
+  }
+
+  valueToGradientPosition(value, minVal, maxVal) {
+    if (!Number.isFinite(value) || !Number.isFinite(minVal) || !Number.isFinite(maxVal)) return 0
+    if (this.getEffectiveGradientScale(minVal, maxVal) === "log") {
+      if (value <= 0) return 0
+      const logMin = Math.log10(minVal)
+      const logMax = Math.log10(maxVal)
+      const span = logMax - logMin
+      if (span <= 0) return 0
+      return Math.min(1, Math.max(0, (Math.log10(value) - logMin) / span))
+    }
+    const span = maxVal - minVal
+    if (span === 0) return 0
+    return Math.min(1, Math.max(0, (value - minVal) / span))
+  }
+
+  actualValueToPosition(actualValue) {
+    if (this.gradientMinValue === undefined || this.gradientMaxValue === undefined) return actualValue
+    return this.valueToGradientPosition(actualValue, this.gradientMinValue, this.gradientMaxValue)
+  }
+
+  positionToActualValue(position) {
+    if (this.gradientMinValue === undefined || this.gradientMaxValue === undefined) return position
+    const minVal = this.gradientMinValue
+    const maxVal = this.gradientMaxValue
+    if (this.getEffectiveGradientScale(minVal, maxVal) === "log") {
+      const logMin = Math.log10(minVal)
+      const logMax = Math.log10(maxVal)
+      return Math.pow(10, logMin + position * (logMax - logMin))
+    }
+    return minVal + (position * (maxVal - minVal))
+  }
+
+  setGradientScale(scale) {
+    const next = scale === "log" ? "log" : "normal"
+    if (next === "log") {
+      const range = this.getEffectiveColorRange()
+      const minVal = range?.min ?? this.gradientMinValue
+      const maxVal = range?.max ?? this.gradientMaxValue
+      if (!this.canUseLogGradientScale(minVal, maxVal)) return false
+    }
+    this.gradientScale = next
+    return true
+  }
+
+  safeMin(values) {
+    let min = Infinity
+    if (!values) return min
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i]
+      if (typeof v === "number" && Number.isFinite(v) && v < min) min = v
+    }
+    return min
+  }
+
+  safeMax(values) {
+    let max = -Infinity
+    if (!values) return max
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i]
+      if (typeof v === "number" && Number.isFinite(v) && v > max) max = v
+    }
+    return max
+  }
+
+  resolveHistogramOptions(options = null) {
+    const fallbackScale = this.histogramScale === "log" ? "log" : "normal"
+    const scale = options && Object.prototype.hasOwnProperty.call(options, "scale")
+      ? (options.scale === "log" ? "log" : "normal")
+      : fallbackScale
+    const fallbackIgnoreZeros = this.histogramIgnoreZeros !== false
+    const ignoreZeros = options && Object.prototype.hasOwnProperty.call(options, "ignoreZeros")
+      ? options.ignoreZeros !== false
+      : fallbackIgnoreZeros
+    return { scale, ignoreZeros }
+  }
+
+  buildHistogramBins(values, minEdge, maxEdge, numBins, options = null) {
+    const resolved = this.resolveHistogramOptions(options)
+    const scale = resolved.scale
+    const ignoreZeros = resolved.ignoreZeros
+    const bins = new Array(numBins).fill(0)
+    const binRanges = new Array(numBins)
+    let sourceCount = 0
+    if (ignoreZeros) {
+      for (let i = 0; i < values.length; i++) {
+        if (values[i] !== 0) sourceCount++
+      }
+    } else {
+      sourceCount = values.length
+    }
+
+    const useLog = scale === "log" && minEdge > 0 && maxEdge > 0
+    if (useLog) {
+      const logMin = Math.log10(minEdge)
+      const logMax = Math.log10(maxEdge)
+      const span = logMax - logMin
+      if (span > 0) {
+        for (let i = 0; i < numBins; i++) {
+          const t0 = logMin + (i / numBins) * span
+          const t1 = logMin + ((i + 1) / numBins) * span
+          binRanges[i] = { min: Math.pow(10, t0), max: Math.pow(10, t1) }
+        }
+        const invSpan = numBins / span
+        for (let vi = 0; vi < values.length; vi++) {
+          const v = values[vi]
+          if (ignoreZeros && v === 0) continue
+          if (v <= 0 || !Number.isFinite(v)) continue
+          let binIndex = Math.floor((Math.log10(v) - logMin) * invSpan)
+          if (binIndex < 0) binIndex = 0
+          if (binIndex > numBins - 1) binIndex = numBins - 1
+          bins[binIndex]++
+        }
+      } else {
+        for (let i = 0; i < numBins; i++) binRanges[i] = { min: minEdge, max: maxEdge }
+        for (let vi = 0; vi < values.length; vi++) {
+          const v = values[vi]
+          if (ignoreZeros && v === 0) continue
+          if (v > 0 && Number.isFinite(v)) bins[0]++
+        }
+      }
+    } else {
+      const binWidth = (maxEdge - minEdge) / numBins
+      for (let i = 0; i < numBins; i++) {
+        binRanges[i] = { min: minEdge + i * binWidth, max: minEdge + (i + 1) * binWidth }
+      }
+      if (binWidth > 0) {
+        const invBinWidth = 1 / binWidth
+        for (let vi = 0; vi < values.length; vi++) {
+          const v = values[vi]
+          if (ignoreZeros && v === 0) continue
+          if (!Number.isFinite(v)) continue
+          let binIndex = Math.floor((v - minEdge) * invBinWidth)
+          if (binIndex < 0) binIndex = 0
+          if (binIndex > numBins - 1) binIndex = numBins - 1
+          bins[binIndex]++
+        }
+      }
+    }
+
+    let maxCount = 0
+    for (let i = 0; i < numBins; i++) {
+      if (bins[i] > maxCount) maxCount = bins[i]
+    }
+    return { bins, maxCount, binRanges, sourceCount }
+  }
+
+  // --- Checkpoints (scoped to this heatmap run) ---
+
+  csrfToken() {
+    return document.querySelector('meta[name="csrf-token"]')?.getAttribute("content")
+  }
+
+  checkpointsUrl(path = "") {
+    const base = `/projects/${encodeURIComponent(this.projectKeyValue)}/checkpoints`
+    return path ? `${base}/${encodeURIComponent(path)}` : base
+  }
+
+  checkpointsQuery() {
+    const params = new URLSearchParams({
+      kind: "heatmap",
+      run_id: String(this.runIdValue)
+    })
+    return params.toString()
+  }
+
+  serializeTrackCheckpoint(track) {
+    const payload = {
+      id: track.id,
+      thickness: track.thickness || this.layout.trackH,
+      showLegend: !!track.showLegend,
+      type: track.type === "numerical" ? "numerical" : "categorical",
+      displayMode: track.displayMode === "barplot" ? "barplot" : "color"
+    }
+    if (track.type === "numerical") {
+      this.ensureTrackGradient(track)
+      const points = this.activeTrackControlPoints(track)
+      payload.gradient = {
+        controlPoints: points.map((p) => ({ position: Number(p.position), color: Number(p.color) })),
+        customColorRange: track.customColorRange
+          ? { min: Number(track.customColorRange.min), max: Number(track.customColorRange.max) }
+          : null,
+        gradientScale: track.gradientScale === "log" ? "log" : "normal"
+      }
+    }
+    return payload
+  }
+
+  buildCheckpointState() {
+    // Keep the live editor target synced before snapshotting.
+    this.stashCurrentGradientEditorTarget()
+    const expressionId = "heatmap_expression"
+    const storedExpression = this.metadataGradients.get(expressionId)
+    const expressionPoints = storedExpression?.customGradientControlPoints ||
+      storedExpression?.gradientControlPoints ||
+      this.activeControlPoints()
+    return {
+      version: 1,
+      kind: "heatmap",
+      run_id: Number(this.runIdValue),
+      view: this.view ? { ...this.view } : null,
+      showColTree: !!this.showColTree,
+      showRowTree: !!this.showRowTree,
+      showLabels: !!this.showLabels,
+      legendWidthPx: this.estimateRightLegendWidth(),
+      rowCollapsed: Array.from(this.rowCollapsed || []),
+      colCollapsed: Array.from(this.colCollapsed || []),
+      colTracks: this.colTracks.filter((t) => !t.loading).map((t) => this.serializeTrackCheckpoint(t)),
+      rowTracks: this.rowTracks.filter((t) => !t.loading).map((t) => this.serializeTrackCheckpoint(t)),
+      gradient: {
+        controlPoints: Array.isArray(expressionPoints)
+          ? expressionPoints.map((p) => ({ position: Number(p.position), color: Number(p.color) }))
+          : [],
+        customColorRange: this.expressionCustomColorRange
+          ? { ...this.expressionCustomColorRange }
+          : (this.customColorRange ? { ...this.customColorRange } : null),
+        gradientScale: (storedExpression?.gradientScale || this.gradientScale || "normal") === "log"
+          ? "log"
+          : "normal"
+      }
+    }
+  }
+
+  buildCurrentCheckpointPersistencePayload() {
+    const state = this.buildCheckpointState()
+    state.clientSavedAt = new Date().toISOString()
+    return state
+  }
+
+  currentCheckpointSessionKey() {
+    if (!this.projectKeyValue || !this.runIdValue) return null
+    return `heatmap-current-checkpoint:${this.projectKeyValue}:${this.runIdValue}`
+  }
+
+  persistCurrentCheckpointToSession(state = null) {
+    const key = this.currentCheckpointSessionKey()
+    if (!key) return
+    try {
+      const payloadState = state || this.buildCurrentCheckpointPersistencePayload()
+      sessionStorage.setItem(key, JSON.stringify({
+        state: payloadState,
+        saved_at: payloadState.clientSavedAt
+      }))
+      this._lastPersistedState = payloadState
+    } catch (_e) {
+      // ignore session storage failures
+    }
+  }
+
+  readCurrentCheckpointFromSession() {
+    const key = this.currentCheckpointSessionKey()
+    if (!key) return null
+    try {
+      const raw = sessionStorage.getItem(key)
+      if (!raw) return null
+      const parsed = JSON.parse(raw)
+      if (!parsed?.state || typeof parsed.state !== "object") return null
+      return parsed.state
+    } catch (_e) {
+      return null
+    }
+  }
+
+  persistCurrentCheckpointBeforeTeardown(reason) {
+    if (this.currentCheckpointLoadInProgress) return
+    if (!this.currentCheckpointReadyForOverwrite) return
+    if (!this.renderer) return
+    this.persistCurrentCheckpointToSession()
+    this.persistCurrentCheckpointOnServer(reason)
+  }
+
+  persistCurrentCheckpointOnServer(reason = "unknown") {
+    if (!this.canAnalyzeValue) return
+    if (this.currentCheckpointLoadInProgress) return
+    if (!this.currentCheckpointReadyForOverwrite) return
+    if (!this.projectKeyValue || !this.runIdValue) return
+
+    const state = this._lastPersistedState?.clientSavedAt
+      ? this._lastPersistedState
+      : this.buildCurrentCheckpointPersistencePayload()
+    this.persistCurrentCheckpointToSession(state)
+
+    fetch(`${this.checkpointsUrl("current")}?${this.checkpointsQuery()}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRF-Token": this.csrfToken()
+      },
+      credentials: "same-origin",
+      keepalive: true,
+      body: JSON.stringify({
+        kind: "heatmap",
+        run_id: this.runIdValue,
+        checkpoint: {
+          kind: "heatmap",
+          run_id: this.runIdValue,
+          state
+        }
+      })
+    }).catch((e) => {
+      console.warn("[heatmap] persist current checkpoint failed", reason, e)
+    })
+  }
+
+  async loadCurrentCheckpointOnEntry() {
+    this.currentCheckpointLoadInProgress = true
+    this.setCheckpointLoading(true, "Loading checkpoint")
+    try {
+      const sessionState = this.readCurrentCheckpointFromSession()
+      let serverState = null
+      try {
+        const response = await fetch(`${this.checkpointsUrl("current")}?${this.checkpointsQuery()}`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+          credentials: "same-origin"
+        })
+        if (response.ok) {
+          const payload = await response.json().catch(() => ({}))
+          if (payload?.checkpoint?.state) serverState = payload.checkpoint.state
+        }
+      } catch (e) {
+        console.warn("[heatmap] load current checkpoint failed", e)
+      }
+
+      const sessionAt = Date.parse(sessionState?.clientSavedAt || "") || 0
+      const serverAt = Date.parse(serverState?.clientSavedAt || "") || 0
+      const stateToApply = sessionAt > serverAt ? sessionState : (serverState || sessionState)
+      if (!stateToApply) return false
+
+      await this.applyCheckpointState(stateToApply)
+      return true
+    } catch (e) {
+      console.warn("[heatmap] apply current checkpoint failed", e)
+      return false
+    } finally {
+      this.currentCheckpointLoadInProgress = false
+      this.setCheckpointLoading(false)
+    }
+  }
+
+  openSaveCheckpointDialog() {
+    if (!this.canAnalyzeValue) {
+      alert("Not authorized to save checkpoints.")
+      return
+    }
+    const title = window.prompt("Checkpoint title")
+    if (!title) return
+    const normalized = title.trim()
+    if (!normalized) return
+    this.saveCheckpoint(normalized)
+  }
+
+  async saveCheckpoint(title) {
+    const response = await fetch(this.checkpointsUrl(), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRF-Token": this.csrfToken()
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        kind: "heatmap",
+        run_id: this.runIdValue,
+        checkpoint: {
+          title,
+          kind: "heatmap",
+          run_id: this.runIdValue,
+          state: this.buildCheckpointState()
+        }
+      })
+    })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || `Failed to save checkpoint (${response.status})`)
+      return
+    }
+
+    const payload = await response.json()
+    const checkpoint = payload.checkpoint
+    this.mergeCheckpointIntoHistory(checkpoint)
+    this.lastLoadedCheckpointId = checkpoint.id
+    this.updateCheckpointCommentsButtonState(checkpoint.comments_count || 0)
+    this.persistCurrentCheckpointOnServer("save-named-checkpoint")
+  }
+
+  mergeCheckpointIntoHistory(checkpoint) {
+    if (!checkpoint) return
+    const list = Array.isArray(this.checkpointHistory) ? this.checkpointHistory : []
+    const idx = list.findIndex((item) => String(item.id) === String(checkpoint.id))
+    if (idx >= 0) list[idx] = checkpoint
+    else list.unshift(checkpoint)
+    this.checkpointHistory = list
+  }
+
+  async fetchCheckpointHistory() {
+    if (!this.projectKeyValue || !this.runIdValue) return
+    const response = await fetch(`${this.checkpointsUrl()}?${this.checkpointsQuery()}`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      credentials: "same-origin"
+    })
+    if (!response.ok) return
+    const payload = await response.json()
+    this.checkpointHistory = Array.isArray(payload.checkpoints) ? payload.checkpoints : []
+    this.updateCheckpointCommentsButtonState(
+      this.checkpointForId(this.lastLoadedCheckpointId)?.comments_count || 0
+    )
+  }
+
+  checkpointForId(id) {
+    if (!id) return null
+    return (this.checkpointHistory || []).find((item) => String(item.id) === String(id)) || null
+  }
+
+  updateCheckpointCommentsButtonState(commentCount = 0) {
+    if (!this.hasCheckpointCommentsBtnTarget) return
+    const count = Number(commentCount) || 0
+    this.checkpointCommentsBtnTarget.style.color = count > 0 ? "#047857" : ""
+    this.checkpointCommentsBtnTarget.title = count > 0
+      ? `Comments (${count})`
+      : "Comments on the loaded checkpoint"
+  }
+
+  async openCheckpointHistory(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    if (!this.hasCheckpointHistoryOverlayTarget) return
+    this.checkpointHistoryOverlayTarget.style.display = "flex"
+    await this.fetchCheckpointHistory()
+    this.renderCheckpointHistory()
+  }
+
+  closeCheckpointHistory() {
+    if (!this.hasCheckpointHistoryOverlayTarget) return
+    this.checkpointHistoryOverlayTarget.style.display = "none"
+  }
+
+  checkpointHistoryBackdropClick(event) {
+    if (event.target === this.checkpointHistoryOverlayTarget) this.closeCheckpointHistory()
+  }
+
+  renderCheckpointHistory() {
+    if (!this.hasCheckpointHistoryListTarget) return
+    const list = this.checkpointHistoryListTarget
+    const history = this.checkpointHistory || []
+    if (!history.length) {
+      list.innerHTML = `<div style="padding:12px;color:#6b7280;font-size:13px;line-height:1.45;">
+        No checkpoints yet for this heatmap run.
+        ${this.canAnalyzeValue ? "Use <strong>Save checkpoint</strong> to store the current view, tracks, and gradient." : ""}
+      </div>`
+      return
+    }
+
+    list.innerHTML = history.map((checkpoint) => {
+      const id = String(checkpoint.id)
+      const createdAt = checkpoint.created_at ? new Date(checkpoint.created_at).toLocaleString() : ""
+      const commentCount = Number(checkpoint.comments_count || 0)
+      const isLoaded = this.lastLoadedCheckpointId && String(this.lastLoadedCheckpointId) === id
+      const author = checkpoint.user_name || "Unknown"
+      return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:${isLoaded ? "#fffbeb" : "#fff"};">
+        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+          <div style="min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:#111827;">${this.escape(checkpoint.title || "Untitled")}</div>
+            <div style="font-size:11px;color:#6b7280;margin-top:2px;">${this.escape(createdAt)} · ${this.escape(author)} · ${commentCount} comment${commentCount === 1 ? "" : "s"}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0;">
+            <button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-gray-100 text-gray-700 rounded border border-gray-300 text-xs"
+              data-action="heatmap#loadCheckpointFromHistory" data-heatmap-id-param="${this.escape(id)}">Load</button>
+            <button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-gray-100 text-gray-700 rounded border border-gray-300 text-xs"
+              data-action="heatmap#loadCheckpointCommentsFromHistory" data-heatmap-id-param="${this.escape(id)}">Comments</button>
+            ${this.canAnalyzeValue ? `<button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-red-50 text-red-700 rounded border border-red-200 text-xs"
+              data-action="heatmap#deleteCheckpointFromHistory" data-heatmap-id-param="${this.escape(id)}">Delete</button>` : ""}
+          </div>
+        </div>
+      </div>`
+    }).join("")
+  }
+
+  async loadCheckpointFromHistory(event) {
+    const id = event.params.id
+    await this.loadCheckpointById(id)
+    this.closeCheckpointHistory()
+  }
+
+  async loadCheckpointCommentsFromHistory(event) {
+    const id = event.params.id
+    await this.loadCheckpointById(id)
+    this.closeCheckpointHistory()
+    await this.openCheckpointComments()
+  }
+
+  async deleteCheckpointFromHistory(event) {
+    const id = event.params.id
+    if (!this.canAnalyzeValue) return
+    if (!window.confirm("Delete this checkpoint?")) return
+    const response = await fetch(this.checkpointsUrl(id), {
+      method: "DELETE",
+      headers: {
+        Accept: "application/json",
+        "X-CSRF-Token": this.csrfToken()
+      },
+      credentials: "same-origin"
+    })
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || `Failed to delete checkpoint (${response.status})`)
+      return
+    }
+    this.checkpointHistory = (this.checkpointHistory || []).filter((item) => String(item.id) !== String(id))
+    if (String(this.lastLoadedCheckpointId) === String(id)) {
+      this.lastLoadedCheckpointId = null
+      this.updateCheckpointCommentsButtonState(0)
+    }
+    this.renderCheckpointHistory()
+  }
+
+  setCheckpointLoading(visible, message = "Loading checkpoint") {
+    if (!this.hasCheckpointLoadingOverlayTarget) return
+    if (this.hasCheckpointLoadingMessageTarget) {
+      const trimmed = message != null ? String(message).trim() : ""
+      this.checkpointLoadingMessageTarget.textContent = trimmed.length > 0 ? trimmed : "Loading checkpoint"
+    }
+    this.checkpointLoadingOverlayTarget.style.display = visible ? "flex" : "none"
+  }
+
+  async loadCheckpointFromUrlIfPresent() {
+    const params = new URLSearchParams(window.location.search)
+    const checkpointId = String(params.get("heatmap_checkpoint_id") || "").trim()
+    if (!checkpointId) return false
+    await this.loadCheckpointById(checkpointId)
+    if (["1", "true", "yes"].includes(String(params.get("open_heatmap_comments") || "").toLowerCase())) {
+      await this.openCheckpointComments()
+    }
+    return true
+  }
+
+  async loadCheckpointById(checkpointId) {
+    if (!checkpointId) return
+    this.setCheckpointLoading(true, "Loading checkpoint")
+    this.currentCheckpointLoadInProgress = true
+    try {
+      const response = await fetch(`${this.checkpointsUrl(checkpointId)}?${this.checkpointsQuery()}`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        credentials: "same-origin"
+      })
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({}))
+        throw new Error(errorPayload.error || `Failed to load checkpoint (${response.status})`)
+      }
+      const payload = await response.json()
+      const checkpoint = payload.checkpoint
+      if (!checkpoint?.state) throw new Error("Checkpoint has no state")
+      if (checkpoint.kind && checkpoint.kind !== "heatmap") {
+        throw new Error("This checkpoint is not a heatmap checkpoint")
+      }
+      if (checkpoint.run_id && String(checkpoint.run_id) !== String(this.runIdValue)) {
+        throw new Error("Checkpoint belongs to a different heatmap run")
+      }
+
+      await this.applyCheckpointState(checkpoint.state)
+      this.mergeCheckpointIntoHistory(checkpoint)
+      this.lastLoadedCheckpointId = checkpoint.id
+      this.checkpointCommentsFocusId = checkpoint.id
+      const commentCount = Number(checkpoint.comments_count || (checkpoint.comments || []).length || 0)
+      this.updateCheckpointCommentsButtonState(commentCount)
+
+      const url = new URL(window.location.href)
+      url.searchParams.set("heatmap_checkpoint_id", String(checkpoint.id))
+      window.history.replaceState({}, "", url.toString())
+    } catch (e) {
+      console.error("[heatmap] load checkpoint failed", e)
+      alert(e.message || "Failed to load checkpoint")
+    } finally {
+      this.currentCheckpointLoadInProgress = false
+      this.setCheckpointLoading(false)
+      if (this.currentCheckpointReadyForOverwrite) {
+        this.persistCurrentCheckpointOnServer("load-named-checkpoint")
+      }
+    }
+  }
+
+  async applyCheckpointState(state) {
+    if (!state || typeof state !== "object") return
+
+    this.showColTree = state.showColTree !== false
+    this.showRowTree = state.showRowTree !== false
+    this.showLabels = state.showLabels !== false
+    if (Number.isFinite(Number(state.legendWidthPx))) {
+      this.legendWidthPx = Number(state.legendWidthPx)
+      this.syncLegendWidthControls()
+    }
+    this.syncToggleButtons()
+
+    this.rowCollapsed = new Set(Array.isArray(state.rowCollapsed) ? state.rowCollapsed.map(Number) : [])
+    this.colCollapsed = new Set(Array.isArray(state.colCollapsed) ? state.colCollapsed.map(Number) : [])
+
+    this.colTracks = []
+    this.rowTracks = []
+    const colSpecs = Array.isArray(state.colTracks) ? state.colTracks : []
+    const rowSpecs = Array.isArray(state.rowTracks) ? state.rowTracks : []
+    for (const spec of colSpecs) {
+      await this.restoreTrack(spec, "column")
+    }
+    for (const spec of rowSpecs) {
+      await this.restoreTrack(spec, "row")
+    }
+    this.renderActiveTracksList()
+
+    this.rebuildDisplay()
+
+    if (state.view && typeof state.view === "object") {
+      this.view = {
+        colStart: Number(state.view.colStart) || 0,
+        colEnd: Number(state.view.colEnd) || this.nDispCols,
+        rowStart: Number(state.view.rowStart) || 0,
+        rowEnd: Number(state.view.rowEnd) || this.nDispRows
+      }
+    } else {
+      this.view = {
+        colStart: 0,
+        colEnd: this.nDispCols,
+        rowStart: 0,
+        rowEnd: this.nDispRows
+      }
+    }
+
+    if (state.gradient && typeof state.gradient === "object") {
+      const points = Array.isArray(state.gradient.controlPoints) ? state.gradient.controlPoints : null
+      if (points && points.length) {
+        this.customGradientControlPoints = points.map((p) => ({
+          position: Number(p.position),
+          color: Number(p.color)
+        }))
+        this.gradientControlPoints = this.customGradientControlPoints
+      }
+      this.customColorRange = state.gradient.customColorRange || null
+      this.expressionCustomColorRange = this.customColorRange
+        ? { min: Number(this.customColorRange.min), max: Number(this.customColorRange.max) }
+        : null
+      this.gradientScale = state.gradient.gradientScale || "normal"
+      if (this.customColorRange?.min != null) this.gradientMinValue = this.customColorRange.min
+      if (this.customColorRange?.max != null) this.gradientMaxValue = this.customColorRange.max
+      this.editingGradientTarget = { type: "expression" }
+      this.currentMetadataId = "heatmap_expression"
+      this.gradientManager.saveGradientForMetadata(this.currentMetadataId)
+      this.applyActiveColormap()
+    }
+
+    this.handleResize()
+  }
+
+  async restoreTrack(spec, axis) {
+    if (!spec || spec.id == null) return
+    try {
+      const track = await this.fetchTrack(spec.id, axis)
+      const prepared = this.prepareTrack(track, {
+        thickness: spec.thickness,
+        showLegend: !!spec.showLegend,
+        gradient: spec.gradient,
+        type: spec.type,
+        displayMode: spec.displayMode
+      })
+      const list = axis === "column" ? this.colTracks : this.rowTracks
+      list.push(prepared)
+      if (prepared.type === "numerical") {
+        this.metadataGradients.set(this.trackGradientMetadataId(prepared), {
+          gradientControlPoints: JSON.parse(JSON.stringify(prepared.gradientControlPoints || this.defaultNumericalTrackControlPoints())),
+          customGradientControlPoints: prepared.customGradientControlPoints
+            ? JSON.parse(JSON.stringify(prepared.customGradientControlPoints))
+            : null,
+          gradientScale: prepared.gradientScale === "log" ? "log" : "normal"
+        })
+      }
+    } catch (e) {
+      console.warn("[heatmap] failed to restore track", spec.id, e)
+    }
+  }
+
+  async openCheckpointComments(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    if (!this.hasCheckpointCommentsOverlayTarget) return
+    await this.fetchCheckpointHistory()
+    this.populateCheckpointCommentSelect()
+    const focusId = this.checkpointCommentsFocusId || this.lastLoadedCheckpointId
+    if (this.hasCheckpointCommentSelectTarget && focusId) {
+      this.checkpointCommentSelectTarget.value = String(focusId)
+    }
+    this.renderCheckpointComments()
+    this.checkpointCommentsOverlayTarget.style.display = "flex"
+  }
+
+  closeCheckpointComments() {
+    if (!this.hasCheckpointCommentsOverlayTarget) return
+    this.checkpointCommentsOverlayTarget.style.display = "none"
+  }
+
+  checkpointCommentsBackdropClick(event) {
+    if (event.target === this.checkpointCommentsOverlayTarget) this.closeCheckpointComments()
+  }
+
+  populateCheckpointCommentSelect() {
+    if (!this.hasCheckpointCommentSelectTarget) return
+    const select = this.checkpointCommentSelectTarget
+    const history = this.checkpointHistory || []
+    select.innerHTML = ""
+    if (!history.length) {
+      const opt = document.createElement("option")
+      opt.value = ""
+      opt.textContent = "No checkpoints yet"
+      select.appendChild(opt)
+      return
+    }
+    history.forEach((checkpoint) => {
+      const opt = document.createElement("option")
+      opt.value = String(checkpoint.id)
+      const count = Number(checkpoint.comments_count || 0)
+      opt.textContent = `${checkpoint.title || "Untitled"} (${count})`
+      select.appendChild(opt)
+    })
+  }
+
+  checkpointCommentTargetChanged() {
+    this.renderCheckpointComments()
+  }
+
+  selectedCommentCheckpointId() {
+    if (this.hasCheckpointCommentSelectTarget && this.checkpointCommentSelectTarget.value) {
+      return this.checkpointCommentSelectTarget.value
+    }
+    return this.lastLoadedCheckpointId
+  }
+
+  renderCheckpointComments() {
+    if (!this.hasCheckpointCommentsListTarget) return
+    const checkpointId = this.selectedCommentCheckpointId()
+    const checkpoint = this.checkpointForId(checkpointId)
+    if (this.hasCheckpointCommentsTitleTarget) {
+      this.checkpointCommentsTitleTarget.textContent = checkpoint
+        ? `Comments on ${checkpoint.title || "checkpoint"}`
+        : "Comments"
+    }
+    if (!checkpoint) {
+      this.checkpointCommentsListTarget.innerHTML = `<div style="padding:12px;color:#6b7280;font-size:13px;">Select or load a checkpoint to view comments.</div>`
+      return
+    }
+    const comments = Array.isArray(checkpoint.comments) ? checkpoint.comments : []
+    if (!comments.length) {
+      this.checkpointCommentsListTarget.innerHTML = `<div style="padding:12px;color:#6b7280;font-size:13px;">No comments yet.</div>`
+      return
+    }
+    this.checkpointCommentsListTarget.innerHTML = comments.map((comment) => {
+      const authoredAt = comment.created_at ? new Date(comment.created_at).toLocaleString() : ""
+      const canManage = comment.user_can_manage === true && this.canAnalyzeValue
+      const commentId = this.escape(comment.id || "")
+      return `<div style="padding:10px 16px;border-bottom:1px solid #f3f4f6;">
+        <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+          <div style="min-width:0;">
+            <div style="font-size:12px;font-weight:600;color:#111827;">${this.escape(comment.user_name || "User")}</div>
+            <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">${this.escape(authoredAt)}</div>
+            <div style="font-size:13px;color:#1f2937;white-space:pre-wrap;">${this.escape(comment.body || "")}</div>
+          </div>
+          ${canManage ? `<div style="display:flex;gap:4px;flex-shrink:0;">
+            <button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-gray-100 text-gray-700 rounded border border-gray-300 text-xs"
+              data-action="heatmap#editCheckpointComment" data-heatmap-id-param="${commentId}">Edit</button>
+            <button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-red-50 text-red-700 rounded border border-red-200 text-xs"
+              data-action="heatmap#deleteCheckpointComment" data-heatmap-id-param="${commentId}">Delete</button>
+          </div>` : ""}
+        </div>
+      </div>`
+    }).join("")
+  }
+
+  async submitCheckpointComment() {
+    if (!this.canAnalyzeValue) return
+    const checkpointId = this.selectedCommentCheckpointId()
+    if (!checkpointId) {
+      alert("Select a checkpoint first.")
+      return
+    }
+    const body = (this.hasCheckpointCommentInputTarget ? this.checkpointCommentInputTarget.value : "").trim()
+    if (!body) {
+      alert("Comment cannot be empty.")
+      return
+    }
+    const response = await fetch(this.checkpointsUrl(checkpointId), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRF-Token": this.csrfToken()
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        kind: "heatmap",
+        run_id: this.runIdValue,
+        checkpoint: { comment_body: body }
+      })
+    })
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || `Failed to add comment (${response.status})`)
+      return
+    }
+    const payload = await response.json()
+    this.mergeCheckpointIntoHistory(payload.checkpoint)
+    if (this.hasCheckpointCommentInputTarget) this.checkpointCommentInputTarget.value = ""
+    this.populateCheckpointCommentSelect()
+    if (this.hasCheckpointCommentSelectTarget) this.checkpointCommentSelectTarget.value = String(checkpointId)
+    this.renderCheckpointComments()
+    this.updateCheckpointCommentsButtonState(payload.checkpoint?.comments_count || 0)
+  }
+
+  async editCheckpointComment(event) {
+    if (!this.canAnalyzeValue) return
+    const commentId = event.params.id
+    const checkpointId = this.selectedCommentCheckpointId()
+    if (!checkpointId || !commentId) return
+    const checkpoint = this.checkpointForId(checkpointId)
+    const existing = (checkpoint?.comments || []).find((c) => String(c.id) === String(commentId))
+    const nextBody = window.prompt("Edit comment", existing?.body || "")
+    if (nextBody == null) return
+    const body = nextBody.trim()
+    if (!body) {
+      alert("Comment cannot be empty.")
+      return
+    }
+    const response = await fetch(this.checkpointsUrl(checkpointId), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRF-Token": this.csrfToken()
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        kind: "heatmap",
+        run_id: this.runIdValue,
+        checkpoint: {
+          comment_action: "edit",
+          comment_id: commentId,
+          comment_body: body
+        }
+      })
+    })
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || `Failed to edit comment (${response.status})`)
+      return
+    }
+    const payload = await response.json()
+    this.mergeCheckpointIntoHistory(payload.checkpoint)
+    this.renderCheckpointComments()
+  }
+
+  async deleteCheckpointComment(event) {
+    if (!this.canAnalyzeValue) return
+    const commentId = event.params.id
+    const checkpointId = this.selectedCommentCheckpointId()
+    if (!checkpointId || !commentId) return
+    if (!window.confirm("Delete this comment?")) return
+    const response = await fetch(this.checkpointsUrl(checkpointId), {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRF-Token": this.csrfToken()
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        kind: "heatmap",
+        run_id: this.runIdValue,
+        checkpoint: {
+          comment_action: "delete",
+          comment_id: commentId
+        }
+      })
+    })
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || `Failed to delete comment (${response.status})`)
+      return
+    }
+    const payload = await response.json()
+    this.mergeCheckpointIntoHistory(payload.checkpoint)
+    this.populateCheckpointCommentSelect()
+    if (this.hasCheckpointCommentSelectTarget) this.checkpointCommentSelectTarget.value = String(checkpointId)
+    this.renderCheckpointComments()
+    this.updateCheckpointCommentsButtonState(payload.checkpoint?.comments_count || 0)
   }
 }

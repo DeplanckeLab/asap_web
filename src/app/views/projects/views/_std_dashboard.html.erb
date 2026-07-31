@@ -82,10 +82,12 @@
           <i class="fas fa-inbox text-gray-400 text-4xl mb-3"></i>
           <p class="text-gray-600">
             No runs found for this step.
-            <br><br>
-            Some runs may be associated to other LOOM file.
-            <br><br>
-            If you want to access them please change accordingly the LOOM file filter at the top of this page.
+            <% if @available_loom_files.present? && @available_loom_files.size > 1 %>
+              <br><br>
+              Some runs may be associated to other LOOM file.
+              <br><br>
+              If you want to access them please change accordingly the LOOM file filter at the top of this page.
+            <% end %>
           </p>
           </div>
         </div>

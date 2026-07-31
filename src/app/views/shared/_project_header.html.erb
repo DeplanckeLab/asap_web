@@ -452,7 +452,8 @@
                 <% guided_tours_for_menu.each do |tour| %>
                   <%= link_to tour.name,
                               guided_tour_start_url(tour.id),
-                              class: "flex items-center gap-2 px-0 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg" %>
+                              class: "flex items-center gap-2 px-0 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg",
+                              data: { guided_tour_start_id: tour.id } %>
                 <% end %>
               </div>
               <div class="border-t border-gray-200 my-1"></div>

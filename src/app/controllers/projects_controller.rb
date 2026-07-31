@@ -12508,9 +12508,10 @@ class ProjectsController < ApplicationController
     end
 
     def heatmap_metadata_options_for(loom_file, dim:)
+      # display_name is a Ruby method on Annot, not a DB column — order by name in SQL
       Annot.where(project_id: @project.id, filepath: loom_file, dim: dim)
            .includes(:data_type)
-           .order(Arel.sql('LOWER(COALESCE(display_name, name))'))
+           .order(Arel.sql('LOWER(name)'))
            .map do |annot|
         {
           id: annot.id,

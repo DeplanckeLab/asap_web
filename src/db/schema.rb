@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_30_220000) do
+ActiveRecord::Schema[8.1].define(version: 2026_07_31_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -213,13 +213,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_30_220000) do
     t.text "comments_json", default: "[]", null: false
     t.datetime "created_at", null: false
     t.boolean "is_landing_page", default: false, null: false
+    t.string "kind", default: "visualization", null: false
     t.integer "project_id", null: false
+    t.integer "run_id"
     t.text "state_json", default: "{}", null: false
     t.string "title", null: false
     t.datetime "updated_at", null: false
     t.integer "user_id"
+    t.index ["kind"], name: "index_checkpoints_on_kind"
+    t.index ["project_id", "kind", "run_id"], name: "index_checkpoints_on_project_kind_run"
     t.index ["project_id"], name: "index_checkpoints_on_project_id"
     t.index ["project_id"], name: "index_checkpoints_one_landing_page_per_project", unique: true, where: "(is_landing_page = true)"
+    t.index ["run_id"], name: "index_checkpoints_on_run_id"
     t.index ["user_id"], name: "index_checkpoints_on_user_id"
   end
 
@@ -1505,6 +1510,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_30_220000) do
   add_foreign_key "cell_ontology_terms", "cell_ontologies", name: "cell_ontology_terms_cell_ontology_id_fkey"
   add_foreign_key "cell_sets", "project_cell_sets", name: "cell_sets_project_cell_set_id_fkey"
   add_foreign_key "checkpoints", "projects"
+  add_foreign_key "checkpoints", "runs"
   add_foreign_key "checkpoints", "users"
   add_foreign_key "cla_votes", "cla_sources", name: "cla_votes_cla_source_id_fkey"
   add_foreign_key "cla_votes", "clas", name: "cla_votes_cla_id_fkey"

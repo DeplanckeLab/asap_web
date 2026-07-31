@@ -206,9 +206,9 @@ export class GradientManager {
       if (!canUseLog) {
         hint.textContent = 'Log10 requires a strictly positive value range.'
       } else if (effective === 'log') {
-        hint.textContent = 'Data values are mapped to the gradient in log10 space (also used by distribution bar plots).'
+        hint.textContent = 'Data values are mapped to the gradient in log10 space.'
       } else {
-        hint.textContent = 'Maps data values to the gradient (also used by distribution bar plots).'
+        hint.textContent = 'Maps data values to the gradient.'
       }
     }
   }
@@ -1103,7 +1103,7 @@ export class GradientManager {
     if (bin) {
       html += `<div style="margin-top:4px;color:#d1d5db;">`
       html += `Bin: ${this.formatGradientEditorValue(bin.start)} – ${this.formatGradientEditorValue(bin.end)}`
-      html += ` · ${bin.count.toLocaleString()} cells`
+      html += ` · ${bin.count.toLocaleString()} values`
       html += `</div>`
     }
     tooltip.innerHTML = html

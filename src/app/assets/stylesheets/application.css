@@ -418,7 +418,7 @@ p, label, li, td, th, input, select, textarea, button {
   z-index: 10100;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   justify-content: flex-end;
   max-width: calc(100vw - 32px);
@@ -427,6 +427,23 @@ p, label, li, td, th, input, select, textarea, button {
   border: 1px solid #334155;
   border-radius: 10px;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+}
+
+.guided-tour-try-bar-status {
+  flex: 1 1 12rem;
+  min-width: 0;
+  color: #e2e8f0;
+  font-size: 13px;
+  line-height: 1.35;
+  font-weight: 500;
+}
+
+.guided-tour-try-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .guided-tour-try-bar-btn {
@@ -456,6 +473,21 @@ p, label, li, td, th, input, select, textarea, button {
 
 .guided-tour-try-bar-btn-secondary:hover {
   background: #334155;
+}
+
+.guided-tour-menu-item-active {
+  font-weight: 600;
+}
+
+.guided-tour-menu-in-progress {
+  margin-left: auto;
+  padding-left: 0.5rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #0284c7;
+  white-space: nowrap;
 }
 
 .guided-tour-admin-dialog {

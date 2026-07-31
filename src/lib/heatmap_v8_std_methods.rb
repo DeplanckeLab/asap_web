@@ -312,7 +312,11 @@ module HeatmapV8StdMethods
     end
 
     def ensure_step!(version_id, docker_image)
-      step = Step.find_or_initialize_by(name: STEP_NAME, version_id: version_id, docker_image_id: docker_image.id)
+      # Prefer the canonical v8 name; fall back to the legacy Visualization catalog row
+      # (expr_heatmap) so upsert migrates it in place instead of creating a duplicate step.
+      step = Step.find_by(name: STEP_NAME, version_id: version_id, docker_image_id: docker_image.id)
+      step ||= Step.find_by(name: "expr_heatmap", version_id: version_id, docker_image_id: docker_image.id)
+      step ||= Step.new(name: STEP_NAME, version_id: version_id, docker_image_id: docker_image.id)
 
       if step.new_record?
         reference = reference_step(version_id, docker_image.id)
@@ -321,6 +325,8 @@ module HeatmapV8StdMethods
         step.color = reference&.color
       end
 
+      step.name = STEP_NAME
+      step.obj_name = STEP_NAME if step.respond_to?(:obj_name=)
       step.label = "Heatmap"
       step.tag = "heatmap"
       step.description = "Interactive heatmap of gene expression across selected cells/samples, with reproducible " \

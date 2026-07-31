@@ -1009,6 +1009,14 @@ export class DataManager {
 
   // Actual filtering update logic (separated for batching)
   performCellFilteringUpdate(shouldUpdateColors = false) {
+    const perfEnabled = this.controller.perfLoggingEnabled?.() === true
+    const t0 = perfEnabled ? performance.now() : 0
+    if (perfEnabled) {
+      this.controller.logPerf('pipeline_performCellFiltering_enter', 0, {
+        shouldUpdateColors: !!shouldUpdateColors
+      })
+    }
+
     // Use incremental filtering for better performance
     const filteredIndices = this.getIncrementalFilteredIndices()
     const previousVisibleCells = this.controller.currentVisibleCells
@@ -1050,9 +1058,36 @@ export class DataManager {
       // Redraw all density plots (histograms in range sliders) to reflect filtered cells
       this.redrawAllDensityPlots()
     }
+
+    if (perfEnabled) {
+      this.controller.logPerf('pipeline_performCellFiltering_syncDone', performance.now() - t0, {
+        shouldUpdateColors: !!shouldUpdateColors,
+        hasFilterNow,
+        hadFilterBefore,
+        filterModeChanged,
+        filteredCount: filteredIndices ? filteredIndices.length : null
+      })
+    }
     
     // Use requestAnimationFrame for smooth updates
+    if (perfEnabled) {
+      this.controller.logPerf('pipeline_performCellFiltering_rafScheduled', 0, {
+        shouldUpdateColors: !!shouldUpdateColors,
+        hasFilterNow,
+        hadFilterBefore,
+        filterModeChanged
+      })
+    }
+    const rafScheduleTime = performance.now()
     requestAnimationFrame(async () => {
+      const rafStart = performance.now()
+      if (perfEnabled) {
+        this.controller.logPerf('pipeline_performCellFiltering_rafStart', rafStart - rafScheduleTime, {
+          shouldUpdateColors: !!shouldUpdateColors,
+          gapSinceScheduleMs: Number((rafStart - rafScheduleTime).toFixed(2))
+        })
+      }
+
       // Debug: Check what metadata is being filtered
       const isGeneFiltering = filteredIndices !== null && 
                              this.controller.selectedRanges && 
@@ -1065,6 +1100,7 @@ export class DataManager {
       // Only update visualization if renderer is ready
       // For ReGL: check if coordinates and displayOrder are set (these are set when renderScatterPlot is called)
       // Also check if renderer has internal state (positions/colors) as fallback
+      const readinessStart = perfEnabled ? performance.now() : 0
       const hasCanvas = this.controller.canvas && 
                        this.controller.canvas.width > 0 && 
                        this.controller.canvas.height > 0
@@ -1412,14 +1448,32 @@ export class DataManager {
       // AND the filter mode didn't just change (e.g. from filtered to unfiltered),
       // skip the visibility pipeline entirely.
       if (!hasFilterNow && !shouldUpdateColors && !filterModeChanged) {
+        if (perfEnabled) {
+          this.controller.logPerf('pipeline_performCellFiltering_rafSkip', performance.now() - rafStart, {
+            readinessMs: Number((performance.now() - readinessStart).toFixed(2)),
+            reason: 'no-filter-no-color-update'
+          })
+        }
         return
       }
 
       // If we need to update colors (e.g., color range adapted), render colors first
       if (shouldUpdateColors && this.controller.currentMetadataVector) {
+        const colorStart = perfEnabled ? performance.now() : 0
         this.controller.renderPointsWithCurrentColoring()
+        if (perfEnabled) {
+          this.controller.logPerf('pipeline_performCellFiltering_rafColoring', performance.now() - colorStart, {
+            metadataId: this.controller.currentMetadataVector?.id ?? null
+          })
+        }
       } else {
+        const visibilityStart = perfEnabled ? performance.now() : 0
         await this.controller.updatePointVisibility(filteredIndices)
+        if (perfEnabled) {
+          this.controller.logPerf('pipeline_performCellFiltering_rafVisibility', performance.now() - visibilityStart, {
+            filteredCount: filteredIndices ? filteredIndices.length : null
+          })
+        }
       }
       
       // Re-render category labels after filtering (ReGL mode only)
@@ -1437,6 +1491,14 @@ export class DataManager {
       
       // Refresh 2D plot if open (filtering may have changed which points are visible)
       this.controller.customPlotManager.refresh2DPlotIfOpen()
+
+      if (perfEnabled) {
+        this.controller.logPerf('pipeline_performCellFiltering_rafDone', performance.now() - rafStart, {
+          shouldUpdateColors: !!shouldUpdateColors,
+          hasFilterNow,
+          filterModeChanged
+        })
+      }
     })
   }
 
@@ -2474,11 +2536,13 @@ export class DataManager {
   
   // Update category distribution bars for all visible (expanded) metadata sections
   updateAllCategoryDistributions() {
-    // console.log('🎨 [BAR PLOTS] updateAllCategoryDistributions called') */
+    const perfEnabled = this.controller.perfLoggingEnabled?.() === true
+    const t0 = perfEnabled ? performance.now() : 0
+    let drawn = 0
+    let skipped = 0
     
     // Find all expanded metadata sections
     const expandedSections = document.querySelectorAll('[data-metadata-item]')
-    // console.log('🎨 [BAR PLOTS] Found sections:', expandedSections.length) */
     
     expandedSections.forEach(section => {
       const metadataId = parseInt(section.dataset.metadataItem)
@@ -2486,28 +2550,41 @@ export class DataManager {
       // Check if this section is expanded by checking if the categories div is visible
       // (not by checking canvas visibility, as canvases might be hidden when no coloring is active)
       const header = section.querySelector('[data-action*="toggleMetadata"]')
-      if (!header) return
+      if (!header) {
+        skipped += 1
+        return
+      }
 
       const categoriesDiv =
         section.querySelector('[style*="padding-left: 32px"]') || header.nextElementSibling
       if (!categoriesDiv || categoriesDiv.style.display === 'none') {
         // Section is not expanded, skip it
+        skipped += 1
         return
       }
       
       // Section is expanded, update its distributions
       // This will show/hide canvases based on whether coloring is active
       const canvases = section.querySelectorAll('.category-distribution-canvas')
-      // console.log(`🎨 [BAR PLOTS] Metadata ${metadataId}: ${canvases.length} canvases found, section expanded`) */
       
       if (canvases.length > 0) {
-        // console.log(`🎨 [BAR PLOTS] Redrawing distributions for metadata ${metadataId}`) */
         this.controller.drawCategoryDistributions(metadataId)
+        drawn += 1
+      } else {
+        skipped += 1
       }
     })
 
     if (typeof this.controller.drawSelectionDistribution === 'function') {
       this.controller.drawSelectionDistribution()
+    }
+
+    if (perfEnabled) {
+      this.controller.logPerf('pipeline_updateAllCategoryDistributions', performance.now() - t0, {
+        sectionCount: expandedSections.length,
+        drawn,
+        skipped
+      })
     }
   }
   

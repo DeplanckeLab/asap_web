@@ -2487,7 +2487,32 @@ export default class extends Controller {
           currentCheckpointReadyForOverwrite: this.currentCheckpointReadyForOverwrite === true,
           autoPreloadMetadata: this.autoPreloadMetadata === true
         })
+
+        // Barplots / checkboxes only need expanded (+ already-loaded coloring/filter) vectors.
+        // Do not wait for the full metadata preload before painting them.
+        if (this.perfLoggingEnabled()) {
+          this.logPerf('pipeline_priorityMetadataFlush_start', 0, {
+            pendingExpanded: this._pendingExpandedMetadataIds?.size || 0
+          })
+        }
+        await this.flushPendingExpandedMetadataAfterPreload()
+        if (this.currentMetadataVector) {
+          this.scheduleDrawCategoryDistributionsForExpandedMetadata()
+        }
+        if (this.perfLoggingEnabled()) {
+          this.logPerf('pipeline_priorityMetadataFlush_done', 0, {
+            loadedMetadataCount: Object.keys(this.loadedMetadataVectors || {}).length
+          })
+        }
+
+        // Remaining metadata can warm the cache in the background.
         await this.preloadAllMetadata({ forceMemoryPromotion: true })
+        if (this.perfLoggingEnabled()) {
+          this.logPerf('pipeline_preloadAllMetadata_done', 0, {
+            loadedMetadataCount: Object.keys(this.loadedMetadataVectors || {}).length
+          })
+        }
+        // Any expands queued while background preload ran.
         await this.flushPendingExpandedMetadataAfterPreload()
       } catch (_error) {
         // Keep background preload best-effort only.
@@ -4542,8 +4567,18 @@ export default class extends Controller {
     this._pendingExpandedMetadataIds = new Set()
     if (pendingIds.length === 0) return
 
+    const perfEnabled = this.perfLoggingEnabled()
+    const flushStart = perfEnabled ? performance.now() : 0
+    if (perfEnabled) {
+      this.logPerf('pipeline_flushPendingExpanded_start', 0, {
+        pendingCount: pendingIds.length,
+        pendingIds: pendingIds.slice(0, 20)
+      })
+    }
+
     for (const metadataId of pendingIds) {
       const mid = String(metadataId || '').trim()
+      const itemStart = perfEnabled ? performance.now() : 0
       try {
         // Checkbox UI never waits on vector I/O.
         if (this.selectedCategories?.[mid] || this.selectedCategories?.[metadataId]) {
@@ -4552,26 +4587,61 @@ export default class extends Controller {
           this.revealCategoryCheckboxesForMetadata(mid)
         }
 
+        let loadMs = 0
         if (!this.loadedMetadataVectors[metadataId] && !this.loadedMetadataVectors[mid]) {
+          const loadStart = perfEnabled ? performance.now() : 0
           const metadataLoomFile = this.getLoomFileForMetadataRequest(mid)
           await this.dataManager.loadSingleMetadataVector(mid, { loomFile: metadataLoomFile })
+          loadMs = perfEnabled ? (performance.now() - loadStart) : 0
         }
-        if (!this.loadedMetadataVectors[metadataId] && !this.loadedMetadataVectors[mid]) continue
+        if (!this.loadedMetadataVectors[metadataId] && !this.loadedMetadataVectors[mid]) {
+          if (perfEnabled) {
+            this.logPerf('pipeline_flushPendingExpanded_item', performance.now() - itemStart, {
+              metadataId: mid,
+              skipped: true,
+              reason: 'vector-missing',
+              loadMs: Number(loadMs.toFixed(2))
+            })
+          }
+          continue
+        }
 
         const metadataItem = document.querySelector(`[data-metadata-item="${mid}"]`)
         const isContinuous = !!(metadataItem && metadataItem.querySelector('.metadata-range-section'))
         if (!isContinuous) {
+          const checkboxStart = perfEnabled ? performance.now() : 0
           await this.initializeCheckboxesForMetadata(mid)
+          const checkboxMs = perfEnabled ? (performance.now() - checkboxStart) : 0
           this.scheduleDrawCategoryDistributions(mid)
           if (this.selectedCategories[mid] || this.selectedCategories[metadataId]) {
             this.dataManager.updateCellFiltering()
           }
+          if (perfEnabled) {
+            this.logPerf('pipeline_flushPendingExpanded_item', performance.now() - itemStart, {
+              metadataId: mid,
+              isContinuous: false,
+              loadMs: Number(loadMs.toFixed(2)),
+              checkboxMs: Number(checkboxMs.toFixed(2))
+            })
+          }
+        } else if (perfEnabled) {
+          this.logPerf('pipeline_flushPendingExpanded_item', performance.now() - itemStart, {
+            metadataId: mid,
+            isContinuous: true,
+            loadMs: Number(loadMs.toFixed(2))
+          })
         }
       } catch (error) {
         console.error(`Failed to finish expanded metadata ${metadataId} after preload:`, error)
       } finally {
         this.setMetadataFilterRestoreLoading(mid, false)
       }
+    }
+
+    if (perfEnabled) {
+      this.logPerf('pipeline_flushPendingExpanded_done', performance.now() - flushStart, {
+        pendingCount: pendingIds.length
+      })
     }
   }
 
@@ -5375,9 +5445,19 @@ export default class extends Controller {
   // Preload all metadata (embeddings + metadata vectors) for instant switching
   async preloadAllMetadata(options = {}) {
     if (this._preloadAllMetadataInProgress) {
+      if (this.perfLoggingEnabled()) {
+        this.logPerf('pipeline_preloadAllMetadata_skipped', 0, { reason: 'already-in-progress' })
+      }
       return
     }
     this._preloadAllMetadataInProgress = true
+    const perfEnabled = this.perfLoggingEnabled()
+    const preloadStart = performance.now()
+    if (perfEnabled) {
+      this.logPerf('pipeline_preloadAllMetadata_start', 0, {
+        forceMemoryPromotion: options.forceMemoryPromotion === true
+      })
+    }
     try {
     // console.log('🚀 [PERF] Starting background preload of all metadata...')
     
@@ -5588,6 +5668,18 @@ export default class extends Controller {
       continuousCount: continuousMetadata.length,
       shouldPreloadAllMetadata
     })
+    if (perfEnabled) {
+      this.logPerf('pipeline_preloadAllMetadata_plan', performance.now() - preloadStart, {
+        cellCount,
+        maxMetadataInMemory: this.maxMetadataInMemory,
+        totalMetadataCount,
+        categoricalCount: categoricalMetadata.length,
+        continuousCount: continuousMetadata.length,
+        embeddingCount: visualizationEmbeddings.length,
+        shouldPreloadAllMetadata,
+        forceMemoryPromotion
+      })
+    }
     if (shouldPreloadAllMetadata) {
       // console.log(`🚀 [MEMORY] Total metadata (${totalMetadataCount}) ≤ buffer size (${this.maxMetadataInMemory}) → Preloading ALL metadata!`)
     } else {
@@ -5624,6 +5716,12 @@ export default class extends Controller {
     // console.log(`🔍 [DEBUG] Valid embeddings after filtering: ${validEmbeddings.length}/${visualizationEmbeddings.length}`)
     // console.log(`🔍 [DEBUG] Valid embedding list:`, validEmbeddings.map(e => ({ id: e.id, name: e.name.trim() })))
     
+    const phase1Start = performance.now()
+    if (perfEnabled) {
+      this.logPerf('pipeline_preload_phase1_embeddings_start', 0, {
+        embeddingCount: validEmbeddings.length
+      })
+    }
     for (const embedding of validEmbeddings) {
       try {
         // console.log(`  📥 Loading: ${embedding.name} (ID: ${embedding.id})`)
@@ -5638,7 +5736,15 @@ export default class extends Controller {
           continue
         }
         
+        const embStart = perfEnabled ? performance.now() : 0
         const result = await this.loadMetadataCoordinatesSilently(embedding.id, embedding.name)
+        if (perfEnabled) {
+          this.logPerf('pipeline_preload_embedding', performance.now() - embStart, {
+            embeddingId: embedding.id,
+            success: !!result?.success,
+            cached: !!result?.cached
+          })
+        }
         
         if (result.success) {
           embeddingCount++
@@ -5659,6 +5765,12 @@ export default class extends Controller {
       // Small delay between embeddings (they're large files)
       await new Promise(resolve => setTimeout(resolve, 200))
     }
+    if (perfEnabled) {
+      this.logPerf('pipeline_preload_phase1_embeddings_done', performance.now() - phase1Start, {
+        loaded: embeddingCount,
+        total: validEmbeddings.length
+      })
+    }
     
     // PHASE 2: Preload metadata vectors (categorical + continuous)
     // These use loadSingleMetadataVectorSilently and are stored in IndexedDB
@@ -5666,47 +5778,15 @@ export default class extends Controller {
       ...categoricalMetadata,
       ...continuousMetadata
     ]
-    
-    // If we should preload all to memory, first get list of what's already in database
-    let metadataInDatabase = new Set()
-    if (shouldPreloadAllMetadata && this.db) {
-      // console.log(`\n🔍 [MEMORY] Checking which metadata are already in database...`)
-      try {
-        const transaction = this.db.transaction(['metadata'], 'readonly')
-        const objectStore = transaction.objectStore('metadata')
-        const getAllRequest = objectStore.getAll()
-        
-        await new Promise((resolve) => {
-          getAllRequest.onsuccess = () => {
-            const allItems = getAllRequest.result
-            const currentLoom = this.getCurrentLoomFile()
-            
-            // Filter by matching loom file
-            allItems.forEach(item => {
-              const itemLoomNormalized = item.loomFile === '' ? null : item.loomFile
-              if (itemLoomNormalized === currentLoom && item.id) {
-                metadataInDatabase.add(item.id.toString())
-              }
-            })
-            
-            // console.log(`🔍 [MEMORY] Found ${metadataInDatabase.size} metadata in database for loom: ${currentLoom}`)
-            resolve()
-          }
-          getAllRequest.onerror = () => {
-            console.error('Error getting metadata list from database')
-            resolve()
-          }
-        })
-      } catch (error) {
-        console.error('Error checking database:', error)
-      }
-    }
+
+    // Do not call IndexedDB getAll() here. With ~1.8k stored vectors that copies every
+    // record into JS just to build an ID set (~5s in perf logs). loadSingleMetadataVector
+    // already tries IndexedDB per id before the network.
     
     if (orderedMetadata.length > 0) {
       // console.log(`\n🏷️ [Phase 2] Preloading all ${orderedMetadata.length} metadata vectors...`)
       if (shouldPreloadAllMetadata) {
         // console.log(`💾 [PERF] Preloading to MEMORY + DISK (all ${totalMetadataCount} metadata fit in buffer)`)
-        // console.log(`💾 [PERF] ${metadataInDatabase.size}/${totalMetadataCount} already in database, will load to memory`)
       } else {
         // console.log(`💾 [PERF] Preloading to DISK only (${totalMetadataCount} metadata > ${this.maxMetadataInMemory} buffer limit)`)
       }
@@ -5714,6 +5794,13 @@ export default class extends Controller {
       // Reduce batch size to prevent server overload and add retry logic
       const batchSize = 1 // Reduced from 3 to 1 to prevent server overload
       const maxRetries = 2
+      const phase2Start = performance.now()
+      if (perfEnabled) {
+        this.logPerf('pipeline_preload_phase2_metadata_start', 0, {
+          orderedCount: orderedMetadata.length,
+          shouldPreloadAllMetadata
+        })
+      }
       
       for (let i = 0; i < orderedMetadata.length; i += batchSize) {
         const batch = orderedMetadata.slice(i, i + batchSize)
@@ -5734,78 +5821,47 @@ export default class extends Controller {
             if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
               // console.log(`🔍 [SEX/AGE DEBUG] Skipping ${metadataName} (${metadataId}) - already loaded/loading`)
             }
+            if (perfEnabled && ((i + batchIndex) % 10 === 0 || i + batchIndex === orderedMetadata.length - 1)) {
+              this.logPerf('pipeline_preload_metadata_progress', performance.now() - phase2Start, {
+                index: i + batchIndex + 1,
+                total: orderedMetadata.length,
+                metadataId,
+                path: 'already-in-memory'
+              })
+            }
             continue
           }
 
-          // If we should preload all to memory, only load if it's in database
+          // Memory promotion path: one load call handles IndexedDB-then-network.
           if (shouldPreloadAllMetadata) {
-            const metadataName = this.dataManager.getMetadataNameById(metadataId)
             const metadataLoomFile = this.getLoomFileForMetadataRequest(metadataId)
-            
-            // Check if this metadata is in the database
-            if (metadataInDatabase.has(metadataId.toString())) {
-              // Metadata is already in IndexedDB; keep disk-state visual (orange), do not reset to spinner.
-              this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db')
-              
-              // Silently load from disk to memory (only log every 10th)
-              const memoryLoadStart = performance.now()
-              // console.log(`🔍 [MEMORY] Starting memory load for existing metadata ${metadataId} at ${memoryLoadStart.toFixed(2)}ms`)
-              // console.log(`🔍 [DEBUG] About to call loadSingleMetadataVector for existing metadata ${metadataId}`)
-              try {
-                const metadata = await this.dataManager.loadSingleMetadataVector(metadataId, { loomFile: metadataLoomFile })
-                const memoryLoadEnd = performance.now()
-                const memoryLoadDuration = (memoryLoadEnd - memoryLoadStart).toFixed(2)
-                // console.log(`🔍 [MEMORY] Completed memory load for existing metadata ${metadataId} in ${memoryLoadDuration}ms`)
-                // console.log(`🔍 [DEBUG] loadSingleMetadataVector returned for existing metadata ${metadataId}:`, metadata ? 'success' : 'failed')
-                if (metadata) {
-                  const globalIndex = i + batchIndex
-                  if (globalIndex < categoricalMetadata.length) {
-                    categoricalCount++
-                    // Log progress every 10 items
-                    if (categoricalCount % 10 === 0 || categoricalCount === categoricalMetadata.length) {
-                      // console.log(`  💾→🧠 Loaded ${categoricalCount}/${categoricalMetadata.length} categorical metadata to memory`)
-                    }
-                  } else {
-                    continuousCount++
-                    // Log progress every 5 items
-                    if (continuousCount % 5 === 0 || continuousCount === continuousMetadata.length) {
-                      // console.log(`  💾→🧠 Loaded ${continuousCount}/${continuousMetadata.length} continuous metadata to memory`)
-                    }
-                  }
-                  
-                  // Update status icon to show it's in memory (green check) - this is new data loaded during preloading
-                  // console.log(`🔍 [PRELOAD] Setting ${metadataId} to in-memory (green) during preloading`)
-                  this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
-                  
-                  // Show checkboxes for loaded metadata
-                  this.uiManager.showCheckboxesForMetadata(metadataId)
-                }
-                
-                const metadataEndTime = performance.now()
-                const metadataDuration = (metadataEndTime - metadataStartTime).toFixed(2)
-                // console.log(`🔍 [TIMING] Completed processing existing metadata ${metadataId} in ${metadataDuration}ms`)
-              } catch (error) {
-                console.error(`  ❌ Failed to load ${metadataId} to memory:`, error)
-              }
-            } else {
-              try {
-                const metadata = await this.dataManager.loadSingleMetadataVector(metadataId, { loomFile: metadataLoomFile })
-                if (metadata) {
-                  const globalIndex = i + batchIndex
-                  if (globalIndex < categoricalMetadata.length) {
-                    categoricalCount++
-                  } else {
-                    continuousCount++
-                  }
-                  this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
-                  this.uiManager.showCheckboxesForMetadata(metadataId)
+            try {
+              const metadata = await this.dataManager.loadSingleMetadataVector(metadataId, { loomFile: metadataLoomFile })
+              if (metadata) {
+                const globalIndex = i + batchIndex
+                if (globalIndex < categoricalMetadata.length) {
+                  categoricalCount++
                 } else {
-                  skippedCount++
+                  continuousCount++
                 }
-              } catch (error) {
-                console.error(`  ❌ Failed to fetch ${metadataId} for forced memory preload:`, error)
+                this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+                this.uiManager.showCheckboxesForMetadata(metadataId)
+              } else {
                 skippedCount++
               }
+              if (perfEnabled) {
+                this.logPerf('pipeline_preload_metadata_item', performance.now() - metadataStartTime, {
+                  index: i + batchIndex + 1,
+                  total: orderedMetadata.length,
+                  metadataId,
+                  path: 'loadSingleMetadataVector',
+                  loaded: !!metadata,
+                  elapsedPhase2Ms: Number((performance.now() - phase2Start).toFixed(2))
+                })
+              }
+            } catch (error) {
+              console.error(`  ❌ Failed to load ${metadataId} for forced memory preload:`, error)
+              skippedCount++
             }
             continue
           }
@@ -5945,21 +6001,39 @@ export default class extends Controller {
             }
           }
           
-          // Add delay between requests to prevent server overload
+          // Add delay between network/disk-only requests to prevent server overload.
+          // Skipped for shouldPreloadAllMetadata (IndexedDB→memory) via continue above.
           if (i + batchSize < orderedMetadata.length) {
             await new Promise(resolve => setTimeout(resolve, 500)) // 500ms delay between requests
           }
         }
         
-        // Small delay between batches
-        if (i + batchSize < orderedMetadata.length) {
+        // Inter-batch pause only when throttling remote/disk-only preload.
+        // With batchSize=1 this used to add ~100ms * N after every IndexedDB memory load.
+        if (!shouldPreloadAllMetadata && i + batchSize < orderedMetadata.length) {
           await new Promise(resolve => setTimeout(resolve, 100))
         }
+      }
+      if (perfEnabled) {
+        this.logPerf('pipeline_preload_phase2_metadata_done', performance.now() - phase2Start, {
+          categoricalCount,
+          continuousCount,
+          skippedCount,
+          orderedCount: orderedMetadata.length
+        })
       }
     }
     
     // console.log(`\n🚀 [PERF] ✅ Preload complete!`)
-    // console.log(`  📊 ${embeddingCount}/${visualizationEmbeddings.length} Embeddings`)
+    if (perfEnabled) {
+      this.logPerf('pipeline_preloadAllMetadata_internalDone', performance.now() - preloadStart, {
+        embeddingCount,
+        categoricalCount,
+        continuousCount,
+        skippedCount,
+        loadedMetadataCount: Object.keys(this.loadedMetadataVectors || {}).length
+      })
+    } // console.log(`  📊 ${embeddingCount}/${visualizationEmbeddings.length} Embeddings`)
     // console.log(`  🏷️ ${categoricalCount}/${categoricalMetadata.length} Categorical`)
     // console.log(`  📈 ${continuousCount}/${continuousMetadata.length} Continuous`)
     // console.log(`  ⏭️  ${skippedCount} items skipped (already in database)`)
@@ -6075,33 +6149,64 @@ export default class extends Controller {
     
     // Store for next comparison
     this.lastMetadataVector = this.currentMetadataVector
-    
+
+    const perfEnabled = this.perfLoggingEnabled()
+    const pipelineStart = perfEnabled ? performance.now() : 0
+    if (perfEnabled) {
+      this.logPerf('pipeline_updateVisualization_start', 0, {
+        metadataId: this.currentMetadataVector?.id ?? null,
+        dataType: data_type,
+        cellCount: values.length
+      })
+    }
+
     // Render with current coloring (will reuse sprites if type matches)
+    const coloringStart = perfEnabled ? performance.now() : 0
     this.renderPointsWithCurrentColoring()
+    if (perfEnabled) {
+      this.logPerf('pipeline_after_renderPointsWithCurrentColoring', performance.now() - coloringStart, {
+        metadataId: this.currentMetadataVector?.id ?? null
+      })
+    }
     
     // Update category distribution bar plots for all unfolded metadata sections
     // This ensures bar plots are shown when coloring is active
+    const barplotsStart = perfEnabled ? performance.now() : 0
     this.dataManager.updateAllCategoryDistributions()
+    if (perfEnabled) {
+      this.logPerf('pipeline_after_updateAllCategoryDistributions', performance.now() - barplotsStart, {
+        metadataId: this.currentMetadataVector?.id ?? null
+      })
+      this.logPerf('pipeline_updateVisualization_total', performance.now() - pipelineStart, {
+        metadataId: this.currentMetadataVector?.id ?? null,
+        dataType: data_type,
+        cellCount: values.length
+      })
+    }
     
   }
 
   // Render all points using the current coloring scheme
   renderPointsWithCurrentColoring() {
-    // console.log('🎨 [RENDER] renderPointsWithCurrentColoring() called')
-    // console.log('🎨 [RENDER] State check:', {
-      // hasReglRenderer: !!this.reglRenderer,
-      // hasCurrentCoordinates: !!this.currentCoordinates,
-      // currentCoordinatesLength: this.currentCoordinates?.length || 0,
-      // currentMetadataVector: this.currentMetadataVector?.id || 'none',
-      // currentMetadataId: this.currentMetadataId || 'none'
-    // })
+    const perfEnabled = this.perfLoggingEnabled()
+    const startTime = performance.now()
+    if (perfEnabled) {
+      this.logPerf('coloring_renderPoints_enter', 0, {
+        metadataId: this.currentMetadataId ?? this.currentMetadataVector?.id ?? null,
+        points: this.displayOrder?.length || 0
+      })
+    }
 
     // Performance optimization: check if color state has changed
     const currentColorHash = this.dataManager.getColorStateHash()
     if (this.lastColorUpdateHash === currentColorHash && this.colorUpdateCache.has('lastColorMap')) {
-      // console.log('🎨 [RENDER] Using cached color update (no color state change)')
       const cachedColorMap = this.colorUpdateCache.get('lastColorMap')
-      
+      if (perfEnabled) {
+        this.logPerf('coloring_renderPoints_cacheHit', performance.now() - startTime, {
+          displayOrderWasReset: !!this._displayOrderWasReset
+        })
+      }
+
       // IMPORTANT: If display order was reset (e.g., after embedding switch),
       // we need to rebuild the colorMap from originalPointColors using the new display order
       if (this._displayOrderWasReset) {
@@ -6139,7 +6244,6 @@ export default class extends Controller {
     }
     
     // console.log('🎨 [ReGL] Updating point colors based on metadata')
-    const startTime = performance.now()
     
     if (!this.reglRenderer || !this.currentCoordinates) {
       // console.log('⚠️ [ReGL] Cannot update colors - missing renderer or coordinates')
@@ -6150,10 +6254,15 @@ export default class extends Controller {
     const colorMap = new Uint32Array(this.displayOrder.length)
     
     // Get current filtered indices to hide invisible points
+    const filterStart = perfEnabled ? performance.now() : 0
     const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
     const visibleSet = filteredIndices ? new Set(filteredIndices) : null
-    // console.log(`🎨 [ReGL] Filtered indices:`, filteredIndices ? `${filteredIndices.length} visible cells` : 'all visible')
-    
+    if (perfEnabled) {
+      this.logPerf('coloring_visibleSet', performance.now() - filterStart, {
+        filteredCount: filteredIndices ? filteredIndices.length : null,
+        builtSet: !!visibleSet
+      })
+    } 
     // Check if we have metadata coloring active
     // FIXED: Use getColoringMetadataVector() to get the correct metadata for coloring
     const coloringMetadataVector = this.colorManager.getColoringMetadataVector()
@@ -6241,7 +6350,20 @@ export default class extends Controller {
           
           // Reorder points in buffer (this will re-render and redraw overlay)
           // Pass visibleSet so filtered cells stay hidden during reordering
+          const reorderStart = perfEnabled ? performance.now() : 0
           this.reorderPointsForCategoryDisplay(visibleSet)
+          if (perfEnabled) {
+            this.logPerf('coloring_discrete_reorder', performance.now() - reorderStart, {
+              points: this.displayOrder.length,
+              metadataId: coloringMetadataVector.id
+            })
+            this.logPerf('coloring_total', performance.now() - startTime, {
+              points: this.displayOrder.length,
+              metadataId: coloringMetadataVector.id,
+              metadataType: coloringMetadataVector.data_type,
+              path: 'reorder'
+            })
+          }
           
           // Redraw overlay is handled by reorderPointsForCategoryDisplay
           const elapsed = performance.now() - startTime
@@ -6287,6 +6409,7 @@ export default class extends Controller {
         }
         
         // Apply colors for every cell; transparency is draw-only (never stored in color caches).
+        const numericColorLoopStart = perfEnabled ? performance.now() : 0
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
           const cellIndex = this.displayOrder[drawPos]
           const value = values[cellIndex]
@@ -6313,6 +6436,12 @@ export default class extends Controller {
 
           const isVisible = !visibleSet || visibleSet.has(cellIndex)
           colorMap[drawPos] = isVisible ? pointColor : 0x00000000
+        }
+        if (perfEnabled) {
+          this.logPerf('coloring_numeric_colorLoop', performance.now() - numericColorLoopStart, {
+            points: this.displayOrder.length,
+            metadataId: coloringMetadataVector.id
+          })
         }
         this.lastColoringMetadataId = coloringMetadataVector.id
         this.lastColorRange = effectiveRange ? { min: effectiveRange.min, max: effectiveRange.max } : null
@@ -6342,7 +6471,21 @@ export default class extends Controller {
           
           // Reorder points in buffer based on z-index (this will re-render and redraw overlay)
           // Pass visibleSet so filtered cells are hidden during reordering
+          const reorderStart = perfEnabled ? performance.now() : 0
           this.reorderPointsForNumericDisplay(values, minVal, maxVal, visibleSet)
+          if (perfEnabled) {
+            this.logPerf('coloring_numeric_reorder', performance.now() - reorderStart, {
+              points: this.displayOrder.length,
+              metadataId: coloringMetadataVector.id,
+              numericalOrder: this.numericalOrder
+            })
+            this.logPerf('coloring_total', performance.now() - startTime, {
+              points: this.displayOrder.length,
+              metadataId: coloringMetadataVector.id,
+              metadataType: 'NUMERIC',
+              path: 'reorder'
+            })
+          }
           
           // Redraw overlay and legend is handled by reorderPointsForNumericDisplay
           const elapsed = performance.now() - startTime
@@ -8515,6 +8658,14 @@ export default class extends Controller {
       })
     }
 
+    // Load only expanded-panel vectors for barplots now (coloring + filter vectors are already loaded).
+    // Full metadata preload continues later in the background and must not block this.
+    if ((this._pendingExpandedMetadataIds?.size || 0) > 0) {
+      await this.flushPendingExpandedMetadataAfterPreload()
+    } else if (this.currentMetadataVector) {
+      this.scheduleDrawCategoryDistributionsForExpandedMetadata()
+    }
+
     if (state.customPlotWindow && this.customPlotManager?.apply2DPlotCheckpointState) {
       await this.customPlotManager.apply2DPlotCheckpointState(state.customPlotWindow)
     } else if (this.customPlotManager?.close2DPlotModal) {
@@ -8652,13 +8803,8 @@ export default class extends Controller {
       }
     })
 
-    // Entry-time restore defers expand loads to scheduleAutoMetadataPreload.
-    // Mid-session checkpoint apply (preload already done) must flush immediately.
-    const pendingCount = this._pendingExpandedMetadataIds?.size || 0
-    const preloadWillHandle = this.autoPreloadMetadata === true && this._autoPreloadStarted !== true
-    if (pendingCount > 0 && !preloadWillHandle) {
-      await this.flushPendingExpandedMetadataAfterPreload()
-    }
+    // Expanded panel vectors are loaded after coloring below so the first barplot
+    // paint already has the active coloring metadata.
   }
 
   async restoreColoringAndAxisState(state) {
@@ -8715,6 +8861,15 @@ export default class extends Controller {
         Array.isArray(this.currentCoordinates) &&
         this.currentCoordinates.length > 0
 
+      const perfEnabled = this.perfLoggingEnabled()
+      const coloringRestoreStart = perfEnabled ? performance.now() : 0
+      if (perfEnabled) {
+        this.logPerf('pipeline_restoreColoring_start', 0, {
+          coloringMetadataId: normalizedColoringMetadataId,
+          alreadyLoaded: alreadyLoadedColoringVector
+        })
+      }
+
       let loadedColorVector = null
       if (alreadyLoadedColoringVector) {
         this.updateVisualizationWithMetadataVector()
@@ -8724,7 +8879,14 @@ export default class extends Controller {
         })
       } else {
         // Apply coloring through the data path deterministically.
+        const loadStart = perfEnabled ? performance.now() : 0
         loadedColorVector = await this.dataManager.loadAndVisualizeMetadataVector(normalizedColoringMetadataId)
+        if (perfEnabled) {
+          this.logPerf('pipeline_restoreColoring_loadAndVisualize', performance.now() - loadStart, {
+            coloringMetadataId: normalizedColoringMetadataId,
+            loaded: !!loadedColorVector
+          })
+        }
       }
       this.syncCurrentMetadataIdWithPanelByName()
       this.checkpointDebug('restoreColoringAndAxisState:color-reapply', {
@@ -8735,6 +8897,11 @@ export default class extends Controller {
         currentMetadataVectorId: this.currentMetadataVector?.id || null
       })
       // Barplots need coloring vector; draw after paint for already-expanded panels.
+      if (perfEnabled) {
+        this.logPerf('pipeline_restoreColoring_beforeScheduleDraw', performance.now() - coloringRestoreStart, {
+          coloringMetadataId: normalizedColoringMetadataId
+        })
+      }
       this.scheduleDrawCategoryDistributionsForExpandedMetadata()
     } else {
       this.resetAllWaterDropButtons()
@@ -10209,17 +10376,49 @@ export default class extends Controller {
     // Force reordering of points
     this._lastNumericOrderApplied = null
     
+    const perfEnabled = this.perfLoggingEnabled()
+    const genePipelineStart = perfEnabled ? performance.now() : 0
+    if (perfEnabled) {
+      this.logPerf('pipeline_geneColoring_start', 0, {
+        geneMetadataId,
+        cellCount: values.length,
+        wasLoading
+      })
+    }
+
     // Update visualization with gene expression coloring (synchronous when data in memory)
+    const vizStart = perfEnabled ? performance.now() : 0
     this.updateVisualizationWithMetadataVector()
+    if (perfEnabled) {
+      this.logPerf('pipeline_geneColoring_after_updateVisualization', performance.now() - vizStart, {
+        geneMetadataId
+      })
+    }
     
     // Update distribution bars (synchronous)
+    const barsStart = perfEnabled ? performance.now() : 0
     this.dataManager.updateAllCategoryDistributions()
+    if (perfEnabled) {
+      this.logPerf('pipeline_geneColoring_after_second_barplots', performance.now() - barsStart, {
+        geneMetadataId
+      })
+    }
     
     // Update cell filtering after loading gene vector (same as continuous metadata)
     // Pass shouldUpdateColors=true for gene expression to ensure colors are rendered after filtering
     // This ensures renderer state is properly initialized and coordinates are available for filtering
     const shouldUpdateColors = true
+    const filterStart = perfEnabled ? performance.now() : 0
     this.dataManager.updateCellFiltering(shouldUpdateColors)
+    if (perfEnabled) {
+      this.logPerf('pipeline_geneColoring_after_updateCellFiltering', performance.now() - filterStart, {
+        geneMetadataId
+      })
+      this.logPerf('pipeline_geneColoring_total', performance.now() - genePipelineStart, {
+        geneMetadataId,
+        cellCount: values.length
+      })
+    }
     
     // Hide spinner only if we showed it
     if (wasLoading) {
@@ -15295,6 +15494,7 @@ export default class extends Controller {
     }
     
     // console.log(`📊 [ReGL] Reordering display order for numeric: ${this.numericalOrder}`)
+    const perfEnabled = this.perfLoggingEnabled()
     const startTime = performance.now()
     
     // Compute z-indices for all cells based on their original cell indices
@@ -15330,9 +15530,12 @@ export default class extends Controller {
       }
       zIndices.push({ cellIndex, zIndex })
     }
+    const zBuildMs = perfEnabled ? (performance.now() - startTime) : 0
     
     // Sort by z-index (lower z-index = drawn first = background)
+    const sortStart = perfEnabled ? performance.now() : 0
     zIndices.sort((a, b) => a.zIndex - b.zIndex)
+    const sortMs = perfEnabled ? (performance.now() - sortStart) : 0
     
     // Update displayOrder array
     for (let i = 0; i < zIndices.length; i++) {
@@ -15342,6 +15545,7 @@ export default class extends Controller {
     // console.log(`📊 [ReGL] Reordered displayOrder by numeric values (first 5 cells: ${this.displayOrder.slice(0, 5).join(', ')})`)
     
     // Rebuild buffer using new display order
+    const rebuildStart = perfEnabled ? performance.now() : 0
     const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
     const colorMap = new Uint32Array(this.displayOrder.length)
     
@@ -15365,8 +15569,10 @@ export default class extends Controller {
         colorMap[drawPos] = 0x00000000
       }
     }
+    const rebuildMs = perfEnabled ? (performance.now() - rebuildStart) : 0
     
     // Update ReGL buffers with reordered data
+    const uploadStart = perfEnabled ? performance.now() : 0
     this.reglRenderer.updatePositions(screenCoordinates)
     this.reglRenderer.updateColors(colorMap)
     this.reglRenderer.render()
@@ -15375,8 +15581,19 @@ export default class extends Controller {
     this.rendererManager.renderGrid()
     this.rendererManager.renderAxes()
     this.renderContinuousColorLegend()
+    const uploadMs = perfEnabled ? (performance.now() - uploadStart) : 0
     
     const elapsed = performance.now() - startTime
+    if (perfEnabled) {
+      this.logPerf('reorder_numeric_total', elapsed, {
+        points: this.displayOrder.length,
+        zBuildMs: Number(zBuildMs.toFixed(2)),
+        sortMs: Number(sortMs.toFixed(2)),
+        rebuildMs: Number(rebuildMs.toFixed(2)),
+        uploadMs: Number(uploadMs.toFixed(2)),
+        numericalOrder: this.numericalOrder
+      })
+    }
     // console.log(`📊 [ReGL] Reordered ${this.displayOrder.length} numeric points in ${elapsed.toFixed(2)}ms`)
   }
 
@@ -22147,6 +22364,8 @@ export default class extends Controller {
   async initializeCheckboxesForMetadata(metadataId) {
     const mid = String(metadataId || '').trim()
     if (!mid) return
+    const perfEnabled = this.perfLoggingEnabled()
+    const t0 = perfEnabled ? performance.now() : 0
 
     const existingSelection =
       (this.selectedCategories?.[mid] instanceof Set && this.selectedCategories[mid]) ||
@@ -22175,16 +22394,34 @@ export default class extends Controller {
 
     // Ensure metadata is loaded (from memory or disk) for filtering / distributions.
     let metadataVector = this.dataManager.getMetadataVectorById(mid)
+    let diskLoadMs = 0
     if (!metadataVector) {
+      const diskStart = perfEnabled ? performance.now() : 0
       metadataVector = await this.loadMetadataVectorFromDisk(mid)
+      diskLoadMs = perfEnabled ? (performance.now() - diskStart) : 0
       if (!metadataVector) {
         console.error(`Failed to load metadata ${mid} from disk`)
+        if (perfEnabled) {
+          this.logPerf('pipeline_initializeCheckboxes', performance.now() - t0, {
+            metadataId: mid,
+            failed: true,
+            diskLoadMs: Number(diskLoadMs.toFixed(2))
+          })
+        }
         return
       }
     }
     
     // Only initialize for discrete metadata
     if (!metadataVector || (metadataVector.data_type !== 'DISCRETE' && metadataVector.data_type !== 'STRING')) {
+      if (perfEnabled) {
+        this.logPerf('pipeline_initializeCheckboxes', performance.now() - t0, {
+          metadataId: mid,
+          skipped: true,
+          reason: 'not-discrete',
+          diskLoadMs: Number(diskLoadMs.toFixed(2))
+        })
+      }
       return
     }
     
@@ -22192,6 +22429,13 @@ export default class extends Controller {
     if (this.selectedCategories[mid] instanceof Set || this.selectedCategories[metadataId] instanceof Set) {
       this.syncCategoryCheckboxUiForMetadata(mid, { reveal: true })
       this.uiManager.updateFilterSwitchVisibility(mid)
+      if (perfEnabled) {
+        this.logPerf('pipeline_initializeCheckboxes', performance.now() - t0, {
+          metadataId: mid,
+          path: 'existing-selection',
+          diskLoadMs: Number(diskLoadMs.toFixed(2))
+        })
+      }
       return
     }
     
@@ -22214,6 +22458,15 @@ export default class extends Controller {
     
     // Show the filter switch now that we have a selection
     this.uiManager.updateFilterSwitchVisibility(mid)
+
+    if (perfEnabled) {
+      this.logPerf('pipeline_initializeCheckboxes', performance.now() - t0, {
+        metadataId: mid,
+        path: 'new-selection',
+        universeSize: this.selectedCategories[mid]?.size || 0,
+        diskLoadMs: Number(diskLoadMs.toFixed(2))
+      })
+    }
   }
 
   // Paint category / select-all checkboxes from selectedCategories (DOM defaults are "checked").
@@ -22234,8 +22487,14 @@ export default class extends Controller {
     const mid = String(metadataId || '').trim()
     if (!mid) return
     // Barplots are expensive; never block checkbox paint on the same turn.
+    if (this.perfLoggingEnabled()) {
+      this.logPerf('pipeline_scheduleDrawCategoryDistributions', 0, { metadataId: mid })
+    }
     window.setTimeout(() => {
       try {
+        if (this.perfLoggingEnabled()) {
+          this.logPerf('pipeline_scheduledDraw_fire', 0, { metadataId: mid })
+        }
         this.drawCategoryDistributions(mid)
       } catch (error) {
         console.warn(`Failed to draw category distributions for ${mid}:`, error)
@@ -22244,6 +22503,22 @@ export default class extends Controller {
   }
 
   scheduleDrawCategoryDistributionsForExpandedMetadata() {
+    const perfEnabled = this.perfLoggingEnabled()
+    const t0 = perfEnabled ? performance.now() : 0
+    let scheduled = 0
+    this.forEachExpandedDiscreteMetadata((metadataId) => {
+      scheduled += 1
+      this.scheduleDrawCategoryDistributions(metadataId)
+    })
+    if (perfEnabled) {
+      this.logPerf('pipeline_scheduleDrawForExpanded', performance.now() - t0, {
+        scheduled
+      })
+    }
+  }
+
+  // Walk expanded categorical metadata panels (skip continuous range sections).
+  forEachExpandedDiscreteMetadata(callback) {
     this.getMetadataFoldHeaders().forEach((header) => {
       const metadataId = header.dataset.metadataId
       if (!metadataId) return
@@ -22252,8 +22527,34 @@ export default class extends Controller {
       if (!isExpanded) return
       const metadataItem = header.closest('[data-metadata-item]')
       if (metadataItem?.querySelector('.metadata-range-section')) return
-      this.scheduleDrawCategoryDistributions(metadataId)
+      callback(metadataId, header, metadataItem)
     })
+  }
+
+  // Shared filtered-cell Set for barplots. Building Set(86k) is ~20ms; never do it per panel.
+  // A filter that still includes every cell is a no-op for barplot scans.
+  getBarplotFilteredCellSet(totalCellCount = null) {
+    const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
+    if (!filteredIndices) {
+      return { filteredIndices: null, filteredSet: null }
+    }
+
+    const n = Number.isFinite(totalCellCount) && totalCellCount > 0
+      ? totalCellCount
+      : (this.currentCoordinates?.length || filteredIndices.length)
+
+    if (filteredIndices.length >= n) {
+      return { filteredIndices: null, filteredSet: null }
+    }
+
+    if (this._barplotFilteredSetSource === filteredIndices && this._barplotFilteredSet instanceof Set) {
+      return { filteredIndices, filteredSet: this._barplotFilteredSet }
+    }
+
+    const filteredSet = new Set(filteredIndices)
+    this._barplotFilteredSetSource = filteredIndices
+    this._barplotFilteredSet = filteredSet
+    return { filteredIndices, filteredSet }
   }
 
   syncCategoryCheckboxUiForMetadata(metadataId, { reveal = true } = {}) {
@@ -22836,6 +23137,9 @@ export default class extends Controller {
   // Get a summary of current filtering constraints
 
   // Performance monitoring helper
+  // Enable in console: localStorage.setItem('vizPerfLogging','1') then reload.
+  // Disable: localStorage.removeItem('vizPerfLogging')
+  // Filter console for [PERF]. Pipeline markers: pipeline_*, coloring_*, reorder_*, barplot_*.
   perfLoggingEnabled() {
     try {
       return localStorage.getItem('vizPerfLogging') === '1'
@@ -22847,11 +23151,11 @@ export default class extends Controller {
   logPerf(label, durationMs, details = null) {
     if (!this.perfLoggingEnabled()) return
     const rounded = Number(durationMs).toFixed(2)
-    if (details && typeof details === 'object') {
-      console.log(`[PERF] ${label}: ${rounded}ms`, details)
-      return
+    const payload = {
+      tMs: Number(performance.now().toFixed(2)),
+      ...(details && typeof details === 'object' ? details : details != null ? { detail: details } : {})
     }
-    console.log(`[PERF] ${label}: ${rounded}ms`)
+    console.log(`[PERF] ${label}: ${rounded}ms`, payload)
   }
 
   recordPerformanceMetrics(operationName, duration) {
@@ -22880,6 +23184,8 @@ export default class extends Controller {
     this.colorUpdateCache.clear()
     this.filterCache.clear()
     this.pendingUpdates.clear()
+    this._barplotFilteredSet = null
+    this._barplotFilteredSetSource = null
     
     if (this.updateBatchTimer) {
       clearTimeout(this.updateBatchTimer)
@@ -22911,7 +23217,13 @@ export default class extends Controller {
     if (this.pendingUpdates.size === 0) return
     
     const startTime = performance.now()
-    // console.log('🔄 Executing batched updates:', Array.from(this.pendingUpdates))
+    const pending = Array.from(this.pendingUpdates)
+    if (this.perfLoggingEnabled()) {
+      this.logPerf('pipeline_executeBatchedUpdates', 0, {
+        pending
+      })
+    }
+    // console.log('🔄 Executing batched updates:', pending)
     
     // Clear pending updates
     this.pendingUpdates.clear()
@@ -22922,6 +23234,7 @@ export default class extends Controller {
     // Execute the actual updates
     // Note: This is a simplified version - in practice, you'd want to merge
     // multiple update types intelligently
+    // WARNING: always passes false today — ignores the scheduled updateFunction's shouldUpdateColors.
     this.dataManager.performCellFilteringUpdate(false)
     
     const duration = performance.now() - startTime
@@ -23766,8 +24079,14 @@ export default class extends Controller {
     const ignoreZeros = resolved.ignoreZeros
     const bins = new Array(numBins).fill(0)
     const binRanges = new Array(numBins)
-    const sourceValues = ignoreZeros ? values.filter((v) => v !== 0) : values
-    const sourceCount = sourceValues.length
+    let sourceCount = 0
+    if (ignoreZeros) {
+      for (let i = 0; i < values.length; i++) {
+        if (values[i] !== 0) sourceCount++
+      }
+    } else {
+      sourceCount = values.length
+    }
 
     const useLog = scale === 'log' && minEdge > 0 && maxEdge > 0
     if (useLog) {
@@ -23781,8 +24100,9 @@ export default class extends Controller {
           binRanges[i] = { min: Math.pow(10, t0), max: Math.pow(10, t1) }
         }
         const invSpan = numBins / span
-        for (let vi = 0; vi < sourceValues.length; vi++) {
-          const v = sourceValues[vi]
+        for (let vi = 0; vi < values.length; vi++) {
+          const v = values[vi]
+          if (ignoreZeros && v === 0) continue
           if (v <= 0 || !Number.isFinite(v)) continue
           const lv = Math.log10(v)
           let binIndex = Math.floor((lv - logMin) * invSpan)
@@ -23794,8 +24114,9 @@ export default class extends Controller {
         for (let i = 0; i < numBins; i++) {
           binRanges[i] = { min: minEdge, max: maxEdge }
         }
-        for (let vi = 0; vi < sourceValues.length; vi++) {
-          const v = sourceValues[vi]
+        for (let vi = 0; vi < values.length; vi++) {
+          const v = values[vi]
+          if (ignoreZeros && v === 0) continue
           if (v > 0 && Number.isFinite(v)) bins[0]++
         }
       }
@@ -23809,8 +24130,9 @@ export default class extends Controller {
       }
       if (binWidth > 0) {
         const invBinWidth = 1 / binWidth
-        for (let vi = 0; vi < sourceValues.length; vi++) {
-          const v = sourceValues[vi]
+        for (let vi = 0; vi < values.length; vi++) {
+          const v = values[vi]
+          if (ignoreZeros && v === 0) continue
           if (!Number.isFinite(v)) continue
           let binIndex = Math.floor((v - minEdge) * invBinWidth)
           if (binIndex < 0) binIndex = 0
@@ -23868,14 +24190,24 @@ export default class extends Controller {
   }
 
   refreshAllDistributionBarplots() {
-    document.querySelectorAll('[data-metadata-item]').forEach((section) => {
-      const metadataId = Number(section.dataset.metadataItem)
-      if (!Number.isFinite(metadataId)) return
-      const canvases = section.querySelectorAll('.category-distribution-canvas')
-      if (canvases.length === 0) return
+    const perfEnabled = this.perfLoggingEnabled()
+    const t0 = perfEnabled ? performance.now() : 0
+    let drawn = 0
+    // Warm the shared filtered Set once for this refresh pass.
+    this.getBarplotFilteredCellSet()
+    // Only expanded discrete panels are visible; folded canvases need not repaint.
+    this.forEachExpandedDiscreteMetadata((metadataId) => {
       this.drawCategoryDistributions(metadataId)
+      drawn += 1
     })
+    const tSel = perfEnabled ? performance.now() : 0
     this.drawSelectionDistribution()
+    if (perfEnabled) {
+      this.logPerf('barplot_refreshAll', performance.now() - t0, {
+        metadataSectionsDrawn: drawn,
+        selectionMs: Number((performance.now() - tSel).toFixed(2))
+      })
+    }
   }
 
   resolveHistogramOptions(options = null) {
@@ -24351,6 +24683,10 @@ export default class extends Controller {
 
   // Draw category distribution bar plots (cumulative stacked bars showing coloring metadata distribution)
   drawCategoryDistributions(metadataId) {
+    const perfEnabled = this.perfLoggingEnabled()
+    const t0 = perfEnabled ? performance.now() : 0
+    let tMark = t0
+
     // Get the metadata vector that's being displayed (the one with categories)
     const displayedMetadataVector = this.dataManager.getMetadataVectorById(metadataId)
     if (!displayedMetadataVector || !displayedMetadataVector.values || displayedMetadataVector.data_type !== 'DISCRETE') {
@@ -24361,11 +24697,15 @@ export default class extends Controller {
     const canvases = document.querySelectorAll(`.category-distribution-canvas[data-metadata-id="${metadataId}"]`)
     
     // Same cell set as ReGL point colors (incremental path when filters are on).
-    const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
-    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+    // Shared/cached Set — building Set(n) per panel was ~20ms each in perf logs.
+    const { filteredSet } = this.getBarplotFilteredCellSet(displayedMetadataVector.values.length)
+    const filterMs = perfEnabled ? (performance.now() - tMark) : 0
+    if (perfEnabled) tMark = performance.now()
     
     // Keep category count tooltips up to date even when coloring is disabled.
     this.updateCategoryCountTooltips(metadataId, displayedMetadataVector, filteredSet)
+    const countTooltipMs = perfEnabled ? (performance.now() - tMark) : 0
+    if (perfEnabled) tMark = performance.now()
     
     // Same source as scatter / ReGL (not only currentMetadataVector; can differ after restore / DOM state).
     const coloringMetadataVector =
@@ -24375,6 +24715,16 @@ export default class extends Controller {
       canvases.forEach(canvas => {
         canvas.style.display = 'none'
       })
+      if (perfEnabled) {
+        this.logPerf('barplot_drawCategoryDistributions', performance.now() - t0, {
+          metadataId,
+          path: 'hide',
+          canvasCount: canvases.length,
+          cellCount: displayedMetadataVector.values.length,
+          filterMs: Number(filterMs.toFixed(2)),
+          countTooltipMs: Number(countTooltipMs.toFixed(2))
+        })
+      }
       return
     }
     
@@ -24386,23 +24736,51 @@ export default class extends Controller {
     // Check if coloring is continuous or categorical
     if (coloringMetadataVector.data_type === 'NUMERIC') {
       // Draw continuous distribution (gradient bar)
-      this.drawContinuousDistributions(metadataId, displayedMetadataVector, coloringMetadataVector)
+      this.drawContinuousDistributions(metadataId, displayedMetadataVector, coloringMetadataVector, {
+        parentStartMs: t0,
+        filterMs,
+        countTooltipMs,
+        filteredSet
+      })
       return
     } else if (coloringMetadataVector.data_type !== 'DISCRETE') {
       // Unknown type, don't draw
       return
     }
+
+    if (perfEnabled) tMark = performance.now()
     
-    // Count occurrences of each coloring category (filtered only) for display
+    // Count coloring categories and per-row distributions in one pass.
     const coloringCategoryCounts = {}
-    const totalCells = coloringMetadataVector.values.length
-    
-    for (let i = 0; i < coloringMetadataVector.values.length; i++) {
-      if (!filteredSet || filteredSet.has(i)) {
-        const category = coloringMetadataVector.values[i]
-        coloringCategoryCounts[category] = (coloringCategoryCounts[category] || 0) + 1
-      }
+    const displayedCategories = Array.from(canvases)
+      .map(canvas => canvas.dataset.category)
+      .filter(category => category !== undefined && category !== null)
+    const displayedCategorySet = new Set(displayedCategories)
+    const perDisplayedCategoryCounts = {}
+    const displayedCategoryTotals = {}
+    displayedCategories.forEach(category => {
+      perDisplayedCategoryCounts[category] = {}
+      displayedCategoryTotals[category] = 0
+    })
+
+    const displayedValues = displayedMetadataVector.values
+    const coloringValues = coloringMetadataVector.values
+    const n = displayedValues.length
+    for (let i = 0; i < n; i++) {
+      if (filteredSet && !filteredSet.has(i)) continue
+
+      const coloringCategory = coloringValues[i]
+      coloringCategoryCounts[coloringCategory] = (coloringCategoryCounts[coloringCategory] || 0) + 1
+
+      const displayedCategory = String(displayedValues[i])
+      if (!displayedCategorySet.has(displayedCategory)) continue
+
+      const distributionCounts = perDisplayedCategoryCounts[displayedCategory]
+      distributionCounts[coloringCategory] = (distributionCounts[coloringCategory] || 0) + 1
+      displayedCategoryTotals[displayedCategory] += 1
     }
+    const aggregateMs = perfEnabled ? (performance.now() - tMark) : 0
+    if (perfEnabled) tMark = performance.now()
     
     // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
     // Otherwise fall back to unique categories from values
@@ -24444,37 +24822,20 @@ export default class extends Controller {
     const sortedColoringCategories = Object.keys(coloringCategoryCounts).sort((a, b) => {
       return (coloringCategoryCounts[b] || 0) - (coloringCategoryCounts[a] || 0)
     })
-    
-    // Build category distributions in a single pass across cells.
-    // Previous implementation scanned all cells once per canvas/category.
-    const displayedCategories = Array.from(canvases)
-      .map(canvas => canvas.dataset.category)
-      .filter(category => category !== undefined && category !== null)
-    const displayedCategorySet = new Set(displayedCategories)
-    const perDisplayedCategoryCounts = {}
-    const displayedCategoryTotals = {}
-    displayedCategories.forEach(category => {
-      perDisplayedCategoryCounts[category] = {}
-      displayedCategoryTotals[category] = 0
-    })
 
-    for (let i = 0; i < displayedMetadataVector.values.length; i++) {
-      if (filteredSet && !filteredSet.has(i)) continue
-
-      const displayedCategoryValue = displayedMetadataVector.values[i]
-      const displayedCategory = String(displayedCategoryValue)
-      if (!displayedCategorySet.has(displayedCategory)) continue
-
-      const coloringCategory = coloringMetadataVector.values[i]
-      const distributionCounts = perDisplayedCategoryCounts[displayedCategory]
-      distributionCounts[coloringCategory] = (distributionCounts[coloringCategory] || 0) + 1
-      displayedCategoryTotals[displayedCategory] += 1
-    }
+    const dpr = window.devicePixelRatio || 1
+    const tooltip = this.ensureCategoryBarTooltip()
+    let colorResolveMs = 0
+    let paintMs = 0
+    let segmentCount = 0
+    let localStorageLookups = 0
 
     canvases.forEach(canvas => {
       const displayedCategory = canvas.dataset.category
       const distributionCounts = perDisplayedCategoryCounts[displayedCategory] || {}
       const cellsInDisplayedCategoryCount = displayedCategoryTotals[displayedCategory] || 0
+      const width = canvas.clientWidth
+      const height = canvas.clientHeight
       
       // Store segment information for tooltip
       const segments = []
@@ -24483,17 +24844,22 @@ export default class extends Controller {
       sortedColoringCategories.forEach((coloringCategory) => {
         const count = this.countInCategoryMap(distributionCounts, coloringCategory)
         if (count > 0) {
+          const colorStart = perfEnabled ? performance.now() : 0
           let paletteSlot = this.getStablePaletteIndexForCategory(coloringMetaId, coloringCategory)
           if (paletteSlot < 0) {
             const j = stableSortedCategories.findIndex((c) => String(c) === String(coloringCategory))
             paletteSlot = j >= 0 ? j : 0
           }
           const colorHex = this.getCategoryColor(coloringCategory, paletteSlot, coloringMetaId)
+          if (perfEnabled) {
+            colorResolveMs += performance.now() - colorStart
+            localStorageLookups += 1
+          }
 
           const percentage = cellsInDisplayedCategoryCount > 0
             ? (count / cellsInDisplayedCategoryCount) * 100
             : 0
-          const segmentWidth = (percentage / 100) * canvas.getBoundingClientRect().width
+          const segmentWidth = (percentage / 100) * width
 
           segments.push({
             category: coloringCategory,
@@ -24507,6 +24873,7 @@ export default class extends Controller {
           currentX += segmentWidth
         }
       })
+      segmentCount += segments.length
 
       if (debugBars && debugBarRowsLogged < debugBarRowLimit) {
         let dotComputedBg = null
@@ -24553,22 +24920,19 @@ export default class extends Controller {
         debugBarRowsLogged += 1
       }
       
-      // Store segments data on canvas for tooltip
+      const paintStart = perfEnabled ? performance.now() : 0
       canvas.dataset.segments = JSON.stringify(segments)
+      canvas._barSegments = segments
       
-      // Set canvas size
-      const rect = canvas.getBoundingClientRect()
-      canvas.width = rect.width * window.devicePixelRatio
-      canvas.height = rect.height * window.devicePixelRatio
+      canvas.width = width * dpr
+      canvas.height = height * dpr
       
       const ctx = canvas.getContext('2d')
-      ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       
-      // Draw background (light gray)
       ctx.fillStyle = '#f3f4f6'
-      ctx.fillRect(0, 0, rect.width, rect.height)
+      ctx.fillRect(0, 0, width, height)
       
-      // Draw cumulative stacked bar
       segments.forEach(segment => {
         const colorValue = segment.color
         const color =
@@ -24577,74 +24941,46 @@ export default class extends Controller {
             : `#${((colorValue >>> 0) & 0xffffff).toString(16).padStart(6, '0')}`
         
         ctx.fillStyle = color
-        const segmentWidth = segment.endX - segment.startX
-        ctx.fillRect(segment.startX, 0, segmentWidth, rect.height)
+        ctx.fillRect(segment.startX, 0, segment.endX - segment.startX, height)
       })
-      
-      // Add mousemove event listener for tooltip
-      // Remove old listeners if they exist (to handle switching between categorical and continuous)
-      if (canvas._tooltipHandler) {
-        canvas.removeEventListener('mousemove', canvas._tooltipHandler)
-        canvas.removeEventListener('mouseleave', canvas._tooltipLeaveHandler)
-      }
-      
-      canvas.style.cursor = 'pointer'
-      
-      // Create custom tooltip element if it doesn't exist
-      let tooltip = document.getElementById('category-bar-tooltip')
-      if (!tooltip) {
-        tooltip = document.createElement('div')
-        tooltip.id = 'category-bar-tooltip'
-        tooltip.style.cssText = `
-          position: fixed;
-          background-color: rgba(0, 0, 0, 0.85);
-          color: white;
-          padding: 6px 10px;
-          border-radius: 4px;
-          font-size: 12px;
-          pointer-events: none;
-          z-index: 10000;
-          display: none;
-          white-space: nowrap;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-        `
-        document.body.appendChild(tooltip)
-      }
-      
-      // Create tooltip handler for categorical data
-      const tooltipHandler = (e) => {
+
+      this.bindCanvasBarTooltip(canvas, (e) => {
         const rect = canvas.getBoundingClientRect()
         const x = e.clientX - rect.left
-        const segments = JSON.parse(canvas.dataset.segments || '[]')
-        
-        // Find which segment the mouse is over
-        const hoveredSegment = segments.find(seg => x >= seg.startX && x < seg.endX)
-        
+        const segs = canvas._barSegments || []
+        const hoveredSegment = segs.find(seg => x >= seg.startX && x < seg.endX)
         if (hoveredSegment) {
-          const tooltipText = `${hoveredSegment.category} (${hoveredSegment.count} cells, ${hoveredSegment.percentage.toFixed(1)}%)`
-          tooltip.textContent = tooltipText
-          tooltip.style.display = 'block'
-          tooltip.style.left = `${e.clientX + 10}px`
-          tooltip.style.top = `${e.clientY + 10}px`
+          tooltip.textContent = `${hoveredSegment.category} (${hoveredSegment.count} cells, ${hoveredSegment.percentage.toFixed(1)}%)`
+          this.positionCategoryBarTooltip(tooltip, e.clientX, e.clientY)
         } else {
           tooltip.style.display = 'none'
         }
-      }
-      
-      const leaveHandler = () => {
-        tooltip.style.display = 'none'
-      }
-      
-      canvas.addEventListener('mousemove', tooltipHandler)
-      canvas.addEventListener('mouseleave', leaveHandler)
-      
-      // Store handlers for later removal (using object properties, not dataset)
-      canvas._tooltipHandler = tooltipHandler
-      canvas._tooltipLeaveHandler = leaveHandler
+      })
+      if (perfEnabled) paintMs += performance.now() - paintStart
     })
+
+    if (perfEnabled) {
+      this.logPerf('barplot_drawCategoryDistributions', performance.now() - t0, {
+        metadataId,
+        path: 'discrete',
+        canvasCount: canvases.length,
+        cellCount: n,
+        filteredCellCount: filteredSet ? filteredSet.size : n,
+        coloringCategoryCount: sortedColoringCategories.length,
+        segmentCount,
+        filterMs: Number(filterMs.toFixed(2)),
+        countTooltipMs: Number(countTooltipMs.toFixed(2)),
+        aggregateMs: Number(aggregateMs.toFixed(2)),
+        colorResolveMs: Number(colorResolveMs.toFixed(2)),
+        paintMs: Number(paintMs.toFixed(2)),
+        getCategoryColorCalls: localStorageLookups
+      })
+    }
   }
 
   updateCategoryCountTooltips(metadataId, displayedMetadataVector, filteredSet) {
+    const perfEnabled = this.perfLoggingEnabled()
+    const t0 = perfEnabled ? performance.now() : 0
     const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
     if (!metadataItem || !displayedMetadataVector?.values) return
 
@@ -24654,6 +24990,7 @@ export default class extends Controller {
     const countsByCategory = new Map()
     const selectedCountsByCategory = new Map()
 
+    const tCount = perfEnabled ? performance.now() : 0
     for (let i = 0; i < values.length; i++) {
       const category = String(values[i])
       countsByCategory.set(category, (countsByCategory.get(category) || 0) + 1)
@@ -24661,9 +24998,11 @@ export default class extends Controller {
         selectedCountsByCategory.set(category, (selectedCountsByCategory.get(category) || 0) + 1)
       }
     }
+    const countMs = perfEnabled ? (performance.now() - tCount) : 0
 
     const tooltip = this.ensureCategoryCountTooltip()
     const countElements = metadataItem.querySelectorAll('.metadata-category-row .metadata-category-count')
+    const tBind = perfEnabled ? performance.now() : 0
 
     countElements.forEach((countElement) => {
       // Ensure browser-native tooltip never appears for count cells.
@@ -24727,6 +25066,16 @@ export default class extends Controller {
       countElement._categoryCountTooltipMoveHandler = showTooltip
       countElement._categoryCountTooltipLeaveHandler = hideTooltip
     })
+
+    if (perfEnabled) {
+      this.logPerf('barplot_updateCategoryCountTooltips', performance.now() - t0, {
+        metadataId,
+        cellCount: totalCells,
+        countElements: countElements.length,
+        countMs: Number(countMs.toFixed(2)),
+        bindMs: Number((performance.now() - tBind).toFixed(2))
+      })
+    }
   }
 
   ensureCategoryCountTooltip() {
@@ -24752,95 +25101,139 @@ export default class extends Controller {
   }
 
   // Draw continuous distribution (histogram-like bar showing value distribution)
-  drawContinuousDistributions(metadataId, displayedMetadataVector, coloringMetadataVector) {
-    // console.log('🎨 [BAR PLOTS] drawContinuousDistributions called for metadata:', metadataId)
-    // console.log('🎨 [BAR PLOTS] Current gradient points:', this.customGradientControlPoints || this.gradientControlPoints)
-    
-    const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
-    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
-    
-    // Get all canvases for this metadata
+  drawContinuousDistributions(metadataId, displayedMetadataVector, coloringMetadataVector, parentPerf = null) {
+    const perfEnabled = this.perfLoggingEnabled()
+    const t0 = perfEnabled ? (parentPerf?.parentStartMs ?? performance.now()) : 0
+    let tMark = perfEnabled ? performance.now() : 0
+
+    // Prefer Set from parent; never rebuild Set(n) here (was a second ~20ms hit).
+    let filteredSet = parentPerf && Object.prototype.hasOwnProperty.call(parentPerf, 'filteredSet')
+      ? parentPerf.filteredSet
+      : undefined
+    if (filteredSet === undefined) {
+      filteredSet = this.getBarplotFilteredCellSet(displayedMetadataVector.values.length).filteredSet
+    }
+    const filterMsInner = perfEnabled ? (performance.now() - tMark) : 0
+    if (perfEnabled) tMark = performance.now()
+
     const canvases = document.querySelectorAll(`.category-distribution-canvas[data-metadata-id="${metadataId}"]`)
-    
-    // Show bar plots when coloring is active
     canvases.forEach(canvas => {
       canvas.style.display = 'block'
     })
-    
-    // Use the same color range logic as the scatter plot
-    // This ensures the gradient mapping is identical
-    const effectiveRange = this.getEffectiveColorRange()
-    let globalMin, globalMax
-    
-    if (effectiveRange && coloringMetadataVector.id === this.currentMetadataVector?.id) {
-      // Use the effective color range (respects "Adapt color range" setting)
-      globalMin = effectiveRange.min
-      globalMax = effectiveRange.max
-    } else if (coloringMetadataVector.compression_info) {
-      // Use compression info range
-      globalMin = coloringMetadataVector.compression_info.min_val
-      globalMax = coloringMetadataVector.compression_info.max_val
-    } else {
-      // Fallback: calculate from filtered values (loop — never Math.min/max spread)
-      const filteredColoringValues = coloringMetadataVector.values.filter((v, idx) => {
-        return v !== null && v !== undefined && !isNaN(v) && (!filteredSet || filteredSet.has(idx))
-      })
-      globalMin = this.dataManager.safeMin(filteredColoringValues)
-      globalMax = this.dataManager.safeMax(filteredColoringValues)
-    }
 
-    if (!Number.isFinite(globalMin) || !Number.isFinite(globalMax)) {
-      return
-    }
+    const range = this.resolveContinuousColoringRange(coloringMetadataVector, filteredSet)
+    if (!range) return
 
+    const { globalMin, globalMax } = range
     const binMin = globalMin
     const binMax = globalMax
-    
+    const numBins = 20
+    const histogramOptions = this.getBarplotBinHistogramOptions()
+    const useLog = this.getEffectiveGradientScale(globalMin, globalMax) === 'log'
+    const dpr = window.devicePixelRatio || 1
+    const tooltip = this.ensureCategoryBarTooltip()
+
+    // Single pass across cells (same approach as categorical bars).
+    const displayedCategories = Array.from(canvases)
+      .map(canvas => canvas.dataset.category)
+      .filter(category => category !== undefined && category !== null)
+    const displayedCategorySet = new Set(displayedCategories)
+    const valuesByCategory = {}
+    displayedCategories.forEach(category => {
+      valuesByCategory[category] = []
+    })
+
+    const displayedValues = displayedMetadataVector.values
+    const coloringValues = coloringMetadataVector.values
+    const n = displayedValues.length
+    for (let i = 0; i < n; i++) {
+      if (filteredSet && !filteredSet.has(i)) continue
+
+      const displayedCategory = String(displayedValues[i])
+      if (!displayedCategorySet.has(displayedCategory)) continue
+
+      const v = coloringValues[i]
+      if (v === null || v === undefined || isNaN(v)) continue
+      valuesByCategory[displayedCategory].push(v)
+    }
+    const groupMs = perfEnabled ? (performance.now() - tMark) : 0
+    if (perfEnabled) tMark = performance.now()
+
+    const ensureMedian = (stats) => {
+      if (!stats || stats.median != null || !Array.isArray(stats._valuesForMedian)) return stats?.median
+      const values = stats._valuesForMedian
+      values.sort((a, b) => a - b)
+      stats.median = values[Math.floor(values.length / 2)]
+      stats._valuesForMedian = null
+      return stats.median
+    }
+
+    const bindContinuousBarTooltip = (canvas) => {
+      this.bindCanvasBarTooltip(canvas, (e) => {
+        const tipRect = canvas.getBoundingClientRect()
+        const x = e.clientX - tipRect.left
+        const tipBins = canvas._barBins || []
+        const tipStats = canvas._barStats || {}
+        const hoveredBin = tipBins.find(bin => x >= bin.startX && x < bin.endX)
+
+        if (hoveredBin) {
+          tooltip.textContent = `Range: ${hoveredBin.start.toFixed(2)} - ${hoveredBin.end.toFixed(2)} (${hoveredBin.count} cells, ${hoveredBin.percentage.toFixed(1)}%)`
+        } else {
+          const median = ensureMedian(tipStats)
+          const medianText = median == null ? 'n/a' : Number(median).toFixed(2)
+          tooltip.textContent = `Min: ${tipStats.min?.toFixed(2)}, Max: ${tipStats.max?.toFixed(2)}, Mean: ${tipStats.mean?.toFixed(2)}, Median: ${medianText} (${tipStats.count} cells)`
+        }
+        this.positionCategoryBarTooltip(tooltip, e.clientX, e.clientY)
+      })
+    }
+
+    let statsMs = 0
+    let histogramMs = 0
+    let paintMs = 0
+    let valuesSorted = 0
+
     canvases.forEach(canvas => {
       const displayedCategory = canvas.dataset.category
-      
-      // Find all cells that belong to this displayed category (filtered only)
-      const cellsInDisplayedCategory = []
-      for (let i = 0; i < displayedMetadataVector.values.length; i++) {
-        if (
-          this.metadataValueEqualsDatasetCategory(displayedMetadataVector.values[i], displayedCategory) &&
-          (!filteredSet || filteredSet.has(i))
-        ) {
-          cellsInDisplayedCategory.push(i)
-        }
-      }
-      
-      // Get continuous values for these cells
-      const values = cellsInDisplayedCategory.map(cellIndex => coloringMetadataVector.values[cellIndex])
-      
-      // Calculate statistics
-      const validValues = values.filter(v => v !== null && v !== undefined && !isNaN(v))
+      const validValues = valuesByCategory[displayedCategory] || []
+      const width = canvas.clientWidth
+      const height = canvas.clientHeight
+
+      canvas.width = width * dpr
+      canvas.height = height * dpr
+      const ctx = canvas.getContext('2d')
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.fillStyle = '#f3f4f6'
+      ctx.fillRect(0, 0, width, height)
+
       if (validValues.length === 0) {
-        // No valid values, draw empty bar
-        const rect = canvas.getBoundingClientRect()
-        canvas.width = rect.width * window.devicePixelRatio
-        canvas.height = rect.height * window.devicePixelRatio
-        const ctx = canvas.getContext('2d')
-        ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
-        ctx.fillStyle = '#f3f4f6'
-        ctx.fillRect(0, 0, rect.width, rect.height)
+        const emptyStats = { min: 0, max: 0, mean: 0, median: 0, count: 0, binTotal: 0 }
         canvas.dataset.bins = JSON.stringify([])
-        canvas.dataset.stats = JSON.stringify({ min: 0, max: 0, mean: 0, median: 0, count: 0 })
+        canvas.dataset.stats = JSON.stringify(emptyStats)
+        canvas._barBins = []
+        canvas._barStats = emptyStats
+        bindContinuousBarTooltip(canvas)
         return
       }
-      
-      const min = this.dataManager.safeMin(validValues)
-      const max = this.dataManager.safeMax(validValues)
-      const mean = validValues.reduce((a, b) => a + b, 0) / validValues.length
-      const sortedValues = [...validValues].sort((a, b) => a - b)
-      const median = sortedValues[Math.floor(sortedValues.length / 2)]
-      
-      // Store stats for download
-      canvas.dataset.stats = JSON.stringify({ min, max, mean, median, count: validValues.length })
-      
-      // Create bins for histogram (20 bins across the global range; normal or log per settings)
-      const numBins = 20
-      const histogramOptions = this.getBarplotBinHistogramOptions()
+
+      // One pass for min/max/mean. Median is deferred to first tooltip that needs it
+      // (sorting 86k values per panel showed up as a large slice of the 60ms draws).
+      const statsStart = perfEnabled ? performance.now() : 0
+      let min = validValues[0]
+      let max = validValues[0]
+      let sum = 0
+      for (let vi = 0; vi < validValues.length; vi++) {
+        const v = validValues[vi]
+        if (v < min) min = v
+        if (v > max) max = v
+        sum += v
+      }
+      const mean = sum / validValues.length
+      if (perfEnabled) {
+        statsMs += performance.now() - statsStart
+        valuesSorted += validValues.length
+      }
+
+      const histStart = perfEnabled ? performance.now() : 0
       const { bins, binRanges, sourceCount } = this.buildHistogramBins(
         validValues,
         binMin,
@@ -24848,162 +25241,81 @@ export default class extends Controller {
         numBins,
         histogramOptions
       )
+      if (perfEnabled) histogramMs += performance.now() - histStart
       const binTotal = sourceCount > 0 ? sourceCount : validValues.length
+      const stats = {
+        min,
+        max,
+        mean,
+        median: null,
+        count: validValues.length,
+        binTotal,
+        _valuesForMedian: validValues
+      }
+      // Persist JSON without the deferred values array.
       canvas.dataset.stats = JSON.stringify({
         min,
         max,
         mean,
-        median,
+        median: null,
         count: validValues.length,
         binTotal
       })
-      
-      // Store bin information for tooltip (widths ∝ cell counts; scale only changes value edges)
-      const rect = canvas.getBoundingClientRect()
+      canvas._barStats = stats
+
       const binData = []
       let currentX = 0
-      bins.forEach((count, index) => {
-        if (count <= 0) return
+      for (let index = 0; index < bins.length; index++) {
+        const count = bins[index]
+        if (count <= 0) continue
         const percentage = binTotal > 0 ? (count / binTotal) * 100 : 0
-        const segmentWidth = (percentage / 100) * rect.width
+        const segmentWidth = (percentage / 100) * width
         binData.push({
           start: binRanges[index].min,
           end: binRanges[index].max,
-          count: count,
-          percentage: percentage,
+          count,
+          percentage,
           startX: currentX,
           endX: currentX + segmentWidth
         })
         currentX += segmentWidth
-      })
-      canvas.dataset.bins = JSON.stringify(binData)
-      
-      // Set canvas size
-      canvas.width = rect.width * window.devicePixelRatio
-      canvas.height = rect.height * window.devicePixelRatio
-      
-      const ctx = canvas.getContext('2d')
-      ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
-      
-      // Draw background (light gray)
-      ctx.fillStyle = '#f3f4f6'
-      ctx.fillRect(0, 0, rect.width, rect.height)
-      
-      // Get the actual gradient being used in the plot
-      const controlPoints = this.customGradientControlPoints || this.gradientControlPoints || [
-        { position: 0, color: 0x0000ff },
-        { position: 0.5, color: 0x00ff00 },
-        { position: 1, color: 0xff0000 }
-      ]
-      
-      // Convert control points to hex strings if they're numbers
-      const normalizedControlPoints = controlPoints.map(cp => ({
-        position: cp.position,
-        color: typeof cp.color === 'number' ? `#${cp.color.toString(16).padStart(6, '0')}` : cp.color
-      }))
-      
-      // Helper function to get color at a specific position in the gradient
-      const getColorAtPosition = (position) => {
-        // Find the two control points that surround this position
-        let lowerPoint = normalizedControlPoints[0]
-        let upperPoint = normalizedControlPoints[normalizedControlPoints.length - 1]
-        
-        for (let i = 0; i < normalizedControlPoints.length - 1; i++) {
-          if (position >= normalizedControlPoints[i].position && position <= normalizedControlPoints[i + 1].position) {
-            lowerPoint = normalizedControlPoints[i]
-            upperPoint = normalizedControlPoints[i + 1]
-            break
-          }
-        }
-        
-        // Interpolate between the two colors
-        const t = (position - lowerPoint.position) / (upperPoint.position - lowerPoint.position)
-        const lower = this.hexToRgb(lowerPoint.color)
-        const upper = this.hexToRgb(upperPoint.color)
-        
-        const r = Math.round(lower.r + (upper.r - lower.r) * t)
-        const g = Math.round(lower.g + (upper.g - lower.g) * t)
-        const b = Math.round(lower.b + (upper.b - lower.b) * t)
-        
-        return `rgb(${r}, ${g}, ${b})`
       }
-      
-      // Draw bins with width ∝ cell count (color from bin range midpoint in gradient space)
-      binData.forEach((bin) => {
-        const useLog = this.getEffectiveGradientScale(globalMin, globalMax) === 'log'
+      canvas.dataset.bins = JSON.stringify(binData)
+      canvas._barBins = binData
+
+      const paintStart = perfEnabled ? performance.now() : 0
+      for (let bi = 0; bi < binData.length; bi++) {
+        const bin = binData[bi]
         const binCenterValue = useLog && bin.start > 0 && bin.end > 0
           ? Math.sqrt(bin.start * bin.end)
           : (bin.start + bin.end) / 2
         const binPosition = this.valueToGradientPosition(binCenterValue, globalMin, globalMax)
-        ctx.fillStyle = getColorAtPosition(binPosition)
-        ctx.fillRect(bin.startX, 0, bin.endX - bin.startX, rect.height)
-      })
-      
-      // Add mousemove event listener for tooltip
-      // Remove old listeners if they exist (to handle switching between categorical and continuous)
-      if (canvas._tooltipHandler) {
-        canvas.removeEventListener('mousemove', canvas._tooltipHandler)
-        canvas.removeEventListener('mouseleave', canvas._tooltipLeaveHandler)
+        ctx.fillStyle = this.getGradientColorAtPosition(binPosition)
+        ctx.fillRect(bin.startX, 0, bin.endX - bin.startX, height)
       }
-      
-      canvas.style.cursor = 'pointer'
-      
-      // Create custom tooltip element if it doesn't exist
-      let tooltip = document.getElementById('category-bar-tooltip')
-      if (!tooltip) {
-        tooltip = document.createElement('div')
-        tooltip.id = 'category-bar-tooltip'
-        tooltip.style.cssText = `
-          position: fixed;
-          background-color: rgba(0, 0, 0, 0.85);
-          color: white;
-          padding: 6px 10px;
-          border-radius: 4px;
-          font-size: 12px;
-          pointer-events: none;
-          z-index: 10000;
-          display: none;
-          white-space: nowrap;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.2);
-        `
-        document.body.appendChild(tooltip)
-      }
-      
-      // Create tooltip handler for continuous data
-      const tooltipHandler = (e) => {
-        const tipRect = canvas.getBoundingClientRect()
-        const x = e.clientX - tipRect.left
-        const tipBins = JSON.parse(canvas.dataset.bins || '[]')
-        const stats = JSON.parse(canvas.dataset.stats || '{}')
-        const hoveredBin = tipBins.find(bin => x >= bin.startX && x < bin.endX)
-        
-        if (hoveredBin) {
-          const tooltipText = `Range: ${hoveredBin.start.toFixed(2)} - ${hoveredBin.end.toFixed(2)} (${hoveredBin.count} cells, ${hoveredBin.percentage.toFixed(1)}%)`
-          tooltip.textContent = tooltipText
-          tooltip.style.display = 'block'
-          tooltip.style.left = `${e.clientX + 10}px`
-          tooltip.style.top = `${e.clientY + 10}px`
-        } else {
-          // Show overall stats
-          const tooltipText = `Min: ${stats.min?.toFixed(2)}, Max: ${stats.max?.toFixed(2)}, Mean: ${stats.mean?.toFixed(2)}, Median: ${stats.median?.toFixed(2)} (${stats.count} cells)`
-          tooltip.textContent = tooltipText
-          tooltip.style.display = 'block'
-          tooltip.style.left = `${e.clientX + 10}px`
-          tooltip.style.top = `${e.clientY + 10}px`
-        }
-      }
-      
-      const leaveHandler = () => {
-        tooltip.style.display = 'none'
-      }
-      
-      canvas.addEventListener('mousemove', tooltipHandler)
-      canvas.addEventListener('mouseleave', leaveHandler)
-      
-      // Store handlers for later removal (using object properties, not dataset)
-      canvas._tooltipHandler = tooltipHandler
-      canvas._tooltipLeaveHandler = leaveHandler
+
+      bindContinuousBarTooltip(canvas)
+      if (perfEnabled) paintMs += performance.now() - paintStart
     })
+
+    if (perfEnabled) {
+      this.logPerf('barplot_drawContinuousDistributions', performance.now() - t0, {
+        metadataId,
+        path: 'continuous',
+        canvasCount: canvases.length,
+        cellCount: n,
+        filteredCellCount: filteredSet ? filteredSet.size : n,
+        valuesSorted,
+        filterMs: Number((parentPerf?.filterMs ?? filterMsInner).toFixed(2)),
+        countTooltipMs: Number((parentPerf?.countTooltipMs ?? 0).toFixed(2)),
+        filterMsInner: Number(filterMsInner.toFixed(2)),
+        groupMs: Number(groupMs.toFixed(2)),
+        statsMs: Number(statsMs.toFixed(2)),
+        histogramMs: Number(histogramMs.toFixed(2)),
+        paintMs: Number(paintMs.toFixed(2)),
+        usedCachedFilterSet: !!(parentPerf && Object.prototype.hasOwnProperty.call(parentPerf, 'filteredSet'))
+      })
+    }
   }
 
   getBarplotBinHistogramOptions() {

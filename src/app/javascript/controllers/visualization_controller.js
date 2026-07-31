@@ -299,6 +299,10 @@ export default class extends Controller {
     if (this.globalFilterPanelVisible === undefined) this.globalFilterPanelVisible = false
     if (!this._globalFilterOutsideHandler) this._globalFilterOutsideHandler = null
     if (!Array.isArray(this.checkpointHistory)) this.checkpointHistory = []
+    if (!Array.isArray(this.coloringHistory)) this.coloringHistory = []
+    if (this._coloringHistoryCurrentId === undefined) this._coloringHistoryCurrentId = undefined
+    if (this._coloringHistoryCurrentSnapshot === undefined) this._coloringHistoryCurrentSnapshot = null
+    if (this._skipColoringHistoryRecord === undefined) this._skipColoringHistoryRecord = false
     if (this.currentMatchedCheckpointId === undefined) this.currentMatchedCheckpointId = null
     if (this.lastLoadedCheckpointId === undefined) this.lastLoadedCheckpointId = null
     if (this.lastLoadedCheckpointPersistedStateBaseline === undefined) {
@@ -7409,6 +7413,7 @@ export default class extends Controller {
     })
 
     this.closeAllDownloadMenus()
+    this.closeColoringHistoryMenu()
 
     const embeddingMenu = document.getElementById('embedding-selection-menu')
     if (embeddingMenu) {
@@ -10492,24 +10497,314 @@ export default class extends Controller {
     return metadataId
   }
 
+  buildColoringSnapshot(metadataId, displayName = '') {
+    const id = String(metadataId || '').trim()
+    if (!id) return null
+
+    let kind = 'metadata'
+    let geneId = null
+    let geneSetItemId = null
+
+    if (id.startsWith('gene_set_item_')) {
+      kind = 'gene_set'
+      const geneSetInfo = this.extractGeneSetItemColoringFromMetadataId(id)
+      geneSetItemId = geneSetInfo?.itemId ? String(geneSetInfo.itemId) : null
+    } else if (id.startsWith('gene_')) {
+      kind = 'gene'
+      const geneMatch = id.match(/^gene_([^_]+)/)
+      geneId = geneMatch ? geneMatch[1] : null
+    }
+
+    return {
+      metadataId: id,
+      displayName: String(displayName || this.getCurrentColoringDisplayName() || id).trim() || id,
+      kind,
+      geneId,
+      geneSetItemId
+    }
+  }
+
+  pushColoringHistoryEntry(snapshot) {
+    if (!snapshot?.metadataId) return
+    if (!Array.isArray(this.coloringHistory)) this.coloringHistory = []
+
+    const metadataId = String(snapshot.metadataId)
+    this.coloringHistory = this.coloringHistory.filter((entry) => String(entry?.metadataId || '') !== metadataId)
+    this.coloringHistory.unshift({
+      metadataId,
+      displayName: String(snapshot.displayName || metadataId),
+      kind: snapshot.kind || 'metadata',
+      geneId: snapshot.geneId || null,
+      geneSetItemId: snapshot.geneSetItemId || null
+    })
+    if (this.coloringHistory.length > 10) {
+      this.coloringHistory = this.coloringHistory.slice(0, 10)
+    }
+  }
+
+  maybeRecordColoringHistory(metadataId, displayName) {
+    const nextId = String(metadataId || '').trim()
+    const nextSnapshot = nextId
+      ? this.buildColoringSnapshot(nextId, displayName)
+      : null
+
+    if (this._skipColoringHistoryRecord || this.isApplyingCheckpointState) {
+      this._coloringHistoryCurrentId = nextId
+      this._coloringHistoryCurrentSnapshot = nextSnapshot
+      return
+    }
+
+    const prevId = this._coloringHistoryCurrentId
+
+    if (prevId === undefined) {
+      this._coloringHistoryCurrentId = nextId
+      this._coloringHistoryCurrentSnapshot = nextSnapshot
+      return
+    }
+
+    if (prevId === nextId) return
+
+    if (prevId && this._coloringHistoryCurrentSnapshot) {
+      this.pushColoringHistoryEntry(this._coloringHistoryCurrentSnapshot)
+    }
+
+    if (nextId && Array.isArray(this.coloringHistory)) {
+      this.coloringHistory = this.coloringHistory.filter((entry) => String(entry?.metadataId || '') !== nextId)
+    }
+
+    this._coloringHistoryCurrentId = nextId
+    this._coloringHistoryCurrentSnapshot = nextSnapshot
+  }
+
+  updateColoringHistoryControls() {
+    const revertBtn = document.getElementById('current-coloring-revert-btn')
+    const historyBtn = document.getElementById('current-coloring-history-btn')
+    const historyCount = Array.isArray(this.coloringHistory) ? this.coloringHistory.length : 0
+    const showControls = historyCount > 0
+
+    if (revertBtn) {
+      revertBtn.style.display = showControls ? 'inline-flex' : 'none'
+      revertBtn.disabled = !showControls
+    }
+    if (historyBtn) {
+      historyBtn.style.display = showControls ? 'inline-flex' : 'none'
+      historyBtn.disabled = !showControls
+      historyBtn.title = showControls
+        ? `Coloring history (${historyCount})`
+        : 'Coloring history'
+    }
+
+    if (!showControls) {
+      this.closeColoringHistoryMenu()
+    }
+  }
+
+  closeColoringHistoryMenu() {
+    const menu = document.getElementById('current-coloring-history-menu')
+    if (menu) menu.style.display = 'none'
+  }
+
+  preventColoringHistoryMenuClose(event) {
+    event.stopPropagation()
+  }
+
+  renderColoringHistoryMenu() {
+    const menu = document.getElementById('current-coloring-history-menu')
+    if (!menu) return
+
+    menu.innerHTML = ''
+    const entries = Array.isArray(this.coloringHistory) ? this.coloringHistory : []
+    if (entries.length === 0) {
+      const empty = document.createElement('div')
+      empty.style.cssText = 'padding: 10px 12px; font-size: 12px; color: #6b7280;'
+      empty.textContent = 'No previous colorings'
+      menu.appendChild(empty)
+      return
+    }
+
+    entries.forEach((entry, index) => {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.dataset.historyIndex = String(index)
+      button.style.cssText = 'display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; cursor: pointer; font-size: 12px; color: #374151; border-bottom: 1px solid #f3f4f6;'
+      button.textContent = entry.displayName || entry.metadataId
+      button.title = entry.metadataId || ''
+      button.addEventListener('mouseenter', () => { button.style.backgroundColor = '#f3f4f6' })
+      button.addEventListener('mouseleave', () => { button.style.backgroundColor = '' })
+      button.addEventListener('click', (event) => this.applyColoringHistoryEntry(event))
+      menu.appendChild(button)
+    })
+  }
+
+  toggleColoringHistoryMenu(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const menu = document.getElementById('current-coloring-history-menu')
+    if (!menu) return
+
+    const isOpen = menu.style.display === 'block'
+    this.closeAllDropdowns()
+    if (isOpen) return
+
+    this.renderColoringHistoryMenu()
+    menu.style.display = 'block'
+  }
+
+  async applyColoringSnapshot(snapshot) {
+    if (!snapshot?.metadataId) {
+      this.resetAllWaterDropButtons()
+      this.removeAllCategoryColors()
+      this.clearMetadataColoring()
+      return
+    }
+
+    const metadataId = String(snapshot.metadataId)
+    let button = this.findColoringButtonForMetadataId(metadataId)
+
+    if (!button && snapshot.kind === 'gene' && snapshot.geneId) {
+      const geneId = this.escapeAttributeSelectorValue(String(snapshot.geneId))
+      button = document.querySelector(
+        `.gene-color-btn[data-gene-id="${geneId}"], ` +
+        `[data-action*="geneWaterDropClicked"][data-gene-id="${geneId}"]`
+      )
+    }
+
+    if (!button && snapshot.kind === 'gene_set' && snapshot.geneSetItemId) {
+      const itemId = this.escapeAttributeSelectorValue(String(snapshot.geneSetItemId))
+      button = document.querySelector(
+        `[data-action*="geneSetWaterDropClicked"][data-gene-set-item-id="${itemId}"]`
+      )
+    }
+
+    if (!button) {
+      console.warn('Cannot restore coloring; control not found for:', metadataId)
+      return
+    }
+
+    button.dataset.active = 'false'
+    const action = String(button.dataset.action || '')
+    const syntheticEvent = {
+      preventDefault() {},
+      stopPropagation() {},
+      currentTarget: button
+    }
+
+    if (action.includes('geneWaterDropClicked') || button.classList.contains('gene-color-btn')) {
+      await this.geneWaterDropClicked(syntheticEvent)
+    } else if (action.includes('geneSetWaterDropClicked')) {
+      await this.geneSetWaterDropClicked(syntheticEvent)
+    } else {
+      this.waterDropClicked(syntheticEvent)
+    }
+  }
+
+  async revertToPreviousColoring(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    this.closeColoringHistoryMenu()
+    if (!Array.isArray(this.coloringHistory) || this.coloringHistory.length === 0) return
+
+    const previous = this.coloringHistory.shift()
+    this.updateColoringHistoryControls()
+    await this.applyColoringSnapshot(previous)
+  }
+
+  async applyColoringHistoryEntry(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const button = event?.currentTarget
+    const index = parseInt(button?.dataset?.historyIndex, 10)
+    if (!Number.isInteger(index) || index < 0 || !Array.isArray(this.coloringHistory)) return
+    if (index >= this.coloringHistory.length) return
+
+    const [entry] = this.coloringHistory.splice(index, 1)
+    this.closeColoringHistoryMenu()
+    this.updateColoringHistoryControls()
+    await this.applyColoringSnapshot(entry)
+  }
+
+  async applyGeneExpressionColoringForGene(gene) {
+    if (!gene?.stableId) return
+
+    const geneId = String(gene.stableId)
+    const escapedGeneId = this.escapeAttributeSelectorValue(geneId)
+    const button = document.querySelector(
+      `.gene-color-btn[data-gene-id="${escapedGeneId}"], ` +
+      `[data-action*="geneWaterDropClicked"][data-gene-id="${escapedGeneId}"]`
+    )
+    if (!button) return
+
+    const geneMetadataId = this.geneManager?.getGeneMetadataId
+      ? this.geneManager.getGeneMetadataId(geneId, this.geneManager.currentMatrixAnnotId)
+      : `gene_${geneId}`
+    const currentId = String(this.currentMetadataId || this.currentMetadataVector?.id || '')
+    if (button.dataset.active === 'true' && currentId === String(geneMetadataId)) {
+      return
+    }
+
+    button.dataset.active = 'false'
+    await this.geneWaterDropClicked({
+      preventDefault() {},
+      stopPropagation() {},
+      currentTarget: button
+    })
+  }
+
   updateCurrentColoringIndicator() {
     const indicator = document.getElementById('current-coloring-indicator')
     const link = document.getElementById('current-coloring-link')
+    const label = document.getElementById('current-coloring-label')
+    const prefix = document.getElementById('current-coloring-prefix')
     if (!indicator || !link) return
 
     const metadataId = String(this.currentMetadataId || this.currentMetadataVector?.id || '').trim()
     const displayName = this.getCurrentColoringDisplayName()
-    if (!metadataId || !displayName) {
+    this.maybeRecordColoringHistory(metadataId, displayName)
+
+    const historyCount = Array.isArray(this.coloringHistory) ? this.coloringHistory.length : 0
+    const hasColoring = !!(metadataId && displayName)
+
+    if (!hasColoring && historyCount === 0) {
       indicator.style.display = 'none'
       link.textContent = ''
       link.dataset.metadataId = ''
+      this.updateColoringHistoryControls()
       return
     }
 
-    link.textContent = displayName
-    link.dataset.metadataId = metadataId
-    link.title = `Show ${displayName} in the metadata panel`
+    if (label) label.style.display = 'flex'
+
+    if (hasColoring) {
+      if (prefix) {
+        prefix.textContent = 'Colored by'
+        prefix.style.display = ''
+      }
+      link.textContent = displayName
+      link.dataset.metadataId = metadataId
+      link.title = displayName
+      link.style.display = ''
+    } else {
+      if (prefix) {
+        prefix.textContent = 'No coloring'
+        prefix.style.display = ''
+      }
+      link.textContent = ''
+      link.dataset.metadataId = ''
+      link.title = ''
+      link.style.display = 'none'
+    }
+
     indicator.style.display = 'block'
+    this.updateColoringHistoryControls()
   }
 
   async focusCurrentColoringMetadata(event) {

@@ -1184,8 +1184,24 @@ this.currentMatches = allMatches.filter(item => {
       const resultsDiv = document.getElementById('gene-expression-results')
       if (resultsDiv) {
         this.displayBulkGene(gene, resultsDiv)
+        this._autoColorGeneToken = (this._autoColorGeneToken || 0) + 1
+        const autoColorToken = this._autoColorGeneToken
         this.loadGeneExpressionData(gene, resultsDiv)
+          .then(() => {
+            // Only the latest added gene should drive auto-coloring (bulk-safe).
+            if (autoColorToken !== this._autoColorGeneToken) return
+            if (typeof this.controller?.applyGeneExpressionColoringForGene === 'function') {
+              return this.controller.applyGeneExpressionColoringForGene(gene)
+            }
+          })
+          .catch((error) => {
+            console.error('GeneManager: Failed to auto-color newly added gene:', error)
+          })
       }
+    } else if (typeof this.controller?.applyGeneExpressionColoringForGene === 'function') {
+      // Gene already listed: still switch plot coloring to this gene's expression
+      this._autoColorGeneToken = (this._autoColorGeneToken || 0) + 1
+      this.controller.applyGeneExpressionColoringForGene(gene)
     }
 
     // Clear input

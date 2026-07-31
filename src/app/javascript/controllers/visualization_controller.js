@@ -361,10 +361,10 @@ export default class extends Controller {
     this.customColorRange = null // { min: number, max: number } or null for auto
     
     // Initialize category display order preference
-    this.categoryOrder = 'largest-first' // 'largest-first' or 'smallest-first'
+    this.categoryOrder = 'largest-first' // 'largest-first', 'smallest-first', or 'random'
     
     // Initialize numerical display order preference for continuous metadata
-    this.numericalOrder = 'negative-to-positive' // 'negative-to-positive', 'positive-to-negative', 'abs-min-to-max', 'abs-max-to-min'
+    this.numericalOrder = 'negative-to-positive' // 'negative-to-positive', 'positive-to-negative', 'abs-min-to-max', 'abs-max-to-min', or 'random'
     
     // Category label rendering preferences
     this.showLabelBoxes = true
@@ -6467,8 +6467,23 @@ export default class extends Controller {
   }
 
   // Create color map for discrete categories
+  // Fisher-Yates shuffle in place
+  shuffleArrayInPlace(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      const tmp = array[i]
+      array[i] = array[j]
+      array[j] = tmp
+    }
+    return array
+  }
+
   // Get categories sorted by frequency based on user preference
   getSortedCategories(values, categories) {
+    if (this.categoryOrder === 'random') {
+      return this.shuffleArrayInPlace(categories)
+    }
+
     // Calculate category frequencies
     const categoryFrequencies = {}
     values.forEach(value => {
@@ -14928,6 +14943,14 @@ export default class extends Controller {
     this.setSelectionTab(tab)
   }
 
+  isCellsSelectionTabVisible() {
+    const cellsContent = document.getElementById('cells-tab-content')
+    if (!cellsContent) return false
+    if (cellsContent.classList.contains('hidden')) return false
+    if (cellsContent.style.display === 'none') return false
+    return true
+  }
+
   setSelectionTab(tab = 'cells') {
     const normalizedTab = tab === 'gene-sets' ? 'gene-sets' : 'cells'
     const cellsTab = document.getElementById('cells-tab')
@@ -14953,6 +14976,11 @@ export default class extends Controller {
       geneSetsContent.classList.add('hidden')
       cellsContent.style.display = 'flex'
       geneSetsContent.style.display = 'none'
+      // Selection bar plots live in this panel. Coloring while it was hidden painted
+      // into 0x0 canvases; redraw after layout so they are visible again.
+      requestAnimationFrame(() => {
+        this.drawSelectionDistribution()
+      })
     } else if (normalizedTab === 'gene-sets') {
       geneSetsTab.classList.add('border-blue-500', 'text-blue-600')
       geneSetsTab.classList.remove('border-transparent', 'text-gray-500')
@@ -15121,17 +15149,22 @@ export default class extends Controller {
       categoryFrequencies[category] = (categoryFrequencies[category] || 0) + 1
     }
     
-    // Sort categories by frequency
-    const sortedCategories = Object.keys(categoryFrequencies).sort((a, b) => {
-      const freqA = categoryFrequencies[a]
-      const freqB = categoryFrequencies[b]
-      
-      if (this.categoryOrder === 'smallest-first') {
-        return freqA - freqB // Ascending (smallest first = background)
-      } else {
-        return freqB - freqA // Descending (largest first = background)
-      }
-    })
+    // Sort categories by frequency (or shuffle for random)
+    let sortedCategories = Object.keys(categoryFrequencies)
+    if (this.categoryOrder === 'random') {
+      this.shuffleArrayInPlace(sortedCategories)
+    } else {
+      sortedCategories.sort((a, b) => {
+        const freqA = categoryFrequencies[a]
+        const freqB = categoryFrequencies[b]
+        
+        if (this.categoryOrder === 'smallest-first') {
+          return freqA - freqB // Ascending (smallest first = background)
+        } else {
+          return freqB - freqA // Descending (largest first = background)
+        }
+      })
+    }
     
     // console.log(`📊 [ReGL] Category order (${this.categoryOrder}):`, 
                 // sortedCategories.map(c => `${c}(${categoryFrequencies[c]})`).join(', '))
@@ -15224,6 +15257,9 @@ export default class extends Controller {
           const absMax2 = Math.max(Math.abs(minVal), Math.abs(maxVal))
           zIndex = absMax2 > 0 ? Math.round(((absMax2 - absValue2) / absMax2) * maxZIndex) : 0
           break
+        case 'random':
+          zIndex = Math.floor(Math.random() * (maxZIndex + 1))
+          break
       }
       zIndices.push({ cellIndex, zIndex })
     }
@@ -15311,13 +15347,17 @@ export default class extends Controller {
         })
         
         // Sort based on current preference
-        categoriesData.sort((a, b) => {
-          if (this.categoryOrder === 'smallest-first') {
-            return a.count - b.count // Ascending (smallest first)
-          } else {
-            return b.count - a.count // Descending (largest first)
-          }
-        })
+        if (this.categoryOrder === 'random') {
+          this.shuffleArrayInPlace(categoriesData)
+        } else {
+          categoriesData.sort((a, b) => {
+            if (this.categoryOrder === 'smallest-first') {
+              return a.count - b.count // Ascending (smallest first)
+            } else {
+              return b.count - a.count // Descending (largest first)
+            }
+          })
+        }
         
         // Re-append in the new sorted order
         categoriesData.forEach(data => {
@@ -15380,9 +15420,14 @@ export default class extends Controller {
           zIndices[i] = Math.round((absMax2 - absValue) * invAbsMax2 * maxZIndex)
         }
         break
+
+      case 'random':
+        for (let i = 0; i < values.length; i++) {
+          zIndices[i] = Math.floor(Math.random() * (maxZIndex + 1))
+        }
+        break
         
       default:
-        // Fallback: all zeros
         zIndices.fill(0)
     }
     
@@ -25124,6 +25169,11 @@ export default class extends Controller {
       return
     }
 
+    // Canvases under a hidden Cell Sets panel measure 0x0; skip painting until visible.
+    if (!this.isCellsSelectionTabVisible()) {
+      return
+    }
+
     // Show complement only when the selection is a proper subset of all cells.
     const complementIndices = this.getComplementarySelectionIndices(selectionIndices)
     const showComplement = complementIndices.length > 0 && !!complementCanvas && !!complementRow
@@ -25131,6 +25181,19 @@ export default class extends Controller {
     wrap.style.display = 'flex'
     if (complementRow) {
       complementRow.style.display = showComplement ? 'flex' : 'none'
+    }
+
+    // After revealing the wrap, wait one frame if layout has not assigned width yet.
+    const layoutRect = selectionCanvas.getBoundingClientRect()
+    if (layoutRect.width <= 0 || layoutRect.height <= 0) {
+      if (!this._selectionDistributionLayoutRetryScheduled) {
+        this._selectionDistributionLayoutRetryScheduled = true
+        requestAnimationFrame(() => {
+          this._selectionDistributionLayoutRetryScheduled = false
+          this.drawSelectionDistribution()
+        })
+      }
+      return
     }
 
     if (isContinuous) {

@@ -1066,6 +1066,23 @@ project_type_tag = @project&.project_type&.tag.to_s
             to { transform: rotate(360deg); }
           }
           /* Keep FA checkmarks; class state survives <i> -> <svg> replacement. */
+          .category-checkbox {
+            flex: 0 0 16px;
+            width: 16px;
+            height: 16px;
+            min-width: 16px;
+            min-height: 16px;
+            box-sizing: border-box;
+            overflow: hidden;
+          }
+          .category-checkbox > i,
+          .category-checkbox > svg {
+            flex: 0 0 auto;
+            width: 10px;
+            height: 10px;
+            font-size: 10px;
+            line-height: 1;
+          }
           .category-checkbox.is-deselected > i,
           .category-checkbox.is-deselected > svg {
             display: none !important;
@@ -1074,6 +1091,15 @@ project_type_tag = @project&.project_type&.tag.to_s
           .category-checkbox.is-selected > svg {
             display: block !important;
             color: #10b981 !important;
+          }
+          .metadata-select-all-checkbox {
+            flex: 0 0 20px;
+            width: 20px;
+            height: 20px;
+            min-width: 20px;
+            min-height: 20px;
+            box-sizing: border-box;
+            overflow: hidden;
           }
           .metadata-select-all-checkbox.is-deselected > i,
           .metadata-select-all-checkbox.is-deselected > svg {
@@ -1287,6 +1313,7 @@ project_type_tag = @project&.project_type&.tag.to_s
           }
           .metadata-category-name {
             color: #374151;
+            flex: 1 1 auto;
             min-width: 0;
             overflow: hidden;
             text-overflow: ellipsis;

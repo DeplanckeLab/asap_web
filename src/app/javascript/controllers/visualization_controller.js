@@ -24750,17 +24750,24 @@ export default class extends Controller {
         binTotal
       })
       
-      // Store bin information for tooltip (equal visual widths; scale only changes value edges)
+      // Store bin information for tooltip (widths ∝ cell counts; scale only changes value edges)
       const rect = canvas.getBoundingClientRect()
-      const segmentWidth = rect.width / numBins
-      const binData = bins.map((count, index) => ({
-        start: binRanges[index].min,
-        end: binRanges[index].max,
-        count: count,
-        percentage: binTotal > 0 ? (count / binTotal) * 100 : 0,
-        startX: index * segmentWidth,
-        endX: (index + 1) * segmentWidth
-      }))
+      const binData = []
+      let currentX = 0
+      bins.forEach((count, index) => {
+        if (count <= 0) return
+        const percentage = binTotal > 0 ? (count / binTotal) * 100 : 0
+        const segmentWidth = (percentage / 100) * rect.width
+        binData.push({
+          start: binRanges[index].min,
+          end: binRanges[index].max,
+          count: count,
+          percentage: percentage,
+          startX: currentX,
+          endX: currentX + segmentWidth
+        })
+        currentX += segmentWidth
+      })
       canvas.dataset.bins = JSON.stringify(binData)
       
       // Set canvas size
@@ -24813,15 +24820,13 @@ export default class extends Controller {
         return `rgb(${r}, ${g}, ${b})`
       }
       
-      // Draw equal-width bins (normal/log only changes value boundaries)
+      // Draw bins with width ∝ cell count (color from bin range midpoint; scale sets value edges)
       const span = globalMax - globalMin
-      bins.forEach((count, index) => {
-        if (count <= 0) return
-        const range = binRanges[index]
-        const binCenterValue = (range.min + range.max) / 2
+      binData.forEach((bin) => {
+        const binCenterValue = (bin.start + bin.end) / 2
         const binPosition = span > 0 ? (binCenterValue - globalMin) / span : 0
         ctx.fillStyle = getColorAtPosition(Math.min(1, Math.max(0, binPosition)))
-        ctx.fillRect(index * segmentWidth, 0, segmentWidth, rect.height)
+        ctx.fillRect(bin.startX, 0, bin.endX - bin.startX, rect.height)
       })
       
       // Add mousemove event listener for tooltip
@@ -24860,14 +24865,7 @@ export default class extends Controller {
         const x = e.clientX - tipRect.left
         const tipBins = JSON.parse(canvas.dataset.bins || '[]')
         const stats = JSON.parse(canvas.dataset.stats || '{}')
-        let hoveredBin = null
-        if (tipBins.length > 0 && tipRect.width > 0) {
-          const binIndex = Math.min(
-            tipBins.length - 1,
-            Math.max(0, Math.floor((x / tipRect.width) * tipBins.length))
-          )
-          hoveredBin = tipBins[binIndex]
-        }
+        const hoveredBin = tipBins.find(bin => x >= bin.startX && x < bin.endX)
         
         if (hoveredBin) {
           const tooltipText = `Range: ${hoveredBin.start.toFixed(2)} - ${hoveredBin.end.toFixed(2)} (${hoveredBin.count} cells, ${hoveredBin.percentage.toFixed(1)}%)`
@@ -25367,25 +25365,31 @@ export default class extends Controller {
     canvas.dataset.stats = JSON.stringify({ min, max, mean, median, count: values.length, binTotal })
     canvas.dataset.segments = ''
 
-    const segmentWidth = rect.width / numBins
-    const binData = bins.map((count, index) => ({
-      start: binRanges[index].min,
-      end: binRanges[index].max,
-      count: count,
-      percentage: binTotal > 0 ? (count / binTotal) * 100 : 0,
-      startX: index * segmentWidth,
-      endX: (index + 1) * segmentWidth
-    }))
+    // Widths ∝ cell counts; scale only changes value edges; color from bin range midpoint
+    const binData = []
+    let currentX = 0
+    bins.forEach((count, index) => {
+      if (count <= 0) return
+      const percentage = binTotal > 0 ? (count / binTotal) * 100 : 0
+      const segmentWidth = (percentage / 100) * rect.width
+      binData.push({
+        start: binRanges[index].min,
+        end: binRanges[index].max,
+        count: count,
+        percentage: percentage,
+        startX: currentX,
+        endX: currentX + segmentWidth
+      })
+      currentX += segmentWidth
+    })
     canvas.dataset.bins = JSON.stringify(binData)
 
     const span = globalMax - globalMin
-    bins.forEach((count, index) => {
-      if (count <= 0) return
-      const binRange = binRanges[index]
-      const binCenterValue = (binRange.min + binRange.max) / 2
+    binData.forEach((bin) => {
+      const binCenterValue = (bin.start + bin.end) / 2
       const binPosition = span > 0 ? (binCenterValue - globalMin) / span : 0
       ctx.fillStyle = this.getGradientColorAtPosition(Math.min(1, Math.max(0, binPosition)))
-      ctx.fillRect(index * segmentWidth, 0, segmentWidth, rect.height)
+      ctx.fillRect(bin.startX, 0, bin.endX - bin.startX, rect.height)
     })
 
     const tooltip = this.ensureCategoryBarTooltip()
@@ -25394,14 +25398,7 @@ export default class extends Controller {
       const x = e.clientX - canvasRect.left
       const binList = JSON.parse(canvas.dataset.bins || '[]')
       const stats = JSON.parse(canvas.dataset.stats || '{}')
-      let hoveredBin = null
-      if (binList.length > 0 && canvasRect.width > 0) {
-        const binIndex = Math.min(
-          binList.length - 1,
-          Math.max(0, Math.floor((x / canvasRect.width) * binList.length))
-        )
-        hoveredBin = binList[binIndex]
-      }
+      const hoveredBin = binList.find(bin => x >= bin.startX && x < bin.endX)
 
       if (hoveredBin) {
         tooltip.textContent = `Range: ${hoveredBin.start.toFixed(2)} - ${hoveredBin.end.toFixed(2)} (${hoveredBin.count} cells, ${hoveredBin.percentage.toFixed(1)}%)`

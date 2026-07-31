@@ -7777,6 +7777,8 @@ export default class extends Controller {
         categoryColorOverrides: categoryColorOverrides,
         customColorRange: this.customColorRange,
         currentColorScheme: this.currentColorScheme,
+        gradientScale: this.gradientScale === 'log' ? 'log' : 'normal',
+        metadataGradients: this.serializeMetadataGradientsForCheckpoint(),
         history: this.serializeColoringHistoryForCheckpoint()
       },
       filters: {
@@ -8827,6 +8829,27 @@ export default class extends Controller {
       this.currentColorScheme = checkpointColoringState.currentColorScheme
     }
 
+    // Restore per-metadata gradients (including gradientScale) before re-applying coloring,
+    // so loadGradientForMetadata picks up the checkpoint scale/control points.
+    this.restoreMetadataGradientsFromCheckpoint(checkpointColoringState.metadataGradients)
+
+    if (checkpointColoringState.gradientScale === 'log' || checkpointColoringState.gradientScale === 'normal') {
+      this.gradientScale = checkpointColoringState.gradientScale
+      const coloringMetadataIdForScale = checkpointColoringState.metadataId
+      if (coloringMetadataIdForScale) {
+        const existing = this.metadataGradients.get(String(coloringMetadataIdForScale)) || {}
+        this.metadataGradients.set(String(coloringMetadataIdForScale), {
+          gradientControlPoints: existing.gradientControlPoints
+            ? JSON.parse(JSON.stringify(existing.gradientControlPoints))
+            : null,
+          customGradientControlPoints: existing.customGradientControlPoints
+            ? JSON.parse(JSON.stringify(existing.customGradientControlPoints))
+            : null,
+          gradientScale: this.gradientScale
+        })
+      }
+    }
+
     if (Object.prototype.hasOwnProperty.call(checkpointColoringState, 'customColorRange')) {
       const range = checkpointColoringState.customColorRange
       if (range && Number.isFinite(Number(range.min)) && Number.isFinite(Number(range.max))) {
@@ -8872,6 +8895,9 @@ export default class extends Controller {
 
       let loadedColorVector = null
       if (alreadyLoadedColoringVector) {
+        if (this.currentMetadataVector?.data_type === 'NUMERIC') {
+          this.gradientManager.loadGradientForMetadata(normalizedColoringMetadataId)
+        }
         this.updateVisualizationWithMetadataVector()
         loadedColorVector = this.currentMetadataVector
         this.checkpointDebug('restoreColoringAndAxisState:skip-loadAndVisualizeMetadataVector-already-loaded', {
@@ -10744,6 +10770,49 @@ export default class extends Controller {
       geneId,
       geneSetItemId
     }
+  }
+
+  serializeMetadataGradientsForCheckpoint() {
+    if (this.currentMetadataId) {
+      this.gradientManager?.saveGradientForMetadata(this.currentMetadataId)
+    }
+
+    const serialized = {}
+    if (!(this.metadataGradients instanceof Map)) return serialized
+
+    this.metadataGradients.forEach((gradientState, metadataId) => {
+      if (!metadataId || !gradientState) return
+      serialized[String(metadataId)] = {
+        gradientControlPoints: gradientState.gradientControlPoints
+          ? JSON.parse(JSON.stringify(gradientState.gradientControlPoints))
+          : null,
+        customGradientControlPoints: gradientState.customGradientControlPoints
+          ? JSON.parse(JSON.stringify(gradientState.customGradientControlPoints))
+          : null,
+        gradientScale: gradientState.gradientScale === 'log' ? 'log' : 'normal'
+      }
+    })
+    return serialized
+  }
+
+  restoreMetadataGradientsFromCheckpoint(serializedGradients) {
+    if (!serializedGradients || typeof serializedGradients !== 'object' || Array.isArray(serializedGradients)) {
+      return
+    }
+
+    this.metadataGradients = new Map()
+    Object.entries(serializedGradients).forEach(([metadataId, gradientState]) => {
+      if (!metadataId || !gradientState || typeof gradientState !== 'object') return
+      this.metadataGradients.set(String(metadataId), {
+        gradientControlPoints: gradientState.gradientControlPoints
+          ? JSON.parse(JSON.stringify(gradientState.gradientControlPoints))
+          : null,
+        customGradientControlPoints: gradientState.customGradientControlPoints
+          ? JSON.parse(JSON.stringify(gradientState.customGradientControlPoints))
+          : null,
+        gradientScale: gradientState.gradientScale === 'log' ? 'log' : 'normal'
+      })
+    })
   }
 
   serializeColoringHistoryForCheckpoint() {

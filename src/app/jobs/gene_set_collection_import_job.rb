@@ -346,10 +346,11 @@ class GeneSetCollectionImportJob < ApplicationJob
       candidate_ensembl_keys = (ensembl_keys + symbol_keys).uniq
       if candidate_ensembl_keys.any?
         candidate_ensembl_keys.each_slice(2000) do |slice|
-          quoted = slice.map { |value| conn.quote(value) }.join(',')
-          rows = conn.select_all("SELECT id, LOWER(COALESCE(ensembl_id, '')) AS key FROM genes WHERE LOWER(COALESCE(ensembl_id, '')) IN (#{quoted})")
+          query_values = slice.flat_map { |value| [value, value.upcase, value.downcase] }.uniq
+          quoted = query_values.map { |value| conn.quote(value) }.join(',')
+          rows = conn.select_all("SELECT id, ensembl_id AS key FROM genes WHERE ensembl_id IN (#{quoted})")
           rows.each do |row|
-            key = row['key'].to_s
+            key = row['key'].to_s.downcase
             next if key.blank?
             ensembl_lookup[key] ||= row['id'].to_i
           end
@@ -365,10 +366,11 @@ class GeneSetCollectionImportJob < ApplicationJob
       remaining_symbol_keys = symbol_keys.reject { |key| symbol_lookup.key?(key) }
       if resolve_symbol_lookup && remaining_symbol_keys.any?
         remaining_symbol_keys.each_slice(2000) do |slice|
-          quoted = slice.map { |value| conn.quote(value) }.join(',')
-          rows = conn.select_all("SELECT id, LOWER(COALESCE(name, '')) AS key FROM genes WHERE LOWER(COALESCE(name, '')) IN (#{quoted})")
+          query_values = slice.flat_map { |value| [value, value.upcase, value.downcase, value.capitalize] }.uniq
+          quoted = query_values.map { |value| conn.quote(value) }.join(',')
+          rows = conn.select_all("SELECT id, name AS key FROM genes WHERE name IN (#{quoted})")
           rows.each do |row|
-            key = row['key'].to_s
+            key = row['key'].to_s.downcase
             next if key.blank?
             symbol_lookup[key] ||= row['id'].to_i
           end

@@ -26,6 +26,7 @@ class ProjectsController < ApplicationController
   GENE_DETAILS_CACHE_TTL = 24.hours
 
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
+  MANUAL_GENE_SET_COLLECTION_NEW_ID = '__new_manual_collection__'.freeze
   MANUAL_GENE_SET_COLLECTION_LABEL = 'Manual Gene Sets'.freeze
   DE_GENE_SET_COLLECTION_NEW_ID = '__new_de_collection__'.freeze
   DE_GENE_SET_COLLECTION_LABEL = 'DE results'.freeze
@@ -3313,7 +3314,10 @@ class ProjectsController < ApplicationController
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
     db_version = asap_data_db_name_for_env(h_env, context: "save_manual_gene_set")
     genes_with_ids = resolve_manual_gene_ids(submitted_genes, db_version)
-    manual_collection = resolve_target_manual_collection(params[:collection_id])
+    manual_collection = resolve_target_manual_collection(
+      params[:collection_id],
+      new_collection_name: params[:new_collection_name]
+    )
     unless manual_collection
       render json: { status: 'error', message: 'Target manual gene set collection not found' }, status: :unprocessable_entity
       return
@@ -9059,9 +9063,15 @@ class ProjectsController < ApplicationController
       manual_collection
     end
 
-    def resolve_target_manual_collection(collection_id_param)
+    def resolve_target_manual_collection(collection_id_param, new_collection_name: nil)
       requested_id = collection_id_param.to_s.strip
-      return ensure_default_manual_gene_set_collection_record! if requested_id.blank? || requested_id == MANUAL_GENE_SET_COLLECTION_ID
+      create_new = requested_id.blank? || requested_id == MANUAL_GENE_SET_COLLECTION_NEW_ID
+      if create_new
+        label = new_collection_name.to_s.strip.presence || MANUAL_GENE_SET_COLLECTION_LABEL
+        return create_manual_gene_set_collection!(name: label)
+      end
+
+      return ensure_default_manual_gene_set_collection_record! if requested_id == MANUAL_GENE_SET_COLLECTION_ID
 
       local_collection_id = parse_local_gene_set_collection_id(requested_id)
       return nil unless local_collection_id
@@ -9683,11 +9693,15 @@ class ProjectsController < ApplicationController
 
     def resolve_manual_gene_ids(genes, db_version)
       return [] unless genes.is_a?(Array)
-      ensembl_lookup, symbol_lookup = build_manual_gene_id_lookups(genes, db_version)
+      ensembl_lookup, symbol_lookup = build_manual_gene_id_lookups(
+        genes,
+        db_version,
+        organism_id: @project&.organism_id
+      )
       resolve_manual_gene_ids_with_lookups(genes, ensembl_lookup, symbol_lookup)
     end
 
-    def build_manual_gene_id_lookups(genes, db_version)
+    def build_manual_gene_id_lookups(genes, db_version, organism_id: nil)
       return [{}, {}] unless genes.is_a?(Array)
       ensembl_keys = genes.map { |gene| gene[:ensembl_id].to_s.strip.downcase }
                           .reject(&:blank?)
@@ -9698,24 +9712,49 @@ class ProjectsController < ApplicationController
 
       ensembl_lookup = {}
       symbol_lookup = {}
+      scoped_organism_id = organism_id.to_i
 
       RemoteGene.with_remote(db_version) do
         conn = RemoteGene.connection
         if ensembl_keys.any?
-          quoted = ensembl_keys.map { |value| conn.quote(value) }.join(',')
-          ensembl_rows = conn.select_all("SELECT id, LOWER(COALESCE(ensembl_id, '')) AS key FROM genes WHERE LOWER(COALESCE(ensembl_id, '')) IN (#{quoted})")
+          if scoped_organism_id > 0
+            quoted = ensembl_keys.map { |value| conn.quote(value) }.join(',')
+            ensembl_rows = conn.select_all(
+              "SELECT id, LOWER(ensembl_id) AS key FROM genes " \
+              "WHERE organism_id = #{scoped_organism_id} AND ensembl_id IS NOT NULL " \
+              "AND LOWER(ensembl_id) IN (#{quoted})"
+            )
+          else
+            query_values = ensembl_keys.flat_map { |value| [value, value.upcase, value.downcase] }.uniq
+            quoted = query_values.map { |value| conn.quote(value) }.join(',')
+            ensembl_rows = conn.select_all(
+              "SELECT id, ensembl_id AS key FROM genes WHERE ensembl_id IN (#{quoted})"
+            )
+          end
           ensembl_rows.each do |row|
-            key = row['key'].to_s
+            key = row['key'].to_s.downcase
             next if key.blank?
             ensembl_lookup[key] ||= row['id'].to_i
           end
         end
 
         if symbol_keys.any?
-          quoted = symbol_keys.map { |value| conn.quote(value) }.join(',')
-          symbol_rows = conn.select_all("SELECT id, LOWER(COALESCE(name, '')) AS key FROM genes WHERE LOWER(COALESCE(name, '')) IN (#{quoted})")
+          if scoped_organism_id > 0
+            quoted = symbol_keys.map { |value| conn.quote(value) }.join(',')
+            symbol_rows = conn.select_all(
+              "SELECT id, LOWER(name) AS key FROM genes " \
+              "WHERE organism_id = #{scoped_organism_id} AND name IS NOT NULL " \
+              "AND LOWER(name) IN (#{quoted})"
+            )
+          else
+            query_values = symbol_keys.flat_map { |value| [value, value.upcase, value.downcase, value.capitalize] }.uniq
+            quoted = query_values.map { |value| conn.quote(value) }.join(',')
+            symbol_rows = conn.select_all(
+              "SELECT id, name AS key FROM genes WHERE name IN (#{quoted})"
+            )
+          end
           symbol_rows.each do |row|
-            key = row['key'].to_s
+            key = row['key'].to_s.downcase
             next if key.blank?
             symbol_lookup[key] ||= row['id'].to_i
           end

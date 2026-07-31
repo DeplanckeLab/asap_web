@@ -26,15 +26,17 @@
           <label style="display:block;font-size:14px;font-weight:500;color:#374151;margin-bottom:8px;">
             Gene set collection <span style="color:#dc2626;">*</span>
           </label>
-          <select id="de-gene-set-collection-select"
-                  style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;outline:none;background:#fff;box-sizing:border-box;">
-            <% de_options = Array(@de_gene_set_collection_options) %>
-            <% de_options.each do |option| %>
-              <option value="<%= option[:id] %>"><%= option[:label] %></option>
-            <% end %>
-            <option value="<%= ProjectsController::DE_GENE_SET_COLLECTION_NEW_ID %>">Create new collection...</option>
-          </select>
-          <div id="de-gene-set-new-collection-wrap" style="display:none;margin-top:10px;">
+          <% de_options = Array(@de_gene_set_collection_options) %>
+          <div id="de-gene-set-collection-select-wrap" style="<%= de_options.empty? ? 'display:none;' : '' %>">
+            <select id="de-gene-set-collection-select"
+                    style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;outline:none;background:#fff;box-sizing:border-box;">
+              <% de_options.each do |option| %>
+                <option value="<%= option[:id] %>"><%= option[:label] %></option>
+              <% end %>
+              <option value="<%= ProjectsController::DE_GENE_SET_COLLECTION_NEW_ID %>">Create new collection...</option>
+            </select>
+          </div>
+          <div id="de-gene-set-new-collection-wrap" style="<%= de_options.empty? ? '' : 'display:none;' %>margin-top:<%= de_options.empty? ? '0' : '10px' %>;">
             <label style="display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px;">
               New collection name <span style="color:#dc2626;">*</span>
             </label>

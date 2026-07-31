@@ -12,6 +12,7 @@ export class GeneSetCollectionsController {
     this.editingCollectionId = null
     this.pendingCollectionName = null
     this.pendingCollectionFocusId = null
+    this.pendingSave = null
     this.init()
   }
 
@@ -135,7 +136,7 @@ export class GeneSetCollectionsController {
   renderCollectionActionsHtml(collectionId, label, { isCustom = false, isImportPending = false, isLocked = false } = {}) {
     if (isImportPending) {
       return `
-        <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#6b7280;" title="Import in progress">
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#6b7280;" title="Saving in progress">
           <i class="fas fa-spinner fa-spin" style="font-size:12px;"></i>
         </span>
       `
@@ -299,12 +300,15 @@ export class GeneSetCollectionsController {
       const totalGenes = Number(item.gene_count || 0)
       const inDatasetGenes = Number(item.in_dataset_count || 0)
       const geneLabel = totalGenes === 1 ? 'gene' : 'genes'
-      const countLabel = `${inDatasetGenes} / ${totalGenes} ${geneLabel} in dataset`
+      const isPending = item.pending === true
+      const countLabel = isPending
+        ? (totalGenes > 0 ? `Saving (${totalGenes} ${geneLabel})...` : 'Saving...')
+        : `${inDatasetGenes} / ${totalGenes} ${geneLabel} in dataset`
       const itemId = String(item.id || '').trim()
-      const canColor = item.supports_module_score !== false
-      const canDelete = item.deletable === true
+      const canColor = !isPending && item.supports_module_score !== false
+      const canDelete = !isPending && item.deletable === true
       let createdAtLabel = ''
-      if (item.created_at) {
+      if (!isPending && item.created_at) {
         const parsedDate = new Date(item.created_at)
         if (!Number.isNaN(parsedDate.getTime())) {
           createdAtLabel = parsedDate.toLocaleString()
@@ -358,17 +362,9 @@ export class GeneSetCollectionsController {
         </div>`
       }
 
-      return `
-        <div id="${this.buildCollectionItemRowElementId(itemId)}"
-             data-gene-set-item-row="true"
-             data-gene-set-item-id="${itemId}"
-             data-gene-set-identifier="${this.escapeHtml(identifierRaw)}"
-             style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;gap:8px;">
-          <div style="flex:1;min-width:0;">
-            <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">
-              ${titleHtml}
-            </div>
-            <div style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">
+      const metaLine = isPending
+        ? `<div style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">${countLabel}</div>`
+        : `<div style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">
               ${identifierHtml} |
               <button type="button"
                       data-gene-set-genes-preview-btn="true"
@@ -380,11 +376,29 @@ export class GeneSetCollectionsController {
                       onclick="event.stopPropagation()">
                 ${countLabel}
               </button>
+            </div>`
+
+      return `
+        <div id="${this.buildCollectionItemRowElementId(itemId)}"
+             data-gene-set-item-row="true"
+             data-gene-set-item-id="${itemId}"
+             data-gene-set-identifier="${this.escapeHtml(identifierRaw)}"
+             data-gene-set-item-pending="${isPending ? 'true' : 'false'}"
+             style="width:100%;display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:${isPending ? 'default' : 'pointer'};gap:8px;${isPending ? 'opacity:0.85;' : ''}">
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2;">
+              ${titleHtml}
             </div>
+            ${metaLine}
             ${obsoleteLine}
             ${createdAtLabel ? `<div style="font-size:11px;color:#6b7280;line-height:1.2;margin-top:2px;">Created: ${this.escapeHtml(createdAtLabel)}</div>` : ''}
           </div>
           <div style="display:flex;align-items:center;justify-content:flex-end;flex:0 0 auto;">
+            ${isPending ? `
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;color:#6b7280;" title="Saving gene set">
+              <i class="fas fa-spinner fa-spin" style="font-size:12px;"></i>
+            </span>
+            ` : `
             ${canColor ? `
             <button class="gene-set-color-btn"
                     data-action="click->visualization#geneSetWaterDropClicked"
@@ -409,6 +423,7 @@ export class GeneSetCollectionsController {
               <i class="fas fa-trash" style="font-size:12px;"></i>
             </button>
             ` : ''}
+            `}
           </div>
         </div>
       `
@@ -566,6 +581,7 @@ export class GeneSetCollectionsController {
       if (row.dataset.bound === 'true') return
       row.dataset.bound = 'true'
       row.addEventListener('click', async (event) => {
+        if (row.dataset.geneSetItemPending === 'true') return
         if (event.target.closest('.gene-set-color-btn')) return
         if (event.target.closest('[data-gene-set-genes-preview-btn="true"]')) return
         if (event.target.closest('[data-gene-set-replaced-by-btn="true"]')) return
@@ -1196,6 +1212,273 @@ export class GeneSetCollectionsController {
     this.bindDownloadButtons()
     this.applyListFilter()
     this.focusPendingCollectionRenameInput()
+    this.syncManualGeneSetModalSelectOption(collectionId, label, typeKey)
+  }
+
+  syncManualGeneSetModalSelectOption(collectionId, label, typeKey) {
+    if (String(typeKey || '').trim() !== 'manual') return
+    const normalizedId = String(collectionId || '').trim()
+    const normalizedLabel = String(label || '').trim()
+    if (!normalizedId || !normalizedLabel) return
+    if (normalizedId.startsWith('pending_collection:')) return
+
+    const modalTemplate = document.getElementById('save-manual-gene-set-modal-template')
+    const select = modalTemplate?.content?.querySelector('#gene-set-collection-select')
+    if (!select) return
+
+    let option = Array.from(select.options || []).find(
+      (entry) => String(entry.value || '').trim() === normalizedId
+    )
+    if (!option) {
+      option = document.createElement('option')
+      option.value = normalizedId
+      const createOption = Array.from(select.options || []).find(
+        (entry) => String(entry.value || '').trim() === '__new_manual_collection__'
+      )
+      if (createOption) {
+        select.insertBefore(option, createOption)
+      } else {
+        select.appendChild(option)
+      }
+    }
+    option.textContent = normalizedLabel
+  }
+
+  resolveTypePresentation(typeKey) {
+    const normalizedKey = String(typeKey || '').trim()
+    const row = this.listBody?.querySelector(
+      `[data-gene-set-collection-row="true"][data-collection-type-key="${normalizedKey}"]`
+    )
+    if (row) {
+      return {
+        type_key: normalizedKey,
+        type_label: String(row.dataset.collectionTypeLabel || '').trim(),
+        type_icon: String(row.dataset.collectionTypeIcon || '').trim(),
+        type_icon_color: String(row.dataset.collectionTypeIconColor || '').trim()
+      }
+    }
+
+    if (normalizedKey === 'from_de') {
+      return {
+        type_key: 'from_de',
+        type_label: 'From DE results',
+        type_icon: 'DE',
+        type_icon_color: '#7c3aed'
+      }
+    }
+
+    return {
+      type_key: 'manual',
+      type_label: 'Manual',
+      type_icon: 'fas fa-hand',
+      type_icon_color: '#2563eb'
+    }
+  }
+
+  beginPendingGeneSetSave({
+    collectionId = null,
+    collectionLabel = '',
+    isNewCollection = false,
+    typeKey = 'manual',
+    geneSetName = '',
+    geneCount = 0
+  } = {}) {
+    const typePresentation = this.resolveTypePresentation(typeKey)
+    const pendingItemId = `pending_item:${Date.now()}`
+    const creatingNew = isNewCollection === true || !String(collectionId || '').trim()
+    let targetCollectionId = String(collectionId || '').trim()
+    let previousNbItems = null
+    let resolvedLabel = String(collectionLabel || '').trim()
+
+    if (creatingNew) {
+      targetCollectionId = `pending_collection:${Date.now()}`
+      if (!resolvedLabel) {
+        resolvedLabel = typeKey === 'from_de' ? 'DE results' : 'Manual Gene Sets'
+      }
+      this.upsertCollectionFromPayload({
+        id: targetCollectionId,
+        label: resolvedLabel,
+        nb_items: 1,
+        custom: true,
+        locked: false,
+        import_pending: true,
+        ...typePresentation
+      })
+    } else {
+      const row = this.listBody?.querySelector(
+        `[data-gene-set-collection-row="true"][data-collection-id="${CSS.escape(targetCollectionId)}"]`
+      )
+      previousNbItems = Number(row?.dataset.collectionCount || 0)
+      if (!resolvedLabel) {
+        resolvedLabel = String(row?.dataset.collectionLabel || '').trim()
+      }
+      this.upsertCollectionFromPayload({
+        id: targetCollectionId,
+        label: resolvedLabel,
+        nb_items: previousNbItems + 1,
+        custom: row ? row.dataset.collectionCustom === 'true' : true,
+        locked: row ? row.dataset.collectionLocked === 'true' : false,
+        import_pending: true,
+        type_key: String(row?.dataset.collectionTypeKey || typePresentation.type_key).trim(),
+        type_label: String(row?.dataset.collectionTypeLabel || typePresentation.type_label).trim(),
+        type_icon: String(row?.dataset.collectionTypeIcon || typePresentation.type_icon).trim(),
+        type_icon_color: String(row?.dataset.collectionTypeIconColor || typePresentation.type_icon_color).trim()
+      })
+    }
+
+    if (this.controller && typeof this.controller.setSelectionTab === 'function') {
+      this.controller.setSelectionTab('gene-sets')
+    }
+
+    const pendingItem = {
+      id: pendingItemId,
+      name: String(geneSetName || '').trim() || 'Untitled gene set',
+      gene_count: Number(geneCount || 0),
+      pending: true
+    }
+
+    this.showPendingGeneSetInDetail(targetCollectionId, resolvedLabel, pendingItem, {
+      skipFetch: creatingNew
+    })
+
+    this.pendingSave = {
+      pendingItemId,
+      pendingCollectionId: creatingNew ? targetCollectionId : null,
+      targetCollectionId,
+      wasNewCollection: creatingNew,
+      previousNbItems,
+      collectionLabel: resolvedLabel,
+      typeKey: typePresentation.type_key
+    }
+    return this.pendingSave
+  }
+
+  showPendingGeneSetInDetail(collectionId, collectionLabel, pendingItem, { skipFetch = false } = {}) {
+    const alreadyOpen = this.isDetailViewOpen() && String(this.selectedCollectionId || '') === String(collectionId || '')
+    if (alreadyOpen) {
+      this.prependPendingGeneSetItem(pendingItem)
+      return
+    }
+
+    this.selectedCollectionId = collectionId
+    this.clearItemsFilterHistory()
+    if (this.itemsFilterInput) this.itemsFilterInput.value = ''
+    if (this.detailTitle) this.detailTitle.textContent = collectionLabel || ''
+    if (this.listView) this.listView.style.display = 'none'
+    if (this.detailView) this.detailView.style.display = 'flex'
+    this.renderCollectionItems([pendingItem])
+
+    if (skipFetch || String(collectionId || '').startsWith('pending_collection:')) return
+
+    this.fetchCollectionItems(collectionId, '').then(() => {
+      if (this.pendingSave?.pendingItemId === pendingItem.id &&
+          String(this.selectedCollectionId || '') === String(collectionId || '')) {
+        this.prependPendingGeneSetItem(pendingItem)
+      }
+    }).catch(() => {})
+  }
+
+  prependPendingGeneSetItem(pendingItem) {
+    if (!this.itemsList || !pendingItem?.id) return
+    const existing = this.itemsList.querySelector(
+      `[data-gene-set-item-row="true"][data-gene-set-item-id="${CSS.escape(pendingItem.id)}"]`
+    )
+    if (existing) return
+
+    const previousHtml = this.itemsList.innerHTML
+    this.renderCollectionItems([pendingItem])
+    const pendingHtml = this.itemsList.innerHTML
+    this.itemsList.innerHTML = pendingHtml + previousHtml
+    this.bindGeneSetItemClicks()
+    this.bindGeneSetCountPreviewButtons()
+    this.bindManualGeneSetDeleteButtons()
+    this.bindReplacedByButtons()
+    if (this.itemsEmptyMessage) this.itemsEmptyMessage.style.display = 'none'
+  }
+
+  async completePendingGeneSetSave(pendingState, payload = {}) {
+    const state = pendingState || this.pendingSave
+    if (!state) {
+      if (payload.collection) this.upsertCollectionFromPayload(payload.collection)
+      return
+    }
+
+    if (state.wasNewCollection && state.pendingCollectionId) {
+      const pendingRow = this.listBody?.querySelector(
+        `[data-gene-set-collection-row="true"][data-collection-id="${CSS.escape(state.pendingCollectionId)}"]`
+      )
+      if (pendingRow) pendingRow.remove()
+    }
+
+    const collection = payload.collection
+    if (collection) {
+      this.upsertCollectionFromPayload({
+        ...collection,
+        import_pending: false
+      })
+    }
+
+    const realCollectionId = String(collection?.id || state.targetCollectionId || '').trim()
+    const viewingPendingTarget =
+      String(this.selectedCollectionId || '') === String(state.pendingCollectionId || '') ||
+      String(this.selectedCollectionId || '') === String(state.targetCollectionId || '') ||
+      String(this.selectedCollectionId || '') === realCollectionId
+
+    if (viewingPendingTarget && realCollectionId) {
+      this.selectedCollectionId = realCollectionId
+      if (this.detailTitle && collection?.label) {
+        this.detailTitle.textContent = collection.label
+      }
+      await this.fetchCollectionItems(realCollectionId, this.itemsFilterInput?.value || '')
+    }
+
+    if (this.pendingSave === state) this.pendingSave = null
+  }
+
+  failPendingGeneSetSave(pendingState) {
+    const state = pendingState || this.pendingSave
+    if (!state) return
+
+    if (state.wasNewCollection && state.pendingCollectionId) {
+      const pendingRow = this.listBody?.querySelector(
+        `[data-gene-set-collection-row="true"][data-collection-id="${CSS.escape(state.pendingCollectionId)}"]`
+      )
+      if (pendingRow) pendingRow.remove()
+      this.applyListFilter()
+      if (String(this.selectedCollectionId || '') === String(state.pendingCollectionId || '')) {
+        this.closeCollectionDetail()
+      }
+    } else {
+      const row = this.listBody?.querySelector(
+        `[data-gene-set-collection-row="true"][data-collection-id="${CSS.escape(state.targetCollectionId)}"]`
+      )
+      if (row) {
+        this.upsertCollectionFromPayload({
+          id: state.targetCollectionId,
+          label: state.collectionLabel || row.dataset.collectionLabel || '',
+          nb_items: state.previousNbItems == null
+            ? Number(row.dataset.collectionCount || 0)
+            : state.previousNbItems,
+          custom: row.dataset.collectionCustom === 'true',
+          locked: row.dataset.collectionLocked === 'true',
+          import_pending: false,
+          type_key: row.dataset.collectionTypeKey || state.typeKey || '',
+          type_label: row.dataset.collectionTypeLabel || '',
+          type_icon: row.dataset.collectionTypeIcon || '',
+          type_icon_color: row.dataset.collectionTypeIconColor || ''
+        })
+      }
+
+      const pendingItemRow = this.itemsList?.querySelector(
+        `[data-gene-set-item-row="true"][data-gene-set-item-id="${CSS.escape(state.pendingItemId)}"]`
+      )
+      if (pendingItemRow) pendingItemRow.remove()
+      if (this.itemsList && !this.itemsList.querySelector('[data-gene-set-item-row="true"]')) {
+        if (this.itemsEmptyMessage) this.itemsEmptyMessage.style.display = 'block'
+      }
+    }
+
+    if (this.pendingSave === state) this.pendingSave = null
   }
 
   bindCollectionRowClicks() {

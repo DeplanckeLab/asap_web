@@ -28,17 +28,31 @@
           <label style="display:block;font-size:14px;font-weight:500;color:#374151;margin-bottom:8px;">
             Gene Set Collection <span style="color:#dc2626;">*</span>
           </label>
-          <select id="gene-set-collection-select"
-                  style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;outline:none;background:#fff;">
-            <% manual_options = Array(@manual_gene_set_collection_options) %>
-            <% if manual_options.empty? %>
-              <option value="manual_local">Manual Gene Sets</option>
-            <% else %>
+          <% manual_options = Array(@manual_gene_set_collection_options) %>
+          <div id="gene-set-collection-select-wrap" style="<%= manual_options.empty? ? 'display:none;' : '' %>">
+            <select id="gene-set-collection-select"
+                    style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;outline:none;background:#fff;">
               <% manual_options.each do |option| %>
                 <option value="<%= option[:id] %>"><%= option[:label] %></option>
               <% end %>
-            <% end %>
-          </select>
+              <option value="<%= ProjectsController::MANUAL_GENE_SET_COLLECTION_NEW_ID %>">Create new collection...</option>
+            </select>
+          </div>
+          <div id="gene-set-new-collection-wrap" style="<%= manual_options.empty? ? '' : 'display:none;' %>margin-top:<%= manual_options.empty? ? '0' : '10px' %>;">
+            <label style="display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px;">
+              New collection name <span style="color:#dc2626;">*</span>
+            </label>
+            <input
+              type="text"
+              id="gene-set-new-collection-input"
+              placeholder="<%= ProjectsController::MANUAL_GENE_SET_COLLECTION_LABEL %>"
+              value="<%= ProjectsController::MANUAL_GENE_SET_COLLECTION_LABEL %>"
+              style="width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:6px;font-size:14px;outline:none;box-sizing:border-box;"
+            />
+          </div>
+          <div style="margin-top:6px;font-size:12px;color:#6b7280;">
+            Collections of type &quot;Manual&quot; only.
+          </div>
         </div>
 
         <div>

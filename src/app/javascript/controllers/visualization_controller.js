@@ -16904,6 +16904,7 @@ export default class extends Controller {
 
     const nameInput = overlay.querySelector('#de-gene-set-name-input')
     const collectionSelect = overlay.querySelector('#de-gene-set-collection-select')
+    const collectionSelectWrap = overlay.querySelector('#de-gene-set-collection-select-wrap')
     const newWrap = overlay.querySelector('#de-gene-set-new-collection-wrap')
     const newInput = overlay.querySelector('#de-gene-set-new-collection-input')
     const form = overlay.querySelector('#save-de-gene-set-form')
@@ -16915,7 +16916,7 @@ export default class extends Controller {
 
     const newCollectionValue = '__new_de_collection__'
     const liveOptions = this._getDeGeneSetCollectionOptionsFromDom()
-    if (collectionSelect && liveOptions.length) {
+    if (collectionSelect) {
       const createOpt = collectionSelect.querySelector('option[value="' + newCollectionValue + '"]')
       collectionSelect.innerHTML = ''
       liveOptions.forEach(function(opt) {
@@ -16932,14 +16933,23 @@ export default class extends Controller {
         option.textContent = 'Create new collection...'
         collectionSelect.appendChild(option)
       }
-      collectionSelect.value = liveOptions[0].id
-    } else if (collectionSelect) {
-      collectionSelect.value = newCollectionValue
+      if (liveOptions.length) {
+        collectionSelect.value = liveOptions[0].id
+      } else {
+        collectionSelect.value = newCollectionValue
+      }
     }
 
     const syncNewCollectionVisibility = function() {
-      const isNew = collectionSelect && collectionSelect.value === newCollectionValue
-      if (newWrap) newWrap.style.display = isNew ? 'block' : 'none'
+      const hasExisting = liveOptions.length > 0
+      const isNew = !hasExisting || (collectionSelect && collectionSelect.value === newCollectionValue)
+      if (collectionSelectWrap) {
+        collectionSelectWrap.style.display = hasExisting ? '' : 'none'
+      }
+      if (newWrap) {
+        newWrap.style.display = isNew ? 'block' : 'none'
+        newWrap.style.marginTop = hasExisting && isNew ? '10px' : '0'
+      }
       if (isNew && newInput && !newInput.value.trim()) {
         newInput.value = 'DE results'
       }
@@ -16967,7 +16977,10 @@ export default class extends Controller {
           alert('Please enter a gene set name.')
           return
         }
-        const collectionId = collectionSelect ? collectionSelect.value : newCollectionValue
+        const hasExistingCollections = liveOptions.length > 0
+        const collectionId = hasExistingCollections
+          ? (collectionSelect ? collectionSelect.value : newCollectionValue)
+          : newCollectionValue
         let newCollectionName = ''
         if (collectionId === newCollectionValue) {
           newCollectionName = (newInput && newInput.value || '').trim()
@@ -17003,6 +17016,26 @@ export default class extends Controller {
   saveDeVizGeneSet({ runId, annotId, direction, name, fdr, fc, collectionId, newCollectionName, btn }) {
     if (btn) btn.disabled = true
     const csrfMeta = document.querySelector('meta[name="csrf-token"]')
+    const isCreatingNewCollection = !collectionId || collectionId === '__new_de_collection__'
+    let collectionLabel = newCollectionName || ''
+    if (!isCreatingNewCollection) {
+      const liveOptions = this._getDeGeneSetCollectionOptionsFromDom()
+      const match = liveOptions.find((opt) => opt.id === collectionId)
+      if (match) collectionLabel = match.label
+    }
+
+    const collectionsController = this.geneSetCollectionsController
+    const pendingState = collectionsController && typeof collectionsController.beginPendingGeneSetSave === 'function'
+      ? collectionsController.beginPendingGeneSetSave({
+        collectionId: isCreatingNewCollection ? null : collectionId,
+        collectionLabel,
+        isNewCollection: isCreatingNewCollection,
+        typeKey: 'from_de',
+        geneSetName: name,
+        geneCount: 0
+      })
+      : null
+
     const formData = new FormData()
     formData.append('run_id', runId)
     if (annotId) formData.append('annot_id', annotId)
@@ -17022,19 +17055,26 @@ export default class extends Controller {
       credentials: 'same-origin'
     })
     .then(function(r) { return r.json() })
-    .then((data) => {
+    .then(async (data) => {
       if (data.status === 'ok') {
-        const collectionsController = this.geneSetCollectionsController
-        if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function' && data.collection) {
+        if (pendingState && typeof collectionsController.completePendingGeneSetSave === 'function') {
+          await collectionsController.completePendingGeneSetSave(pendingState, data)
+        } else if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function' && data.collection) {
           collectionsController.upsertCollectionFromPayload(data.collection)
         }
-        const collectionLabel = (data.collection && data.collection.label) ? data.collection.label : 'collection'
-        alert('Gene set "' + name + '" saved in "' + collectionLabel + '" (' + data.gene_count + ' genes). Open the Gene set collections tab to find it.')
       } else {
+        if (pendingState && typeof collectionsController?.failPendingGeneSetSave === 'function') {
+          collectionsController.failPendingGeneSetSave(pendingState)
+        }
         alert('Error: ' + (data.message || 'Unknown error'))
       }
     })
-    .catch(function(e) { alert('Request failed: ' + e.message) })
+    .catch((e) => {
+      if (pendingState && typeof collectionsController?.failPendingGeneSetSave === 'function') {
+        collectionsController.failPendingGeneSetSave(pendingState)
+      }
+      alert('Request failed: ' + e.message)
+    })
     .then(function() { if (btn) btn.disabled = false })
   }
 

@@ -3422,7 +3422,14 @@ this.currentMatches = allMatches.filter(item => {
       if (!option) {
         option = document.createElement('option')
         option.value = collectionId
-        select.appendChild(option)
+        const createOption = Array.from(select.options || []).find(
+          (entry) => String(entry.value || '').trim() === '__new_manual_collection__'
+        )
+        if (createOption) {
+          select.insertBefore(option, createOption)
+        } else {
+          select.appendChild(option)
+        }
       }
       option.textContent = label
     }
@@ -3736,35 +3743,60 @@ this.currentMatches = allMatches.filter(item => {
     }
 
     const collectionSelect = overlay.querySelector('#gene-set-collection-select')
-    if (collectionSelect) {
-      const manualRows = Array.from(document.querySelectorAll('[data-gene-set-collection-row="true"]'))
-        .filter((row) => String(row.dataset.collectionTypeKey || '').trim() === 'manual')
-        .map((row) => ({
-          id: String(row.dataset.collectionId || '').trim(),
-          label: String(row.dataset.collectionLabel || '').trim()
-        }))
-        .filter((entry) => entry.id && entry.label)
+    const collectionSelectWrap = overlay.querySelector('#gene-set-collection-select-wrap')
+    const newCollectionWrap = overlay.querySelector('#gene-set-new-collection-wrap')
+    const newCollectionInput = overlay.querySelector('#gene-set-new-collection-input')
+    const newCollectionValue = '__new_manual_collection__'
+    const defaultNewCollectionLabel = 'Manual Gene Sets'
 
-      if (manualRows.length > 0) {
-        collectionSelect.innerHTML = ''
-        manualRows.forEach((entry) => {
-          const option = document.createElement('option')
-          option.value = entry.id
-          option.textContent = entry.label
-          collectionSelect.appendChild(option)
-        })
-      } else {
-        Array.from(collectionSelect.options || []).forEach((option) => {
-          const optionId = String(option.value || '').trim()
-          if (!optionId) return
-          const matchingRow = Array.from(document.querySelectorAll('[data-gene-set-collection-row="true"]'))
-            .find((row) => String(row.dataset.collectionId || '').trim() === optionId)
-          if (matchingRow) {
-            option.textContent = String(matchingRow.dataset.collectionLabel || '').trim() || option.textContent
-          }
-        })
+    const manualRows = Array.from(document.querySelectorAll('[data-gene-set-collection-row="true"]'))
+      .filter((row) => String(row.dataset.collectionTypeKey || '').trim() === 'manual')
+      .map((row) => ({
+        id: String(row.dataset.collectionId || '').trim(),
+        label: String(row.dataset.collectionLabel || '').trim()
+      }))
+      .filter((entry) => entry.id && entry.label)
+
+    const syncNewCollectionVisibility = () => {
+      const hasExisting = manualRows.length > 0
+      const isNew = !hasExisting || (collectionSelect && collectionSelect.value === newCollectionValue)
+      if (collectionSelectWrap) {
+        collectionSelectWrap.style.display = hasExisting ? '' : 'none'
+      }
+      if (newCollectionWrap) {
+        newCollectionWrap.style.display = isNew ? 'block' : 'none'
+        newCollectionWrap.style.marginTop = hasExisting && isNew ? '10px' : '0'
+      }
+      if (isNew && newCollectionInput && !String(newCollectionInput.value || '').trim()) {
+        newCollectionInput.value = defaultNewCollectionLabel
       }
     }
+
+    if (collectionSelect) {
+      const createOpt = collectionSelect.querySelector(`option[value="${newCollectionValue}"]`)
+      collectionSelect.innerHTML = ''
+      manualRows.forEach((entry) => {
+        const option = document.createElement('option')
+        option.value = entry.id
+        option.textContent = entry.label
+        collectionSelect.appendChild(option)
+      })
+      if (createOpt) {
+        collectionSelect.appendChild(createOpt)
+      } else {
+        const option = document.createElement('option')
+        option.value = newCollectionValue
+        option.textContent = 'Create new collection...'
+        collectionSelect.appendChild(option)
+      }
+      if (manualRows.length > 0) {
+        collectionSelect.value = manualRows[0].id
+      } else {
+        collectionSelect.value = newCollectionValue
+      }
+      collectionSelect.addEventListener('change', syncNewCollectionVisibility)
+    }
+    syncNewCollectionVisibility()
 
     const escapeHtml = (value) => String(value || '')
       .replace(/&/g, '&amp;')
@@ -3893,10 +3925,15 @@ this.currentMatches = allMatches.filter(item => {
     document.getElementById('add-gene-set-form').addEventListener('submit', async (e) => {
       e.preventDefault()
       const nameInput = document.getElementById('gene-set-name-input')
-      const collectionSelect = document.getElementById('gene-set-collection-select')
+      const liveCollectionSelect = document.getElementById('gene-set-collection-select')
+      const liveNewCollectionInput = document.getElementById('gene-set-new-collection-input')
       const geneSetName = nameInput.value.trim()
-      const targetCollectionId = String(collectionSelect?.value || '').trim()
-      
+      const hasExistingCollections = manualRows.length > 0
+      const targetCollectionId = hasExistingCollections
+        ? String(liveCollectionSelect?.value || '').trim()
+        : newCollectionValue
+      let newCollectionName = ''
+
       if (!geneSetName) {
         alert('Please enter a gene set name.')
         nameInput.focus()
@@ -3904,8 +3941,16 @@ this.currentMatches = allMatches.filter(item => {
       }
       if (!targetCollectionId) {
         alert('Please select a gene set collection.')
-        if (collectionSelect) collectionSelect.focus()
+        if (liveCollectionSelect) liveCollectionSelect.focus()
         return
+      }
+      if (targetCollectionId === newCollectionValue) {
+        newCollectionName = String(liveNewCollectionInput?.value || '').trim()
+        if (!newCollectionName) {
+          alert('Please enter a name for the new collection.')
+          if (liveNewCollectionInput) liveNewCollectionInput.focus()
+          return
+        }
       }
       
       const checkedCheckboxes = Array.from(
@@ -3929,6 +3974,25 @@ this.currentMatches = allMatches.filter(item => {
       }
 
       const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+      const isCreatingNewCollection = targetCollectionId === newCollectionValue
+      let collectionLabel = newCollectionName
+      if (!isCreatingNewCollection && liveCollectionSelect) {
+        const selectedOption = liveCollectionSelect.options?.[liveCollectionSelect.selectedIndex]
+        collectionLabel = String(selectedOption?.textContent || '').trim()
+      }
+
+      const collectionsController = this.controller?.geneSetCollectionsController
+      const pendingState = collectionsController && typeof collectionsController.beginPendingGeneSetSave === 'function'
+        ? collectionsController.beginPendingGeneSetSave({
+          collectionId: isCreatingNewCollection ? null : targetCollectionId,
+          collectionLabel,
+          isNewCollection: isCreatingNewCollection,
+          typeKey: 'manual',
+          geneSetName,
+          geneCount: normalizedGenes.length
+        })
+        : null
+
       closeModal()
 
       try {
@@ -3938,26 +4002,33 @@ this.currentMatches = allMatches.filter(item => {
         }
         if (csrfToken) headers['X-CSRF-Token'] = csrfToken
 
+        const body = {
+          name: geneSetName,
+          genes: normalizedGenes,
+          collection_id: targetCollectionId
+        }
+        if (newCollectionName) body.new_collection_name = newCollectionName
+
         const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/save_manual_gene_set`, {
           method: 'POST',
           credentials: 'same-origin',
           headers,
-          body: JSON.stringify({
-            name: geneSetName,
-            genes: normalizedGenes,
-            collection_id: targetCollectionId
-          })
+          body: JSON.stringify(body)
         })
         const payload = await response.json()
         if (!response.ok || payload.status !== 'ok') {
           throw new Error(payload.message || 'Failed to save manual gene set')
         }
 
-        const collectionsController = this.controller?.geneSetCollectionsController
-        if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function') {
+        if (pendingState && typeof collectionsController.completePendingGeneSetSave === 'function') {
+          await collectionsController.completePendingGeneSetSave(pendingState, payload)
+        } else if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function') {
           collectionsController.upsertCollectionFromPayload(payload.collection)
         }
       } catch (error) {
+        if (pendingState && typeof collectionsController?.failPendingGeneSetSave === 'function') {
+          collectionsController.failPendingGeneSetSave(pendingState)
+        }
         alert(error.message || 'Failed to save manual gene set')
       }
     })

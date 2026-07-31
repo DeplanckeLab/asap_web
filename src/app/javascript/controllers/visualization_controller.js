@@ -7601,7 +7601,8 @@ export default class extends Controller {
         geneSetItem: this.getActiveGeneSetColoringState(),
         categoryColorOverrides: categoryColorOverrides,
         customColorRange: this.customColorRange,
-        currentColorScheme: this.currentColorScheme
+        currentColorScheme: this.currentColorScheme,
+        history: this.serializeColoringHistoryForCheckpoint()
       },
       filters: {
         selectedCategories: selectedCategories,
@@ -8719,6 +8720,7 @@ export default class extends Controller {
       this.clearMetadataColoring()
     }
 
+    this.restoreColoringHistoryFromCheckpoint(checkpointColoringState.history)
     this.updateCurrentColoringIndicator()
 
     if (state.axes?.x?.metadataId) {
@@ -10522,6 +10524,44 @@ export default class extends Controller {
       geneId,
       geneSetItemId
     }
+  }
+
+  serializeColoringHistoryForCheckpoint() {
+    if (!Array.isArray(this.coloringHistory) || this.coloringHistory.length === 0) return []
+    return this.coloringHistory.slice(0, 10).map((entry) => ({
+      metadataId: String(entry?.metadataId || ''),
+      displayName: String(entry?.displayName || entry?.metadataId || ''),
+      kind: entry?.kind || 'metadata',
+      geneId: entry?.geneId ? String(entry.geneId) : null,
+      geneSetItemId: entry?.geneSetItemId ? String(entry.geneSetItemId) : null
+    })).filter((entry) => entry.metadataId)
+  }
+
+  restoreColoringHistoryFromCheckpoint(history) {
+    if (!Array.isArray(history)) {
+      this.coloringHistory = []
+      this.updateColoringHistoryControls()
+      return
+    }
+
+    const seen = new Set()
+    this.coloringHistory = []
+    history.forEach((entry) => {
+      const metadataId = String(entry?.metadataId || '').trim()
+      if (!metadataId || seen.has(metadataId)) return
+      seen.add(metadataId)
+      this.coloringHistory.push({
+        metadataId,
+        displayName: String(entry?.displayName || metadataId).trim() || metadataId,
+        kind: entry?.kind || 'metadata',
+        geneId: entry?.geneId ? String(entry.geneId) : null,
+        geneSetItemId: entry?.geneSetItemId ? String(entry.geneSetItemId) : null
+      })
+    })
+    if (this.coloringHistory.length > 10) {
+      this.coloringHistory = this.coloringHistory.slice(0, 10)
+    }
+    this.updateColoringHistoryControls()
   }
 
   pushColoringHistoryEntry(snapshot) {

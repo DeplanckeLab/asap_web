@@ -832,6 +832,7 @@ export default class extends Controller {
   }
 
   disconnect() {
+    this.hideViewLimitedTooltip()
     this.stopCheckpointCommentsDrag()
     if (this.moduleScoreAbortController) {
       this.moduleScoreAbortController.abort()
@@ -14748,10 +14749,104 @@ export default class extends Controller {
     }
     if (viewWarningElement) {
       const showWarning = selectionDisplay.label === 'visible cells' && selectionDisplay.showViewWarning
-      viewWarningElement.style.display = showWarning ? 'inline' : 'none'
+      viewWarningElement.style.display = showWarning ? 'inline-flex' : 'none'
+      if (!showWarning) {
+        this.hideViewLimitedTooltip()
+      }
     }
     this.syncSelectionColorDot()
     this.drawSelectionDistribution()
+  }
+
+  showViewLimitedTooltip(event) {
+    const trigger = event.currentTarget
+    if (!trigger) return
+
+    this.hideViewLimitedTooltip()
+
+    const text = trigger.dataset.viewLimitedTooltip
+    if (!text) return
+
+    const tooltip = document.createElement('div')
+    tooltip.id = 'view-limited-tooltip'
+    tooltip.setAttribute('role', 'tooltip')
+    tooltip.style.cssText = [
+      'position: fixed',
+      'z-index: 10050',
+      'width: 260px',
+      'max-width: calc(100vw - 16px)',
+      'padding: 6px 8px',
+      'border-radius: 6px',
+      'background-color: #111827',
+      'color: #ffffff',
+      'font-size: 12px',
+      'font-weight: 500',
+      'line-height: 1.4',
+      'white-space: normal',
+      'pointer-events: none',
+      'box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.25), 0 4px 6px -4px rgba(0, 0, 0, 0.1)',
+      'visibility: hidden'
+    ].join(';')
+    tooltip.textContent = text
+    document.body.appendChild(tooltip)
+
+    const margin = 8
+    const gap = 6
+    const triggerRect = trigger.getBoundingClientRect()
+    const tooltipRect = tooltip.getBoundingClientRect()
+    const viewportWidth = window.innerWidth
+    const viewportHeight = window.innerHeight
+
+    let left = triggerRect.left
+    let top = triggerRect.bottom + gap
+    let placeAbove = false
+
+    if (top + tooltipRect.height + margin > viewportHeight) {
+      const aboveTop = triggerRect.top - tooltipRect.height - gap
+      if (aboveTop >= margin) {
+        top = aboveTop
+        placeAbove = true
+      } else {
+        top = Math.max(margin, viewportHeight - tooltipRect.height - margin)
+      }
+    }
+
+    if (left + tooltipRect.width + margin > viewportWidth) {
+      left = viewportWidth - tooltipRect.width - margin
+    }
+    if (left < margin) {
+      left = margin
+    }
+
+    tooltip.style.left = `${Math.round(left)}px`
+    tooltip.style.top = `${Math.round(top)}px`
+    tooltip.style.visibility = 'visible'
+
+    const arrow = document.createElement('div')
+    arrow.style.cssText = [
+      'position: absolute',
+      'width: 0',
+      'height: 0',
+      'border-left: 4px solid transparent',
+      'border-right: 4px solid transparent',
+      placeAbove ? 'border-top: 4px solid #111827' : 'border-bottom: 4px solid #111827',
+      placeAbove ? 'top: 100%' : 'bottom: 100%',
+      'left: 16px'
+    ].join(';')
+
+    const arrowLeft = Math.min(
+      Math.max(12, triggerRect.left + Math.min(triggerRect.width, 16) - left),
+      tooltipRect.width - 12
+    )
+    arrow.style.left = `${Math.round(arrowLeft)}px`
+    tooltip.appendChild(arrow)
+  }
+
+  hideViewLimitedTooltip() {
+    const existing = document.getElementById('view-limited-tooltip')
+    if (existing) {
+      existing.remove()
+    }
   }
 
   getSelectionCountDisplayData() {

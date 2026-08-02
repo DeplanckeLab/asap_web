@@ -60,6 +60,7 @@ Rails.application.routes.draw do
       post :cancel_gene_set_item_module_score
       get :download_gene_set_collection
       post :save_manual_gene_set
+      post :create_gene_set_collection
       post :save_de_gene_set
       post :import_gene_set_collection
       post :delete_manual_gene_set
@@ -70,6 +71,7 @@ Rails.application.routes.draw do
       post :filter_ge_results
       post :filter_doublet_results
       get :get_annot_info
+      post :create_cla
       get :get_annot_evidences
       get :search_visualization_metadata
       get :get_cell_set_annotations

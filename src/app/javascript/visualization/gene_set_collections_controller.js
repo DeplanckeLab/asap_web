@@ -1,6 +1,13 @@
 export class GeneSetCollectionsController {
-  constructor(controller) {
+  constructor(controller, options = {}) {
     this.controller = controller
+    this.options = {
+      idPrefix: '',
+      root: null,
+      enableModuleScoreColoring: true,
+      createCollectionType: null,
+      ...options
+    }
     this.projectIdentifier = this.resolveProjectIdentifier()
     this.selectedCollectionId = null
     this.detailFilterTimer = null
@@ -25,19 +32,34 @@ export class GeneSetCollectionsController {
     return pathMatch ? pathMatch[1] : null
   }
 
+  elementId(baseId) {
+    const prefix = String(this.options.idPrefix || '').trim()
+    return prefix ? `${prefix}-${baseId}` : baseId
+  }
+
+  findElement(baseId) {
+    const id = this.elementId(baseId)
+    const root = this.options.root
+    if (root && typeof root.querySelector === 'function') {
+      return root.querySelector(`#${id}`)
+    }
+    return document.getElementById(id)
+  }
+
   init() {
-    this.filterInput = document.getElementById('gene-set-collections-name-filter-input')
-    this.listBody = document.getElementById('gene-set-collections-table-body')
-    this.emptyMessage = document.getElementById('gene-set-collections-empty-message')
-    this.listView = document.getElementById('gene-set-collections-list-view')
-    this.detailView = document.getElementById('gene-set-collection-detail-view')
-    this.detailTitle = document.getElementById('gene-set-collection-detail-title')
-    this.detailBackBtn = document.getElementById('gene-set-collection-back-btn')
-    this.itemsFilterInput = document.getElementById('gene-set-items-name-filter-input')
-    this.itemsFilterHistoryBtn = document.getElementById('gene-set-items-filter-history-btn')
-    this.itemsCountLabel = document.getElementById('gene-set-items-count-label')
-    this.itemsList = document.getElementById('gene-set-items-list')
-    this.itemsEmptyMessage = document.getElementById('gene-set-items-empty-message')
+    this.filterInput = this.findElement('gene-set-collections-name-filter-input')
+    this.listBody = this.findElement('gene-set-collections-table-body')
+    this.emptyMessage = this.findElement('gene-set-collections-empty-message')
+    this.listView = this.findElement('gene-set-collections-list-view')
+    this.detailView = this.findElement('gene-set-collection-detail-view')
+    this.detailTitle = this.findElement('gene-set-collection-detail-title')
+    this.detailBackBtn = this.findElement('gene-set-collection-back-btn')
+    this.itemsFilterInput = this.findElement('gene-set-items-name-filter-input')
+    this.itemsFilterHistoryBtn = this.findElement('gene-set-items-filter-history-btn')
+    this.itemsCountLabel = this.findElement('gene-set-items-count-label')
+    this.itemsList = this.findElement('gene-set-items-list')
+    this.itemsEmptyMessage = this.findElement('gene-set-items-empty-message')
+    this.addButton = this.findElement('gene-set-collections-add-btn')
 
     if (!this.listBody || !this.emptyMessage) return
 
@@ -50,7 +72,66 @@ export class GeneSetCollectionsController {
     this.bindCollectionRenameInputs()
     this.bindDeleteButtons()
     this.bindDownloadButtons()
+    this.bindCreateCollectionButton()
     this.applyListFilter()
+  }
+
+  bindCreateCollectionButton() {
+    const collectionType = String(this.options.createCollectionType || '').trim()
+    if (!collectionType || !this.addButton || this.addButton.dataset.heatmapCreateBound === 'true') return
+    // When createCollectionType is set, this panel owns the + button (not the import modal).
+    this.addButton.dataset.heatmapCreateBound = 'true'
+    this.addButton.dataset.geneSetAddBound = 'true'
+    this.addButton.addEventListener('click', async (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      try {
+        await this.createEmptyCollection(collectionType)
+      } catch (error) {
+        alert(error.message || 'Failed to create gene set collection')
+      }
+    })
+  }
+
+  async createEmptyCollection(collectionType) {
+    if (!this.projectIdentifier) {
+      throw new Error('Project identifier is missing')
+    }
+    const typeKey = String(collectionType || '').trim()
+    if (!typeKey) {
+      throw new Error('Collection type is required')
+    }
+    const defaultName = typeKey === 'from_heatmap' ? 'Heatmap selection' : 'Gene set collection'
+    const name = window.prompt('Name for the new gene set collection:', defaultName)
+    if (name === null) return
+    const cleanName = String(name || '').trim()
+    if (!cleanName) {
+      throw new Error('Collection name is required')
+    }
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    const headers = {
+      'Content-Type': 'application/json',
+      Accept: 'application/json'
+    }
+    if (csrfToken) headers['X-CSRF-Token'] = csrfToken
+
+    const response = await fetch(`/projects/${encodeURIComponent(this.projectIdentifier)}/create_gene_set_collection`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers,
+      body: JSON.stringify({
+        name: cleanName,
+        collection_type: typeKey
+      })
+    })
+    const payload = await response.json()
+    if (!response.ok || payload.status !== 'ok') {
+      throw new Error(payload.message || 'Failed to create gene set collection')
+    }
+    if (payload.collection) {
+      this.upsertCollectionFromPayload(payload.collection)
+    }
   }
 
   escapeHtml(value) {
@@ -305,7 +386,9 @@ export class GeneSetCollectionsController {
         ? (totalGenes > 0 ? `Saving (${totalGenes} ${geneLabel})...` : 'Saving...')
         : `${inDatasetGenes} / ${totalGenes} ${geneLabel} in dataset`
       const itemId = String(item.id || '').trim()
-      const canColor = !isPending && item.supports_module_score !== false
+      const canColor = this.options.enableModuleScoreColoring !== false
+        && !isPending
+        && item.supports_module_score !== false
       const canDelete = !isPending && item.deletable === true
       let createdAtLabel = ''
       if (!isPending && item.created_at) {
@@ -585,10 +668,17 @@ export class GeneSetCollectionsController {
         if (event.target.closest('.gene-set-color-btn')) return
         if (event.target.closest('[data-gene-set-genes-preview-btn="true"]')) return
         if (event.target.closest('[data-gene-set-replaced-by-btn="true"]')) return
+        if (event.target.closest('[data-manual-gene-set-delete-btn="true"]')) return
         const itemId = String(row.dataset.geneSetItemId || '').trim()
         if (!itemId) return
         try {
-          await this.loadGeneSetItemIntoGenePanel(itemId)
+          const geneManager = this.controller?.geneManager
+          if (geneManager && typeof geneManager.replaceGenesFromGeneSet === 'function') {
+            await this.loadGeneSetItemIntoGenePanel(itemId)
+          } else {
+            // Heatmap (and any host without a gene panel): show the shared genes popup.
+            await this.toggleGeneSetGenesPopover(row, itemId)
+          }
         } catch (error) {
           alert(error.message || 'Failed to load genes from gene set')
         }
@@ -1005,18 +1095,25 @@ export class GeneSetCollectionsController {
     if (!modal) return
 
     const ensemblId = String(gene?.ensembl_id || gene?.ensemblId || '').trim()
-    const geneLabel = String(gene?.symbol || ensemblId || 'Gene').trim()
+    const geneSymbol = String(gene?.symbol || gene?.name || '').trim()
+    const geneId = String(gene?.gene_id || gene?.geneId || '').trim()
+    const geneLabel = geneSymbol || ensemblId || geneId || 'Gene'
 
     modal.overlay.style.display = 'flex'
     modal.title.textContent = geneLabel
     modal.body.innerHTML = '<div style="color:#6b7280;">Loading...</div>'
 
-    if (!ensemblId) {
+    if (!ensemblId && !geneSymbol && !geneId) {
       modal.body.innerHTML = '<div style="color:#b91c1c;">Gene details are unavailable for this entry.</div>'
       return
     }
 
-    const response = await fetch(`/projects/${encodeURIComponent(this.projectIdentifier)}/search_gene?ensembl_id=${encodeURIComponent(ensemblId)}`, {
+    const params = new URLSearchParams()
+    if (ensemblId) params.set('ensembl_id', ensemblId)
+    if (geneSymbol) params.set('gene_symbol', geneSymbol)
+    if (geneId) params.set('gene_id', geneId)
+
+    const response = await fetch(`/projects/${encodeURIComponent(this.projectIdentifier)}/search_gene?${params.toString()}`, {
       method: 'GET',
       credentials: 'same-origin',
       headers: { 'Accept': 'text/html' }
@@ -1212,18 +1309,28 @@ export class GeneSetCollectionsController {
     this.bindDownloadButtons()
     this.applyListFilter()
     this.focusPendingCollectionRenameInput()
-    this.syncManualGeneSetModalSelectOption(collectionId, label, typeKey)
+    this.syncGeneSetModalSelectOption(collectionId, label, typeKey)
   }
 
-  syncManualGeneSetModalSelectOption(collectionId, label, typeKey) {
-    if (String(typeKey || '').trim() !== 'manual') return
+  syncGeneSetModalSelectOption(collectionId, label, typeKey) {
+    const normalizedType = String(typeKey || '').trim()
     const normalizedId = String(collectionId || '').trim()
     const normalizedLabel = String(label || '').trim()
     if (!normalizedId || !normalizedLabel) return
     if (normalizedId.startsWith('pending_collection:')) return
 
-    const modalTemplate = document.getElementById('save-manual-gene-set-modal-template')
-    const select = modalTemplate?.content?.querySelector('#gene-set-collection-select')
+    let select = null
+    let createOptionValue = null
+    if (normalizedType === 'manual') {
+      const modalTemplate = document.getElementById('save-manual-gene-set-modal-template')
+      select = modalTemplate?.content?.querySelector('#gene-set-collection-select')
+      createOptionValue = '__new_manual_collection__'
+    } else if (normalizedType === 'from_heatmap') {
+      select = document.querySelector('#save-heatmap-gene-set-modal-template [data-role="heatmap-gene-set-collection"]')
+      createOptionValue = '__new_heatmap_collection__'
+      const collectionWrap = document.querySelector('#save-heatmap-gene-set-modal-template [data-role="heatmap-gene-set-collection-wrap"]')
+      if (collectionWrap) collectionWrap.style.display = ''
+    }
     if (!select) return
 
     let option = Array.from(select.options || []).find(
@@ -1232,9 +1339,11 @@ export class GeneSetCollectionsController {
     if (!option) {
       option = document.createElement('option')
       option.value = normalizedId
-      const createOption = Array.from(select.options || []).find(
-        (entry) => String(entry.value || '').trim() === '__new_manual_collection__'
-      )
+      const createOption = createOptionValue
+        ? Array.from(select.options || []).find(
+          (entry) => String(entry.value || '').trim() === createOptionValue
+        )
+        : null
       if (createOption) {
         select.insertBefore(option, createOption)
       } else {
@@ -1242,6 +1351,29 @@ export class GeneSetCollectionsController {
       }
     }
     option.textContent = normalizedLabel
+  }
+
+  // Keep the old name for any external callers.
+  syncManualGeneSetModalSelectOption(collectionId, label, typeKey) {
+    this.syncGeneSetModalSelectOption(collectionId, label, typeKey)
+  }
+
+  removeGeneSetModalSelectOption(collectionId) {
+    const normalizedId = String(collectionId || '').trim()
+    if (!normalizedId) return
+
+    const selects = [
+      document.getElementById('save-manual-gene-set-modal-template')?.content?.querySelector('#gene-set-collection-select'),
+      document.querySelector('#save-heatmap-gene-set-modal-template [data-role="heatmap-gene-set-collection"]')
+    ].filter(Boolean)
+
+    selects.forEach((select) => {
+      Array.from(select.options || []).forEach((option) => {
+        if (String(option.value || '').trim() === normalizedId) {
+          option.remove()
+        }
+      })
+    })
   }
 
   resolveTypePresentation(typeKey) {
@@ -1264,6 +1396,15 @@ export class GeneSetCollectionsController {
         type_label: 'From DE results',
         type_icon: 'DE',
         type_icon_color: '#7c3aed'
+      }
+    }
+
+    if (normalizedKey === 'from_heatmap') {
+      return {
+        type_key: 'from_heatmap',
+        type_label: 'Heatmap selection',
+        type_icon: 'fas fa-th',
+        type_icon_color: '#ea580c'
       }
     }
 
@@ -1772,18 +1913,7 @@ export class GeneSetCollectionsController {
           const row = button.closest('[data-gene-set-collection-row="true"]')
           if (row) row.remove()
           this.applyListFilter()
-
-          const modalTemplate = document.getElementById('save-manual-gene-set-modal-template')
-          if (modalTemplate) {
-            const select = modalTemplate.content?.querySelector('#gene-set-collection-select')
-            if (select) {
-              Array.from(select.options || []).forEach((option) => {
-                if (String(option.value || '').trim() === String(collectionId)) {
-                  option.remove()
-                }
-              })
-            }
-          }
+          this.removeGeneSetModalSelectOption(collectionId)
 
           if (this.selectedCollectionId && String(this.selectedCollectionId) === String(collectionId)) {
             this.closeCollectionDetail()

@@ -2,11 +2,14 @@
  * ReGL-based WebGL heatmap renderer.
  *
  * Renders a genes x columns matrix as a single textured quad. The matrix is
- * uploaded once as an RGBA data texture (R = normalized value, G = validity
- * mask); the fragment shader maps the normalized value through a 1D colormap
- * texture. Zoom/pan are expressed as a visible [colStart,colEnd] x
+ * kept in CPU memory as an RGBA data texture source (R = normalized value,
+ * G = validity mask); the fragment shader maps the normalized value through a
+ * 1D colormap texture. Zoom/pan are expressed as a visible [colStart,colEnd] x
  * [rowStart,rowEnd] range so the 2D overlay (dendrograms/tracks/labels) can
  * stay aligned.
+ *
+ * When the full matrix exceeds the GPU MAX_TEXTURE_SIZE, only the current view
+ * window is uploaded (downsampled if the window itself is still too large).
  */
 
 import createREGL from 'regl'
@@ -25,6 +28,12 @@ export class ReglHeatmap {
     this.vmin = 0
     this.vmax = 1
     this.diverging = true
+    this.sourceRgba = null
+    this.maxTextureSize = 4096
+    this.texOrigin = [0, 0]
+    this.texSize = [1, 1]
+    this.textureViewKey = null
+    this.fullTextureFits = false
     this.initialize()
   }
 
@@ -34,6 +43,12 @@ export class ReglHeatmap {
       // preserveDrawingBuffer so SVG/PNG export can read the canvas reliably
       attributes: { antialias: false, alpha: false, preserveDrawingBuffer: true }
     })
+
+    const gl = this.regl._gl
+    const reportedMax = gl && typeof gl.getParameter === 'function'
+      ? gl.getParameter(gl.MAX_TEXTURE_SIZE)
+      : 0
+    this.maxTextureSize = Math.max(64, Number(reportedMax) || 4096)
 
     this.draw = this.regl({
       vert: `
@@ -53,13 +68,22 @@ export class ReglHeatmap {
         uniform sampler2D uColormap;
         uniform vec2 uColRange;
         uniform vec2 uRowRange;
-        uniform vec2 uDims;
+        uniform vec2 uTexOrigin;
+        uniform vec2 uTexSize;
 
         void main() {
           float col = mix(uColRange.x, uColRange.y, vPos.x);
           float row = mix(uRowRange.x, uRowRange.y, vPos.y);
-          // texture stores row 0 at v=0 (first uploaded row); flip to put row 0 on top
-          vec2 uv = vec2(col / uDims.x, 1.0 - (row / uDims.y));
+          // Texture covers [uTexOrigin, uTexOrigin + uTexSize) in matrix space.
+          // Row 0 is at v=0 in the uploaded buffer; flip so row 0 is on top.
+          vec2 uv = vec2(
+            (col - uTexOrigin.x) / uTexSize.x,
+            1.0 - ((row - uTexOrigin.y) / uTexSize.y)
+          );
+          if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
+            gl_FragColor = vec4(0.88, 0.88, 0.88, 1.0);
+            return;
+          }
           vec4 texel = texture2D(uMatrix, uv);
           if (texel.g < 0.5) {
             gl_FragColor = vec4(0.88, 0.88, 0.88, 1.0);
@@ -78,7 +102,8 @@ export class ReglHeatmap {
         uColormap: () => this.colormapTexture,
         uColRange: this.regl.prop('colRange'),
         uRowRange: this.regl.prop('rowRange'),
-        uDims: () => [this.nCols, this.nRows]
+        uTexOrigin: () => this.texOrigin,
+        uTexSize: () => this.texSize
       },
       count: 6
     })
@@ -200,14 +225,25 @@ export class ReglHeatmap {
    * normalizeValue(v, vmin, vmax) optional custom mapper returning 0..1.
    */
   setMatrix(values, nRows, nCols, vmin, vmax, normalizeValue = null) {
-    this.nRows = nRows
-    this.nCols = nCols
+    this.nRows = Math.max(0, Number(nRows) || 0)
+    this.nCols = Math.max(0, Number(nCols) || 0)
     this.vmin = vmin
     this.vmax = vmax
+    this.textureViewKey = null
+    this.fullTextureFits = false
+
+    if (this.nRows < 1 || this.nCols < 1) {
+      this.sourceRgba = null
+      if (this.texture) {
+        this.texture.destroy()
+        this.texture = null
+      }
+      return
+    }
 
     const span = (vmax - vmin) || 1
-    const rgba = new Uint8Array(nRows * nCols * 4)
-    for (let i = 0; i < nRows * nCols; i++) {
+    const rgba = new Uint8Array(this.nRows * this.nCols * 4)
+    for (let i = 0; i < this.nRows * this.nCols; i++) {
       const v = values[i]
       const o = i * 4
       if (v === null || v === undefined || Number.isNaN(v)) {
@@ -226,13 +262,31 @@ export class ReglHeatmap {
         rgba[o + 3] = 255
       }
     }
+    this.sourceRgba = rgba
 
+    if (this.nCols <= this.maxTextureSize && this.nRows <= this.maxTextureSize) {
+      this.uploadTextureRegion(rgba, this.nCols, this.nRows, 0, 0, this.nCols, this.nRows)
+      this.fullTextureFits = true
+      this.textureViewKey = 'full'
+      return
+    }
+
+    // Too large for a single GPU texture: keep CPU buffer and upload per view.
+    if (this.texture) {
+      this.texture.destroy()
+      this.texture = null
+    }
+  }
+
+  uploadTextureRegion(rgba, width, height, originCol, originRow, sizeCols, sizeRows) {
+    const safeW = Math.max(1, Math.min(this.maxTextureSize, Math.round(width)))
+    const safeH = Math.max(1, Math.min(this.maxTextureSize, Math.round(height)))
     if (this.texture) {
       this.texture.destroy()
     }
     this.texture = this.regl.texture({
-      width: nCols,
-      height: nRows,
+      width: safeW,
+      height: safeH,
       data: rgba,
       format: 'rgba',
       type: 'uint8',
@@ -240,10 +294,52 @@ export class ReglHeatmap {
       min: 'nearest',
       flipY: false
     })
+    this.texOrigin = [originCol, originRow]
+    this.texSize = [Math.max(1e-6, sizeCols), Math.max(1e-6, sizeRows)]
+  }
+
+  syncTextureForView(view) {
+    if (!this.sourceRgba || this.nRows < 1 || this.nCols < 1) return
+    if (this.fullTextureFits && this.texture) return
+
+    const colStart = Number(view?.colStart) || 0
+    const colEnd = Number(view?.colEnd) || this.nCols
+    const rowStart = Number(view?.rowStart) || 0
+    const rowEnd = Number(view?.rowEnd) || this.nRows
+    const c0 = Math.max(0, Math.min(this.nCols, Math.min(colStart, colEnd)))
+    const c1 = Math.max(0, Math.min(this.nCols, Math.max(colStart, colEnd)))
+    const r0 = Math.max(0, Math.min(this.nRows, Math.min(rowStart, rowEnd)))
+    const r1 = Math.max(0, Math.min(this.nRows, Math.max(rowStart, rowEnd)))
+    const visCols = Math.max(1e-6, c1 - c0)
+    const visRows = Math.max(1e-6, r1 - r0)
+
+    const texW = Math.max(1, Math.min(this.maxTextureSize, Math.max(1, Math.ceil(visCols))))
+    const texH = Math.max(1, Math.min(this.maxTextureSize, Math.max(1, Math.ceil(visRows))))
+    const key = `${c0.toFixed(3)}:${c1.toFixed(3)}:${r0.toFixed(3)}:${r1.toFixed(3)}:${texW}x${texH}`
+    if (this.texture && this.textureViewKey === key) return
+
+    const rgba = new Uint8Array(texW * texH * 4)
+    for (let y = 0; y < texH; y++) {
+      const srcRow = Math.min(this.nRows - 1, Math.max(0, Math.floor(r0 + ((y + 0.5) / texH) * visRows)))
+      for (let x = 0; x < texW; x++) {
+        const srcCol = Math.min(this.nCols - 1, Math.max(0, Math.floor(c0 + ((x + 0.5) / texW) * visCols)))
+        const src = (srcRow * this.nCols + srcCol) * 4
+        const dst = (y * texW + x) * 4
+        rgba[dst] = this.sourceRgba[src]
+        rgba[dst + 1] = this.sourceRgba[src + 1]
+        rgba[dst + 2] = this.sourceRgba[src + 2]
+        rgba[dst + 3] = this.sourceRgba[src + 3]
+      }
+    }
+
+    this.uploadTextureRegion(rgba, texW, texH, c0, r0, visCols, visRows)
+    this.textureViewKey = key
   }
 
   render(view) {
-    if (!this.texture || !this.colormapTexture) return
+    if (!this.sourceRgba || !this.colormapTexture) return
+    this.syncTextureForView(view)
+    if (!this.texture) return
     this.regl.poll()
     this.regl.clear({ color: [1, 1, 1, 1], depth: 1 })
     this.draw({
@@ -261,6 +357,7 @@ export class ReglHeatmap {
       this.colormapTexture.destroy()
       this.colormapTexture = null
     }
+    this.sourceRgba = null
     if (this.regl) {
       this.regl.destroy()
       this.regl = null

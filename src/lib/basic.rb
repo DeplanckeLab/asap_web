@@ -5,6 +5,8 @@ module Basic
 
   # Cla rows created by parsing / load_annot (add_clas) use this cla_sources.id (ASAP auto annotation).
   ASAP_AUTO_CLA_SOURCE_ID = 3
+  # Manual annotations submitted from the visualization annotation popup.
+  MANUAL_CLA_SOURCE_ID = 1
 
   # Suggested embedded JSON key for the cross-tool metadata catalog (location depends on file format: LOOM attrs, H5AD, RDS, etc.).
   DATA_FILE_METADATA_CATALOG_ATTR = 'metadata_catalog'
@@ -439,20 +441,29 @@ module Basic
     def upd_project_cell_set p
 
       project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + p.user_id.to_s + p.key
-      
+      loom_path = project_dir + 'parsing' + 'output.loom'
+      return unless File.exist?(loom_path)
+
       puts "get cells..."
-      cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata -loom #{project_dir + 'parsing' + 'output.loom'} -meta /col_attrs/CellID"
-      output = `#{cmd}` 
-      File.open(project_dir + 'parsing' + 'cell_ids', 'w') do |fout|
-        fout.write(output)
+      cells = H5DataService.get_metadata_vector(loom_path.to_s, '/col_attrs/CellID')
+      if cells.blank?
+        cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata -loom #{loom_path} -meta /col_attrs/CellID"
+        output = `#{cmd}`
+        File.open(project_dir + 'parsing' + 'cell_ids', 'w') do |fout|
+          fout.write(output)
+        end
+        res = Basic.safe_parse_json(output, {})
+        cells = res['values']
+      else
+        File.open(project_dir + 'parsing' + 'cell_ids', 'w') do |fout|
+          fout.write({ 'values' => cells }.to_json)
+        end
       end
-      res = Basic.safe_parse_json(output, {})
-      cells = res['values']
-      
+
       if cells and cells.size > 0
-        
+
         dataset_md5 = Digest::MD5.hexdigest({:cells => cells.sort}.to_json)
-        
+
         pc = ProjectCellSet.where(:key => dataset_md5).first
         if !pc
           pc = ProjectCellSet.new(:key => dataset_md5, :nber_cells => cells.size)
@@ -460,10 +471,78 @@ module Basic
         else
           pc.update({:nber_cells => cells.size})
         end
-        
+
         p.update({:project_cell_set_id => pc.id})
-        
+
       end
+    end
+
+    # Ensure AnnotCellSet / CellSet rows exist for a discrete cell metadata annot.
+    # Used by manual CLA creation when finish_run never populated cell sets for this project/annot.
+    def ensure_annot_cell_sets(project, annot, logger: nil)
+      return {} unless project && annot
+      return {} unless annot.dim.to_i == 1 && annot.data_type_id.to_i == 3
+
+      list_cats = safe_parse_json(annot.list_cat_json, [])
+      return {} if list_cats.blank?
+
+      existing = AnnotCellSet.where(annot_id: annot.id).index_by(&:cat_idx)
+      if list_cats.each_index.all? { |i| existing[i]&.cell_set_id.present? }
+        return existing.transform_values { |acs| CellSet.find_by(id: acs.cell_set_id) }.compact
+      end
+
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+      loom_path = project_dir + annot.filepath
+      unless File.exist?(loom_path)
+        logger&.error("[ensure_annot_cell_sets] loom not found: #{loom_path}")
+        return {}
+      end
+
+      unless project.project_cell_set_id.present? && File.exist?(project_dir + 'parsing' + 'cell_ids')
+        upd_project_cell_set(project)
+        project.reload
+      end
+      unless project.project_cell_set_id.present?
+        logger&.error("[ensure_annot_cell_sets] project #{project.id} has no project_cell_set")
+        return {}
+      end
+
+      stable_ids_file = project_dir + (annot.filepath.to_s + '.stable_ids')
+      unless File.exist?(stable_ids_file)
+        stable_ids = H5DataService.get_metadata_vector(loom_path.to_s, '/col_attrs/_StableID')
+        if stable_ids.present?
+          File.open(stable_ids_file, 'w') { |fout| fout.write({ 'values' => stable_ids }.to_json) }
+        else
+          logger&.error("[ensure_annot_cell_sets] could not extract _StableID for #{annot.id}")
+          return {}
+        end
+      end
+
+      meta_compl = H5DataService.extract_metadata_compl(
+        loom_path.to_s,
+        annot.name,
+        type_name: 'DISCRETE',
+        no_values: false
+      )
+      if meta_compl['values'].blank?
+        values = H5DataService.get_metadata_vector(loom_path.to_s, annot.name)
+        meta_compl = { 'values' => values } if values.present?
+      end
+      if meta_compl['values'].blank?
+        logger&.error("[ensure_annot_cell_sets] could not extract values for annot #{annot.id} #{annot.name}")
+        return {}
+      end
+
+      cache = { cell_sets_by_md5: {}, annot_cell_sets_by_project_id: {} }
+      CellSet.where(project_cell_set_id: project.project_cell_set_id).find_each do |cs|
+        cache[:cell_sets_by_md5][cs.key] = cs
+      end
+      AnnotCellSet.where(project_id: project.id).find_each do |acs|
+        cache[:annot_cell_sets_by_project_id][project.id] ||= {}
+        cache[:annot_cell_sets_by_project_id][project.id][[acs.annot_id, acs.cat_idx]] = acs
+      end
+
+      add_cell_sets(project, project_dir, annot, meta_compl, list_cats, cache)
     end
     
     def get_s3_settings
@@ -1307,11 +1386,22 @@ module Basic
       return asap_docker_image if !asap_docker_image
 
       # FindMarkers is not available in ASAP v4; pin only this step to v5.
-      if asap_docker_image.tag == 'v4'
+      # v8+ uses de.v8.py FindAllMarkers on the project's own asap_run image.
+      if asap_docker_major_version(asap_docker_image) < 8 && asap_docker_image.tag == 'v4'
         return DockerImage.find_by!(name: asap_docker_image.name, tag: 'v5')
       end
 
       asap_docker_image
+    end
+
+    def asap_docker_major_version(docker_image)
+      tag = docker_image&.tag.to_s
+      m = tag.match(/\Av?(\d+)/i)
+      m ? m[1].to_i : 0
+    end
+
+    def markers_use_python_de?(docker_image)
+      asap_docker_major_version(docker_image) >= 8
     end
 
     def marker_groups_annot_id project, meta
@@ -2554,7 +2644,7 @@ module Basic
           return { run: nil, error: e.message }
         end
 
-        ensure_markers_original_gene_attr(logger, project_dir + meta.filepath)
+        ensure_markers_original_gene_attr(logger, project_dir + meta.filepath) unless markers_use_python_de?(runtime_marker_docker_image)
         h_attrs = {
   #        #        {"input_de":{"annot_id":168794,"run_id":32390},"fdr_cutoff":"0.05","fc_cutoff":"2","gene_set_id":"672","adj_method":"fdr","min":"15","max":"500"}
 #          :input_matrix_filename => project_dir + meta.filepath,
@@ -3705,6 +3795,10 @@ module Basic
               
               #            cell_set = CellSet.where(:key => md5, :project_cell_set_id => pc.id).first                                                           
               cell_set = h_cell_sets[md5]
+              if !cell_set
+                cell_set = CellSet.where(key: md5, project_cell_set_id: pc.id).first
+                h_cell_sets[md5] = cell_set if cell_set
+              end
               if !cell_set
                 cell_set = CellSet.new(h_cell_set)
                 cell_set.save

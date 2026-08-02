@@ -34,7 +34,7 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
   <div data-guided-tour="project-visualization-view" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; background-color: #f9fafb; padding: 40px;">
     <div style="max-width: 600px; text-align: center;">
       <div style="font-size: 64px; color: #d1d5db; margin-bottom: 24px;">
-        <i class="fas fa-chart-scatter"></i>
+        <%= render 'shared/scatter_plot_icon' %>
       </div>
       <h2 style="font-size: 24px; font-weight: 600; color: #374151; margin-bottom: 16px;">No Visualization Data Available</h2>
       <p style="font-size: 16px; color: #6b7280; margin-bottom: 24px; line-height: 1.6;">
@@ -127,10 +127,12 @@ cell_id_annot_ids_by_loom = {}
   end
 end
 project_type_tag = @project&.project_type&.tag.to_s
+annotation_tool_available = @project&.single_cell?
 %>
 
 <div data-controller="visualization"
      data-guided-tour="project-visualization-view"
+     data-project-id="<%= @project.id %>"
      data-visualization-embeddings-by-loom-value="<%= embedding_groups.to_json %>"
      data-visualization-default-loom-file-value="<%= (default_group_key.presence || @default_loom_file || 'parsing/output.loom') %>"
      data-visualization-default-embedding-id-value="<%= default_embedding_id&.to_s %>"
@@ -142,6 +144,7 @@ project_type_tag = @project&.project_type&.tag.to_s
      data-visualization-row-label-value="<%= row_label(@project) %>"
      data-visualization-col-label-value="<%= col_label(@project) %>"
      data-visualization-project-type-tag-value="<%= project_type_tag %>"
+     data-visualization-annotation-tool-available-value="<%= annotation_tool_available ? 'true' : 'false' %>"
      data-visualization-cell-id-annot-ids-by-loom-value="<%= cell_id_annot_ids_by_loom.to_json %>"
      data-is-admin="<%= admin? ? 'true' : 'false' %>"
      style="display: flex; flex-direction: row; height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden;">
@@ -149,7 +152,7 @@ project_type_tag = @project&.project_type&.tag.to_s
   <!-- Left Panel: Metadata -->
   <% loom_meta_for_tour = @h_metadata[@default_loom_file] %>
   <% viz_tour_sample_on_categorical = loom_meta_for_tour.present? && (loom_meta_for_tour.dig('cell', 'DISCRETE') || []).any? %>
-  <div id="left-panel" data-guided-tour="visualization-metadata-panel" style="width: 380px; height: 100%; background-color: white; display: flex; flex-direction: column; min-height: 0;">
+  <div id="left-panel" data-guided-tour="visualization-metadata-panel" class="<%= annotation_tool_available ? '' : 'metadata-panel--no-annotation-tool' %>" style="width: 380px; height: 100%; background-color: white; display: flex; flex-direction: column; min-height: 0;">
     <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
       <!-- Categorical Metadata Section -->
       <div data-guided-tour="visualization-categorical-metadata" style="height: 50%; display: flex; flex-direction: column; border-bottom: 1px solid #e5e7eb;">
@@ -1230,6 +1233,10 @@ project_type_tag = @project&.project_type&.tag.to_s
           .metadata-category-row--wide {
             grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px 28px;
           }
+          .metadata-panel--no-annotation-tool .metadata-category-row,
+          .metadata-panel--no-annotation-tool .metadata-category-row--wide {
+            grid-template-columns: minmax(0, 1fr) 72px;
+          }
           .metadata-category-header {
             display: grid;
             padding: 4px 8px;
@@ -1246,8 +1253,17 @@ project_type_tag = @project&.project_type&.tag.to_s
           .metadata-category-header--wide {
             display: grid;
             grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 72px 28px;
-            gap: 4px;
-            margin-bottom: 4px;
+          }
+          .metadata-panel--no-annotation-tool .metadata-category-header,
+          .metadata-panel--no-annotation-tool .metadata-category-header--wide {
+            grid-template-columns: minmax(0, 1fr) 72px;
+          }
+          .metadata-panel--no-annotation-tool .metadata-category-header-best,
+          .metadata-panel--no-annotation-tool .metadata-category-best,
+          .metadata-panel--no-annotation-tool .metadata-category-header-annot,
+          .metadata-panel--no-annotation-tool .category-annot-btn,
+          .metadata-panel--no-annotation-tool .metadata-markers-status {
+            display: none !important;
           }
           .metadata-category-header-cell {
             overflow: hidden;
@@ -2064,9 +2080,13 @@ project_type_tag = @project&.project_type&.tag.to_s
                         <span>Visible cells sets</span>
                         <span data-filter-check="visible" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
                       </button>
-                      <button type="button" data-filter-type-option="compose" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
+                      <button type="button" data-filter-type-option="compose" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;border-bottom:1px solid #e5e7eb;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
                         <span>Composed sets</span>
                         <span data-filter-check="compose" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
+                      </button>
+                      <button type="button" data-filter-type-option="heatmap-rect" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
+                        <span>Heatmap sets</span>
+                        <span data-filter-check="heatmap-rect" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
                       </button>
                     </div>
                   </div>
@@ -2075,7 +2095,7 @@ project_type_tag = @project&.project_type&.tag.to_s
                       <button id="de-selection-btn"
                               type="button"
                               style="display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 8px;background-color:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;"
-                              title="Differential expression (selected vs complementary)"
+                              title="Differential expression (run new DE or browse existing results)"
                               aria-label="Differential expression"
                               data-action="click->visualization#openDeSelectionModal">
                         DE
@@ -3635,7 +3655,9 @@ var _annotPopupData = {
     ontologyTerms: [],
     upGenes: [],
     downGenes: [],
-    status: ''
+    status: '',
+    pendingConfirm: false,
+    submitting: false
   }
 }
 
@@ -3647,21 +3669,32 @@ var _annotOntologyTermTypes = <%= raw begin
   co_id_to_tag = all_co_ids.any? ? CellOntology.where(id: all_co_ids).pluck(:id, :tag).to_h : {}
   otts.map do |ott|
     prefixes = ott.ontology_prefixes(co_id_to_tag)
+    obs_field = Scfair::Rules.obs_field_name_from_path(ott.term_path)
     {
       id: ott.id,
+      name: ott.name.to_s,
       label: ott.label.to_s,
-      prefixes: prefixes
+      prefixes: prefixes,
+      multiValue: Scfair::Rules.multi_value_field?(obs_field)
     }
   end.select { |e| e[:label].present? && e[:prefixes].present? }
 end.to_json %>
 
 function defaultAnnotTypeId() {
-  return (_annotOntologyTermTypes && _annotOntologyTermTypes.length > 0) ? String(_annotOntologyTermTypes[0].id) : ''
+  var types = _annotOntologyTermTypes || []
+  if (types.length === 0) return ''
+  var cellType = types.find(function(t) { return String(t.name) === 'cell_type' })
+  return String((cellType || types[0]).id)
 }
 
 function selectedAnnotTypeEntry() {
   var selectedId = String((_annotPopupData.newForm && _annotPopupData.newForm.annotationTypeId) || '')
   return (_annotOntologyTermTypes || []).find(function(t) { return String(t.id) === selectedId }) || null
+}
+
+function selectedAnnotTypeAllowsMultipleOntologyTerms() {
+  var entry = selectedAnnotTypeEntry()
+  return !!(entry && entry.multiValue)
 }
 
 function selectedAnnotTypePrefixesCsv() {
@@ -3920,11 +3953,15 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
   var dialog = document.getElementById('annotation-popup-dialog')
   var panel = document.getElementById('annot-popup-panel')
   var titleEl = document.getElementById('annot-popup-title')
+  if (!overlay || !dialog || !panel || !titleEl) return
+  var vizRoot = document.querySelector('[data-controller="visualization"]')
+  if (vizRoot && vizRoot.dataset.visualizationAnnotationToolAvailableValue === 'false') return
 
   _annotPopupData.catName = catName
   _annotPopupData.catIdx = catIdx
   _annotPopupData.metadataId = metadataId
   _annotPopupData.metadataName = metadataName != null ? String(metadataName) : ''
+  _annotPopupData.annotInfoUrl = baseUrl || ''
   _annotPopupData.categoryColor = categoryColor != null && String(categoryColor).trim() !== '' ? String(categoryColor).trim() : ''
   _annotPopupData.evidencesUrl = evidencesUrl || ''
   _annotPopupData.clas = []
@@ -3956,7 +3993,9 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
     ontologyTerms: [],
     upGenes: [],
     downGenes: [],
-    status: ''
+    status: '',
+    pendingConfirm: false,
+    submitting: false
   }
   panel.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af; font-size: 14px;"><i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Loading...</div>'
 
@@ -3991,8 +4030,74 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
 function closeAnnotationPopup() {
   var tip = document.getElementById('annot-split-violin-tooltip')
   if (tip) tip.style.display = 'none'
+  if (_annotPopupData.uiReady) {
+    updateCategoryRowAnnotationSummary(_annotPopupData.metadataId, _annotPopupData.catIdx, _annotPopupData.clas || [])
+  }
   document.getElementById('annotation-popup-overlay').style.display = 'none'
   _annotPopupData.activeTab = 'existing'
+}
+
+function pickBestClaFromList(clas) {
+  if (!Array.isArray(clas) || clas.length === 0) return null
+  return clas.slice().sort(function(a, b) {
+    var scoreA = (a.nber_agree || 0) - (a.nber_disagree || 0)
+    var scoreB = (b.nber_agree || 0) - (b.nber_disagree || 0)
+    if (scoreB !== scoreA) return scoreB - scoreA
+    return String(b.created_at || '').localeCompare(String(a.created_at || ''))
+  })[0]
+}
+
+function bestAnnotationLabelFromCla(cla) {
+  if (!cla) return '-'
+  var terms = Array.isArray(cla.cell_ontology_terms) ? cla.cell_ontology_terms : []
+  if (terms.length > 0) {
+    var labels = terms.map(function(t) {
+      return String((t && (t.name || t.identifier)) || '').trim()
+    }).filter(function(s) { return s.length > 0 })
+    if (labels.length > 0) return labels.join(', ')
+  }
+  var name = String(cla.name || '').trim()
+  if (name) return name
+  return 'Unnamed annotation'
+}
+
+function newAnnotationFormValidation(formState) {
+  formState = formState || _annotPopupData.newForm || {}
+  var ontologyTerms = formState.ontologyTerms || []
+  var allowsMultiple = selectedAnnotTypeAllowsMultipleOntologyTerms()
+  var ontologyMissing = ontologyTerms.length === 0
+  var ontologyTooMany = !allowsMultiple && ontologyTerms.length > 1
+  return {
+    valid: !ontologyMissing && !ontologyTooMany,
+    ontologyMissing: ontologyMissing,
+    ontologyTooMany: ontologyTooMany,
+    allowsMultiple: allowsMultiple
+  }
+}
+
+function updateCategoryRowAnnotationSummary(metadataId, catIdx, clas) {
+  if (metadataId == null || catIdx == null) return
+  var list = Array.isArray(clas) ? clas : []
+  var best = pickBestClaFromList(list)
+  var has = list.length > 0
+  var label = has ? bestAnnotationLabelFromCla(best) : '-'
+  var selector = '.category-annot-btn[data-metadata-id="' + String(metadataId) + '"][data-cat-idx="' + String(catIdx) + '"]'
+  document.querySelectorAll(selector).forEach(function(btn) {
+    btn.dataset.categoryHasAnnots = has ? 'true' : 'false'
+    btn.style.color = has ? '#16a34a' : '#d1d5db'
+    btn.title = has ? 'View annotations' : 'No annotations yet'
+    var row = btn.closest('.metadata-category-row')
+    if (!row) return
+    var bestEl = row.querySelector('.metadata-category-best')
+    if (bestEl) {
+      bestEl.textContent = label
+      bestEl.title = label
+    }
+  })
+  if (String(metadataId) === String(_annotPopupData.metadataId) && String(catIdx) === String(_annotPopupData.catIdx)) {
+    _annotPopupData.titleAnnotHint = has
+    refreshAnnotPopupTitle()
+  }
 }
 
 function setAnnotationTab(tabName) {
@@ -4018,12 +4123,69 @@ function normalizeEvidencesSubTabAfterLoad(upRows, downRows) {
   }
 }
 
-function setNewAnnotationStatus(message) {
+function setNewAnnotationStatus(message, opts) {
+  opts = opts || {}
   _annotPopupData.newForm.status = message || ''
+  if (opts.pendingConfirm === true || opts.pendingConfirm === false) {
+    _annotPopupData.newForm.pendingConfirm = opts.pendingConfirm
+  }
+  if (opts.submitting === true || opts.submitting === false) {
+    _annotPopupData.newForm.submitting = opts.submitting
+  }
   renderAnnotationPanel()
 }
 
-function submitNewAnnotation() {
+function clearNewAnnotationFeedback() {
+  _annotPopupData.newForm.status = ''
+  _annotPopupData.newForm.pendingConfirm = false
+}
+
+function cancelNewAnnotationConfirm() {
+  clearNewAnnotationFeedback()
+  renderAnnotationPanel()
+}
+
+function markCategoryHasAnnotations(metadataId, catIdx) {
+  updateCategoryRowAnnotationSummary(metadataId, catIdx, _annotPopupData.clas || [])
+}
+
+function reloadAnnotationClasAfterCreate() {
+  var url = _annotPopupData.annotInfoUrl
+  if (!url) {
+    setNewAnnotationStatus('Annotation created, but refresh URL is missing.')
+    return
+  }
+  var fullUrl = url + '?annot_id=' + encodeURIComponent(_annotPopupData.metadataId) +
+    '&cat_idx=' + encodeURIComponent(_annotPopupData.catIdx) +
+    '&cat_name=' + encodeURIComponent(_annotPopupData.catName || '')
+  fetch(fullUrl, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+    .then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status)
+      return r.json()
+    })
+    .then(function(data) {
+      _annotPopupData.clas = data.clas || []
+      _annotPopupData.activeTab = 'existing'
+      _annotPopupData.newForm = {
+        annotationTypeId: defaultAnnotTypeId(),
+        name: '',
+        comment: '',
+        ontologyTerms: [],
+        upGenes: [],
+        downGenes: [],
+        status: '',
+        pendingConfirm: false,
+        submitting: false
+      }
+      markCategoryHasAnnotations(_annotPopupData.metadataId, _annotPopupData.catIdx)
+      renderAnnotationPanel()
+    })
+    .catch(function(err) {
+      setNewAnnotationStatus('Annotation created, but failed to refresh list: ' + err.message)
+    })
+}
+
+function submitNewAnnotation(confirmed) {
   var overlay = document.getElementById('annotation-popup-overlay')
   if (overlay && overlay.dataset.annotable !== 'true') {
     setNewAnnotationStatus('You should be logged in and associate your ORCID ID to your account to submit annotations.')
@@ -4031,19 +4193,89 @@ function submitNewAnnotation() {
   }
 
   var formState = _annotPopupData.newForm || {}
-  var hasContent = (formState.name || '').trim().length > 0 ||
-    (formState.comment || '').trim().length > 0 ||
-    (formState.ontologyTerms || []).length > 0 ||
-    (formState.upGenes || []).length > 0 ||
-    (formState.downGenes || []).length > 0
+  if (formState.submitting) return
 
-  if (!hasContent) {
-    setNewAnnotationStatus('Please add at least one field before submitting.')
+  var validation = newAnnotationFormValidation(formState)
+  if (!validation.valid) {
+    var messages = []
+    if (validation.ontologyMissing) messages.push('Add at least one ontology term before submitting.')
+    if (validation.ontologyTooMany) messages.push('This annotation type allows only one ontology term.')
+    setNewAnnotationStatus(messages.join('\n'), { pendingConfirm: false })
     return
   }
 
-  setNewAnnotationStatus('Submit clicked. Backend create endpoint is not wired yet in this view.')
+  var upIds = {}
+  ;(formState.upGenes || []).forEach(function(g) { upIds[String(g.stableId)] = true })
+  var overlap = (formState.downGenes || []).some(function(g) { return upIds[String(g.stableId)] })
+  if (overlap) {
+    setNewAnnotationStatus('The same gene cannot be both up-regulated and down-regulated.', { pendingConfirm: false })
+    return
+  }
+
+  var createUrl = overlay && overlay.dataset.createClaUrl
+  if (!createUrl) {
+    setNewAnnotationStatus('Create annotation endpoint is not configured.')
+    return
+  }
+
+  var csrfToken = document.querySelector('meta[name="csrf-token"]') && document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+  var payload = {
+    annot_id: _annotPopupData.metadataId,
+    cat_idx: _annotPopupData.catIdx,
+    cat_name: _annotPopupData.catName,
+    name: formState.name || '',
+    comment: formState.comment || '',
+    ontology_term_type_id: formState.annotationTypeId || '',
+    cell_ontology_term_ids: (formState.ontologyTerms || []).map(function(t) { return t.id }).join(','),
+    up_gene_ids: (formState.upGenes || []).map(function(g) { return g.stableId }).join(','),
+    down_gene_ids: (formState.downGenes || []).map(function(g) { return g.stableId }).join(','),
+    confirm: confirmed ? '1' : '0'
+  }
+
+  setNewAnnotationStatus('Submitting annotation...', { submitting: true, pendingConfirm: !!formState.pendingConfirm })
+
+  fetch(createUrl, {
+    method: 'POST',
+    headers: {
+      'X-CSRF-Token': csrfToken || '',
+      'Accept': 'application/json',
+      'Content-Type': 'application/json'
+    },
+    credentials: 'same-origin',
+    body: JSON.stringify(payload)
+  })
+    .then(function(r) {
+      return r.json().then(function(data) {
+        return { ok: r.ok, status: r.status, data: data || {} }
+      }).catch(function() {
+        throw new Error('HTTP ' + r.status)
+      })
+    })
+    .then(function(res) {
+      var data = res.data || {}
+      if (data.status === 'ok') {
+        reloadAnnotationClasAfterCreate()
+        return
+      }
+      if (data.status === 'warning' && data.requires_confirm) {
+        var warnings = Array.isArray(data.warnings) ? data.warnings : []
+        setNewAnnotationStatus(
+          (warnings.length ? warnings.join('\n') + '\n\n' : '') + 'Click Confirm submit to save this annotation anyway.',
+          { pendingConfirm: true, submitting: false }
+        )
+        return
+      }
+      var errors = Array.isArray(data.errors) ? data.errors : []
+      if (!errors.length && data.error) errors = [String(data.error)]
+      if (!errors.length) errors = ['Failed to create annotation (HTTP ' + res.status + ').']
+      setNewAnnotationStatus(errors.join('\n'), { pendingConfirm: false, submitting: false })
+    })
+    .catch(function(err) {
+      setNewAnnotationStatus('Failed to create annotation: ' + err.message, { pendingConfirm: false, submitting: false })
+    })
 }
+window.submitNewAnnotation = submitNewAnnotation
+window.cancelNewAnnotationConfirm = cancelNewAnnotationConfirm
 
 function loadAnnotationEvidences(force) {
   var ev = _annotPopupData.evidences || {}
@@ -4245,27 +4477,41 @@ function renderNewOntologySuggestions(results) {
 function addNewOntologyTerm(termId, termLabel) {
   var exists = _annotPopupData.newForm.ontologyTerms.some(function(t) { return String(t.id) === String(termId) })
   if (exists) return
+  if (!selectedAnnotTypeAllowsMultipleOntologyTerms() && _annotPopupData.newForm.ontologyTerms.length >= 1) {
+    _annotPopupData.newForm.ontologyTerms = [{ id: String(termId), label: String(termLabel) }]
+    clearNewAnnotationFeedback()
+    renderAnnotationPanel()
+    return
+  }
   _annotPopupData.newForm.ontologyTerms.push({ id: String(termId), label: String(termLabel) })
-  _annotPopupData.newForm.status = ''
+  clearNewAnnotationFeedback()
   renderAnnotationPanel()
 }
 
 function removeNewOntologyTerm(termId) {
   _annotPopupData.newForm.ontologyTerms = _annotPopupData.newForm.ontologyTerms.filter(function(t) { return String(t.id) !== String(termId) })
-  _annotPopupData.newForm.status = ''
+  clearNewAnnotationFeedback()
   renderAnnotationPanel()
 }
 
 function addNewGene(kind, geneObj) {
-  var arr = kind === 'up' ? _annotPopupData.newForm.upGenes : _annotPopupData.newForm.downGenes
-  var exists = arr.some(function(g) { return String(g.stableId) === String(geneObj.stableId) })
-  if (exists) return
-  arr.push({
+  var upArr = _annotPopupData.newForm.upGenes
+  var downArr = _annotPopupData.newForm.downGenes
+  var targetArr = kind === 'up' ? upArr : downArr
+  var otherArr = kind === 'up' ? downArr : upArr
+  var stableId = String(geneObj.stableId)
+  if (targetArr.some(function(g) { return String(g.stableId) === stableId })) return
+  if (otherArr.some(function(g) { return String(g.stableId) === stableId })) {
+    setNewAnnotationStatus('This gene is already listed as ' +
+      (kind === 'up' ? 'down-regulated' : 'up-regulated') + '.')
+    return
+  }
+  targetArr.push({
     label: String(geneObj.label),
     ensemblId: String(geneObj.ensemblId),
-    stableId: String(geneObj.stableId)
+    stableId: stableId
   })
-  _annotPopupData.newForm.status = ''
+  clearNewAnnotationFeedback()
   renderAnnotationPanel()
 }
 
@@ -4275,7 +4521,7 @@ function removeNewGene(kind, stableId) {
   } else {
     _annotPopupData.newForm.downGenes = _annotPopupData.newForm.downGenes.filter(function(g) { return String(g.stableId) !== String(stableId) })
   }
-  _annotPopupData.newForm.status = ''
+  clearNewAnnotationFeedback()
   renderAnnotationPanel()
 }
 
@@ -4293,7 +4539,7 @@ function initNewAnnotationTab() {
     annotationTypeSelect.addEventListener('change', function() {
       _annotPopupData.newForm.annotationTypeId = annotationTypeSelect.value
       _annotPopupData.newForm.ontologyTerms = []
-      _annotPopupData.newForm.status = ''
+      clearNewAnnotationFeedback()
       renderAnnotationPanel()
     })
   }
@@ -4381,41 +4627,85 @@ function initNewAnnotationTab() {
 function renderNewAnnotationTab() {
   var formState = _annotPopupData.newForm
   var annotationTypeId = String(formState.annotationTypeId || defaultAnnotTypeId())
+  var validation = newAnnotationFormValidation(formState)
   var annotationTypeOptions = (_annotOntologyTermTypes || []).map(function(t) {
     var id = String(t.id)
     var selected = id === annotationTypeId ? ' selected' : ''
     return '<option value="' + escapeHtml(id) + '"' + selected + '>' + escapeHtml(t.label) + '</option>'
   }).join('')
-  var ontologyBadges = (formState.ontologyTerms || []).map(function(term) {
+  var ontologyBadgeItems = (formState.ontologyTerms || []).map(function(term) {
     return '<span style="display:inline-flex;align-items:center;gap:6px;padding:2px 6px;background:#e0f2fe;color:#0c4a6e;border-radius:999px;font-size:11px;">' +
       escapeHtml(term.label) +
       '<button type="button" data-remove-ontology-id="' + escapeHtml(term.id) + '" style="background:none;border:none;color:#0c4a6e;cursor:pointer;padding:0;line-height:1;">x</button></span>'
-  }).join(' ')
-  var upBadges = (formState.upGenes || []).map(function(gene) {
+  })
+  var ontologyBadges = ontologyBadgeItems.length
+    ? '<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">' + ontologyBadgeItems.join(' ') + '</div>'
+    : ''
+  var upBadgeItems = (formState.upGenes || []).map(function(gene) {
     return '<span style="display:inline-flex;align-items:center;gap:6px;padding:2px 6px;background:#dcfce7;color:#166534;border-radius:999px;font-size:11px;">' +
       escapeHtml(gene.label) + ' [' + escapeHtml(gene.ensemblId) + ']' +
       '<button type="button" data-remove-gene-kind="up" data-remove-gene-stable="' + escapeHtml(gene.stableId) + '" style="background:none;border:none;color:#166534;cursor:pointer;padding:0;line-height:1;">x</button></span>'
-  }).join(' ')
-  var downBadges = (formState.downGenes || []).map(function(gene) {
+  })
+  var upBadges = upBadgeItems.length
+    ? '<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">' + upBadgeItems.join(' ') + '</div>'
+    : ''
+  var downBadgeItems = (formState.downGenes || []).map(function(gene) {
     return '<span style="display:inline-flex;align-items:center;gap:6px;padding:2px 6px;background:#fee2e2;color:#991b1b;border-radius:999px;font-size:11px;">' +
       escapeHtml(gene.label) + ' [' + escapeHtml(gene.ensemblId) + ']' +
       '<button type="button" data-remove-gene-kind="down" data-remove-gene-stable="' + escapeHtml(gene.stableId) + '" style="background:none;border:none;color:#991b1b;cursor:pointer;padding:0;line-height:1;">x</button></span>'
-  }).join(' ')
+  })
+  var downBadges = downBadgeItems.length
+    ? '<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">' + downBadgeItems.join(' ') + '</div>'
+    : ''
+
+  var ontologyInvalid = validation.ontologyMissing || validation.ontologyTooMany
+  var ontologyBorder = ontologyInvalid ? '#dc2626' : '#d1d5db'
+  var ontologyShadow = ontologyInvalid ? '0 0 0 3px rgba(220, 38, 38, 0.15)' : 'none'
+  var ontologyPlaceholder = validation.allowsMultiple
+    ? 'Search ontology terms (one or more allowed)'
+    : 'Search ontology term (exactly one required)'
+  var ontologyHint = ''
+  if (validation.ontologyMissing) {
+    ontologyHint = '<div style="margin-top:4px;font-size:11px;color:#b91c1c;line-height:1.3;">At least one ontology term is required (scFAIR).</div>'
+  } else if (validation.ontologyTooMany) {
+    ontologyHint = '<div style="margin-top:4px;font-size:11px;color:#b91c1c;line-height:1.3;">This annotation type allows only one ontology term.</div>'
+  } else if (validation.allowsMultiple) {
+    ontologyHint = '<div style="margin-top:4px;font-size:11px;color:#6b7280;line-height:1.3;">Multiple ontology terms are allowed for this annotation type.</div>'
+  } else {
+    ontologyHint = '<div style="margin-top:4px;font-size:11px;color:#6b7280;line-height:1.3;">Only one ontology term is allowed for this annotation type.</div>'
+  }
 
   var annotable = document.getElementById('annotation-popup-overlay') && document.getElementById('annotation-popup-overlay').dataset.annotable === 'true'
-  var submitSection = annotable
-    ? '<button type="button" onclick="submitNewAnnotation()" style="background:#2563eb;border:1px solid #2563eb;color:#fff;cursor:pointer;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;">Submit annotation</button>'
-    : '<button type="button" disabled style="background:#9ca3af;border:1px solid #9ca3af;color:#fff;cursor:not-allowed;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;">Submit annotation</button><span style="font-size:12px;color:#92400e;">You should be logged in and associate your ORCID ID to your account to submit annotations.</span>'
+  var submitting = !!formState.submitting
+  var pendingConfirm = !!formState.pendingConfirm
+  var formInvalid = !validation.valid
+  var submitDisabled = submitting || formInvalid
+  var submitSection
+  if (!annotable) {
+    submitSection = '<button type="button" disabled style="background:#9ca3af;border:1px solid #9ca3af;color:#fff;cursor:not-allowed;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;">Submit annotation</button><span style="font-size:12px;color:#92400e;">You should be logged in and associate your ORCID ID to your account to submit annotations.</span>'
+  } else if (pendingConfirm) {
+    submitSection =
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">' +
+      '<button type="button" onclick="submitNewAnnotation(true)"' + (submitDisabled ? ' disabled' : '') + ' style="background:' + (formInvalid ? '#9ca3af' : '#2563eb') + ';border:1px solid ' + (formInvalid ? '#9ca3af' : '#2563eb') + ';color:#fff;cursor:' + (submitDisabled ? 'not-allowed' : 'pointer') + ';padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;">' + (submitting ? 'Submitting...' : 'Confirm submit') + '</button>' +
+      '<button type="button" onclick="cancelNewAnnotationConfirm()"' + (submitting ? ' disabled' : '') + ' style="background:#fff;border:1px solid #d1d5db;color:#374151;cursor:' + (submitting ? 'not-allowed' : 'pointer') + ';padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;">Cancel</button>' +
+      '</div>'
+  } else {
+    submitSection = '<button type="button" onclick="submitNewAnnotation(false)"' + (submitDisabled ? ' disabled' : '') + ' style="background:' + (formInvalid ? '#9ca3af' : '#2563eb') + ';border:1px solid ' + (formInvalid ? '#9ca3af' : '#2563eb') + ';color:#fff;cursor:' + (submitDisabled ? 'not-allowed' : 'pointer') + ';padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;">' + (submitting ? 'Submitting...' : 'Submit annotation') + '</button>'
+  }
 
   var html = templateHtml('annot-new-tab-template')
     .replace('__ANNOTATION_TYPE_OPTIONS__', annotationTypeOptions)
     .replace('__NAME__', escapeHtml(formState.name))
+    .replace('__ONTOLOGY_PLACEHOLDER__', escapeHtml(ontologyPlaceholder))
+    .replace('__ONTOLOGY_BORDER__', ontologyBorder)
+    .replace('__ONTOLOGY_SHADOW__', ontologyShadow)
     .replace('__ONTOLOGY_BADGES__', ontologyBadges)
+    .replace('__ONTOLOGY_HINT__', ontologyHint)
     .replace('__UP_BADGES__', upBadges)
     .replace('__DOWN_BADGES__', downBadges)
     .replace('__COMMENT__', escapeHtml(formState.comment))
     .replace('__SUBMIT_SECTION__', submitSection)
-    .replace('__STATUS__', (formState.status || '').trim().length > 0 ? '<div style="margin-top:8px;padding:8px 10px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:6px;font-size:12px;">' + escapeHtml(formState.status) + '</div>' : '')
+    .replace('__STATUS__', (formState.status || '').trim().length > 0 ? '<div style="margin-top:8px;padding:8px 10px;border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:6px;font-size:12px;white-space:pre-wrap;">' + escapeHtml(formState.status) + '</div>' : '')
   return html
 }
 
@@ -4809,7 +5099,7 @@ function renderAnnotationPanel() {
 window._annotPopupRenderPanel = renderAnnotationPanel
 </script>
 
-<%= render 'projects/views/annotation_popup' %>
+<%= render 'projects/views/annotation_popup' if annotation_tool_available %>
 <script>
 window.scheduleAnnotEvidenceBoxplotRender = function() {
   requestAnimationFrame(function() {

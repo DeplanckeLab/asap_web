@@ -6,6 +6,7 @@
   runs = local_assigns[:current_runs] || []
   h_attrs_by_run_id = local_assigns[:h_attrs_by_run_id] || {}
   log2fc_threshold = Math.log2(fc_threshold)
+  annotation_tool_available = @project&.single_cell?
 
   project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
 
@@ -227,7 +228,9 @@
         <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none" data-sort-col="2">Comp cluster <span class="sort-indicator"></span></th>
         <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Top up-regulated genes</th>
         <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Top down-regulated genes</th>
-        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Annotation</th>
+        <% if annotation_tool_available %>
+          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap">Annotation</th>
+        <% end %>
       </tr>
     </thead>
     <tbody class="bg-white divide-y divide-gray-200">
@@ -301,6 +304,7 @@
               </div>
             <% end %>
           </td>
+          <% if annotation_tool_available %>
           <td class="px-3 py-2 whitespace-nowrap">
             <% has_metadata = md[:annotation_metadata_id].present? %>
             <button class="category-annot-btn"
@@ -320,6 +324,7 @@
               <i class="fas fa-bookmark" style="font-size: 11px;"></i>
             </button>
           </td>
+          <% end %>
         </tr>
       <% end %>
     </tbody>
@@ -1322,7 +1327,7 @@ if (typeof openAnnotationPopup !== 'function') {
 }
 </script>
 
-<%= render 'projects/views/annotation_popup' %>
+<%= render 'projects/views/annotation_popup' if annotation_tool_available %>
 <script>
 (function() {
   if (typeof window.scheduleAnnotEvidenceBoxplotRender !== 'function') {

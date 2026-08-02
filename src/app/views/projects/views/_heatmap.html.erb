@@ -1,0 +1,68 @@
+<%# Full-page heatmap viewer (project view=heatmap), parallel to visualization. %>
+<%
+  completed_runs = Array(@heatmap_runs)
+  selected_run = @run
+  heatmap_step = @step
+  back_analysis_path = if heatmap_step
+    project_path(@project, view: 'analysis', step_id: heatmap_step.id)
+  else
+    project_path(@project, view: 'analysis')
+  end
+%>
+
+<div data-guided-tour="project-heatmap-view"
+     class="heatmap-page"
+     style="display:flex; flex-direction:column; height:100%; width:100%; margin:0; padding:0; overflow:hidden; background:#f8fafc;">
+  <div style="flex-shrink:0; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-bottom:1px solid #e5e7eb; background:#ffffff;">
+    <div style="display:flex; flex-wrap:wrap; align-items:center; gap:12px; min-width:0;">
+      <%= link_to back_analysis_path,
+          class: "inline-flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-xs transition-colors cursor-pointer border border-gray-300 shadow-sm",
+          title: "Back to heatmap runs in analysis" do %>
+        <i class="fas fa-arrow-left"></i>
+        <span>Back to analysis</span>
+      <% end %>
+      <h1 style="margin:0; font-size:16px; font-weight:600; color:#111827;">Heatmap</h1>
+      <% if completed_runs.any? && selected_run %>
+        <label style="display:flex; align-items:center; gap:8px; margin:0; font-size:12px; color:#4b5563;">
+          <span>Run</span>
+          <select class="form-select form-select-sm"
+                  style="min-width:220px; max-width:min(420px, 55vw);"
+                  onchange="if (this.value) { window.location.href = '<%= j project_path(@project, view: 'heatmap', run_id: '__RUN_ID__') %>'.replace('__RUN_ID__', encodeURIComponent(this.value)); }">
+            <% completed_runs.each do |r| %>
+              <%
+                std_method = @h_std_methods.is_a?(Hash) ? @h_std_methods[r.std_method_id] : nil
+                method_label = std_method&.label.presence || std_method&.name.presence || 'Heatmap'
+                run_num = r.num.presence || r.id
+                created = r.created_at ? r.created_at.strftime('%Y-%m-%d %H:%M') : ''
+                option_label = "##{run_num} — #{method_label}"
+                option_label += " (#{created})" if created.present?
+              %>
+              <option value="<%= r.id %>" <%= 'selected' if selected_run.id == r.id %>>
+                <%= option_label %>
+              </option>
+            <% end %>
+          </select>
+        </label>
+      <% end %>
+    </div>
+  </div>
+
+  <div style="flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column;">
+    <% if selected_run %>
+      <%= render partial: 'projects/views/heatmap_view', locals: { project: @project, run: selected_run, full_height: true } %>
+    <% else %>
+      <div style="display:flex; align-items:center; justify-content:center; height:100%; min-height:320px; padding:16px;">
+        <div style="text-align:center; max-width:420px;">
+          <h2 style="margin:0 0 8px 0; font-size:18px; font-weight:600; color:#374151;">No completed heatmap runs</h2>
+          <p style="margin:0 0 16px 0; font-size:14px; color:#6b7280; line-height:1.5;">
+            Create a heatmap run from Analysis, then open the viewer from the runs list.
+          </p>
+          <%= link_to back_analysis_path,
+              class: "inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-xs transition-colors cursor-pointer border border-indigo-600 shadow-sm" do %>
+            <span>Go to analysis</span>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  </div>
+</div>

@@ -314,9 +314,17 @@ class RunsController < ApplicationController
       }
 
       if @step.name == 'heatmap' && @run.status_id == 3
+        open_heatmap_path = project_path(@project, view: 'heatmap', run_id: @run.id)
         @h_el["card-heatmap"] = {
           card_header: 'Heatmap',
-          card_body: render_to_string(partial: 'projects/views/heatmap_view', locals: { project: @project, run: @run })
+          card_body: %(<div class="py-4 px-2 text-center">
+            <p class="text-sm text-gray-600 mb-3">Open the full-page heatmap viewer for this run.</p>
+            <a href="#{open_heatmap_path}"
+               class="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-xs transition-colors cursor-pointer border border-indigo-600 shadow-sm">
+              <i class="fas fa-th"></i>
+              <span>Open heatmap viewer</span>
+            </a>
+          </div>).html_safe
         }
       end
     end

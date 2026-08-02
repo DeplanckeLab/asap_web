@@ -2,24 +2,29 @@ import { Controller } from "@hotwired/stimulus"
 import { ReglHeatmap } from "visualization/regl_heatmap"
 import { GradientManager } from "visualization/gradient_manager"
 import { ColorManager } from "visualization/color_manager"
+import { GeneSetCollectionsController } from "visualization/gene_set_collections_controller"
+import consumer from "channels/consumer"
 
 // Interactive expression heatmap viewer.
 //
 // Renders the precomputed genes x columns matrix (WebGL) with a Canvas 2D
-// overlay for collapsible row/column dendrograms, categorical/numerical
-// annotation tracks, axis labels and a colormap legend. Supports Shift+scroll
-// zoom, drag pan, reset, and per-branch collapse (which aggregates the matrix).
-// Clicking the colormap or continuous-track legends opens the shared gradient editor modal.
+// overlay for row/column dendrograms, categorical/numerical annotation tracks,
+// axis labels and a colormap legend. Supports Shift+scroll zoom, drag pan,
+// rectangular gene/cell selection, and reset. Clicking the colormap or
+// continuous-track legends opens the shared gradient editor modal.
 export default class extends Controller {
   static values = {
     projectKey: String,
+    projectId: String,
     runId: String,
+    runNum: String,
+    runLabel: String,
     dataUrl: String,
     canAnalyze: { type: Boolean, default: false }
   }
 
   static targets = [
-    "webgl", "overlay", "status", "tooltip",
+    "webgl", "overlay", "status", "statusSpinner", "statusMessage", "tooltip",
     "colTrackList", "rowTrackList", "colTrackListEmpty", "rowTrackListEmpty",
     "addColTrackBtn", "addRowTrackBtn",
     "trackModal", "trackModalTitle", "trackModalSelect",
@@ -31,10 +36,16 @@ export default class extends Controller {
     "colTreeToggle", "rowTreeToggle", "labelsToggle",
     "colTreeState", "rowTreeState", "labelsState",
     "settingsBtn", "settingsMenu", "legendWidthSlider", "legendWidthValue",
+    "rightMarginSlider", "rightMarginValue",
     "checkpointHistoryOverlay", "checkpointHistoryList", "checkpointHistoryBtn",
     "checkpointCommentsOverlay", "checkpointCommentsTitle", "checkpointCommentsList",
     "checkpointCommentSelect", "checkpointCommentInput", "checkpointCommentsBtn",
-    "checkpointLoadingOverlay", "checkpointLoadingMessage"
+    "checkpointLoadingOverlay", "checkpointLoadingMessage",
+    "panModeBtn", "selectModeBtn", "controlInstructions",
+    "selectedGenesCount", "selectedCellsCount",
+    "savedCellSetsList",
+    "geneSelectionStatus", "cellSelectionStatus",
+    "clearGeneSelectionBtn", "clearCellSelectionBtn"
   ]
 
   connect() {
@@ -42,9 +53,27 @@ export default class extends Controller {
     this.showRowTree = true
     this.showColTree = true
     this.showLabels = true
-    this.rowCollapsed = new Set()
-    this.colCollapsed = new Set()
     this.dragging = false
+    this.selecting = false
+    this.selectionRect = null
+    this.interactionMode = "pan"
+    this.selectedGenes = new Set()
+    this.selectedCells = new Set()
+    this.selectedOrigRows = new Set()
+    this.selectedOrigCols = new Set()
+    this.savedCellSets = []
+    this.recentlyCreatedSavedCellSetId = null
+    this.editingSavedCellSetId = null
+    this.pendingSavedCellSetName = null
+    this.pendingSavedCellSetFocusId = null
+    this.savedCellSetsFilterQuery = ""
+    this.savedCellSetsFilterType = "all"
+    this.savedCellSetsSortBy = "created_at"
+    this.savedCellSetsSortOrder = "desc"
+    this.selectionStatesSubscription = null
+    this.selectionStatesRefreshTimer = null
+    this.selectionStatusPollingTimer = null
+    this.embeddingMetadataId = null
     this.colTracks = []
     this.rowTracks = []
     this.loomFile = null
@@ -54,6 +83,12 @@ export default class extends Controller {
     this.trackLegendBounds = []
     this.isHoveringLegend = false
     this.hoveringTrackLegendKey = null
+    this.geneSetCollectionsController = new GeneSetCollectionsController(this, {
+      idPrefix: "heatmap",
+      root: this.element.querySelector("#heatmap-genes-panel") || this.element,
+      enableModuleScoreColoring: false,
+      createCollectionType: "from_heatmap"
+    })
     this.editingGradientTarget = { type: "expression" }
     this.expressionCustomColorRange = null
     this.checkpointHistory = []
@@ -96,14 +131,21 @@ export default class extends Controller {
       trackGap: 3,
       trackRefW: 18,
       trackRefH: 14,
-      rowLabelW: 150,
+      rowLabelW: 50,
       colLabelH: 90,
       legendW: 220,
       legendWMin: 140,
       legendWMax: 360,
+      rightMargin: 8,
+      rightMarginMin: 0,
+      rightMarginMax: 200,
       pad: 8
     }
     this.legendWidthPx = this.layout.legendW
+    this.rightMarginPx = this.layout.rightMargin
+    this.rightMargin = this.layout.rightMargin
+    this.labelW = 0
+    this.legendLeft = 0
     this.trackSizePx = { thin: 10, normal: 16, thick: 24 }
     this.pendingTrackAxis = null
 
@@ -118,11 +160,17 @@ export default class extends Controller {
 
     this.syncToggleButtons()
     this.syncLegendWidthControls()
+    this.syncRightMarginControls()
+    this.initializePanelLayout()
     this.loadData()
   }
 
   disconnect() {
     this.persistCurrentCheckpointBeforeTeardown("disconnect")
+    this.teardownPanelLayout()
+    this.teardownSavedCellSetLiveUpdates()
+    this.teardownSavedCellSetsFilterMenus()
+    this.geneSetCollectionsController = null
     window.removeEventListener("resize", this.boundResize)
     window.removeEventListener("beforeunload", this.boundPersistCurrent)
     document.removeEventListener("turbo:before-cache", this.boundPersistCurrentTurboCache)
@@ -137,15 +185,31 @@ export default class extends Controller {
     }
   }
 
-  setStatus(message) {
-    if (this.hasStatusTarget) {
-      this.statusTarget.textContent = message || ""
-      this.statusTarget.style.display = message ? "block" : "none"
+  getProjectIdentifier() {
+    return this.projectKeyValue || null
+  }
+
+  getCurrentLoomFileForRequest() {
+    return this.loomFile || ""
+  }
+
+  setStatus(message, { loading = null } = {}) {
+    if (!this.hasStatusTarget) return
+    const text = String(message || "").trim()
+    if (!text) {
+      this.statusTarget.style.display = "none"
+      return
+    }
+    this.statusTarget.style.display = "flex"
+    if (this.hasStatusMessageTarget) this.statusMessageTarget.textContent = text
+    const showSpinner = loading === true || (loading === null && /^loading\b/i.test(text))
+    if (this.hasStatusSpinnerTarget) {
+      this.statusSpinnerTarget.style.display = showSpinner ? "block" : "none"
     }
   }
 
   async loadData() {
-    this.setStatus("Loading heatmap...")
+    this.setStatus("Loading heatmap...", { loading: true })
     try {
       const metaRes = await fetch(this.dataUrlValue, {
         headers: { Accept: "application/json" },
@@ -153,7 +217,7 @@ export default class extends Controller {
       })
       if (!metaRes.ok) {
         const body = await metaRes.json().catch(() => ({}))
-        this.setStatus(body.error || "Heatmap results are not available yet.")
+        this.setStatus(body.error || "Heatmap results are not available yet.", { loading: false })
         return
       }
       this.meta = await metaRes.json()
@@ -164,12 +228,12 @@ export default class extends Controller {
 
       const matrixUrl = this.meta.matrix_url
       if (!matrixUrl) {
-        this.setStatus("Heatmap matrix is missing.")
+        this.setStatus("Heatmap matrix is missing.", { loading: false })
         return
       }
       const matRes = await fetch(matrixUrl, { credentials: "same-origin" })
       if (!matRes.ok) {
-        this.setStatus("Failed to load heatmap matrix.")
+        this.setStatus("Failed to load heatmap matrix.", { loading: false })
         return
       }
       const buf = await matRes.arrayBuffer()
@@ -182,13 +246,16 @@ export default class extends Controller {
       this.diverging = this.meta.diverging !== false
 
       if (this.baseMatrix.length !== this.nOrigRows * this.nOrigCols) {
-        this.setStatus("Heatmap matrix size does not match metadata.")
+        this.setStatus("Heatmap matrix size does not match metadata.", { loading: false })
         return
       }
 
       this.rowTree = this.prepareTree(this.meta.row_tree, this.nOrigRows)
       this.colTree = this.prepareTree(this.meta.col_tree, this.nOrigCols)
       this.loomFile = this.meta.loom_file || null
+      this.embeddingMetadataId = this.meta.embedding_metadata_id
+        ? Number(this.meta.embedding_metadata_id)
+        : null
 
       this.setupExpressionGradient()
       this.setStatus("")
@@ -198,6 +265,10 @@ export default class extends Controller {
       this.bindEvents()
       await this.loadMetadataCatalog()
       this.handleResize()
+      this.syncInteractionModeButtons()
+      this.updateSelectionPanels()
+      this.setupSavedCellSetLiveUpdates()
+      await this.refreshSavedCellSets()
       await this.fetchCheckpointHistory()
       const loadedFromUrl = await this.loadCheckpointFromUrlIfPresent()
       if (!loadedFromUrl) {
@@ -206,7 +277,7 @@ export default class extends Controller {
       this.currentCheckpointReadyForOverwrite = true
     } catch (e) {
       console.error("[heatmap] load failed", e)
-      this.setStatus("Failed to load heatmap: " + e.message)
+      this.setStatus("Failed to load heatmap: " + e.message, { loading: false })
       this.currentCheckpointReadyForOverwrite = true
     }
   }
@@ -394,6 +465,7 @@ export default class extends Controller {
       option.value = String(opt.id)
       option.textContent = opt.name
       option.dataset.dataType = opt.data_type || ""
+      option.dataset.nberCats = String(opt.nber_cats != null ? opt.nber_cats : "")
       selectEl.appendChild(option)
     })
     this.trackModalMetadataChanged()
@@ -415,7 +487,7 @@ export default class extends Controller {
         : "Add gene metadata track"
     }
     if (this.hasTrackModalSizeTarget) this.trackModalSizeTarget.value = "normal"
-    if (this.hasTrackModalShowLegendTarget) this.trackModalShowLegendTarget.checked = true
+    if (this.hasTrackModalShowLegendTarget) this.trackModalShowLegendTarget.checked = false
     this.fillTrackModalSelect(axis)
     if (this.hasTrackModalTarget) {
       this.trackModalTarget.style.display = "flex"
@@ -440,14 +512,19 @@ export default class extends Controller {
     const selected = this.trackModalSelectTarget.selectedOptions[0]
     const dataType = (selected?.dataset?.dataType || "").toUpperCase()
     const isCategorical = dataType !== "NUMERIC" && dataType !== "CONTINUOUS"
+    const nberCats = Number(selected?.dataset?.nberCats)
+    const legendFits = Number.isFinite(nberCats) && nberCats > 0 && nberCats <= this.legendMaxCategories
     if (this.hasTrackModalLegendWrapTarget) {
       this.trackModalLegendWrapTarget.style.display = isCategorical ? "flex" : "none"
+    }
+    if (this.hasTrackModalShowLegendTarget) {
+      this.trackModalShowLegendTarget.checked = isCategorical && legendFits
     }
     if (this.hasTrackModalHintTarget) {
       if (!selected || !selected.value) {
         this.trackModalHintTarget.textContent = "Choose a metadata annotation to display beside the heatmap."
       } else if (isCategorical) {
-        this.trackModalHintTarget.textContent = "Categorical tracks are colored by category. Enable the legend when there are few levels."
+        this.trackModalHintTarget.textContent = "Categorical tracks are colored by category."
       } else {
         this.trackModalHintTarget.textContent = "Numerical tracks use a light-to-dark blue scale from low to high values."
       }
@@ -578,14 +655,14 @@ export default class extends Controller {
       prepared.type = options.type
     }
     this.applyLocalTrackType(prepared, prepared.type)
-    const legendAllowed = prepared.type === "categorical" &&
+    const legendFits = prepared.type === "categorical" &&
       Array.isArray(prepared.categories) &&
       prepared.categories.length > 0 &&
       prepared.categories.length <= this.legendMaxCategories
     if (Object.prototype.hasOwnProperty.call(options, "showLegend")) {
-      prepared.showLegend = !!options.showLegend && legendAllowed
+      prepared.showLegend = !!options.showLegend
     } else {
-      prepared.showLegend = track.show_legend !== false && legendAllowed
+      prepared.showLegend = legendFits
     }
     if (prepared.type === "numerical") {
       this.applyGradientOptionsToTrack(prepared, options.gradient)
@@ -637,7 +714,8 @@ export default class extends Controller {
       track.categories = cats
       track._catIndex = {}
       cats.forEach((cat, i) => { track._catIndex[cat] = i })
-      if (track.categories.length > this.legendMaxCategories) track.showLegend = false
+      track.showLegend = track.categories.length > 0 &&
+        track.categories.length <= this.legendMaxCategories
       return
     }
     const nums = source.map((v) => {
@@ -817,23 +895,44 @@ export default class extends Controller {
     listTarget.innerHTML = tracks.map((track, index) => {
       const ref = axis === "column" ? `c${index + 1}` : `r${index + 1}`
       return `<div class="heatmap-track-row"
-                  draggable="true"
                   data-heatmap-axis-param="${axis}"
                   data-heatmap-index-param="${index}"
-                  data-action="dragstart->heatmap#trackDragStart dragover->heatmap#trackDragOver drop->heatmap#trackDrop dragend->heatmap#trackDragEnd">
+                  data-action="dragover->heatmap#trackDragOver drop->heatmap#trackDrop">
+        <span class="heatmap-track-grip"
+              draggable="true"
+              title="Drag to reorder"
+              aria-label="Drag to reorder"
+              data-heatmap-axis-param="${axis}"
+              data-heatmap-index-param="${index}"
+              data-action="dragstart->heatmap#trackDragStart dragend->heatmap#trackDragEnd">
+          <svg viewBox="0 0 8 14" aria-hidden="true">
+            <circle cx="2" cy="2" r="1.25" fill="currentColor"/>
+            <circle cx="6" cy="2" r="1.25" fill="currentColor"/>
+            <circle cx="2" cy="7" r="1.25" fill="currentColor"/>
+            <circle cx="6" cy="7" r="1.25" fill="currentColor"/>
+            <circle cx="2" cy="12" r="1.25" fill="currentColor"/>
+            <circle cx="6" cy="12" r="1.25" fill="currentColor"/>
+          </svg>
+        </span>
         <span class="heatmap-track-ref">${this.escape(ref)}</span>
         <span class="heatmap-track-name" title="${this.escape(track.name)}">${this.escape(track.name)}</span>
         <button type="button"
-                class="inline-flex items-center justify-center px-2 py-1 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-xs transition-colors cursor-pointer border border-gray-300 shadow-sm"
+                style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:none;background:none;color:#6b7280;cursor:pointer;flex:0 0 auto;"
+                title="Edit track"
+                aria-label="Edit track"
                 data-action="heatmap#openEditTrackModal"
                 data-heatmap-id-param="${track.id}"
-                data-heatmap-axis-param="${axis}">Edit</button>
+                data-heatmap-axis-param="${axis}"
+                onmouseover="this.style.color='#111827'"
+                onmouseout="this.style.color='#6b7280'">
+          <i class="fas fa-pen" style="font-size:10px;" aria-hidden="true"></i>
+        </button>
       </div>`
     }).join("")
   }
 
   trackDragStart(event) {
-    if (event.target.closest("button")) {
+    if (!event.target.closest(".heatmap-track-grip")) {
       event.preventDefault()
       return
     }
@@ -841,7 +940,8 @@ export default class extends Controller {
     const index = Number(event.params.index)
     if (!axis || !Number.isFinite(index)) return
     this._trackDrag = { axis, index }
-    event.currentTarget.classList.add("heatmap-track-dragging")
+    const row = event.target.closest(".heatmap-track-row")
+    if (row) row.classList.add("heatmap-track-dragging")
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = "move"
       event.dataTransfer.setData("text/plain", `${axis}:${index}`)
@@ -873,12 +973,14 @@ export default class extends Controller {
   }
 
   trackDragEnd(event) {
-    event.currentTarget.classList.remove("heatmap-track-dragging")
+    const row = event.target.closest(".heatmap-track-row")
+    if (row) row.classList.remove("heatmap-track-dragging")
     const list = this._trackDrag?.axis === "column"
       ? (this.hasColTrackListTarget ? this.colTrackListTarget : null)
       : (this.hasRowTrackListTarget ? this.rowTrackListTarget : null)
     if (list) {
       list.querySelectorAll(".heatmap-track-drag-over").forEach((el) => el.classList.remove("heatmap-track-drag-over"))
+      list.querySelectorAll(".heatmap-track-dragging").forEach((el) => el.classList.remove("heatmap-track-dragging"))
     }
     this._trackDrag = null
   }
@@ -992,10 +1094,7 @@ export default class extends Controller {
       this.ensureTrackGradient(track)
     } else {
       track.displayMode = "color"
-      const legendAllowed = Array.isArray(track.categories) &&
-        track.categories.length > 0 &&
-        track.categories.length <= this.legendMaxCategories
-      track.showLegend = legendAllowed && !!(this.hasEditTrackShowLegendTarget && this.editTrackShowLegendTarget.checked)
+      track.showLegend = !!(this.hasEditTrackShowLegendTarget && this.editTrackShowLegendTarget.checked)
     }
 
     const sizeKey = this.hasEditTrackSizeTarget ? this.editTrackSizeTarget.value : "normal"
@@ -1054,6 +1153,20 @@ export default class extends Controller {
     if (this.hasLegendWidthValueTarget) this.legendWidthValueTarget.textContent = `${width}px`
   }
 
+  estimateRightMargin() {
+    const minM = this.layout.rightMarginMin
+    const maxM = this.layout.rightMarginMax
+    const preferred = Number(this.rightMarginPx)
+    const value = Number.isFinite(preferred) ? preferred : this.layout.rightMargin
+    return Math.min(maxM, Math.max(minM, Math.round(value)))
+  }
+
+  syncRightMarginControls() {
+    const margin = this.estimateRightMargin()
+    if (this.hasRightMarginSliderTarget) this.rightMarginSliderTarget.value = String(margin)
+    if (this.hasRightMarginValueTarget) this.rightMarginValueTarget.textContent = `${margin}px`
+  }
+
   toggleSettingsMenu(event) {
     if (event) {
       event.preventDefault()
@@ -1063,6 +1176,7 @@ export default class extends Controller {
     const opening = this.settingsMenuTarget.style.display === "none" || !this.settingsMenuTarget.style.display
     if (opening) {
       this.syncLegendWidthControls()
+      this.syncRightMarginControls()
       this.settingsMenuTarget.style.display = "block"
       this.ensureSettingsMenuOutsideCloseBound()
     } else {
@@ -1097,11 +1211,20 @@ export default class extends Controller {
     this.persistCurrentCheckpointOnServer("legend-width")
   }
 
-  // Build display groups (contiguous leaf ranges) honoring collapsed nodes,
-  // then aggregate the base matrix into the displayed matrix.
+  rightMarginChanged() {
+    if (!this.hasRightMarginSliderTarget) return
+    const value = Number(this.rightMarginSliderTarget.value)
+    if (!Number.isFinite(value)) return
+    this.rightMarginPx = value
+    this.syncRightMarginControls()
+    this.handleResize()
+    this.persistCurrentCheckpointOnServer("right-margin")
+  }
+
+  // Build display groups (contiguous leaf ranges) from the dendrogram leaves.
   rebuildDisplay() {
-    this.colGroups = this.buildGroups(this.colTree, this.nOrigCols, this.colCollapsed)
-    this.rowGroups = this.buildGroups(this.rowTree, this.nOrigRows, this.rowCollapsed)
+    this.colGroups = this.buildGroups(this.colTree, this.nOrigCols)
+    this.rowGroups = this.buildGroups(this.rowTree, this.nOrigRows)
 
     this.origColToDisplay = this.mapOriginalToDisplay(this.colGroups, this.nOrigCols)
     this.origRowToDisplay = this.mapOriginalToDisplay(this.rowGroups, this.nOrigRows)
@@ -1153,7 +1276,7 @@ export default class extends Controller {
     )
   }
 
-  buildGroups(tree, nLeaves, collapsed) {
+  buildGroups(tree, nLeaves) {
     const groups = []
     if (!tree || !tree.root) {
       for (let i = 0; i < nLeaves; i++) groups.push([i, i])
@@ -1162,10 +1285,6 @@ export default class extends Controller {
     const walk = (node) => {
       if (node.leaf) {
         groups.push([node.index, node.index])
-        return
-      }
-      if (collapsed.has(node.id)) {
-        groups.push([node.minLeaf, node.maxLeaf])
         return
       }
       node.children.forEach(walk)
@@ -1184,8 +1303,6 @@ export default class extends Controller {
   }
 
   resetView(rerender = true) {
-    this.rowCollapsed.clear()
-    this.colCollapsed.clear()
     if (rerender) this.rebuildDisplay()
     this.view = {
       colStart: 0,
@@ -1209,18 +1326,21 @@ export default class extends Controller {
     this.showRowTree = !this.showRowTree
     this.syncToggleButtons()
     this.handleResize()
+    this.persistCurrentCheckpointOnServer("toggle-row-tree")
   }
 
   toggleColTree() {
     this.showColTree = !this.showColTree
     this.syncToggleButtons()
     this.handleResize()
+    this.persistCurrentCheckpointOnServer("toggle-col-tree")
   }
 
   toggleLabels() {
     this.showLabels = !this.showLabels
     this.syncToggleButtons()
     this.handleResize()
+    this.persistCurrentCheckpointOnServer("toggle-labels")
   }
 
   syncToggleButtons() {
@@ -1259,8 +1379,11 @@ export default class extends Controller {
     gl.style.top = this.my + "px"
     gl.style.width = this.mw + "px"
     gl.style.height = this.mh + "px"
-    gl.width = Math.max(1, Math.round(this.mw * this.dpr))
-    gl.height = Math.max(1, Math.round(this.mh * this.dpr))
+    const maxBufferDim = this.renderer?.maxTextureSize
+      ? Math.max(256, this.renderer.maxTextureSize)
+      : 8192
+    gl.width = Math.max(1, Math.min(maxBufferDim, Math.round(this.mw * this.dpr)))
+    gl.height = Math.max(1, Math.min(maxBufferDim, Math.round(this.mh * this.dpr)))
 
     const ov = this.overlayTarget
     ov.style.position = "absolute"
@@ -1268,8 +1391,8 @@ export default class extends Controller {
     ov.style.top = "0px"
     ov.style.width = w + "px"
     ov.style.height = h + "px"
-    ov.width = Math.max(1, Math.round(w * this.dpr))
-    ov.height = Math.max(1, Math.round(h * this.dpr))
+    ov.width = Math.max(1, Math.min(maxBufferDim, Math.round(w * this.dpr)))
+    ov.height = Math.max(1, Math.min(maxBufferDim, Math.round(h * this.dpr)))
 
     this.render()
   }
@@ -1310,10 +1433,14 @@ export default class extends Controller {
     this.colTreeH = colTreeH
     this.rowTreeW = rowTreeW
     this.rightLegendW = this.estimateRightLegendWidth()
+    this.rightMargin = this.estimateRightMargin()
+    this.labelW = this.showLabels ? L.rowLabelW : 0
 
     const labelH = this.showLabels ? L.colLabelH : 0
-    this.mw = Math.max(20, this.containerW - this.mx - L.rowLabelW - this.rightLegendW - L.pad)
+    // Right side: [matrix][gene labels][rightMargin][legend][pad]
+    this.mw = Math.max(20, this.containerW - this.mx - this.labelW - this.rightMargin - this.rightLegendW - L.pad)
     this.mh = Math.max(20, this.containerH - this.my - labelH - L.pad)
+    this.legendLeft = this.mx + this.mw + this.labelW + this.rightMargin
     this.positionAddTrackButtons()
   }
 
@@ -1395,6 +1522,7 @@ export default class extends Controller {
     window.addEventListener("mousemove", (e) => this.onMouseMove(e))
     window.addEventListener("mouseup", () => this.onMouseUp())
     ov.addEventListener("click", (e) => this.onClick(e))
+    ov.addEventListener("dblclick", (e) => this.onDblClick(e))
     ov.addEventListener("mouseleave", () => this.hideTooltip())
   }
 
@@ -1427,6 +1555,191 @@ export default class extends Controller {
     return this.my + ((r - v.rowStart) / (v.rowEnd - v.rowStart)) * this.mh
   }
 
+  setPanMode(event) {
+    if (event) event.preventDefault()
+    this.interactionMode = "pan"
+    this.selecting = false
+    this.selectionRect = null
+    this.syncInteractionModeButtons()
+    this.drawOverlay()
+  }
+
+  setSelectMode(event) {
+    if (event) event.preventDefault()
+    this.interactionMode = "select"
+    this.dragging = false
+    this.dragStart = null
+    this.syncInteractionModeButtons()
+    this.drawOverlay()
+  }
+
+  syncInteractionModeButtons() {
+    const isPan = this.interactionMode !== "select"
+    if (this.hasPanModeBtnTarget) {
+      this.panModeBtnTarget.setAttribute("aria-pressed", isPan ? "true" : "false")
+    }
+    if (this.hasSelectModeBtnTarget) {
+      this.selectModeBtnTarget.setAttribute("aria-pressed", isPan ? "false" : "true")
+    }
+    if (this.hasOverlayTarget) {
+      if (this.interactionMode === "select") {
+        this.overlayTarget.style.cursor = "crosshair"
+      } else {
+        this.overlayTarget.style.cursor = "grab"
+      }
+    }
+    if (this.hasControlInstructionsTarget) {
+      this.controlInstructionsTarget.textContent = isPan
+        ? "Drag to pan, Shift+scroll to zoom. Double-click to clear selection."
+        : "Drag a rectangle to select genes (rows) and cells (columns). Selections accumulate. Double-click to clear."
+    }
+  }
+
+  initializePanelLayout() {
+    this.teardownPanelLayout()
+    const leftPanel = this.element.querySelector("#heatmap-left-panel")
+    const rightPanel = this.element.querySelector("#heatmap-right-panel")
+    const leftResizer = this.element.querySelector("#heatmap-left-resizer")
+    const rightResizer = this.element.querySelector("#heatmap-right-resizer")
+    if (!leftPanel || !rightPanel || !leftResizer || !rightResizer) return
+
+    this._panelResizeState = { left: false, right: false, startX: 0, startLeft: 0, startRight: 0 }
+
+    this._onPanelResizeMove = (e) => {
+      const state = this._panelResizeState
+      if (!state) return
+      if (state.left) {
+        const deltaX = e.clientX - state.startX
+        leftPanel.style.width = `${Math.max(200, Math.min(560, state.startLeft + deltaX))}px`
+        this.handleResize()
+      } else if (state.right) {
+        const deltaX = e.clientX - state.startX
+        rightPanel.style.width = `${Math.max(200, Math.min(560, state.startRight - deltaX))}px`
+        this.handleResize()
+      }
+    }
+
+    this._onPanelResizeUp = () => {
+      const state = this._panelResizeState
+      if (!state || (!state.left && !state.right)) return
+      state.left = false
+      state.right = false
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
+      this.handleResize()
+    }
+
+    this._onLeftResizerDown = (e) => {
+      this._panelResizeState.left = true
+      this._panelResizeState.right = false
+      this._panelResizeState.startX = e.clientX
+      this._panelResizeState.startLeft = leftPanel.offsetWidth
+      document.body.style.cursor = "col-resize"
+      document.body.style.userSelect = "none"
+      e.preventDefault()
+    }
+
+    this._onRightResizerDown = (e) => {
+      this._panelResizeState.right = true
+      this._panelResizeState.left = false
+      this._panelResizeState.startX = e.clientX
+      this._panelResizeState.startRight = rightPanel.offsetWidth
+      document.body.style.cursor = "col-resize"
+      document.body.style.userSelect = "none"
+      e.preventDefault()
+    }
+
+    leftResizer.addEventListener("mousedown", this._onLeftResizerDown)
+    rightResizer.addEventListener("mousedown", this._onRightResizerDown)
+    document.addEventListener("mousemove", this._onPanelResizeMove)
+    document.addEventListener("mouseup", this._onPanelResizeUp)
+
+    this._boundHorizontalCleanups = []
+    this._boundHorizontalCleanups.push(
+      this.bindHorizontalDivider(
+        this.element.querySelector("#heatmap-left-divider"),
+        this.element.querySelector("#heatmap-cell-tracks-panel"),
+        this.element.querySelector("#heatmap-gene-tracks-panel")
+      )
+    )
+    this._boundHorizontalCleanups.push(
+      this.bindHorizontalDivider(
+        this.element.querySelector("#heatmap-right-divider"),
+        this.element.querySelector("#heatmap-genes-panel"),
+        this.element.querySelector("#heatmap-cells-panel")
+      )
+    )
+  }
+
+  bindHorizontalDivider(divider, topPanel, bottomPanel) {
+    if (!divider || !topPanel || !bottomPanel) return null
+    const container = divider.parentElement
+    if (!container) return null
+    const minPanelHeight = 100
+    let dragging = false
+    let startY = 0
+    let startHeight = 0
+
+    const onDown = (e) => {
+      dragging = true
+      startY = e.clientY
+      startHeight = topPanel.offsetHeight
+      document.body.style.cursor = "row-resize"
+      document.body.style.userSelect = "none"
+      divider.style.backgroundColor = "#6B7280"
+      e.preventDefault()
+    }
+    const onMove = (e) => {
+      if (!dragging) return
+      const containerHeight = container.offsetHeight - divider.offsetHeight
+      const next = Math.max(minPanelHeight, Math.min(startHeight + (e.clientY - startY), containerHeight - minPanelHeight))
+      topPanel.style.height = `${(next / containerHeight) * 100}%`
+      topPanel.style.flex = "none"
+    }
+    const onUp = () => {
+      if (!dragging) return
+      dragging = false
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
+      divider.style.backgroundColor = ""
+    }
+
+    divider.addEventListener("mousedown", onDown)
+    document.addEventListener("mousemove", onMove)
+    document.addEventListener("mouseup", onUp)
+    return () => {
+      divider.removeEventListener("mousedown", onDown)
+      document.removeEventListener("mousemove", onMove)
+      document.removeEventListener("mouseup", onUp)
+    }
+  }
+
+  teardownPanelLayout() {
+    const leftResizer = this.element.querySelector("#heatmap-left-resizer")
+    const rightResizer = this.element.querySelector("#heatmap-right-resizer")
+    if (leftResizer && this._onLeftResizerDown) {
+      leftResizer.removeEventListener("mousedown", this._onLeftResizerDown)
+    }
+    if (rightResizer && this._onRightResizerDown) {
+      rightResizer.removeEventListener("mousedown", this._onRightResizerDown)
+    }
+    if (this._onPanelResizeMove) {
+      document.removeEventListener("mousemove", this._onPanelResizeMove)
+    }
+    if (this._onPanelResizeUp) {
+      document.removeEventListener("mouseup", this._onPanelResizeUp)
+    }
+    if (Array.isArray(this._boundHorizontalCleanups)) {
+      this._boundHorizontalCleanups.forEach((fn) => { if (typeof fn === "function") fn() })
+    }
+    this._boundHorizontalCleanups = []
+    this._onLeftResizerDown = null
+    this._onRightResizerDown = null
+    this._onPanelResizeMove = null
+    this._onPanelResizeUp = null
+    this._panelResizeState = null
+  }
+
   onWheel(e) {
     // Plain scroll keeps page scrolling; Shift+scroll zooms the heatmap.
     if (!e.shiftKey) return
@@ -1457,12 +1770,27 @@ export default class extends Controller {
   onMouseDown(e) {
     const p = this.localPoint(e)
     if (!this.inMatrix(p)) return
+    if (this.interactionMode === "select") {
+      this.selecting = true
+      this.selectionRect = { x0: p.x, y0: p.y, x1: p.x, y1: p.y }
+      this.hideTooltip()
+      this.drawOverlay()
+      return
+    }
     this.dragging = true
     this.dragStart = { x: p.x, y: p.y, view: { ...this.view } }
   }
 
   onMouseMove(e) {
     const p = this.localPoint(e)
+
+    if (this.selecting && this.selectionRect) {
+      this.selectionRect.x1 = Math.max(this.mx, Math.min(this.mx + this.mw, p.x))
+      this.selectionRect.y1 = Math.max(this.my, Math.min(this.my + this.mh, p.y))
+      this.drawOverlay()
+      return
+    }
+
     if (this.dragging && this.dragStart) {
       const v0 = this.dragStart.view
       const colSpan = v0.colEnd - v0.colStart
@@ -1486,7 +1814,13 @@ export default class extends Controller {
     if (hoveringLegend !== this.isHoveringLegend || hoverKey !== this.hoveringTrackLegendKey) {
       this.isHoveringLegend = hoveringLegend
       this.hoveringTrackLegendKey = hoverKey
-      this.overlayTarget.style.cursor = hoveringLegend ? "pointer" : "default"
+      if (this.interactionMode === "select") {
+        this.overlayTarget.style.cursor = "crosshair"
+      } else if (hoveringLegend) {
+        this.overlayTarget.style.cursor = "pointer"
+      } else {
+        this.overlayTarget.style.cursor = "grab"
+      }
       this.drawOverlay()
     }
     if (hoveringLegend) {
@@ -1507,8 +1841,139 @@ export default class extends Controller {
   }
 
   onMouseUp() {
+    if (this.selecting && this.selectionRect) {
+      this.commitSelectionRect(this.selectionRect)
+      this.selecting = false
+      this.selectionRect = null
+      this.drawOverlay()
+      return
+    }
     this.dragging = false
     this.dragStart = null
+  }
+
+  onDblClick(e) {
+    const p = this.localPoint(e)
+    if (!this.inMatrix(p)) return
+    e.preventDefault()
+    this.clearLiveSelection()
+  }
+
+  displayRangeFromRect(rect) {
+    const x0 = Math.max(this.mx, Math.min(rect.x0, rect.x1))
+    const x1 = Math.min(this.mx + this.mw, Math.max(rect.x0, rect.x1))
+    const y0 = Math.max(this.my, Math.min(rect.y0, rect.y1))
+    const y1 = Math.min(this.my + this.mh, Math.max(rect.y0, rect.y1))
+    if (x1 <= x0 || y1 <= y0) return null
+
+    let colStart = Math.floor(this.colForX(x0))
+    let colEnd = Math.ceil(this.colForX(x1)) - 1
+    let rowStart = Math.floor(this.rowForY(y0))
+    let rowEnd = Math.ceil(this.rowForY(y1)) - 1
+
+    colStart = Math.max(0, Math.min(this.nDispCols - 1, colStart))
+    colEnd = Math.max(0, Math.min(this.nDispCols - 1, colEnd))
+    rowStart = Math.max(0, Math.min(this.nDispRows - 1, rowStart))
+    rowEnd = Math.max(0, Math.min(this.nDispRows - 1, rowEnd))
+    if (colEnd < colStart) colEnd = colStart
+    if (rowEnd < rowStart) rowEnd = rowStart
+    return { colStart, colEnd, rowStart, rowEnd }
+  }
+
+  commitSelectionRect(rect) {
+    const range = this.displayRangeFromRect(rect)
+    if (!range) return
+
+    const rowLabels = this.meta?.row_labels || []
+    const colLabels = this.meta?.col_labels || []
+    const colCellIndices = this.meta?.col_cell_indices
+    const columnMode = String(this.meta?.column_mode || "cells")
+
+    for (let d = range.rowStart; d <= range.rowEnd; d++) {
+      const group = this.rowGroups[d]
+      if (!group) continue
+      for (let i = group[0]; i <= group[1]; i++) {
+        this.selectedOrigRows.add(i)
+        const label = rowLabels[i]
+        if (label != null && String(label).trim() !== "") this.selectedGenes.add(String(label))
+      }
+    }
+
+    for (let d = range.colStart; d <= range.colEnd; d++) {
+      const group = this.colGroups[d]
+      if (!group) continue
+      for (let i = group[0]; i <= group[1]; i++) {
+        this.selectedOrigCols.add(i)
+        const indices = Array.isArray(colCellIndices) ? colCellIndices[i] : null
+        if (Array.isArray(indices) && indices.length) {
+          for (const idx of indices) {
+            const n = Number(idx)
+            if (Number.isInteger(n) && n >= 0) this.selectedCells.add(n)
+          }
+          continue
+        }
+        if (columnMode === "group") continue
+        const label = colLabels[i]
+        if (label == null || String(label).trim() === "") continue
+        const asInt = Number(label)
+        if (Number.isInteger(asInt) && String(asInt) === String(label).trim()) {
+          this.selectedCells.add(asInt)
+        }
+      }
+    }
+
+    this.updateSelectionPanels()
+  }
+
+  clearLiveSelection(event) {
+    if (event) event.preventDefault()
+    this.selectedGenes.clear()
+    this.selectedCells.clear()
+    this.selectedOrigRows.clear()
+    this.selectedOrigCols.clear()
+    this.selectionRect = null
+    this.selecting = false
+    this.updateSelectionPanels()
+    this.drawOverlay()
+  }
+
+  clearGeneSelection(event) {
+    if (event) event.preventDefault()
+    this.selectedGenes.clear()
+    this.selectedOrigRows.clear()
+    this.updateSelectionPanels()
+    this.drawOverlay()
+  }
+
+  clearCellSelection(event) {
+    if (event) event.preventDefault()
+    this.selectedCells.clear()
+    this.selectedOrigCols.clear()
+    this.updateSelectionPanels()
+    this.drawOverlay()
+  }
+
+  updateSelectionPanels() {
+    if (this.hasSelectedGenesCountTarget) {
+      this.selectedGenesCountTarget.textContent = String(this.selectedGenes.size)
+    }
+    if (this.hasSelectedCellsCountTarget) {
+      this.selectedCellsCountTarget.textContent = String(this.selectedCells.size)
+    }
+    if (this.hasClearGeneSelectionBtnTarget) {
+      this.clearGeneSelectionBtnTarget.style.display = this.selectedGenes.size > 0 ? "inline-flex" : "none"
+    }
+    if (this.hasClearCellSelectionBtnTarget) {
+      this.clearCellSelectionBtnTarget.style.display = this.selectedCells.size > 0 ? "inline-flex" : "none"
+    }
+  }
+
+  escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
   }
 
   clampView() {
@@ -1523,25 +1988,12 @@ export default class extends Controller {
 
   // Click on expression or continuous-track legend opens the shared gradient editor.
   onClick(e) {
+    if (this.interactionMode === "select") return
     const p = this.localPoint(e)
     const legendHit = this.hitTestEditableLegend(p)
     if (legendHit) {
       if (legendHit.type === "expression") this.openExpressionGradientEditor()
       else this.openTrackGradientEditor(legendHit.track, legendHit.axis)
-      return
-    }
-    let changed = false
-    if (this.showColTree && this.colTree && p.y >= this.layout.pad && p.y <= this.layout.pad + this.colTreeH) {
-      const node = this.hitTestTree(this.colTree, p, "col")
-      if (node) { this.toggleCollapse(this.colCollapsed, node.id); changed = true }
-    } else if (this.showRowTree && this.rowTree && p.x >= this.layout.pad && p.x <= this.layout.pad + this.rowTreeW) {
-      const node = this.hitTestTree(this.rowTree, p, "row")
-      if (node) { this.toggleCollapse(this.rowCollapsed, node.id); changed = true }
-    }
-    if (changed) {
-      this.rebuildDisplay()
-      this.clampView()
-      this.render()
     }
   }
 
@@ -1561,36 +2013,6 @@ export default class extends Controller {
       }
     }
     return null
-  }
-
-  toggleCollapse(set, id) {
-    if (set.has(id)) set.delete(id)
-    else set.add(id)
-  }
-
-  hitTestTree(tree, p, axis) {
-    let best = null
-    let bestDist = 14
-    const maxH = tree.maxHeight
-    const visit = (node) => {
-      if (node.leaf) return
-      if (axis === "col" && this.colCollapsed.has(node.id)) { /* still hittable to expand */ }
-      const centerDisp = this.nodeDisplayCenter(node, axis)
-      let nx, ny
-      if (axis === "col") {
-        nx = this.xForCol(centerDisp)
-        ny = this.layout.pad + this.colTreeH * (1 - node.height / maxH)
-      } else {
-        ny = this.yForRow(centerDisp)
-        nx = this.layout.pad + this.rowTreeW * (1 - node.height / maxH)
-      }
-      const d = Math.hypot(nx - p.x, ny - p.y)
-      if (d < bestDist) { bestDist = d; best = node }
-      const collapsed = (axis === "col" ? this.colCollapsed : this.rowCollapsed).has(node.id)
-      if (!collapsed) node.children.forEach(visit)
-    }
-    visit(tree.root)
-    return best
   }
 
   nodeDisplayCenter(node, axis) {
@@ -1616,6 +2038,8 @@ export default class extends Controller {
     ctx.strokeStyle = "#cbd5e1"
     ctx.strokeRect(this.mx, this.my, this.mw, this.mh)
 
+    this.drawSelectionHighlights(ctx)
+
     if (this.showColTree && this.colTree) this.drawDendrogram(ctx, this.colTree, "col")
     if (this.showRowTree && this.rowTree) this.drawDendrogram(ctx, this.rowTree, "row")
 
@@ -1623,15 +2047,73 @@ export default class extends Controller {
     if (this.showLabels) this.drawLabels(ctx)
     this.drawLegend(ctx)
     this.drawTrackLegends(ctx)
+    this.drawActiveSelectionRect(ctx)
+  }
+
+  drawSelectionHighlights(ctx) {
+    if (!this.selectedOrigRows?.size && !this.selectedOrigCols?.size) return
+    const v = this.view
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(this.mx, this.my, this.mw, this.mh)
+    ctx.clip()
+
+    if (this.selectedOrigRows?.size && this.rowGroups) {
+      ctx.fillStyle = "rgba(37, 99, 235, 0.10)"
+      for (let d = 0; d < this.nDispRows; d++) {
+        const group = this.rowGroups[d]
+        if (!group) continue
+        let hit = false
+        for (let i = group[0]; i <= group[1]; i++) {
+          if (this.selectedOrigRows.has(i)) { hit = true; break }
+        }
+        if (!hit) continue
+        if (d + 1 <= v.rowStart || d >= v.rowEnd) continue
+        const y0 = this.yForRow(Math.max(d, v.rowStart))
+        const y1 = this.yForRow(Math.min(d + 1, v.rowEnd))
+        if (y1 > y0) ctx.fillRect(this.mx, y0, this.mw, y1 - y0)
+      }
+    }
+
+    if (this.selectedOrigCols?.size && this.colGroups) {
+      ctx.fillStyle = "rgba(14, 165, 233, 0.10)"
+      for (let d = 0; d < this.nDispCols; d++) {
+        const group = this.colGroups[d]
+        if (!group) continue
+        let hit = false
+        for (let i = group[0]; i <= group[1]; i++) {
+          if (this.selectedOrigCols.has(i)) { hit = true; break }
+        }
+        if (!hit) continue
+        if (d + 1 <= v.colStart || d >= v.colEnd) continue
+        const x0 = this.xForCol(Math.max(d, v.colStart))
+        const x1 = this.xForCol(Math.min(d + 1, v.colEnd))
+        if (x1 > x0) ctx.fillRect(x0, this.my, x1 - x0, this.mh)
+      }
+    }
+    ctx.restore()
+  }
+
+  drawActiveSelectionRect(ctx) {
+    if (!this.selectionRect) return
+    const x = Math.min(this.selectionRect.x0, this.selectionRect.x1)
+    const y = Math.min(this.selectionRect.y0, this.selectionRect.y1)
+    const w = Math.abs(this.selectionRect.x1 - this.selectionRect.x0)
+    const h = Math.abs(this.selectionRect.y1 - this.selectionRect.y0)
+    ctx.save()
+    ctx.fillStyle = "rgba(37, 99, 235, 0.12)"
+    ctx.strokeStyle = "rgba(37, 99, 235, 0.9)"
+    ctx.lineWidth = 1.5
+    ctx.fillRect(x, y, w, h)
+    ctx.strokeRect(x, y, w, h)
+    ctx.restore()
   }
 
   drawDendrogram(ctx, tree, axis) {
     const maxH = tree.maxHeight
     ctx.strokeStyle = "#475569"
-    ctx.fillStyle = "#94a3b8"
     ctx.lineWidth = 1
 
-    const collapsedSet = axis === "col" ? this.colCollapsed : this.rowCollapsed
     const baseAxis = this.layout.pad
 
     const posOf = (node) => {
@@ -1649,26 +2131,6 @@ export default class extends Controller {
         const center = this.nodeDisplayCenter(node, axis)
         const main = axis === "col" ? this.xForCol(center) : this.yForRow(center)
         return { main, depth: leafDepth }
-      }
-      if (collapsedSet.has(node.id)) {
-        const center = this.nodeDisplayCenter(node, axis)
-        const main = axis === "col" ? this.xForCol(center) : this.yForRow(center)
-        const p = posOf(node)
-        // draw a collapsed wedge
-        const halfW = 5
-        ctx.beginPath()
-        if (axis === "col") {
-          ctx.moveTo(main, p.depth)
-          ctx.lineTo(main - halfW, leafDepth)
-          ctx.lineTo(main + halfW, leafDepth)
-        } else {
-          ctx.moveTo(p.depth, main)
-          ctx.lineTo(leafDepth, main - halfW)
-          ctx.lineTo(leafDepth, main + halfW)
-        }
-        ctx.closePath()
-        ctx.fill()
-        return { main, depth: p.depth }
       }
       const childPos = node.children.map(draw)
       const p = posOf(node)
@@ -1955,7 +2417,7 @@ export default class extends Controller {
   }
 
   drawLegend(ctx) {
-    const x0 = this.containerW - this.rightLegendW + 8
+    const x0 = this.legendLeft + 8
     const maxW = Math.max(40, this.rightLegendW - 16)
     let y = this.layout.pad + 4
 
@@ -2005,7 +2467,7 @@ export default class extends Controller {
     ctx.textAlign = "right"
     ctx.fillText(maxText, x0 + barW, y)
 
-    this._legendTracksStartY = y + 16
+    this._legendTracksStartY = y + 28
   }
 
   drawTrackLegends(ctx) {
@@ -2014,8 +2476,8 @@ export default class extends Controller {
     this.trackLegendBounds = []
     if (!geneTracks.length && !cellTracks.length) return
 
-    const x0 = this.containerW - this.rightLegendW + 8
-    const maxX = this.containerW - this.layout.pad
+    const x0 = this.legendLeft + 8
+    const maxX = this.legendLeft + this.rightLegendW - this.layout.pad
     const maxW = Math.max(40, maxX - x0)
     let y = this._legendTracksStartY || (this.layout.pad + 4 + 50)
 
@@ -2040,7 +2502,7 @@ export default class extends Controller {
     const drawSection = (title, tracks) => {
       if (!tracks.length) return
       ctx.font = "bold 11px sans-serif"
-      ctx.fillStyle = "#1f2937"
+      ctx.fillStyle = "#0f172a"
       ctx.textAlign = "left"
       ctx.textBaseline = "top"
       ctx.fillText(title, x0, y)
@@ -2048,13 +2510,20 @@ export default class extends Controller {
 
       tracks.forEach((track) => {
         const ref = this.trackRefFor(track.axis, track)
-        const title = ref ? `${ref}  ${track.name}` : track.name
-        ctx.font = "10px sans-serif"
-        ctx.fillStyle = "#475569"
         ctx.textAlign = "left"
         ctx.textBaseline = "top"
-        ctx.fillText(this.fitTextToWidth(ctx, title, maxW), x0, y)
-        y += 14
+        let titleX = x0
+        if (ref) {
+          ctx.font = "bold 11px sans-serif"
+          ctx.fillStyle = "#1d4ed8"
+          ctx.fillText(ref, titleX, y)
+          titleX += ctx.measureText(ref).width + 6
+        }
+        ctx.font = "bold 11px sans-serif"
+        ctx.fillStyle = "#111827"
+        const nameMaxW = Math.max(20, maxW - (titleX - x0))
+        ctx.fillText(this.fitTextToWidth(ctx, track.name, nameMaxW), titleX, y)
+        y += 15
 
         if (track.type === "numerical") {
           const range = this.trackValueRange(track)
@@ -2121,10 +2590,10 @@ export default class extends Controller {
         })
         y += rowH + 8
       })
-      y += 4
     }
 
     drawSection("Gene metadata tracks", geneTracks)
+    if (geneTracks.length && cellTracks.length) y += 14
     drawSection("Cell metadata tracks", cellTracks)
 
     ctx.restore()
@@ -2569,6 +3038,1146 @@ export default class extends Controller {
     return document.querySelector('meta[name="csrf-token"]')?.getAttribute("content")
   }
 
+  async saveGeneSelection(event) {
+    if (event) event.preventDefault()
+    if (!this.canAnalyzeValue) {
+      alert("Analyze permission is required to save a gene set.")
+      return
+    }
+    if (!this.selectedGenes.size) {
+      alert("No genes selected to save.")
+      return
+    }
+    this.openHeatmapGeneSetModal()
+  }
+
+  openHeatmapGeneSetModal() {
+    const existing = document.getElementById("heatmap-gene-set-modal-overlay")
+    if (existing) existing.remove()
+
+    const template = document.getElementById("save-heatmap-gene-set-modal-template")
+    if (!template?.content?.firstElementChild) {
+      alert("Gene set save form is missing.")
+      return
+    }
+
+    const overlay = template.content.firstElementChild.cloneNode(true)
+    const form = overlay.querySelector('[data-role="heatmap-gene-set-form"]')
+    const nameInput = overlay.querySelector('[data-role="heatmap-gene-set-name"]')
+    const collectionSelect = overlay.querySelector('[data-role="heatmap-gene-set-collection"]')
+    const collectionWrap = overlay.querySelector('[data-role="heatmap-gene-set-collection-wrap"]')
+    const newWrap = overlay.querySelector('[data-role="heatmap-gene-set-new-collection-wrap"]')
+    const newInput = overlay.querySelector('[data-role="heatmap-gene-set-new-collection"]')
+    const countEl = overlay.querySelector('[data-role="heatmap-gene-set-count"]')
+    const newCollectionValue = "__new_heatmap_collection__"
+    const defaultCollectionName = "Heatmap selection"
+
+    if (countEl) countEl.textContent = String(this.selectedGenes.size)
+
+    const hasExisting = !!(collectionSelect && collectionSelect.querySelectorAll("option").length > 1)
+    const syncNewVisibility = () => {
+      const isNew = !hasExisting || (collectionSelect && collectionSelect.value === newCollectionValue)
+      if (collectionWrap) collectionWrap.style.display = hasExisting ? "" : "none"
+      if (newWrap) {
+        newWrap.style.display = isNew ? "block" : "none"
+        newWrap.style.marginTop = hasExisting && isNew ? "10px" : "0"
+      }
+      if (isNew && newInput && !String(newInput.value || "").trim()) {
+        newInput.value = defaultCollectionName
+      }
+    }
+    if (collectionSelect) {
+      if (hasExisting) {
+        const firstExisting = Array.from(collectionSelect.options).find((opt) => opt.value !== newCollectionValue)
+        if (firstExisting) collectionSelect.value = firstExisting.value
+      } else {
+        collectionSelect.value = newCollectionValue
+      }
+      collectionSelect.addEventListener("change", syncNewVisibility)
+    }
+    syncNewVisibility()
+
+    const close = () => overlay.remove()
+    overlay.querySelectorAll('[data-role="heatmap-gene-set-close"], [data-role="heatmap-gene-set-cancel"]').forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault()
+        close()
+      })
+    })
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) close()
+    })
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault()
+      const cleanName = String(nameInput?.value || "").trim()
+      if (!cleanName) {
+        alert("Gene set name is required.")
+        return
+      }
+      const collectionId = collectionSelect ? collectionSelect.value : newCollectionValue
+      let newCollectionName = ""
+      if (!collectionId || collectionId === newCollectionValue) {
+        newCollectionName = String(newInput?.value || "").trim()
+        if (!newCollectionName) {
+          alert("Please enter a name for the new collection.")
+          return
+        }
+      }
+
+      const genes = Array.from(this.selectedGenes).map((symbol) => ({ symbol: String(symbol) }))
+      const submitBtn = overlay.querySelector('[data-role="heatmap-gene-set-submit"]')
+      if (submitBtn) submitBtn.disabled = true
+      try {
+        if (this.hasGeneSelectionStatusTarget) {
+          this.geneSelectionStatusTarget.textContent = "Saving gene set..."
+        }
+        const body = {
+          name: cleanName,
+          genes,
+          collection_type: "from_heatmap",
+          collection_id: collectionId || newCollectionValue,
+          heatmap_run_id: this.runIdValue
+        }
+        if (newCollectionName) body.new_collection_name = newCollectionName
+
+        const response = await fetch(`/projects/${encodeURIComponent(this.projectKeyValue)}/save_manual_gene_set`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "X-CSRF-Token": this.csrfToken() || ""
+          },
+          body: JSON.stringify(body)
+        })
+        const payload = await response.json()
+        if (!response.ok || payload.status !== "ok") {
+          throw new Error(payload.message || "Failed to save gene set")
+        }
+
+        // Keep dropdown options current if a new collection was created.
+        if (payload.collection?.id && collectionSelect) {
+          const exists = Array.from(collectionSelect.options).some((opt) => opt.value === payload.collection.id)
+          if (!exists) {
+            const option = document.createElement("option")
+            option.value = payload.collection.id
+            option.textContent = payload.collection.label || newCollectionName || defaultCollectionName
+            const createOpt = collectionSelect.querySelector(`option[value="${newCollectionValue}"]`)
+            if (createOpt) collectionSelect.insertBefore(option, createOpt)
+            else collectionSelect.appendChild(option)
+          }
+          const templateSelect = document.querySelector('#save-heatmap-gene-set-modal-template [data-role="heatmap-gene-set-collection"]')
+          if (templateSelect && !Array.from(templateSelect.options).some((opt) => opt.value === payload.collection.id)) {
+            const option = document.createElement("option")
+            option.value = payload.collection.id
+            option.textContent = payload.collection.label || newCollectionName || defaultCollectionName
+            const createOpt = templateSelect.querySelector(`option[value="${newCollectionValue}"]`)
+            if (createOpt) templateSelect.insertBefore(option, createOpt)
+            else templateSelect.appendChild(option)
+            const templateWrap = document.querySelector('#save-heatmap-gene-set-modal-template [data-role="heatmap-gene-set-collection-wrap"]')
+            if (templateWrap) templateWrap.style.display = ""
+          }
+        }
+
+        if (payload.collection && this.geneSetCollectionsController?.upsertCollectionFromPayload) {
+          this.geneSetCollectionsController.upsertCollectionFromPayload(payload.collection)
+          const collectionId = String(payload.collection.id || "").trim()
+          if (
+            collectionId
+            && this.geneSetCollectionsController.selectedCollectionId
+            && String(this.geneSetCollectionsController.selectedCollectionId) === collectionId
+          ) {
+            this.geneSetCollectionsController.fetchCollectionItems(
+              collectionId,
+              this.geneSetCollectionsController.itemsFilterInput?.value || ""
+            ).catch(() => {})
+          }
+        }
+        if (this.hasGeneSelectionStatusTarget) {
+          this.geneSelectionStatusTarget.textContent = `Saved "${cleanName}" (${genes.length} genes).`
+        }
+        close()
+      } catch (error) {
+        if (submitBtn) submitBtn.disabled = false
+        if (this.hasGeneSelectionStatusTarget) {
+          this.geneSelectionStatusTarget.textContent = ""
+        }
+        alert(error.message || "Failed to save gene set")
+      }
+    })
+
+    document.body.appendChild(overlay)
+    setTimeout(() => nameInput?.focus(), 50)
+  }
+
+  async saveCellSelection(event) {
+    if (event) event.preventDefault()
+    if (!this.canAnalyzeValue) {
+      alert("Analyze permission is required to save a cell selection.")
+      return
+    }
+    const listCols = Array.from(this.selectedCells)
+      .map((v) => Number(v))
+      .filter((v) => Number.isInteger(v) && v >= 0)
+    if (!listCols.length) {
+      alert("No cells selected to save. Select columns on the heatmap first.")
+      return
+    }
+    if (!this.embeddingMetadataId) {
+      alert("Cannot save selection: no embedding metadata is available for this loom.")
+      return
+    }
+    const selectionName = prompt("Enter a name for this selection:")
+    if (selectionName === null) return
+    const cleanName = selectionName.trim()
+    if (!cleanName) {
+      alert("Selection name is required.")
+      return
+    }
+
+    const loomFile = this.loomFile || ""
+    const plotContext = {
+      plot: "heatmap",
+      heatmap: {
+        run_id: Number(this.runIdValue) || null,
+        run_num: String(this.runNumValue || this.runIdValue || ""),
+        method_label: String(this.runLabelValue || "Heatmap"),
+        loom_file: String(loomFile)
+      }
+    }
+    const localItemId = `local-${Date.now()}-${Math.floor(Math.random() * 100000)}`
+    const pendingItem = this.normalizeSavedCellSetItem({
+      id: localItemId,
+      run_id: null,
+      metadata_id: null,
+      name: cleanName,
+      selected_count: listCols.length,
+      status: "queued",
+      created_at: new Date().toISOString(),
+      loom_file: loomFile,
+      unselected_name: "Not selected",
+      selection_source: "heatmap-rect",
+      plot_context: plotContext
+    })
+    this.savedCellSets = [pendingItem, ...(this.savedCellSets || [])]
+    this.recentlyCreatedSavedCellSetId = localItemId
+    this.renderSavedCellSets()
+    this.startSelectionStatusPolling()
+
+    try {
+      if (this.hasCellSelectionStatusTarget) {
+        this.cellSelectionStatusTarget.textContent = "Saving cell selection..."
+      }
+      const response = await fetch(`/projects/${encodeURIComponent(this.projectKeyValue)}/save_metadata_from_selection`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-CSRF-Token": this.csrfToken() || ""
+        },
+        body: JSON.stringify({
+          selection_name: cleanName,
+          embedding_metadata_id: this.embeddingMetadataId,
+          loom_file: loomFile,
+          list_cols: listCols,
+          selection_source: "heatmap-rect",
+          heatmap_run_id: this.runIdValue,
+          plot_context: plotContext
+        })
+      })
+      const payload = await response.json()
+      if (!response.ok || payload.status !== "ok") {
+        throw new Error(payload.message || "Failed to save cell selection")
+      }
+
+      const returnedItem = this.normalizeSavedCellSetItem(payload.item)
+      if (returnedItem) {
+        const idx = this.savedCellSets.findIndex((item) => String(item.id) === localItemId)
+        if (idx >= 0) this.savedCellSets[idx] = returnedItem
+        else this.savedCellSets.unshift(returnedItem)
+        this.recentlyCreatedSavedCellSetId = String(returnedItem.id)
+        this.renderSavedCellSets()
+      }
+      if (this.hasCellSelectionStatusTarget) {
+        this.cellSelectionStatusTarget.textContent = `Saved "${cleanName}" (${listCols.length} cells).`
+      }
+      this.scheduleSavedCellSetsRefresh(150)
+    } catch (error) {
+      this.savedCellSets = (this.savedCellSets || []).filter((item) => String(item.id) !== localItemId)
+      this.recentlyCreatedSavedCellSetId = null
+      this.renderSavedCellSets()
+      if (this.hasCellSelectionStatusTarget) {
+        this.cellSelectionStatusTarget.textContent = ""
+      }
+      alert(error.message || "Failed to save cell selection")
+    }
+  }
+
+  normalizeSavedCellSetItem(item) {
+    if (!item || typeof item !== "object") return null
+    const selectedCount = Number(item.selected_count ?? item.selectedCount)
+    const plotContextRaw = item.plot_context || item.plotContext || null
+    const selectionNumberRaw = item.selection_number ?? item.selectionNumber
+    return {
+      id: String(item.id || ""),
+      runId: item.run_id != null ? Number(item.run_id) : (item.runId != null ? Number(item.runId) : null),
+      metadataId: item.metadata_id != null ? String(item.metadata_id) : (item.metadataId != null ? String(item.metadataId) : null),
+      name: item.name == null ? "" : String(item.name),
+      selectedCount: Number.isFinite(selectedCount) ? selectedCount : 0,
+      status: String(item.status || "queued"),
+      createdAt: item.created_at ? String(item.created_at) : (item.createdAt ? String(item.createdAt) : null),
+      loomFile: item.loom_file ? String(item.loom_file) : (item.loomFile ? String(item.loomFile) : null),
+      unselectedName: item.unselected_name ? String(item.unselected_name) : (item.unselectedName || "Not selected"),
+      selectionNumber: selectionNumberRaw != null && selectionNumberRaw !== "" ? Number(selectionNumberRaw) : null,
+      selectionSource: item.selection_source ? String(item.selection_source) : (item.selectionSource ? String(item.selectionSource) : "lasso"),
+      plotContext: (plotContextRaw && typeof plotContextRaw === "object") ? plotContextRaw : null,
+      locked: item.locked === true
+    }
+  }
+
+  setupSavedCellSetLiveUpdates() {
+    this.setupSelectionStatesSubscription()
+    this.startSelectionStatusPolling()
+  }
+
+  teardownSavedCellSetLiveUpdates() {
+    if (this.selectionStatusPollingTimer) {
+      clearInterval(this.selectionStatusPollingTimer)
+      this.selectionStatusPollingTimer = null
+    }
+    if (this.selectionStatesRefreshTimer) {
+      window.clearTimeout(this.selectionStatesRefreshTimer)
+      this.selectionStatesRefreshTimer = null
+    }
+    if (this.selectionStatesSubscription) {
+      this.selectionStatesSubscription.unsubscribe()
+      this.selectionStatesSubscription = null
+    }
+  }
+
+  startSelectionStatusPolling() {
+    if (this.selectionStatusPollingTimer) {
+      clearInterval(this.selectionStatusPollingTimer)
+    }
+    this.selectionStatusPollingTimer = setInterval(() => {
+      const hasIncomplete = (this.savedCellSets || []).some((item) => {
+        const status = String(item.status || "")
+        return status === "queued" || status === "running"
+      })
+      if (!hasIncomplete && !this.recentlyCreatedSavedCellSetId) return
+      this.refreshSavedCellSets()
+    }, 3000)
+  }
+
+  setupSelectionStatesSubscription() {
+    if (this.selectionStatesSubscription) return
+    const projectChannelId = String(this.projectIdValue || "").trim()
+    if (!projectChannelId) return
+
+    this.selectionStatesSubscription = consumer.subscriptions.create(
+      { channel: "ProjectChannel", project_id: projectChannelId },
+      {
+        connected: () => {
+          this.scheduleSavedCellSetsRefresh(100)
+        },
+        received: (data) => {
+          if (!data || data.event !== "selection_states_changed") return
+          const messageLoomFile = String(data.loom_file || "")
+          const currentLoomFile = String(this.loomFile || "")
+          if (messageLoomFile && currentLoomFile && messageLoomFile !== currentLoomFile) return
+          this.scheduleSavedCellSetsRefresh(100)
+        }
+      }
+    )
+  }
+
+  scheduleSavedCellSetsRefresh(delayMs = 0) {
+    if (this.selectionStatesRefreshTimer) {
+      window.clearTimeout(this.selectionStatesRefreshTimer)
+      this.selectionStatesRefreshTimer = null
+    }
+    this.selectionStatesRefreshTimer = window.setTimeout(() => {
+      this.selectionStatesRefreshTimer = null
+      this.refreshSavedCellSets()
+    }, Math.max(0, Number(delayMs) || 0))
+  }
+
+  serverItemsMatchPendingSelection(pendingItem, serverItems) {
+    if (!pendingItem || !Array.isArray(serverItems) || serverItems.length === 0) return false
+    const pendingRunId = Number(pendingItem.runId)
+    if (Number.isInteger(pendingRunId) && pendingRunId > 0) {
+      if (serverItems.some((item) => Number(item.runId) === pendingRunId)) return true
+    }
+    const pendingName = String(pendingItem.name || "").trim()
+    if (!pendingName) return false
+    const pendingCount = Number(pendingItem.selectedCount)
+    const sameName = serverItems.filter((item) => String(item.name || "").trim() === pendingName)
+    if (sameName.length === 0) return false
+    if (!Number.isFinite(pendingCount) || pendingCount < 0) return true
+    return sameName.some((item) => Number(item.selectedCount || 0) === pendingCount)
+  }
+
+  mergeSavedCellSetsWithServer(serverItems) {
+    const previousItems = Array.isArray(this.savedCellSets) ? this.savedCellSets : []
+    const merged = Array.isArray(serverItems) ? [...serverItems] : []
+    const mergedIds = new Set(merged.map((item) => String(item.id || "")))
+
+    for (const previous of previousItems) {
+      const previousId = String(previous?.id || "")
+      if (!previousId.startsWith("local-")) continue
+      if (mergedIds.has(previousId)) continue
+      if (this.serverItemsMatchPendingSelection(previous, merged)) continue
+      merged.unshift(previous)
+      mergedIds.add(previousId)
+    }
+
+    const recentId = String(this.recentlyCreatedSavedCellSetId || "").trim()
+    if (recentId) {
+      const pending = previousItems.find((entry) => String(entry.id) === recentId)
+      const matched = merged.find((item) => {
+        if (String(item.id) === recentId) return true
+        return pending ? this.serverItemsMatchPendingSelection(pending, [item]) : false
+      })
+      if (matched) {
+        this.recentlyCreatedSavedCellSetId = String(matched.id)
+        if (String(matched.status || "") === "completed" || String(matched.status || "") === "failed") {
+          this.recentlyCreatedSavedCellSetId = null
+        }
+      }
+    }
+
+    return merged
+  }
+
+  async refreshSavedCellSets() {
+    if (!this.hasSavedCellSetsListTarget || !this.projectKeyValue) return
+    if (String(this.editingSavedCellSetId || "").trim().length > 0) return
+    try {
+      const loomFile = this.loomFile || ""
+      const response = await fetch(
+        `/projects/${encodeURIComponent(this.projectKeyValue)}/selection_states?loom_file=${encodeURIComponent(loomFile)}`,
+        { headers: { Accept: "application/json" }, credentials: "same-origin" }
+      )
+      if (!response.ok) return
+      const payload = await response.json()
+      if (!payload || payload.status !== "ok" || !Array.isArray(payload.items)) return
+      const serverItems = payload.items
+        .map((item) => this.normalizeSavedCellSetItem(item))
+        .filter((item) => item && item.id)
+      this.savedCellSets = this.mergeSavedCellSetsWithServer(serverItems)
+      this.renderSavedCellSets()
+    } catch (_error) {
+      // Ignore transient refresh errors.
+    }
+  }
+
+  selectionSourceIconHtml(source) {
+    const normalizedSource = String(source || "lasso")
+    if (normalizedSource === "compose") {
+      return '<span title="Composed selection" style="display:inline-flex;align-items:center;justify-content:center;color:#8b5cf6;flex:0 0 auto;line-height:0;"><i class="fas fa-object-group" style="font-size:11px;"></i></span>'
+    }
+    if (normalizedSource === "visible") {
+      return '<i class="fas fa-filter" title="Visible filtered cells selection" style="font-size:11px;color:#059669;flex:0 0 auto;"></i>'
+    }
+    if (normalizedSource === "heatmap-rect") {
+      return '<i class="fas fa-th" title="Heatmap selection" style="font-size:11px;color:#ea580c;flex:0 0 auto;"></i>'
+    }
+    return '<i class="fas fa-draw-polygon" title="Lasso selection" style="font-size:11px;color:#2563eb;flex:0 0 auto;"></i>'
+  }
+
+  selectionStatusBadgeHtml(status) {
+    if (status === "running") {
+      return '<span title="Saving" style="display:inline-flex;width:14px;height:14px;border:2px solid #93c5fd;border-top-color:#2563eb;border-radius:9999px;animation:spin 1s linear infinite;"></span>'
+    }
+    if (status === "failed") {
+      return '<span title="Failed" style="display:inline-block;width:14px;height:14px;border-radius:9999px;background:#ef4444;"></span>'
+    }
+    if (status === "queued") {
+      return '<span title="Queued" style="display:inline-block;width:14px;height:14px;border-radius:9999px;background:#f59e0b;"></span>'
+    }
+    return ""
+  }
+
+  savedCellSetDisplayName(item) {
+    const rawName = item && item.name != null ? String(item.name).trim() : ""
+    return rawName.length > 0 ? rawName : "Unnamed"
+  }
+
+  formatHeatmapSelectionOriginLines(item) {
+    const source = String(item.selectionSource || item.selection_source || "")
+    if (source !== "heatmap-rect") return []
+    const plotContext = item.plotContext || item.plot_context || {}
+    const heatmap = plotContext.heatmap || {}
+    const runNum = String(heatmap.run_num || heatmap.runNum || "").trim()
+    const method = String(heatmap.method_label || heatmap.methodLabel || "Heatmap").trim()
+    const runId = String(heatmap.run_id || heatmap.runId || "").trim()
+    const runLabel = runNum ? `#${runNum}` : (runId || "")
+    const lines = []
+    lines.push(`Heatmap run: ${runLabel || "unknown"}`)
+    lines.push(`Method: ${method || "Heatmap"}`)
+    return lines
+  }
+
+  renderHeatmapParametersHtml(itemOrHeatmap) {
+    const heatmap = itemOrHeatmap?.heatmap
+      || itemOrHeatmap?.plotContext?.heatmap
+      || itemOrHeatmap?.plot_context?.heatmap
+      || itemOrHeatmap
+      || {}
+    const parameters = Array.isArray(heatmap.parameters) ? heatmap.parameters : []
+    if (!parameters.length) return ""
+    const rows = parameters.map((entry) => {
+      const label = String(entry?.label || entry?.key || "Parameter")
+      const value = String(entry?.value ?? "")
+      return `<div style="font-size:11px;color:#374151;margin-top:2px;"><span style="color:#6b7280;">${this.escapeHtml(label)}:</span> ${this.escapeHtml(value)}</div>`
+    }).join("")
+    return `
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid #e5e7eb;">
+        <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Heatmap parameters</div>
+        ${rows}
+      </div>
+    `
+  }
+
+  heatmapSelectionRunLabel(item) {
+    if (!item || String(item.selectionSource || item.selection_source || "") !== "heatmap-rect") return ""
+    const plotContext = item.plotContext || item.plot_context || {}
+    const heatmap = plotContext.heatmap || {}
+    const runNum = String(heatmap.run_num || heatmap.runNum || "").trim()
+    if (runNum) return `Heatmap #${runNum}`
+    const runId = String(heatmap.run_id || heatmap.runId || "").trim()
+    return runId ? `Heatmap #${runId}` : "Heatmap"
+  }
+
+  heatmapSelectionRunId(item) {
+    if (!item || String(item.selectionSource || item.selection_source || "") !== "heatmap-rect") return ""
+    const plotContext = item.plotContext || item.plot_context || {}
+    const heatmap = plotContext.heatmap || {}
+    return String(heatmap.run_id || heatmap.runId || "").trim()
+  }
+
+  heatmapSelectionPageUrl(item) {
+    const runId = this.heatmapSelectionRunId(item)
+    const projectKey = String(this.projectKeyValue || "").trim()
+    if (!runId || !projectKey) return ""
+    return `/projects/${encodeURIComponent(projectKey)}?view=heatmap&run_id=${encodeURIComponent(runId)}`
+  }
+
+  heatmapSelectionOriginHtml(item) {
+    const label = this.heatmapSelectionRunLabel(item)
+    if (!label) return ""
+    const url = this.heatmapSelectionPageUrl(item)
+    if (!url) return this.escapeHtml(label)
+    return `<a href="${this.escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;" title="Open heatmap in a new tab" onclick="event.stopPropagation()">${this.escapeHtml(label)}</a>`
+  }
+
+  initializeSavedCellSetsFilterMenus() {
+    const sortButton = document.getElementById("heatmap-sort-saved-selections-btn")
+    const sortMenu = document.getElementById("heatmap-sort-saved-selections-menu")
+    const sortBySelect = document.getElementById("heatmap-sort-saved-selections-by")
+    const orderSelect = document.getElementById("heatmap-sort-saved-selections-order")
+    const filterButton = document.getElementById("heatmap-filter-saved-selections-btn")
+    const filterMenu = document.getElementById("heatmap-filter-saved-selections-menu")
+    const searchInput = document.getElementById("heatmap-saved-selections-name-filter-input")
+
+    if (sortButton && sortMenu && sortBySelect && orderSelect) {
+      sortBySelect.value = this.savedCellSetsSortBy || "created_at"
+      orderSelect.value = this.savedCellSetsSortOrder || "desc"
+
+      if (!this.boundHeatmapSortMenuClick) {
+        this.boundHeatmapSortMenuClick = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          if (filterMenu) filterMenu.style.display = "none"
+          const isOpen = sortMenu.style.display === "block"
+          sortMenu.style.display = isOpen ? "none" : "block"
+        }
+        sortButton.addEventListener("click", this.boundHeatmapSortMenuClick)
+      }
+
+      if (!this.boundHeatmapSortByChange) {
+        this.boundHeatmapSortByChange = (event) => {
+          this.savedCellSetsSortBy = String(event.target.value || "created_at")
+          this.renderSavedCellSets()
+        }
+        sortBySelect.addEventListener("change", this.boundHeatmapSortByChange)
+      }
+
+      if (!this.boundHeatmapSortOrderChange) {
+        this.boundHeatmapSortOrderChange = (event) => {
+          this.savedCellSetsSortOrder = String(event.target.value || "desc")
+          this.renderSavedCellSets()
+        }
+        orderSelect.addEventListener("change", this.boundHeatmapSortOrderChange)
+      }
+
+      if (!this.boundHeatmapSortOutsideClick) {
+        this.boundHeatmapSortOutsideClick = (event) => {
+          if (sortMenu.style.display !== "block") return
+          if (sortMenu.contains(event.target) || sortButton.contains(event.target)) return
+          sortMenu.style.display = "none"
+        }
+        document.addEventListener("click", this.boundHeatmapSortOutsideClick, true)
+      }
+    }
+
+    if (filterButton && filterMenu && searchInput) {
+      if (searchInput.value !== (this.savedCellSetsFilterQuery || "")) {
+        searchInput.value = this.savedCellSetsFilterQuery || ""
+      }
+      this.updateSavedCellSetsFilterButtonAppearance(filterButton)
+      this.updateSavedCellSetsFilterMenuState(filterMenu)
+
+      if (!this.boundHeatmapFilterMenuClick) {
+        this.boundHeatmapFilterMenuClick = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          if (sortMenu) sortMenu.style.display = "none"
+          const isOpen = filterMenu.style.display === "block"
+          filterMenu.style.display = isOpen ? "none" : "block"
+        }
+        filterButton.addEventListener("click", this.boundHeatmapFilterMenuClick)
+      }
+
+      if (!this.boundHeatmapFilterSearchInput) {
+        this.boundHeatmapFilterSearchInput = (event) => {
+          this.savedCellSetsFilterQuery = String(event.target.value || "")
+          this.renderSavedCellSets()
+        }
+        searchInput.addEventListener("input", this.boundHeatmapFilterSearchInput)
+      }
+
+      if (!this.boundHeatmapFilterTypeClick) {
+        this.boundHeatmapFilterTypeClick = (event) => {
+          const option = event.target?.closest?.("[data-heatmap-filter-type-option]")
+          if (!option) return
+          event.preventDefault()
+          event.stopPropagation()
+          this.savedCellSetsFilterType = String(option.dataset.heatmapFilterTypeOption || "all")
+          filterMenu.style.display = "none"
+          this.updateSavedCellSetsFilterButtonAppearance(filterButton)
+          this.updateSavedCellSetsFilterMenuState(filterMenu)
+          this.renderSavedCellSets()
+        }
+        filterMenu.addEventListener("click", this.boundHeatmapFilterTypeClick)
+      }
+
+      if (!this.boundHeatmapFilterOutsideClick) {
+        this.boundHeatmapFilterOutsideClick = (event) => {
+          if (filterMenu.style.display !== "block") return
+          if (filterMenu.contains(event.target) || filterButton.contains(event.target)) return
+          filterMenu.style.display = "none"
+        }
+        document.addEventListener("click", this.boundHeatmapFilterOutsideClick, true)
+      }
+    }
+  }
+
+  teardownSavedCellSetsFilterMenus() {
+    const sortButton = document.getElementById("heatmap-sort-saved-selections-btn")
+    const sortBySelect = document.getElementById("heatmap-sort-saved-selections-by")
+    const orderSelect = document.getElementById("heatmap-sort-saved-selections-order")
+    const filterButton = document.getElementById("heatmap-filter-saved-selections-btn")
+    const filterMenu = document.getElementById("heatmap-filter-saved-selections-menu")
+    const searchInput = document.getElementById("heatmap-saved-selections-name-filter-input")
+
+    if (this.boundHeatmapSortMenuClick && sortButton) {
+      sortButton.removeEventListener("click", this.boundHeatmapSortMenuClick)
+    }
+    this.boundHeatmapSortMenuClick = null
+    if (this.boundHeatmapSortByChange && sortBySelect) {
+      sortBySelect.removeEventListener("change", this.boundHeatmapSortByChange)
+    }
+    this.boundHeatmapSortByChange = null
+    if (this.boundHeatmapSortOrderChange && orderSelect) {
+      orderSelect.removeEventListener("change", this.boundHeatmapSortOrderChange)
+    }
+    this.boundHeatmapSortOrderChange = null
+    if (this.boundHeatmapSortOutsideClick) {
+      document.removeEventListener("click", this.boundHeatmapSortOutsideClick, true)
+    }
+    this.boundHeatmapSortOutsideClick = null
+
+    if (this.boundHeatmapFilterMenuClick && filterButton) {
+      filterButton.removeEventListener("click", this.boundHeatmapFilterMenuClick)
+    }
+    this.boundHeatmapFilterMenuClick = null
+    if (this.boundHeatmapFilterSearchInput && searchInput) {
+      searchInput.removeEventListener("input", this.boundHeatmapFilterSearchInput)
+    }
+    this.boundHeatmapFilterSearchInput = null
+    if (this.boundHeatmapFilterTypeClick && filterMenu) {
+      filterMenu.removeEventListener("click", this.boundHeatmapFilterTypeClick)
+    }
+    this.boundHeatmapFilterTypeClick = null
+    if (this.boundHeatmapFilterOutsideClick) {
+      document.removeEventListener("click", this.boundHeatmapFilterOutsideClick, true)
+    }
+    this.boundHeatmapFilterOutsideClick = null
+  }
+
+  updateSavedCellSetsFilterButtonAppearance(button) {
+    if (!button) return
+    const type = String(this.savedCellSetsFilterType || "all")
+    button.innerHTML = '<i class="fas fa-filter" style="font-size:12px;"></i>'
+    button.title = `Filter saved cell sets: ${this.savedCellSetsFilterTypeLabel(type)}`
+    if (type === "all") {
+      button.style.backgroundColor = "white"
+      button.style.color = "#374151"
+      button.style.border = "1px solid #d1d5db"
+      return
+    }
+    button.style.backgroundColor = "#22c55e"
+    button.style.color = "white"
+    button.style.border = "1px solid #22c55e"
+  }
+
+  savedCellSetsFilterTypeLabel(type) {
+    const normalizedType = String(type || "all")
+    if (normalizedType === "compose") return "Composed sets"
+    if (normalizedType === "visible") return "Visible cells sets"
+    if (normalizedType === "lasso") return "Lasso sets"
+    if (normalizedType === "heatmap-rect") return "Heatmap sets"
+    return "All type sets"
+  }
+
+  updateSavedCellSetsFilterMenuState(menu) {
+    if (!menu) return
+    const selectedType = String(this.savedCellSetsFilterType || "all")
+    menu.querySelectorAll("[data-heatmap-filter-type-option]").forEach((option) => {
+      const optionType = String(option.dataset.heatmapFilterTypeOption || "")
+      const isSelected = optionType === selectedType
+      option.style.backgroundColor = isSelected && optionType !== "all" ? "#dcfce7" : "#ffffff"
+      const check = option.querySelector(`[data-heatmap-filter-check="${optionType}"]`)
+      if (check) check.style.display = isSelected ? "inline-flex" : "none"
+    })
+  }
+
+  getFilteredSavedCellSetItems(items) {
+    const query = String(this.savedCellSetsFilterQuery || "").trim().toLowerCase()
+    const type = String(this.savedCellSetsFilterType || "all")
+    return (items || []).filter((item) => {
+      if (type !== "all" && String(item.selectionSource || item.selection_source || "") !== type) {
+        return false
+      }
+      if (!query) return true
+      return this.savedCellSetDisplayName(item).toLowerCase().includes(query)
+    })
+  }
+
+  getSortedSavedCellSetItems(items) {
+    const sorted = [...(items || [])]
+    const sortBy = this.savedCellSetsSortBy || "created_at"
+    const order = this.savedCellSetsSortOrder === "asc" ? 1 : -1
+    const createdAtValue = (item) => {
+      if (!item?.createdAt) return 0
+      const ts = new Date(item.createdAt).getTime()
+      return Number.isFinite(ts) ? ts : 0
+    }
+    sorted.sort((a, b) => {
+      if (sortBy === "name") {
+        const cmp = this.savedCellSetDisplayName(a).toLowerCase()
+          .localeCompare(this.savedCellSetDisplayName(b).toLowerCase())
+        if (cmp !== 0) return cmp * order
+        return (createdAtValue(a) - createdAtValue(b)) * -1
+      }
+      if (sortBy === "selected_count") {
+        const aCount = Number(a?.selectedCount || 0)
+        const bCount = Number(b?.selectedCount || 0)
+        if (aCount !== bCount) return (aCount - bCount) * order
+        return (createdAtValue(a) - createdAtValue(b)) * -1
+      }
+      return (createdAtValue(a) - createdAtValue(b)) * order
+    })
+    return sorted
+  }
+
+  renderSavedCellSets() {
+    if (!this.hasSavedCellSetsListTarget) return
+    this.initializeSavedCellSetsFilterMenus()
+    const items = Array.isArray(this.savedCellSets) ? this.savedCellSets : []
+    if (!items.length) {
+      this.savedCellSetsListTarget.style.fontStyle = "italic"
+      this.savedCellSetsListTarget.style.color = "#6b7280"
+      this.savedCellSetsListTarget.innerHTML = "No cell sets yet"
+      return
+    }
+
+    const filteredItems = this.getFilteredSavedCellSetItems(items)
+    if (!filteredItems.length) {
+      this.savedCellSetsListTarget.style.fontStyle = "italic"
+      this.savedCellSetsListTarget.style.color = "#6b7280"
+      this.savedCellSetsListTarget.innerHTML = "No cell sets match the current filters"
+      return
+    }
+
+    const sortedItems = this.getSortedSavedCellSetItems(filteredItems)
+    this.savedCellSetsListTarget.style.fontStyle = "normal"
+    this.savedCellSetsListTarget.style.color = "#374151"
+    this.savedCellSetsListTarget.innerHTML = sortedItems.map((item) => {
+      const selectionId = this.escapeHtml(item.id)
+      const selectionPrefix = item.selectionNumber ? `#${item.selectionNumber} ` : ""
+      const displayName = this.escapeHtml(this.savedCellSetDisplayName(item))
+      const count = Number(item.selectedCount || 0)
+      const created = item.createdAt ? new Date(item.createdAt).toLocaleString() : ""
+      const heatmapOriginHtml = this.heatmapSelectionOriginHtml(item)
+      const countParts = [`${count.toLocaleString()} cells`]
+      if (heatmapOriginHtml) countParts.push(heatmapOriginHtml)
+      if (created) countParts.push(this.escapeHtml(created))
+      const countText = countParts.join(" - ")
+      const isLocked = item.locked === true
+      const isEditing = String(this.editingSavedCellSetId || "") === String(item.id)
+      const canRename = this.canAnalyzeValue && !isLocked
+      const statusHtml = this.selectionStatusBadgeHtml(item.status)
+      const lockHtml = isLocked
+        ? `<span title="Created before publication; cannot be modified"
+                 aria-label="Created before publication; cannot be modified"
+                 style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;color:#6b7280;cursor:help;padding:0;">
+             <i class="fas fa-lock" style="font-size:11px;"></i>
+           </span>`
+        : ""
+      const deleteHtml = (this.canAnalyzeValue && !isLocked)
+        ? `<button type="button"
+                   data-action="heatmap#deleteSavedCellSet"
+                   data-selection-id="${selectionId}"
+                   title="Delete selection"
+                   aria-label="Delete selection"
+                   style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;color:#dc2626;background:none;border:none;cursor:pointer;padding:0;">
+             <i class="fas fa-trash" style="font-size:12px;"></i>
+           </button>`
+        : ""
+      const renameControls = canRename
+        ? `<button type="button"
+                   data-action="heatmap#startRenameSavedCellSet"
+                   data-selection-id="${selectionId}"
+                   title="Rename selection"
+                   aria-label="Rename selection"
+                   style="display:${isEditing ? "none" : "inline-flex"};align-items:center;justify-content:center;width:16px;height:16px;color:#6b7280;background:none;border:none;cursor:pointer;padding:0;flex:0 0 auto;">
+             <i class="fas fa-pen" style="font-size:10px;"></i>
+           </button>
+           <button type="button"
+                   data-action="heatmap#commitRenameSavedCellSet"
+                   data-selection-id="${selectionId}"
+                   title="Save name"
+                   aria-label="Save name"
+                   style="display:${isEditing ? "inline-flex" : "none"};align-items:center;justify-content:center;width:16px;height:16px;color:#16a34a;background:none;border:none;cursor:pointer;padding:0;flex:0 0 auto;">
+             <i class="fas fa-check" style="font-size:11px;"></i>
+           </button>
+           <button type="button"
+                   data-action="heatmap#cancelRenameSavedCellSet"
+                   title="Cancel edit"
+                   aria-label="Cancel edit"
+                   style="display:${isEditing ? "inline-flex" : "none"};align-items:center;justify-content:center;width:16px;height:16px;color:#6b7280;background:none;border:none;cursor:pointer;padding:0;flex:0 0 auto;">
+             <i class="fas fa-times" style="font-size:11px;"></i>
+           </button>`
+        : ""
+
+      return `<div data-selection-id="${selectionId}"
+                   style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;padding:8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;">
+        <div style="flex:1;min-width:0;display:flex;align-items:flex-start;gap:6px;">
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+              ${this.selectionSourceIconHtml(item.selectionSource)}
+              <div data-role="heatmap-saved-cell-set-name-display"
+                   style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:${isEditing ? "none" : "block"};">
+                ${selectionPrefix}${displayName}
+              </div>
+              <input type="text"
+                     data-role="heatmap-saved-cell-set-name-input"
+                     data-selection-id="${selectionId}"
+                     data-action="click->heatmap#preventSavedCellSetRowClick keydown->heatmap#handleRenameSavedCellSetKeydown input->heatmap#trackRenameSavedCellSetInput"
+                     value="${this.escapeHtml(item.name || "")}"
+                     placeholder="Unnamed"
+                     style="display:${isEditing ? "block" : "none"};font-size:13px;font-weight:600;min-width:0;flex:1;border:1px solid #d1d5db;border-radius:4px;padding:2px 6px;" />
+              ${renameControls}
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <button type="button"
+                      data-action="heatmap#openSavedCellSetDetails"
+                      data-selection-id="${selectionId}"
+                      title="Selection details"
+                      aria-label="Selection details"
+                      style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;color:#2563eb;background:none;border:none;cursor:pointer;padding:0;flex:0 0 auto;">
+                <i class="fas fa-circle-info" style="font-size:10px;"></i>
+              </button>
+              <div style="font-size:11px;color:#6b7280;">${countText}</div>
+            </div>
+          </div>
+        </div>
+        <div style="margin-left:8px;display:flex;align-items:center;gap:8px;flex:0 0 auto;">
+          <div>${statusHtml}</div>
+          ${lockHtml}
+          ${deleteHtml}
+        </div>
+      </div>`
+    }).join("")
+
+    this.focusPendingSavedCellSetRenameInput()
+  }
+
+  preventSavedCellSetRowClick(event) {
+    event.stopPropagation()
+  }
+
+  trackRenameSavedCellSetInput(event) {
+    event.stopPropagation()
+    this.pendingSavedCellSetName = event.currentTarget?.value || ""
+  }
+
+  startRenameSavedCellSet(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!this.canAnalyzeValue) return
+    const selectionId = String(event.currentTarget?.dataset?.selectionId || "").trim()
+    if (!selectionId) return
+    const item = (this.savedCellSets || []).find((entry) => String(entry.id) === selectionId)
+    if (!item || item.locked) return
+    this.editingSavedCellSetId = selectionId
+    this.pendingSavedCellSetName = String(item.name || "")
+    this.pendingSavedCellSetFocusId = selectionId
+    this.renderSavedCellSets()
+  }
+
+  cancelRenameSavedCellSet(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    this.editingSavedCellSetId = null
+    this.pendingSavedCellSetName = null
+    this.pendingSavedCellSetFocusId = null
+    this.renderSavedCellSets()
+  }
+
+  handleRenameSavedCellSetKeydown(event) {
+    event.stopPropagation()
+    if (event.key === "Enter") {
+      event.preventDefault()
+      this.commitRenameSavedCellSet(event)
+      return
+    }
+    if (event.key === "Escape") {
+      event.preventDefault()
+      this.cancelRenameSavedCellSet(event)
+      return
+    }
+    this.pendingSavedCellSetName = event.currentTarget?.value || ""
+  }
+
+  focusPendingSavedCellSetRenameInput() {
+    const selectionId = String(this.pendingSavedCellSetFocusId || "").trim()
+    if (!selectionId || !this.hasSavedCellSetsListTarget) return
+    this.pendingSavedCellSetFocusId = null
+    setTimeout(() => {
+      const input = this.savedCellSetsListTarget.querySelector(
+        `input[data-role="heatmap-saved-cell-set-name-input"][data-selection-id="${selectionId.replace(/"/g, '\\"')}"]`
+      )
+      if (input) {
+        input.focus()
+        input.select()
+      }
+    }, 0)
+  }
+
+  async commitRenameSavedCellSet(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!this.canAnalyzeValue) return
+
+    const closestSelectionNode = event.currentTarget?.closest?.("[data-selection-id]")
+    const selectionId = String(
+      event.currentTarget?.dataset?.selectionId ||
+      closestSelectionNode?.dataset?.selectionId ||
+      this.editingSavedCellSetId ||
+      ""
+    ).trim()
+    if (!selectionId) return
+
+    const input = this.hasSavedCellSetsListTarget
+      ? this.savedCellSetsListTarget.querySelector(
+          `input[data-role="heatmap-saved-cell-set-name-input"][data-selection-id="${selectionId.replace(/"/g, '\\"')}"]`
+        )
+      : null
+    const nextName = input ? String(input.value || "").trim() : String(this.pendingSavedCellSetName || "").trim()
+    const itemIndex = (this.savedCellSets || []).findIndex((entry) => String(entry.id) === selectionId)
+    const item = itemIndex >= 0 ? this.savedCellSets[itemIndex] : null
+    const previousName = itemIndex >= 0 ? String(this.savedCellSets[itemIndex].name || "") : ""
+
+    try {
+      if (itemIndex >= 0) this.savedCellSets[itemIndex].name = nextName
+      this.editingSavedCellSetId = null
+      this.pendingSavedCellSetName = null
+      this.pendingSavedCellSetFocusId = null
+      this.renderSavedCellSets()
+
+      const response = await fetch(`/projects/${encodeURIComponent(this.projectKeyValue)}/rename_selection`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-CSRF-Token": this.csrfToken() || ""
+        },
+        body: JSON.stringify({
+          selection_id: selectionId,
+          new_name: nextName,
+          run_id: item?.runId || null,
+          metadata_id: item?.metadataId || null
+        })
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok || (payload.status !== "ok" && payload.status !== "success")) {
+        throw new Error(payload.message || "Failed to rename selection")
+      }
+      this.scheduleSavedCellSetsRefresh(100)
+    } catch (error) {
+      if (itemIndex >= 0) this.savedCellSets[itemIndex].name = previousName
+      this.renderSavedCellSets()
+      alert(error.message || "Failed to rename selection")
+    }
+  }
+
+  openSavedCellSetDetails(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const selectionId = event?.currentTarget?.dataset?.selectionId
+    if (!selectionId) return
+    const item = (this.savedCellSets || []).find((entry) => String(entry.id) === String(selectionId))
+    if (!item) return
+
+    const overlay = document.getElementById("heatmap-cell-set-details-overlay")
+    const summary = document.getElementById("heatmap-cell-set-details-summary")
+    if (!overlay || !summary) return
+
+    const selectionLabel = `${item.selectionNumber ? `#${item.selectionNumber} ` : ""}${this.savedCellSetDisplayName(item)}`
+    const createdLabel = item.createdAt ? new Date(item.createdAt).toLocaleString() : "Unknown"
+    const sourceText = item.selectionSource === "heatmap-rect"
+      ? "Heatmap selection"
+      : (item.selectionSource === "compose"
+          ? "Composed selection"
+          : (item.selectionSource === "visible"
+              ? "Visible filtered cells selection"
+              : "Lasso selection"))
+    const originLines = this.formatHeatmapSelectionOriginLines(item)
+      .map((line) => `<div style="font-size:11px;color:#6b7280;margin-top:2px;">${this.escapeHtml(line)}</div>`)
+      .join("")
+    const parametersHtml = this.renderHeatmapParametersHtml(item)
+    summary.innerHTML = `
+      <div style="font-size:13px;color:#111827;font-weight:600;word-break:break-word;">${this.escapeHtml(selectionLabel)}</div>
+      <div style="font-size:12px;color:#374151;margin-top:4px;">Final result: <span style="font-weight:600;color:#065f46;">${Number(item.selectedCount || 0).toLocaleString()} cells</span></div>
+      <div style="font-size:11px;color:#6b7280;margin-top:2px;">Source: ${this.escapeHtml(sourceText)}</div>
+      ${originLines}
+      ${parametersHtml}
+      <div style="font-size:11px;color:#6b7280;margin-top:2px;">Created: ${this.escapeHtml(createdLabel)}</div>
+    `
+    overlay.style.display = "flex"
+  }
+
+  closeSavedCellSetDetails(event) {
+    if (event) {
+      event.preventDefault()
+      if (event.type === "click" && event.target !== event.currentTarget && event.currentTarget?.id === "heatmap-cell-set-details-overlay") {
+        return
+      }
+    }
+    const overlay = document.getElementById("heatmap-cell-set-details-overlay")
+    if (overlay) overlay.style.display = "none"
+  }
+
+  async deleteSavedCellSet(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    if (!this.canAnalyzeValue) {
+      alert("Analyze permission is required to delete a cell selection.")
+      return
+    }
+    const selectionId = event?.currentTarget?.dataset?.selectionId
+    if (!selectionId) return
+    const item = (this.savedCellSets || []).find((entry) => String(entry.id) === String(selectionId))
+    const label = item ? this.savedCellSetDisplayName(item) : `Selection ${selectionId}`
+    const hasAssociatedRun = item && Number.isInteger(item.runId) && item.runId > 0
+    const confirmMessage = hasAssociatedRun
+      ? `Delete ${label}? This will also delete the associated run and generated metadata.`
+      : `Delete ${label}?`
+    if (!window.confirm(confirmMessage)) return
+
+    try {
+      await this.executeSavedCellSetDeletion(item, selectionId)
+      this.savedCellSets = (this.savedCellSets || []).filter((entry) => String(entry.id) !== String(selectionId))
+      this.renderSavedCellSets()
+      this.scheduleSavedCellSetsRefresh(100)
+    } catch (error) {
+      alert(error.message || "Failed to delete selection")
+    }
+  }
+
+  async executeSavedCellSetDeletion(item, selectionId) {
+    const requestBody = { selection_id: selectionId }
+    const hasAssociatedRun = item && Number.isInteger(item.runId) && item.runId > 0
+    if (hasAssociatedRun) requestBody.run_id = item.runId
+    const response = await fetch(`/projects/${encodeURIComponent(this.projectKeyValue)}/delete_selection`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRF-Token": this.csrfToken() || ""
+      },
+      body: JSON.stringify(requestBody)
+    })
+    const payload = await response.json().catch(() => ({}))
+    const okStatus = payload.status === "ok" || payload.status === "success"
+    if (!response.ok || !okStatus) {
+      throw new Error(payload.message || "Failed to delete selection")
+    }
+  }
+
+  async deleteAllSavedCellSets(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    if (!this.canAnalyzeValue) {
+      alert("Analyze permission is required to delete cell selections.")
+      return
+    }
+
+    const items = (this.savedCellSets || []).filter((item) => item && item.locked !== true)
+    if (items.length === 0) {
+      alert("No saved cell sets to delete.")
+      return
+    }
+
+    const confirmed = window.confirm(`Delete all saved cell sets (${items.length})? This action cannot be undone.`)
+    if (!confirmed) return
+
+    const btn = document.getElementById("heatmap-delete-all-saved-selections-btn")
+    if (btn) btn.disabled = true
+    try {
+      for (const item of items) {
+        await this.executeSavedCellSetDeletion(item, item.id)
+      }
+      const deletedIds = new Set(items.map((item) => String(item.id)))
+      this.savedCellSets = (this.savedCellSets || []).filter((entry) => !deletedIds.has(String(entry.id)))
+      if (this.recentlyCreatedSavedCellSetId && deletedIds.has(String(this.recentlyCreatedSavedCellSetId))) {
+        this.recentlyCreatedSavedCellSetId = null
+      }
+      this.renderSavedCellSets()
+      this.scheduleSavedCellSetsRefresh(100)
+    } catch (error) {
+      alert(error.message || "Failed to delete all saved cell sets")
+      this.scheduleSavedCellSetsRefresh(100)
+    } finally {
+      if (btn) btn.disabled = false
+    }
+  }
+
   checkpointsUrl(path = "") {
     const base = `/projects/${encodeURIComponent(this.projectKeyValue)}/checkpoints`
     return path ? `${base}/${encodeURIComponent(path)}` : base
@@ -2621,8 +4230,7 @@ export default class extends Controller {
       showRowTree: !!this.showRowTree,
       showLabels: !!this.showLabels,
       legendWidthPx: this.estimateRightLegendWidth(),
-      rowCollapsed: Array.from(this.rowCollapsed || []),
-      colCollapsed: Array.from(this.colCollapsed || []),
+      rightMarginPx: this.estimateRightMargin(),
       colTracks: this.colTracks.filter((t) => !t.loading).map((t) => this.serializeTrackCheckpoint(t)),
       rowTracks: this.rowTracks.filter((t) => !t.loading).map((t) => this.serializeTrackCheckpoint(t)),
       gradient: {
@@ -2693,9 +4301,9 @@ export default class extends Controller {
     if (!this.currentCheckpointReadyForOverwrite) return
     if (!this.projectKeyValue || !this.runIdValue) return
 
-    const state = this._lastPersistedState?.clientSavedAt
-      ? this._lastPersistedState
-      : this.buildCurrentCheckpointPersistencePayload()
+    // Always snapshot the live view — never reuse a previous payload, or edits
+    // (show legend, size, display mode, order, etc.) are lost on the next save.
+    const state = this.buildCurrentCheckpointPersistencePayload()
     this.persistCurrentCheckpointToSession(state)
 
     fetch(`${this.checkpointsUrl("current")}?${this.checkpointsQuery()}`, {
@@ -3013,10 +4621,11 @@ export default class extends Controller {
       this.legendWidthPx = Number(state.legendWidthPx)
       this.syncLegendWidthControls()
     }
+    if (Number.isFinite(Number(state.rightMarginPx))) {
+      this.rightMarginPx = Number(state.rightMarginPx)
+      this.syncRightMarginControls()
+    }
     this.syncToggleButtons()
-
-    this.rowCollapsed = new Set(Array.isArray(state.rowCollapsed) ? state.rowCollapsed.map(Number) : [])
-    this.colCollapsed = new Set(Array.isArray(state.colCollapsed) ? state.colCollapsed.map(Number) : [])
 
     this.colTracks = []
     this.rowTracks = []
@@ -3077,13 +4686,16 @@ export default class extends Controller {
     if (!spec || spec.id == null) return
     try {
       const track = await this.fetchTrack(spec.id, axis)
-      const prepared = this.prepareTrack(track, {
+      const options = {
         thickness: spec.thickness,
-        showLegend: !!spec.showLegend,
         gradient: spec.gradient,
         type: spec.type,
         displayMode: spec.displayMode
-      })
+      }
+      if (Object.prototype.hasOwnProperty.call(spec, "showLegend")) {
+        options.showLegend = !!spec.showLegend
+      }
+      const prepared = this.prepareTrack(track, options)
       const list = axis === "column" ? this.colTracks : this.rowTracks
       list.push(prepared)
       if (prepared.type === "numerical") {

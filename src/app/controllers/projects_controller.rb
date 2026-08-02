@@ -17,10 +17,10 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
   before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states spatial_data spatial_image]
-  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
+  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
   GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
   GENE_DETAILS_CACHE_TTL = 24.hours
@@ -30,12 +30,15 @@ class ProjectsController < ApplicationController
   MANUAL_GENE_SET_COLLECTION_LABEL = 'Manual Gene Sets'.freeze
   DE_GENE_SET_COLLECTION_NEW_ID = '__new_de_collection__'.freeze
   DE_GENE_SET_COLLECTION_LABEL = 'DE results'.freeze
+  HEATMAP_GENE_SET_COLLECTION_NEW_ID = '__new_heatmap_collection__'.freeze
+  HEATMAP_GENE_SET_COLLECTION_LABEL = 'Heatmap selection'.freeze
   LOCAL_GENE_SET_COLLECTION_ID_PREFIX = 'local_collection'.freeze
   GENE_SET_COLLECTION_TYPE_MANUAL = 'manual'.freeze
   GENE_SET_COLLECTION_TYPE_IMPORTED = 'imported'.freeze
   GENE_SET_COLLECTION_TYPE_GLOBAL = 'global'.freeze
   GENE_SET_COLLECTION_TYPE_FROM_DE = 'from_de'.freeze
   GENE_SET_COLLECTION_TYPE_FROM_FIND_MARKERS = 'from_find_markers'.freeze
+  GENE_SET_COLLECTION_TYPE_FROM_HEATMAP = 'from_heatmap'.freeze
   MARKER_EVIDENCES_ANALYZE_FORBIDDEN_MESSAGE =
     'FindMarkers requires analyze permission on this project. You can view completed marker tables when a run has already finished.'.freeze
 
@@ -241,13 +244,18 @@ class ProjectsController < ApplicationController
                                         .group_by(&:filepath)
     
     # Precompute best CLA annotation metadata per categorical metadata category
-    categorical_metadata = []
-    @h_metadata.each_value do |dimension_hash|
-      next unless dimension_hash
-      discrete = dimension_hash.dig('cell', 'DISCRETE')
-      categorical_metadata.concat(discrete) if discrete.present?
+    # (annotation tool is limited to single-cell transcriptomics projects)
+    if @project.single_cell?
+      categorical_metadata = []
+      @h_metadata.each_value do |dimension_hash|
+        next unless dimension_hash
+        discrete = dimension_hash.dig('cell', 'DISCRETE')
+        categorical_metadata.concat(discrete) if discrete.present?
+      end
+      build_best_cla_category_map(categorical_metadata)
+    else
+      @best_clas_by_metadata_category = {}
     end
-    build_best_cla_category_map(categorical_metadata)
     
     # Check if we have embeddings for visualization
     has_visualization_embeddings = @all_embeddings_by_loom.any? { |_filepath, embeddings| embeddings.present? }
@@ -2981,7 +2989,14 @@ class ProjectsController < ApplicationController
     compose_steps = sanitize_compose_steps(params[:compose_steps])
     selection_source = sanitize_selection_source(params[:selection_source])
     filter_components = sanitize_filter_components(params[:filter_components])
-    plot_context = sanitize_plot_context(params[:plot_context])
+    plot_context = if selection_source == 'heatmap-rect'
+                     selection_plot_context_with_heatmap_params(
+                       params[:plot_context],
+                       { 'heatmap_run_id' => params[:heatmap_run_id] }
+                     )
+                   else
+                     sanitize_plot_context(params[:plot_context])
+                   end
 
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
     loom_path = project_dir + loom_file
@@ -3059,6 +3074,10 @@ class ProjectsController < ApplicationController
       selection_metadata_name: selection_metadata_name,
       selected_cells_file: selected_cells_file.to_s
     }
+    if selection_source == 'heatmap-rect'
+      heatmap_run_id = params[:heatmap_run_id].to_i
+      run_attrs[:heatmap_run_id] = heatmap_run_id if heatmap_run_id > 0
+    end
     run_attrs[:compose_steps] = compose_steps if compose_steps.present?
     run_attrs[:filter_components] = filter_components if filter_components.present?
     run_attrs[:plot_context] = plot_context if plot_context.present?
@@ -3082,7 +3101,8 @@ class ProjectsController < ApplicationController
       selection_source: selection_source,
       source_metadata_id: embedding_annot.id,
       status: 'queued',
-      created_at: Time.current.iso8601
+      created_at: Time.current.iso8601,
+      plot_context: plot_context
     }
     cache_data[cache_key] = cache_entry
     write_selection_session_cache(cache_data)
@@ -3280,6 +3300,35 @@ class ProjectsController < ApplicationController
     render json: { status: 'error', message: "Rename failed: #{e.message}" }, status: :unprocessable_entity
   end
 
+  # POST /projects/:id/create_gene_set_collection
+  def create_gene_set_collection
+    name = params[:name].to_s.strip
+    collection_type = params[:collection_type].to_s.strip
+
+    unless collection_type == GENE_SET_COLLECTION_TYPE_FROM_HEATMAP
+      render json: { status: 'error', message: 'Unsupported gene set collection type' }, status: :unprocessable_entity
+      return
+    end
+
+    target_collection = create_heatmap_gene_set_collection!(
+      name: name.presence || HEATMAP_GENE_SET_COLLECTION_LABEL
+    )
+
+    render json: {
+      status: 'ok',
+      collection: {
+        id: local_gene_set_collection_id(target_collection),
+        label: target_collection.name.to_s,
+        nb_items: 0,
+        custom: true,
+        locked: immutable_since_publication?(target_collection)
+      }
+    }.deep_merge(collection_type_presentation_for_collection(target_collection))
+  rescue StandardError => e
+    Rails.logger.error("create_gene_set_collection failed: #{e.class} - #{e.message}")
+    render json: { status: 'error', message: "Failed to create gene set collection: #{e.message}" }, status: :unprocessable_entity
+  end
+
   # POST /projects/:id/save_manual_gene_set
   def save_manual_gene_set
     name = params[:name].to_s.strip
@@ -3314,24 +3363,42 @@ class ProjectsController < ApplicationController
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
     db_version = asap_data_db_name_for_env(h_env, context: "save_manual_gene_set")
     genes_with_ids = resolve_manual_gene_ids(submitted_genes, db_version)
-    manual_collection = resolve_target_manual_collection(
-      params[:collection_id],
-      new_collection_name: params[:new_collection_name]
-    )
-    unless manual_collection
-      render json: { status: 'error', message: 'Target manual gene set collection not found' }, status: :unprocessable_entity
+    collection_type = params[:collection_type].to_s.strip
+    target_collection = if collection_type == GENE_SET_COLLECTION_TYPE_FROM_HEATMAP
+      resolve_target_heatmap_collection(
+        params[:collection_id],
+        new_collection_name: params[:new_collection_name]
+      )
+    else
+      resolve_target_manual_collection(
+        params[:collection_id],
+        new_collection_name: params[:new_collection_name]
+      )
+    end
+    unless target_collection
+      label = collection_type == GENE_SET_COLLECTION_TYPE_FROM_HEATMAP ? 'heatmap' : 'manual'
+      render json: { status: 'error', message: "Target #{label} gene set collection not found" }, status: :unprocessable_entity
       return
     end
-    if immutable_since_publication?(manual_collection)
+    if immutable_since_publication?(target_collection)
       render json: { status: 'error', message: 'This gene set collection was created before publication and cannot be edited.' }, status: :forbidden
       return
     end
 
-    payload = load_local_gene_set_collection_payload(manual_collection.file_key, manual_collection.name)
+    payload = load_local_gene_set_collection_payload(target_collection.file_key, target_collection.name)
     items = Array(payload['items'])
     timestamp = Time.now.utc.iso8601
-    item_identifier = "manual_#{SecureRandom.hex(6)}"
-    item_id = "#{local_gene_set_collection_id(manual_collection)}:#{item_identifier}"
+    if collection_type == GENE_SET_COLLECTION_TYPE_FROM_HEATMAP
+      heatmap_run = @project.runs.find_by(id: params[:heatmap_run_id].to_i)
+      unless heatmap_run&.num.present?
+        render json: { status: 'error', message: 'Heatmap run is required to save a heatmap gene set' }, status: :unprocessable_entity
+        return
+      end
+      item_identifier = "heatmap_#{heatmap_run.num}_#{SecureRandom.hex(6)}"
+    else
+      item_identifier = "manual_#{SecureRandom.hex(6)}"
+    end
+    item_id = "#{local_gene_set_collection_id(target_collection)}:#{item_identifier}"
     new_item = {
       'id' => item_id,
       'identifier' => item_identifier,
@@ -3341,20 +3408,20 @@ class ProjectsController < ApplicationController
       'updated_at' => timestamp
     }
     items << new_item
-    payload['collection'] = manual_collection.name.to_s
+    payload['collection'] = target_collection.name.to_s
     payload['items'] = items
     payload['updated_at'] = timestamp
 
-    write_local_gene_set_collection_payload(manual_collection.file_key, payload)
+    write_local_gene_set_collection_payload(target_collection.file_key, payload)
 
     render json: {
       status: 'ok',
       collection: {
-        id: local_gene_set_collection_id(manual_collection),
-        label: manual_collection.name.to_s,
+        id: local_gene_set_collection_id(target_collection),
+        label: target_collection.name.to_s,
         nb_items: items.length,
         custom: true,
-        locked: immutable_since_publication?(manual_collection)
+        locked: immutable_since_publication?(target_collection)
       },
       item: {
         id: item_id,
@@ -3362,7 +3429,7 @@ class ProjectsController < ApplicationController
         name: name,
         gene_count: genes_with_ids.length
       }
-    }.deep_merge(collection_type_presentation_for_collection(manual_collection))
+    }.deep_merge(collection_type_presentation_for_collection(target_collection))
   rescue StandardError => e
     Rails.logger.error("save_manual_gene_set failed: #{e.class} - #{e.message}")
     render json: { status: 'error', message: "Failed to save manual gene set: #{e.message}" }, status: :unprocessable_entity
@@ -5025,6 +5092,12 @@ class ProjectsController < ApplicationController
 
   # GET /projects/1/get_annot_info?annot_id=123&cat_idx=0&cat_name=foo
   def get_annot_info
+    unless @project.single_cell?
+      return render json: {
+        error: 'Annotation is available only for single-cell transcriptomics projects.'
+      }, status: :unprocessable_entity
+    end
+
     annot_id = params[:annot_id].to_i
     cat_idx = params[:cat_idx].to_i
     cat_name = params[:cat_name]
@@ -5162,8 +5235,310 @@ class ProjectsController < ApplicationController
     }
   end
 
+  # POST /projects/:id/create_cla
+  # Manual CLA creation from the visualization annotation popup.
+  def create_cla
+    unless @project.single_cell?
+      return render json: {
+        status: 'error',
+        errors: ['Annotation is available only for single-cell transcriptomics projects.']
+      }, status: :unprocessable_entity
+    end
+
+    unless annotable?(@project)
+      return render json: {
+        status: 'error',
+        errors: ['You should be logged in and associate your ORCID ID to your account to submit annotations.']
+      }, status: :forbidden
+    end
+
+    annot_id = params[:annot_id].presence || params.dig(:cla, :annot_id)
+    annot = Annot.find_by(id: annot_id.to_i, project_id: @project.id)
+    return render(json: { status: 'error', errors: ['Annotation not found'] }, status: :not_found) unless annot
+
+    list_cats = Basic.safe_parse_json(annot.list_cat_json, [])
+    cat_idx = (params[:cat_idx].presence || params.dig(:cla, :cat_idx)).to_i
+    cat_name = (params[:cat_name].presence || params.dig(:cla, :cat) || list_cats[cat_idx]).to_s
+    if cat_idx < 0 || cat_idx >= list_cats.size
+      return render json: { status: 'error', errors: ['Invalid category index'] }, status: :unprocessable_entity
+    end
+
+    annot_cell_set = AnnotCellSet.where(annot_id: annot.id, cat_idx: cat_idx).first
+    unless annot_cell_set&.cell_set_id
+      Basic.ensure_annot_cell_sets(@project, annot, logger: Rails.logger)
+      annot_cell_set = AnnotCellSet.where(annot_id: annot.id, cat_idx: cat_idx).first
+    end
+    unless annot_cell_set&.cell_set_id
+      return render json: { status: 'error', errors: ['Cell set not found for this category'] }, status: :unprocessable_entity
+    end
+    cell_set = CellSet.find_by(id: annot_cell_set.cell_set_id)
+    unless cell_set
+      return render json: { status: 'error', errors: ['Cell set not found for this category'] }, status: :unprocessable_entity
+    end
+
+    name = (params[:name].presence || params.dig(:cla, :name)).to_s.strip
+    comment = (params[:comment].presence || params.dig(:cla, :comment)).to_s.strip
+    ontology_term_type_id = (params[:ontology_term_type_id].presence || params.dig(:cla, :ontology_term_type_id)).presence
+    ontology_term_type_id = ontology_term_type_id.to_i if ontology_term_type_id
+    ontology_term_type_id = nil unless ontology_term_type_id&.positive?
+    ontology_term_type = ontology_term_type_id ? OntologyTermType.find_by(id: ontology_term_type_id) : nil
+    if ontology_term_type_id && !ontology_term_type
+      return render json: { status: 'error', errors: ['Invalid annotation type'] }, status: :unprocessable_entity
+    end
+
+    cot_ids = normalize_cla_id_list(
+      params[:cell_ontology_term_ids].presence || params.dig(:cla, :cell_ontology_term_ids)
+    )
+    up_gene_ids = normalize_cla_id_list(
+      params[:up_gene_ids].presence || params.dig(:cla, :up_gene_ids)
+    )
+    down_gene_ids = normalize_cla_id_list(
+      params[:down_gene_ids].presence || params.dig(:cla, :down_gene_ids)
+    )
+
+    if cot_ids.empty?
+      return render json: {
+        status: 'error',
+        errors: ['At least one ontology term is required.']
+      }, status: :unprocessable_entity
+    end
+
+    if ontology_term_type
+      obs_field = Scfair::Rules.obs_field_name_from_path(ontology_term_type.term_path)
+      unless Scfair::Rules.multi_value_field?(obs_field) || cot_ids.size <= 1
+        return render json: {
+          status: 'error',
+          errors: ['This annotation type allows only one ontology term.']
+        }, status: :unprocessable_entity
+      end
+    elsif cot_ids.size > 1
+      return render json: {
+        status: 'error',
+        errors: ['Multiple ontology terms require a multi-value annotation type.']
+      }, status: :unprocessable_entity
+    end
+
+    overlap_ids = up_gene_ids & down_gene_ids
+    if overlap_ids.any?
+      return render json: {
+        status: 'error',
+        errors: ['The same gene cannot be both up-regulated and down-regulated.']
+      }, status: :unprocessable_entity
+    end
+
+    found_cot_ids = CellOntologyTerm.where(id: cot_ids).pluck(:id).map(&:to_s)
+    missing_cots = cot_ids - found_cot_ids
+    if missing_cots.any?
+      return render json: {
+        status: 'error',
+        errors: ["Unknown ontology term id(s): #{missing_cots.join(', ')}"]
+      }, status: :unprocessable_entity
+    end
+
+    gene_ids_to_check = (up_gene_ids | down_gene_ids).map(&:to_i).select(&:positive?)
+    if gene_ids_to_check.any?
+      unless @project.version
+        return render json: { status: 'error', errors: ['Project version is missing'] }, status: :unprocessable_entity
+      end
+      h_env = Basic.safe_parse_json(@project.version.env_json, {})
+      db_version = asap_data_db_name_for_env(h_env, context: 'create_cla')
+      found_gene_ids = []
+      RemoteGene.with_remote(db_version) do
+        scope = RemoteGene.where(id: gene_ids_to_check)
+        scope = scope.where(organism_id: @project.organism_id) if @project.organism_id.present?
+        found_gene_ids = scope.pluck(:id).map(&:to_s)
+      end
+      missing_genes = gene_ids_to_check.map(&:to_s) - found_gene_ids
+      if missing_genes.any?
+        return render json: {
+          status: 'error',
+          errors: ["Unknown gene id(s): #{missing_genes.join(', ')}"]
+        }, status: :unprocessable_entity
+      end
+    end
+
+    sorted_cot_ids = cot_ids.sort_by { |v| v.to_i }
+    sorted_up_gene_ids = up_gene_ids.sort_by { |v| v.to_i }
+    sorted_down_gene_ids = down_gene_ids.sort_by { |v| v.to_i }
+
+    orcid_user = current_user.orcid_user
+    cla = Cla.new(
+      annot_id: annot.id,
+      project_id: @project.id,
+      cat: cat_name.presence || list_cats[cat_idx].to_s,
+      cat_idx: cat_idx,
+      cell_set_id: cell_set.id,
+      name: name,
+      comment: comment,
+      ontology_term_type_id: ontology_term_type_id,
+      cell_ontology_term_ids: cot_ids.join(','),
+      sorted_cell_ontology_term_ids: sorted_cot_ids.join(','),
+      up_gene_ids: up_gene_ids.join(','),
+      down_gene_ids: down_gene_ids.join(','),
+      sorted_up_gene_ids: sorted_up_gene_ids.join(','),
+      sorted_down_gene_ids: sorted_down_gene_ids.join(','),
+      cla_source_id: Basic::MANUAL_CLA_SOURCE_ID,
+      user_id: current_user.id,
+      orcid_user_id: orcid_user&.id,
+      nber_agree: 0,
+      nber_disagree: 0,
+      obsolete: false
+    )
+
+    errors = []
+    if cot_ids.any?
+      existing_cla = Cla.where(cell_set_id: cell_set.id, cell_ontology_term_ids: cla.cell_ontology_term_ids).first
+      if existing_cla
+        errors << "Annotation ##{existing_cla.num} in group #{existing_cla.cat} has the same ontology terms."
+      end
+    end
+    if name.present?
+      existing_cla = Cla.where(cell_set_id: cell_set.id, name: name, cell_ontology_term_ids: [nil, '']).first
+      if existing_cla
+        errors << "Annotation ##{existing_cla.num} in group #{existing_cla.cat} has the same name."
+      end
+    end
+    if up_gene_ids.any? || down_gene_ids.any?
+      existing_cla = Cla.where(
+        cell_set_id: cell_set.id,
+        sorted_up_gene_ids: cla.sorted_up_gene_ids,
+        sorted_down_gene_ids: cla.sorted_down_gene_ids
+      ).first
+      if existing_cla
+        errors << "Annotation ##{existing_cla.num} in group #{existing_cla.cat} has the same gene lists (up and down)."
+      end
+    end
+
+    if errors.any?
+      return render json: { status: 'error', errors: errors }, status: :unprocessable_entity
+    end
+
+    all_clas = Cla.where(cell_set_id: cell_set.id).to_a
+    cla.num = all_clas.map(&:num).compact.max.to_i + 1
+
+    h_up = up_gene_ids.each_with_object({}) { |gid, h| h[gid] = 1 }
+    h_down = down_gene_ids.each_with_object({}) { |gid, h| h[gid] = 1 }
+    h_cot = cot_ids.each_with_object({}) { |cid, h| h[cid] = 1 }
+
+    approaching = { cot_ids: [], up_gene_ids: [], down_gene_ids: [] }
+    max_common = { cot_ids: 0, up_gene_ids: 0, down_gene_ids: 0 }
+    all_clas_by_id = {}
+    all_clas.each do |existing|
+      all_clas_by_id[existing.id] = existing
+      if existing.sorted_up_gene_ids.to_s != cla.sorted_up_gene_ids.to_s
+        tmp = parse_cla_field(existing.up_gene_ids)
+        nber_common = tmp.sum { |gid| h_up[gid] || 0 }
+        if nber_common > max_common[:up_gene_ids]
+          max_common[:up_gene_ids] = nber_common
+          approaching[:up_gene_ids] = [existing.id]
+        elsif nber_common.positive? && nber_common == max_common[:up_gene_ids]
+          approaching[:up_gene_ids] << existing.id
+        end
+      end
+      if existing.sorted_down_gene_ids.to_s != cla.sorted_down_gene_ids.to_s
+        tmp = parse_cla_field(existing.down_gene_ids)
+        nber_common = tmp.sum { |gid| h_down[gid] || 0 }
+        if nber_common > max_common[:down_gene_ids]
+          max_common[:down_gene_ids] = nber_common
+          approaching[:down_gene_ids] = [existing.id]
+        elsif nber_common.positive? && nber_common == max_common[:down_gene_ids]
+          approaching[:down_gene_ids] << existing.id
+        end
+      end
+      if existing.sorted_cell_ontology_term_ids.to_s != cla.sorted_cell_ontology_term_ids.to_s
+        tmp = parse_cla_field(existing.cell_ontology_term_ids)
+        nber_common = tmp.sum { |cid| h_cot[cid] || 0 }
+        if nber_common > max_common[:cot_ids]
+          max_common[:cot_ids] = nber_common
+          approaching[:cot_ids] = [existing.id]
+        elsif nber_common.positive? && nber_common == max_common[:cot_ids]
+          approaching[:cot_ids] << existing.id
+        end
+      end
+    end
+    approaching.each_value(&:uniq!)
+
+    confirm = params[:confirm].to_s == '1' || params[:confirm] == true || params[:confirm].to_s == 'true'
+    needs_confirm = max_common.values.any?(&:positive?)
+    if needs_confirm && !confirm
+      warnings = []
+      if max_common[:cot_ids].positive?
+        labels = approaching[:cot_ids].filter_map { |id| all_clas_by_id[id] }.map { |c| "#{c.cat} ##{c.num}" }
+        warnings << "Annotations exist for this group with #{max_common[:cot_ids]} ontology term#{'s' if max_common[:cot_ids] > 1} in common: #{labels.join(', ')}"
+      end
+      if max_common[:up_gene_ids].positive?
+        labels = approaching[:up_gene_ids].filter_map { |id| all_clas_by_id[id] }.map { |c| "#{c.cat} ##{c.num}" }
+        warnings << "Annotations exist for this group with #{max_common[:up_gene_ids]} up-regulated gene#{'s' if max_common[:up_gene_ids] > 1} in common: #{labels.join(', ')}"
+      end
+      if max_common[:down_gene_ids].positive?
+        labels = approaching[:down_gene_ids].filter_map { |id| all_clas_by_id[id] }.map { |c| "#{c.cat} ##{c.num}" }
+        warnings << "Annotations exist for this group with #{max_common[:down_gene_ids]} down-regulated gene#{'s' if max_common[:down_gene_ids] > 1} in common: #{labels.join(', ')}"
+      end
+      return render json: {
+        status: 'warning',
+        requires_confirm: true,
+        warnings: warnings,
+        errors: []
+      }
+    end
+
+    unless cla.save
+      return render json: {
+        status: 'error',
+        errors: cla.errors.full_messages.presence || ['Failed to save annotation']
+      }, status: :unprocessable_entity
+    end
+
+    vote_attrs = {
+      cla_id: cla.id,
+      cla_source_id: Basic::MANUAL_CLA_SOURCE_ID,
+      agree: true,
+      user_id: current_user.id,
+      user_name: current_user.displayed_name,
+      orcid_user_id: orcid_user&.id
+    }
+    cla_vote = ClaVote.where(cla_id: cla.id, user_id: current_user.id).first
+    if cla_vote
+      cla_vote.update!(vote_attrs)
+    else
+      ClaVote.create!(vote_attrs)
+    end
+    cla.update!(nber_agree: 1)
+
+    refreshed_clas = Cla.where(cell_set_id: cell_set.id).to_a
+    selected_cla = refreshed_clas.max_by { |c| (c.nber_agree || 0) - (c.nber_disagree || 0) }
+
+    h_cat_info = Basic.safe_parse_json(annot.cat_info_json, {})
+    h_cat_info['nber_clas'] = Array.new(list_cats.size, 0) unless h_cat_info['nber_clas'].is_a?(Array)
+    h_cat_info['selected_cla_ids'] = Array.new(list_cats.size, '') unless h_cat_info['selected_cla_ids'].is_a?(Array)
+    while h_cat_info['nber_clas'].size < list_cats.size
+      h_cat_info['nber_clas'] << 0
+    end
+    while h_cat_info['selected_cla_ids'].size < list_cats.size
+      h_cat_info['selected_cla_ids'] << ''
+    end
+    h_cat_info['nber_clas'][cat_idx] = refreshed_clas.size
+    h_cat_info['selected_cla_ids'][cat_idx] = selected_cla.id if selected_cla
+    annot.update!(cat_info_json: h_cat_info.to_json)
+    cell_set.update!(nber_clas: refreshed_clas.size, cla_id: selected_cla&.id)
+
+    render json: {
+      status: 'ok',
+      cla_id: cla.id,
+      num: cla.num,
+      cat_idx: cat_idx,
+      annot_id: annot.id
+    }, status: :created
+  end
+
   # GET /projects/1/get_cell_set_annotations?cell_set_key=<md5>
   def get_cell_set_annotations
+    unless @project.single_cell?
+      return render json: {
+        error: 'Annotation is available only for single-cell transcriptomics projects.'
+      }, status: :unprocessable_entity
+    end
+
     cell_set_key = params[:cell_set_key].to_s.strip
     if cell_set_key.blank?
       return render json: { error: 'Cell set key is required' }, status: :unprocessable_entity
@@ -5310,6 +5685,12 @@ class ProjectsController < ApplicationController
 
   # GET /projects/1/get_annot_evidences?annot_id=123&cat_idx=0
   def get_annot_evidences
+    unless @project.single_cell?
+      return render json: {
+        error: 'Annotation is available only for single-cell transcriptomics projects.'
+      }, status: :unprocessable_entity
+    end
+
     annot_id = params[:annot_id].to_i
     cat_idx = params[:cat_idx].to_i
 
@@ -5356,7 +5737,7 @@ class ProjectsController < ApplicationController
       end
 
       if status_id == 3
-        parsed = parse_marker_rows_for_category(marker_run, cat_idx)
+        parsed = parse_marker_rows_for_category(marker_run, cat_idx, annot: annot)
         if parsed[:error]
           return render json: {
             state: 'failed',
@@ -5523,7 +5904,7 @@ class ProjectsController < ApplicationController
       }
     end
 
-    parsed = parse_marker_rows_for_category(marker_run, cat_idx)
+    parsed = parse_marker_rows_for_category(marker_run, cat_idx, annot: annot)
     if parsed[:error]
       return render json: {
         state: 'failed',
@@ -5963,6 +6344,7 @@ class ProjectsController < ApplicationController
     HeatmapMetaNormalizer.normalize!(meta)
     meta['loom_file'] = heatmap_loom_file_for_run(run)
     meta['matrix_url'] = heatmap_data_project_path(@project, run_id: run.id, part: 'matrix')
+    enrich_heatmap_selection_meta!(meta, meta['loom_file'])
     render body: JSON.generate(meta), content_type: 'application/json'
   rescue StandardError => e
     Rails.logger.error("[heatmap_data] #{e.class} - #{e.message}")
@@ -8695,7 +9077,7 @@ class ProjectsController < ApplicationController
 
     def resolve_project_view_type(requested_view)
       view = requested_view.to_s
-      allowed_views = %w[summary visualization analysis data settings compliance access]
+      allowed_views = %w[summary visualization heatmap analysis data settings compliance access]
       return view if allowed_views.include?(view)
 
       #project_has_embeddings? ? 'visualization' : 'summary'
@@ -8730,6 +9112,8 @@ class ProjectsController < ApplicationController
       case view_type
       when 'visualization'
         load_visualization_context
+      when 'heatmap'
+        load_heatmap_viewer_context
       when 'summary'
         load_analysis_context
         load_summary_context
@@ -8747,6 +9131,60 @@ class ProjectsController < ApplicationController
         @view_type = 'summary'
         load_analysis_context
         load_summary_context
+      end
+    end
+
+    def load_heatmap_viewer_context
+      asap_docker_image = Basic.get_asap_docker(@project.version)
+      @h_std_methods = {}
+      step_ids = []
+      if asap_docker_image
+        StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s }
+        heatmap_steps = Step.where(docker_image_id: asap_docker_image.id, name: 'heatmap')
+        @step = heatmap_steps.first
+        step_ids = heatmap_steps.pluck(:id)
+      else
+        @step = Step.find_by(name: 'heatmap')
+        step_ids = @step ? [@step.id] : []
+      end
+
+      runs_scope = if step_ids.any?
+                     @project.runs.where(step_id: step_ids, status_id: 3).includes(:std_method).order(created_at: :desc)
+                   else
+                     Run.none
+                   end
+      @heatmap_runs = apply_publication_snapshot_to_runs(runs_scope).to_a
+      requested_id = params[:run_id].to_i
+      @run = @heatmap_runs.find { |r| r.id == requested_id } || @heatmap_runs.first
+      @heatmap_gene_set_collections = heatmap_gene_set_collections_payload
+      @heatmap_gene_set_collection_options = @heatmap_gene_set_collections.map do |collection|
+        { id: collection[:id], label: collection[:label] }
+      end
+    end
+
+    def heatmap_gene_set_collections_payload
+      collections = GeneSetCollection.where(project_id: @project.id).includes(:gene_set_collection_type).order(created_at: :desc).select do |collection|
+        gene_set_collection_from_heatmap?(collection)
+      end
+      collections.map do |collection|
+        payload = load_local_gene_set_collection_payload(collection.file_key, collection.name)
+        {
+          id: local_gene_set_collection_id(collection),
+          label: collection.name.to_s,
+          database_name: '',
+          nb_items: Array(payload['items']).length,
+          custom: true,
+          locked: immutable_since_publication?(collection)
+        }.merge(gene_set_collection_type_presentation(gene_set_collection_type_key(collection)))
+      end
+    end
+
+    def heatmap_gene_set_collections_for_dropdown
+      heatmap_gene_set_collections_payload.map do |collection|
+        {
+          id: collection[:id],
+          label: collection[:label]
+        }
       end
     end
 
@@ -8891,7 +9329,11 @@ class ProjectsController < ApplicationController
         end
         values
       end
-      timed_step.call('build_best_cla_category_map') { build_best_cla_category_map(categorical_metadata) }
+      if @project.single_cell?
+        timed_step.call('build_best_cla_category_map') { build_best_cla_category_map(categorical_metadata) }
+      else
+        @best_clas_by_metadata_category = {}
+      end
 
       @initial_selection_items = []
       if @default_loom_file.present?
@@ -9144,12 +9586,50 @@ class ProjectsController < ApplicationController
       end
     end
 
+    def create_heatmap_gene_set_collection!(name:)
+      file_key = "gene_set_collection_heatmap_#{SecureRandom.hex(12)}"
+      collection = GeneSetCollection.create!(
+        project_id: @project.id,
+        user_id: current_user&.id,
+        name: name.to_s.strip.presence || HEATMAP_GENE_SET_COLLECTION_LABEL,
+        file_key: file_key,
+        source_kind: GENE_SET_COLLECTION_TYPE_FROM_HEATMAP,
+        gene_set_collection_type_id: gene_set_collection_type_id_for!(GENE_SET_COLLECTION_TYPE_FROM_HEATMAP)
+      )
+      write_local_gene_set_collection_payload(collection.file_key, {
+        'collection' => collection.name.to_s,
+        'items' => [],
+        'created_at' => Time.current.utc.iso8601,
+        'updated_at' => Time.current.utc.iso8601
+      })
+      collection
+    end
+
+    def resolve_target_heatmap_collection(collection_id_param, new_collection_name: nil)
+      requested_id = collection_id_param.to_s.strip
+      create_new = requested_id.blank? || requested_id == HEATMAP_GENE_SET_COLLECTION_NEW_ID
+      if create_new
+        label = new_collection_name.to_s.strip.presence || HEATMAP_GENE_SET_COLLECTION_LABEL
+        return create_heatmap_gene_set_collection!(name: label)
+      end
+
+      local_collection_id = parse_local_gene_set_collection_id(requested_id)
+      return nil unless local_collection_id
+
+      collection = GeneSetCollection.find_by(id: local_collection_id, project_id: @project.id)
+      return nil unless collection
+      return nil unless gene_set_collection_from_heatmap?(collection)
+
+      collection
+    end
+
     def gene_set_collection_type_key(collection)
       type_key = collection&.gene_set_collection_type&.key.to_s.strip
       return type_key if type_key.present?
       legacy_kind = collection&.source_kind.to_s.strip
       return GENE_SET_COLLECTION_TYPE_MANUAL if legacy_kind == 'manual'
       return GENE_SET_COLLECTION_TYPE_FROM_DE if legacy_kind == 'from_de'
+      return GENE_SET_COLLECTION_TYPE_FROM_HEATMAP if legacy_kind == 'from_heatmap'
       GENE_SET_COLLECTION_TYPE_IMPORTED
     end
 
@@ -9159,6 +9639,10 @@ class ProjectsController < ApplicationController
 
     def gene_set_collection_from_de?(collection)
       gene_set_collection_type_key(collection) == GENE_SET_COLLECTION_TYPE_FROM_DE
+    end
+
+    def gene_set_collection_from_heatmap?(collection)
+      gene_set_collection_type_key(collection) == GENE_SET_COLLECTION_TYPE_FROM_HEATMAP
     end
 
     def gene_set_collection_type_id_for!(type_key)
@@ -9720,7 +10204,7 @@ class ProjectsController < ApplicationController
           if scoped_organism_id > 0
             quoted = ensembl_keys.map { |value| conn.quote(value) }.join(',')
             ensembl_rows = conn.select_all(
-              "SELECT id, LOWER(ensembl_id) AS key FROM genes " \
+              "SELECT id, ensembl_id, name, LOWER(ensembl_id) AS key FROM genes " \
               "WHERE organism_id = #{scoped_organism_id} AND ensembl_id IS NOT NULL " \
               "AND LOWER(ensembl_id) IN (#{quoted})"
             )
@@ -9728,13 +10212,17 @@ class ProjectsController < ApplicationController
             query_values = ensembl_keys.flat_map { |value| [value, value.upcase, value.downcase] }.uniq
             quoted = query_values.map { |value| conn.quote(value) }.join(',')
             ensembl_rows = conn.select_all(
-              "SELECT id, ensembl_id AS key FROM genes WHERE ensembl_id IN (#{quoted})"
+              "SELECT id, ensembl_id, name, ensembl_id AS key FROM genes WHERE ensembl_id IN (#{quoted})"
             )
           end
           ensembl_rows.each do |row|
             key = row['key'].to_s.downcase
             next if key.blank?
-            ensembl_lookup[key] ||= row['id'].to_i
+            ensembl_lookup[key] ||= {
+              id: row['id'].to_i,
+              ensembl_id: row['ensembl_id'].to_s,
+              name: row['name'].to_s
+            }
           end
         end
 
@@ -9742,7 +10230,7 @@ class ProjectsController < ApplicationController
           if scoped_organism_id > 0
             quoted = symbol_keys.map { |value| conn.quote(value) }.join(',')
             symbol_rows = conn.select_all(
-              "SELECT id, LOWER(name) AS key FROM genes " \
+              "SELECT id, ensembl_id, name, LOWER(name) AS key FROM genes " \
               "WHERE organism_id = #{scoped_organism_id} AND name IS NOT NULL " \
               "AND LOWER(name) IN (#{quoted})"
             )
@@ -9750,13 +10238,17 @@ class ProjectsController < ApplicationController
             query_values = symbol_keys.flat_map { |value| [value, value.upcase, value.downcase, value.capitalize] }.uniq
             quoted = query_values.map { |value| conn.quote(value) }.join(',')
             symbol_rows = conn.select_all(
-              "SELECT id, name AS key FROM genes WHERE name IN (#{quoted})"
+              "SELECT id, ensembl_id, name, name AS key FROM genes WHERE name IN (#{quoted})"
             )
           end
           symbol_rows.each do |row|
             key = row['key'].to_s.downcase
             next if key.blank?
-            symbol_lookup[key] ||= row['id'].to_i
+            symbol_lookup[key] ||= {
+              id: row['id'].to_i,
+              ensembl_id: row['ensembl_id'].to_s,
+              name: row['name'].to_s
+            }
           end
         end
       end
@@ -9769,30 +10261,37 @@ class ProjectsController < ApplicationController
         symbol = gene[:symbol].to_s.strip
         ensembl_id = gene[:ensembl_id].to_s.strip
         stable_id = gene[:stable_id].to_s.strip
-        gene_id = nil
+        matched = nil
 
         if ensembl_id.present?
-          gene_id = ensembl_lookup[ensembl_id.downcase]
-          if gene_id.nil? && symbol.blank?
-            fallback_symbol_id = symbol_lookup[ensembl_id.downcase]
-            if fallback_symbol_id
-              gene_id = fallback_symbol_id
+          matched = ensembl_lookup[ensembl_id.downcase]
+          if matched.nil? && symbol.blank?
+            matched = symbol_lookup[ensembl_id.downcase]
+            if matched
               symbol = ensembl_id
               ensembl_id = ''
             end
           end
         end
 
-        if gene_id.nil? && symbol.present?
-          gene_id = symbol_lookup[symbol.downcase]
-          if gene_id.nil?
-            fallback_ensembl_id = ensembl_lookup[symbol.downcase]
-            if fallback_ensembl_id
-              gene_id = fallback_ensembl_id
+        if matched.nil? && symbol.present?
+          matched = symbol_lookup[symbol.downcase]
+          if matched.nil?
+            matched = ensembl_lookup[symbol.downcase]
+            if matched
               ensembl_id = symbol
               symbol = ''
             end
           end
+        end
+
+        gene_id = matched.is_a?(Hash) ? matched[:id].to_i : matched.to_i
+        gene_id = nil if gene_id <= 0
+
+        # Backfill accession/symbol from the gene DB so downstream UIs can open details.
+        if matched.is_a?(Hash)
+          ensembl_id = matched[:ensembl_id].to_s if ensembl_id.blank? && matched[:ensembl_id].to_s.present?
+          symbol = matched[:name].to_s if symbol.blank? && matched[:name].to_s.present?
         end
 
         {
@@ -9888,40 +10387,58 @@ class ProjectsController < ApplicationController
 
     def delete_related_manual_module_score_runs(removed_item)
       return 0 unless removed_item.is_a?(Hash)
-      item_id = removed_item[:id].to_s
-      item_identifier = removed_item[:identifier].to_s
-      item_name = removed_item[:name].to_s
-      candidate_run_ids = []
+      item_id = removed_item[:id].to_s.strip
+      item_identifier = removed_item[:identifier].to_s.strip
+      return 0 if item_id.blank? && item_identifier.blank?
 
       module_score_method_ids = StdMethod
         .where("LOWER(COALESCE(name, '')) LIKE ? OR LOWER(COALESCE(label, '')) LIKE ?", '%modulescore%', '%module score%')
         .pluck(:id)
-
-      runs_scope = Run.where(project_id: @project.id)
-      runs_scope = runs_scope.where(std_method_id: module_score_method_ids) if module_score_method_ids.any?
-
-      runs_scope.find_each do |run|
-        attrs = Basic.safe_parse_json(run.attrs_json, {})
-        attrs_text = attrs.to_json.downcase
-        match = false
-        match ||= item_id.present? && attrs_text.include?(item_id.downcase)
-        match ||= item_identifier.present? && attrs_text.include?(item_identifier.downcase)
-        match ||= item_name.present? && attrs_text.include?(item_name.downcase)
-        candidate_run_ids << run.id if match
-      end
-
-      return 0 if candidate_run_ids.empty?
+      # Without ModuleScore methods, never fall back to scanning all project runs.
+      return 0 if module_score_method_ids.empty?
 
       deletable_ids = []
-      Run.where(id: candidate_run_ids).find_each do |run|
+      Run.where(project_id: @project.id, std_method_id: module_score_method_ids).find_each do |run|
         next if @project.locked_from_publication?(run)
+
+        attrs = Basic.safe_parse_json(run.attrs_json, {})
+        next unless module_score_run_references_gene_set?(attrs, item_id: item_id, item_identifier: item_identifier)
 
         deletable_ids << run.id
       end
       return 0 if deletable_ids.empty?
 
-      Run.where(id: deletable_ids).delete_all
-      deletable_ids.size
+      deleted_count = 0
+      Run.where(id: deletable_ids).find_each do |run|
+        RunsController.destroy_run_call(@project, run)
+        deleted_count += 1
+      rescue PublicationLockedDeletionError
+        next
+      end
+      deleted_count
+    end
+
+    def module_score_run_references_gene_set?(attrs, item_id:, item_identifier:)
+      return false unless attrs.is_a?(Hash)
+
+      candidates = [
+        attrs['global_gene_set_item_id'],
+        attrs['gene_set_item_id'],
+        attrs['geneset'],
+        attrs.dig('input_gene_set', 'item_id'),
+        attrs.dig('input_gene_set', 'identifier')
+      ].map { |value| value.to_s.strip }.reject(&:blank?)
+
+      return false if candidates.empty?
+
+      item_id_l = item_id.to_s.downcase
+      item_identifier_l = item_identifier.to_s.downcase
+
+      candidates.any? do |candidate|
+        candidate_l = candidate.downcase
+        (item_id_l.present? && candidate_l == item_id_l) ||
+          (item_identifier_l.present? && (candidate_l == item_identifier_l || candidate_l.end_with?(":#{item_identifier_l}")))
+      end
     end
 
     def prepare_visualization_de_modal_context
@@ -10725,7 +11242,10 @@ class ProjectsController < ApplicationController
           selection_source: (entry['selection_source'] || entry[:selection_source] || run_attrs['selection_source'] || run_attrs[:selection_source] || 'lasso'),
           compose_steps: sanitize_compose_steps(entry['compose_steps'] || entry[:compose_steps]) || sanitize_compose_steps(run_attrs['compose_steps']),
           filter_components: sanitize_filter_components(entry['filter_components'] || entry[:filter_components]) || sanitize_filter_components(run_attrs['filter_components']),
-          plot_context: sanitize_plot_context(entry['plot_context'] || entry[:plot_context]) || sanitize_plot_context(run_attrs['plot_context']),
+          plot_context: selection_plot_context_with_heatmap_params(
+            entry['plot_context'] || entry[:plot_context] || run_attrs['plot_context'],
+            run_attrs
+          ),
           selection_number: begin
             from_entry = entry['selection_number'] || entry[:selection_number]
             if from_entry.present?
@@ -10798,8 +11318,11 @@ class ProjectsController < ApplicationController
             from_annot.presence || sanitize_filter_components(run_attrs_by_run_id.dig(annot.run_id, 'filter_components'))
           end,
           plot_context: begin
-            from_annot = sanitize_plot_context(Basic.safe_parse_json(annot.attrs_json, {})['plot_context'])
-            from_annot.presence || sanitize_plot_context(run_attrs_by_run_id.dig(annot.run_id, 'plot_context'))
+            from_annot = Basic.safe_parse_json(annot.attrs_json, {})['plot_context']
+            selection_plot_context_with_heatmap_params(
+              from_annot.presence || run_attrs_by_run_id.dig(annot.run_id, 'plot_context'),
+              run_attrs_by_run_id[annot.run_id] || {}
+            )
           end,
           selection_number: selection_number_from_metadata_name(annot.name),
           locked: immutable_since_publication?(annot)
@@ -10894,7 +11417,7 @@ class ProjectsController < ApplicationController
 
     def sanitize_selection_source(raw_source)
       source = raw_source.to_s.strip
-      return source if %w[visible lasso compose].include?(source)
+      return source if %w[visible lasso compose heatmap-rect].include?(source)
       'lasso'
     end
 
@@ -10903,7 +11426,7 @@ class ProjectsController < ApplicationController
       return nil unless context.is_a?(Hash)
 
       plot = (context['plot'] || context[:plot]).to_s.strip.downcase
-      return nil unless %w[main secondary].include?(plot)
+      return nil unless %w[main secondary heatmap].include?(plot)
 
       if plot == 'secondary'
         plot_type = (context['plot_type'] || context[:plot_type]).to_s.strip.downcase
@@ -10919,6 +11442,20 @@ class ProjectsController < ApplicationController
           y_axis: y_axis,
           x_scale: x_scale,
           y_scale: y_scale
+        }
+      elsif plot == 'heatmap'
+        heatmap_raw = normalize_selection_nested_hash(context['heatmap'] || context[:heatmap]) || {}
+        run_id = (heatmap_raw['run_id'] || heatmap_raw[:run_id]).to_i
+        parameters = sanitize_heatmap_parameters(heatmap_raw['parameters'] || heatmap_raw[:parameters])
+        {
+          plot: 'heatmap',
+          heatmap: {
+            run_id: run_id > 0 ? run_id : nil,
+            run_num: (heatmap_raw['run_num'] || heatmap_raw[:run_num]).to_s,
+            method_label: (heatmap_raw['method_label'] || heatmap_raw[:method_label]).to_s,
+            loom_file: (heatmap_raw['loom_file'] || heatmap_raw[:loom_file]).to_s,
+            parameters: parameters
+          }.compact
         }
       else
         embedding_raw = normalize_selection_nested_hash(context['embedding'] || context[:embedding]) || {}
@@ -10952,6 +11489,149 @@ class ProjectsController < ApplicationController
       scale = raw_scale.to_s.strip.downcase
       return scale if %w[normal log2 log10].include?(scale)
       'normal'
+    end
+
+    def sanitize_heatmap_parameters(raw_parameters)
+      Array(raw_parameters).filter_map do |entry|
+        row = normalize_selection_nested_hash(entry)
+        next unless row.is_a?(Hash)
+
+        label = (row['label'] || row[:label] || row['key'] || row[:key]).to_s.strip
+        value = (row['value'] || row[:value]).to_s.strip
+        next if label.blank? && value.blank?
+
+        {
+          label: label.presence || 'Parameter',
+          value: value
+        }
+      end.first(50)
+    end
+
+    def enrich_heatmap_plot_context(plot_context, heatmap_run_id: nil)
+      context = sanitize_plot_context(plot_context)
+      return context unless context.is_a?(Hash) && context[:plot] == 'heatmap'
+
+      heatmap = (context[:heatmap] || {}).dup
+      run_id = heatmap_run_id.to_i
+      run_id = heatmap[:run_id].to_i if run_id <= 0
+      return context unless run_id > 0
+
+      run = @project.runs.find_by(id: run_id)
+      return context unless run
+
+      heatmap[:run_id] = run.id
+      heatmap[:run_num] = run.num.to_s if heatmap[:run_num].to_s.blank? && run.num.present?
+      if heatmap[:method_label].to_s.blank?
+        std_method = run.std_method
+        heatmap[:method_label] = std_method&.label.presence || std_method&.name.presence || 'Heatmap'
+      end
+      if heatmap[:loom_file].to_s.blank?
+        loom = heatmap_loom_file_for_run(run)
+        heatmap[:loom_file] = loom.to_s if loom.present?
+      end
+      existing_parameters = Array(heatmap[:parameters])
+      heatmap[:parameters] = heatmap_run_parameter_pairs(run) if existing_parameters.blank?
+
+      context.merge(heatmap: heatmap.compact)
+    end
+
+    def heatmap_run_parameter_pairs(run)
+      return [] unless run
+
+      h_attrs = Basic.safe_parse_json(run.attrs_json, {})
+      return [] unless h_attrs.is_a?(Hash)
+
+      std_method = run.std_method
+      step = run.step
+      method_map = if std_method && step
+                     Basic.get_std_method_attrs(std_method, step)[:h_attrs] || {}
+                   elsif std_method
+                     Basic.safe_parse_json(std_method.attrs_json, {})
+                   else
+                     {}
+                   end
+      method_map = {} unless method_map.is_a?(Hash)
+
+      helpers.preload_gene_set_display_labels!(
+        @project,
+        collection_ids: [h_attrs['global_gene_set_collection_id'], h_attrs['gene_set_id']].compact,
+        item_ids: [h_attrs['global_gene_set_item_id']].compact
+      )
+
+      h_steps = Step.where(id: @project.runs.select(:step_id)).index_by(&:id)
+      attr_keys = helpers.prepare_run_attr_keys_for_display(run, h_attrs, method_map, [], false)
+      pairs = []
+
+      attr_keys.each do |attr|
+        composite_cfg = helpers.run_display_composite_config(attr, method_map, h_attrs)
+        if composite_cfg
+          txt = helpers.composite_run_param_txt(h_attrs, composite_cfg)
+          next if txt.blank?
+          label, value = txt.split(':', 2)
+          pairs << { label: label.to_s.strip.presence || attr.to_s, value: value.to_s.strip }
+          next
+        end
+
+        value = h_attrs[attr]
+        if value.is_a?(Hash) && value['run_id']
+          tmp_run = Run.find_by(id: value['run_id'])
+          tmp_step = tmp_run ? (h_steps[tmp_run.step_id] || tmp_run.step) : nil
+          display_value = if tmp_run && tmp_step
+                            "#{tmp_step.name}" + (tmp_step.multiple_runs? ? " ##{tmp_run.num}" : '')
+                          else
+                            'NA'
+                          end
+          pairs << {
+            label: helpers.form_param_label(attr, method_map).presence || attr.to_s,
+            value: display_value
+          }
+        elsif value.is_a?(Array) && value[0].is_a?(Hash) && value[0]['run_id']
+          display_values = value.map do |entry|
+            tmp_run = Run.find_by(id: entry['run_id'])
+            tmp_step = tmp_run ? (h_steps[tmp_run.step_id] || tmp_run.step) : nil
+            if tmp_run && tmp_step
+              "#{tmp_step.name}" + (tmp_step.multiple_runs? ? " ##{tmp_run.num}" : '')
+            else
+              'NA'
+            end
+          end
+          pairs << {
+            label: helpers.form_param_label(attr, method_map).presence || attr.to_s,
+            value: display_values.join(', ')
+          }
+        elsif method_map[attr]
+          display_value = if value.is_a?(Array) || value.is_a?(Hash)
+                            value.to_json
+                          else
+                            selected = helpers.resolve_select_param_display_value(attr, value, method_map)
+                            if selected.to_s != value.to_s
+                              selected
+                            else
+                              helpers.resolve_scalar_param_display_value(run, attr, value, method_map)
+                            end
+                          end
+          pairs << {
+            label: helpers.form_param_label(attr, method_map).presence || attr.to_s,
+            value: display_value.to_s
+          }
+        end
+      end
+
+      sanitize_heatmap_parameters(pairs)
+    rescue StandardError => e
+      Rails.logger.warn("[heatmap_run_parameter_pairs] run##{run&.id}: #{e.class} - #{e.message}")
+      []
+    end
+
+    def selection_plot_context_with_heatmap_params(raw_context, run_attrs = {})
+      context = sanitize_plot_context(raw_context)
+      heatmap_run_id = (run_attrs['heatmap_run_id'] || run_attrs[:heatmap_run_id]).to_i
+      if context.nil? && heatmap_run_id > 0
+        context = { plot: 'heatmap', heatmap: { run_id: heatmap_run_id } }
+      end
+      return context unless context.is_a?(Hash) && context[:plot] == 'heatmap'
+
+      enrich_heatmap_plot_context(context, heatmap_run_id: heatmap_run_id)
     end
 
     def sanitize_filter_components(raw_components)
@@ -11409,7 +12089,7 @@ class ProjectsController < ApplicationController
     end
 
     {
-      log2fc: pick.call('avglog2fc', 'avglogfc', 'log2fc', 'logfc'),
+      log2fc: pick.call('avglog2fc', 'avglogfc', 'log2fc', 'logfc', 'logfoldchange'),
       p_value: pick.call('pval', 'pvalue', 'pvalues'),
       fdr: pick.call('pvaladj', 'padj', 'fdr', 'adjpval', 'adjp'),
       gene_id: pick.call('ensembl', 'ensemblid', 'accession', 'geneid', 'stableid'),
@@ -11417,8 +12097,45 @@ class ProjectsController < ApplicationController
     }
   end
 
-  def parse_marker_rows_for_category(marker_run, cat_idx)
-    marker_file = project_data_dir + 'markers' + marker_run.id.to_s + "cat_#{cat_idx + 1}.tsv"
+  def marker_output_dir_for_run(marker_run)
+    project_data_dir + 'markers' + marker_run.id.to_s
+  end
+
+  # Java FindMarkers used UI cat_idx + 1. de.v8.py FindAllMarkers uses 1-based index in
+  # output.json list_cats_json (sorted unique loom labels). Resolve by category label when possible.
+  def marker_category_tsv_path(marker_run, cat_idx, annot: nil)
+    output_dir = marker_output_dir_for_run(marker_run)
+    fallback = output_dir + "cat_#{cat_idx.to_i + 1}.tsv"
+
+    annot ||= begin
+      attrs = Basic.safe_parse_json(marker_run.attrs_json, {})
+      groups_id = (attrs['groups_id'] || attrs[:groups_id]).to_i
+      groups_id.positive? ? Annot.find_by(id: groups_id) : nil
+    end
+    annot ||= Annot.find_by(id: marker_run.try(:marker_metadata_annot_id))
+
+    list_cats = Basic.safe_parse_json(annot&.list_cat_json, [])
+    cat_label = list_cats[cat_idx.to_i]
+    if cat_label.present?
+      output_json_path = output_dir + 'output.json'
+      if File.exist?(output_json_path)
+        output = Basic.safe_parse_json(File.read(output_json_path), {})
+        run_cats = output['list_cats_json']
+        if run_cats.is_a?(Array)
+          run_i = run_cats.index { |c| c.to_s == cat_label.to_s }
+          if run_i
+            mapped = output_dir + "cat_#{run_i + 1}.tsv"
+            return mapped if File.exist?(mapped)
+          end
+        end
+      end
+    end
+
+    fallback
+  end
+
+  def parse_marker_rows_for_category(marker_run, cat_idx, annot: nil)
+    marker_file = marker_category_tsv_path(marker_run, cat_idx, annot: annot)
     return { error: 'FindMarkers output is not available yet. Please refresh shortly.' } unless File.exist?(marker_file)
 
     rows_up = []
@@ -12498,6 +13215,43 @@ class ProjectsController < ApplicationController
       meta
     end
 
+    def enrich_heatmap_selection_meta!(meta, loom_file)
+      return unless meta.is_a?(Hash)
+
+      if loom_file.present?
+        embedding_id = Annot.where(project_id: @project.id, filepath: loom_file)
+                            .where(nber_rows: 2)
+                            .order(:id)
+                            .pick(:id)
+        meta['embedding_metadata_id'] = embedding_id if embedding_id
+      end
+
+      col_labels = Array(meta['col_labels'])
+      existing = Array(meta['col_cell_indices'])
+      return if col_labels.empty?
+      return if existing.length == col_labels.length && existing.all? { |entry| entry.is_a?(Array) }
+      # Group-mode columns already ship cell-index lists from the heatmap run.
+      return if meta['column_mode'].to_s == 'group'
+      return if loom_file.blank?
+
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+      loom_path = project_dir + loom_file
+      return unless File.exist?(loom_path)
+
+      cell_ids = H5DataService.get_metadata_vector(loom_path.to_s, '/col_attrs/CellID')
+      return unless cell_ids.is_a?(Array)
+
+      index = {}
+      cell_ids.each_with_index do |cid, i|
+        key = cid.to_s
+        index[key] = i unless index.key?(key)
+      end
+      meta['col_cell_indices'] = col_labels.map do |label|
+        idx = index[label.to_s]
+        idx ? [idx] : []
+      end
+    end
+
     def heatmap_loom_file_for_run(run)
       attrs = Basic.safe_parse_json(run.attrs_json, {})
       item = attrs['input_matrix']
@@ -12517,7 +13271,8 @@ class ProjectsController < ApplicationController
           id: annot.id,
           name: annot.display_name.presence || annot.name,
           path: annot.name,
-          data_type: annot.data_type&.name
+          data_type: annot.data_type&.name,
+          nber_cats: annot.nber_cats.to_i
         }
       end
     end
@@ -12814,28 +13569,44 @@ class ProjectsController < ApplicationController
           readable_for_sets.group_by(&:cell_set_id)
         end
 
+      best_clas = []
       annot_cell_sets.each do |annot_cell_set|
-          metadata = metadata_by_id[annot_cell_set.annot_id]
-          next unless metadata
+        metadata = metadata_by_id[annot_cell_set.annot_id]
+        next unless metadata
 
-          cell_set = annot_cell_set.cell_set
-          next unless cell_set
+        cell_set = annot_cell_set.cell_set
+        next unless cell_set
 
         cla_candidates = cla_by_cell_set_id[cell_set.id]
         next if cla_candidates.blank?
 
         best_cla = cla_candidates.max_by { |cla| [cla_consensus_score(cla), cla.created_at&.to_i || 0] }
-          next unless best_cla
+        next unless best_cla
 
-          category_label = category_label_for(metadata, annot_cell_set.cat_idx, cell_set)
-          next unless category_label.present?
+        category_label = category_label_for(metadata, annot_cell_set.cat_idx, cell_set)
+        next unless category_label.present?
 
-          entry = build_best_cla_entry(best_cla).merge(
-            category_label: category_label,
-            nber_clas: cla_candidates.size
-          )
-          store_best_cla_entry(metadata.id, category_label, entry)
+        best_clas << [metadata.id, category_label, best_cla, cla_candidates.size]
+      end
+
+      cot_ids = best_clas.flat_map do |_metadata_id, _category_label, cla, _nber|
+        parse_cla_field(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids)
+      end.map { |v| v.to_s.to_i }.select(&:positive?).uniq
+      cot_label_by_id = {}
+      if cot_ids.any?
+        CellOntologyTerm.where(id: cot_ids).pluck(:id, :identifier, :name).each do |id, identifier, name|
+          label = name.to_s.strip.presence || identifier.to_s.strip.presence
+          cot_label_by_id[id.to_s] = label if label.present?
         end
+      end
+
+      best_clas.each do |metadata_id, category_label, best_cla, nber_clas|
+        entry = build_best_cla_entry(best_cla, cot_label_by_id: cot_label_by_id).merge(
+          category_label: category_label,
+          nber_clas: nber_clas
+        )
+        store_best_cla_entry(metadata_id, category_label, entry)
+      end
     end
 
     def store_best_cla_entry(metadata_id, category_label, entry)
@@ -12945,10 +13716,20 @@ class ProjectsController < ApplicationController
       nil
     end
 
-    def build_best_cla_entry(cla)
+    def build_best_cla_entry(cla, cot_label_by_id: {})
+      cot_ids = parse_cla_field(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids)
+      ontology_labels = cot_ids.filter_map { |cot_id| cot_label_by_id[cot_id.to_s].presence }
+      display_name =
+        if ontology_labels.any?
+          ontology_labels.join(', ')
+        else
+          cla.name.presence || "Unnamed annotation"
+        end
+
       {
         score: cla_consensus_score(cla),
-        name: cla.name.presence || "Unnamed annotation",
+        name: display_name,
+        free_text_name: cla.name.presence,
         cell_ontology_term_ids: format_cla_list(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids),
         sorted_up_gene_ids: format_cla_list(cla.sorted_up_gene_ids),
         sorted_down_gene_ids: format_cla_list(cla.sorted_down_gene_ids)
@@ -12993,6 +13774,13 @@ class ProjectsController < ApplicationController
       end
 
       candidates.map { |item| item.to_s.strip }.reject(&:blank?)
+    end
+
+    def normalize_cla_id_list(value)
+      parse_cla_field(value)
+        .map { |item| item.to_s.strip }
+        .reject(&:blank?)
+        .uniq
     end
 
     def build_summary_gene_symbol_map
@@ -14415,9 +15203,17 @@ class ProjectsController < ApplicationController
       }
 
       if @step.name == 'heatmap' && run.status_id == 3
+        open_heatmap_path = project_path(@project, view: 'heatmap', run_id: run.id)
         @h_el["card-heatmap"] = {
           card_header: 'Heatmap',
-          card_body: render_to_string(partial: 'projects/views/heatmap_view', locals: { project: @project, run: run })
+          card_body: %(<div class="py-4 px-2 text-center">
+            <p class="text-sm text-gray-600 mb-3">Open the full-page heatmap viewer for this run.</p>
+            <a href="#{open_heatmap_path}"
+               class="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md font-medium text-xs transition-colors cursor-pointer border border-indigo-600 shadow-sm">
+              <i class="fas fa-th"></i>
+              <span>Open heatmap viewer</span>
+            </a>
+          </div>).html_safe
         }
       end
     end

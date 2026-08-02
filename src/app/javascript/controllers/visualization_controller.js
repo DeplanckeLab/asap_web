@@ -10763,13 +10763,50 @@ export default class extends Controller {
       geneId = geneMatch ? geneMatch[1] : null
     }
 
+    const metadataType = kind === 'metadata' ? this.resolveColoringMetadataType(id) : null
+
     return {
       metadataId: id,
       displayName: String(displayName || this.getCurrentColoringDisplayName() || id).trim() || id,
       kind,
+      metadataType,
+      typeLabel: this.coloringHistoryTypeLabel({ kind, metadataType }),
       geneId,
       geneSetItemId
     }
+  }
+
+  resolveColoringMetadataType(metadataId) {
+    const id = String(metadataId || '').trim()
+    if (!id) return null
+
+    const button = this.findColoringButtonForMetadataId(id)
+    const fromButton = String(button?.dataset?.metadataType || '').trim()
+    if (fromButton) return fromButton
+
+    const vector = this.loadedMetadataVectors?.[id] || this.currentMetadataVector
+    if (vector && String(vector.id || '') === id) {
+      const fromVector = String(vector.data_type || vector.dataType || '').trim()
+      if (fromVector) return fromVector
+    }
+
+    const container = document.querySelector(
+      `.metadata-item[data-metadata-id="${this.escapeAttributeSelectorValue(id)}"], ` +
+      `[data-metadata-id="${this.escapeAttributeSelectorValue(id)}"][data-metadata-type]`
+    )
+    const fromContainer = String(container?.dataset?.metadataType || '').trim()
+    return fromContainer || null
+  }
+
+  coloringHistoryTypeLabel(entry) {
+    const kind = String(entry?.kind || 'metadata')
+    if (kind === 'gene') return 'Gene expression'
+    if (kind === 'gene_set') return 'Gene set score'
+
+    const metadataType = String(entry?.metadataType || '').trim().toUpperCase()
+    if (metadataType === 'NUMERIC') return 'Continuous metadata'
+    if (metadataType === 'DISCRETE' || metadataType === 'STRING') return 'Categorical metadata'
+    return 'Metadata'
   }
 
   serializeMetadataGradientsForCheckpoint() {
@@ -10821,6 +10858,8 @@ export default class extends Controller {
       metadataId: String(entry?.metadataId || ''),
       displayName: String(entry?.displayName || entry?.metadataId || ''),
       kind: entry?.kind || 'metadata',
+      metadataType: entry?.metadataType ? String(entry.metadataType) : null,
+      typeLabel: entry?.typeLabel ? String(entry.typeLabel) : this.coloringHistoryTypeLabel(entry),
       geneId: entry?.geneId ? String(entry.geneId) : null,
       geneSetItemId: entry?.geneSetItemId ? String(entry.geneSetItemId) : null
     })).filter((entry) => entry.metadataId)
@@ -10839,10 +10878,16 @@ export default class extends Controller {
       const metadataId = String(entry?.metadataId || '').trim()
       if (!metadataId || seen.has(metadataId)) return
       seen.add(metadataId)
+      const kind = entry?.kind || 'metadata'
+      const metadataType = entry?.metadataType ? String(entry.metadataType) : null
       this.coloringHistory.push({
         metadataId,
         displayName: String(entry?.displayName || metadataId).trim() || metadataId,
-        kind: entry?.kind || 'metadata',
+        kind,
+        metadataType,
+        typeLabel: entry?.typeLabel
+          ? String(entry.typeLabel)
+          : this.coloringHistoryTypeLabel({ kind, metadataType }),
         geneId: entry?.geneId ? String(entry.geneId) : null,
         geneSetItemId: entry?.geneSetItemId ? String(entry.geneSetItemId) : null
       })
@@ -10863,6 +10908,8 @@ export default class extends Controller {
       metadataId,
       displayName: String(snapshot.displayName || metadataId),
       kind: snapshot.kind || 'metadata',
+      metadataType: snapshot.metadataType || null,
+      typeLabel: snapshot.typeLabel || this.coloringHistoryTypeLabel(snapshot),
       geneId: snapshot.geneId || null,
       geneSetItemId: snapshot.geneSetItemId || null
     })
@@ -10956,8 +11003,12 @@ export default class extends Controller {
       button.type = 'button'
       button.dataset.historyIndex = String(index)
       button.style.cssText = 'display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; cursor: pointer; font-size: 12px; color: #374151; border-bottom: 1px solid #f3f4f6;'
-      button.textContent = entry.displayName || entry.metadataId
-      button.title = entry.metadataId || ''
+      const typeLabel = entry.typeLabel || this.coloringHistoryTypeLabel(entry)
+      const valueLabel = entry.displayName || entry.metadataId || ''
+      button.innerHTML =
+        `<span style="color:#6b7280;">${this.escapeHtml(typeLabel)}:</span> ` +
+        `<span style="color:#111827;">${this.escapeHtml(valueLabel)}</span>`
+      button.title = typeLabel ? `${typeLabel}: ${valueLabel}` : valueLabel
       button.addEventListener('mouseenter', () => { button.style.backgroundColor = '#f3f4f6' })
       button.addEventListener('mouseleave', () => { button.style.backgroundColor = '' })
       button.addEventListener('click', (event) => this.applyColoringHistoryEntry(event))
@@ -16427,12 +16478,72 @@ export default class extends Controller {
     return value ? value.charAt(0).toUpperCase() + value.slice(1) : 'Unknown'
   }
 
+  heatmapSelectionRunLabel(item) {
+    if (!item || String(item.selectionSource || '') !== 'heatmap-rect') return ''
+    const plotContext = item.plotContext || {}
+    const heatmap = plotContext.heatmap || {}
+    const runNum = String(heatmap.run_num || heatmap.runNum || '').trim()
+    if (runNum) return `Heatmap #${runNum}`
+    const runId = String(heatmap.run_id || heatmap.runId || '').trim()
+    return runId ? `Heatmap #${runId}` : 'Heatmap'
+  }
+
+  heatmapSelectionRunId(item) {
+    if (!item || String(item.selectionSource || '') !== 'heatmap-rect') return ''
+    const plotContext = item.plotContext || {}
+    const heatmap = plotContext.heatmap || {}
+    return String(heatmap.run_id || heatmap.runId || '').trim()
+  }
+
+  heatmapSelectionPageUrl(item) {
+    const runId = this.heatmapSelectionRunId(item)
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!runId || !projectIdentifier) return ''
+    return `/projects/${encodeURIComponent(projectIdentifier)}?view=heatmap&run_id=${encodeURIComponent(runId)}`
+  }
+
+  heatmapSelectionOriginHtml(item) {
+    const label = this.heatmapSelectionRunLabel(item)
+    if (!label) return ''
+    const url = this.heatmapSelectionPageUrl(item)
+    if (!url) return this.escapeHtml(label)
+    return `<a href="${this.escapeHtml(url)}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline;" title="Open heatmap in a new tab" onclick="event.stopPropagation()">${this.escapeHtml(label)}</a>`
+  }
+
+  renderHeatmapParametersHtml(heatmap) {
+    const parameters = Array.isArray(heatmap?.parameters) ? heatmap.parameters : []
+    if (!parameters.length) return ''
+    const rows = parameters.map((entry) => {
+      const label = String(entry?.label || entry?.key || 'Parameter')
+      const value = String(entry?.value ?? '')
+      return `<div style="font-size:11px;color:#374151;margin-top:2px;"><span style="color:#6b7280;">${this.escapeHtml(label)}:</span> ${this.escapeHtml(value)}</div>`
+    }).join('')
+    return `
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid #e5e7eb;">
+        <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:4px;">Heatmap parameters</div>
+        ${rows}
+      </div>
+    `
+  }
+
   renderSelectionPlotContextDetails(plotContext) {
     if (!plotContext || typeof plotContext !== 'object') {
       return ''
     }
 
     const plotSide = String(plotContext.plot || '').toLowerCase()
+    if (plotSide === 'heatmap') {
+      const heatmap = plotContext.heatmap || {}
+      const runNum = String(heatmap.run_num || heatmap.runNum || '').trim()
+      const runId = String(heatmap.run_id || heatmap.runId || '').trim()
+      const method = String(heatmap.method_label || heatmap.methodLabel || 'Heatmap').trim()
+      const runLabel = runNum ? `#${runNum}` : (runId ? String(runId) : '')
+      return `
+        <div style="font-size:11px;color:#6b7280;margin-top:2px;">Heatmap run: ${this.escapeHtml(runLabel || 'unknown')}</div>
+        <div style="font-size:11px;color:#6b7280;margin-top:2px;">Method: ${this.escapeHtml(method || 'Heatmap')}</div>
+        ${this.renderHeatmapParametersHtml(heatmap)}
+      `
+    }
     if (plotSide === 'secondary') {
       const plotType = this.formatSelectionPlotTypeLabel(plotContext.plot_type || plotContext.plotType)
       const xAxis = plotContext.x_axis || plotContext.xAxis || {}
@@ -16568,7 +16679,11 @@ export default class extends Controller {
       lockBadge.style.display = isLocked ? 'inline-flex' : 'none'
     }
     if (countLabel) {
-      countLabel.textContent = `${item.selectedCount} cells${createdAt ? ` - ${createdAt}` : ''}`
+      const heatmapOriginHtml = this.heatmapSelectionOriginHtml(item)
+      const parts = [`${this.escapeHtml(String(item.selectedCount))} cells`]
+      if (heatmapOriginHtml) parts.push(heatmapOriginHtml)
+      if (createdAt) parts.push(this.escapeHtml(createdAt))
+      countLabel.innerHTML = parts.join(' - ')
     }
     if (statusSlot) {
       statusSlot.innerHTML = this.selectionStatusBadgeHtml(item.status)
@@ -16778,6 +16893,7 @@ export default class extends Controller {
     if (normalizedType === 'compose') return 'Composed sets'
     if (normalizedType === 'visible') return 'Visible cells sets'
     if (normalizedType === 'lasso') return 'Lasso sets'
+    if (normalizedType === 'heatmap-rect') return 'Heatmap sets'
     return 'All type sets'
   }
 
@@ -16886,13 +17002,13 @@ export default class extends Controller {
     const deButton = document.getElementById('de-selection-btn')
     if (!deButton) return
 
-    const hasEnoughSelections = Array.isArray(items) && items.length >= 1
-    deButton.disabled = !hasEnoughSelections
-    deButton.style.opacity = hasEnoughSelections ? '1' : '0.45'
-    deButton.style.cursor = hasEnoughSelections ? 'pointer' : 'not-allowed'
-    deButton.title = hasEnoughSelections
-      ? `Differential expression (selected vs complementary)`
-      : `Requires at least 1 saved ${this.getColSetLabel({ plural: false })}`
+    const hasSelections = Array.isArray(items) && items.length >= 1
+    deButton.disabled = false
+    deButton.style.opacity = '1'
+    deButton.style.cursor = 'pointer'
+    deButton.title = hasSelections
+      ? 'Differential expression (run new DE or browse existing results)'
+      : 'Browse existing differential expression results'
   }
 
   preventSavedSelectionRowClick(event) {
@@ -17039,6 +17155,9 @@ export default class extends Controller {
     if (normalizedSource === 'visible') {
       return '<i class="fas fa-filter" title="Visible filtered cells selection" style="font-size:11px;color:#059669;flex:0 0 auto;"></i>'
     }
+    if (normalizedSource === 'heatmap-rect') {
+      return '<i class="fas fa-th" title="Heatmap selection" style="font-size:11px;color:#ea580c;flex:0 0 auto;"></i>'
+    }
     return '<span title="Lasso selection" style="display:inline-flex;align-items:center;justify-content:center;color:#2563eb;flex:0 0 auto;line-height:0;"><svg width="12" height="12" viewBox="0 0 496.149 496.149" style="fill: currentColor;" xmlns="http://www.w3.org/2000/svg"><g><path d="M250.201,81.608c97.43,0,179.746,43.434,179.746,94.834c0,12.449-4.934,24.449-13.645,35.465l35.402,10.404 c8.613-14.227,13.533-29.629,13.533-45.869c0-72.965-94.463-130.123-215.037-130.123S35.164,103.477,35.164,176.442 c0,26.918,12.936,51.643,35.189,72.172c-6.951,4.502-13.756,10.502-18.836,18.984c-10.453,17.449-10.66,39.094-0.645,64.35 c9.433,23.791,7.125,32.582,5.693,35.242c-3.354,6.322-18.127,9.514-32.385,12.596c-3.486,0.758-7.035,1.531-10.582,2.371 c-9.484,2.24-15.353,11.725-13.129,21.225c1.902,8.111,9.164,13.596,17.16,13.596c1.34,0,2.709-0.16,4.068-0.467 c3.32-0.791,6.656-1.518,9.932-2.227c21.111-4.564,45.016-9.742,56.076-30.482c8.486-15.902,7.195-36.516-4.031-64.85 c-5.725-14.435-6.385-25.564-1.947-33.098c4.965-8.451,16.141-12.207,22.19-13.467c35.705,19.902,82.85,32.354,135.592,33.869 l-10.504-35.74c-87.867-5.758-158.555-46.447-158.555-94.074C70.451,125.041,152.772,81.608,250.201,81.608z"/><path d="M487.573,269.629l-222.049-65.271c-1.115-0.338-2.244-0.482-3.373-0.482c-3.113,0-6.158,1.227-8.434,3.5 c-3.096,3.08-4.258,7.613-3.018,11.789l65.271,222.102c1.34,4.613,5.352,7.982,10.143,8.5c0.453,0.047,0.891,0.064,1.322,0.064 c4.309,0,8.307-2.338,10.439-6.162l54.076-98.043l98.025-54.094c4.225-2.322,6.629-6.951,6.1-11.727 C495.561,275.018,492.201,271,487.573,269.629z"/></g></svg></span>'
   }
 
@@ -17064,7 +17183,7 @@ export default class extends Controller {
   openDeSelectionModal() {
     const loomFile = this.getCurrentLoomFileForRequest()
     const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
-    if (items.length < 1) return
+    const canRunNewDe = items.length >= 1
 
     window.visualizationController = this
     const overlay = document.getElementById('de-selection-overlay')
@@ -17073,6 +17192,12 @@ export default class extends Controller {
     const runButton = document.getElementById('de-selection-run-btn')
     if (runButton) {
       runButton.onclick = (event) => this.submitDeSelectionRun(event)
+      runButton.disabled = !canRunNewDe
+      runButton.style.opacity = canRunNewDe ? '1' : '0.45'
+      runButton.style.cursor = canRunNewDe ? 'pointer' : 'not-allowed'
+      runButton.title = canRunNewDe
+        ? 'Run differential expression'
+        : `Requires at least 1 saved ${this.getColSetLabel({ plural: false })}`
     }
     this.showDeRunFeedback('')
 
@@ -17080,6 +17205,27 @@ export default class extends Controller {
     this.populateDeSelectionOperands()
     this.populateDeSelectionMethods()
     this.updateDeSelectionPreview()
+    this.setDeModalRunTabEnabled(canRunNewDe)
+    this.switchDeModalTab(canRunNewDe ? 'run' : 'results')
+  }
+
+  setDeModalRunTabEnabled(enabled) {
+    const runTab = document.getElementById('de-modal-tab-run')
+    if (!runTab) return
+    runTab.disabled = !enabled
+    runTab.style.opacity = enabled ? '1' : '0.45'
+    runTab.style.cursor = enabled ? 'pointer' : 'not-allowed'
+    runTab.title = enabled
+      ? 'Run differential expression'
+      : `Requires at least 1 saved ${this.getColSetLabel({ plural: false })}`
+    if (!enabled) {
+      runTab.onclick = (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+    } else {
+      runTab.onclick = () => this.switchDeModalTab('run')
+    }
   }
 
   closeDeSelectionModal() {
@@ -18256,9 +18402,11 @@ export default class extends Controller {
     const hasFilterDetails = Array.isArray(item.filterComponents) && item.filterComponents.length > 0
     const sourceText = item.selectionSource === 'compose'
       ? 'Composed selection'
-      : (item.selectionSource === 'lasso'
-          ? (hasFilterDetails ? 'Lasso selection with filters' : 'Lasso selection without filters')
-          : 'Visible filtered cells selection')
+      : (item.selectionSource === 'heatmap-rect'
+          ? 'Heatmap selection'
+          : (item.selectionSource === 'lasso'
+              ? (hasFilterDetails ? 'Lasso selection with filters' : 'Lasso selection without filters')
+              : 'Visible filtered cells selection'))
 
     summary.innerHTML = `
       <div style="font-size:13px;color:#111827;font-weight:600;word-break:break-word;">${this.escapeHtml(selectionLabel)}</div>

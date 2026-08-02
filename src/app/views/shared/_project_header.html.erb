@@ -254,7 +254,9 @@
                           "Sign in and ask the project owner for Analyze permission in project sharing settings for this private project.#{clone_solution_text}"
                         end
                       when 'Annotate/Comment'
-                        if @project.public?
+                        if !@project.single_cell?
+                          "Annotation is available only for single-cell transcriptomics projects.#{clone_solution_text}"
+                        elsif @project.public?
                           "Sign in and use an account linked to ORCID.#{clone_solution_text}"
                         else
                           "Sign in and use an account linked to ORCID, then ask the project owner for Analyze permission in project sharing settings for this private project.#{clone_solution_text}"
@@ -279,8 +281,9 @@
                         when 'Analyze'
                           blocked_reasons << (@project.public? ? 'Analyze permission was not granted by the project owner.' : 'Project is private and Analyze permission was not granted by the project owner.')
                         when 'Annotate/Comment'
-                          blocked_reasons << 'ORCID ID missing in the user profile.' if user_signed_in? && current_user&.orcid_user_id.blank?
-                          blocked_reasons << 'Project is private and Analyze permission is required for annotation.' if !@project.public? && !analyzable?(@project)
+                          blocked_reasons << 'Annotation is available only for single-cell transcriptomics projects.' unless @project.single_cell?
+                          blocked_reasons << 'ORCID ID missing in the user profile.' if @project.single_cell? && user_signed_in? && current_user&.orcid_user_id.blank?
+                          blocked_reasons << 'Project is private and Analyze permission is required for annotation.' if @project.single_cell? && !@project.public? && !analyzable?(@project)
                         when 'Clone'
                           blocked_reasons << (@project.public? ? 'Clone/Download permission was not granted by the project owner.' : 'Project is private and Export permission was not granted by the project owner.')
                         when 'Edit'
@@ -294,6 +297,7 @@
                         when 'Analyze'
                           granted_reasons << (admin? ? 'Admin access.' : (@project.public? ? 'Project access is available with current sharing rights.' : 'Analyze permission is granted for this private project.'))
                         when 'Annotate/Comment'
+                          granted_reasons << 'Project type is single-cell transcriptomics.'
                           granted_reasons << 'ORCID ID is linked in the user profile.' if user_signed_in? && current_user&.orcid_user_id.present?
                           granted_reasons << (@project.public? ? 'Project is public.' : 'Analyze permission is granted for this private project.')
                         when 'Clone'
@@ -381,7 +385,7 @@
             <%= link_to project_path(@project, view: 'visualization'),
                 class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'visualization' ? 'bg-gray-100 font-medium' : ''}",
                 data: { guided_tour: "project-nav-visualization" } do %>
-              <i class="fas fa-chart-line text-lg mr-3 <%= has_visualization_embeddings ? 'text-emerald-500' : 'text-white' %>"></i>
+              <span class="inline-flex text-lg mr-3 <%= has_visualization_embeddings ? 'text-emerald-500' : 'text-white' %>"><%= render 'shared/scatter_plot_icon' %></span>
               Visualization
             <% end %>
             
@@ -534,7 +538,7 @@
         <%= link_to project_path(@project, view: 'summary'),
             class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'summary' ? 'bg-gray-700' : ''}", title: "Summary", data: { guided_tour: "project-nav-summary" } do %><i class="fas fa-info-circle text-lg"></i><% end %>
         <%= link_to project_path(@project, view: 'visualization'),
-            class: "p-2 rounded-lg hover:bg-gray-700 #{nav_visualization_icon_class} #{@view_type == 'visualization' ? 'bg-gray-700' : ''}", title: "Visualization", data: { guided_tour: "project-nav-visualization" } do %><i class="fas fa-chart-line text-lg"></i><% end %>
+            class: "p-2 rounded-lg hover:bg-gray-700 #{nav_visualization_icon_class} #{@view_type == 'visualization' ? 'bg-gray-700' : ''}", title: "Visualization", data: { guided_tour: "project-nav-visualization" } do %><span class="inline-flex text-lg"><%= render 'shared/scatter_plot_icon' %></span><% end %>
         <%= link_to project_path(@project, view: 'analysis'),
             class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'analysis' ? 'bg-gray-700' : ''}", title: "Analysis", data: { guided_tour: "project-nav-analysis" } do %><i class="fas fa-sitemap text-lg"></i><% end %>
         <%= link_to project_path(@project, view: 'data'),

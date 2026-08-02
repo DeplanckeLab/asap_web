@@ -74,7 +74,14 @@ class SelectionMetadataImportJob < ApplicationJob
       cat_aliases_json: {
         user_ids: { '0' => run.user_id, '1' => run.user_id },
         names: { '0' => unselected_name, '1' => selected_name }
-      }.to_json
+      }.to_json,
+      attrs_json: {
+        selection_source: attrs['selection_source'],
+        plot_context: attrs['plot_context'],
+        heatmap_run_id: attrs['heatmap_run_id'],
+        compose_steps: attrs['compose_steps'],
+        filter_components: attrs['filter_components']
+      }.compact.to_json
     )
 
     [['0', unselected_name], ['1', selected_name]].each do |cat, label|

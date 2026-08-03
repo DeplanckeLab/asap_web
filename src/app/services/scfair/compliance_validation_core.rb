@@ -70,6 +70,12 @@ module Scfair
         project_compliance: @project_compliance
       ).call
       metadata_general = MetadataGeneralValidator.new(field_values: field_values, format: format).call
+      consensus_official = ConsensusOfficialMetadataValidator.new(
+        file_path: @file_path,
+        field_values: field_values,
+        format: format,
+        project_compliance: @project_compliance
+      ).call
       tick('ensembl', 'Checking Ensembl metadata', 84, format: format)
       schema_version_check = schema_version_evaluation(field_values, format)
       schema_reference_check = schema_reference_evaluation(field_values, format)
@@ -107,7 +113,8 @@ module Scfair
         organism_specific[:warnings] +
         extensions[:warnings] +
         schema_version_check[:warnings] +
-        schema_reference_check[:warnings]
+        schema_reference_check[:warnings] +
+        consensus_official[:warnings]
       ).uniq
       valid_checks = (
         base_result.valid_checks +

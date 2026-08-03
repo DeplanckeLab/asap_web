@@ -388,6 +388,14 @@
               <span class="inline-flex text-lg mr-3 <%= has_visualization_embeddings ? 'text-emerald-500' : 'text-white' %>"><%= render 'shared/scatter_plot_icon' %></span>
               Visualization
             <% end %>
+
+            <!-- Annotations -->
+            <%= link_to project_path(@project, view: 'annotations'),
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'annotations' ? 'bg-gray-100 font-medium' : ''}",
+                data: { guided_tour: "project-nav-annotations" } do %>
+              <i class="fas fa-bookmark text-lg mr-3 text-emerald-500"></i>
+              Annotations
+            <% end %>
             
             <!-- Analysis -->
               <%= link_to project_path(@project, view: 'analysis'),
@@ -539,6 +547,8 @@
             class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'summary' ? 'bg-gray-700' : ''}", title: "Summary", data: { guided_tour: "project-nav-summary" } do %><i class="fas fa-info-circle text-lg"></i><% end %>
         <%= link_to project_path(@project, view: 'visualization'),
             class: "p-2 rounded-lg hover:bg-gray-700 #{nav_visualization_icon_class} #{@view_type == 'visualization' ? 'bg-gray-700' : ''}", title: "Visualization", data: { guided_tour: "project-nav-visualization" } do %><span class="inline-flex text-lg"><%= render 'shared/scatter_plot_icon' %></span><% end %>
+        <%= link_to project_path(@project, view: 'annotations'),
+            class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'annotations' ? 'bg-gray-700' : ''}", title: "Annotations", data: { guided_tour: "project-nav-annotations" } do %><i class="fas fa-bookmark text-lg"></i><% end %>
         <%= link_to project_path(@project, view: 'analysis'),
             class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'analysis' ? 'bg-gray-700' : ''}", title: "Analysis", data: { guided_tour: "project-nav-analysis" } do %><i class="fas fa-sitemap text-lg"></i><% end %>
         <%= link_to project_path(@project, view: 'data'),

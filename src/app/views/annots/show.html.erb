@@ -179,6 +179,18 @@
             </div>
           <% end %>
           <div>
+            <span class="text-sm font-medium text-gray-500">Created by</span>
+            <p class="mt-1 text-sm text-gray-900">
+              <%= user_display_name(@annot.user || @annot.run&.user, current_user: current_user) %>
+            </p>
+          </div>
+          <div>
+            <span class="text-sm font-medium text-gray-500">Created</span>
+            <p class="mt-1 text-sm text-gray-900">
+              <%= @annot.created_at ? @annot.created_at.strftime("%b %d, %Y %H:%M") : '-' %>
+            </p>
+          </div>
+          <div>
             <span class="text-sm font-medium text-gray-500">Data origin</span>
             <div class="mt-2">
               <% if @annot.imported %>

@@ -6,6 +6,7 @@ class Cla < ApplicationRecord
   belongs_to :cla_source, optional: true
   belongs_to :user, optional: true
   belongs_to :project, optional: true
+  belongs_to :ontology_term_type, optional: true
   has_many :cla_votes, dependent: :destroy
 
   scope :active, -> { where(obsolete: [false, nil]) }

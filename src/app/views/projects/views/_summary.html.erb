@@ -129,12 +129,33 @@ cp.comments.each do |c|
 summary_checkpoint_comments << { checkpoint_title: cp.title, body: (c['body'] || c[:body] || c['comment']).to_s, user_name: (c['user_name'] || c[:user_name]).to_s, created_at: (c['created_at'] || c[:created_at]).to_s }
 end
 end
-summary_cla_records = Cla.active.where(project_id: @project.id).includes(:annot, :cell_set, :user, :cla_source).order(created_at: :desc).to_a
-summary_annotation_options = summary_cla_records.group_by(&:annot_id).map do |aid, clas|
-annot = clas.first&.annot; next unless annot; { id: aid, label: (annot.display_name.presence || annot.name.to_s), count: clas.length }
-end.compact.sort_by { |e| e[:label].to_s.downcase }
-summary_default_annotation_id = summary_annotation_options.first&.dig(:id)
+summary_cla_records = Cla.active.where(project_id: @project.id).includes(:annot, :cell_set, :user, :cla_source, :ontology_term_type).order(created_at: :desc).to_a
+summary_annotation_type_options = summary_cla_records.group_by(&:ontology_term_type_id).map do |tid, clas|
+  ott = clas.first&.ontology_term_type
+  label = if tid.nil?
+            'Unspecified'
+          else
+            ott&.label.presence || ott&.name.presence || "Type #{tid}"
+          end
+  { id: tid.nil? ? '' : tid.to_s, label: label, count: clas.length, tag: ott&.name.to_s }
+end.sort_by { |e| [e[:id].blank? ? 1 : 0, e[:label].to_s.downcase] }
+summary_default_annotation_type_id = summary_annotation_type_options.find { |e| e[:id].present? }&.dig(:id) ||
+                                     summary_annotation_type_options.first&.dig(:id)
+summary_annotation_metadata_by_type = {}
+summary_cla_records.group_by { |cla| cla.ontology_term_type_id.nil? ? '' : cla.ontology_term_type_id.to_s }.each do |type_id, clas|
+  metadata_entries = clas.group_by(&:annot_id).filter_map do |aid, type_clas|
+    annot = type_clas.first&.annot
+    next unless annot
+    { id: aid.to_s, label: (annot.display_name.presence || annot.name.to_s), count: type_clas.length }
+  end
+  summary_annotation_metadata_by_type[type_id] = metadata_entries.sort_by { |e| e[:label].to_s.downcase }
+end
+summary_default_annotation_id = ''
+summary_gene_info_by_id = @summary_gene_info_by_stable_id || {}
 summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
+summary_cot_info_by_id = @summary_cot_info_by_id || {}
+summary_cot_label_by_id = @summary_cot_label_by_id || {}
+summary_search_gene_url = search_gene_project_path(@project)
 %>
 <div class="adaptive-dashboard" data-guided-tour="project-summary-dashboard">
 <% if summary_archive_data_unavailable %>
@@ -435,15 +456,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
 
 </div>
 
-<%# Draggable Details Popover %>
-<!--<div id="summary-visual-details-popover" class="hidden fixed z-50 w-[min(64rem,95vw)] max-h-[85vh] bg-white rounded-lg border shadow-2xl flex flex-col overflow-hidden">
-<div id="summary-visual-details-header" class="flex items-center justify-between px-4 py-3 border-b bg-gray-50 cursor-move"><h3 id="summary-visual-details-title" class="font-bold text-gray-900">Details</h3><button id="summary-visual-details-close-button" type="button" class="text-gray-400 hover:text-red-500"><i class="fas fa-times"></i></button></div>
-<div class="p-4 flex-1 overflow-auto">
-<div data-summary-detail-section="embeddings" class="hidden"><table class="min-w-full"><thead class="bg-gray-50"><tr><th class="px-2 py-2 text-left">File</th><th class="px-2 py-2 text-left">Name</th></tr></thead><tbody><% summary_embedding_records.each do |e| %><tr class="border-b"><td class="px-2 py-2 text-gray-500"><%= e.filepath.split('/').last %></td><td class="px-2 py-2 font-bold"><%= e.name %></td></tr><% end %></tbody></table></div>
-<div data-summary-detail-section="annotations" class="hidden"><div id="summary-annotations-main-view"><select id="summary-annotations-metadata-select" class="w-full max-w-md p-2 border rounded mb-4"><% summary_annotation_options.each do |o| %><option value="<%= o[:id] %>"><%= o[:label] %> (<%= o[:count] %>)</option><% end %></select><table class="min-w-full"><thead><tr class="bg-gray-50 text-gray-500 font-bold"><th class="px-2 py-2 text-left">Label</th><th class="px-2 py-2 text-left">Votes</th></tr></thead><tbody><% summary_cla_records.each do |cla| %><tr data-summary-annotation-row data-annot-id="<%= cla.annot_id %>" class="border-b"><td class="px-2 py-2 font-bold"><%= cla.name || cla.cat %></td><td class="px-2 py-2 font-bold text-gray-500">+<%= cla.nber_agree %> / -<%= cla.nber_disagree %></td></tr><% end %></tbody></table></div></div>
-<div data-summary-detail-section="checkpoints" class="hidden"><% summary_checkpoint_records.each do |cp| %><div class="border-b py-3"><p class="font-bold"><%= cp.title %></p></div><% end %></div>
-<div data-summary-detail-section="comments" class="hidden"><% summary_checkpoint_comments.each do |com| %><div class="border-b py-3"><p class="font-medium">"<%= com[:body] %>"</p></div><% end %></div>
--->
+<%# Obsolete commented popover markup removed (ERB inside HTML comments still executes). %>
  <% if summary_clone_lineage_projects.any? %>
       <div id="summary-lineage-popover" class="hidden fixed z-50 w-[min(56rem,95vw)] max-h-[85vh] bg-white rounded-lg border border-gray-200 shadow-xl flex flex-col overflow-hidden">
         <div id="summary-lineage-header" class="flex items-center justify-between px-4 py-3 border-b border-gray-200 cursor-move select-none">
@@ -516,7 +529,12 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
       </div>
     </div>
 
-    <div id="summary-visual-details-popover" data-guided-tour="summary-collab-popover" data-project-key="<%= @project.key %>" data-current-project-id="<%= @project.id %>" class="hidden fixed z-50 w-[min(64rem,95vw)] max-h-[85vh] bg-white rounded-lg border border-gray-200 shadow-xl flex flex-col overflow-hidden">
+    <div id="summary-visual-details-popover"
+         data-guided-tour="summary-collab-popover"
+         data-project-key="<%= @project.key %>"
+         data-current-project-id="<%= @project.id %>"
+         data-search-gene-url="<%= summary_search_gene_url %>"
+         class="hidden fixed z-50 w-[min(64rem,95vw)] max-h-[85vh] bg-white rounded-lg border border-gray-200 shadow-xl flex flex-col overflow-hidden">
       <div id="summary-visual-details-header" class="flex items-center justify-between px-4 py-3 border-b border-gray-200 cursor-move select-none">
         <div class="flex items-center gap-2 min-w-0">
           <span id="summary-visual-details-drag-handle" class="inline-flex items-center text-gray-400 cursor-move select-none" title="Drag">
@@ -631,7 +649,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
         </div>
 
         <div data-summary-detail-section="annotations" class="hidden">
-          <% if summary_annotation_options.any? %>
+          <% if summary_annotation_type_options.any? %>
             <% parse_summary_cla_field = lambda do |value|
                  next [] if value.blank?
                  text = value.to_s.strip
@@ -655,22 +673,58 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
 
                  candidates.map { |item| item.to_s.strip }.reject(&:blank?)
                end %>
-            <div id="summary-annotations-main-view">
-              <div class="mb-3">
-              <label for="summary-annotations-metadata-select" class="block text-xs font-medium text-gray-600 mb-1">Metadata</label>
-              <select id="summary-annotations-metadata-select" class="block w-full max-w-md px-2 py-1 text-xs border border-gray-300 rounded">
-                <% summary_annotation_options.each do |metadata_option| %>
-                  <option value="<%= metadata_option[:id] %>" <%= metadata_option[:id] == summary_default_annotation_id ? 'selected' : '' %>>
-                    <%= metadata_option[:label] %> (<%= number_with_delimiter(metadata_option[:count]) %>)
-                  </option>
-                <% end %>
-              </select>
+            <div id="summary-annotations-main-view"
+                 data-annotation-metadata-by-type="<%= ERB::Util.html_escape(summary_annotation_metadata_by_type.to_json) %>">
+              <div class="mb-3 space-y-3">
+                <div class="flex flex-col sm:flex-row gap-3 sm:items-end">
+                  <div class="min-w-0 flex-1 max-w-md">
+                    <label for="summary-annotations-type-select" class="block text-xs font-medium text-gray-600 mb-1">Annotation type</label>
+                    <select id="summary-annotations-type-select" class="block w-full px-2 py-1 text-xs border border-gray-300 rounded">
+                      <% summary_annotation_type_options.each do |type_option| %>
+                        <option value="<%= type_option[:id] %>"
+                                data-tag="<%= type_option[:tag] %>"
+                                <%= type_option[:id].to_s == summary_default_annotation_type_id.to_s ? 'selected' : '' %>>
+                          <%= type_option[:label] %> (<%= number_with_delimiter(type_option[:count]) %>)
+                        </option>
+                      <% end %>
+                    </select>
+                  </div>
+                  <div class="shrink-0">
+                    <%= link_to "Open Annotations",
+                                project_path(@project, view: 'annotations'),
+                                class: "inline-flex items-center px-2.5 py-1 text-xs font-medium rounded border border-gray-300 bg-white text-gray-700 hover:bg-gray-50" %>
+                  </div>
+                </div>
+                <div class="flex flex-col sm:flex-row gap-3 sm:items-end">
+                  <div class="min-w-0 flex-1 max-w-md">
+                    <label for="summary-annotations-metadata-select" class="block text-xs font-medium text-gray-600 mb-1">Metadata</label>
+                    <select id="summary-annotations-metadata-select" class="block w-full px-2 py-1 text-xs border border-gray-300 rounded">
+                      <option value="" selected>All</option>
+                      <% (summary_annotation_metadata_by_type[summary_default_annotation_type_id.to_s] || []).each do |metadata_option| %>
+                        <option value="<%= metadata_option[:id] %>">
+                          <%= metadata_option[:label] %> (<%= number_with_delimiter(metadata_option[:count]) %>)
+                        </option>
+                      <% end %>
+                    </select>
+                  </div>
+                  <div class="min-w-0 flex-1 max-w-md">
+                    <label for="summary-annotations-text-filter" class="block text-xs font-medium text-gray-600 mb-1">Filter</label>
+                    <input type="search"
+                           id="summary-annotations-text-filter"
+                           class="block w-full px-2 py-1 text-xs border border-gray-300 rounded"
+                           placeholder="Filter rows by any cell text"
+                           autocomplete="off"
+                           spellcheck="false">
+                  </div>
+                </div>
               </div>
             <div class="overflow-x-auto">
               <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
                   <tr>
+                    <th data-summary-annotation-metadata-col class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Metadata</th>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cluster/category</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Ontology term(s)</th>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Label</th>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Origin</th>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cell set</th>
@@ -685,12 +739,38 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
                   <% summary_cla_records.each do |cla| %>
                     <% up_genes = parse_summary_cla_field.call(cla.sorted_up_gene_ids.presence || cla.up_gene_ids) %>
                     <% down_genes = parse_summary_cla_field.call(cla.sorted_down_gene_ids.presence || cla.down_gene_ids) %>
-                    <% up_gene_symbols = up_genes.map { |gene_id| summary_gene_symbol_by_id[gene_id.to_s].presence || gene_id } %>
-                    <% down_gene_symbols = down_genes.map { |gene_id| summary_gene_symbol_by_id[gene_id.to_s].presence || gene_id } %>
+                    <% ontology_term_ids = parse_summary_cla_field.call(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids) %>
+                    <% ontology_term_infos = ontology_term_ids.filter_map { |cot_id| summary_cot_info_by_id[cot_id.to_s] } %>
                     <% cluster_category_label = cla.cat.presence || cla.name.presence || '-' %>
-                    <tr data-summary-annotation-row data-annot-id="<%= cla.annot_id %>" class="<%= summary_default_annotation_id.present? && cla.annot_id != summary_default_annotation_id ? 'hidden' : '' %>">
+                    <% cla_type_id = cla.ontology_term_type_id.nil? ? '' : cla.ontology_term_type_id.to_s %>
+                    <% metadata_label = cla.annot&.display_name.presence || cla.annot&.name.presence || '-' %>
+                    <% row_hidden = summary_default_annotation_type_id.to_s != cla_type_id %>
+                    <tr data-summary-annotation-row
+                        data-annot-id="<%= cla.annot_id %>"
+                        data-ontology-term-type-id="<%= cla_type_id %>"
+                        class="<%= row_hidden ? 'hidden' : '' %>">
+                      <td data-summary-annotation-metadata-col class="px-2 py-1.5 text-xs text-gray-700 whitespace-nowrap"><%= metadata_label %></td>
                       <td class="px-2 py-1.5 text-xs text-gray-700"><%= cluster_category_label %></td>
-                      <td class="px-2 py-1.5 text-xs text-gray-700"><%= cla.name.presence || cla.cat.presence || '-' %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-700">
+                        <% if ontology_term_infos.any? %>
+                          <div class="flex flex-wrap gap-1">
+                            <% ontology_term_infos.each do |term_info| %>
+                              <% term_label = term_info[:name].presence || term_info[:identifier].presence || '-' %>
+                              <button type="button"
+                                      class="summary-ontology-badge cursor-pointer inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-violet-100 text-violet-800 hover:bg-violet-200"
+                                      data-ontology-identifier="<%= term_info[:identifier] %>"
+                                      data-ontology-name="<%= term_info[:name] %>"
+                                      data-ontology-url="<%= term_info[:url] %>"
+                                      title="<%= [term_info[:identifier], term_info[:name]].reject(&:blank?).join(' - ') %>">
+                                <%= term_label %>
+                              </button>
+                            <% end %>
+                          </div>
+                        <% else %>
+                          <span class="text-gray-400">-</span>
+                        <% end %>
+                      </td>
+                      <td class="px-2 py-1.5 text-xs text-gray-700"><%= cla.name.presence || '-' %></td>
                       <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= cla.origin_label.presence || '-' %></td>
                       <% cell_set_md5 = cla.cell_set&.key.to_s.presence %>
                       <td class="px-2 py-1.5 text-xs text-gray-600 font-mono whitespace-nowrap">
@@ -701,10 +781,17 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
                         <% end %>
                       </td>
                       <td class="px-2 py-1.5 text-xs text-gray-600">
-                        <% if up_gene_symbols.any? %>
+                        <% if up_genes.any? %>
                           <div class="flex flex-wrap gap-1">
-                            <% up_gene_symbols.each do |gene| %>
-                              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800"><%= gene %></span>
+                            <% up_genes.each do |gene_stable_id| %>
+                              <% gene_info = summary_gene_info_by_id[gene_stable_id.to_s] || {} %>
+                              <% gene_symbol = gene_info[:symbol].presence || summary_gene_symbol_by_id[gene_stable_id.to_s].presence || gene_stable_id %>
+                              <% gene_ensembl = gene_info[:ensembl_id].presence %>
+                              <button type="button"
+                                      class="summary-gene-badge gene-badge cursor-pointer inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 hover:bg-green-200"
+                                      data-gene-symbol="<%= gene_symbol %>"
+                                      <% if gene_ensembl.present? %>data-ensembl-id="<%= gene_ensembl %>"<% end %>
+                                      title="<%= gene_ensembl.presence || gene_symbol %>"><%= gene_symbol %></button>
                             <% end %>
                           </div>
                         <% else %>
@@ -712,10 +799,17 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
                         <% end %>
                       </td>
                       <td class="px-2 py-1.5 text-xs text-gray-600">
-                        <% if down_gene_symbols.any? %>
+                        <% if down_genes.any? %>
                           <div class="flex flex-wrap gap-1">
-                            <% down_gene_symbols.each do |gene| %>
-                              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800"><%= gene %></span>
+                            <% down_genes.each do |gene_stable_id| %>
+                              <% gene_info = summary_gene_info_by_id[gene_stable_id.to_s] || {} %>
+                              <% gene_symbol = gene_info[:symbol].presence || summary_gene_symbol_by_id[gene_stable_id.to_s].presence || gene_stable_id %>
+                              <% gene_ensembl = gene_info[:ensembl_id].presence %>
+                              <button type="button"
+                                      class="summary-gene-badge gene-badge cursor-pointer inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200"
+                                      data-gene-symbol="<%= gene_symbol %>"
+                                      <% if gene_ensembl.present? %>data-ensembl-id="<%= gene_ensembl %>"<% end %>
+                                      title="<%= gene_ensembl.presence || gene_symbol %>"><%= gene_symbol %></button>
                             <% end %>
                           </div>
                         <% else %>
@@ -730,7 +824,7 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
                 </tbody>
               </table>
             </div>
-              <p id="summary-annotations-empty" class="hidden text-xs text-gray-500 italic mt-2">No annotations for this metadata.</p>
+              <p id="summary-annotations-empty" class="hidden text-xs text-gray-500 italic mt-2">No annotations match the current filters.</p>
             </div>
 
             <div id="summary-annotations-cell-set-view" class="hidden">
@@ -770,6 +864,32 @@ summary_gene_symbol_by_id = @summary_gene_symbol_by_id || {}
       </div>
     </div>
 
+<div id="summary-gene-modal-overlay" class="hidden fixed inset-0 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5); z-index: 10050;">
+  <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 overflow-hidden" style="max-height: 80vh;">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200" style="background: linear-gradient(to right, #f0fdf4, #ecfdf5);">
+      <h3 class="text-lg font-semibold text-gray-900" id="summary-gene-modal-title">Gene details</h3>
+      <button type="button" id="summary-gene-modal-close" class="text-gray-500 hover:text-gray-900 p-1 rounded" title="Close" aria-label="Close">
+        <i class="fas fa-times" style="font-size: 18px;"></i>
+      </button>
+    </div>
+    <div class="px-6 py-5 overflow-auto" style="max-height: calc(80vh - 60px);" id="summary-gene-modal-body">
+      <div class="text-gray-500 text-sm">Loading...</div>
+    </div>
+  </div>
+</div>
+
+<div id="summary-ontology-modal-overlay" class="hidden fixed inset-0 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5); z-index: 10050;">
+  <div class="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 overflow-hidden" style="max-height: 80vh;">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200" style="background: linear-gradient(to right, #f5f3ff, #ede9fe);">
+      <h3 class="text-lg font-semibold text-gray-900" id="summary-ontology-modal-title">Ontology term</h3>
+      <button type="button" id="summary-ontology-modal-close" class="text-gray-500 hover:text-gray-900 p-1 rounded" title="Close" aria-label="Close">
+        <i class="fas fa-times" style="font-size: 18px;"></i>
+      </button>
+    </div>
+    <div class="px-6 py-5 overflow-auto" style="max-height: calc(80vh - 60px);" id="summary-ontology-modal-body"></div>
+  </div>
+</div>
+
 
 </div>
 </div>
@@ -806,11 +926,6 @@ detailsPop.classList.remove('hidden'); detailsPop.style.top = '15%'; detailsPop.
 });
 document.getElementById('summary-visual-details-close-button')?.addEventListener('click', () => detailsPop.classList.add('hidden'));
 makeDraggable(detailsPop, 'summary-visual-details-header');
-const metaSelect = document.getElementById('summary-annotations-metadata-select');
-if (metaSelect) {
-const update = () => { const v = metaSelect.value; document.querySelectorAll('[data-summary-annotation-row]').forEach(r => r.classList.toggle('hidden', r.dataset.annotId !== v)); };
-metaSelect.addEventListener('change', update); update();
-}
 const lineageBtn = document.getElementById('summary-lineage-toggle-button'); const lineagePop = document.getElementById('summary-lineage-popover');
 lineageBtn?.addEventListener('click', (e) => { e.stopPropagation(); lineagePop?.classList.remove('hidden'); });
 const cardLink = document.querySelector('[data-summary-visualization-card-link]');
@@ -1135,6 +1250,8 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
 
     const allSections = Array.from(popover.querySelectorAll('[data-summary-detail-section]'))
     const annotationSelect = document.getElementById('summary-annotations-metadata-select')
+    const annotationTypeSelect = document.getElementById('summary-annotations-type-select')
+    const annotationTextFilter = document.getElementById('summary-annotations-text-filter')
     const annotationRows = Array.from(popover.querySelectorAll('[data-summary-annotation-row]'))
     const annotationEmpty = document.getElementById('summary-annotations-empty')
     const annotationsMainView = document.getElementById('summary-annotations-main-view')
@@ -1144,6 +1261,13 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
     const annotationsCellSetEmpty = document.getElementById('summary-annotations-cell-set-empty')
     const projectKey = popover.dataset.projectKey
     const currentProjectId = popover.dataset.currentProjectId ? String(popover.dataset.currentProjectId) : ''
+
+    let annotationMetadataByType = {}
+    try {
+      annotationMetadataByType = JSON.parse(annotationsMainView?.dataset?.annotationMetadataByType || '{}') || {}
+    } catch (_error) {
+      annotationMetadataByType = {}
+    }
 
     const renderSourceProjectCell = (row) => {
       const pid = row.project_id != null ? String(row.project_id) : ''
@@ -1166,16 +1290,67 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
       return `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-800 border border-slate-200 max-w-xs">${detail}</span>`
     }
 
+    const syncAnnotationMetadataOptions = () => {
+      if (!annotationSelect || !annotationTypeSelect) return
+      const selectedTypeId = String(annotationTypeSelect.value || '')
+      const metadataOptions = Array.isArray(annotationMetadataByType[selectedTypeId])
+        ? annotationMetadataByType[selectedTypeId]
+        : []
+      const previousAnnotId = String(annotationSelect.value || '')
+      annotationSelect.innerHTML = ''
+      const allOption = document.createElement('option')
+      allOption.value = ''
+      allOption.textContent = 'All'
+      annotationSelect.appendChild(allOption)
+      metadataOptions.forEach((metadataOption) => {
+        const option = document.createElement('option')
+        option.value = metadataOption.id == null ? '' : String(metadataOption.id)
+        const count = metadataOption.count != null ? Number(metadataOption.count) : 0
+        option.textContent = `${metadataOption.label || 'Metadata'} (${count.toLocaleString()})`
+        annotationSelect.appendChild(option)
+      })
+      const hasPrevious = previousAnnotId !== '' && metadataOptions.some((metadataOption) => String(metadataOption.id == null ? '' : metadataOption.id) === previousAnnotId)
+      annotationSelect.value = hasPrevious ? previousAnnotId : ''
+    }
+
+    const refreshAnnotationMetadataColumn = () => {
+      const showAllMetadata = !annotationSelect || String(annotationSelect.value || '') === ''
+      popover.querySelectorAll('[data-summary-annotation-metadata-col]').forEach((el) => {
+        el.classList.toggle('hidden', !showAllMetadata)
+      })
+    }
+
+    const annotationRowSearchText = (row) => {
+      if (!row.dataset.summarySearchText) {
+        row.dataset.summarySearchText = String(row.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase()
+      }
+      return row.dataset.summarySearchText
+    }
+
     const refreshAnnotationRows = () => {
-      if (!annotationSelect || annotationRows.length === 0) return
-      const selected = annotationSelect.value
+      if (!annotationTypeSelect || annotationRows.length === 0) return
+      const selectedTypeId = String(annotationTypeSelect.value || '')
+      const selectedAnnotId = annotationSelect ? String(annotationSelect.value || '') : ''
+      const showAllMetadata = selectedAnnotId === ''
+      const textQuery = annotationTextFilter
+        ? String(annotationTextFilter.value || '').trim().toLowerCase()
+        : ''
       let visibleCount = 0
       annotationRows.forEach((row) => {
-        const isVisible = row.dataset.annotId === selected
+        const typeMatch = String(row.dataset.ontologyTermTypeId || '') === selectedTypeId
+        const annotMatch = showAllMetadata || String(row.dataset.annotId || '') === selectedAnnotId
+        const textMatch = textQuery === '' || annotationRowSearchText(row).includes(textQuery)
+        const isVisible = typeMatch && annotMatch && textMatch
         row.classList.toggle('hidden', !isVisible)
         if (isVisible) visibleCount += 1
       })
       if (annotationEmpty) annotationEmpty.classList.toggle('hidden', visibleCount > 0)
+      refreshAnnotationMetadataColumn()
+    }
+
+    const refreshAnnotationFilters = () => {
+      syncAnnotationMetadataOptions()
+      refreshAnnotationRows()
     }
 
     const escapeHtml = (value) => {
@@ -1187,13 +1362,95 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
         .replaceAll("'", '&#39;')
     }
 
+    const escapeAttr = (value) => escapeHtml(value).replaceAll('`', '&#96;')
+
+    const searchGeneUrl = popover.dataset.searchGeneUrl || ''
+    const geneModalOverlay = document.getElementById('summary-gene-modal-overlay')
+    const geneModalBody = document.getElementById('summary-gene-modal-body')
+    const geneModalTitle = document.getElementById('summary-gene-modal-title')
+    const geneModalClose = document.getElementById('summary-gene-modal-close')
+    const ontologyModalOverlay = document.getElementById('summary-ontology-modal-overlay')
+    const ontologyModalBody = document.getElementById('summary-ontology-modal-body')
+    const ontologyModalTitle = document.getElementById('summary-ontology-modal-title')
+    const ontologyModalClose = document.getElementById('summary-ontology-modal-close')
+
+    const openSummaryGeneModal = (ensemblId, geneSymbol) => {
+      if (!geneModalOverlay || !geneModalBody || !geneModalTitle || !searchGeneUrl) return
+      const ens = String(ensemblId || '').trim()
+      const sym = String(geneSymbol || '').trim()
+      const parts = []
+      if (ens) parts.push('ensembl_id=' + encodeURIComponent(ens))
+      if (sym) parts.push('gene_symbol=' + encodeURIComponent(sym))
+      if (parts.length === 0) return
+      geneModalTitle.textContent = sym || ens
+      geneModalBody.innerHTML = '<div class="text-gray-500 text-sm">Loading...</div>'
+      geneModalOverlay.classList.remove('hidden')
+      const csrf = document.querySelector('meta[name="csrf-token"]')?.content || ''
+      const url = searchGeneUrl + (searchGeneUrl.indexOf('?') >= 0 ? '&' : '?') + parts.join('&')
+      fetch(url, {
+        headers: { 'X-CSRF-Token': csrf, Accept: 'text/html' },
+        credentials: 'same-origin'
+      })
+        .then((response) => response.text())
+        .then((html) => {
+          geneModalBody.innerHTML = html
+        })
+        .catch(() => {
+          geneModalBody.innerHTML = '<div class="text-red-600 text-sm">Failed to load gene details.</div>'
+        })
+    }
+
+    const closeSummaryGeneModal = () => {
+      if (geneModalOverlay) geneModalOverlay.classList.add('hidden')
+    }
+
+    const openSummaryOntologyModal = (identifier, name, url) => {
+      if (!ontologyModalOverlay || !ontologyModalBody || !ontologyModalTitle) return
+      const id = String(identifier || '').trim()
+      const termName = String(name || '').trim()
+      const termUrl = String(url || '').trim()
+      ontologyModalTitle.textContent = termName || id || 'Ontology term'
+      const rows = []
+      if (termName) {
+        rows.push(`<div class="mb-3"><div class="text-xs font-medium text-gray-500 mb-1">Name</div><div class="text-sm text-gray-900">${escapeHtml(termName)}</div></div>`)
+      }
+      if (id) {
+        rows.push(`<div class="mb-3"><div class="text-xs font-medium text-gray-500 mb-1">Identifier</div><div class="text-sm text-gray-900 font-mono">${escapeHtml(id)}</div></div>`)
+      }
+      if (termUrl) {
+        rows.push(`<div class="mt-4"><a href="${escapeAttr(termUrl)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center px-3 py-1.5 rounded text-sm font-medium bg-violet-600 text-white hover:bg-violet-700">Open ontology term</a></div>`)
+      } else if (!termName && !id) {
+        rows.push('<div class="text-sm text-gray-500">No ontology term details available.</div>')
+      }
+      ontologyModalBody.innerHTML = rows.join('')
+      ontologyModalOverlay.classList.remove('hidden')
+    }
+
+    const closeSummaryOntologyModal = () => {
+      if (ontologyModalOverlay) ontologyModalOverlay.classList.add('hidden')
+    }
+
     const renderGeneBadges = (genes, tone) => {
       const list = Array.isArray(genes) ? genes : []
       if (list.length === 0) return '<span class="text-gray-400">-</span>'
       const badgeClass = tone === 'up'
-        ? 'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800'
-        : 'inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800'
-      return `<div class="flex flex-wrap gap-1">${list.map((gene) => `<span class="${badgeClass}">${escapeHtml(gene)}</span>`).join('')}</div>`
+        ? 'summary-gene-badge gene-badge cursor-pointer inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800 hover:bg-green-200'
+        : 'summary-gene-badge gene-badge cursor-pointer inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200'
+      return `<div class="flex flex-wrap gap-1">${list.map((gene) => {
+        const symbol = typeof gene === 'object' && gene != null
+          ? String(gene.symbol || gene.gene_id || gene || '').trim()
+          : String(gene || '').trim()
+        const ensembl = typeof gene === 'object' && gene != null
+          ? String(gene.ensembl_id || '').trim()
+          : ''
+        const attrs = [
+          `class="${badgeClass}"`,
+          `data-gene-symbol="${escapeAttr(symbol)}"`,
+          ensembl ? `data-ensembl-id="${escapeAttr(ensembl)}"` : '',
+          `title="${escapeAttr(ensembl || symbol)}"`
+        ].filter(Boolean).join(' ')
+        return `<button type="button" ${attrs}>${escapeHtml(symbol || '-')}</button>`
+      }).join('')}</div>`
     }
 
     const showProjectAnnotationsView = () => {
@@ -1251,27 +1508,83 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
       }
     }
 
+    if (annotationTypeSelect) {
+      annotationTypeSelect.addEventListener('change', refreshAnnotationFilters)
+      refreshAnnotationFilters()
+    }
     if (annotationSelect) {
       annotationSelect.addEventListener('change', refreshAnnotationRows)
-      refreshAnnotationRows()
     }
-
+    if (annotationTextFilter) {
+      annotationTextFilter.addEventListener('input', refreshAnnotationRows)
+      annotationTextFilter.addEventListener('search', refreshAnnotationRows)
+    }
     if (annotationsCellSetBackButton) {
       annotationsCellSetBackButton.addEventListener('click', (event) => {
         event.preventDefault()
         event.stopPropagation()
         showProjectAnnotationsView()
-        refreshAnnotationRows()
+        refreshAnnotationFilters()
       })
     }
 
     popover.addEventListener('click', (event) => {
+      const geneBadge = event.target.closest('.summary-gene-badge, .gene-badge')
+      if (geneBadge && popover.contains(geneBadge)) {
+        event.preventDefault()
+        event.stopPropagation()
+        openSummaryGeneModal(
+          geneBadge.getAttribute('data-ensembl-id') || '',
+          geneBadge.getAttribute('data-gene-symbol') || ''
+        )
+        return
+      }
+
+      const ontologyBadge = event.target.closest('.summary-ontology-badge')
+      if (ontologyBadge && popover.contains(ontologyBadge)) {
+        event.preventDefault()
+        event.stopPropagation()
+        openSummaryOntologyModal(
+          ontologyBadge.getAttribute('data-ontology-identifier') || '',
+          ontologyBadge.getAttribute('data-ontology-name') || '',
+          ontologyBadge.getAttribute('data-ontology-url') || ''
+        )
+        return
+      }
+
       const trigger = event.target.closest('[data-summary-cell-set-key]')
       if (!trigger) return
       event.preventDefault()
       event.stopPropagation()
       loadCellSetAnnotations(trigger.dataset.summaryCellSetKey)
     })
+
+    if (geneModalClose) {
+      geneModalClose.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        closeSummaryGeneModal()
+      })
+    }
+    if (geneModalOverlay) {
+      geneModalOverlay.addEventListener('click', (event) => {
+        event.stopPropagation()
+        if (event.target === geneModalOverlay) closeSummaryGeneModal()
+      })
+    }
+    if (ontologyModalClose) {
+      ontologyModalClose.addEventListener('click', (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        closeSummaryOntologyModal()
+      })
+    }
+    if (ontologyModalOverlay) {
+      ontologyModalOverlay.addEventListener('click', (event) => {
+        event.stopPropagation()
+        if (event.target === ontologyModalOverlay) closeSummaryOntologyModal()
+      })
+    }
 
     const closePopover = () => {
       popover.classList.add('hidden')
@@ -1330,7 +1643,7 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
       triggers.forEach((otherTrigger) => otherTrigger.setAttribute('aria-expanded', otherTrigger === trigger ? 'true' : 'false'))
       if (type === 'annotations') {
         showProjectAnnotationsView()
-        refreshAnnotationRows()
+        refreshAnnotationFilters()
       }
     }
 
@@ -1355,11 +1668,20 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
 
     header.addEventListener('mousedown', startDrag)
 
+    const detailModalOpen = () => {
+      const geneOpen = geneModalOverlay && !geneModalOverlay.classList.contains('hidden')
+      const ontologyOpen = ontologyModalOverlay && !ontologyModalOverlay.classList.contains('hidden')
+      return !!(geneOpen || ontologyOpen)
+    }
+
     document.addEventListener('click', (event) => {
       if (popover.classList.contains('hidden')) return
       if (popover.contains(event.target)) return
+      if (geneModalOverlay && geneModalOverlay.contains(event.target)) return
+      if (ontologyModalOverlay && ontologyModalOverlay.contains(event.target)) return
       const clickedTrigger = triggers.some((trigger) => trigger.contains(event.target))
       if (clickedTrigger) return
+      if (detailModalOpen()) return
       closePopover()
     })
 
@@ -1378,7 +1700,18 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
     }, { passive: true })
 
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && !popover.classList.contains('hidden')) closePopover()
+      if (event.key !== 'Escape') return
+      if (geneModalOverlay && !geneModalOverlay.classList.contains('hidden')) {
+        event.stopPropagation()
+        closeSummaryGeneModal()
+        return
+      }
+      if (ontologyModalOverlay && !ontologyModalOverlay.classList.contains('hidden')) {
+        event.stopPropagation()
+        closeSummaryOntologyModal()
+        return
+      }
+      if (!popover.classList.contains('hidden')) closePopover()
     })
   })()
 </script>

@@ -83,6 +83,11 @@ Rails.application.routes.draw do
       post :toggle_public
       post :prepare_metadata
       post :do_import_metadata
+      post :export_consensus_annotation
+      post :preview_consensus_annotation
+      get :related_clone_projects
+      get :federated_annotations
+      get :consensus_annotation_support
       post :save_metadata_from_selection
       post :delete_selection
       post :rename_selection

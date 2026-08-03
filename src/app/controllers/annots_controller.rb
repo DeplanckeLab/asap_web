@@ -725,7 +725,7 @@ class AnnotsController < ApplicationController
   end
 
   def set_annot
-    @annot = Annot.includes(:data_transformation, :data_type, :sim_step).find(params[:id])
+    @annot = Annot.includes(:data_transformation, :data_type, :sim_step, :user, run: :user).find(params[:id])
     unless readable?(@annot.project)
       redirect_to unauthorized_path and return
     end

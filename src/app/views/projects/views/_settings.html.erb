@@ -136,6 +136,13 @@
             <input type="checkbox" id="batch_export_perm" checked class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
             Export
           </label>
+          <button type="button"
+                  class="inline-flex items-center justify-center text-gray-500 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded-full"
+                  data-rights-help="open"
+                  aria-label="Explain user rights"
+                  title="Explain user rights">
+            <i class="far fa-question-circle text-base" aria-hidden="true"></i>
+          </button>
           <button id="batch_upd_btn" class="px-3 py-1 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700">
             Batch Add
           </button>
@@ -149,8 +156,30 @@
             <tr>
               <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
               <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">View</th>
-              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Analyze</th>
-              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Export</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <span class="inline-flex items-center justify-center gap-1">
+                  Analyze
+                  <button type="button"
+                          class="inline-flex items-center justify-center text-gray-400 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded-full normal-case"
+                          data-rights-help="open"
+                          aria-label="Explain user rights"
+                          title="Explain user rights">
+                    <i class="far fa-question-circle text-sm" aria-hidden="true"></i>
+                  </button>
+                </span>
+              </th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <span class="inline-flex items-center justify-center gap-1">
+                  Export
+                  <button type="button"
+                          class="inline-flex items-center justify-center text-gray-400 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded-full normal-case"
+                          data-rights-help="open"
+                          aria-label="Explain user rights"
+                          title="Explain user rights">
+                    <i class="far fa-question-circle text-sm" aria-hidden="true"></i>
+                  </button>
+                </span>
+              </th>
               <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
@@ -465,8 +494,30 @@ document.addEventListener('DOMContentLoaded', function() {
             <tr>
               <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
               <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">View</th>
-              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Analyze</th>
-              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Export</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <span class="inline-flex items-center justify-center gap-1">
+                  Analyze
+                  <button type="button"
+                          class="inline-flex items-center justify-center text-gray-400 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded-full normal-case"
+                          data-rights-help="open"
+                          aria-label="Explain user rights"
+                          title="Explain user rights">
+                    <i class="far fa-question-circle text-sm" aria-hidden="true"></i>
+                  </button>
+                </span>
+              </th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <span class="inline-flex items-center justify-center gap-1">
+                  Export
+                  <button type="button"
+                          class="inline-flex items-center justify-center text-gray-400 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded-full normal-case"
+                          data-rights-help="open"
+                          aria-label="Explain user rights"
+                          title="Explain user rights">
+                    <i class="far fa-question-circle text-sm" aria-hidden="true"></i>
+                  </button>
+                </span>
+              </th>
             </tr>
           </thead>
           <tbody class="bg-white divide-y divide-gray-200">
@@ -490,4 +541,111 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
   </div>
 </div>
+<% end %>
+
+<div id="user-rights-help-modal"
+     class="hidden fixed inset-0 z-50"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="user-rights-help-title">
+  <div class="absolute inset-0 bg-black/50 cursor-default" data-rights-help="close"></div>
+  <div class="absolute inset-0 overflow-y-auto pointer-events-none">
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col border border-gray-200 pointer-events-auto">
+        <div class="px-5 py-4 border-b border-gray-200 flex items-center justify-between gap-3 flex-shrink-0">
+          <h2 id="user-rights-help-title" class="text-base font-semibold text-gray-900 m-0 pr-2">
+            User rights
+          </h2>
+          <button type="button"
+                  class="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 cursor-pointer"
+                  data-rights-help="close"
+                  aria-label="Close">
+            Close
+          </button>
+        </div>
+        <div class="px-5 py-4 overflow-y-auto text-sm text-gray-700 flex-1 min-h-0 space-y-4">
+          <p class="text-xs text-gray-500 mb-0">
+            Shared users always receive View access. Analyze and Export can be granted independently. The project owner has all rights listed below.
+          </p>
+          <div>
+            <h3 class="text-sm font-semibold text-gray-900 mb-2">Analyze</h3>
+            <p class="text-xs text-gray-600 mb-2">Lets the user work inside this project and run analyses. It includes:</p>
+            <ul class="list-disc list-inside space-y-1 text-xs text-gray-700">
+              <li>Submit and run analysis pipeline steps</li>
+              <li>Create and manage cell selections, and save them as metadata</li>
+              <li>Use interactive analysis tools that require analysis rights (for example visualization and heatmap analysis controls)</li>
+              <li>Create visualization and heatmap checkpoints</li>
+              <li>Compute FindMarkers / marker evidences</li>
+              <li>Create collaborative annotations and vote on them in private projects (also requires a linked ORCID)</li>
+            </ul>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-gray-900 mb-2">Export</h3>
+            <p class="text-xs text-gray-600 mb-2">Lets the user take project data out of ASAP. It includes:</p>
+            <ul class="list-disc list-inside space-y-1 text-xs text-gray-700">
+              <li>Download loom files, logs, and analysis output files</li>
+              <li>Clone the project (the user becomes the owner of the cloned project)</li>
+              <li>Download differential expression and gene enrichment result tables when downloads are gated</li>
+              <li>Download the original uploaded dataset when available</li>
+            </ul>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-gray-900 mb-2">Project owner</h3>
+            <p class="text-xs text-gray-600 mb-2">The owner has full control of the project. In addition to Analyze and Export, this includes:</p>
+            <ul class="list-disc list-inside space-y-1 text-xs text-gray-700">
+              <li>Edit project settings (privacy, project type, and user rights)</li>
+              <li>Invite, update, and remove shared users</li>
+              <li>Publish or unpublish the project</li>
+              <li>Delete the project</li>
+              <li>Restart, stop, and reset analysis runs and parsing</li>
+              <li>Import, prepare, rename, and delete metadata and selections</li>
+              <li>Create, import, rename, and delete gene set collections</li>
+              <li>Build and validate consensus annotations</li>
+              <li>Edit annot properties such as data type and manual step mapping</li>
+              <li>See all runs and metadata after publication (not limited to the publication snapshot)</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<%= javascript_tag do %>
+function initUserRightsHelpModal() {
+  const modal = document.getElementById('user-rights-help-modal');
+  if (!modal || modal.dataset.bound === '1') return;
+  modal.dataset.bound = '1';
+
+  const openModal = function() {
+    modal.classList.remove('hidden');
+    document.body.classList.add('overflow-hidden');
+  };
+  const closeModal = function() {
+    modal.classList.add('hidden');
+    document.body.classList.remove('overflow-hidden');
+  };
+
+  document.querySelectorAll('[data-rights-help="open"]').forEach(function(button) {
+    button.addEventListener('click', function(event) {
+      event.preventDefault();
+      openModal();
+    });
+  });
+  document.querySelectorAll('[data-rights-help="close"]').forEach(function(el) {
+    el.addEventListener('click', function(event) {
+      event.preventDefault();
+      closeModal();
+    });
+  });
+  document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape' && !modal.classList.contains('hidden')) {
+      closeModal();
+    }
+  });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  initUserRightsHelpModal();
+});
 <% end %>

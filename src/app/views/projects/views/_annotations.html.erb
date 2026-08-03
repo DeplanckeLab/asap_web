@@ -1,0 +1,174 @@
+<% payload = @annotations_payload || {} %>
+<% type_options = Array(payload[:annotation_type_options] || payload['annotation_type_options']) %>
+<% default_type_id = begin
+     preferred = type_options.find { |opt| (opt[:id] || opt['id']).to_s.present? }
+     (preferred && (preferred[:id] || preferred['id'])) ||
+       (type_options.first && (type_options.first[:id] || type_options.first['id'])) ||
+       ''
+   end %>
+
+<div class="max-w-7xl mx-auto"
+     data-controller="annotations-page"
+     data-annotations-page-project-id-value="<%= @project.id %>"
+     data-annotations-page-related-url-value="<%= related_clone_projects_project_path(@project) %>"
+     data-annotations-page-federated-url-value="<%= federated_annotations_project_path(@project) %>"
+     data-annotations-page-preview-url-value="<%= preview_consensus_annotation_project_path(@project) %>"
+     data-annotations-page-export-url-value="<%= export_consensus_annotation_project_path(@project) %>"
+     data-annotations-page-can-export-value="<%= @annotations_can_export ? '1' : '0' %>"
+     data-annotations-page-support-url-value="<%= consensus_annotation_support_project_path(@project) %>"
+     data-annotations-page-initial-payload-value="<%= ERB::Util.html_escape((payload).to_json) %>"
+     data-annotations-page-initial-projects-value="<%= ERB::Util.html_escape(Array(@annotations_related_projects).to_json) %>"
+     data-annotations-page-initial-support-value="<%= ERB::Util.html_escape((@annotations_consensus_support || {}).to_json) %>">
+  <div class="mb-6">
+    <h1 class="text-2xl font-semibold text-gray-900">Annotations</h1>
+    <p class="mt-1 text-sm text-gray-600">
+      Browse collaborative annotations across this project and related clones, then build consensus metadata for scFAIR.
+    </p>
+  </div>
+
+  <div class="hidden mb-4 space-y-2"
+       data-annotations-page-target="consensusSupportBanner"></div>
+
+  <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-4 mb-4 space-y-4">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div>
+        <label for="annotations-scope-select" class="block text-xs font-medium text-gray-600 mb-1">Project scope</label>
+        <select id="annotations-scope-select"
+                class="block w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
+                data-annotations-page-target="scopeSelect"
+                data-action="change->annotations-page#scopeChanged">
+          <option value="current" selected>Current project only</option>
+          <option value="my_clones">Projects I cloned from this one</option>
+          <option value="all_children">All projects cloned from this one</option>
+          <option value="lineage">All sibling projects in the clone lineage</option>
+        </select>
+      </div>
+      <div>
+        <label for="annotations-type-select" class="block text-xs font-medium text-gray-600 mb-1">Annotation type</label>
+        <select id="annotations-type-select"
+                class="block w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
+                data-annotations-page-target="typeSelect"
+                data-action="change->annotations-page#filtersChanged">
+          <% type_options.each do |type_option| %>
+            <% tid = (type_option[:id] || type_option['id']).to_s %>
+            <% tlabel = type_option[:label] || type_option['label'] %>
+            <% tcount = type_option[:count] || type_option['count'] %>
+            <% ttag = type_option[:tag] || type_option['tag'] %>
+            <option value="<%= tid %>"
+                    data-tag="<%= ttag %>"
+                    <%= tid.to_s == default_type_id.to_s ? 'selected' : '' %>>
+              <%= tlabel %> (<%= number_with_delimiter(tcount.to_i) %>)
+            </option>
+          <% end %>
+        </select>
+      </div>
+    </div>
+
+    <div>
+      <div class="flex items-center justify-between mb-1">
+        <label class="block text-xs font-medium text-gray-600">Projects in scope</label>
+        <div class="flex items-center gap-2 text-xs">
+          <button type="button" class="text-blue-700 hover:underline" data-action="click->annotations-page#selectAllProjects">Select all</button>
+          <button type="button" class="text-blue-700 hover:underline" data-action="click->annotations-page#clearAllProjects">Clear</button>
+        </div>
+      </div>
+      <div class="max-h-40 overflow-y-auto border border-gray-200 rounded p-2 space-y-1"
+           data-annotations-page-target="projectList"></div>
+    </div>
+
+    <div class="flex flex-col sm:flex-row gap-3 sm:items-end">
+      <div class="min-w-0 flex-1 max-w-md">
+        <label for="annotations-metadata-select" class="block text-xs font-medium text-gray-600 mb-1">Metadata</label>
+        <select id="annotations-metadata-select"
+                class="block w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
+                data-annotations-page-target="metadataSelect"
+                data-action="change->annotations-page#filtersChanged">
+          <option value="">All</option>
+        </select>
+      </div>
+      <div class="min-w-0 flex-1 max-w-md">
+        <label for="annotations-text-filter" class="block text-xs font-medium text-gray-600 mb-1">Filter</label>
+        <input type="search"
+               id="annotations-text-filter"
+               class="block w-full px-2 py-1.5 text-sm border border-gray-300 rounded"
+               placeholder="Filter rows by any cell text"
+               autocomplete="off"
+               spellcheck="false"
+               data-annotations-page-target="textFilter"
+               data-action="input->annotations-page#filtersChanged">
+      </div>
+      <% if @annotations_can_export %>
+        <div class="shrink-0">
+          <button type="button"
+                  class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                  data-annotations-page-target="createConsensusButton"
+                  data-action="click->annotations-page#openConsensusPreview"
+                  <%= default_type_id.blank? ? 'disabled' : '' %>>
+            Create consensus annotation
+          </button>
+        </div>
+      <% end %>
+    </div>
+    <p class="text-xs text-gray-600 hidden" data-annotations-page-target="status"></p>
+    <p class="hidden text-xs text-blue-800" data-annotations-page-target="cellSetFilterChip"></p>
+  </div>
+
+  <div class="bg-white border border-gray-200 rounded-lg shadow-sm overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Project</th>
+            <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Metadata</th>
+            <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cluster/category</th>
+            <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Label</th>
+            <th class="px-2 py-1.5 text-center text-xs font-medium text-gray-500" title="Present in ASAP consensus metadata">Consensus</th>
+            <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Origin</th>
+            <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Cell set</th>
+            <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Votes</th>
+            <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created by</th>
+            <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created</th>
+          </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-100" data-annotations-page-target="tableBody"></tbody>
+      </table>
+    </div>
+    <p class="text-xs text-gray-500 px-3 py-2 border-t border-gray-100">
+      <i class="fas fa-check-circle text-emerald-600"></i>
+      marks annotations whose label is already present in this project's ASAP consensus metadata
+      <span data-annotations-page-target="consensusMetadataLinks"></span>.
+    </p>
+    <p class="hidden text-xs text-gray-500 italic px-3 py-2" data-annotations-page-target="emptyState">No annotations match the current filters.</p>
+  </div>
+
+  <div class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5);"
+       data-annotations-page-target="modal"
+       data-action="click->annotations-page#backdropClose">
+    <div class="bg-white rounded-lg shadow-xl max-w-5xl w-full mx-4 overflow-hidden flex flex-col" style="max-height: 85vh;"
+         data-action="click->annotations-page#stopPropagation">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900">Review consensus annotation</h2>
+        <button type="button" class="text-gray-500 hover:text-gray-700" data-action="click->annotations-page#closeModal" aria-label="Close">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="px-5 py-3 overflow-y-auto flex-1 space-y-4" data-annotations-page-target="modalBody"></div>
+      <div class="px-5 py-3 border-t border-gray-200 flex items-center justify-between gap-3">
+        <p class="text-xs text-gray-600" data-annotations-page-target="modalStatus"></p>
+        <div class="flex items-center gap-2">
+          <button type="button"
+                  class="px-3 py-1.5 text-sm rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                  data-action="click->annotations-page#closeModal">
+            Cancel
+          </button>
+          <button type="button"
+                  class="px-3 py-1.5 text-sm rounded border border-indigo-300 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 disabled:opacity-50"
+                  data-annotations-page-target="validateButton"
+                  data-action="click->annotations-page#validateConsensus">
+            Validate consensus annotation
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

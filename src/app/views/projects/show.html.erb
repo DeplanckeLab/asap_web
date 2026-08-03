@@ -13,7 +13,7 @@ end %>
     Unarchive button (force_unarchive=1), in which case we fall through to the regular
     overlay so the unarchive progress is shown. %>
 <% unarchive_state = @project_unarchive_state.to_s %>
-<% suppress_unarchive_overlay = metadata_only_view_request? && %w[summary settings access].include?(@view_type.to_s) %>
+<% suppress_unarchive_overlay = metadata_only_view_request? && %w[summary settings access annotations].include?(@view_type.to_s) %>
 <% show_unarchive_pending = !suppress_unarchive_overlay && (@project_archive_transitioning || (@project_files_missing && %w[queued in_progress archived_missing queue_failed].include?(unarchive_state))) %>
 <% if show_unarchive_pending %>
   <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
@@ -52,6 +52,10 @@ end %>
 <% when 'access' %>
   <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
     <%= render 'projects/views/access' %>
+  </div>
+<% when 'annotations' %>
+  <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+    <%= render 'projects/views/annotations' %>
   </div>
 <% else %>
   <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">

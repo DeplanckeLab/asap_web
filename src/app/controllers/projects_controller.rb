@@ -15,13 +15,14 @@ class ProjectsController < ApplicationController
   # Project show views that only depend on database metadata (no need for unarchived
   # project files on disk). These views can be rendered for archived projects without
   # triggering an unarchive job.
-  METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access].freeze
+  METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access annotations].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets selection_states spatial_data spatial_image]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
+  before_action :authorize_project_owner_access, only: %i[export_consensus_annotation preview_consensus_annotation]
   GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
   GENE_DETAILS_CACHE_TTL = 24.hours
 
@@ -2543,12 +2544,22 @@ class ProjectsController < ApplicationController
           parse_cla_field(cla.sorted_up_gene_ids.presence || cla.up_gene_ids),
           parse_cla_field(cla.sorted_down_gene_ids.presence || cla.down_gene_ids)
         ].flatten
-      end.map { |value| value.to_i }.select(&:positive?).uniq
+      end.map { |value| value.to_s.strip }.reject(&:blank?).uniq
 
       gene_map = {}
-      if db_version.present? && gene_ids.any?
+      loom_gene_map = project_cla_gene_info_by_stable_id(@project)
+      gene_ids.each do |gid|
+        info = loom_gene_map[gid]
+        next unless info
+
+        gene_map[gid] = { symbol: info[:symbol].to_s, ensembl_id: info[:ensembl_id].to_s }
+      end
+
+      # Legacy rows may still store asap_data genes.id; fill only unresolved ids.
+      unresolved_gene_ids = gene_ids.reject { |gid| gene_map.key?(gid) }.map(&:to_i).select(&:positive?).uniq
+      if db_version.present? && unresolved_gene_ids.any?
         RemoteGene.with_remote(db_version) do
-          RemoteGene.where(id: gene_ids).pluck(:id, :name, :ensembl_id).each do |gid, symbol, ensembl_id|
+          RemoteGene.where(id: unresolved_gene_ids).pluck(:id, :name, :ensembl_id).each do |gid, symbol, ensembl_id|
             gene_map[gid.to_s] = { symbol: symbol.to_s, ensembl_id: ensembl_id.to_s }
           end
         end
@@ -2960,6 +2971,213 @@ class ProjectsController < ApplicationController
     )
 
     render json: { status: 'ok', run_id: new_run.id }
+  end
+
+  # GET /projects/:id/related_clone_projects?scope=current|my_clones|all_children|lineage
+  def related_clone_projects
+    result = CloneRelatedProjectsQuery.call(
+      project: @project,
+      scope: params[:scope].presence || 'current',
+      user: current_user,
+      readable_if: ->(project) { readable?(project) }
+    )
+    unless result[:ok]
+      return render json: { status: 'error', message: result[:error] }, status: :unprocessable_entity
+    end
+
+    render json: { status: 'ok', scope: result[:scope], projects: result[:projects] }
+  end
+
+  # GET /projects/:id/federated_annotations?project_ids[]=&ontology_term_type_id=
+  def federated_annotations
+    project_ids = Array(params[:project_ids]).presence || [@project.id]
+    result = FederatedAnnotationsQuery.call(
+      project_ids: project_ids,
+      ontology_term_type_id: params[:ontology_term_type_id],
+      readable_if: ->(project) { readable?(project) },
+      current_project: @project
+    )
+    unless result[:ok]
+      return render json: { status: 'error', message: result[:error] }, status: :unprocessable_entity
+    end
+
+    render json: {
+      status: 'ok',
+      annotations: result[:annotations],
+      annotation_type_options: result[:annotation_type_options],
+      annotation_metadata_by_type: result[:annotation_metadata_by_type],
+      consensus_metadata_by_type: result[:consensus_metadata_by_type]
+    }
+  end
+
+  # GET /projects/:id/consensus_annotation_support
+  def consensus_annotation_support
+    result = ConsensusAnnotationSupportService.call(
+      project: @project,
+      user: current_user,
+      readable_if: ->(project) { readable?(project) }
+    )
+    unless result[:ok]
+      return render json: { status: 'error', message: result[:error] }, status: :unprocessable_entity
+    end
+
+    render json: { status: 'ok', by_type: result[:by_type] }
+  end
+
+  # POST /projects/:id/preview_consensus_annotation
+  def preview_consensus_annotation
+    ontology_term_type_id = params[:ontology_term_type_id].presence&.to_i
+    unless ontology_term_type_id&.positive?
+      return render json: { status: 'error', message: 'ontology_term_type_id is required' }, status: :unprocessable_entity
+    end
+
+    unless @project.filesystem_project_data_present?
+      return render json: {
+        status: 'error',
+        message: 'Project data files are not available on this server. Unarchive the project before previewing consensus metadata.'
+      }, status: :unprocessable_entity
+    end
+
+    project_ids = Array(params[:project_ids]).presence || [@project.id]
+    preview = ConsensusAnnotationPreviewService.call(
+      project: @project,
+      ontology_term_type_id: ontology_term_type_id,
+      project_ids: project_ids,
+      readable_if: ->(project) { readable?(project) },
+      equal_rank_choices: params[:equal_rank_choices] || {},
+      collision_choices: params[:collision_choices] || {},
+      build_vectors: false
+    )
+    unless preview[:ok]
+      return render json: { status: 'error', message: preview[:error] }, status: :unprocessable_entity
+    end
+
+    render json: preview.merge(status: 'ok')
+  end
+
+  # POST /projects/:id/export_consensus_annotation
+  # Builds /col_attrs/_asap_consensus_<annotation_type_tag> from CLAs of one ontology type
+  # (small cell sets first; assigned cells stay fixed), backs up any differing existing
+  # column, then writes the loom dataset and Annot immediately.
+  def export_consensus_annotation
+    ontology_term_type_id = params[:ontology_term_type_id].presence&.to_i
+    unless ontology_term_type_id&.positive?
+      return render json: { status: 'error', message: 'ontology_term_type_id is required' }, status: :unprocessable_entity
+    end
+
+    unless @project.filesystem_project_data_present?
+      return render json: {
+        status: 'error',
+        message: 'Project data files are not available on this server. Unarchive the project before exporting consensus metadata.'
+      }, status: :unprocessable_entity
+    end
+
+    project_ids = Array(params[:project_ids]).presence || [@project.id]
+    built = ConsensusAnnotationMetadataExportService.call(
+      project: @project,
+      ontology_term_type_id: ontology_term_type_id,
+      project_ids: project_ids,
+      readable_if: ->(project) { readable?(project) },
+      equal_rank_choices: params[:equal_rank_choices] || {},
+      collision_choices: params[:collision_choices] || {}
+    )
+    unless built[:ok]
+      return render json: { status: 'error', message: built[:error] }, status: :unprocessable_entity
+    end
+
+    backup = ConsensusAnnotationMetadataBackupService.call(
+      project: @project,
+      loom_file: built[:loom_file],
+      metadata_path: built[:metadata_path],
+      new_labels: built[:labels]
+    )
+    unless backup[:ok]
+      return render json: { status: 'error', message: backup[:error] }, status: :unprocessable_entity
+    end
+
+    ontology_id_backup = ConsensusAnnotationMetadataBackupService.call(
+      project: @project,
+      loom_file: built[:loom_file],
+      metadata_path: built[:ontology_id_path],
+      new_labels: built[:ontology_term_ids]
+    )
+    unless ontology_id_backup[:ok]
+      return render json: { status: 'error', message: ontology_id_backup[:error] }, status: :unprocessable_entity
+    end
+
+    if backup[:unchanged] && ontology_id_backup[:unchanged]
+      payload = {
+        status: 'ok',
+        metadata_path: built[:metadata_path],
+        ontology_id_path: built[:ontology_id_path],
+        annotation_type_label: built[:annotation_type_label],
+        assigned_cell_count: built[:assigned_cell_count],
+        total_cell_count: built[:total_cell_count],
+        cell_set_count: built[:cell_set_count],
+        backed_up: false,
+        ontology_id_backed_up: false,
+        unchanged: true
+      }
+      return render json: payload
+    end
+
+    annot_id = nil
+    unless backup[:unchanged]
+      persisted = ConsensusAnnotationMetadataPersistService.call(
+        project: @project,
+        loom_file: built[:loom_file],
+        metadata_path: built[:metadata_path],
+        metadata_basename: built[:metadata_basename],
+        labels: built[:labels],
+        user_id: current_user&.id || @project.user_id
+      )
+      unless persisted[:ok]
+        return render json: { status: 'error', message: persisted[:error] }, status: :unprocessable_entity
+      end
+      annot_id = persisted[:annot_id]
+    end
+
+    ontology_id_annot_id = nil
+    unless ontology_id_backup[:unchanged]
+      ontology_persisted = ConsensusAnnotationMetadataPersistService.call(
+        project: @project,
+        loom_file: built[:loom_file],
+        metadata_path: built[:ontology_id_path],
+        metadata_basename: built[:ontology_id_basename],
+        labels: built[:ontology_term_ids],
+        user_id: current_user&.id || @project.user_id
+      )
+      unless ontology_persisted[:ok]
+        return render json: { status: 'error', message: ontology_persisted[:error] }, status: :unprocessable_entity
+      end
+      ontology_id_annot_id = ontology_persisted[:annot_id]
+    end
+
+    payload = {
+      status: 'ok',
+      metadata_path: built[:metadata_path],
+      ontology_id_path: built[:ontology_id_path],
+      annotation_type_label: built[:annotation_type_label],
+      assigned_cell_count: built[:assigned_cell_count],
+      total_cell_count: built[:total_cell_count],
+      cell_set_count: built[:cell_set_count],
+      annot_id: annot_id,
+      ontology_id_annot_id: ontology_id_annot_id,
+      backed_up: backup[:backed_up] == true,
+      ontology_id_backed_up: ontology_id_backup[:backed_up] == true,
+      unchanged: false
+    }
+    if backup[:backed_up]
+      payload[:backup_path] = backup[:backup_path]
+      payload[:backup_idx] = backup[:backup_idx]
+      payload[:backup_annot_id] = backup[:backup_annot_id]
+    end
+    if ontology_id_backup[:backed_up]
+      payload[:ontology_id_backup_path] = ontology_id_backup[:backup_path]
+      payload[:ontology_id_backup_idx] = ontology_id_backup[:backup_idx]
+      payload[:ontology_id_backup_annot_id] = ontology_id_backup[:backup_annot_id]
+    end
+    render json: payload
   end
 
   # POST /projects/:id/save_metadata_from_selection
@@ -5116,33 +5334,11 @@ class ProjectsController < ApplicationController
     end
 
     symbol_map_by_project_id = {}
-    clas_list.group_by(&:project_id).each do |project_id, project_clas|
-      project = project_clas.first&.project
-      next unless project&.version
+    clas_list.group_by(&:project_id).each do |project_id, _project_clas|
+      project = Project.find_by(id: project_id) || clas_list.find { |cla| cla.project_id == project_id }&.project
+      next unless project
 
-      h_env = Basic.safe_parse_json(project.version.env_json, {})
-      db_version = asap_data_db_name_for_env(h_env, context: "annot_info_gene_symbols")
-      next if db_version.blank?
-
-      gene_ids = project_clas.flat_map do |cla|
-        [
-          parse_cla_field(cla.sorted_up_gene_ids.presence || cla.up_gene_ids),
-          parse_cla_field(cla.sorted_down_gene_ids.presence || cla.down_gene_ids)
-        ].flatten
-      end
-      gene_ids = gene_ids.map { |v| v.to_s.to_i }.select { |id| id.positive? }.uniq
-      next if gene_ids.empty?
-
-      project_map = {}
-      RemoteGene.with_remote(db_version) do
-        RemoteGene.where(id: gene_ids).pluck(:id, :name, :ensembl_id).each do |gene_id, gene_name, ensembl_id|
-          project_map[gene_id.to_s] = {
-            symbol: gene_name.to_s.presence || gene_id.to_s,
-            ensembl_id: ensembl_id.to_s.presence
-          }
-        end
-      end
-      symbol_map_by_project_id[project_id] = project_map
+      symbol_map_by_project_id[project_id] = project_cla_gene_info_by_stable_id(project)
     end
 
     cot_ids = clas_list.flat_map do |cla|
@@ -5335,24 +5531,20 @@ class ProjectsController < ApplicationController
       }, status: :unprocessable_entity
     end
 
-    gene_ids_to_check = (up_gene_ids | down_gene_ids).map(&:to_i).select(&:positive?)
+    gene_ids_to_check = (up_gene_ids | down_gene_ids).map(&:to_s).map(&:strip).reject(&:blank?).uniq
     if gene_ids_to_check.any?
-      unless @project.version
-        return render json: { status: 'error', errors: ['Project version is missing'] }, status: :unprocessable_entity
-      end
-      h_env = Basic.safe_parse_json(@project.version.env_json, {})
-      db_version = asap_data_db_name_for_env(h_env, context: 'create_cla')
-      found_gene_ids = []
-      RemoteGene.with_remote(db_version) do
-        scope = RemoteGene.where(id: gene_ids_to_check)
-        scope = scope.where(organism_id: @project.organism_id) if @project.organism_id.present?
-        found_gene_ids = scope.pluck(:id).map(&:to_s)
-      end
-      missing_genes = gene_ids_to_check.map(&:to_s) - found_gene_ids
+      stable_symbol_map = project_cla_gene_symbol_by_stable_id(@project)
+      ensure_project_cla_gene_symbols_for_loom!(
+        stable_symbol_map,
+        @project,
+        annot.filepath,
+        required_ids: gene_ids_to_check
+      )
+      missing_genes = gene_ids_to_check.reject { |gid| stable_symbol_map.key?(gid) }
       if missing_genes.any?
         return render json: {
           status: 'error',
-          errors: ["Unknown gene id(s): #{missing_genes.join(', ')}"]
+          errors: ["Unknown gene stable id(s) for this project loom: #{missing_genes.join(', ')}"]
         }, status: :unprocessable_entity
       end
     end
@@ -5547,7 +5739,7 @@ class ProjectsController < ApplicationController
     clas = Cla.active.joins(:cell_set)
              .where(cell_sets: { key: cell_set_key })
              .includes(:project, :annot, :cell_set, :user, :cla_source)
-             .order(Arel.sql("(nber_agree - nber_disagree) DESC, created_at DESC"))
+             .order(Arel.sql("(clas.nber_agree - clas.nber_disagree) DESC, clas.created_at DESC"))
              .to_a
 
     readable_clas = clas.select { |cla| cla.project && readable?(cla.project) }
@@ -5555,34 +5747,15 @@ class ProjectsController < ApplicationController
     symbol_map_by_project_id = {}
     readable_clas.group_by(&:project_id).each do |project_id, project_clas|
       project = project_clas.first&.project
-      next unless project&.version
+      next unless project
 
-      h_env = Basic.safe_parse_json(project.version.env_json, {})
-      db_version = asap_data_db_name_for_env(h_env, context: "cell_set_annotations_symbols")
-      next if db_version.blank?
-
-      gene_ids = project_clas.flat_map do |cla|
-        [
-          cla.sorted_up_gene_ids.presence || cla.up_gene_ids,
-          cla.sorted_down_gene_ids.presence || cla.down_gene_ids
-        ].flat_map { |raw| parse_cla_field(raw) }
-      end
-      gene_ids = gene_ids.map { |value| value.to_i }.select { |id| id.positive? }.uniq
-      next if gene_ids.empty?
-
-      project_map = {}
-      RemoteGene.with_remote(db_version) do
-        RemoteGene.where(id: gene_ids).pluck(:id, :name).each do |gene_id, gene_name|
-          project_map[gene_id.to_s] = gene_name.to_s.presence || gene_id.to_s
-        end
-      end
-      symbol_map_by_project_id[project_id] = project_map
+      symbol_map_by_project_id[project_id] = project_cla_gene_info_by_stable_id(project)
     end
 
     rows = readable_clas.map do |cla|
       up_gene_ids = parse_cla_field(cla.sorted_up_gene_ids.presence || cla.up_gene_ids)
       down_gene_ids = parse_cla_field(cla.sorted_down_gene_ids.presence || cla.down_gene_ids)
-      symbol_map = symbol_map_by_project_id[cla.project_id] || {}
+      gene_info_map = symbol_map_by_project_id[cla.project_id] || {}
 
       creator_label = if cla.user && current_user && cla.user.id == current_user.id
                         'me'
@@ -5591,6 +5764,16 @@ class ProjectsController < ApplicationController
                       else
                         '-'
                       end
+
+      map_gene = lambda do |gene_id|
+        key = gene_id.to_s.strip
+        info = gene_info_map[key] || {}
+        {
+          gene_id: key,
+          symbol: info[:symbol].presence || key,
+          ensembl_id: info[:ensembl_id]
+        }
+      end
 
       proj = cla.project
       {
@@ -5605,8 +5788,8 @@ class ProjectsController < ApplicationController
         cluster_category: cla.cat.presence || cla.name.presence || '-',
         label: cla.name.presence || cla.cat.presence || '-',
         cell_set_key: cla.cell_set&.key.to_s,
-        up_genes: up_gene_ids.map { |gene_id| symbol_map[gene_id.to_s].presence || gene_id },
-        down_genes: down_gene_ids.map { |gene_id| symbol_map[gene_id.to_s].presence || gene_id },
+        up_genes: up_gene_ids.map { |gene_id| map_gene.call(gene_id) },
+        down_genes: down_gene_ids.map { |gene_id| map_gene.call(gene_id) },
         nber_agree: cla.nber_agree || 0,
         nber_disagree: cla.nber_disagree || 0,
         created_by: creator_label,
@@ -9027,6 +9210,12 @@ class ProjectsController < ApplicationController
       handle_project_unauthorized_access
     end
 
+    def authorize_project_owner_access
+      return if owner?(@project)
+
+      handle_project_unauthorized_access
+    end
+
     def handle_project_unauthorized_access
       respond_to do |format|
         format.html { redirect_to unauthorized_path }
@@ -9077,7 +9266,7 @@ class ProjectsController < ApplicationController
 
     def resolve_project_view_type(requested_view)
       view = requested_view.to_s
-      allowed_views = %w[summary visualization heatmap analysis data settings compliance access]
+      allowed_views = %w[summary visualization heatmap analysis data settings compliance access annotations]
       return view if allowed_views.include?(view)
 
       #project_has_embeddings? ? 'visualization' : 'summary'
@@ -9127,6 +9316,8 @@ class ProjectsController < ApplicationController
         load_compliance_context
       when 'access'
         load_access_context
+      when 'annotations'
+        load_annotations_context
       else
         @view_type = 'summary'
         load_analysis_context
@@ -10933,6 +11124,39 @@ class ProjectsController < ApplicationController
       @compliance_check_groups = resolve_compliance_check_groups(@validation_result) if @validation_result.present?
     end
 
+    def load_annotations_context
+      @annotations_can_export = owner?(@project)
+      @annotations_default_scope = 'current'
+      related = CloneRelatedProjectsQuery.call(
+        project: @project,
+        scope: @annotations_default_scope,
+        user: current_user,
+        readable_if: ->(project) { readable?(project) }
+      )
+      @annotations_related_projects = related[:ok] ? related[:projects] : [{ id: @project.id, key: @project.key, name: @project.name.presence || @project.key, is_current: true }]
+      federated = FederatedAnnotationsQuery.call(
+        project_ids: @annotations_related_projects.map { |row| row[:id] },
+        readable_if: ->(project) { readable?(project) },
+        current_project: @project
+      )
+      @annotations_payload = if federated[:ok]
+                               federated
+                             else
+                               {
+                                 annotations: [],
+                                 annotation_type_options: [],
+                                 annotation_metadata_by_type: {},
+                                 consensus_metadata_by_type: {}
+                               }
+                             end
+      support = ConsensusAnnotationSupportService.call(
+        project: @project,
+        user: current_user,
+        readable_if: ->(project) { readable?(project) }
+      )
+      @annotations_consensus_support = support[:ok] ? support[:by_type] : {}
+    end
+
     def load_summary_context
       @parsing_status = 'success'
       @parsing_step = parsing_step_for_project(@project)
@@ -10980,7 +11204,10 @@ class ProjectsController < ApplicationController
 
       @project_type = @project.project_type
       compute_summary_loom_overview
-      @summary_gene_symbol_by_id = build_summary_gene_symbol_map
+      @summary_gene_info_by_stable_id = project_cla_gene_info_by_stable_id(@project)
+      @summary_gene_symbol_by_id = @summary_gene_info_by_stable_id.transform_values { |info| info[:symbol] }
+      @summary_cot_info_by_id = build_summary_cot_info_map
+      @summary_cot_label_by_id = @summary_cot_info_by_id.transform_values { |info| info[:name].presence || info[:identifier] }
       @non_published_runs_count = if @project.public? && @project.public_at.present?
         @runs.count { |run| !@project.locked_from_publication?(run) }
       else
@@ -13784,31 +14011,167 @@ class ProjectsController < ApplicationController
     end
 
     def build_summary_gene_symbol_map
-      return {} unless @project&.version
+      project_cla_gene_symbol_by_stable_id(@project)
+    end
 
-      h_env = Basic.safe_parse_json(@project.version.env_json, {})
-      db_version = asap_data_db_name_for_env(h_env, context: "summary_gene_symbols")
-      return {} if db_version.blank?
+    def build_summary_cot_label_map
+      build_summary_cot_info_map.transform_values { |info| info[:name].presence || info[:identifier] }
+    end
 
-      raw_gene_fields = Cla.active.where(project_id: @project.id)
-                           .pluck(:sorted_up_gene_ids, :up_gene_ids, :sorted_down_gene_ids, :down_gene_ids)
+    def build_summary_cot_info_map
+      cot_ids = Cla.active.where(project_id: @project.id).flat_map do |cla|
+        parse_cla_field(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids)
+      end.map { |value| value.to_s.to_i }.select(&:positive?).uniq
+      return {} if cot_ids.empty?
 
-      gene_ids = raw_gene_fields.flat_map do |sorted_up_ids, up_ids, sorted_down_ids, down_ids|
-        [sorted_up_ids, up_ids, sorted_down_ids, down_ids].flat_map { |raw| parse_cla_field(raw) }
+      ontology_by_tag = AsapData::OntologyIdentifierUrl.ontology_by_tag_index
+      cot_info_by_id = {}
+      CellOntologyTerm.where(id: cot_ids).pluck(:id, :identifier, :name).each do |id, identifier, name|
+        identifier_s = identifier.to_s.strip
+        name_s = name.to_s.strip
+        next if identifier_s.blank? && name_s.blank?
+
+        cot_info_by_id[id.to_s] = {
+          id: id,
+          identifier: identifier_s,
+          name: name_s,
+          url: identifier_s.present? ? AsapData::OntologyIdentifierUrl.url_for(identifier_s, ontology_by_tag: ontology_by_tag) : nil
+        }
       end
-      gene_ids = gene_ids.map { |value| value.to_i }.select { |id| id.positive? }.uniq
-      return {} if gene_ids.empty?
+      cot_info_by_id
+    rescue StandardError => e
+      Rails.logger.warn("[summary_cot_info] Unable to resolve ontology terms for project #{@project&.id}: #{e.class} - #{e.message}")
+      {}
+    end
 
-      gene_symbol_by_id = {}
-      RemoteGene.with_remote(db_version) do
-        RemoteGene.where(id: gene_ids).pluck(:id, :name).each do |gene_id, gene_name|
-          gene_symbol_by_id[gene_id.to_s] = gene_name.to_s.presence || gene_id.to_s
+    # CLA up/down gene fields store loom /row_attrs/_StableID values (from gene autocomplete),
+    # not asap_data genes.id. Resolve symbols from project loom autocomplete / row attrs.
+    def project_cla_gene_symbol_by_stable_id(project)
+      project_cla_gene_info_by_stable_id(project).transform_values { |info| info[:symbol] }
+    end
+
+    def project_cla_gene_info_by_stable_id(project)
+      return {} unless project
+
+      map = {}
+      roots = project_data_roots_for_cla_genes(project)
+      return map if roots.empty?
+
+      roots.each do |root|
+        Dir.glob(root.join("**/autocomplete_genes.json").to_s).each do |path|
+          merge_autocomplete_genes_file_into_info_map!(map, path)
         end
       end
-      gene_symbol_by_id
+
+      if map.empty?
+        loom_files = Annot.where(project_id: project.id).where.not(filepath: [nil, ""]).distinct.pluck(:filepath)
+        roots.each do |root|
+          loom_files.each do |rel|
+            loom_path = root + rel.to_s
+            next unless File.exist?(loom_path)
+
+            merge_loom_row_attrs_into_info_map!(map, loom_path.to_s)
+          end
+        end
+      end
+
+      map
     rescue StandardError => e
-      Rails.logger.warn("[summary_gene_symbols] Unable to resolve gene symbols for project #{@project&.id}: #{e.class} - #{e.message}")
+      Rails.logger.warn("[cla_gene_symbols] Unable to resolve loom gene symbols for project #{project&.id}: #{e.class} - #{e.message}")
       {}
+    end
+
+    def project_data_roots_for_cla_genes(project)
+      return [] unless project&.user_id.present?
+
+      roots = []
+      summary_root = summary_project_data_root(project)
+      roots << summary_root if summary_root
+
+      user_data_dir = ENV["USER_DATA_DIR"].to_s.chomp("/")
+      if user_data_dir.present?
+        roots << (Pathname.new(user_data_dir) + project.user_id.to_s + project.key)
+      end
+
+      roots.compact.uniq.select { |path| path.exist? }
+    end
+
+    def merge_autocomplete_genes_file_into_symbol_map!(map, path)
+      info_map = {}
+      merge_autocomplete_genes_file_into_info_map!(info_map, path)
+      info_map.each { |stable_id, info| map[stable_id] = info[:symbol] }
+    end
+
+    def merge_autocomplete_genes_file_into_info_map!(map, path)
+      data = JSON.parse(File.read(path))
+      Array(data["search"] || data[:search]).each do |entry|
+        parsed = parse_loom_autocomplete_gene_entry(entry)
+        next unless parsed
+
+        map[parsed[:stable_id]] = {
+          symbol: parsed[:symbol],
+          ensembl_id: parsed[:ensembl_id].presence
+        }
+      end
+    rescue StandardError => e
+      Rails.logger.warn("[cla_gene_symbols] Failed reading #{path}: #{e.class} - #{e.message}")
+    end
+
+    def merge_loom_row_attrs_into_symbol_map!(map, loom_path)
+      info_map = {}
+      merge_loom_row_attrs_into_info_map!(info_map, loom_path)
+      info_map.each { |stable_id, info| map[stable_id] = info[:symbol] }
+    end
+
+    def merge_loom_row_attrs_into_info_map!(map, loom_path)
+      gene_values = H5DataService.get_metadata_vector(loom_path, "/row_attrs/Gene")
+      accession_values = H5DataService.get_metadata_vector(loom_path, "/row_attrs/Accession")
+      stable_values = H5DataService.get_metadata_vector(loom_path, "/row_attrs/_StableID")
+      return unless gene_values.is_a?(Array) && stable_values.is_a?(Array)
+
+      size = [gene_values.length, stable_values.length].min
+      size.times do |i|
+        gene = gene_values[i].to_s.strip
+        stable = stable_values[i].to_s.strip
+        next if gene.blank? || stable.blank?
+
+        ensembl = accession_values.is_a?(Array) ? accession_values[i].to_s.strip.presence : nil
+        map[stable] = { symbol: gene, ensembl_id: ensembl }
+      end
+    rescue StandardError => e
+      Rails.logger.warn("[cla_gene_symbols] Failed reading loom row attrs #{loom_path}: #{e.class} - #{e.message}")
+    end
+
+    def parse_loom_autocomplete_gene_entry(entry)
+      match = entry.to_s.strip.match(/\A(.+?)\s+(\S+)\s+\{([^}]+)\}\z/)
+      return nil unless match
+
+      symbol = match[1].to_s.strip
+      ensembl_id = match[2].to_s.strip
+      stable_id = match[3].to_s.strip
+      return nil if symbol.blank? || stable_id.blank?
+
+      { symbol: symbol, ensembl_id: ensembl_id, stable_id: stable_id }
+    end
+
+    def ensure_project_cla_gene_symbols_for_loom!(map, project, loom_file, required_ids: [])
+      roots = project_data_roots_for_cla_genes(project)
+      return map if roots.empty? || loom_file.blank?
+
+      roots.each do |root|
+        autocomplete_file = root + File.dirname(loom_file.to_s) + "autocomplete_genes.json"
+        merge_autocomplete_genes_file_into_symbol_map!(map, autocomplete_file.to_s) if File.exist?(autocomplete_file)
+      end
+
+      still_missing = Array(required_ids).map(&:to_s).reject { |gid| map.key?(gid) }
+      if still_missing.any? || map.empty?
+        roots.each do |root|
+          loom_path = root + loom_file.to_s
+          merge_loom_row_attrs_into_symbol_map!(map, loom_path.to_s) if File.exist?(loom_path)
+        end
+      end
+
+      map
     end
 
     def reproduction_run_short_txt(run)

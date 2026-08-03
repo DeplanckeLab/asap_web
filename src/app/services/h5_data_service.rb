@@ -1,6 +1,8 @@
 require 'open3'
 require 'json'
 require 'shellwords'
+require 'securerandom'
+require 'pathname'
 
 class H5DataService
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
@@ -634,4 +636,205 @@ class H5DataService
       raise e
     end
   end
+
+  # Compare pairs of 1-D string metadata vectors in one h5py pass.
+  # +pairs+ is an Array of hashes with :a/:b (or "a"/"b") paths (with or without leading slash).
+  # Returns an Array of { "a" => path, "b" => path, "equal" => true/false/nil, "missing" => bool }.
+  # equal is nil when either path is missing or not a readable dataset.
+  def self.compare_metadata_vector_pairs(h5_file, pairs)
+    normalized = Array(pairs).filter_map do |pair|
+      next unless pair.is_a?(Hash)
+
+      a = (pair[:a] || pair['a']).to_s
+      b = (pair[:b] || pair['b']).to_s
+      next if a.blank? || b.blank?
+
+      { 'a' => strip_leading_slash(a), 'b' => strip_leading_slash(b) }
+    end
+    return [] if normalized.empty?
+
+    script = <<~PYTHON
+      import h5py
+      import json
+      import sys
+      import numpy as np
+
+      def decode(value):
+          if value is None:
+              return ""
+          if isinstance(value, bytes):
+              return value.decode("utf-8", "replace")
+          return str(value)
+
+      def read_vec(f, path):
+          if path not in f:
+              return None
+          node = f[path]
+          if not isinstance(node, h5py.Dataset):
+              return None
+          raw = node[()]
+          if isinstance(raw, np.ndarray):
+              items = raw.tolist()
+          elif isinstance(raw, (list, tuple)):
+              items = list(raw)
+          else:
+              items = [raw]
+          return [decode(v) for v in items]
+
+      pairs = json.loads(sys.argv[2])
+      results = []
+      with h5py.File(sys.argv[1], "r") as f:
+          for pair in pairs:
+              a_path = pair["a"]
+              b_path = pair["b"]
+              a = read_vec(f, a_path)
+              b = read_vec(f, b_path)
+              if a is None or b is None:
+                  results.append({"a": a_path, "b": b_path, "equal": None, "missing": True})
+              else:
+                  results.append({"a": a_path, "b": b_path, "equal": a == b, "missing": False})
+      print(json.dumps(results))
+    PYTHON
+
+    stdout, stderr, status = Open3.capture3(
+      'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-',
+      h5_file.to_s, normalized.to_json,
+      stdin_data: script
+    )
+    unless status.success?
+      Rails.logger.error("[H5DataService] compare_metadata_vector_pairs failed: #{stderr.presence || stdout}")
+      raise "Failed to compare metadata vector pairs: #{stderr.presence || stdout}"
+    end
+
+    JSON.parse(stdout)
+  end
+
+  # True when +metadata_path+ (with or without leading slash) exists as an HDF5 dataset.
+  def self.metadata_dataset_exists?(h5_file, metadata_path)
+    field = strip_leading_slash(metadata_path)
+    script = <<~PYTHON
+      import h5py
+      import sys
+
+      with h5py.File(sys.argv[1], 'r') as f:
+          print('EXISTS' if sys.argv[2] in f else 'NOT_FOUND')
+    PYTHON
+    stdout, stderr, status = Open3.capture3(
+      'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-', h5_file.to_s, field,
+      stdin_data: script
+    )
+    unless status.success?
+      Rails.logger.error("[H5DataService] metadata_dataset_exists? failed: #{stderr}")
+      return false
+    end
+
+    stdout.strip == 'EXISTS'
+  end
+
+  # Copy an existing metadata dataset to a new path. Fails if source is missing or target exists.
+  def self.copy_metadata_dataset!(h5_file, source_path, target_path)
+    source = strip_leading_slash(source_path)
+    target = strip_leading_slash(target_path)
+    script = <<~PYTHON
+      import h5py
+      import sys
+
+      loom_path = sys.argv[1]
+      source = sys.argv[2]
+      target = sys.argv[3]
+
+      with h5py.File(loom_path, 'r+') as f:
+          if source not in f:
+              print('ERROR: Source path not found: ' + source)
+              sys.exit(1)
+          if target in f:
+              print('ERROR: Target path already exists: ' + target)
+              sys.exit(1)
+          f[target] = f[source][:]
+
+      print('OK')
+    PYTHON
+    stdout, stderr, status = Open3.capture3(
+      'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-', h5_file.to_s, source, target,
+      stdin_data: script
+    )
+    unless status.success? && stdout.strip.start_with?('OK')
+      raise "Failed to copy metadata #{source_path} -> #{target_path}: #{stderr.presence || stdout}"
+    end
+
+    true
+  end
+
+  # Delete a metadata dataset if present. No-op when missing.
+  def self.delete_metadata_dataset!(h5_file, metadata_path)
+    field = strip_leading_slash(metadata_path)
+    script = <<~PYTHON
+      import h5py
+      import sys
+
+      with h5py.File(sys.argv[1], 'r+') as f:
+          if sys.argv[2] in f:
+              del f[sys.argv[2]]
+
+      print('OK')
+    PYTHON
+    stdout, stderr, status = Open3.capture3(
+      'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-', h5_file.to_s, field,
+      stdin_data: script
+    )
+    unless status.success? && stdout.strip.start_with?('OK')
+      raise "Failed to delete metadata #{metadata_path}: #{stderr.presence || stdout}"
+    end
+
+    true
+  end
+
+  # Write a 1-D string metadata vector. Replaces the dataset if it already exists.
+  # Values are staged to a temp JSON file under the loom directory (shared with the run container).
+  def self.write_metadata_string_vector!(h5_file, metadata_path, values)
+    field = strip_leading_slash(metadata_path)
+    loom_path = Pathname.new(h5_file.to_s)
+    staging_path = loom_path.dirname.join(".asap_consensus_write_#{Process.pid}_#{SecureRandom.hex(8)}.json")
+    File.write(staging_path, Array(values).map { |v| v.nil? ? "" : v.to_s }.to_json)
+
+    script = <<~PYTHON
+      import h5py
+      import numpy as np
+      import json
+      import sys
+
+      loom_path = sys.argv[1]
+      field = sys.argv[2]
+      values_path = sys.argv[3]
+      with open(values_path, 'r', encoding='utf-8') as fh:
+          values = json.load(fh)
+      arr = np.array(values, dtype=h5py.special_dtype(vlen=str))
+
+      with h5py.File(loom_path, 'r+') as f:
+          if field in f:
+              del f[field]
+          f.create_dataset(field, data=arr)
+
+      print('OK')
+    PYTHON
+
+    begin
+      stdout, stderr, status = Open3.capture3(
+        'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-',
+        loom_path.to_s, field, staging_path.to_s,
+        stdin_data: script
+      )
+      unless status.success? && stdout.strip.start_with?('OK')
+        raise "Failed to write metadata #{metadata_path}: #{stderr.presence || stdout}"
+      end
+      true
+    ensure
+      File.delete(staging_path) if File.exist?(staging_path)
+    end
+  end
+
+  def self.strip_leading_slash(path)
+    path.to_s.sub(%r{\A/}, '')
+  end
+  private_class_method :strip_leading_slash
 end

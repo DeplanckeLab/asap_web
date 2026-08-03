@@ -1,12 +1,17 @@
 version: 2
 updates:
 - package-ecosystem: bundler
-  directory: "/"
+  directory: "/src"
+  schedule:
+    interval: daily
+  open-pull-requests-limit: 10
+- package-ecosystem: npm
+  directory: "/src"
   schedule:
     interval: daily
   open-pull-requests-limit: 10
 - package-ecosystem: github-actions
-  directory: "/"
+  directory: "/src"
   schedule:
     interval: daily
   open-pull-requests-limit: 10

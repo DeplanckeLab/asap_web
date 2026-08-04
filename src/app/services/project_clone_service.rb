@@ -76,6 +76,12 @@ class ProjectCloneService
       normalization_job_id: nil,
       replaced_by_project_key: nil,
       replaced_by_comment: nil,
+      # Clones get a local file copy; never inherit the source's S3 archive bookkeeping
+      # (dup would keep archive_status_id=3 / disk_size_archived and the UI would try to
+      # unarchive under the new key, which does not exist on S3).
+      archive_status_id: 1,
+      disk_size_archive: nil,
+      disk_size_archived: nil,
       viewed_at: now,
       created_at: now,
       updated_at: now,

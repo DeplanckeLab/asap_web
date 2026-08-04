@@ -798,10 +798,14 @@ class ProjectsController < ApplicationController
     tmp_attrs[:has_header] = 1 if tmp_attrs[:has_header]
     
     # Collect parsing attributes from params
-    [:file_type, :sel_name, :sel, :nber_cols, :nber_rows, :delimiter, :gene_name_col, :has_header, :integrate_method, :integrate_source_keys, :integrate_batch_paths, :integrate_n_pcs].each do |k|
+    [:file_type, :sel_name, :sel, :nber_cols, :nber_rows, :gene_name_col, :has_header, :integrate_method, :integrate_source_keys, :integrate_batch_paths, :integrate_n_pcs].each do |k|
       if params[k].present? && (!params[k].is_a?(String) || !params[k].strip.empty?)
         tmp_attrs[k] = params[k]
       end
+    end
+    # Delimiter may be empty (tab) or whitespace (space); accept whenever submitted.
+    if params.key?(:delimiter)
+      tmp_attrs[:delimiter] = params[:delimiter].to_s
     end
     if tmp_attrs[:integrate_method].present? && !Basic::INTEGRATION_METHODS.include?(tmp_attrs[:integrate_method].to_s)
       tmp_attrs.delete(:integrate_method)
@@ -818,13 +822,18 @@ class ProjectsController < ApplicationController
       tmp_attrs[:sel_name] = tmp_attrs[:sel]
       tmp_attrs.delete(:sel)
     end
+    # RAW_TEXT preparsing "group" labels (often the filename) are not archive members.
+    # Keeping them as sel_name makes reset/restart preparsing pass Java -sel and fail.
+    if tmp_attrs[:file_type].to_s.upcase == 'RAW_TEXT'
+      tmp_attrs.delete(:sel_name)
+    end
     
     # Set defaults for RAW_TEXT file types (matching original application behavior)
     # This matches the logic in /srv/asap2/app/controllers/fus_controller.rb lines 99-104
     detected_format = tmp_attrs[:file_type] || params[:file_type]
     if detected_format.blank? || ['ARCHIVE', 'ARCHIVE_COMPRESSED', 'COMPRESSED', 'RAW_TEXT'].include?(detected_format)
       tmp_attrs[:gene_name_col] ||= 'first' unless tmp_attrs[:gene_name_col].present?
-      tmp_attrs[:delimiter] ||= '' unless tmp_attrs[:delimiter].present?
+      tmp_attrs[:delimiter] = '' unless tmp_attrs.key?(:delimiter)
       tmp_attrs[:has_header] ||= '1' unless tmp_attrs[:has_header].present?
     end
     
@@ -1131,10 +1140,14 @@ class ProjectsController < ApplicationController
       tmp_attrs[:has_header] = 1 if tmp_attrs[:has_header]
       
       # Collect parsing attributes from params
-      [:file_type, :sel_name, :sel, :nber_cols, :nber_rows, :delimiter, :gene_name_col, :has_header].each do |k|
+      [:file_type, :sel_name, :sel, :nber_cols, :nber_rows, :gene_name_col, :has_header].each do |k|
         if params[k].present? && (!params[k].is_a?(String) || !params[k].strip.empty?)
           tmp_attrs[k] = params[k]
         end
+      end
+      # Delimiter may be empty (tab) or whitespace (space); accept whenever submitted.
+      if params.key?(:delimiter)
+        tmp_attrs[:delimiter] = params[:delimiter].to_s
       end
       [:rowname_metadata, :colname_metadata].each do |k|
         tmp_attrs[k] = params[k] if params.key?(k)
@@ -1147,12 +1160,16 @@ class ProjectsController < ApplicationController
         tmp_attrs[:sel_name] = tmp_attrs[:sel]
         tmp_attrs.delete(:sel)
       end
+      # RAW_TEXT preparsing "group" labels (often the filename) are not archive members.
+      if tmp_attrs[:file_type].to_s.upcase == 'RAW_TEXT'
+        tmp_attrs.delete(:sel_name)
+      end
       
       # Set defaults for RAW_TEXT file types
       detected_format = tmp_attrs[:file_type] || params[:file_type]
       if detected_format.blank? || ['ARCHIVE', 'ARCHIVE_COMPRESSED', 'COMPRESSED', 'RAW_TEXT'].include?(detected_format)
         tmp_attrs[:gene_name_col] ||= 'first' unless tmp_attrs[:gene_name_col].present?
-        tmp_attrs[:delimiter] ||= '' unless tmp_attrs[:delimiter].present?
+        tmp_attrs[:delimiter] = '' unless tmp_attrs.key?(:delimiter)
         tmp_attrs[:has_header] ||= '1' unless tmp_attrs[:has_header].present?
       end
       
@@ -7871,8 +7888,12 @@ class ProjectsController < ApplicationController
             options[:organism_id] = @project.organism_id if @project.organism_id.present?
             options[:version_id] = @project.version_id if @project.version_id.present?
             
-            # Add dataset selection if present
-            options[:sel] = h_attrs['sel_name'] if h_attrs['sel_name'].present?
+            # sel_name is archive/H5AD/RDS selection only; RAW_TEXT group labels must not
+            # be passed as Java -sel (that treats the matrix as COMPRESSED/ARCHIVED).
+            file_type = h_attrs['file_type'].to_s.upcase
+            if h_attrs['sel_name'].present? && file_type != 'RAW_TEXT'
+              options[:sel] = h_attrs['sel_name']
+            end
             
             # Add parsing parameters for text files (delimiter can be empty string for tab)
             options[:delimiter] = h_attrs['delimiter'] if h_attrs.key?('delimiter')
@@ -8264,11 +8285,30 @@ class ProjectsController < ApplicationController
       Rails.logger.info("[reset_parsing] Restored upload file to #{upload_file_path} from #{source_path}")
     end
 
+    # Extract parsing attributes before restarting preparsing so text-matrix
+    # options (especially delimiter) are applied on the reset form too.
+    h_attrs = {}
+    if @original_project.parsing_attrs_json.present?
+      h_attrs = Basic.safe_parse_json(@original_project.parsing_attrs_json, {})
+    end
+
     preparsing_options = {
       organism_id: @original_project.organism_id,
       version_id: @original_project.version_id,
       project_id: @original_project.id
-    }.compact
+    }
+    # sel_name is only an archive/H5AD/RDS selection. For RAW_TEXT it is often just
+    # the preparsing group label (filename) and must not be passed as Java -sel.
+    file_type = h_attrs['file_type'].to_s.upcase
+    if h_attrs['sel_name'].present? && file_type != 'RAW_TEXT'
+      preparsing_options[:sel] = h_attrs['sel_name']
+    end
+    # Delimiter may be empty (tab); include whenever previously stored.
+    preparsing_options[:delimiter] = h_attrs['delimiter'] if h_attrs.key?('delimiter')
+    preparsing_options[:gene_name_col] = h_attrs['gene_name_col'] if h_attrs['gene_name_col'].present?
+    preparsing_options[:has_header] = h_attrs['has_header'] if h_attrs.key?('has_header')
+    preparsing_options = preparsing_options.compact
+
     fu.update!(
       upload_file_size: restored_file_size,
       status: 'preparsing'
@@ -8296,12 +8336,6 @@ class ProjectsController < ApplicationController
       organism_id: @original_project.organism_id,
       version_id: @original_project.version_id
     }
-    
-    # Extract parsing attributes from existing project
-    h_attrs = {}
-    if @original_project.parsing_attrs_json.present?
-      h_attrs = Basic.safe_parse_json(@original_project.parsing_attrs_json, {})
-    end
     
     # Use the existing project instead of creating a new one
     # This ensures we keep the same project ID

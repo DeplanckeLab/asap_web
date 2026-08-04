@@ -752,7 +752,7 @@ module Basic
     # Canonical docker run prefix stored in versions.env_json (same on dev and prod).
     # Deployment-specific values (#run_network, #user_data_mount, #env_file_option) are
     # filled at runtime from ENV in build_docker_cmd.
-    def canonical_asap_run_docker_call(include_env_file: false)
+    def canonical_asap_run_docker_call(include_env_file: true)
       env_file_option = include_env_file ? '#env_file_option' : ''
       "docker run #host_option --name #container_name --network=#run_network " \
         "-e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm " \

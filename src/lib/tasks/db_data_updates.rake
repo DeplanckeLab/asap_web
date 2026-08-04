@@ -348,7 +348,7 @@ namespace :versions do
     error_count = 0
 
     puts "Normalizing versions.env_json docker_images.asap_run.call (dry_run=#{dry_run})"
-    puts "  canonical template uses #run_network, #user_data_mount, optional #env_file_option"
+    puts "  canonical template uses #run_network, #user_data_mount, #env_file_option"
     puts ""
 
     Version.find_each do |version|
@@ -362,8 +362,9 @@ namespace :versions do
         end
 
         current_call = docker_images['asap_run']['call'].to_s
-        include_env_file = version.id >= 8 || current_call.match?(/(?:^|\s)--env-file\s+/)
-        canonical_call = Basic.canonical_asap_run_docker_call(include_env_file: include_env_file)
+        next if current_call.blank?
+
+        canonical_call = Basic.canonical_asap_run_docker_call(include_env_file: true)
 
         if current_call == canonical_call
           puts "  Version ##{version.id}: already canonical, skipping"

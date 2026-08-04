@@ -19,7 +19,9 @@ class AddDescriptionToDataTransformations < ActiveRecord::Migration[8.0]
   }.freeze
 
   def up
-    add_column :data_transformations, :description, :text
+    # CreateDataTransformations may already include description + seed rows
+    # (schema folded into the create migration after this one was written).
+    add_column :data_transformations, :description, :text unless column_exists?(:data_transformations, :description)
 
     DESCRIPTIONS.each do |name, attrs|
       execute <<~SQL.squish
@@ -33,6 +35,6 @@ class AddDescriptionToDataTransformations < ActiveRecord::Migration[8.0]
   end
 
   def down
-    remove_column :data_transformations, :description
+    remove_column :data_transformations, :description if column_exists?(:data_transformations, :description)
   end
 end

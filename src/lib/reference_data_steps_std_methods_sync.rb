@@ -474,6 +474,7 @@ class ReferenceDataStepsStdMethodsSync
 
   def apply_std_methods!(steps_in, methods_in, snapshot_step_id_lookup, docker_remap, version_remap, speed_remap, summary)
     fk = { docker: docker_remap, version: version_remap, speed: speed_remap }
+    snapshot_step_ids = steps_in.map { |row| row["id"].to_i }.to_set
     sort_methods =
       if match_by_id?
         ->(r) { r["id"].to_i }
@@ -485,18 +486,38 @@ class ReferenceDataStepsStdMethodsSync
       end
     methods_in.sort_by(&sort_methods).each do |src|
       if match_by_id?
-        apply_std_method_by_id!(src, fk, summary)
+        apply_std_method_by_id!(src, fk, summary, snapshot_step_ids: snapshot_step_ids)
       else
         apply_std_method_by_name!(src, snapshot_step_id_lookup, steps_in, version_remap, fk, summary)
       end
     end
   end
 
-  def apply_std_method_by_id!(src, fk, summary)
+  def apply_std_method_by_id!(src, fk, summary, snapshot_step_ids:)
     src_id = src["id"]
     step_src_id = src["step_id"]
     raise SyncError, "StdMethod row without id: #{src.inspect}" if src_id.nil?
     raise SyncError, "StdMethod id=#{src_id} row without step_id: #{src.inspect}" if step_src_id.nil?
+
+    prepared = prepare_row_for_model(StdMethod, src, fk)
+    prepared["step_id"] = step_src_id
+    method_label = std_method_log_label(src_id, step_src_id, prepared["name"], prepared["version_id"])
+    pending_new_step = !Step.exists?(id: step_src_id) && snapshot_step_ids.include?(step_src_id.to_i)
+
+    if pending_new_step && @dry_run
+      record = StdMethod.find_by(id: src_id)
+      if record.nil?
+        puts "[#{mode_label}] create StdMethod #{method_label} (after new Step in same run)"
+        summary[:std_methods_created] += 1
+      elsif record_attributes_match?(record, prepared)
+        summary[:std_methods_unchanged] += 1
+      else
+        puts "[#{mode_label}] update StdMethod #{method_label} (after new Step in same run)"
+        log_verbose_diff!(record, prepared)
+        summary[:std_methods_updated] += 1
+      end
+      return
+    end
 
     unless Step.exists?(id: step_src_id)
       raise SyncError,
@@ -504,9 +525,6 @@ class ReferenceDataStepsStdMethodsSync
             "(create the Step first or align primary keys)"
     end
 
-    prepared = prepare_row_for_model(StdMethod, src, fk)
-    prepared["step_id"] = step_src_id
-    method_label = std_method_log_label(src_id, step_src_id, prepared["name"], prepared["version_id"])
     record = StdMethod.find_by(id: src_id)
 
     if record.nil?

@@ -435,10 +435,20 @@ class FuPreparsingService
 
   # model.Parameters.loadPreparsing (Java) for Fu upload preparsing.
   def build_java_preparsing_inner_command(file_path, upload_dir_str)
-    apply_java_raw_text_sel_defaults! if @options[:sel].present?
+    # Java -sel means "member inside an archive". For a standalone .csv/.tsv/.txt
+    # upload, preparsing list_groups often uses the filename as the group label and
+    # that value is wrongly stored as sel_name; passing it as -sel makes Java try
+    # to open the matrix as COMPRESSED/ARCHIVED and fail.
+    sel = @options[:sel].to_s
+    if sel.present? && Basic.raw_text_matrix_file?(file_path)
+      @logger.info("[FuPreparsingService] Ignoring sel=#{sel.inspect} for plain text upload #{file_path}")
+      sel = ''
+    elsif sel.present?
+      apply_java_raw_text_sel_defaults!
+    end
 
     script_args = ['java', '-jar', asap_jar_path, '-T', 'Preparsing', '-f', file_path.to_s, '-o', upload_dir_str]
-    script_args << '-sel' << @options[:sel].to_s if @options[:sel].present?
+    script_args << '-sel' << sel if sel.present?
     row_path = H5adPreparsingMetadata.java_metadata_path(@options[:rowname_metadata], :row)
     col_path = H5adPreparsingMetadata.java_metadata_path(@options[:colname_metadata], :col)
     if row_path.present?

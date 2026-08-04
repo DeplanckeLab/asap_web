@@ -31,6 +31,7 @@ export default class extends Controller {
     "resetButton",
     "fileFormatsData",
     "projectTypesData",
+    "initialParsingParamsData",
     "projectName",
     "versionSelect",
     "projectTypeSelect",
@@ -80,6 +81,7 @@ export default class extends Controller {
       rowname_metadata: '',
       colname_metadata: ''
     }
+    this.applyInitialParsingParams()
     this.h5adMetadataChosenByUser = false
     this.h5adMetadataRerunTimer = null
     this.currentDetectedFormat = null  // Track current file format
@@ -178,6 +180,35 @@ export default class extends Controller {
 
     // Initially disable submit button
     this.checkSubmitButton()
+  }
+
+  applyInitialParsingParams() {
+    if (!this.hasInitialParsingParamsDataTarget) return
+    let raw = {}
+    try {
+      raw = JSON.parse(this.initialParsingParamsDataTarget.textContent || '{}')
+    } catch (e) {
+      console.error('[FileUpload] Failed to parse initialParsingParamsData', e)
+      return
+    }
+    if (!raw || typeof raw !== 'object') return
+
+    if (Object.prototype.hasOwnProperty.call(raw, 'delimiter')) {
+      this.parsingParams.delimiter = raw.delimiter == null ? '' : String(raw.delimiter)
+    }
+    if (raw.gene_name_col) {
+      this.parsingParams.gene_name_col = String(raw.gene_name_col)
+    }
+    if (Object.prototype.hasOwnProperty.call(raw, 'has_header')) {
+      const v = raw.has_header
+      this.parsingParams.has_header = !(v === false || v === 0 || v === '0' || v === 'false')
+    }
+    if (raw.rowname_metadata) {
+      this.parsingParams.rowname_metadata = String(raw.rowname_metadata)
+    }
+    if (raw.colname_metadata) {
+      this.parsingParams.colname_metadata = String(raw.colname_metadata)
+    }
   }
 
   prefillDownloadUrl(url) {
@@ -2752,6 +2783,7 @@ export default class extends Controller {
 
   handleFormSubmit(e) {
     this.syncSelectedDatasetInput()
+    this.syncParsingParamsHiddenFields()
     this.syncH5adMetadataHiddenFields()
 
     // If a file was selected, wait for upload to complete
@@ -2768,8 +2800,52 @@ export default class extends Controller {
     // The form will submit and follow the server redirect
   }
 
+  // Parsing parameter controls update preparsing via AJAX but are not named form fields.
+  // Persist the chosen values (especially delimiter) as hidden inputs on submit so
+  // create/reset stores them in parsing_attrs_json for the Java parse step.
+  syncParsingParamsHiddenFields() {
+    if (!this.form) return
+
+    const delimiterSelect = this.preparsingResultTarget?.querySelector('#parsing-delimiter')
+    const geneNameColSelect = this.preparsingResultTarget?.querySelector('#parsing-gene-name-col')
+    const hasHeaderCheckbox = this.preparsingResultTarget?.querySelector('#parsing-has-header')
+
+    if (delimiterSelect) {
+      this.parsingParams.delimiter = delimiterSelect.value
+    }
+    if (geneNameColSelect) {
+      this.parsingParams.gene_name_col = geneNameColSelect.value
+    }
+    if (hasHeaderCheckbox) {
+      this.parsingParams.has_header = hasHeaderCheckbox.checked
+    }
+
+    const showRawTextParams = !!(delimiterSelect || geneNameColSelect || hasHeaderCheckbox)
+    if (showRawTextParams) {
+      const delimiter = this.parsingParams.delimiter !== undefined && this.parsingParams.delimiter !== null
+        ? this.parsingParams.delimiter
+        : ''
+      this.ensureHiddenField('delimiter', delimiter)
+      this.ensureHiddenField('gene_name_col', this.parsingParams.gene_name_col || 'first')
+      this.ensureHiddenField('has_header', this.parsingParams.has_header !== false ? '1' : '0')
+    }
+
+    if (this.currentDetectedFormat) {
+      this.ensureHiddenField('file_type', this.currentDetectedFormat)
+    }
+  }
+
   syncSelectedDatasetInput() {
     if (!this.form) return
+
+    const existingSelInput = this.form.querySelector('input[name="sel"]')
+    // Standalone RAW_TEXT group labels are not archive selections; do not persist as sel.
+    const standaloneRawText =
+      this.currentDetectedFormat === 'RAW_TEXT' && !this.cameFromArchive && !this.selectedArchiveEntry
+    if (standaloneRawText) {
+      if (existingSelInput) existingSelInput.remove()
+      return
+    }
 
     let selectedName = this.selectedArchiveEntry || this.selectedDatasetName
     if (!selectedName) {
@@ -2780,7 +2856,6 @@ export default class extends Controller {
       }
     }
 
-    const existingSelInput = this.form.querySelector('input[name="sel"]')
     if (selectedName && selectedName.trim() !== '') {
       if (existingSelInput) {
         existingSelInput.value = selectedName
@@ -3040,7 +3115,9 @@ export default class extends Controller {
       const versionField = this.form?.querySelector('[name="project[version_id]"]')
       
       const requestBody = {}
-      const archiveSel = this.selectedArchiveEntry || this.selectedDatasetName
+      // Only archive member paths belong in sel. Dataset/group names for standalone
+      // RAW_TEXT (often the filename) must not be sent — Java -sel means archive member.
+      const archiveSel = this.selectedArchiveEntry
       if (archiveSel && this.isTextMatrixFilename(archiveSel)) {
         requestBody.sel = archiveSel
       }

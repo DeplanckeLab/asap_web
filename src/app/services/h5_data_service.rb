@@ -7,6 +7,38 @@ require 'pathname'
 class H5DataService
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
 
+  # Serialize writers for a loom. h5py "r+" takes an exclusive HDF5 lock; concurrent
+  # opens raise BlockingIOError. Same pattern as Basic.ensure_markers_original_gene_attr.
+  def self.with_loom_write_lock(loom_path)
+    path = loom_path.to_s
+    lock_path = "#{path}.asap_h5_lock"
+    File.open(lock_path, File::RDWR | File::CREAT, 0o644) do |lockf|
+      lockf.flock(File::LOCK_EX)
+      yield
+    end
+  end
+
+  def self.run_with_optional_loom_write_lock(loom_path, already_locked:)
+    if already_locked
+      yield
+    else
+      with_loom_write_lock(loom_path) { yield }
+    end
+  end
+
+  # docker exec python for loom mutations. HDF5_USE_FILE_LOCKING=FALSE avoids
+  # BlockingIOError when another client still holds an HDF5 advisory lock; writers
+  # must still use with_loom_write_lock for mutual exclusion.
+  def self.docker_exec_h5_write_python3!(*argv, stdin_data:)
+    Open3.capture3(
+      'docker', 'exec', '-i',
+      '-e', 'HDF5_USE_FILE_LOCKING=FALSE',
+      ASAP_RUN_CONTAINER, 'python3', '-',
+      *argv,
+      stdin_data: stdin_data
+    )
+  end
+
   # ASAP.jar ExtractDataset only accepts /matrix or /layers/* (JSON error otherwise).
   # /attrs/* DE tables are compound or non-float HDF5; read a small slice with h5py in the run container.
   H5_ATTRS_PREVIEW_PY = <<~PYTHON
@@ -732,7 +764,7 @@ class H5DataService
   end
 
   # Copy an existing metadata dataset to a new path. Fails if source is missing or target exists.
-  def self.copy_metadata_dataset!(h5_file, source_path, target_path)
+  def self.copy_metadata_dataset!(h5_file, source_path, target_path, already_locked: false)
     source = strip_leading_slash(source_path)
     target = strip_leading_slash(target_path)
     script = <<~PYTHON
@@ -754,19 +786,21 @@ class H5DataService
 
       print('OK')
     PYTHON
-    stdout, stderr, status = Open3.capture3(
-      'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-', h5_file.to_s, source, target,
-      stdin_data: script
-    )
-    unless status.success? && stdout.strip.start_with?('OK')
-      raise "Failed to copy metadata #{source_path} -> #{target_path}: #{stderr.presence || stdout}"
+    run_with_optional_loom_write_lock(h5_file, already_locked: already_locked) do
+      stdout, stderr, status = docker_exec_h5_write_python3!(
+        h5_file.to_s, source, target,
+        stdin_data: script
+      )
+      unless status.success? && stdout.strip.start_with?('OK')
+        raise "Failed to copy metadata #{source_path} -> #{target_path}: #{stderr.presence || stdout}"
+      end
     end
 
     true
   end
 
   # Delete a metadata dataset if present. No-op when missing.
-  def self.delete_metadata_dataset!(h5_file, metadata_path)
+  def self.delete_metadata_dataset!(h5_file, metadata_path, already_locked: false)
     field = strip_leading_slash(metadata_path)
     script = <<~PYTHON
       import h5py
@@ -778,20 +812,129 @@ class H5DataService
 
       print('OK')
     PYTHON
-    stdout, stderr, status = Open3.capture3(
-      'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-', h5_file.to_s, field,
-      stdin_data: script
-    )
-    unless status.success? && stdout.strip.start_with?('OK')
-      raise "Failed to delete metadata #{metadata_path}: #{stderr.presence || stdout}"
+    run_with_optional_loom_write_lock(h5_file, already_locked: already_locked) do
+      stdout, stderr, status = docker_exec_h5_write_python3!(
+        h5_file.to_s, field,
+        stdin_data: script
+      )
+      unless status.success? && stdout.strip.start_with?('OK')
+        raise "Failed to delete metadata #{metadata_path}: #{stderr.presence || stdout}"
+      end
     end
 
     true
   end
 
+  # Write a global loom attribute as a length-1 string dataset under attrs/<name>.
+  # Also sets f.attrs[name] (loom-style file attribute). Replaces existing values.
+  # The string is staged to a temp file under the loom directory (shared with the run container).
+  def self.write_global_attr_string!(h5_file, metadata_path, value, already_locked: false)
+    attr_name = strip_leading_slash(metadata_path).sub(%r{\Aattrs/}, '')
+    raise ArgumentError, 'Global attr name is required' if attr_name.blank?
+
+    loom_path = Pathname.new(h5_file.to_s)
+    staging_path = loom_path.dirname.join(".asap_global_attr_write_#{Process.pid}_#{SecureRandom.hex(8)}.txt")
+    File.write(staging_path, value.to_s)
+
+    script = <<~PYTHON
+      import h5py
+      import numpy as np
+      import sys
+
+      loom_path = sys.argv[1]
+      attr_name = sys.argv[2]
+      value_path = sys.argv[3]
+      with open(value_path, 'r', encoding='utf-8') as fh:
+          value = fh.read()
+      arr = np.array([value], dtype=h5py.special_dtype(vlen=str))
+      attrs_path = 'attrs/' + attr_name
+
+      with h5py.File(loom_path, 'r+') as f:
+          f.attrs[attr_name] = value
+          if attrs_path in f:
+              del f[attrs_path]
+          f.create_dataset(attrs_path, data=arr)
+
+      print('OK')
+    PYTHON
+
+    begin
+      run_with_optional_loom_write_lock(loom_path, already_locked: already_locked) do
+        stdout, stderr, status = docker_exec_h5_write_python3!(
+          loom_path.to_s, attr_name, staging_path.to_s,
+          stdin_data: script
+        )
+        unless status.success? && stdout.strip.start_with?('OK')
+          raise "Failed to write global attr #{metadata_path}: #{stderr.presence || stdout}"
+        end
+      end
+      true
+    ensure
+      File.delete(staging_path) if File.exist?(staging_path)
+    end
+  end
+
+  # Read a global loom attribute stored as attrs/<name> (length-1 string dataset) or f.attrs[name].
+  # Prefer this over ASAP.jar ExtractMetadata for JSON payloads that break the Java JSON wrapper.
+  def self.read_global_attr_string(h5_file, metadata_path)
+    attr_name = strip_leading_slash(metadata_path).sub(%r{\Aattrs/}, '')
+    raise ArgumentError, 'Global attr name is required' if attr_name.blank?
+
+    loom_path = Pathname.new(h5_file.to_s)
+    out_path = loom_path.dirname.join(".asap_global_attr_read_#{Process.pid}_#{SecureRandom.hex(8)}.txt")
+
+    script = <<~PYTHON
+      import h5py
+      import sys
+
+      loom_path = sys.argv[1]
+      attr_name = sys.argv[2]
+      out_path = sys.argv[3]
+      attrs_path = 'attrs/' + attr_name
+      value = None
+
+      with h5py.File(loom_path, 'r') as f:
+          if attrs_path in f:
+              ds = f[attrs_path]
+              if getattr(ds, 'shape', ()) == ():
+                  value = ds[()]
+              elif len(ds.shape) == 1 and ds.shape[0] >= 1:
+                  value = ds[0]
+              else:
+                  value = ds[()]
+          elif attr_name in f.attrs:
+              value = f.attrs[attr_name]
+
+      if value is None:
+          print('MISSING')
+          sys.exit(1)
+      if isinstance(value, bytes):
+          value = value.decode('utf-8')
+      else:
+          value = str(value)
+      with open(out_path, 'w', encoding='utf-8') as fh:
+          fh.write(value)
+      print('OK')
+    PYTHON
+
+    begin
+      stdout, stderr, status = Open3.capture3(
+        'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-',
+        loom_path.to_s, attr_name, out_path.to_s,
+        stdin_data: script
+      )
+      unless status.success? && stdout.strip.start_with?('OK')
+        raise "Failed to read global attr #{metadata_path}: #{stderr.presence || stdout}"
+      end
+      File.read(out_path, encoding: 'utf-8')
+    ensure
+      File.delete(out_path) if File.exist?(out_path)
+    end
+  end
+
   # Write a 1-D string metadata vector. Replaces the dataset if it already exists.
   # Values are staged to a temp JSON file under the loom directory (shared with the run container).
-  def self.write_metadata_string_vector!(h5_file, metadata_path, values)
+  def self.write_metadata_string_vector!(h5_file, metadata_path, values, already_locked: false)
     field = strip_leading_slash(metadata_path)
     loom_path = Pathname.new(h5_file.to_s)
     staging_path = loom_path.dirname.join(".asap_consensus_write_#{Process.pid}_#{SecureRandom.hex(8)}.json")
@@ -819,13 +962,14 @@ class H5DataService
     PYTHON
 
     begin
-      stdout, stderr, status = Open3.capture3(
-        'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-',
-        loom_path.to_s, field, staging_path.to_s,
-        stdin_data: script
-      )
-      unless status.success? && stdout.strip.start_with?('OK')
-        raise "Failed to write metadata #{metadata_path}: #{stderr.presence || stdout}"
+      run_with_optional_loom_write_lock(loom_path, already_locked: already_locked) do
+        stdout, stderr, status = docker_exec_h5_write_python3!(
+          loom_path.to_s, field, staging_path.to_s,
+          stdin_data: script
+        )
+        unless status.success? && stdout.strip.start_with?('OK')
+          raise "Failed to write metadata #{metadata_path}: #{stderr.presence || stdout}"
+        end
       end
       true
     ensure

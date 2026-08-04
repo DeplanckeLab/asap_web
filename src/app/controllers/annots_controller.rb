@@ -84,6 +84,7 @@ class AnnotsController < ApplicationController
     @histogram = nil
     @h_sums = {}
     @matrix_preview = nil
+    @json_preview = nil
 
     # 2D metadata: col_attrs/row_attrs (e.g. PCA) or /attrs/ tables (e.g. DE) when
     # ExtractMetadata returns a matrix of values.
@@ -92,6 +93,10 @@ class AnnotsController < ApplicationController
                      @annot.nber_cols.to_i > 1 &&
                      (@annot.name.start_with?('/col_attrs/') || @annot.name.start_with?('/row_attrs/') ||
                       @annot.name.start_with?('/attrs/'))
+
+    scalar_global_attr = @annot.name.start_with?('/attrs/') &&
+                         @annot.nber_rows.to_i <= 1 &&
+                         (@annot.nber_cols.to_i <= 1 || @annot.dim.to_i == 4)
 
     if @annot.dim == 3
       # Expression matrix - extract sample and compute distributions
@@ -262,16 +267,29 @@ class AnnotsController < ApplicationController
       # Metadata annotation - extract values
       begin
         if File.exist?(loom_path)
-          values = H5DataService.get_metadata_vector(loom_path.to_s, @annot.name)
-          @h_results['values'] = values
-          
-          # Get preview (first 100 values)
-          @preview_data = values.first(100)
-          
+          if scalar_global_attr
+            # Length-1 /attrs/* strings (including nested JSON) via h5py: ASAP.jar
+            # ExtractMetadata wraps values in JSON and breaks on nested JSON payloads.
+            raw = H5DataService.read_global_attr_string(loom_path.to_s, @annot.name)
+            values = [raw]
+            @h_results['values'] = values
+            @preview_data = values
+            @json_preview = parse_annot_json_preview(raw)
+          else
+            values = H5DataService.get_metadata_vector(loom_path.to_s, @annot.name)
+            @h_results['values'] = values
+
+            # Get preview (first 100 values)
+            @preview_data = values.first(100)
+            if @annot.name.start_with?('/attrs/') && values.size == 1
+              @json_preview = parse_annot_json_preview(values.first)
+            end
+          end
+
           # Determine number of columns
           nber_cols = ((@annot.dim == 1) ? @annot.nber_rows : @annot.nber_cols)
-          
-          if nber_cols == 1 && @annot.data_type
+
+          if nber_cols == 1 && @annot.data_type && @json_preview.nil?
             if @annot.data_type.name == 'CATEGORICAL' || @annot.data_type_id == 3
               # Categorical data - count categories
               @h_results['values'].each do |e|
@@ -732,6 +750,19 @@ class AnnotsController < ApplicationController
     unless annot_visible_under_publication_rules?(@annot.project, @annot)
       redirect_to unauthorized_path and return
     end
+  end
+
+  # Parse a scalar global-attr value into a Hash/Array when it is JSON; otherwise nil.
+  def parse_annot_json_preview(raw)
+    return raw if raw.is_a?(Hash) || raw.is_a?(Array)
+
+    s = raw.to_s.strip
+    return nil if s.empty?
+    return nil unless s.start_with?('{', '[')
+
+    JSON.parse(s)
+  rescue JSON::ParserError
+    nil
   end
 
   # Redundant HDF5 / header column titled exactly "Gene" or "Genes" (compound id column).

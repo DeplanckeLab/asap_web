@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_07_31_220000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_03_201000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -21,6 +21,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_220000) do
     t.text "children_run_ids", default: ""
     t.text "command_json"
     t.datetime "created_at", precision: nil
+    t.bigint "docker_build_id"
     t.float "duration"
     t.text "error"
     t.text "lineage_run_ids"
@@ -47,6 +48,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_220000) do
     t.datetime "submitted_at", precision: nil
     t.integer "user_id"
     t.float "waiting_duration"
+    t.index ["docker_build_id"], name: "index_active_runs_on_docker_build_id"
   end
 
   create_table "annot_cell_sets", id: :serial, force: :cascade do |t|
@@ -441,6 +443,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_220000) do
     t.integer "cloned_run_id"
     t.text "command_json"
     t.datetime "created_at", precision: nil
+    t.bigint "docker_build_id"
     t.float "duration"
     t.text "error"
     t.text "lineage_run_ids"
@@ -468,6 +471,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_220000) do
     t.datetime "submitted_at", precision: nil
     t.integer "user_id"
     t.float "waiting_duration"
+    t.index ["docker_build_id"], name: "index_del_runs_on_docker_build_id"
     t.index ["project_id"], name: "project_id_del_runs"
   end
 
@@ -547,8 +551,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_220000) do
     t.text "view_key"
   end
 
+  create_table "docker_builds", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "digest", null: false
+    t.bigint "docker_image_id", null: false
+    t.text "tag", null: false
+    t.datetime "updated_at", null: false
+    t.index ["digest"], name: "index_docker_builds_on_digest", unique: true
+    t.index ["docker_image_id"], name: "index_docker_builds_on_docker_image_id"
+  end
+
   create_table "docker_images", id: :serial, force: :cascade do |t|
     t.datetime "created_at", precision: nil
+    t.text "digest"
     t.text "full_name"
     t.text "name"
     t.text "tag"
@@ -1175,6 +1190,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_220000) do
     t.integer "cloned_run_id"
     t.text "command_json"
     t.datetime "created_at", precision: nil
+    t.bigint "docker_build_id"
     t.float "duration"
     t.text "error"
     t.text "lineage_run_ids", default: ""
@@ -1202,6 +1218,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_220000) do
     t.datetime "submitted_at", precision: nil
     t.integer "user_id"
     t.float "waiting_duration"
+    t.index ["docker_build_id"], name: "index_runs_on_docker_build_id"
     t.index ["slurm_job_id"], name: "index_runs_on_slurm_job_id"
   end
 
@@ -1480,6 +1497,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_220000) do
     t.datetime "updated_at", precision: nil
   end
 
+  add_foreign_key "active_runs", "docker_builds"
   add_foreign_key "active_runs", "projects", name: "active_runs_project_id_fkey"
   add_foreign_key "active_runs", "reqs", name: "active_runs_req_id_fkey"
   add_foreign_key "active_runs", "runs", name: "active_runs_run_id_fkey"
@@ -1541,6 +1559,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_220000) do
   add_foreign_key "covariates", "statuses", name: "covariates_status_id_fkey"
   add_foreign_key "covariates", "users", name: "covariates_user_id_fkey"
   add_foreign_key "db_sets", "tools", name: "db_sets_tool_id_fkey"
+  add_foreign_key "del_runs", "docker_builds"
   add_foreign_key "del_runs", "statuses", name: "del_runs_status_id_fkey"
   add_foreign_key "del_runs", "std_methods", name: "del_runs_std_method_id_fkey"
   add_foreign_key "del_runs", "steps", name: "del_runs_step_id_fkey"
@@ -1553,6 +1572,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_220000) do
   add_foreign_key "diff_exprs", "users", name: "diff_exprs_user_id_fkey"
   add_foreign_key "dim_reductions", "speeds", name: "dim_reductions_speed_id_fkey"
   add_foreign_key "direct_links", "projects", name: "direct_links_project_id_fkey"
+  add_foreign_key "docker_builds", "docker_images"
   add_foreign_key "docker_patches", "versions", name: "docker_patches_version_id_fkey"
   add_foreign_key "exp_entries", "identifier_types", name: "geo_entries_identifier_type_id_fkey"
   add_foreign_key "exp_entries_projects", "exp_entries", name: "geo_entries_projects_geo_entry_id_fkey"
@@ -1642,6 +1662,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_07_31_220000) do
   add_foreign_key "reqs", "std_methods", name: "reqs_std_method_id_fkey"
   add_foreign_key "reqs", "steps", name: "reqs_step_id_fkey"
   add_foreign_key "reqs", "users", name: "reqs_user_id_fkey"
+  add_foreign_key "runs", "docker_builds"
   add_foreign_key "runs", "projects", name: "runs_project_id_fkey"
   add_foreign_key "runs", "reqs", name: "runs_req_id_fkey"
   add_foreign_key "runs", "statuses", name: "runs_status_id_fkey"

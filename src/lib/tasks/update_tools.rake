@@ -113,13 +113,18 @@ task update_tools: :environment do
       end
     end
     
-    docker_image.update_attributes({:full_name => docker_image.name + ":" + docker_image.tag, :tools_json => h_docker_tools.to_json})
+    docker_image.update!(
+      full_name: "#{docker_image.name}:#{docker_image.tag}",
+      tools_json: h_docker_tools.to_json,
+      digest: DockerImage.fetch_digest_from_docker!(h_dockers[k][:ref])
+    )
+    puts "digest: #{docker_image.digest}"
     
   end
 
   ## get ontologies versions (for ontologies that are used to create gene sets) if last version (this file contains the last ASAP version's tool versions)
   if Version.last.id == version_id
-    tools_versions_file = Pathname.new(APP_CONFIG[:data_dir]) + 'tmp' + "tool_versions.json"
+    tools_versions_file = Pathname.new(ENV.fetch('PROD_DATA_DIR')) + 'tmp' + 'tool_versions.json'
     h_tools_versions = Basic.safe_parse_json(File.read(tools_versions_file), {})        
     tmp_k = h_tools_versions.keys
     tmp_k.each do |k|
@@ -131,6 +136,6 @@ task update_tools: :environment do
     end
   end
 
-  version.update_attributes({:env_json => h_env.to_json})
+  version.update!(env_json: h_env.to_json)
 
 end

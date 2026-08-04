@@ -57,4 +57,41 @@ class ScfairExtractStructureValidatorTest < ActiveSupport::TestCase
     assert_equal 1, result[:errors].size
     assert_match(/The obs column-order attribute lists CellID, which is not stored in the file/, result[:errors].first[:message])
   end
+
+  test 'standalone loom validation omits missing anndata_mapping warning' do
+    result = Scfair::ExtractStructureValidator.new(
+      extract: loom_extract(anndata_mapping_present: false),
+      format: 'loom',
+      project_compliance: false
+    ).call
+
+    refute result[:warnings].any? { |w| w[:field] == '/attrs/anndata_mapping' }
+  end
+
+  test 'project loom validation warns when anndata_mapping is missing' do
+    result = Scfair::ExtractStructureValidator.new(
+      extract: loom_extract(anndata_mapping_present: false),
+      format: 'loom',
+      project_compliance: true
+    ).call
+
+    warning = result[:warnings].find { |w| w[:field] == '/attrs/anndata_mapping' }
+    assert warning
+    assert_match(/Missing anndata_mapping manifest/, warning[:message])
+  end
+
+  private
+
+  def loom_extract(anndata_mapping_present:)
+    {
+      'file_inventory' => {
+        'structure' => {
+          'groups_present' => %w[matrix col_attrs row_attrs attrs],
+          'anndata_mapping_present' => anndata_mapping_present
+        },
+        'matrix' => { 'n_obs' => 10, 'n_vars' => 100 },
+        'obs' => { 'column_names' => %w[CellID] }
+      }
+    }
+  end
 end

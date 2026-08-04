@@ -39,7 +39,7 @@ class ScfairSchemaExtensionValidatorTest < TestBaseWithoutFixtures
     ).call
 
     warning = result[:warnings].find { |entry| entry[:field] == 'extension.analysis_json' }
-    assert_equal 'ASAP will save/update the performed analysis in /attrs/analysis_json at download time.',
+    assert_equal 'ASAP will save/update the performed analysis in /attrs/analysis_pipeline at download time.',
                  warning[:message]
   end
 
@@ -51,7 +51,7 @@ class ScfairSchemaExtensionValidatorTest < TestBaseWithoutFixtures
     ).call
 
     warning = result[:warnings].find { |entry| entry[:field] == 'extension.analysis_json' }
-    assert_equal 'ASAP will save/update the performed analysis in uns/analysis_json at download time.',
+    assert_equal 'ASAP will save/update the performed analysis in uns/analysis_pipeline at download time.',
                  warning[:message]
   end
 

@@ -49,7 +49,8 @@ module Scfair
       base_result = ExtractComplianceChecker.new(
         extract: extract,
         format: format,
-        progress_cb: method(:relay_extract_progress)
+        progress_cb: method(:relay_extract_progress),
+        project_compliance: @project_compliance
       ).call
 
       field_values = base_result.field_values || {}

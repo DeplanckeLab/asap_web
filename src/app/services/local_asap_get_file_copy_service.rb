@@ -81,6 +81,10 @@ class LocalAsapGetFileCopyService
         raise 'Source file does not exist'
       end
 
+      if filepath.to_s.match?(/\.(loom|h5ad)\z/i)
+        ensure_analysis_json!(project: project, project_dir: project_dir, filepath: filepath)
+      end
+
       FileUtils.mkdir_p(File.dirname(dest_path))
       IO.copy_stream(filepath.to_s, dest_path.to_s)
       copied = File.size(dest_path)
@@ -90,6 +94,19 @@ class LocalAsapGetFileCopyService
     end
 
     private
+
+    def ensure_analysis_json!(project:, project_dir:, filepath:)
+      abs = Pathname.new(filepath.to_s).expand_path
+      root = Pathname.new(project_dir.to_s).expand_path
+      rel = abs.relative_path_from(root).to_s
+      loom_rel = rel.sub(/\.h5ad\z/i, '.loom')
+      return unless loom_rel.end_with?('.loom')
+
+      loom_abs = root + loom_rel
+      return unless File.exist?(loom_abs)
+
+      AnalysisJsonPersistService.call(project: project, loom_filepath: loom_rel)
+    end
 
     def host_allowed?(host)
       return false if host.blank?

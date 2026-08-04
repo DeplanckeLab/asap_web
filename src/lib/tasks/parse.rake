@@ -825,16 +825,16 @@ task :parse, [:project_key] => [:environment] do |t, args|
         asap_instance_name = ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev')
         h_cmd_parse = {
           'host_name' => "localhost",
-          # v8 parsing runs in a container context that does not always mount USER_DATA_DIR
-          # when USER_DATA_DIR is not mounted in the container, so legacy `time -o <output_dir>/exec_run_details.log`
-          # can fail before parser execution. Keep time_call empty for v8 and rely on parser output.
-          'time_call' => nil,
+          'time_call' => h_env["time_call"].gsub(/\#output_dir/, tmp_dir.to_s),
           'container_name' => asap_instance_name + "_" + run.id.to_s,
           'docker_call' => docker_call,
           'program' => "python3 parse.v8.py",
           'opts' => opts,
           'args' => []
         }
+
+        # Persist the real container command (not the rails parse[...] SLURM wrapper).
+        run.update_columns(command_json: h_cmd_parse.to_json)
 
 #        output_file = tmp_dir + "output.loom"                                                                                                                                                
 #        output_json = tmp_dir + "output.json"                                                                                                                                                
@@ -887,6 +887,9 @@ task :parse, [:project_key] => [:environment] do |t, args|
         'args' => []
       }
 
+      # Persist the real container command (not the rails parse[...] SLURM wrapper).
+      run.update_columns(command_json: h_cmd_parse.to_json)
+
       output_file = tmp_dir + "output.loom"
       output_json = tmp_dir + "output.json"
 
@@ -914,59 +917,12 @@ task :parse, [:project_key] => [:environment] do |t, args|
         end
       end
 
-      # Parse exec_run_details.log to extract max_ram and process_duration
       exec_run_details_file = tmp_dir + 'exec_run_details.log'
-      max_ram_mb = nil
-      process_duration_seconds = nil
-      
-      if File.exist?(exec_run_details_file)
-        logger.info("[ParseRake] Reading exec_run_details.log from #{exec_run_details_file}")
-        h_time_info = {}
-        
-        File.readlines(exec_run_details_file).each do |line|
-          t = line.split(",")
-          if t.size > 1
-            t.each do |e|
-              if m = e.match(/^([A-Za-z])=([\d\:.]+)$/)
-                h_time_info[m[1]] = m[2]
-              end
-            end
-          end
-        end
-        
-        logger.info("[ParseRake] Parsed time info: #{h_time_info.to_json}")
-        
-        # Extract max_ram from M= (in KB, convert to MB)
-        if h_time_info['M']
-          max_ram_kb = h_time_info['M'].to_f
-          max_ram_mb = (max_ram_kb / 1024.0).round(2)
-          logger.info("[ParseRake] Extracted max_ram: #{max_ram_kb} KB = #{max_ram_mb} MB")
-        end
-        
-        # Extract process_duration from E= (elapsed time)
-        if h_time_info['E']
-          process_duration_seconds = 0.0
-          t = h_time_info['E'].split(":")
-          if t.size == 1
-            # Case of docker-compose context (e.g., "1h 2m 3.45s")
-            t_str = h_time_info['E']
-            t_str.scan(/([\d.]+)s/) { |match| process_duration_seconds += match[0].to_f }
-            t_str.scan(/([\d]+)m/) { |match| process_duration_seconds += match[0].to_f * 60 }
-            t_str.scan(/([\d]+)h/) { |match| process_duration_seconds += match[0].to_f * 3600 }
-            t_str.scan(/([\d]+)d/) { |match| process_duration_seconds += match[0].to_f * 3600 * 24 }
-          else
-            # Standard format HH:MM:SS or MM:SS
-            if t.size == 3
-              process_duration_seconds += t[0].to_f * 3600
-            end
-            if t.size >= 2
-              process_duration_seconds += t[t.size - 2].to_f * 60
-              process_duration_seconds += t[t.size - 1].to_f
-            end
-          end
-          process_duration_seconds = process_duration_seconds.round(2)
-          logger.info("[ParseRake] Extracted process_duration: #{h_time_info['E']} = #{process_duration_seconds} seconds")
-        end
+      timing = Basic.parse_exec_run_details(exec_run_details_file)
+      max_ram_mb = timing[:max_ram_mb]
+      process_duration_seconds = timing[:process_duration_seconds]
+      if timing[:time_info].present?
+        logger.info("[ParseRake] Parsed time info: #{timing[:time_info].to_json}")
       else
         logger.warn("[ParseRake] exec_run_details.log not found at #{exec_run_details_file}")
       end

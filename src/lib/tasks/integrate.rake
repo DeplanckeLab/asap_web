@@ -30,6 +30,7 @@ task :integrate, [:project_key] => [:environment] do |t, args|
 
   h_env_docker_image = h_env['docker_images']['asap_run']
   image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
+  docker_build = DockerBuild.find_or_create_for_image_ref!(image_name)
 
   asap_data_db_name = Basic.asap_data_db_name_from_env!(h_env)
   db_conn = Basic.asap_data_db_url(h_env)
@@ -65,7 +66,8 @@ task :integrate, [:project_key] => [:environment] do |t, args|
     run.update(
       status_id: 2,
       start_time: start_time,
-      waiting_duration: waiting_duration
+      waiting_duration: waiting_duration,
+      docker_build_id: docker_build.id
     )
     logger.info("[IntegrateRake] Updated run #{run.id} to running, waiting_duration: #{waiting_duration}")
   end
@@ -223,6 +225,9 @@ task :integrate, [:project_key] => [:environment] do |t, args|
       'opts' => opts,
       'args' => []
     }
+
+    # Persist the real parse command used inside the container (after R integration).
+    run.update_columns(command_json: h_cmd_parse.to_json)
 
     cmd_parse = Basic.build_cmd(h_cmd_parse)
     puts "CMD_PARSE: #{cmd_parse}"

@@ -278,8 +278,29 @@
           <i class="fas fa-table text-blue-600"></i>
           Preview
         </h4>
-        
-        <% if @matrix_preview %>
+
+        <% if @json_preview %>
+          <div data-json-preview>
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <p class="text-sm text-gray-600">JSON content</p>
+              <div class="flex items-center gap-2 text-xs">
+                <button type="button"
+                        class="px-2 py-1 rounded border border-gray-300 text-gray-700 bg-white hover:bg-gray-50"
+                        onclick="this.closest('[data-json-preview]').querySelectorAll('details.json-foldable').forEach(function(d){ d.open = true; })">
+                  Expand all
+                </button>
+                <button type="button"
+                        class="px-2 py-1 rounded border border-gray-300 text-gray-700 bg-white hover:bg-gray-50"
+                        onclick="this.closest('[data-json-preview]').querySelectorAll('details.json-foldable').forEach(function(d){ d.open = false; })">
+                  Collapse all
+                </button>
+              </div>
+            </div>
+            <div class="border border-gray-200 rounded-lg p-3 max-h-[40rem] overflow-auto bg-gray-50">
+              <%= render_json_foldable(@json_preview, open: true) %>
+            </div>
+          </div>
+        <% elsif @matrix_preview %>
           <%# 2D metadata matrix preview (e.g. /col_attrs/X_pca, /attrs/ DE table) %>
           <% mp = @matrix_preview %>
           <% ch = mp[:column_headers] %>

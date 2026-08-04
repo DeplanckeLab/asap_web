@@ -7,6 +7,7 @@ class ActiveRun < ApplicationRecord
   belongs_to :user
   belongs_to :job, optional: true
   belongs_to :run
+  belongs_to :docker_build, optional: true
 end
 
 

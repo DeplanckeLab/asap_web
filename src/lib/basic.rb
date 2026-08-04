@@ -67,9 +67,10 @@ module Basic
       "#{project_export_server_url}/projects/#{project.key}/get_file?filename=#{CGI.escape(data_file_path)}"
     end
 
-    # Docker Hub image page (layers view), e.g. fabdavid/asap_run:v5.1 ->
-    # https://hub.docker.com/layers/fabdavid/asap_run/v5.1
-    def dockerhub_layers_url(image_name)
+    # Docker Hub image layers URL.
+    # With digest: https://hub.docker.com/layers/fabdavid/asap_run/v8/images/sha256-56e75aeb...
+    # Without:     https://hub.docker.com/layers/fabdavid/asap_run/v8
+    def dockerhub_layers_url(image_name, digest: nil)
       return nil if image_name.blank?
 
       image_ref = image_name.to_s.strip.split('@').first
@@ -81,7 +82,13 @@ module Basic
       return nil if repo.blank? || repo.include?(' ') || repo.include?('://')
       return nil unless repo.match?(%r{\A[a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]+(?:/[a-z0-9][a-z0-9_.-]+)?\z}i)
 
-      "https://hub.docker.com/layers/#{repo}/#{tag}"
+      url = "https://hub.docker.com/layers/#{repo}/#{tag}"
+      digest_s = digest.to_s.strip
+      return url if digest_s.blank?
+
+      digest_path = digest_s.sub(/\Asha256:/i, 'sha256-')
+      digest_path = "sha256-#{digest_path}" unless digest_path.start_with?('sha256-')
+      "#{url}/images/#{digest_path}"
     end
 
     def build_export_lookup_tables
@@ -3180,9 +3187,11 @@ module Basic
       #      query = model.select(select).joins(join).where(where).to_sql.gsub("'", "\\\\'")
       query = "select #{select} from #{from} #{join} where #{where}" #.gsub("'", "\\\\'")
 #      puts query
+      asap_data_host = ENV.fetch('ASAP2_REMOTE_HOST', 'host.docker.internal')
+      asap_data_port = ENV.fetch('ASAP2_REMOTE_PORT', '5433')
       h_cmd = {
         :asap_development => "psql -h postgres -p 5434 -U postgres -AF $'<\t>' --no-align -c \"#{query}\" asap2_development",
-        :asap_data => "psql -h postgres -p 5434 -U postgres -AF $'<\t>' --no-align -c \"#{query}\" asap_data_v#{version}"
+        :asap_data => "psql -h #{asap_data_host} -p #{asap_data_port} -U postgres -AF $'<\t>' --no-align -c \"#{query}\" asap_data_v#{version}"
       }
       
  
@@ -4146,6 +4155,53 @@ module Basic
       project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
       step_dir = project_dir + step.name
       (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+    end
+
+    def parse_exec_run_details(path)
+      file_path = path.to_s
+      return {} unless file_path.present? && File.exist?(file_path)
+
+      h_time_info = {}
+      File.readlines(file_path).each do |line|
+        entries = line.split(',')
+        next unless entries.size > 1
+
+        entries.each do |entry|
+          next unless (m = entry.match(/^([A-Za-z])=([\d\:.]+)$/))
+
+          h_time_info[m[1]] = m[2]
+        end
+      end
+
+      max_ram_mb = h_time_info['M'].present? ? (h_time_info['M'].to_f / 1024.0).round(2) : nil
+      process_duration_seconds = parse_time_elapsed_seconds(h_time_info['E'])
+
+      {
+        time_info: h_time_info,
+        max_ram_mb: max_ram_mb,
+        process_duration_seconds: process_duration_seconds
+      }
+    end
+
+    def parse_time_elapsed_seconds(elapsed)
+      return nil if elapsed.blank?
+
+      total = 0.0
+      parts = elapsed.split(':')
+      if parts.size == 1
+        elapsed.scan(/([\d.]+)s/) { |m| total += m[0].to_f }
+        elapsed.scan(/([\d]+)m/) { |m| total += m[0].to_f * 60 }
+        elapsed.scan(/([\d]+)h/) { |m| total += m[0].to_f * 3600 }
+        elapsed.scan(/([\d]+)d/) { |m| total += m[0].to_f * 3600 * 24 }
+        return total.round(2)
+      end
+
+      total += parts.shift.to_f * 3600 if parts.size == 3
+      return nil unless parts.size == 2
+
+      total += parts[0].to_f * 60
+      total += parts[1].to_f
+      total.round(2)
     end
 
     # Remove result files from a step output directory when a run is (re)started.
@@ -5135,6 +5191,7 @@ module Basic
 
       logger.debug(h_env_docker_image.to_json)
       image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
+      docker_build = DockerBuild.find_or_create_for_image_ref!(image_name)
       h_cmd = {
         :host_name => host_name,
         :container_name => container_name,
@@ -5193,6 +5250,7 @@ module Basic
         :pred_process_duration => (h_pred_results['predicted_time'] != 'NA') ?  h_pred_results['predicted_time'] : nil,
         :attrs_json => new_h_attrs.to_json,
         :command_json => h_cmd.to_json,
+        :docker_build_id => docker_build.id,
         :run_parents_json => run_parents_to_save.to_json,        
         :lineage_run_ids => (run_parents and run_parents.size > 0) ? (run_parents.map{|e| e[:lineage_run_ids].split(",").map{|e| e.to_i}}.flatten + run_parents.map{|e| e[:run_id]}).uniq.sort.join(",") : ""
       }
@@ -6135,50 +6193,11 @@ puts "TEST RUN"
  #     Dir.mkdir step_dir if !File.exist? step_dir
  #     output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
    
-      ### get time info                                                                                                                                                                      
-      h_time_info = {}
       time_info_filename = output_dir + 'exec_run_details.log'
-      if File.exist? time_info_filename
-        File.readlines(time_info_filename).each do |l|
-          t = l.split(",")
-          if t.size > 1
-            t.each do |e|
-              logger.debug(e)
-              if m = e.match(/^([A-Za-z])=([\d\:.]+)$/)
-                h_time_info[m[1]] = m[2]
-              end
-            end
-          end
-        end
-
-        process_duration = 0.0
-        if h_time_info['E']
-          t = h_time_info['E'].split(":")
-          if t.size == 1 ## case of docker-compose context
-            t =  h_time_info['E'].split(" ")
-            t.each do |part|
-              if m = part.match(/([\d.]+)s/)
-                part += m[1]
-              elsif m = part.match(/([\d]+)m/)
-                 part += m[1] * 60
-              elsif m = part.match(/([\d]+)h/)
-                part += m[1] * 3600
-              elsif m = part.match(/([\d]+)d/)
-                part += m[1] * 3600 * 24
-              end
-            end
-          else
-            if t.size == 3
-              process_duration += t.shift.to_f * 3600
-            end
-            if t.size == 2
-              process_duration += t[0].to_f * 60
-              process_duration += t[1].to_f
-            end
-            logger.debug("TIME_INFO: " + h_time_info.to_json)
-          end
-        end
-      end
+      timing = parse_exec_run_details(time_info_filename)
+      h_time_info = timing[:time_info] || {}
+      process_duration = timing[:process_duration_seconds]
+      logger.debug("TIME_INFO: " + h_time_info.to_json) if h_time_info.any?
 
       duration = (start_time) ? (Time.now - start_time) : nil 
 
@@ -6220,12 +6239,7 @@ puts "TEST RUN"
       ### compute_pred_params
       h_pred_params = set_predict_params(project, run, std_method, h_runs, h_steps)
 
-      # Convert max_ram from KB (time command output) to MB for storage
-      max_ram_mb = nil
-      if h_time_info['M']
-        max_ram_kb = h_time_info['M'].to_f
-        max_ram_mb = (max_ram_kb / 1024.0).round(2)  # Convert KB to MB
-      end
+      max_ram_mb = timing[:max_ram_mb]
 
       h_upd = {
         :output_json => h_output_files.to_json,

@@ -5,10 +5,11 @@ module Scfair
   class ExtractComplianceChecker
     Result = Struct.new(:valid?, :errors, :warnings, :info, :valid_checks, :field_values, keyword_init: true)
 
-    def initialize(extract:, format:, progress_cb: nil)
+    def initialize(extract:, format:, progress_cb: nil, project_compliance: false)
       @extract = deep_stringify(extract || {})
       @format = format.to_s
       @progress_cb = progress_cb
+      @project_compliance = project_compliance
     end
 
     def call
@@ -22,7 +23,11 @@ module Scfair
       info = []
 
       tick('structure', 'Checking file structure', 30)
-      structure = ExtractStructureValidator.new(extract: @extract, format: @format).call
+      structure = ExtractStructureValidator.new(
+        extract: @extract,
+        format: @format,
+        project_compliance: @project_compliance
+      ).call
       errors.concat(structure[:errors])
       warnings.concat(structure[:warnings])
       valid_checks.concat(structure[:valid_checks])

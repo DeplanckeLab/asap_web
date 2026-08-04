@@ -116,16 +116,23 @@
         <div class="cell-filtering-form-col space-y-4">
           <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-3 sm:p-4">
             <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-2">Filtering summary</h4>
-            <div class="flex flex-wrap gap-2">
-              <% if kept_cells_count %>
-                <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg">
-                  <span class="text-sm font-medium text-green-900">Kept cells: <span class="font-bold"><%= number_with_delimiter(kept_cells_count) %></span></span>
+            <% if run_status_id == 3 %>
+              <div class="flex flex-wrap gap-2">
+                <% if kept_cells_count %>
+                  <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg">
+                    <span class="text-sm font-medium text-green-900">Kept cells: <span class="font-bold"><%= number_with_delimiter(kept_cells_count) %></span></span>
+                  </div>
+                <% end %>
+                <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg">
+                  <span class="text-sm font-medium text-gray-900">Discarded cells: <span class="font-bold"><%= number_with_delimiter(discarded_cells_count) %></span></span>
                 </div>
-              <% end %>
-              <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg">
-                <span class="text-sm font-medium text-gray-900">Discarded cells: <span class="font-bold"><%= number_with_delimiter(discarded_cells_count) %></span></span>
               </div>
-            </div>
+            <% else %>
+              <p class="text-sm text-gray-500 italic mb-0 inline-flex items-center gap-2">
+                <i class="fas fa-spinner fa-spin" aria-hidden="true"></i>
+                Being filtered...
+              </p>
+            <% end %>
           </div>
 
           <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-3 sm:p-4">

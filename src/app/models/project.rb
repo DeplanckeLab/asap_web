@@ -669,6 +669,7 @@ class Project < ApplicationRecord
     asap_instance_name = ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev')
     h_env_docker_image = h_env['docker_images']['asap_run']
     image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
+    docker_build = DockerBuild.find_or_create_for_image_ref!(image_name)
 
     h_cmd = {
       'host_name' => 'localhost',
@@ -692,6 +693,7 @@ class Project < ApplicationRecord
       num: 1,
       user_id: self.user_id,
       command_json: h_cmd.to_json,
+      docker_build_id: docker_build.id,
       attrs_json: self.parsing_attrs_json,
       output_json: h_outputs.to_json,
       submitted_at: start_time,

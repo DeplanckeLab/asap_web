@@ -1711,11 +1711,12 @@ checks:
     messages:
       missing_file_check: 'analysis_json metadata not found (recommended)'
       missing_project:
-        h5ad: 'ASAP will save/update the performed analysis in uns/analysis_json at download time.'
-        loom: 'ASAP will save/update the performed analysis in /attrs/analysis_json at download time.'
+        h5ad: 'ASAP will save/update the performed analysis in uns/analysis_pipeline at download time.'
+        loom: 'ASAP will save/update the performed analysis in /attrs/analysis_pipeline at download time.'
     rollup:
-    - Looks for analysis_pipeline metadata (recommended analysis_json extension)
+    - Looks for analysis_pipeline metadata (analysis_json schema extension)
     - Warns when analysis pipeline metadata is absent
+    - ASAP writes /attrs/analysis_pipeline (Loom) or uns/analysis_pipeline (H5AD) at download time
   extension.spatial.structure:
     summary: uns/spatial dictionary layout (is_single, library identifiers, scalefactors).
     rollup:

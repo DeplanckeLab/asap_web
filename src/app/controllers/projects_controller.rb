@@ -1930,6 +1930,11 @@ class ProjectsController < ApplicationController
       Rails.logger.info "get_file: authorized=#{authorized}"
       
       if authorized
+
+        # Refresh scFAIR analysis_pipeline global metadata from DB before loom/h5ad download.
+        if filepath.to_s.match?(/\.(loom|h5ad)\z/i)
+          ensure_analysis_json_before_download!(project_root, filepath)
+        end
   
         ## export to h5ad                                                                                                                                                                                                                          
         if filepath.to_s.match(/output\.h5ad$/)
@@ -11286,6 +11291,24 @@ class ProjectsController < ApplicationController
       root_s = root.to_s
       fp_s = fp.to_s
       fp_s.start_with?(root_s + File::SEPARATOR) || fp_s == root_s
+    end
+
+    # Rebuild /attrs/analysis_pipeline on the loom sibling before serving loom or converting to h5ad.
+    def ensure_analysis_json_before_download!(project_root, filepath)
+      abs = Pathname.new(filepath.to_s).expand_path
+      root = Pathname.new(project_root.to_s).expand_path
+      rel = abs.relative_path_from(root).to_s
+      loom_rel = rel.sub(/\.h5ad\z/i, '.loom')
+      return unless loom_rel.end_with?('.loom')
+
+      loom_abs = root + loom_rel
+      return unless File.exist?(loom_abs)
+
+      result = AnalysisJsonPersistService.call(project: @project, loom_filepath: loom_rel)
+      Rails.logger.info(
+        "get_file: updated analysis_pipeline on #{loom_rel} " \
+        "(annot_id=#{result[:annot_id]}, steps=#{result[:nber_steps]})"
+      )
     end
 
     def compute_summary_loom_overview

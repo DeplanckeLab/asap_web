@@ -8,6 +8,7 @@ class Run < ApplicationRecord
   belongs_to :req, optional: true
   belongs_to :user, optional: true
   belongs_to :job, optional: true
+  belongs_to :docker_build, optional: true
 
   has_many :annots, dependent: :destroy
   has_many :fos, dependent: :destroy
@@ -90,6 +91,30 @@ class Run < ApplicationRecord
     Annot.find_by(project_id: project_id, name: name.to_s, filepath: rel)&.id
   rescue ArgumentError
     nil
+  end
+
+  # runs.max_ram storage units:
+  # - Before 2025-12-17 Basic.finish_run wrote GNU time %M directly (kilobytes).
+  # - Since then it stores megabytes (KB/1024). Slurm monitor also stores MB.
+  # Values that would be >= 1 TiB if read as MB are still unconverted KB writes.
+  MAX_RAM_STORED_AS_MB_FROM = Time.utc(2025, 12, 17)
+  MAX_PLAUSIBLE_RAM_MB = 1024 * 1024
+
+  def max_ram_mb
+    return nil if max_ram.nil?
+
+    value = max_ram.to_f
+    return value / 1024.0 if value >= MAX_PLAUSIBLE_RAM_MB
+    return value / 1024.0 if created_at.present? && created_at < MAX_RAM_STORED_AS_MB_FROM
+
+    value
+  end
+
+  def max_ram_gb
+    mb = max_ram_mb
+    return nil if mb.nil?
+
+    (mb / 1024.0).round(4)
   end
 
   private

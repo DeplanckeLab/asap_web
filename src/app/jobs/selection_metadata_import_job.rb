@@ -13,6 +13,9 @@ class SelectionMetadataImportJob < ApplicationJob
 
     attrs = Basic.safe_parse_json(run.attrs_json, {})
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+    output_dir = Basic.run_output_dir(run)
+    FileUtils.mkdir_p(output_dir)
+    h_env = Basic.safe_parse_json(project.version&.env_json, {})
 
     run.update(
       status_id: 2,
@@ -50,7 +53,9 @@ class SelectionMetadataImportJob < ApplicationJob
       '-meta', metadata_name,
       '-f', selected_file_path.to_s
     ]
-    raw_output = `#{Shellwords.join(cmd)}`
+    time_call = h_env['time_call']&.gsub(/\#output_dir/, output_dir.to_s)
+    exec_cmd = [time_call, Shellwords.join(cmd)].compact.join(' ')
+    raw_output = `#{exec_cmd}`
     if !$?.success?
       raise StandardError, 'CreateCellSelection command failed'
     end
@@ -90,10 +95,14 @@ class SelectionMetadataImportJob < ApplicationJob
       Cla.create(project_id: project.id, annot_id: new_annot.id, cat: cat, name: label, user_id: run.user_id)
     end
 
-    run.update(
+    timing = Basic.parse_exec_run_details(output_dir + 'exec_run_details.log')
+    run_updates = {
       status_id: 3,
       duration: run.start_time ? (Time.now - run.start_time).to_f : nil
-    )
+    }
+    run_updates[:max_ram] = timing[:max_ram_mb] if timing[:max_ram_mb]
+    run_updates[:process_duration] = timing[:process_duration_seconds] if timing[:process_duration_seconds]
+    run.update(run_updates)
     Basic.upd_project_step(project, step.id)
     project.broadcast(step.id) if project.respond_to?(:broadcast)
     broadcast_selection_states_changed(project, loom_file: loom_file, status: 'completed', run_id: run.id)

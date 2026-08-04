@@ -6,10 +6,11 @@ module Scfair
     H5AD_REQUIRED_GROUPS = %w[obs var X].freeze
     LOOM_REQUIRED_GROUPS = %w[matrix col_attrs row_attrs attrs].freeze
 
-    def initialize(extract:, format:)
+    def initialize(extract:, format:, project_compliance: false)
       @extract = extract || {}
       @format = format.to_s
       @inventory = @extract['file_inventory'] || {}
+      @project_compliance = project_compliance
     end
 
     def call
@@ -154,7 +155,7 @@ module Scfair
 
       if structure['anndata_mapping_present']
         valid_checks << { field: '/attrs/anndata_mapping', message: 'Found anndata_mapping manifest' }
-      else
+      elsif @project_compliance
         warnings << {
           field: '/attrs/anndata_mapping',
           message: 'Missing anndata_mapping manifest (recommended for deterministic Loom->H5AD conversion)'

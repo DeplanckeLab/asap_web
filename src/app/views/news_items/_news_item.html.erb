@@ -1,7 +1,9 @@
 <% scheme = news_item.color_scheme %>
 <div id="news-item-<%= news_item.id %>"
-     class="<%= news_item_card_classes(news_item) %> scroll-mt-24 transition duration-500 ring-2 ring-offset-2 ring-transparent"
+     class="<%= news_item_card_classes(news_item) %> scroll-mt-40 transition duration-500 ring-2 ring-offset-2 ring-transparent"
      data-news-highlight-target="card"
+     data-news-filter-target="card"
+     data-news-type="<%= news_item.news_type %>"
      data-highlight-ring="<%= news_item_highlight_ring_class(news_item) %>">
   <div class="flex items-start gap-3">
     <div class="shrink-0 mt-0.5">

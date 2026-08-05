@@ -1,8 +1,9 @@
 import { Controller } from "@hotwired/stimulus"
 
 // Scrolls to and briefly highlights the news card matching the URL hash.
+// Accounts for the sticky news filter header under the fixed nav.
 export default class extends Controller {
-  static targets = ["card"]
+  static targets = ["card", "header"]
 
   connect() {
     this.highlightFromHash()
@@ -28,7 +29,8 @@ export default class extends Controller {
     this.clearHighlight()
 
     requestAnimationFrame(() => {
-      card.scrollIntoView({ behavior: "smooth", block: "center" })
+      this.scrollCardIntoView(card)
+
       const ringClasses = (card.dataset.highlightRing || "ring-gray-400").split(/\s+/).filter(Boolean)
       card.classList.remove("ring-transparent")
       card.classList.add(...ringClasses)
@@ -37,6 +39,16 @@ export default class extends Controller {
 
       this.clearTimer = setTimeout(() => this.clearHighlight(), 2500)
     })
+  }
+
+  scrollCardIntoView(card) {
+    const gap = 16
+    const headerBottom = this.hasHeaderTarget
+      ? this.headerTarget.getBoundingClientRect().bottom
+      : 0
+    const cardTop = card.getBoundingClientRect().top
+    const top = window.scrollY + cardTop - headerBottom - gap
+    window.scrollTo({ top: Math.max(0, top), behavior: "smooth" })
   }
 
   clearHighlight() {

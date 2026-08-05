@@ -269,6 +269,10 @@ import NewsHighlightController from "controllers/news_highlight_controller"
 application.register("news-highlight", NewsHighlightController)
 console.log('News highlight controller registered')
 
+import NewsFilterController from "controllers/news_filter_controller"
+application.register("news-filter", NewsFilterController)
+console.log('News filter controller registered')
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

@@ -1,33 +1,63 @@
 <% content_for :title, "News - ASAP" %>
-<div class="max-w-5xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
-  <div class="mb-8 flex items-center justify-between gap-4 flex-wrap">
-    <div>
-      <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">News</h1>
-      <p class="mt-2 text-gray-600 dark:text-gray-300">
-        Announcements, features, alerts, and updates from the ASAP team.
-      </p>
+<% initial_type = params[:type].to_s %>
+<% initial_type = '' unless NewsItem::NEWS_TYPES.key?(initial_type) %>
+
+<div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8"
+     data-controller="news-filter news-highlight"
+     data-news-filter-type-value="<%= initial_type %>">
+  <div class="sticky top-13 z-20 -mx-4 sm:-mx-6 lg:-mx-8 px-4 sm:px-6 lg:px-8 py-4 mb-6 bg-white/95 backdrop-blur border-b border-gray-200 dark:bg-gray-950/95 dark:border-gray-700"
+       data-news-highlight-target="header">
+    <div class="flex items-start justify-between gap-4 flex-wrap">
+      <div>
+        <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">News</h1>
+        <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">
+          Announcements, features, alerts, and updates from the ASAP team.
+        </p>
+      </div>
+      <% if admin? %>
+        <%= link_to 'New news item', new_news_item_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
+      <% end %>
     </div>
-    <% if admin? %>
-      <%= link_to 'New news item', new_news_item_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
-    <% end %>
+
+    <div class="mt-4 flex flex-wrap items-center gap-2" role="group" aria-label="Filter news by category">
+      <button type="button"
+              class="inline-flex items-center rounded-full border px-3 py-1.5 text-sm font-medium transition"
+              data-news-filter-target="button"
+              data-news-type=""
+              data-action="click->news-filter#select"
+              aria-pressed="true">
+        All
+      </button>
+      <% NewsItem::NEWS_TYPES.each do |type, meta| %>
+        <button type="button"
+                class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition"
+                data-news-filter-target="button"
+                data-news-type="<%= type %>"
+                data-action="click->news-filter#select"
+                aria-pressed="false">
+          <i class="<%= meta[:default_icon] %>" aria-hidden="true"></i>
+          <%= meta[:label] %>
+        </button>
+      <% end %>
+    </div>
   </div>
 
   <% if notice.present? %>
-    <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700"><%= notice %></div>
+    <div class="mb-4 rounded-md bg-green-100 px-4 py-3 text-sm text-green-700"><%= notice %></div>
   <% end %>
   <% if alert.present? %>
-    <div class="rounded-md bg-red-100 px-4 py-3 text-sm text-red-700"><%= alert %></div>
+    <div class="mb-4 rounded-md bg-red-100 px-4 py-3 text-sm text-red-700"><%= alert %></div>
   <% end %>
 
-  <div class="space-y-4" data-controller="news-highlight">
+  <div class="space-y-4 pb-10">
     <% @news_items.each do |news_item| %>
       <%= render 'news_item', news_item: news_item, show_actions: true %>
     <% end %>
   </div>
 
-  <% if @news_items.empty? %>
-    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-400">
-      No news has been published yet.
-    </div>
-  <% end %>
+  <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-400"
+       data-news-filter-target="empty"
+       hidden>
+    <%= @news_items.empty? ? 'No news has been published yet.' : 'No news matches this category.' %>
+  </div>
 </div>

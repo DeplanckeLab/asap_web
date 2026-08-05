@@ -225,6 +225,10 @@ import SearchRunStatusController from "controllers/search_run_status_controller"
 application.register("search-run-status", SearchRunStatusController)
 console.log('Search run status controller registered')
 
+import SearchProjectsRefreshController from "controllers/search_projects_refresh_controller"
+application.register("search-projects-refresh", SearchProjectsRefreshController)
+console.log('Search projects refresh controller registered')
+
 import SortableListController from "controllers/sortable_list_controller"
 application.register("sortable-list", SortableListController)
 console.log('Sortable list controller registered')

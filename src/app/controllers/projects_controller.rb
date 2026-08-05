@@ -45,28 +45,8 @@ class ProjectsController < ApplicationController
 
   # GET /projects or /projects.json
   def index
-    @query = params[:q]
-    visibility = params[:visibility].presence || (
-      if params[:public_only].present?
-        params[:public_only] == 'true' ? 'public' : 'private'
-      else
-        'all'
-      end
-    )
+    @query, @filters = project_search_query_and_filters
 
-    @filters = {
-      organism_id: params[:organism_id],
-      project_type_id: params[:project_type_id],
-      tissue: params[:tissue],
-      status_id: params[:status_id],
-      visibility: visibility,
-      sort: params[:sort] || 'updated_at',
-      page: params[:page] || 1,
-      # User permission context for filtering
-      current_user_id: current_user&.id,
-      is_admin: admin?
-    }
-    
     # Use Elasticsearch for search
     search_results = Project.search(@query, @filters)
     
@@ -7894,6 +7874,21 @@ class ProjectsController < ApplicationController
     render json: counts
   end
 
+  # GET /projects/search_snapshot
+  # Lightweight fingerprint of the current search-results page (total count +
+  # result IDs). Used by the search page to detect newly submitted / removed
+  # projects and reload without a full manual refresh.
+  def search_snapshot
+    query, filters = project_search_query_and_filters
+    search_results = Project.search(query, filters)
+    hits = search_results.response['hits']
+
+    render json: {
+      total_count: hits['total']['value'].to_i,
+      ids: Array(hits['hits']).map { |hit| hit['_id'].to_i }
+    }
+  end
+
   # GET /projects/run_counts_batch?ids=1,2,3
   # Returns run counts for multiple projects (search page adaptive polling).
   # Unauthorized or missing IDs are omitted. Caps at 50 IDs.
@@ -9051,6 +9046,31 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def project_search_query_and_filters
+      query = params[:q]
+      visibility = params[:visibility].presence || (
+        if params[:public_only].present?
+          params[:public_only] == 'true' ? 'public' : 'private'
+        else
+          'all'
+        end
+      )
+
+      filters = {
+        organism_id: params[:organism_id],
+        project_type_id: params[:project_type_id],
+        tissue: params[:tissue],
+        status_id: params[:status_id],
+        visibility: visibility,
+        sort: params[:sort] || 'updated_at',
+        page: params[:page] || 1,
+        current_user_id: current_user&.id,
+        is_admin: admin?
+      }
+
+      [query, filters]
+    end
+
     def creation_complete_redirect_url(project)
       project_path(project, view: 'analysis')
     end

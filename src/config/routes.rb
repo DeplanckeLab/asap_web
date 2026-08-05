@@ -12,6 +12,7 @@ Rails.application.routes.draw do
       post :bulk_destroy
       post :prepare_integrate
       get :run_counts_batch
+      get :search_snapshot
     end
     member do
       get :instructions

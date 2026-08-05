@@ -48,6 +48,22 @@ task update_genes: :environment do
     end
   end
 
+  def mark_unseen_organisms_obsolete!(db_type, seen_db_names, release_num)
+    subdomain = EnsemblSubdomain.find_by(name: db_type.to_s)
+    return 0 unless subdomain
+    return 0 if seen_db_names.empty?
+
+    scope = Organism.where(ensembl_subdomain_id: subdomain.id)
+      .where.not(ensembl_db_name: [nil, ""])
+    scope = scope.where.not(ensembl_db_name: seen_db_names) if seen_db_names.any?
+    updated = scope.where(obsolete: [false, nil]).update_all(
+      obsolete: true,
+      updated_at: Time.now
+    )
+    puts "Marked #{updated} #{db_type} organisms obsolete for release #{release_num}."
+    updated
+  end
+
   def extract_genes start, db_type, release_num, remote_db, download_missing_meta
     
     base_dir = ensembl_data_dir
@@ -104,49 +120,47 @@ task update_genes: :environment do
     
     #    organisms = Organism.all.to_a.select{|o| o.name and !o.name.strip.empty?}
     #    organisms.each_index do |oid|
-    h_db_names.keys.select{|e| !e.match(/_collection$/)}.each do |db_name| # and e.match(/drosophila_melanogaster/)}.each do |db_name|
+    current_db_names = h_db_names.keys.select{|e| !e.match(/_collection$/)}
+    db_names_to_extract = []
+
+    current_db_names.each do |db_name| # and e.match(/drosophila_melanogaster/)}.each do |db_name|
       o = Organism.where(:ensembl_db_name => db_name).first
-      if !o or release_num > o.latest_ensembl_release
-        if !o
-          puts "Create new organism for #{db_name}..."
-          h_o = {
-            :ensembl_db_name => db_name, 
-            :ensembl_subdomain_id => h_ensembl_subdomains[db_type].id, 
-            :latest_ensembl_release => release_num
-          }
-          o = Organism.new(h_o)
-          o.save
-        elsif 
-          o.update!(
-            :ensembl_subdomain_id => h_ensembl_subdomains[db_type].id, 
-            :latest_ensembl_release => release_num
-          )
+      needs_extract = !o || release_num > o.latest_ensembl_release.to_i
+      if !o
+        puts "Create new organism for #{db_name}..."
+        h_o = {
+          :ensembl_db_name => db_name,
+          :ensembl_subdomain_id => h_ensembl_subdomains[db_type].id,
+          :latest_ensembl_release => release_num,
+          :obsolete => false
+        }
+        o = Organism.new(h_o)
+        o.save
+      else
+        h_updates = {
+          :ensembl_subdomain_id => h_ensembl_subdomains[db_type].id,
+          :obsolete => false
+        }
+        if o.latest_ensembl_release.to_i < release_num
+          h_updates[:latest_ensembl_release] = release_num
         end
-        
-        #      ConnectionSwitch.with_db(:website_with_version, nil) do 
-        #        o2 = Organism.where(:ensembl_db_name => db_name).first
-        #        if ! o2
-        #          puts "Create new organism for #{db_name}..."
-        #          h_o = {
-        #            :ensembl_db_name => db_name,
-        #            :ensembl_subdomain_id => h_ensembl_subdomains[db_type].id,
-        #            :latest_ensembl_release => release_num
-        #          }
-        #          o2 = Organism.new(h_o)
-        #          o2.save
-        #        else
-        #          o2.update_attributes(
-        #                               :ensembl_subdomain_id => h_ensembl_subdomains[db_type].id,
-        #                               :latest_ensembl_release => release_num
-        #                               )
-        #        end
-        #        
-        #        if o2.id != o.id
-        #          puts "DISCREPENCY #{o.id} #{o2.id}!"
-        #        end
-        #      end
-        
-        #      o = organisms[oid]
+        o.update!(h_updates) if h_updates.any? { |k, v| o.attributes[k.to_s] != v }
+      end
+
+      if needs_extract
+        db_names_to_extract << db_name
+      else
+        puts "organism #{db_name} already exists in database with version #{o.latest_ensembl_release}."
+      end
+    end
+
+    db_names_to_extract.each do |db_name|
+      o = Organism.where(:ensembl_db_name => db_name).first
+      if !o
+        puts "Skip #{db_name}: organism record was not created."
+        next
+      end
+
         puts "#{dt(Time.now, start)}: ====> Extract #{o.ensembl_db_name} RELEASE #{release_num} #{db_type.upcase}..."
         folder_name = h_db_names[o.ensembl_db_name] #o.ensembl_db_name + '_core_97_1'
         
@@ -687,10 +701,9 @@ task update_genes: :environment do
             `#{cmd}`
           end
         end
-      else
-        puts "organism #{db_name} already exists in database with version #{o.latest_ensembl_release}."
-      end
     end
+
+    mark_unseen_organisms_obsolete!(db_type, current_db_names, release_num)
 
     AsapData::EnsemblAssembliesLoader.update_subdomain_latest_release!(
       db_type,

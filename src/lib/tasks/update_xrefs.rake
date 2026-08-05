@@ -63,6 +63,25 @@ task update_xrefs: :environment do
     "Reactome"
   ].freeze
 
+  # Ensembl FTP core folder names: species_core_<release>_<assembly> or, for genomes
+  # species bridged on the main Ensembl FTP, species_core_<genomes_release>_<release>_<assembly>.
+  def parse_ensembl_core_folder(folder, subdomain: nil)
+    m = folder.match(/\A(.+?)_core_(.+)\z/)
+    return nil unless m
+
+    parts = m[2].split("_")
+    return nil if parts.size < 2
+    return nil unless parts.all? { |p| p.match?(/\A\d+\z/) }
+
+    release_num =
+      if parts.size >= 3 && subdomain.to_s == "vertebrates"
+        parts[-2]
+      else
+        parts[0]
+      end
+    { ensembl_db_name: m[1], release_num: release_num, folder: folder }
+  end
+
   def flush_gene_set_item_writes!(inserts, updates, batch_size)
     now = Time.now
     inserts.each_slice(batch_size) do |slice|
@@ -209,7 +228,7 @@ task update_xrefs: :environment do
 
   ## get organisms
   h_organisms = {}
-  Organism.all.each do |o|
+  Organism.where(obsolete: [false, nil]).all.each do |o|
     h_organisms[o.id] = o
   end
 
@@ -237,12 +256,10 @@ task update_xrefs: :environment do
     next unless (m = l.match(/>(\w+)\/</))
 
     folder = m[1]
-    # e.g. homo_sapiens_core_116_38 or foo_bar_core_63_1
-    next unless (m_core = folder.match(/\A(.+)_core_(\d+)_\d+\z/))
+    parsed = parse_ensembl_core_folder(folder)
+    next unless parsed
 
-    ensembl_db_name = m_core[1]
-    # Prefer an existing core entry only if somehow duplicated; last core wins.
-    h_db_names[ensembl_db_name] = folder
+    h_db_names[parsed[:ensembl_db_name]] = parsed[:folder]
   end
 
   puts h_db_names.to_json
@@ -255,10 +272,13 @@ task update_xrefs: :environment do
     h_ensembl_subdomains[es.name.to_sym]= es
     h_ensembl_subdomains_by_id[es.id]= es
   end
+
+  organism_filter = ENV["ORGANISM"].to_s.split(",").map(&:strip).reject(&:empty?)
     
   #  Organism.all.select{|o| o.id == 35}.each do |o|
   #  Organism.where(:ensembl_db_name => 'aedes_aegypti_lvpagwg').all.each do |o|
-  Organism.all.each do |o|
+  Organism.where(obsolete: [false, nil]).all.each do |o|
+    next if organism_filter.any? && !organism_filter.include?(o.ensembl_db_name)
     
     puts "Extract #{o.ensembl_db_name}..."  
 
@@ -278,9 +298,8 @@ task update_xrefs: :environment do
       next
     end
 
-    # Release from *_core_<release>_<assembly>, never the first digit in the species name
-    # (e.g. cricetulus_griseus_chok1gshd_core_116_1 -> 116, not 1).
-    release_num = folder_name[/_core_(\d+)_\d+\z/, 1]
+    parsed_folder = parse_ensembl_core_folder(folder_name, subdomain: es)
+    release_num = parsed_folder&.dig(:release_num)
     release_num ||= o.latest_ensembl_release.to_s
     unless release_num.present? && release_num.to_i > 0
       puts "Skip #{o.ensembl_db_name}: cannot determine Ensembl release from #{folder_name}"

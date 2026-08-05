@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_30_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_05_115000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
@@ -149,10 +149,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_30_140000) do
     t.text "go_short_name"
     t.integer "latest_ensembl_release"
     t.text "name"
+    t.boolean "obsolete", default: false, null: false
     t.text "short_name"
     t.text "tag"
     t.integer "tax_id"
     t.datetime "updated_at", precision: nil
+    t.index ["obsolete"], name: "index_organisms_on_obsolete"
   end
 
   create_table "statuses", id: :serial, force: :cascade do |t|

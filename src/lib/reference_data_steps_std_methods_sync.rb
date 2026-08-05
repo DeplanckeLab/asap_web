@@ -3,13 +3,13 @@
 require "json"
 require "set"
 
-# Applies Step, StdMethod, Version, DockerImage, and DockerBuild rows from a JSON
-# snapshot produced by ReferenceDataCompare / bin/rake reference_data:export, or
-# built in-memory by the rake tasks.
+# Applies Step, StdMethod, Version, DockerImage, DockerBuild, and NewsItem rows
+# from a JSON snapshot produced by ReferenceDataCompare / bin/rake
+# reference_data:export, or built in-memory by the rake tasks.
 #
 # Preferred entry point: +reference_data:steps_std_methods:sync_from_dev+, which
-# sets +max_version_id+ and matches Step, StdMethod, and Version by primary key id
-# (required when the same step name exists across pipeline versions).
+# sets +max_version_id+ and matches Step, StdMethod, Version, and NewsItem by
+# primary key id (required when the same step name exists across pipeline versions).
 #
 # OBSOLETE: calling without +max_version_id+ (rake +reference_data:steps_std_methods:sync+)
 # matches Step by +name+ only. That mode cannot sync a full multi-version snapshot
@@ -21,6 +21,9 @@ require "set"
 # target database using snapshot side tables when ids differ.
 # Version rows (env_json, tools_json, docker_json, activated, ...) are applied by id
 # when present in the snapshot.
+# NewsItem rows are applied by id when present; +user_id+ is always cleared so
+# author FKs do not break across environments. In id-based mode, target-only news
+# rows are removed so production matches the snapshot set.
 class ReferenceDataStepsStdMethodsSync
   SyncError = Class.new(StandardError)
 
@@ -36,8 +39,8 @@ class ReferenceDataStepsStdMethodsSync
     "DockerImage" => %w[tools_json]
   }.freeze
 
-  TIMESTAMP_COLUMNS = %w[created_at updated_at activated_at].freeze
-  BOOLEAN_COLUMNS = %w[activated beta hidden obsolete].freeze
+  TIMESTAMP_COLUMNS = %w[created_at updated_at activated_at published_at].freeze
+  BOOLEAN_COLUMNS = %w[activated beta hidden obsolete published show_on_welcome].freeze
 
   def initialize(snapshot_path:, dry_run: false, verbose: false, max_version_id: nil)
     @snapshot_path = snapshot_path
@@ -59,6 +62,7 @@ class ReferenceDataStepsStdMethodsSync
     methods_in = filter_legacy_version!(fetch_records!("StdMethod"))
     docker_images_in = fetch_optional_records!("DockerImage")
     docker_builds_in = fetch_optional_records!("DockerBuild")
+    news_items_in = fetch_optional_records_if_present!("NewsItem")
 
     docker_by_src_id = index_optional_model!("DockerImage")
     version_by_src_id = index_optional_model!("Version")
@@ -81,6 +85,10 @@ class ReferenceDataStepsStdMethodsSync
       versions_created: 0,
       versions_updated: 0,
       versions_unchanged: 0,
+      news_items_created: 0,
+      news_items_updated: 0,
+      news_items_unchanged: 0,
+      news_items_deleted: 0,
       steps_created: 0,
       steps_updated: 0,
       steps_unchanged: 0,
@@ -98,6 +106,7 @@ class ReferenceDataStepsStdMethodsSync
       )
       apply_docker_builds!(docker_builds_in, docker_remap, summary)
       apply_versions!(versions_in, summary)
+      apply_news_items!(news_items_in, summary)
       apply_steps!(steps_in, docker_remap, version_remap, summary)
       apply_std_methods!(
         steps_in,
@@ -112,7 +121,14 @@ class ReferenceDataStepsStdMethodsSync
       raise ActiveRecord::Rollback if @dry_run
     end
 
-    print_summary(summary, versions_in, steps_in, docker_images_in, docker_builds_in)
+    print_summary(
+      summary,
+      versions_in,
+      steps_in,
+      docker_images_in,
+      docker_builds_in,
+      news_items_in
+    )
     summary
   end
 
@@ -164,6 +180,14 @@ class ReferenceDataStepsStdMethodsSync
     raise SyncError, "records[#{model_name}] must be an array" unless list.is_a?(Array)
 
     list
+  end
+
+  # Like fetch_optional_records!, but returns nil when the model key is absent so
+  # callers can skip apply entirely (important for destructive syncs like NewsItem).
+  def fetch_optional_records_if_present!(model_name)
+    return nil unless @snapshot["records"]&.key?(model_name)
+
+    fetch_optional_records!(model_name)
   end
 
   def index_optional_model!(model_name)
@@ -397,6 +421,13 @@ class ReferenceDataStepsStdMethodsSync
     attrs
   end
 
+  def prepare_news_item_row(row)
+    attrs = row.except("id")
+    # Authors differ across environments; avoid FK failures on production users.
+    attrs["user_id"] = nil
+    attrs
+  end
+
   def prepare_docker_build_row(row, docker_remap)
     attrs = row.except("id")
     src_docker_image_id = attrs["docker_image_id"]
@@ -521,6 +552,77 @@ class ReferenceDataStepsStdMethodsSync
 
       record.update!(prepared)
     end
+  end
+
+  def apply_news_items!(news_items_in, summary)
+    return if news_items_in.nil?
+
+    unless ActiveRecord::Base.connection.table_exists?(:news_items)
+      raise SyncError,
+            "news_items table is missing on the target database. " \
+            "Run migrations (CreateNewsItems) before syncing NewsItem rows."
+    end
+
+    source_ids = news_items_in.map { |row| row["id"].to_i }.to_set
+
+    news_items_in.sort_by { |row| row["id"].to_i }.each do |src|
+      src_id = src["id"]
+      raise SyncError, "NewsItem row without id: #{src.inspect}" if src_id.nil?
+
+      prepared = prepare_news_item_row(src)
+      title = prepared["title"].to_s
+      label = "id=#{src_id} title=#{title.inspect}"
+      record = NewsItem.find_by(id: src_id)
+
+      if record.nil?
+        puts "[#{mode_label}] create NewsItem #{label}"
+        summary[:news_items_created] += 1
+        next if @dry_run
+
+        NewsItem.create!(prepared.merge("id" => src_id))
+        next
+      end
+
+      if record_attributes_match?(record, prepared)
+        summary[:news_items_unchanged] += 1
+        next
+      end
+
+      puts "[#{mode_label}] update NewsItem #{label} (target id=#{record.id})"
+      log_verbose_diff!(record, prepared)
+      summary[:news_items_updated] += 1
+      next if @dry_run
+
+      record.update!(prepared)
+    end
+
+    return unless match_by_id?
+
+    NewsItem.order(:id).each do |record|
+      next if source_ids.include?(record.id)
+
+      puts "[#{mode_label}] delete NewsItem id=#{record.id} title=#{record.title.inspect}"
+      summary[:news_items_deleted] += 1
+      next if @dry_run
+
+      record.destroy!
+    end
+
+    return if @dry_run || news_items_in.empty?
+
+    reset_pk_sequence!("news_items")
+  end
+
+  def reset_pk_sequence!(table_name)
+    quoted_table_name = ActiveRecord::Base.connection.quote(table_name)
+    sql = <<~SQL.squish
+      SELECT setval(
+        pg_get_serial_sequence(#{quoted_table_name}, 'id'),
+        COALESCE((SELECT MAX(id) FROM #{table_name}), 0) + 1,
+        false
+      )
+    SQL
+    ActiveRecord::Base.connection.execute(sql)
   end
 
   def encode_json_columns!(model_name, attrs)
@@ -870,7 +972,14 @@ class ReferenceDataStepsStdMethodsSync
     @dry_run ? "dry-run" : "apply"
   end
 
-  def print_summary(summary, versions_in, steps_in, docker_images_in = [], docker_builds_in = [])
+  def print_summary(
+    summary,
+    versions_in,
+    steps_in,
+    docker_images_in = [],
+    docker_builds_in = [],
+    news_items_in = []
+  )
     puts ""
     puts "Summary (#{mode_label})"
     if docker_images_in.any?
@@ -884,6 +993,11 @@ class ReferenceDataStepsStdMethodsSync
     if versions_in.any?
       puts "  versions: created=#{summary[:versions_created]} updated=#{summary[:versions_updated]} unchanged=#{summary[:versions_unchanged]}"
       puts "  snapshot versions: #{versions_in.size}"
+    end
+    if news_items_in
+      puts "  news_items: created=#{summary[:news_items_created]} updated=#{summary[:news_items_updated]} " \
+           "unchanged=#{summary[:news_items_unchanged]} deleted=#{summary[:news_items_deleted]}"
+      puts "  snapshot news_items: #{news_items_in.size}"
     end
     puts "  steps: created=#{summary[:steps_created]} updated=#{summary[:steps_updated]} unchanged=#{summary[:steps_unchanged]}"
     puts "  std_methods: created=#{summary[:std_methods_created]} updated=#{summary[:std_methods_updated]} unchanged=#{summary[:std_methods_unchanged]}"

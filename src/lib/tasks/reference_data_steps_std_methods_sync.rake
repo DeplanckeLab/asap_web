@@ -35,6 +35,10 @@ namespace :reference_data do
       self.table_name = "speeds"
     end
 
+    class SourceNewsItem < SourceReferenceBase
+      self.table_name = "news_items"
+    end
+
     def dev_db_config_for_reference_sync
       database_url = ENV["SOURCE_DATABASE_URL"].to_s.strip
       return { url: database_url } if database_url.present?
@@ -107,7 +111,11 @@ namespace :reference_data do
         else
           std_methods.where(step_id: step_ids).order(:id).map(&:attributes)
         end
-      {
+      news_items =
+        if SourceReferenceBase.connection.table_exists?(:news_items)
+          SourceNewsItem.order(:id).map(&:attributes)
+        end
+      payload_rows = {
         steps: step_rows,
         std_methods: std_method_rows,
         docker_images: SourceDockerImage.order(:id).map(&:attributes),
@@ -115,6 +123,8 @@ namespace :reference_data do
         versions: SourceVersion.order(:id).map(&:attributes),
         speeds: SourceSpeed.order(:id).map(&:attributes)
       }
+      payload_rows[:news_items] = news_items unless news_items.nil?
+      payload_rows
     ensure
       SourceReferenceBase.remove_connection
     end
@@ -131,6 +141,7 @@ namespace :reference_data do
           "Speed" => rows[:speeds]
         }
       }
+      payload["records"]["NewsItem"] = rows[:news_items] if rows.key?(:news_items)
 
       tmp = Tempfile.new(["reference_data_steps_std_methods", ".json"])
       tmp.write(JSON.pretty_generate(payload))
@@ -215,9 +226,10 @@ namespace :reference_data do
       generated_snapshot&.close!
     end
 
-    desc "Preferred: apply Step, StdMethod, Version, DockerImage, and DockerBuild from development to production. " \
+    desc "Preferred: apply Step, StdMethod, Version, DockerImage, DockerBuild, and NewsItem from development to production. " \
          "Match by primary key id; version id < MAX_VERSION_ID (default 9, includes v8). " \
          "Version sync includes env_json and activated status. " \
+         "NewsItem sync clears user_id and removes target-only rows. " \
          "Hidden steps included; obsolete std_methods excluded. " \
          "Set DEV_POSTGRES_DB (and DEV_DB_HOST/DEV_DB_PORT). DRY_RUN=1, VERBOSE=1"
     task sync_from_dev: :environment do
@@ -243,7 +255,7 @@ namespace :reference_data do
         exit 1
       end
 
-      puts "Applying development Step/StdMethod/Version/DockerImage/DockerBuild (id < #{max_version_id}, including hidden steps) to production"
+      puts "Applying development Step/StdMethod/Version/DockerImage/DockerBuild/NewsItem (id < #{max_version_id}, including hidden steps) to production"
       puts "  dry_run=#{dry}  match_by=id"
 
       ReferenceDataStepsStdMethodsSync.new(

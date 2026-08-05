@@ -12,7 +12,7 @@ require 'uri'
 #   GITHUB_DISCUSSIONS_TOKEN  - PAT or GitHub App token with discussions:write
 #
 # Optional ENV:
-#   GITHUB_DISCUSSIONS_REPO   - "owner/name" (default: DeplanckeLab/asap_web)
+#   GITHUB_DISCUSSIONS_REPO   - "owner/name" (default: DeplanckeLab/ASAP)
 #   GITHUB_DISCUSSIONS_CATEGORY_RELEASE
 #   GITHUB_DISCUSSIONS_CATEGORY_FEATURE
 #   GITHUB_DISCUSSIONS_CATEGORY_ANNOUNCEMENT
@@ -102,7 +102,7 @@ class NewsItems::GithubDiscussionSync
   end
 
   def self.repo_slug
-    ENV.fetch('GITHUB_DISCUSSIONS_REPO', 'DeplanckeLab/asap_web').to_s.strip
+    ENV.fetch('GITHUB_DISCUSSIONS_REPO', 'DeplanckeLab/ASAP').to_s.strip
   end
 
   def self.category_name_for(news_type)

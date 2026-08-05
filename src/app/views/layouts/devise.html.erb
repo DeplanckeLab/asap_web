@@ -57,9 +57,15 @@
     </div>
 
     <!-- Footer Links -->
-    <div class="text-center text-sm text-gray-600">
+    <div class="text-center text-sm text-gray-600 space-y-2">
       <% if controller_name == 'sessions' %>
-        <%= link_to "Don't have an account? Sign up", new_user_registration_path, class: "text-blue-600 hover:text-blue-500" %>
+        <div>
+          <%= link_to "Don't have an account? Sign up", new_user_registration_path, class: "text-blue-600 hover:text-blue-500" %>
+        </div>
+        <div>
+          Prefer not to sign in?
+          <%= link_to "Contact us", contact_home_index_path, class: "text-blue-600 hover:text-blue-500" %>
+        </div>
       <% elsif controller_name == 'registrations' %>
         <%= link_to "Already have an account? Sign in", new_user_session_path, class: "text-blue-600 hover:text-blue-500" %>
       <% end %>

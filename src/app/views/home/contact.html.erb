@@ -26,6 +26,17 @@
   <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
     <%= form_with url: contact_submit_home_index_path, method: :post, local: true, multipart: true, class: "space-y-5" do |f| %>
 
+      <% unless user_signed_in? %>
+        <div>
+          <label for="email" class="block text-sm font-medium text-gray-700 mb-1">Your email</label>
+          <input type="email" name="email" id="email"
+                 value="<%= params[:email] %>"
+                 required
+                 class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                 placeholder="you@example.com">
+        </div>
+      <% end %>
+
       <div>
         <label for="subject" class="block text-sm font-medium text-gray-700 mb-1">Subject</label>
         <input type="text" name="subject" id="subject"

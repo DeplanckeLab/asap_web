@@ -326,7 +326,7 @@ module ApplicationHelper
       {
         label: "Discussions",
         description: "Ask questions and share ideas",
-        path: "https://github.com/DeplanckeLab/asap_web/discussions",
+        path: "https://github.com/DeplanckeLab/ASAP/discussions",
         icon: "fas fa-comments",
         external: true
       },

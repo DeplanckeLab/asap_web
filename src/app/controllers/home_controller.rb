@@ -5,7 +5,7 @@ require 'yaml'
 
 class HomeController < ApplicationController
   skip_before_action :authenticate_user!, raise: false
-  before_action :authenticate_user!, only: [:contact, :contact_submit, :rate, :rate_submit]
+  before_action :authenticate_user!, only: [:rate, :rate_submit]
 
   def unauthorized
     render 'shared/unauthorized'
@@ -106,7 +106,7 @@ class HomeController < ApplicationController
 
       - [Contact](#{base}/home/contact): Reach the ASAP team
       - [Sitemap](#{base}/sitemap.xml): Full list of public URLs
-      - [GitHub discussions](https://github.com/DeplanckeLab/asap_web/discussions): Community Q&A
+      - [GitHub discussions](https://github.com/DeplanckeLab/ASAP/discussions): Community Q&A
       - [GitHub issues](https://github.com/DeplanckeLab/asap_web/issues): Bug reports and feature requests
     LLMS
   end
@@ -220,9 +220,20 @@ class HomeController < ApplicationController
   def contact_submit
     subject = params[:subject].to_s.strip
     body = params[:body].to_s.strip
+    sender_email = if current_user
+                     current_user.email
+                   else
+                     params[:email].to_s.strip
+                   end
 
     if subject.blank? || body.blank?
-      flash[:alert] = "Please fill in both the subject and the message."
+      flash.now[:alert] = "Please fill in both the subject and the message."
+      render :contact, status: :unprocessable_entity
+      return
+    end
+
+    if sender_email.blank? || !sender_email.match?(URI::MailTo::EMAIL_REGEXP)
+      flash.now[:alert] = "Please provide a valid email address."
       render :contact, status: :unprocessable_entity
       return
     end
@@ -241,7 +252,7 @@ class HomeController < ApplicationController
 
     begin
       ContactMailer.contact_email(
-        sender_email: current_user.email,
+        sender_email: sender_email,
         subject: subject,
         body: body,
         attachments_data: attachments_data

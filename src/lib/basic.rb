@@ -3971,16 +3971,22 @@ module Basic
       labels.index_with { |name| by_ident[name] || by_name[name] }
     end
 
+    # Unique OntologyTermType id for the given CellOntologyTerm id(s), or nil when
+    # empty / unresolved / ambiguous (see ClaOntologyTermTypeResolver).
+    def ontology_term_type_id_for_cot_ids(cot_ids, resolver: nil)
+      ClaOntologyTermTypeResolver.ontology_term_type_id_for(cot_ids, resolver: resolver)
+    end
+
+    # ASAP auto Clas: create/update only when category label maps to an ontology term.
+    # Name stays blank; ontology_term_type_id is set when uniquely resolvable.
     def add_clas project, a, h_cell_sets, cache = nil
       cache ||= {}
       cla_by_annot_cat = cache[:cla_by_annot_cat] ||= {}
       cot_by_name_or_identifier = cache[:cot_by_name_or_identifier] ||= {}
       annot_clas_by_catidx = cache[:annot_clas_by_catidx] ||= {}
+      ott_id_by_cot_id = cache[:ott_id_by_cot_id] ||= {}
 
-   #   user = User.where(:id => a.user_id).first
-   #   orcid_user = user.orcid_user #OrcidUser.where(:user_id => a.user_id).first
       list_cats =  Basic.safe_parse_json(a.list_cat_json, [])
-      h_cat_aliases = Basic.safe_parse_json(a.cat_aliases_json, {})
 
       # Resolve ontology terms (see h_cell_ontology_terms_by_cat_label).
       missing_names = list_cats.map(&:to_s).select { |name| name != '' }.uniq.reject { |name| cot_by_name_or_identifier.key?(name) }
@@ -4004,28 +4010,28 @@ module Basic
       sel_clas = []
       list_cats.each_index do |i|
         k = list_cats[i]
-#        annot_name = h_cat_aliases['names'][k] #if h_cat_aliases['names'][k] != k
-#        if ! annot_name
         annot_name = k
-#        end
-        if annot_name and annot_name != ''
-          
-          cot = cot_by_name_or_identifier[annot_name.to_s]
-          cot_ids = (cot) ? cot.id : nil
+        cot = (annot_name.present?) ? cot_by_name_or_identifier[annot_name.to_s] : nil
+
+        if cot
+          cot_ids = cot.id
+          unless ott_id_by_cot_id.key?(cot.id)
+            ott_id_by_cot_id[cot.id] = ontology_term_type_id_for_cot_ids(cot_ids)
+          end
           h_cla = {
             :cla_source_id => ASAP_AUTO_CLA_SOURCE_ID,
-            :name => (cot) ? "" : annot_name, # : 1,
+            :name => "",
             :annot_id => a.id,
             :num => 1,
             :cat_idx => i,
             :cell_set_id => (h_cell_sets[i]) ? h_cell_sets[i].id : nil,
             :cell_ontology_term_ids => cot_ids,
-            :cat => k, #a.name, #(cot) ? '' : k,
-            :user_id => a.user_id, #(h_cat_aliases and h_cat_aliases['user_ids'] and h_cat_aliases['user_ids'][k]) ? h_cat_aliases['user_ids'][k] : a.user_id,
-          #  :orcid_user_id => (orcid_user) ? orcid_user.id : nil, 
+            :ontology_term_type_id => ott_id_by_cot_id[cot.id],
+            :cat => k,
+            :user_id => a.user_id,
             :project_id => a.project_id
           }
-          
+
           annot_cat_key = [a.id, i]
           if cla_by_annot_cat.key?(annot_cat_key)
             cla = cla_by_annot_cat[annot_cat_key]
@@ -4042,39 +4048,18 @@ module Basic
           cla_by_annot_cat[annot_cat_key] = cla
           existing_clas_for_annot[i] ||= cla
           sel_clas.push cla.id
-
-          ## add vote
-          #          h_cla_vote = {
-          #            :cla_source_id => 3, #(p.name.match(/HCA/)) ? 3 : ((p.name.match(/FCA/)) ? 2 : 1),
-          #            :cla_id => cla.id,
-          #            :user_name => (user.id == 1) ? 'admin' : user.displayed_name, #user.email.split(/@/).first,
-          #            :user_id => user.id,
-          #            :orcid_user_id => (orcid_user) ? orcid_user.id : nil,
-          #            :comment => '',
-          #            :agree => true
-          #          }
-          #
-          #          cla_vote = ClaVote.where(h_cla_vote).first
-          #          if !cla_vote
-          #            cla_vote = ClaVote.new(h_cla_vote)
-          #            cla_vote.save
-          #          end
-          #
-          #          ## update nber_votes                                                                                                    
-          #          cla.update({:nber_agree => 1})
-          
         else
+          # No perfect ontology match: do not create/update ASAP auto Clas (leave orphans for manual review).
           sel_clas.push ""
         end
       end
-      
+
       h_cla_sum = {
         :nber_clas => (0 .. list_cats.size-1).to_a.map{|i| (sel_clas[i] == '') ? 0 : 1},
         :selected_cla_ids => sel_clas
       }
-      
-      a.update({:cat_info_json => h_cla_sum.to_json})
 
+      a.update({:cat_info_json => h_cla_sum.to_json})
     end
     
     # Map output.json log fields (is_log_transformed, log_type, log_base) to data_transformations.id.

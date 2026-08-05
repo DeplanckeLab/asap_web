@@ -288,7 +288,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
             puts output_file
             h_preparsing = Basic.safe_parse_json(File.read(output_file), {})
             puts h_preparsing.to_json
-            if list_group = h_preparsing['list_groups'][0]
+            if list_group = h_preparsing['list_groups']&.[](0)
               run.update({
                                       :pred_max_ram => (list_group['pred_max_ram'] != '') ? list_group['pred_max_ram'] : nil, 
                                       :pred_process_duration => (list_group['pred_process_duration']) ? list_group['pred_process_duration'] : nil
@@ -486,11 +486,14 @@ task :parse, [:project_key] => [:environment] do |t, args|
       end
 
        h_types = {
-        'MEX' => "H5_10x",
         'H5_10X' => 'H5_10x'
       }
-      # Legacy Java parser reads LOOM, not RDS; v8 parse.v8.py has a native RDS handler.
-      h_types['RDS'] = 'LOOM' if version.id < 8
+      # Legacy Java parser maps MEX -> H5_10x and reads LOOM not RDS.
+      # v8 parse.v8.py has native MEX and RDS handlers; keep the original type names.
+      if version.id < 8
+        h_types['MEX'] = 'H5_10x'
+        h_types['RDS'] = 'LOOM'
+      end
       
       # Ensure H5AD selection is always explicit for Java parsing.
       # Java H5AD parser crashes with a NullPointerException if selection is missing.
@@ -774,6 +777,57 @@ task :parse, [:project_key] => [:environment] do |t, args|
               logger.error("[ParseRake] v8 MTX: could not resolve a .mtx file; last candidate was #{filepath.inspect}")
               raise "v8 MTX parsing requires a readable path to a .mtx file; resolved input was #{filepath.inspect}"
             end
+        end
+
+        if file_type == 'MEX' && fu
+          begin
+            # For v8 MEX, parse.v8.py MexHandler expects an uncompressed .mtx file path.
+            # Resolve from the fu upload directory: prefer the uncompressed input_file there.
+            mex_candidates = []
+            # Explicit .mtx files in fu dir
+            if fu_upload_dir
+              mex_candidates << (fu_upload_dir + 'input_file')
+              staging_dir = fu.global_upload_dir.to_s
+              preparsing_output_file = fu_upload_dir + "output.json"
+              if File.exist?(preparsing_output_file)
+                h_mex_prep = Basic.safe_parse_json(File.read(preparsing_output_file), {})
+                raw_fp = h_mex_prep['file_path']
+                prep_paths = raw_fp.is_a?(Array) ? raw_fp.map(&:to_s) : [raw_fp.to_s]
+                prep_paths.map(&:strip).reject(&:blank?).each do |prep_p|
+                  if prep_p.start_with?(staging_dir)
+                    rest = prep_p.delete_prefix(staging_dir).sub(/\A\/+/, '')
+                    prep_p = File.join(fu_upload_dir.to_s, rest)
+                  end
+                  mex_candidates << Pathname.new(prep_p)
+                end
+              end
+            end
+            # Also try current filepath decompressed
+            fp_s = filepath.to_s
+            if fp_s.downcase.end_with?('.gz') && File.file?(fp_s)
+              decompressed = tmp_dir + File.basename(fp_s, '.gz')
+              unless File.file?(decompressed.to_s)
+                require 'zlib'
+                Zlib::GzipReader.open(fp_s) do |gz|
+                  File.open(decompressed.to_s, 'wb') { |out| IO.copy_stream(gz, out) }
+                end
+                logger.info("[ParseRake] Decompressed #{fp_s} to #{decompressed} for v8 MEX parsing")
+              end
+              mex_candidates << decompressed
+            end
+            mex_resolved = mex_candidates.find do |cand|
+              cand_s = cand.to_s
+              File.file?(cand_s) && !cand_s.downcase.end_with?('.gz')
+            end
+            if mex_resolved
+              filepath = Pathname.new(mex_resolved.to_s)
+              logger.info("[ParseRake] v8 MEX: resolved input path to #{filepath}")
+            else
+              logger.warn("[ParseRake] v8 MEX: could not resolve uncompressed .mtx file; passing original filepath #{filepath}")
+            end
+          rescue => e
+            logger.warn("[ParseRake] v8 MEX: file resolution failed (#{e.class} - #{e.message}); using original filepath #{filepath}")
+          end
         end
 
 

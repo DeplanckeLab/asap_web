@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
 # Verifies Cla rows created by Basic.add_clas (ASAP auto annotations) against the same rules used at creation:
+# - ASAP auto Clas must have a perfect ontology term match (no name-only free-text rows)
 # - category string maps via Basic.h_cell_ontology_terms_by_cat_label (identifier before name, stable id;
 #   chosen term: exact species ontology > same NCBI order > universal (empty tax_ids); multiple_cot_rows uses same tier)
-# - cell_ontology_term_ids must equal that chosen term id (or be empty when there is no match)
-# - name must be blank when an ontology term is linked, else equal to the category label
+# - cell_ontology_term_ids must equal that chosen term id
+# - name must be blank when an ontology term is linked
+# - ontology_term_type_id must match ClaOntologyTermTypeResolver when uniquely resolvable
 # - cla.cat must match annot.list_cat_json at cla.cat_idx when list_cat_json is present
 #
 # Usage (docker-compose website container):
@@ -93,25 +95,46 @@ namespace :cla do
         warnings << { id: cla.id, kind: "multiple_cot_rows_for_label", detail: "cat=#{cat.inspect} term_ids=#{all_matches.map(&:id).join(',')} chosen_id=#{chosen&.id}" }
       end
 
+      # Match-only rule: ASAP auto Clas without a resolvable ontology term are invalid
+      # (use cla:list_name_only_asap to inventory them for manual cleanup).
       if chosen.nil?
-        if stored_ids.any?
-          cot = CellOntologyTerm.where(id: stored_ids).pick(:id, :identifier, :name)
-          cla_errs << "stored_ontology_not_exact_match cat=#{cat.inspect} stored_ids=#{stored_ids.inspect} term=#{cot.inspect}"
-        elsif cla.name.to_s.strip != cat
-          cla_errs << "name_without_match expected name==cat #{cat.inspect}, got #{cla.name.inspect}"
-        end
-      else
-        if stored_ids.empty?
-          cla_errs << "missing_ontology_ids cat=#{cat.inspect} expected_term_id=#{chosen.id}"
-        elsif stored_ids.size > 1
-          cla_errs << "multiple_stored_ids stored=#{stored_ids.inspect} cat=#{cat.inspect}"
-        elsif stored_ids.first != chosen.id
-          cla_errs << "ontology_id_wrong stored_id=#{stored_ids.first} expected_id=#{chosen.id} cat=#{cat.inspect}"
-        end
+        cla_errs << "name_only_or_unmatched_asap_auto cat=#{cat.inspect} name=#{cla.name.inspect} stored_ids=#{stored_ids.inspect}"
+        errors_by_cla[cla.id] = cla_errs.join("; ")
+        next
+      end
 
-        if stored_ids.any? && cla.name.to_s.strip != ""
-          cla_errs << "name_should_be_blank ontology linked but name=#{cla.name.inspect}"
+      if stored_ids.empty?
+        cla_errs << "missing_ontology_ids cat=#{cat.inspect} expected_term_id=#{chosen.id}"
+      elsif stored_ids.size > 1
+        cla_errs << "multiple_stored_ids stored=#{stored_ids.inspect} cat=#{cat.inspect}"
+      elsif stored_ids.first != chosen.id
+        cla_errs << "ontology_id_wrong stored_id=#{stored_ids.first} expected_id=#{chosen.id} cat=#{cat.inspect}"
+      end
+
+      if cla.name.to_s.strip != ""
+        cla_errs << "name_should_be_blank ontology linked but name=#{cla.name.inspect}"
+      end
+
+      type_ids = stored_ids.presence || [chosen.id]
+      type_result = ClaOntologyTermTypeResolver.call(type_ids)
+      if type_result.status == :unique
+        if cla.ontology_term_type_id.nil?
+          cla_errs << "missing_ontology_term_type_id expected=#{type_result.ontology_term_type_id}"
+        elsif cla.ontology_term_type_id != type_result.ontology_term_type_id
+          cla_errs << "ontology_term_type_id_wrong stored=#{cla.ontology_term_type_id} expected=#{type_result.ontology_term_type_id}"
         end
+      elsif type_result.status == :ambiguous
+        warnings << {
+          id: cla.id,
+          kind: "ambiguous_ontology_term_type",
+          detail: "cot_ids=#{type_ids.inspect} candidates=#{type_result.candidate_ids.inspect} stored_ott=#{cla.ontology_term_type_id.inspect}"
+        }
+      elsif cla.ontology_term_type_id.present?
+        warnings << {
+          id: cla.id,
+          kind: "unresolved_ontology_term_type_but_set",
+          detail: "status=#{type_result.status} stored_ott=#{cla.ontology_term_type_id}"
+        }
       end
 
       errors_by_cla[cla.id] = cla_errs.join("; ") if cla_errs.any?

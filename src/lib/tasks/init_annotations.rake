@@ -2,6 +2,8 @@
 
 # Backfill / repair Clas from list_cat_json (legacy task, aligned with Basic.add_clas rules).
 #
+# ASAP auto Clas are created only when the category label maps to an ontology term.
+#
 # Env:
 #   PROJECT_ID=id          only this project (numeric id)
 #   PROJECT_KEY=key        only this project (projects.key)
@@ -37,23 +39,28 @@ module InitAnnotationsRake
     cla.name.to_s != intended[:name].to_s ||
       cla.cat.to_s != intended[:cat].to_s ||
       cla.user_id != intended[:user_id] ||
-      cla.num != intended[:num]
+      cla.num != intended[:num] ||
+      cla.ontology_term_type_id != intended[:ontology_term_type_id]
   end
 
-  # Intended ASAP row for this slot, or nil if this rake would not create an ASAP cla here.
+  # Intended ASAP row for this slot, or nil if this rake would not create an ASAP cla here
+  # (blank/numeric label, or no perfect ontology term match).
   def asap_intended_attrs(p, a, i, k, list_cats, cot_by_label, h_cell_sets, asap_src)
     raw_label = k.to_s.strip
     return nil if raw_label.blank? || raw_label.match(/^-?[0-9.]+$/)
 
     cot = cot_by_label[raw_label]
+    return nil unless cot
+
     {
       cla_source_id: asap_src,
-      name: cot ? "" : raw_label,
+      name: "",
       annot_id: a.id,
       num: 1,
       cat_idx: i,
       cell_set_id: h_cell_sets[[a.id, i]],
-      cell_ontology_term_ids: cot&.id,
+      cell_ontology_term_ids: cot.id,
+      ontology_term_type_id: Basic.ontology_term_type_id_for_cot_ids(cot.id),
       cat: k,
       user_id: a.user_id,
       project_id: p.id
@@ -110,7 +117,12 @@ module InitAnnotationsRake
 
       intended = asap_intended_attrs(p, a, cla.cat_idx, k, list_cats, cot_by_label, h_cell_sets, asap_src)
       if intended.nil?
-        puts "unexpected_asap_cla cla_id=#{cla.id} reason=rake_skips_slot_numeric_or_blank annot_id=#{a.id} cat_idx=#{cla.cat_idx} cat=#{cla.cat.inspect}"
+        reason = if k.to_s.strip.blank? || k.to_s.strip.match(/^-?[0-9.]+$/)
+                   'rake_skips_slot_numeric_or_blank'
+                 else
+                   'rake_skips_slot_no_ontology_match'
+                 end
+        puts "unexpected_asap_cla cla_id=#{cla.id} reason=#{reason} annot_id=#{a.id} cat_idx=#{cla.cat_idx} cat=#{cla.cat.inspect}"
         next
       end
 
@@ -120,7 +132,8 @@ module InitAnnotationsRake
         puts "misaligned_asap_cla cla_id=#{cla.id} reason=attrs_differ_from_intended annot_id=#{a.id} cat_idx=#{cla.cat_idx} " \
              "stored cell_set_id=#{cla.cell_set_id} intended=#{intended[:cell_set_id]} " \
              "stored cot_ids=#{cla.cell_ontology_term_ids.inspect} intended=#{intended[:cell_ontology_term_ids].inspect} " \
-             "stored name=#{cla.name.inspect} intended=#{intended[:name].inspect}"
+             "stored name=#{cla.name.inspect} intended=#{intended[:name].inspect} " \
+             "stored ott_id=#{cla.ontology_term_type_id.inspect} intended=#{intended[:ontology_term_type_id].inspect}"
       end
     end
   end
@@ -196,40 +209,41 @@ task init_annotations: :environment do
 
         if raw_label != "" && !raw_label.match(/^-?[0-9.]+$/)
           cot = cot_by_label[raw_label]
-          num = 1
-          cot_ids = cot&.id
+          if cot
+            num = 1
+            h_cla = {
+              cla_source_id: asap_src,
+              name: "",
+              annot_id: a.id,
+              num: num,
+              cat_idx: i,
+              cell_set_id: cell_set_id,
+              cell_ontology_term_ids: cot.id,
+              ontology_term_type_id: Basic.ontology_term_type_id_for_cot_ids(cot.id),
+              cat: k,
+              user_id: a.user_id,
+              project_id: p.id
+            }
 
-          h_cla = {
-            cla_source_id: asap_src,
-            name: cot ? "" : raw_label,
-            annot_id: a.id,
-            num: num,
-            cat_idx: i,
-            cell_set_id: cell_set_id,
-            cell_ontology_term_ids: cot_ids,
-            cat: k,
-            user_id: a.user_id,
-            project_id: p.id
-          }
-
-          cla = Cla.find_by(annot_id: a.id, cat_idx: i, cla_source_id: asap_src)
-          if dry_run
-            if cla.nil?
-              puts "dry_run would_create asap annot_id=#{a.id} cat_idx=#{i} attrs=#{h_cla.inspect}"
-            elsif InitAnnotationsRake.attrs_differ?(cla, h_cla)
-              puts "dry_run would_update asap cla_id=#{cla.id} annot_id=#{a.id} cat_idx=#{i} attrs=#{h_cla.inspect}"
+            cla = Cla.find_by(annot_id: a.id, cat_idx: i, cla_source_id: asap_src)
+            if dry_run
+              if cla.nil?
+                puts "dry_run would_create asap annot_id=#{a.id} cat_idx=#{i} attrs=#{h_cla.inspect}"
+              elsif InitAnnotationsRake.attrs_differ?(cla, h_cla)
+                puts "dry_run would_update asap cla_id=#{cla.id} annot_id=#{a.id} cat_idx=#{i} attrs=#{h_cla.inspect}"
+              else
+                puts "dry_run no_change asap cla_id=#{cla.id} annot_id=#{a.id} cat_idx=#{i}"
+              end
+              sel_cla = cla ? cla.id : ""
             else
-              puts "dry_run no_change asap cla_id=#{cla.id} annot_id=#{a.id} cat_idx=#{i}"
+              if cla
+                cla.assign_attributes(h_cla)
+                cla.save if cla.changed?
+              else
+                cla = Cla.create!(h_cla)
+              end
+              sel_cla = cla.id
             end
-            sel_cla = cla ? cla.id : ""
-          else
-            if cla
-              cla.assign_attributes(h_cla)
-              cla.save if cla.changed?
-            else
-              cla = Cla.create!(h_cla)
-            end
-            sel_cla = cla.id
           end
         end
 
@@ -254,6 +268,7 @@ task init_annotations: :environment do
             cat_idx: i,
             cell_set_id: cell_set_id,
             cell_ontology_term_ids: cot_ids,
+            ontology_term_type_id: (cot ? Basic.ontology_term_type_id_for_cot_ids(cot.id) : nil),
             cat: k,
             user_id: (names_map[k].present? ? user_id : 1),
             project_id: p.id

@@ -90,6 +90,7 @@ Notable in-app documentation:
 
 - [`src/SLURM_SCHEDULER.md`](src/SLURM_SCHEDULER.md) — job submission, monitoring, rake tasks
 - [`src/public/swagger/openapi.yaml`](src/public/swagger/openapi.yaml) — REST API (also at `/api_documentation` when running)
+- [`docs/reference-data-steps-std-methods-sync.md`](docs/reference-data-steps-std-methods-sync.md) — sync Step / StdMethod (and related) reference data between environments
 
 ---
 

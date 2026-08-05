@@ -176,11 +176,15 @@ namespace :reference_data do
       build_temp_snapshot_from_rows!(rows, label: "production_legacy")
     end
 
-    desc "Sync Step, StdMethod, Version, DockerImage, and DockerBuild from SNAPSHOT=export.json (DRY_RUN=1, VERBOSE=1). " \
-         "Version rows include env_json, tools_json, docker_json, and activated status. " \
-         "DockerImage matched by name+tag; DockerBuild matched by digest. " \
-         "Export with MODELS=Step,StdMethod,DockerImage,DockerBuild,Version,Speed as needed."
+    # OBSOLETE: name-based snapshot sync. Prefer sync_from_dev for multi-version ASAP.
+    desc "[OBSOLETE] Name-based sync from SNAPSHOT=export.json. " \
+         "Cannot apply full multi-version exports (duplicate step names). " \
+         "Use reference_data:steps_std_methods:sync_from_dev instead. " \
+         "DRY_RUN=1, VERBOSE=1 still supported."
     task sync: :environment do
+      warn "[OBSOLETE] reference_data:steps_std_methods:sync is obsolete. " \
+           "Use reference_data:steps_std_methods:sync_from_dev for dev -> production."
+
       path = ENV["SNAPSHOT"].to_s.strip
       generated_snapshot = nil
       if path.empty?
@@ -189,14 +193,13 @@ namespace :reference_data do
       end
 
       if path.empty?
-        puts "Usage:"
+        puts "Usage (obsolete task — prefer sync_from_dev):"
+        puts "  RAILS_ENV=production bin/rake reference_data:steps_std_methods:sync_from_dev DRY_RUN=1"
+        puts ""
+        puts "Legacy name-based sync:"
         puts "  RAILS_ENV=production bin/rake reference_data:steps_std_methods:sync SNAPSHOT=/path/to/snapshot.json"
         puts "  or set DEV_POSTGRES_DB=... (and optional DEV_DB_HOST/DEV_DB_PORT) to auto-build snapshot from source DB."
         puts "  Add DRY_RUN=1 to preview changes (transaction rolled back)."
-        puts ""
-        puts "Generate the snapshot from a reference environment, for example:"
-        puts "  bin/rake reference_data:export LABEL=dev OUT=/tmp/ref.json \\"
-        puts "    MODELS=Step,StdMethod,DockerImage,DockerBuild,Version,Speed"
         exit 1
       end
 
@@ -212,7 +215,7 @@ namespace :reference_data do
       generated_snapshot&.close!
     end
 
-    desc "Apply Step, StdMethod, Version, DockerImage, and DockerBuild from development to the current DB (production). " \
+    desc "Preferred: apply Step, StdMethod, Version, DockerImage, and DockerBuild from development to production. " \
          "Match by primary key id; version id < MAX_VERSION_ID (default 9, includes v8). " \
          "Version sync includes env_json and activated status. " \
          "Hidden steps included; obsolete std_methods excluded. " \

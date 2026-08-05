@@ -1,109 +1,93 @@
 # Step and StdMethod reference synchronisation
 
-This document describes how to copy **Step** and **StdMethod** definitions from one Rails environment (for example staging or development) into another (typically **production**) using a JSON snapshot and a rake task.
+This document describes how to copy **Step**, **StdMethod**, and related reference rows (**Version**, **DockerImage**, **DockerBuild**, **Speed**) from development into **production**.
 
-The snapshot format is the same as produced by **`reference_data:export`** (implemented by `ReferenceDataCompare` in `src/lib/reference_data_compare.rb`). The apply step is implemented by **`ReferenceDataStepsStdMethodsSync`** (`src/lib/reference_data_steps_std_methods_sync.rb`) and invoked via **`reference_data:steps_std_methods:sync`** (`src/lib/tasks/reference_data_steps_std_methods_sync.rake`).
+| Piece | Location |
+|-------|----------|
+| Preferred apply | `bin/rake reference_data:steps_std_methods:sync_from_dev` |
+| Apply implementation | `src/lib/reference_data_steps_std_methods_sync.rb`, `src/lib/tasks/reference_data_steps_std_methods_sync.rake` |
+| Export / compare snapshots | `bin/rake reference_data:export` / `reference_data:compare` (still useful for diffs; not the preferred apply path) |
 
-## What the sync does
+## Preferred path: `sync_from_dev`
 
-- **Creates** production `Step` rows that do not exist yet (matched by step **name**).
-- **Updates** existing production `Step` rows when any exported column differs (again keyed by **name**).
-- **Creates** production `StdMethod` rows that do not exist for the target step (matched by **step name** plus std method **name**).
-- **Updates** existing production `StdMethod` rows when exported data differs.
-- **Does not delete** anything on the target database. Extra steps or std methods that exist only in production are left unchanged.
+ASAP keeps **multiple Step rows with the same `name`** (one per pipeline version, e.g. `parsing` for versions 4–8). Sync must therefore match by **primary key id**, not by name alone.
 
-Foreign keys (`docker_image_id`, `version_id`, `speed_id`) are **remapped** on the target so that numeric ids from the source environment are resolved to the correct rows in production (see below).
+**`reference_data:steps_std_methods:sync_from_dev`** reads the development database directly, filters by `version_id` / version `id` **&lt; `MAX_VERSION_ID`** (default **9**), and applies Step, StdMethod, Version, DockerImage, and DockerBuild onto production.
 
-## Snapshot requirements
-
-The JSON file must contain at least:
-
-- `records.Step` — array of step hashes (as exported).
-- `records.StdMethod` — array of std method hashes.
-
-Whenever a non-null **`docker_image_id`** appears on any step or std method in the snapshot, the file must also include the corresponding **`DockerImage`** rows under `records.DockerImage`, so each referenced id can be resolved to production by **`name` and `tag`**.
-
-Whenever a non-null **`version_id`** appears:
-
-- If production already has a `Version` with the **same primary key**, that id is kept.
-- Otherwise the snapshot must include **`records.Version`** for that id, and production must match **uniquely** either by **`description`** or by the pair **`release_date` + `beta`**. If neither yields exactly one row, the sync aborts with an error.
-
-Whenever a non-null **`speed_id`** appears on a std method:
-
-- If production already has a `Speed` with the **same primary key**, that id is kept.
-- Otherwise the snapshot must include **`records.Speed`** for that id, and production must have a **`Speed`** with the same **`name`**.
-
-**Recommended export** from the source environment (adjust `LABEL` and `OUT`):
+Run inside the `website` service with the Compose file that talks to production (often `docker-compose.prod.yml`). Ensure `DEV_POSTGRES_DB` (and host/port if needed) is set so the container can reach the development database.
 
 ```bash
-bin/rake reference_data:export LABEL=dev OUT=/tmp/ref.json \
-  MODELS=Step,StdMethod,DockerImage,Version,Speed
+# Dry run (transaction rolled back)
+docker compose -f docker-compose.prod.yml exec website \
+  bash -lc 'RAILS_ENV=production bin/rake reference_data:steps_std_methods:sync_from_dev DRY_RUN=1'
+
+# Field-level diffs
+docker compose -f docker-compose.prod.yml exec website \
+  bash -lc 'RAILS_ENV=production bin/rake reference_data:steps_std_methods:sync_from_dev DRY_RUN=1 VERBOSE=1'
+
+# Apply for real
+docker compose -f docker-compose.prod.yml exec website \
+  bash -lc 'RAILS_ENV=production bin/rake reference_data:steps_std_methods:sync_from_dev'
 ```
 
-You can omit `Version` or `Speed` from `MODELS` only if no non-null `version_id` or `speed_id` appears in the exported steps and std methods (or those ids already exist unchanged on production).
+Optional: `MAX_VERSION_ID=9`, `DEV_POSTGRES_DB=asap2_development`, `DEV_DB_HOST`, `DEV_DB_PORT`.
 
-The default export omits `created_at` and `updated_at`; that is fine for sync. To include timestamps, add `INCLUDE_TIMESTAMPS=1` to the export (the sync still keys off logical fields, not timestamps).
+Hidden steps are included; obsolete std methods are excluded. The task requires `RAILS_ENV=production` so the write target is production.
 
-## Rake task: apply or dry run
+### What it updates
 
-All commands are run from the application directory (for example `src/`) with **`bin/rake`**, in the target environment (set **`RAILS_ENV=production`** when applying to production). If you normally run Rails through Docker Compose, use the same service you use for other rake tasks.
+- **Creates** / **updates** `Step`, `StdMethod`, and `Version` (matched by **id**).
+- **Creates** / **updates** `DockerImage` (matched by `name`+`tag`, with id fallback) and `DockerBuild` (matched by **digest** only). New digests are inserted; existing digests are never rewritten or deleted; only non-identity fields (e.g. tag, `docker_image_id`) may update on a digest match. Source primary keys are not forced. All DockerImage/DockerBuild rows from the source DB are included (not filtered by `MAX_VERSION_ID`).
+- **Does not delete** anything on the target.
 
-### Environment variables
+Foreign keys (`docker_image_id`, `version_id`, `speed_id`) are remapped when source and target ids differ.
 
-| Variable    | Required | Meaning |
-|------------|----------|---------|
-| `SNAPSHOT` | Yes      | Absolute or relative path to the JSON snapshot file. |
-| `DRY_RUN`  | No       | Set to `1` to perform all checks and print intended creates/updates, then **roll back** the transaction so **no data is written**. |
-| `VERBOSE`  | No       | Set to `1` to print per-column differences for rows that would be updated (with `DRY_RUN=1` or on real apply). |
+## Other direct DB-to-DB tasks
 
-### Examples
+These still support `DRY_RUN=1` and `VERBOSE=1`.
 
-Dry run (recommended before production apply):
+### Production legacy → development (`sync_legacy_versions_to_dev`)
+
+Applies production Step/StdMethod (and related rows) with `version_id < MAX_VERSION_ID` (default **8**) onto the **current** DB. Requires **not** `RAILS_ENV=production` (typically `development`). Set `PROD_POSTGRES_DB` or `SOURCE_DATABASE_URL` (optional `PROD_DB_HOST` / `PROD_DB_PORT`).
 
 ```bash
-RAILS_ENV=production bin/rake reference_data:steps_std_methods:sync SNAPSHOT=/tmp/ref.json DRY_RUN=1
+docker compose -f docker-compose.test.yml exec -e RAILS_ENV=development website \
+  bin/rake reference_data:steps_std_methods:sync_legacy_versions_to_dev \
+  PROD_POSTGRES_DB=asap2_production DRY_RUN=1
 ```
 
-Dry run with field-level detail:
+### Compare without writing (`compare_legacy_versions`)
+
+Compares Step/StdMethod with `version_id < MAX_VERSION_ID` (default **8**) between the source DB and the current DB. Exits with status 1 if differences exist. Optional `OUT=/path/to/report.json`, `VERBOSE=1`.
 
 ```bash
-RAILS_ENV=production bin/rake reference_data:steps_std_methods:sync SNAPSHOT=/tmp/ref.json DRY_RUN=1 VERBOSE=1
+docker compose -f docker-compose.test.yml exec -e RAILS_ENV=production website \
+  bin/rake reference_data:steps_std_methods:compare_legacy_versions \
+  DEV_POSTGRES_DB=asap2_development VERBOSE=1 OUT=/tmp/legacy-diff.json
 ```
 
-Apply changes:
+## Related tooling (export / compare)
 
-```bash
-RAILS_ENV=production bin/rake reference_data:steps_std_methods:sync SNAPSHOT=/tmp/ref.json
-```
-
-If `SNAPSHOT` is missing, the task prints usage and exits with status 1.
-
-## Matching rules and ordering
-
-- **Steps** in the snapshot must have **unique `name`** values. Duplicate names in the snapshot cause the sync to abort.
-- On production, at most **one** `Step` per `name` is allowed for the sync to proceed. If multiple rows share the same name, fix the data manually first.
-- **Std methods** are tied to steps via the snapshot’s `step_id`; that id is translated to the **step `name`** in the snapshot, then to the production **`Step`** with that name. The production **`std_methods.step_id`** is set from that row.
-- **Std methods** are matched on production by **`(step_id, name)`**. Multiple rows for the same pair cause the sync to abort.
-
-Processing order: **all steps first**, then **all std methods**, so new steps exist before std methods that reference them.
-
-### Dry run and brand-new steps
-
-In dry run mode, new steps are **not** inserted, so std methods that belong only to those future steps cannot be attached to a real `step_id` yet. For those rows the task prints a **create** line noting that the std method would be created **after** the new step in the same run. On a real apply, steps are created first, so those std methods are created normally.
-
-## JSON columns
-
-Exported JSON/text columns may appear in the snapshot as structured objects (arrays or hashes). Before save, the sync serialises them back to JSON strings for columns such as `attrs_json`, `command_json`, and similar fields on `Step` and `StdMethod`. Comparisons normalise JSON text so equivalent content does not trigger unnecessary updates.
-
-## Related tooling
-
-- **`bin/rake reference_data:export`** — build the snapshot (`LABEL`, `OUT`, optional `MODELS`, `INCLUDE_TIMESTAMPS`).
+- **`bin/rake reference_data:export`** — build a JSON snapshot (`LABEL`, `OUT`, optional `MODELS`, `INCLUDE_TIMESTAMPS`). Useful for inspection or `reference_data:compare`, not for the preferred apply path.
 - **`bin/rake reference_data:compare`** — compare two snapshots without touching the database (`LEFT`, `RIGHT`, optional `OUT`, `MODELS`).
+
+## OBSOLETE: name-based `reference_data:steps_std_methods:sync`
+
+**Do not use for day-to-day dev → production.** This older task matches Steps by **name** only. A full multi-version export has duplicate names (`parsing` once per version) and the task aborts. Prefer **`sync_from_dev`**.
+
+The task still exists for exceptional cases (e.g. a hand-built snapshot with unique step names). It prints an obsolete warning when run. The same name-based mode in `ReferenceDataStepsStdMethodsSync` (no `max_version_id`) is marked obsolete in code comments and emits a warning.
+
+Legacy invocation (not recommended):
+
+```bash
+docker compose -f docker-compose.test.yml exec -e RAILS_ENV=production website \
+  bin/rake reference_data:steps_std_methods:sync SNAPSHOT=/tmp/ref.json DRY_RUN=1
+```
 
 ## Troubleshooting
 
-- **Missing `records[Step]` or `records[StdMethod]`** — export with at least `MODELS=Step,StdMethod,...`.
-- **Docker image remap errors** — include `DockerImage` in the export; ensure production has a row with the same **`name`** and **`tag`** as in the snapshot.
-- **Version remap errors** — include `Version` in the export when ids differ, or align version primary keys; ensure `description` or `release_date`+`beta` identifies exactly one production version.
-- **Speed remap errors** — include `Speed` in the export when `speed_id` differs; ensure production has a `Speed` with the same **`name`** (see `app/models/speed.rb`).
-- **Unknown model `Speed`** — the application must define the `Speed` ActiveRecord model for exports that list `Speed` in `MODELS`.
+- **Duplicate step names in snapshot** — expected when using the obsolete name-based `sync` on a full export. Use **`sync_from_dev`** instead.
+- **`sync_from_dev` refuses to run** — it requires `RAILS_ENV=production` so the write target is production.
+- **`sync_legacy_versions_to_dev` refuses to run** — it refuses `RAILS_ENV=production` so the write target is not production.
+- **Docker image remap errors** — ensure production has a `DockerImage` with the same **`name`** and **`tag`** as in development (or allow the sync to create it).
+- **Version remap errors** — with `sync_from_dev`, versions are matched by id; keep version primary keys aligned between dev and prod when possible.

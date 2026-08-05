@@ -91,6 +91,7 @@ Notable in-app documentation:
 - [`src/SLURM_SCHEDULER.md`](src/SLURM_SCHEDULER.md) — job submission, monitoring, rake tasks
 - [`src/public/data/README.md`](src/public/data/README.md) — serving example input files
 - [`src/public/swagger/openapi.yaml`](src/public/swagger/openapi.yaml) — REST API (also at `/api_documentation` when running)
+- [`docs/reference-data-steps-std-methods-sync.md`](docs/reference-data-steps-std-methods-sync.md) — sync Step / StdMethod (and related) reference data between environments
 
 Operational notes with real host paths, credentials, and Fail2ban layouts are kept **out of Git**: use `docs/*.md.example`, `slurm/*.example`, a local `private/` directory, or a separate ops repository.
 

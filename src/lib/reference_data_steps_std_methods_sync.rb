@@ -4,13 +4,19 @@ require "json"
 require "set"
 
 # Applies Step, StdMethod, Version, DockerImage, and DockerBuild rows from a JSON
-# snapshot produced by ReferenceDataCompare / bin/rake reference_data:export.
+# snapshot produced by ReferenceDataCompare / bin/rake reference_data:export, or
+# built in-memory by the rake tasks.
 #
-# Matching: Step by +name+ for full sync; Step, StdMethod, and Version by +id+ when
-# +max_version_id+ is set (legacy prod/dev alignment). StdMethod names must be unique
-# per snapshot +step_id+ for full sync only.
-# DockerImage is matched by name+tag (and by id when legacy sync). DockerBuild is
-# matched by digest.
+# Preferred entry point: +reference_data:steps_std_methods:sync_from_dev+, which
+# sets +max_version_id+ and matches Step, StdMethod, and Version by primary key id
+# (required when the same step name exists across pipeline versions).
+#
+# OBSOLETE: calling without +max_version_id+ (rake +reference_data:steps_std_methods:sync+)
+# matches Step by +name+ only. That mode cannot sync a full multi-version snapshot
+# and should not be used for day-to-day dev -> production.
+#
+# DockerImage is matched by name+tag (and by id when max_version_id is set).
+# DockerBuild is matched by digest only (never force source ids; they diverge across envs).
 # Foreign keys +docker_image_id+, +version_id+, +speed_id+ are remapped for the
 # target database using snapshot side tables when ids differ.
 # Version rows (env_json, tools_json, docker_json, activated, ...) are applied by id
@@ -42,6 +48,11 @@ class ReferenceDataStepsStdMethodsSync
   end
 
   def run
+    if @max_version_id.nil?
+      warn "[OBSOLETE] ReferenceDataStepsStdMethodsSync name-based mode (no max_version_id). " \
+           "Prefer sync_from_dev / pass max_version_id for id-based matching."
+    end
+
     @snapshot = load_snapshot!(@snapshot_path)
     versions_in = filter_legacy_version_ids!(fetch_optional_records!("Version"))
     steps_in = filter_legacy_version!(fetch_records!("Step"))
@@ -192,7 +203,10 @@ class ReferenceDataStepsStdMethodsSync
       elsif match_by_version?
         "Duplicate steps in snapshot (same name and version_id): #{format_step_keys(dup)}"
       else
-        "Duplicate step names in snapshot (cannot sync): #{dup.map(&:first).join(', ')}"
+        # Keys are step name strings (not [name, version_id] pairs).
+        "Duplicate step names in snapshot (cannot sync by name alone; " \
+          "same name exists across versions — use sync_from_dev / MAX_VERSION_ID path): " \
+          "#{dup.join(', ')}"
       end
     raise SyncError, message
   end
@@ -445,6 +459,10 @@ class ReferenceDataStepsStdMethodsSync
 
       prepared = prepare_docker_build_row(src, docker_remap)
       label = "id=#{src_id} tag=#{prepared['tag'].inspect} digest=#{digest}"
+      # Content-addressable by digest:
+      # - never force source primary keys (ids diverge across environments)
+      # - never rewrite digest on an existing row (identity key)
+      # - unknown digests are inserted as new rows; prod-only digests are left alone
       record = DockerBuild.find_by(digest: digest)
 
       if record.nil?
@@ -452,15 +470,12 @@ class ReferenceDataStepsStdMethodsSync
         summary[:docker_builds_created] += 1
         next if @dry_run
 
-        if match_by_id? && !src_id.nil?
-          DockerBuild.create!(prepared.merge("id" => src_id))
-        else
-          DockerBuild.create!(prepared)
-        end
+        DockerBuild.create!(prepared.except("id"))
         next
       end
 
-      comparable = prepared.except("created_at")
+      # Digest matched: only non-identity fields may change (tag, docker_image_id, ...).
+      comparable = prepared.except("created_at", "id", "digest")
       if record_attributes_match?(record, comparable)
         summary[:docker_builds_unchanged] += 1
         next

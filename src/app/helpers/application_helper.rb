@@ -326,7 +326,7 @@ module ApplicationHelper
       {
         label: "Discussions",
         description: "Ask questions and share ideas",
-        path: "https://github.com/DeplanckeLab/ASAP/discussions",
+        path: "https://github.com/DeplanckeLab/asap_web/discussions",
         icon: "fas fa-comments",
         external: true
       },
@@ -339,7 +339,7 @@ module ApplicationHelper
       {
         label: "Feature requests and issues",
         description: "Report bugs or suggest improvements",
-        path: "https://github.com/DeplanckeLab/ASAP/issues",
+        path: "https://github.com/DeplanckeLab/asap_web/issues",
         icon: "fab fa-github",
         external: true
       },

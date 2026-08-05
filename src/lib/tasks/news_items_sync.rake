@@ -142,6 +142,10 @@ namespace :news_items do
         published_at: attrs['published_at'],
         published: attrs.key?('published') ? attrs['published'] : true,
         show_on_welcome: attrs.key?('show_on_welcome') ? attrs['show_on_welcome'] : true,
+        github_discussion_node_id: attrs['github_discussion_node_id'],
+        github_discussion_url: attrs['github_discussion_url'],
+        github_discussion_number: attrs['github_discussion_number'],
+        github_synced_at: attrs['github_synced_at'],
         # Authors differ across environments; avoid FK failures on production users.
         user_id: nil,
         created_at: attrs['created_at'],

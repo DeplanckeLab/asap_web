@@ -184,7 +184,11 @@ Rails.application.routes.draw do
     end
   end
 
-  resources :news_items
+  resources :news_items do
+    member do
+      post :sync_to_github
+    end
+  end
   
   resources :home do
     collection do

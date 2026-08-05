@@ -1,7 +1,7 @@
 class NewsItemsController < ApplicationController
   skip_before_action :authenticate_user!, raise: false
   before_action :ensure_admin!, except: [:index, :show]
-  before_action :set_news_item, only: [:show, :edit, :update, :destroy]
+  before_action :set_news_item, only: [:show, :edit, :update, :destroy, :sync_to_github]
 
   def index
     @news_items = if admin?
@@ -51,6 +51,16 @@ class NewsItemsController < ApplicationController
   def destroy
     @news_item.destroy
     redirect_to news_items_path, notice: 'News item was successfully deleted.'
+  end
+
+  def sync_to_github
+    result = NewsItems::GithubDiscussionSync.new(@news_item).call
+    verb = result.created ? 'created' : 'updated'
+    redirect_to news_items_path(anchor: "news-item-#{@news_item.id}"),
+                notice: "GitHub discussion #{verb}: #{result.discussion_url}"
+  rescue NewsItems::GithubDiscussionSync::Error => e
+    redirect_to news_items_path(anchor: "news-item-#{@news_item.id}"),
+                alert: e.message
   end
 
   private

@@ -222,9 +222,15 @@ summary_search_gene_url = search_gene_project_path(@project)
 <h2 class="font-bold text-gray-900 mb-2" style="font-size: clamp(1.5rem, 3.5vw, 2.75rem);">Summary</h2>
 </div>
 <div class="space-y-4">
-<%# Row 1: Metrics %>
-<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-<%= (admin?) ? 3 : 2 %> xl:grid-cols-<%= (admin?) ? 5 : 4 %> gap-3">
-<div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer sm:col-span-2 lg:col-span-1" data-guided-tour="summary-visualization-shortcut" data-summary-visualization-card-link data-url="<%= project_path(@project, view: 'visualization') %>" role="link" tabindex="0">
+<%# Row 1: Metrics
+    When Compliance is shown (editable projects): 2+3 from sm, then 5-across from lg (fits typical 13").
+    Without Compliance: 2x2 from sm, then 4-across from lg. %>
+<% summary_metrics_show_compliance = editable?(@project) %>
+<% summary_metrics_grid_class = summary_metrics_show_compliance ? 'grid grid-cols-1 sm:grid-cols-6 lg:grid-cols-5 gap-3' : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3' %>
+<% summary_metrics_span_half = summary_metrics_show_compliance ? 'sm:col-span-3 lg:col-span-1' : '' %>
+<% summary_metrics_span_third = summary_metrics_show_compliance ? 'sm:col-span-2 lg:col-span-1' : '' %>
+<div class="<%= summary_metrics_grid_class %>">
+<div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer <%= summary_metrics_show_compliance ? summary_metrics_span_half : 'sm:col-span-2 lg:col-span-1' %>" data-guided-tour="summary-visualization-shortcut" data-summary-visualization-card-link data-url="<%= project_path(@project, view: 'visualization') %>" role="link" tabindex="0">
 <p class="dashboard-card-title text-gray-900 flex items-center gap-2"><span class="inline-flex text-gray-500"><%= render 'shared/scatter_plot_icon' %></span><span>Visualization</span></p>
 <div class="grid grid-cols-2 gap-2 mt-2">
 <button type="button" data-summary-detail-trigger data-summary-detail-type="embeddings" data-guided-tour="summary-embeddings-trigger" class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= summary_embedding_count.to_i.positive? ? 'bg-blue-100 text-blue-800 hover:bg-blue-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200' %>"><span class="font-semibold mr-1"><%= number_with_delimiter(summary_embedding_count) %></span> embeddings</button>
@@ -235,12 +241,12 @@ summary_search_gene_url = search_gene_project_path(@project)
 </div>
 
 
-<%= link_to project_path(@project, view: 'analysis'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors", data: { guided_tour: "summary-analysis-card" } do %>
+<%= link_to project_path(@project, view: 'analysis'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors #{summary_metrics_span_half}", data: { guided_tour: "summary-analysis-card" } do %>
     <p class="dashboard-card-title text-gray-900 flex items-center gap-2"><i class="fas fa-sitemap text-gray-500"></i><span>Analysis</span></p>
     <div class="mt-2 flex flex-wrap items-baseline gap-x-2"><span class="hero-stat text-gray-900"><%= number_with_delimiter(summary_total_runs) %></span><span class="font-semibold text-gray-600 uppercase tracking-wide badge-text">runs</span></div>
   <% end %>
 
-  <%= link_to project_path(@project, view: 'data'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors", data: { guided_tour: "summary-data-card" } do %>
+  <%= link_to project_path(@project, view: 'data'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors #{summary_metrics_span_third}", data: { guided_tour: "summary-data-card" } do %>
     <p class="dashboard-card-title text-gray-900 flex items-center justify-between gap-2 w-full">
       <span class="flex items-center gap-2 min-w-0">
         <i class="fas fa-database text-gray-500"></i>
@@ -257,21 +263,21 @@ summary_search_gene_url = search_gene_project_path(@project)
     <div class="mt-2 flex items-baseline gap-2"><span class="hero-stat text-gray-900"><%= number_with_delimiter(summary_loom_file_count) %></span><span class="font-semibold text-gray-600 uppercase tracking-wide badge-text">LOOM files</span></div>
   <% end %>
 
-  <div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3" data-guided-tour="summary-settings-card">
+  <div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 <%= summary_metrics_span_third %>" data-guided-tour="summary-settings-card">
     <p class="dashboard-card-title text-gray-900 flex items-center gap-2"><i class="fas fa-cog text-gray-500"></i><span>Settings</span></p>
     <div class="flex flex-col gap-2 mt-2">
       <span class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= @project.public? ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800' %>" data-guided-tour="summary-settings-visibility-badge"><%= @project.public? ? 'Public project' : 'Private project' %></span>
       <span class="badge-text inline-flex items-center justify-center rounded px-2 py-1 whitespace-nowrap <%= summary_shared_users_count.to_i.positive? ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-100 text-gray-600' %>" data-guided-tour="summary-sharing-badge">Shared with <span class="font-semibold mx-1"><%= number_with_delimiter(summary_shared_users_count) %></span> users</span>
     </div>
   </div>
-<% if editable?(@project) %>
+<% if summary_metrics_show_compliance %>
   <% if @project.compliance_schemas.any? %>
-    <%= link_to project_path(@project, view: 'compliance'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors", data: { guided_tour: "summary-compliance-card" } do %>
+    <%= link_to project_path(@project, view: 'compliance'), class: "block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 hover:border-blue-300 hover:bg-blue-50 transition-colors #{summary_metrics_span_third}", data: { guided_tour: "summary-compliance-card" } do %>
       <p class="dashboard-card-title text-gray-900 flex items-center gap-2"><i class="fas fa-check-circle text-gray-500"></i><span>Compliance</span></p>
       <div class="mt-2 flex items-baseline gap-2" data-guided-tour="summary-compliance-schemas-stat"><span class="hero-stat text-gray-900"><%= number_with_delimiter(summary_compliance_schema_count) %></span><span class="font-semibold text-gray-600 uppercase tracking-wide badge-text">schemas</span></div>
     <% end %>
   <% else %>
-    <div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3" data-guided-tour="summary-compliance-card"><p class="dashboard-card-title text-gray-900 flex items-center gap-2"><i class="fas fa-check-circle text-gray-500"></i><span>Compliance</span></p><p class="italic text-gray-500 mt-2">No available schema</p></div>
+    <div class="block bg-gray-50 rounded-lg border border-gray-200 px-4 py-3 <%= summary_metrics_span_third %>" data-guided-tour="summary-compliance-card"><p class="dashboard-card-title text-gray-900 flex items-center gap-2"><i class="fas fa-check-circle text-gray-500"></i><span>Compliance</span></p><p class="italic text-gray-500 mt-2">No available schema</p></div>
   <% end %>
 <% end %>
 </div>

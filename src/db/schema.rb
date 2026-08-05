@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_05_151000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_05_154500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -875,6 +875,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_05_151000) do
   create_table "news_items", force: :cascade do |t|
     t.text "body", null: false
     t.datetime "created_at", null: false
+    t.string "github_discussion_node_id"
+    t.integer "github_discussion_number"
+    t.string "github_discussion_url"
+    t.datetime "github_synced_at"
     t.string "icon", null: false
     t.string "news_type", default: "announcement", null: false
     t.boolean "published", default: true, null: false
@@ -883,6 +887,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_05_151000) do
     t.string "title", null: false
     t.datetime "updated_at", null: false
     t.integer "user_id"
+    t.index ["github_discussion_node_id"], name: "index_news_items_on_github_discussion_node_id", unique: true
+    t.index ["github_discussion_number"], name: "index_news_items_on_github_discussion_number"
     t.index ["news_type"], name: "index_news_items_on_news_type"
     t.index ["published"], name: "index_news_items_on_published"
     t.index ["published_at"], name: "index_news_items_on_published_at"

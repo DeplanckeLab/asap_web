@@ -117,6 +117,14 @@ class NewsItem < ApplicationRecord
   scope :for_welcome, -> { published.where(show_on_welcome: true) }
   scope :ordered, -> { order(published_at: :desc, id: :desc) }
 
+  def github_synced?
+    github_discussion_node_id.present? && github_discussion_url.present?
+  end
+
+  def github_syncable?
+    NewsItems::GithubDiscussionSync.syncable?(self)
+  end
+
   def type_label
     NEWS_TYPES.dig(news_type, :label) || news_type.to_s.humanize
   end

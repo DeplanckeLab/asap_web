@@ -106,8 +106,8 @@ class HomeController < ApplicationController
 
       - [Contact](#{base}/home/contact): Reach the ASAP team
       - [Sitemap](#{base}/sitemap.xml): Full list of public URLs
-      - [GitHub discussions](https://github.com/DeplanckeLab/ASAP/discussions): Community Q&A
-      - [GitHub issues](https://github.com/DeplanckeLab/ASAP/issues): Bug reports and feature requests
+      - [GitHub discussions](https://github.com/DeplanckeLab/asap_web/discussions): Community Q&A
+      - [GitHub issues](https://github.com/DeplanckeLab/asap_web/issues): Bug reports and feature requests
     LLMS
   end
 

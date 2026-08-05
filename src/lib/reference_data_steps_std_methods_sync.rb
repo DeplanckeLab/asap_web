@@ -425,7 +425,10 @@ class ReferenceDataStepsStdMethodsSync
     attrs = row.except("id")
     # Authors differ across environments; avoid FK failures on production users.
     attrs["user_id"] = nil
-    attrs
+    # Dev may be ahead of prod schema (e.g. github_discussion_* columns).
+    # Only apply attributes the target table actually has.
+    target_columns = NewsItem.column_names.to_set
+    attrs.select { |column, _value| target_columns.include?(column) }
   end
 
   def prepare_docker_build_row(row, docker_remap)

@@ -1,0 +1,84 @@
+<% content_for :title, "Standalone scFAIR checks - ASAP" %>
+<div class="max-w-6xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div>
+    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">Standalone scFAIR checks</h1>
+    <p class="mt-2 text-gray-600 dark:text-gray-300">
+      History of file-check requests (results only; uploaded files are not retained in this log).
+    </p>
+  </div>
+
+  <p class="text-sm text-gray-600 dark:text-gray-300">
+    <%= @total_count %> total
+    · <%= @passed_count %> passed
+    · <%= @failed_status_count %> job failures
+  </p>
+
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+      <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-950 dark:text-gray-400">
+        <tr>
+          <th scope="col" class="px-3 py-2 text-left">Date</th>
+          <th scope="col" class="px-3 py-2 text-left">User</th>
+          <th scope="col" class="px-3 py-2 text-left">Filename</th>
+          <th scope="col" class="px-3 py-2 text-left">Format</th>
+          <th scope="col" class="px-3 py-2 text-left">Schema</th>
+          <th scope="col" class="px-3 py-2 text-left">Outcome</th>
+          <th scope="col" class="px-3 py-2 text-left">Source URL</th>
+          <th scope="col" class="px-3 py-2 text-right"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-gray-800 dark:text-gray-200">
+        <% @standalone_compliance_checks.each do |check| %>
+          <tr>
+            <td class="whitespace-nowrap px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+              <%= display_timestamp(check, :checked_at) %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2">
+              <%= check.user&.email.presence || 'Anonymous' %>
+            </td>
+            <td class="px-3 py-2 max-w-xs truncate" title="<%= check.filename %>">
+              <%= check.filename.presence || '—' %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2">
+              <%= check.format.presence || '—' %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-xs">
+              <%= check.schema_id.presence || '—' %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2">
+              <% if check.status == 'failed' %>
+                <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200">
+                  Job failed
+                </span>
+              <% elsif check.passed %>
+                <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">
+                  Passed
+                </span>
+              <% else %>
+                <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                  Issues found
+                </span>
+              <% end %>
+            </td>
+            <td class="px-3 py-2 max-w-xs truncate text-xs" title="<%= check.source_url %>">
+              <% if check.source_url.present? %>
+                <%= link_to check.source_url, check.source_url, target: '_blank', rel: 'noopener noreferrer', class: 'text-sky-700 hover:underline dark:text-sky-300' %>
+              <% else %>
+                <span class="text-gray-400">Upload</span>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-right">
+              <%= link_to 'Details', standalone_compliance_check_path(check), class: 'text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white' %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if @standalone_compliance_checks.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+      No standalone compliance checks have been recorded yet.
+    </div>
+  <% end %>
+</div>

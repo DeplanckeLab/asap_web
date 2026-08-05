@@ -457,6 +457,12 @@
             <% end %>
             
             <div class="border-t border-gray-200 my-1"></div>
+
+            <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+               href="<%= news_items_path %>">
+              <i class="fas fa-newspaper w-4 text-center"></i>
+              News
+            </a>
             
             <% if guided_tours_for_menu.any? %>
               <div class="px-4 py-2">
@@ -579,6 +585,12 @@
         <% end %>
         
         <%= header_separator %>
+
+        <%= link_to news_items_path,
+            class: "p-2 rounded-lg text-gray-300 hover:bg-gray-700",
+            title: "News" do %>
+          <i class="fas fa-newspaper text-lg"></i>
+        <% end %>
         
         <!-- Info Dropdown -->
         <div class="relative"

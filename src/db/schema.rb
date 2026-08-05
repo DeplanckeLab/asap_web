@@ -10,10 +10,9 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_03_201000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_05_151000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
-  enable_extension "pg_trgm"
 
   create_table "active_runs", id: :serial, force: :cascade do |t|
     t.boolean "async", default: true
@@ -873,6 +872,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_201000) do
     t.index ["rank"], name: "index_ncbi_taxonomy_nodes_on_rank"
   end
 
+  create_table "news_items", force: :cascade do |t|
+    t.text "body", null: false
+    t.datetime "created_at", null: false
+    t.string "icon", null: false
+    t.string "news_type", default: "announcement", null: false
+    t.boolean "published", default: true, null: false
+    t.datetime "published_at", null: false
+    t.boolean "show_on_welcome", default: true, null: false
+    t.string "title", null: false
+    t.datetime "updated_at", null: false
+    t.integer "user_id"
+    t.index ["news_type"], name: "index_news_items_on_news_type"
+    t.index ["published"], name: "index_news_items_on_published"
+    t.index ["published_at"], name: "index_news_items_on_published_at"
+    t.index ["show_on_welcome"], name: "index_news_items_on_show_on_welcome"
+    t.index ["user_id"], name: "index_news_items_on_user_id"
+  end
+
   create_table "normalizations", id: :serial, force: :cascade do |t|
     t.text "attrs_json"
     t.datetime "created_at", precision: nil
@@ -938,10 +955,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_201000) do
     t.text "go_short_name"
     t.integer "latest_ensembl_release"
     t.text "name"
+    t.boolean "obsolete", default: false, null: false
     t.text "short_name"
     t.text "tag"
     t.integer "tax_id"
     t.datetime "updated_at", precision: nil
+    t.index ["obsolete"], name: "index_organisms_on_obsolete"
   end
 
   create_table "organisms_bkp", id: :integer, default: nil, force: :cascade do |t|
@@ -1269,6 +1288,28 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_201000) do
   create_table "speeds", id: :serial, force: :cascade do |t|
     t.text "logo"
     t.text "name"
+  end
+
+  create_table "standalone_compliance_checks", force: :cascade do |t|
+    t.datetime "checked_at", null: false
+    t.datetime "created_at", null: false
+    t.string "filename"
+    t.string "format"
+    t.integer "fu_id"
+    t.boolean "passed", default: false, null: false
+    t.jsonb "result_json", default: {}, null: false
+    t.string "schema_id"
+    t.text "source_url"
+    t.string "status", default: "completed", null: false
+    t.string "task_id"
+    t.datetime "updated_at", null: false
+    t.integer "user_id"
+    t.index ["checked_at"], name: "index_standalone_compliance_checks_on_checked_at"
+    t.index ["fu_id"], name: "index_standalone_compliance_checks_on_fu_id"
+    t.index ["passed"], name: "index_standalone_compliance_checks_on_passed"
+    t.index ["status"], name: "index_standalone_compliance_checks_on_status"
+    t.index ["task_id"], name: "index_standalone_compliance_checks_on_task_id"
+    t.index ["user_id"], name: "index_standalone_compliance_checks_on_user_id"
   end
 
   create_table "statuses", id: :serial, force: :cascade do |t|
@@ -1615,6 +1656,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_03_201000) do
   add_foreign_key "jobs", "statuses", name: "jobs_status_id_fkey"
   add_foreign_key "jobs", "steps", name: "jobs_step_id_fkey"
   add_foreign_key "jobs", "users", name: "jobs_user_id_fkey"
+  add_foreign_key "news_items", "users"
   add_foreign_key "normalizations", "jobs", name: "normalizations_job_id_fkey"
   add_foreign_key "normalizations", "norms", name: "normalizations_norm_id_fkey"
   add_foreign_key "normalizations", "projects", name: "normalizations_project_id_fkey"

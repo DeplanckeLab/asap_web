@@ -221,6 +221,10 @@ import SearchFormController from "controllers/search_form_controller"
 application.register("search-form", SearchFormController)
 console.log('Search form controller registered')
 
+import SearchRunStatusController from "controllers/search_run_status_controller"
+application.register("search-run-status", SearchRunStatusController)
+console.log('Search run status controller registered')
+
 import SortableListController from "controllers/sortable_list_controller"
 application.register("sortable-list", SortableListController)
 console.log('Sortable list controller registered')
@@ -252,6 +256,18 @@ console.log('Annotations page controller registered')
 import HeatmapController from "controllers/heatmap_controller"
 application.register("heatmap", HeatmapController)
 console.log('Heatmap controller registered')
+
+import NewsItemFormController from "controllers/news_item_form_controller"
+application.register("news-item-form", NewsItemFormController)
+console.log('News item form controller registered')
+
+import NewsWelcomeCardController from "controllers/news_welcome_card_controller"
+application.register("news-welcome-card", NewsWelcomeCardController)
+console.log('News welcome card controller registered')
+
+import NewsHighlightController from "controllers/news_highlight_controller"
+application.register("news-highlight", NewsHighlightController)
+console.log('News highlight controller registered')
 
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))

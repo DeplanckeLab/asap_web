@@ -744,7 +744,8 @@ module Basic
       Pathname.new(ENV.fetch('USER_DATA_DIR')).parent.join('.env_asap_run').to_s
     end
 
-    # Optional docker --env-file fragment for v8+ asap_run containers.
+    # Optional docker --env-file fragment for asap_run containers.
+    # Trailing space keeps glued legacy templates (#env_file_option#image_name) valid.
     def asap_run_env_file_docker_option
       "--env-file #{asap_run_env_file_path} "
     end
@@ -753,7 +754,7 @@ module Basic
     # Deployment-specific values (#run_network, #user_data_mount, #env_file_option) are
     # filled at runtime from ENV in build_docker_cmd.
     def canonical_asap_run_docker_call(include_env_file: true)
-      env_file_option = include_env_file ? '#env_file_option' : ''
+      env_file_option = include_env_file ? '#env_file_option ' : ''
       "docker run #host_option --name #container_name --network=#run_network " \
         "-e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm " \
         "#user_data_mount #{env_file_option}#image_name -c"

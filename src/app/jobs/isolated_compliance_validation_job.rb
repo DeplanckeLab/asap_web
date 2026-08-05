@@ -4,12 +4,15 @@ class IsolatedComplianceValidationJob < ApplicationJob
   queue_as :default
 
   def perform(task_id, file_path, schema_id, original_filename, fu_id: nil)
+    meta = metadata_from_fu(fu_id, original_filename)
+    recorded = false
+
     started_payload = {
       status: 'started',
       task_id: task_id,
       message: 'Validation started',
       progress: 1,
-      filename: original_filename
+      filename: meta[:filename]
     }
     write_status(task_id, started_payload)
     broadcast(task_id, started_payload)
@@ -30,6 +33,17 @@ class IsolatedComplianceValidationJob < ApplicationJob
     end
 
     result = service.validate
+    StandaloneComplianceCheckRecorder.record_completed!(
+      task_id: task_id,
+      result: result,
+      filename: meta[:filename],
+      schema_id: schema_id,
+      user_id: meta[:user_id],
+      source_url: meta[:source_url],
+      fu_id: fu_id
+    )
+    recorded = true
+
     completed_payload = {
       status: 'completed',
       task_id: task_id,
@@ -51,6 +65,7 @@ class IsolatedComplianceValidationJob < ApplicationJob
     write_status(task_id, failed_payload)
     broadcast(task_id, failed_payload)
     mark_fu_failed(fu_id, e.message)
+    record_failure_safely(task_id, e, schema_id, original_filename, fu_id) unless recorded
     Rails.logger.error("[IsolatedComplianceValidationJob] #{e.class}: #{e.message}")
     Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
   ensure
@@ -61,6 +76,37 @@ class IsolatedComplianceValidationJob < ApplicationJob
   end
 
   private
+
+  def metadata_from_fu(fu_id, original_filename)
+    filename = original_filename.to_s.presence
+    return { filename: filename, user_id: nil, source_url: nil } if fu_id.blank?
+
+    fu = Fu.find(fu_id)
+    {
+      filename: fu.name.presence || fu.upload_file_name.presence || filename,
+      user_id: fu.user_id,
+      source_url: fu.url.presence
+    }
+  end
+
+  # Persistence of the failure row must not raise out of the rescue handler.
+  def record_failure_safely(task_id, error, schema_id, original_filename, fu_id)
+    fu = fu_id.present? ? Fu.find_by(id: fu_id) : nil
+    StandaloneComplianceCheckRecorder.record_failed!(
+      task_id: task_id,
+      error_message: error.message,
+      filename: fu&.name.presence || fu&.upload_file_name.presence || original_filename,
+      schema_id: schema_id,
+      user_id: fu&.user_id,
+      source_url: fu&.url.presence,
+      fu_id: fu_id
+    )
+  rescue StandardError => record_error
+    Rails.logger.error(
+      "[IsolatedComplianceValidationJob] Could not record failed check: " \
+      "#{record_error.class}: #{record_error.message}"
+    )
+  end
 
   def mark_fu_validated(fu_id)
     return if fu_id.blank?
@@ -99,4 +145,3 @@ class IsolatedComplianceValidationJob < ApplicationJob
     Rails.logger.warn("[IsolatedComplianceValidationJob] Could not cleanup temp file #{path}: #{e.message}")
   end
 end
-

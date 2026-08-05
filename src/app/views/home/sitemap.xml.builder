@@ -3,6 +3,7 @@ base = ENV.fetch('SERVER_URL').chomp('/')
 entries = [
   [root_path, 'weekly', '1.0'],
   [projects_path, 'weekly', '0.9'],
+  [news_items_path, 'weekly', '0.7'],
   *info_menu_links.map { |link| [link[:path], 'monthly', '0.6'] }
 ]
 

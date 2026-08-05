@@ -11,6 +11,8 @@ class User < ApplicationRecord
   has_many :shares, dependent: :destroy
   has_many :checkpoints, dependent: :destroy
   has_many :ratings, dependent: :destroy
+  has_many :news_items, dependent: :nullify
+  has_many :standalone_compliance_checks, dependent: :nullify
   has_and_belongs_to_many :ips
   belongs_to :orcid_user, optional: true
 

@@ -1,0 +1,83 @@
+<%= form_with(model: news_item, class: "space-y-6", local: true,
+              data: {
+                controller: "news-item-form",
+                news_item_form_defaults_value: NewsItem::NEWS_TYPES.transform_values { |meta| meta[:default_icon] }
+              }) do |form| %>
+  <% if news_item.errors.any? %>
+    <div class="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <p class="font-semibold"><%= pluralize(news_item.errors.count, "error") %> prohibited this news item from being saved:</p>
+      <ul class="mt-2 list-disc pl-5">
+        <% news_item.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div>
+    <%= form.label :title, class: "block text-sm font-medium text-gray-700 dark:text-gray-200" %>
+    <div class="mt-1">
+      <%= form.text_field :title, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white" %>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :body, class: "block text-sm font-medium text-gray-700 dark:text-gray-200" %>
+    <div class="mt-1">
+      <%= form.text_area :body, rows: 6, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white" %>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div>
+      <%= form.label :news_type, "Type", class: "block text-sm font-medium text-gray-700 dark:text-gray-200" %>
+      <div class="mt-1">
+        <%= form.select :news_type,
+                        NewsItem.news_type_options,
+                        {},
+                        class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white",
+                        data: { news_item_form_target: "type", action: "change->news-item-form#typeChanged" } %>
+      </div>
+      <p class="mt-1 text-xs text-gray-500">
+        Defaults: New release=rocket, Feature/Update=bolt, Technical announcement=loudspeaker, Technical alert=fire, Tip=lightbulb.
+      </p>
+    </div>
+
+    <div>
+      <%= form.label :icon, class: "block text-sm font-medium text-gray-700 dark:text-gray-200" %>
+      <div class="mt-1">
+        <%= form.select :icon,
+                        NewsItem.icon_options,
+                        {},
+                        class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white",
+                        data: { news_item_form_target: "icon" } %>
+      </div>
+      <p class="mt-1 text-xs text-gray-500">
+        Changing the type auto-selects the default icon unless you already chose a custom one.
+      </p>
+    </div>
+  </div>
+
+  <div>
+    <%= form.label :published_at, class: "block text-sm font-medium text-gray-700 dark:text-gray-200" %>
+    <div class="mt-1">
+      <%= form.datetime_select :published_at, { include_seconds: false }, class: "rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 dark:border-gray-600 dark:bg-gray-800 dark:text-white" %>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div class="flex items-center gap-2">
+      <%= form.check_box :published, class: "rounded border-gray-300 text-gray-900 focus:ring-gray-900" %>
+      <%= form.label :published, "Published", class: "text-sm text-gray-700 dark:text-gray-200" %>
+    </div>
+    <div class="flex items-center gap-2">
+      <%= form.check_box :show_on_welcome, class: "rounded border-gray-300 text-gray-900 focus:ring-gray-900" %>
+      <%= form.label :show_on_welcome, "Show on welcome page", class: "text-sm text-gray-700 dark:text-gray-200" %>
+    </div>
+  </div>
+
+  <div class="flex items-center justify-end gap-2">
+    <%= link_to 'Cancel', news_items_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
+    <%= form.submit (news_item.persisted? ? 'Update news item' : 'Create news item'), class: "inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition" %>
+  </div>
+<% end %>

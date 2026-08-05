@@ -12,6 +12,7 @@ class HomeController < ApplicationController
   end
 
   def welcome
+    @welcome_news_items = NewsItem.for_welcome.ordered.limit(5)
   end
 
   def atlases
@@ -84,6 +85,7 @@ class HomeController < ApplicationController
       - [File formats](#{base}/home/file_format): Supported upload and export formats
       - [API documentation](#{base}/api-doc): Interactive OpenAPI reference for JSON endpoints
       - [OpenAPI spec](#{base}/api/openapi.yaml): Machine-readable API specification
+      - [News](#{base}/news_items): Platform announcements and updates
       - [Releases](#{base}/versions): ASAP version history and release notes
       - [Project types](#{base}/project_types): Available pipeline types and configurations
       - [Cell metadata schema](#{base}/ontology_term_types): Cell metadata fields used for annotations

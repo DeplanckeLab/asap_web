@@ -7894,6 +7894,36 @@ class ProjectsController < ApplicationController
     render json: counts
   end
 
+  # GET /projects/run_counts_batch?ids=1,2,3
+  # Returns run counts for multiple projects (search page adaptive polling).
+  # Unauthorized or missing IDs are omitted. Caps at 50 IDs.
+  def run_counts_batch
+    raw_ids = params[:ids]
+    id_list =
+      if raw_ids.is_a?(Array)
+        raw_ids
+      else
+        raw_ids.to_s.split(',')
+      end
+    project_ids = id_list.map { |id| id.to_i }.select(&:positive?).uniq.first(50)
+
+    result = {}
+    if project_ids.any?
+      Project.where(id: project_ids).find_each do |project|
+        next unless readable?(project)
+        counts = helpers.project_run_counts(project)
+        result[project.id.to_s] = {
+          pending: counts[:pending],
+          running: counts[:running],
+          success: counts[:success],
+          failed: counts[:failed]
+        }
+      end
+    end
+
+    render json: result
+  end
+
   # GET /projects/:id/run_list?status=failed
   # Returns the refreshed HTML for a run-status dropdown popup. Called by
   # nav_dropdown_controller when the user opens the popup so the list always

@@ -194,7 +194,7 @@
 
     <!-- Results Header and Projects Container -->
     <h2 class="text-xl font-semibold text-gray-900 mb-4" data-guided-tour="projects-results-section">Search results</h2>
-    <div data-controller="project-selection delete-projects integrate-projects"
+    <div data-controller="project-selection delete-projects integrate-projects search-run-status"
          data-delete-projects-url-value="<%= bulk_destroy_projects_path %>"
          data-integrate-projects-url-value="<%= prepare_integrate_projects_path %>">
       <div class="flex flex-col gap-3 md:flex-row md:justify-between md:items-center mb-6">
@@ -229,6 +229,16 @@
                   onchange: "this.form.requestSubmit()"
                 } %>
           <% end %>
+          <% if @v8_active_for_integration %>
+            <button type="button"
+                    class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-600 hover:bg-green-700"
+                    data-project-selection-target="integrateButton"
+                    data-action="click->integrate-projects#integrateSelected"
+                    disabled>
+              <i class="fas fa-object-group mr-2"></i>
+              <span data-project-selection-target="integrateButtonText">Integrate selected</span>
+            </button>
+          <% end %>
           <button type="button"
                   class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-red-600 hover:bg-red-700"
                   data-project-selection-target="deleteButton"
@@ -244,28 +254,14 @@
     <% if @projects.any? %>
       <div>
         <!-- Action Bar -->
-        <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-3">
-            <span class="text-sm text-gray-500" data-project-selection-target="selectedCount"></span>
-            <button type="button"
-                    class="hidden text-sm text-blue-600 hover:text-blue-800 underline"
-                    data-project-selection-target="clearButton"
-                    data-action="click->project-selection#clearSelection">
-              Clear selection
-            </button>
-          </div>
-          <div class="flex items-center gap-2">
-            <% if @v8_active_for_integration %>
-              <button type="button"
-                      class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-green-600 hover:bg-green-700"
-                      data-project-selection-target="integrateButton"
-                      data-action="click->integrate-projects#integrateSelected"
-                      disabled>
-                <i class="fas fa-object-group mr-2"></i>
-                <span data-project-selection-target="integrateButtonText">Integrate selected</span>
-              </button>
-            <% end %>
-          </div>
+        <div class="flex items-center gap-3 mb-3">
+          <span class="text-sm text-gray-500" data-project-selection-target="selectedCount"></span>
+          <button type="button"
+                  class="hidden text-sm text-blue-600 hover:text-blue-800 underline"
+                  data-project-selection-target="clearButton"
+                  data-action="click->project-selection#clearSelection">
+            Clear selection
+          </button>
         </div>
 
         <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
@@ -366,7 +362,9 @@
                     <span class="block font-medium text-gray-900"><%= number_with_delimiter(project.gene_count) %></span>
                     <span class="block text-xs text-gray-500"><%= row_label(project) %></span>
                   </td>
-                  <td class="px-6 py-4 whitespace-nowrap" onclick="window.location='<%= project_path(project) %>'">
+                  <td class="px-6 py-4 whitespace-nowrap" onclick="window.location='<%= project_path(project) %>'"
+                      data-search-run-status-target="statusCell"
+                      data-project-id="<%= project.id %>">
                     <% run_counts = project_run_counts(project) %>
                     <div class="flex items-center gap-2">
                       <% [:pending, :running, :success, :failed].each do |key| %>
@@ -376,11 +374,19 @@
                           is_active = count > 0
                           icon_class = config[:icon_base]
                           icon_class += " #{config[:icon_spin]}" if is_active && config[:icon_spin].present?
-                          color_class = is_active ? config[:active_color] : 'text-gray-300'
+                          color_class = is_active ? config[:active_color] : (config[:inactive_color].presence || 'text-gray-300')
                         %>
                         <div class="flex flex-col items-center" title="<%= run_summary_tooltip_label(key) %>">
-                          <i class="<%= icon_class %> text-sm <%= color_class %>"></i>
-                          <span class="text-[9px] leading-tight text-gray-400 mt-0.5"><%= count %></span>
+                          <i class="<%= icon_class %> text-sm <%= color_class %>"
+                             data-search-run-status-target="statusIcon"
+                             data-status-key="<%= key %>"
+                             data-icon-base="<%= config[:icon_base] %>"
+                             data-icon-spin="<%= config[:icon_spin] %>"
+                             data-active-color="<%= config[:active_color] %>"
+                             data-inactive-color="<%= config[:inactive_color].presence || 'text-gray-300' %>"></i>
+                          <span class="text-[9px] leading-tight text-gray-400 mt-0.5"
+                                data-search-run-status-target="statusCount"
+                                data-status-key="<%= key %>"><%= count %></span>
                         </div>
                       <% end %>
                     </div>

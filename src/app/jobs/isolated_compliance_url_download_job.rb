@@ -51,7 +51,8 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
       name: original_filename,
       status: 'validating',
       upload_type: upload_type_id,
-      user_id: user_id
+      user_id: user_id,
+      url: source_url.to_s
     )
 
     fu_dir = fu.upload_dir.to_s

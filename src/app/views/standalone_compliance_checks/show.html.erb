@@ -1,0 +1,113 @@
+<% content_for :title, "Standalone scFAIR check ##{@standalone_compliance_check.id} - ASAP" %>
+<% check = @standalone_compliance_check %>
+<% summary = ((@validation_result && @validation_result[:summary]) || {}).with_indifferent_access %>
+<div class="max-w-6xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div class="flex items-start justify-between gap-4 flex-wrap">
+    <div>
+      <p class="text-sm text-gray-500 dark:text-gray-400">
+        <%= link_to 'Standalone scFAIR checks', standalone_compliance_checks_path, class: 'hover:underline' %>
+        / #<%= check.id %>
+      </p>
+      <h1 class="mt-1 text-3xl font-semibold text-gray-900 dark:text-white">
+        <%= check.filename.presence || "Check ##{check.id}" %>
+      </h1>
+      <p class="mt-2 text-gray-600 dark:text-gray-300">
+        Checked <%= display_timestamp(check, :checked_at) %>
+        · <%= check.user&.email.presence || 'Anonymous' %>
+        <% if check.format.present? %>
+          · <%= check.format.upcase %>
+        <% end %>
+        <% if check.schema_id.present? %>
+          · <%= check.schema_id %>
+        <% end %>
+      </p>
+      <% if check.source_url.present? %>
+        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400 break-all">
+          Source:
+          <%= link_to check.source_url, check.source_url, target: '_blank', rel: 'noopener noreferrer', class: 'text-sky-700 hover:underline dark:text-sky-300' %>
+        </p>
+      <% end %>
+    </div>
+  </div>
+
+  <% if check.status == 'failed' %>
+    <div class="rounded-lg border border-red-200 bg-red-50 p-6 dark:border-red-900/50 dark:bg-red-950/40">
+      <h2 class="text-lg font-semibold text-red-800 dark:text-red-200">Job failed</h2>
+      <p class="mt-2 text-sm text-red-700 dark:text-red-300">
+        <%= check.result_json.is_a?(Hash) ? (check.result_json['error'].presence || 'Validation job failed without details.') : 'Validation job failed without details.' %>
+      </p>
+    </div>
+  <% elsif @validation_result.present? %>
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-gray-900">Validation Summary</h2>
+        <% if @validation_result[:valid] %>
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+            Compliant
+          </span>
+        <% else %>
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+            Non-compliant
+          </span>
+        <% end %>
+      </div>
+
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <% if @validation_result[:schema_version].present? %>
+          <div class="bg-gray-50 rounded-lg p-4 text-center">
+            <div class="text-2xl font-bold text-gray-900"><%= @validation_result[:schema_version] %></div>
+            <div class="text-sm text-gray-500">Schema Version</div>
+          </div>
+        <% end %>
+
+        <div class="<%= Array(@validation_result[:errors]).any? ? 'bg-red-50' : 'bg-gray-50' %> rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold <%= Array(@validation_result[:errors]).any? ? 'text-red-600' : 'text-gray-900' %>">
+            <%= summary[:errors_count] || Array(@validation_result[:errors]).size %>
+          </div>
+          <div class="text-sm text-gray-500">Errors</div>
+        </div>
+
+        <div class="<%= Array(@validation_result[:warnings]).any? ? 'bg-yellow-50' : 'bg-gray-50' %> rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold <%= Array(@validation_result[:warnings]).any? ? 'text-yellow-600' : 'text-gray-900' %>">
+            <%= summary[:warnings_count] || Array(@validation_result[:warnings]).size %>
+          </div>
+          <div class="text-sm text-gray-500">Warnings</div>
+        </div>
+
+        <div class="bg-green-50 rounded-lg p-4 text-center">
+          <div class="text-2xl font-bold text-green-600">
+            <%= summary[:valid_checks_count] || Array(@validation_result[:valid_checks]).size %>
+          </div>
+          <div class="text-sm text-gray-500">Passed</div>
+        </div>
+      </div>
+
+      <% if @validation_result[:validated_at].present? %>
+        <div class="mt-4 pt-4 border-t border-gray-200 text-sm text-gray-500">
+          Validated: <%= Time.parse(@validation_result[:validated_at].to_s).strftime('%B %d, %Y at %H:%M:%S UTC') %>
+        </div>
+      <% end %>
+    </div>
+
+    <% if compliance_report_uses_check_groups?(@validation_result) %>
+      <% report_payload = compliance_check_report_payload(@validation_result, @compliance_check_groups) %>
+      <div data-controller="compliance-check-report"
+           data-compliance-check-report-result-value="<%= report_payload.to_json %>"
+           data-compliance-check-report-schema-id-value="<%= report_payload[:schema_id] %>"
+           data-compliance-check-report-rules-snippet-url-value="<%= compliance_rules_snippet_path %>"
+           data-compliance-check-report-rules-yaml-url-value="<%= compliance_rules_yaml_path %>"
+           data-compliance-check-report-show-result-banner-value="true">
+        <div data-compliance-check-report-target="resultBody"></div>
+        <%= render 'compliance/check_detail_modal',
+            stimulus_controller: 'compliance-check-report',
+            rules_yaml_path: report_payload[:rules_yaml_path] %>
+      </div>
+    <% else %>
+      <%= render 'compliance/legacy_validation_report', validation_result: @validation_result %>
+    <% end %>
+  <% else %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+      No validation result is available for this check.
+    </div>
+  <% end %>
+</div>

@@ -199,6 +199,18 @@ module ApplicationHelper
   def admin_menu_links
     [
       {
+        label: "News",
+        description: "Manage welcome-page announcements and news history",
+        path: news_items_path,
+        icon: "fas fa-newspaper"
+      },
+      {
+        label: "Standalone scFAIR checks",
+        description: "Review standalone file-check requests and outcomes",
+        path: standalone_compliance_checks_path,
+        icon: "fas fa-clipboard-check"
+      },
+      {
         label: "Cross-references",
         description: "Manage identifier types & external links",
         path: cross_references_admin_home_index_path,

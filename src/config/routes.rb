@@ -11,6 +11,7 @@ Rails.application.routes.draw do
       get :organisms_for_version
       post :bulk_destroy
       post :prepare_integrate
+      get :run_counts_batch
     end
     member do
       get :instructions
@@ -146,6 +147,7 @@ Rails.application.routes.draw do
   resources :docker_images
   resources :tools
   resources :ratings, only: [:index]
+  resources :standalone_compliance_checks, only: [:index, :show]
   resources :data_classes
   resources :tool_types
   resources :project_types
@@ -181,6 +183,8 @@ Rails.application.routes.draw do
       get :run_stats
     end
   end
+
+  resources :news_items
   
   resources :home do
     collection do

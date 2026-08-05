@@ -1,0 +1,31 @@
+<% if news_items.present? %>
+  <div class="mb-6 max-w-2xl mx-auto space-y-3 text-left">
+    <% news_items.each do |news_item| %>
+      <% scheme = news_item.color_scheme %>
+      <div class="<%= news_item_card_classes(news_item) %> relative cursor-pointer transition hover:shadow-md"
+           role="link"
+           tabindex="0"
+           data-controller="news-welcome-card"
+           data-action="click->news-welcome-card#open keydown.enter->news-welcome-card#open keydown.space->news-welcome-card#open"
+           data-news-welcome-card-url-value="<%= news_items_path(anchor: "news-item-#{news_item.id}") %>">
+        <div class="flex items-start gap-3">
+          <div class="shrink-0 mt-0.5">
+            <%= news_item_icon_tag(news_item) %>
+          </div>
+          <div class="min-w-0 flex-1 pb-4">
+            <div class="flex flex-wrap items-center gap-2 mb-1">
+              <%= news_item_type_badge(news_item) %>
+              <span class="text-xs text-gray-500 dark:text-gray-400"><%= format_news_published_at(news_item) %></span>
+            </div>
+            <p class="text-sm font-semibold <%= scheme[:title] %>">
+              <%= raw news_item.title %>
+            </p>
+          </div>
+        </div>
+        <span class="absolute bottom-2 right-3 text-xs italic <%= scheme[:details] %>">
+          more details
+        </span>
+      </div>
+    <% end %>
+  </div>
+<% end %>

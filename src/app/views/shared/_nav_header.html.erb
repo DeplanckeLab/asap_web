@@ -82,6 +82,15 @@
               <i class="fas fa-search w-4 text-center"></i>
               Search projects
             </a>
+
+            <!-- News -->
+            <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+               href="<%= news_items_path %>"
+               data-controller="nav-item"
+               data-action="click->nav-item#navigate">
+              <i class="fas fa-newspaper w-4 text-center"></i>
+              News
+            </a>
             
             <% if guided_tours_for_menu.any? %>
               <div class="px-4 py-2">
@@ -166,6 +175,15 @@
         </div>
 
         <%= render "shared/guided_tour_nav_dropdown" %>
+
+        <a class="<%= tw_menu_item %>"
+           href="<%= news_items_path %>"
+           data-controller="nav-item"
+           data-action="click->nav-item#navigate"
+           title="News">
+          <i class="fas fa-newspaper me-1.5"></i>
+          News
+        </a>
 
         <!-- Info Dropdown -->
         <div class="relative inline-block text-left"
@@ -302,6 +320,14 @@
                  data-guided-tour="welcome-search-projects-nav">
                 <i class="fas fa-search me-1.5"></i>
                 Search projects
+              </a>
+
+              <a class="<%= tw_menu_item %> md:hidden"
+                 href="<%= news_items_path %>"
+                 data-controller="nav-item"
+                 data-action="click->nav-item#navigate">
+                <i class="fas fa-newspaper me-1.5"></i>
+                News
               </a>
 
               <% if guided_tours_for_menu.any? %>

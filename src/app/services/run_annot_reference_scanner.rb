@@ -112,10 +112,11 @@ class RunAnnotReferenceScanner
     def key_reference_matches_annot?(key, value, annot_id, path, path_match)
       case key
       when "annot_id", "embedding_metadata_id", "matrix_annot_id", "metadata_annot_id",
-           "source_annot_id", "target_annot_id", "selection_annot_id"
+           "source_annot_id", "target_annot_id", "selection_annot_id", "metadata_id",
+           "source_metadata_id"
         value.to_i == annot_id
       else
-        if key.end_with?("_annot_id")
+        if key.end_with?("_annot_id") || key.end_with?("_metadata_id")
           i = Integer(value) rescue nil
           !i.nil? && i == annot_id
         elsif path_match && value.is_a?(String) && value == path

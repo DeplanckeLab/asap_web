@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Rewrites staged import file headers so "keep both" uses versioned LOOM paths (R-M4).
+# Rewrites staged import file headers so path remaps can retarget LOOM attribute names.
 # Only touches the first line (list or matrix header row).
 class MetadataImportUploadRewriter
   class << self

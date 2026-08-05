@@ -9,12 +9,44 @@
       </button>
     </div>
     <div style="padding: 16px; overflow-y: auto; min-height: 0;">
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <button type="button"
+                id="compose-mode-selection-btn"
+                style="padding: 6px 12px; border: 1px solid #2563eb; border-radius: 6px; background: #2563eb; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer;"
+                onclick="if (window.visualizationController) window.visualizationController.setComposeMode('selection')">
+          Selection
+        </button>
+        <% if admin? %>
+          <button type="button"
+                  id="compose-mode-batch-btn"
+                  style="padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; color: #374151; font-size: 12px; font-weight: 600; cursor: pointer;"
+                  onclick="if (window.visualizationController) window.visualizationController.setComposeMode('batch')">
+            Batch
+          </button>
+        <% end %>
+      </div>
       <div style="display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 12px;">
         <div>
           <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Preview embedding</label>
           <select id="compose-selection-embedding"
                   onchange="if (window.visualizationController) window.visualizationController.onComposeSelectionEmbeddingChanged()"
                   style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+        </div>
+      </div>
+      <div id="compose-batch-controls" style="display: none; margin-bottom: 12px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div>
+            <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Fan-out metadata</label>
+            <select id="compose-batch-fanout-metadata"
+                    onchange="if (window.visualizationController) window.visualizationController.onComposeBatchFanoutChanged()"
+                    style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+          </div>
+          <div>
+            <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Preview category</label>
+            <select id="compose-batch-preview-category"
+                    onchange="if (window.visualizationController) window.visualizationController.updateComposeSelectionPreview()"
+                    style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+          </div>
         </div>
       </div>
       <div style="display: grid; grid-template-columns: 1fr 180px 1fr auto; gap: 10px; align-items: end; margin-bottom: 14px;">
@@ -52,9 +84,60 @@
       </div>
       <div id="compose-selection-status" style="display: none; margin-bottom: 12px; padding: 8px 10px; border-radius: 6px; font-size: 12px;"></div>
       <div id="compose-selection-preview" style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 16px;"></div>
+      <div id="compose-batch-sizes" style="display: none; margin-bottom: 16px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 8px; max-height: 160px; overflow-y: auto;"></div>
       <div>
         <div style="font-size: 13px; font-weight: 600; color: #111827; margin-bottom: 8px;">Composition steps</div>
         <div id="compose-selection-steps" style="max-height: 220px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 8px;"></div>
+      </div>
+      <div id="compose-batch-save-panel" style="display: none; margin-top: 14px; padding-top: 12px; border-top: 1px solid #e5e7eb;">
+        <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Batch metadata name</label>
+        <div style="display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center;">
+          <input type="text"
+                 id="compose-batch-metadata-name"
+                 placeholder="auto name ending with .batch_compose"
+                 style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"
+                 oninput="if (window.visualizationController) window.visualizationController.onComposeBatchMetadataNameInput()" />
+          <button type="button"
+                  id="compose-batch-save-btn"
+                  style="padding: 8px 12px; background: #059669; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;"
+                  onclick="if (window.visualizationController) window.visualizationController.composeSaveBatchMetadata()">
+            Save batch metadata
+          </button>
+        </div>
+        <div style="font-size: 11px; color: #6b7280; margin-top: 6px;">Auto shape: fanout.with.operands.batch_compose. Multi-step uses nested parentheses, e.g. ((region_AND_x)_OR_y). Clear to regenerate.</div>
+      </div>
+      <div id="compose-batch-conflict-panel" style="display: none; margin-top: 14px; padding: 12px; border: 1px solid #f59e0b; border-radius: 8px; background: #fffbeb;">
+        <div style="font-size: 13px; font-weight: 600; color: #92400e; margin-bottom: 8px;">Metadata name already exists</div>
+        <div id="compose-batch-conflict-message" style="font-size: 12px; color: #78350f; margin-bottom: 8px;"></div>
+        <div id="compose-batch-conflict-dependents" style="font-size: 12px; color: #374151; white-space: pre-wrap; margin-bottom: 10px; max-height: 140px; overflow-y: auto;"></div>
+        <div style="margin-bottom: 10px;">
+          <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Rename previous to (must end with .batch_compose)</label>
+          <input type="text"
+                 id="compose-batch-conflict-rename-name"
+                 style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;" />
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <button type="button"
+                  style="padding: 8px 10px; background: #2563eb; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;"
+                  onclick="if (window.visualizationController) window.visualizationController.composeResolveBatchConflict('rename')">
+            Rename previous
+          </button>
+          <button type="button"
+                  style="padding: 8px 10px; background: #4b5563; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;"
+                  onclick="if (window.visualizationController) window.visualizationController.composeResolveBatchConflict('archive')">
+            Keep as .bkp.N
+          </button>
+          <button type="button"
+                  style="padding: 8px 10px; background: #b91c1c; color: #fff; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;"
+                  onclick="if (window.visualizationController) window.visualizationController.composeResolveBatchConflict('delete')">
+            Replace and delete dependents
+          </button>
+          <button type="button"
+                  style="padding: 8px 10px; background: #e5e7eb; color: #374151; border: none; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;"
+                  onclick="if (window.visualizationController) window.visualizationController.composeCancelBatchConflict()">
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   </div>

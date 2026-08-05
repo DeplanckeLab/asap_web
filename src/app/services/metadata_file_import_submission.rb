@@ -1,10 +1,14 @@
 # frozen_string_literal: true
 
-# Server-side gate for do_import_metadata: reserved names, collisions, overwrite safety, keep-both rewrites.
+# Server-side gate for do_import_metadata: reserved names, collisions, keep-both / overwrite.
+#
+# Collision policies:
+# - keep_both: rename/archive existing Annot to base.bkp.N; import writes at the canonical name
+# - overwrite: delete existing Annot + dependents; import writes at the canonical name
 class MetadataFileImportSubmission
   class << self
     def prepare_staged_file!(project:, fu:, metadata_type_id:, input_type_id:, name:, header_name:, has_header:,
-                             collision_resolution:)
+                             collision_resolution:, loom_file: nil)
       stage_path = fu.upload_dir + "clipboard.txt"
       unless File.exist?(stage_path)
         return { ok: false, error: "Staged import file is missing. Run preview again.", status: :unprocessable_entity }
@@ -46,44 +50,58 @@ class MetadataFileImportSubmission
       if res.blank?
         return {
           ok: false,
-          error: "This import overlaps existing metadata columns. Choose keep both (adds a .vN suffix), overwrite (only if no runs use the column), or cancel.",
+          error: "This import overlaps existing metadata columns. Choose keep both (rename existing to .bkp.N) or overwrite existing metadata.",
           status: :unprocessable_entity
         }
       end
 
-      unless %w[keep_both overwrite skip].include?(res)
+      unless %w[keep_both overwrite].include?(res)
         return { ok: false, error: "Invalid collision resolution.", status: :unprocessable_entity }
       end
 
-      if res == "skip"
-        return { ok: false, error: "Import cancelled.", status: :unprocessable_entity }
-      end
-
-      path_map = {}
       colliding.each do |c|
+        unless loom_file.present?
+          return {
+            ok: false,
+            error: "#{res == 'keep_both' ? 'Keep both' : 'Overwrite'} requires a loom file so existing metadata can be renamed or removed.",
+            status: :unprocessable_entity,
+            blocking_path: c.path
+          }
+        end
+
         if res == "keep_both"
-          path_map[c.path] = MetadataFileImportValidation.next_versioned_path(project, c.path)
-        elsif res == "overwrite"
-          if c.dependent_run_ids.any?
+          archived = MetadataAnnotVersionArchiveService.call(
+            project: project,
+            loom_file: loom_file,
+            metadata_path: c.path
+          )
+          unless archived[:ok]
             return {
               ok: false,
-              error: "Cannot overwrite metadata at #{c.path} because pipeline runs still reference it (run ids: #{c.dependent_run_ids.join(', ')}). Finish or remove those runs, then retry.",
+              error: archived[:error] || "Failed to rename existing metadata at #{c.path} to .bkp.N",
               status: :unprocessable_entity,
-              blocking_path: c.path,
-              dependent_run_ids: c.dependent_run_ids
+              blocking_path: c.path
             }
           end
-          Annot.where(project_id: project.id, name: c.path).find_each(&:destroy)
-        end
-      end
+        elsif res == "overwrite"
+          annots = Annot.where(project_id: project.id, name: c.path).to_a
+          next if annots.empty?
 
-      if res == "keep_both" && path_map.any?
-        MetadataImportUploadRewriter.apply_path_map!(
-          filepath: stage_path.to_s,
-          metadata_type_id: metadata_type_id,
-          input_type_id: input_type_id,
-          path_map: path_map
-        )
+          gate = MetadataRewritePolicyGate.call(
+            project: project,
+            annots: annots,
+            loom_file: loom_file,
+            previous_metadata_policy: "delete"
+          )
+          unless gate[:ok]
+            return {
+              ok: false,
+              error: gate[:error] || "Failed to overwrite existing metadata at #{c.path}",
+              status: :unprocessable_entity,
+              blocking_path: c.path
+            }
+          end
+        end
       end
 
       { ok: true }

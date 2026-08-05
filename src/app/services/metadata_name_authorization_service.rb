@@ -8,21 +8,24 @@
 # *finite* set of {Regexp} rules, optionally extended per {Version} from env_json / step templates
 # for column and row attributes (section 6.3.4, R-NM0–R-NM4).
 #
-# For a trailing +.vN+ compliance-style suffix, both the full string and the base (suffix stripped)
-# are checked so versioned aliases cannot bypass reserved patterns (R-NM4).
+# For a trailing collision-backup suffix (+.bkp.N+ or legacy +.vN+), both the full
+# string and the base (suffix stripped) are checked so backup aliases cannot bypass
+# reserved patterns (R-NM4).
 class MetadataNameAuthorizationService
   Result = Struct.new(:authorized, :reason, :message, keyword_init: true)
 
   # Metadata import only considers /col_attrs/... and /row_attrs/... (Rule M2, R-MS).
   LOOM_ATTR_IMPORT_PATH = /\A\/(col_attrs|row_attrs)\//.freeze
 
-  # Compliance / manual versioning suffix (+.v42+ at end of the string).
-  VERSION_SUFFIX_PATTERN = /\.v\d+\z/
+  # Same as {MetadataCollisionBackupNaming::STRIP_SUFFIX_PATTERN} (kept local for boot order).
+  VERSION_SUFFIX_PATTERN = /\.(?:bkp\.\d+|v\d+)\z/.freeze
 
   # Baseline patterns under col_attrs/row_attrs — families of ASAP-like names, not an enumeration.
   MINIMAL_RESERVED_REGEXPS = [
     # Selection-derived: +<embedding>.sel_<n>+ (see projects_controller selection metadata).
-    /\.sel_\d+\z/
+    /\.sel_\d+\z/,
+    # Batch compose derived categorical metadata (see save_batch_compose_metadata).
+    /\.batch_compose\z/
   ].freeze
 
   # Common ASAP embedding / reduction output columns (run id suffix); finite families (R-NM1).

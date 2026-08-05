@@ -57,11 +57,14 @@ export default class extends Controller {
     }
 
     this.element.addEventListener('change', (e) => {
-      if (!e.target.matches || !e.target.matches('input.import-collision-radio')) return
-      const warnings = this.element.querySelector('#import-warnings')
-      const sel = warnings && warnings.querySelector('input.import-collision-radio:checked')
-      window._importCollisionResolution = sel ? sel.value : ''
-      this.updateImportSubmitEnabled()
+      if (!e.target.matches) return
+      if (e.target.matches('input.import-collision-radio')) {
+        const warnings = this.element.querySelector('#import-warnings')
+        const sel = warnings && warnings.querySelector('input.import-collision-radio:checked')
+        window._importCollisionResolution = sel ? sel.value : ''
+        this.updateOverwriteImplicationsPanel()
+        this.updateImportSubmitEnabled()
+      }
     })
 
     this.element.querySelectorAll('.import-cross-mode-radio').forEach((r) => {
@@ -163,7 +166,7 @@ export default class extends Controller {
     this.element.querySelector('#import-format-desc-global')?.classList.add('hidden')
 
     const previewBtn = this.element.querySelector('#import-preview-btn')
-    if (previewBtn) { previewBtn.disabled = true; previewBtn.classList.remove('hidden') }
+    if (previewBtn) { previewBtn.disabled = true; previewBtn.classList.remove('hidden'); previewBtn.textContent = 'Preview' }
 
     const submitBtn = this.element.querySelector('#import-submit-btn')
     if (submitBtn) { submitBtn.disabled = true; submitBtn.classList.add('hidden') }
@@ -173,6 +176,10 @@ export default class extends Controller {
 
     const preview = this.element.querySelector('#import-preview')
     if (preview) preview.classList.add('hidden')
+
+    this.showImportFormStep()
+    const formError = this.element.querySelector('#import-form-error')
+    if (formError) { formError.classList.add('hidden'); formError.innerHTML = '' }
 
     this.element.querySelector('#import-from-project-section')?.classList.add('hidden')
     const crossStatus = this.element.querySelector('#import-cross-status')
@@ -520,6 +527,7 @@ export default class extends Controller {
     if (preview) preview.classList.add('hidden')
     const submitBtn = this.element.querySelector('#import-submit-btn')
     if (submitBtn) submitBtn.classList.add('hidden')
+    this.showImportFormStep()
     this.checkForm()
   }
 
@@ -548,6 +556,13 @@ export default class extends Controller {
       lines = metadataType === '2' ? genes.slice() : cells.slice()
     }
     content.placeholder = lines.join(this.delimiterValues[delimiterIdx] || '\n')
+  }
+
+  fillExampleContent() {
+    const content = this.element.querySelector('#import-metadata-content')
+    if (!content) return
+    content.value = content.placeholder || ''
+    this.checkForm()
   }
 
   checkForm() {
@@ -625,7 +640,8 @@ export default class extends Controller {
         credentials: 'same-origin',
         body: JSON.stringify({
           source_project_id: sel.sourceProjectId,
-          source_annot_id: sel.sourceAnnotId
+          source_annot_id: sel.sourceAnnotId,
+          loom_file: loomFile
         })
       })
     } else if (inputMethod === '2') {
@@ -697,16 +713,20 @@ export default class extends Controller {
           ? `<div class="p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm text-yellow-800">${data.duplicates.length} duplicate(s) found (${data.duplicates.map((d) => this.escapeHtml(d)).join(', ')}). Only first occurrence is kept.</div>`
           : ''
         warnings.innerHTML = dupBlock + this.buildImportValidationHtml(data.import_validation)
-        warnings.classList.remove('hidden')
+        if (warnings.innerHTML.trim()) {
+          warnings.classList.remove('hidden')
+        } else {
+          warnings.classList.add('hidden')
+        }
         this.updateImportSubmitEnabled()
 
         const preview = this.element.querySelector('#import-preview')
         const previewContent = this.element.querySelector('#import-preview-content')
-        if (data.preview_lines && data.preview_lines.length > 0) {
-          previewContent.innerHTML = data.preview_lines.map(l =>
-            `<div class="py-0.5 border-b border-gray-100 last:border-0 whitespace-nowrap">${this.escapeHtml(l)}</div>`
-          ).join('')
+        if (data.preview || (data.preview_lines && data.preview_lines.length > 0)) {
+          previewContent.innerHTML = this.renderImportPreviewHtml(data.preview, data.preview_lines)
           preview.classList.remove('hidden')
+        } else if (preview) {
+          preview.classList.add('hidden')
         }
 
         if (data.header_name && inputMethod !== '3') {
@@ -719,16 +739,62 @@ export default class extends Controller {
         const submitBtn = this.element.querySelector('#import-submit-btn')
         if (submitBtn) { submitBtn.classList.remove('hidden') }
         this.updateImportSubmitEnabled()
-        btn.classList.add('hidden')
+        const formError = this.element.querySelector('#import-form-error')
+        if (formError) { formError.classList.add('hidden'); formError.innerHTML = '' }
+        this.showImportReviewStep()
       })
       .catch(error => {
         console.error('[DataViewController] Preview error:', error)
         btn.textContent = 'Preview'
         btn.disabled = false
-        const warnings = this.element.querySelector('#import-warnings')
-        warnings.innerHTML = `<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">Error: ${error.message}</div>`
-        warnings.classList.remove('hidden')
+        this.showImportFormStep()
+        const formError = this.element.querySelector('#import-form-error')
+        if (formError) {
+          formError.innerHTML = `<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">Error: ${this.escapeHtml(error.message)}</div>`
+          formError.classList.remove('hidden')
+        }
       })
+  }
+
+  showImportFormStep() {
+    const formStep = this.element.querySelector('#import-form-step')
+    const reviewStep = this.element.querySelector('#import-review-step')
+    const previewBtn = this.element.querySelector('#import-preview-btn')
+    const submitBtn = this.element.querySelector('#import-submit-btn')
+    const backBtn = this.element.querySelector('#import-back-btn')
+    const backArrow = this.element.querySelector('#import-back-arrow-btn')
+    if (formStep) formStep.classList.remove('hidden')
+    if (reviewStep) reviewStep.classList.add('hidden')
+    if (previewBtn) previewBtn.classList.remove('hidden')
+    if (submitBtn) submitBtn.classList.add('hidden')
+    if (backBtn) backBtn.classList.add('hidden')
+    if (backArrow) backArrow.classList.add('hidden')
+  }
+
+  showImportReviewStep() {
+    const formStep = this.element.querySelector('#import-form-step')
+    const reviewStep = this.element.querySelector('#import-review-step')
+    const previewBtn = this.element.querySelector('#import-preview-btn')
+    const submitBtn = this.element.querySelector('#import-submit-btn')
+    const backBtn = this.element.querySelector('#import-back-btn')
+    const backArrow = this.element.querySelector('#import-back-arrow-btn')
+    if (formStep) formStep.classList.add('hidden')
+    if (reviewStep) reviewStep.classList.remove('hidden')
+    if (previewBtn) previewBtn.classList.add('hidden')
+    if (submitBtn) submitBtn.classList.remove('hidden')
+    if (backBtn) backBtn.classList.remove('hidden')
+    if (backArrow) backArrow.classList.remove('hidden')
+    const scrollRoot = reviewStep?.closest('.overflow-y-auto')
+    if (scrollRoot) scrollRoot.scrollTop = 0
+  }
+
+  backToImportForm(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    this.showImportFormStep()
+    this.checkForm()
   }
 
   submitMetadata(event) {
@@ -751,7 +817,7 @@ export default class extends Controller {
     const hasHeader = this.element.querySelector('#import-has-header')?.checked ? '1' : '0'
     const headerName = ''
 
-    fetch(`/projects/${projectId}/do_import_metadata`, {
+    const postImport = () => fetch(`/projects/${projectId}/do_import_metadata`, {
       method: 'POST',
       headers: {
         'X-CSRF-Token': csrfToken,
@@ -769,16 +835,14 @@ export default class extends Controller {
         has_header: hasHeader,
         collision_resolution: window._importCollisionResolution || ''
       })
+    }).then(async (response) => {
+      const data = await response.json().catch(() => ({}))
+      data.__httpOk = response.ok
+      return data
     })
-      .then(async (response) => {
-        const data = await response.json().catch(() => ({}))
-        if (!response.ok) {
-          const msg = data.message || data.error || `HTTP error ${response.status}`
-          throw new Error(msg)
-        }
-        return data
-      })
-      .then(data => {
+
+    postImport()
+      .then((data) => {
         const modal = this.element.querySelector('#add-metadata-modal')
         if (data.status !== 'ok') {
           const msg = data.message || data.error || 'Import failed'
@@ -806,6 +870,36 @@ export default class extends Controller {
       })
   }
 
+  formatDependentsSummary(payload) {
+    const dependents = payload?.dependents || {}
+    const summary = dependents.summary || {}
+    const selectionCount = summary.selection_count || 0
+    const runDeleteCount = summary.run_ids_to_delete_count || 0
+    const claCount = summary.cla_count || 0
+    const lines = [
+      `Selections: ${selectionCount}`,
+      `Pipeline runs that would be deleted: ${runDeleteCount}`,
+      `Manual annotations on metadata: ${claCount}`
+    ]
+    if (!selectionCount && !runDeleteCount && !claCount) {
+      lines.unshift('Nothing would be cascade-deleted.')
+    } else {
+      lines.unshift('Overwrite will also remove:')
+    }
+    Array(dependents.annots || []).forEach((annot) => {
+      Array(annot.selections || []).slice(0, 8).forEach((sel) => {
+        lines.push(`- Selection: ${sel.selection_name || sel.run_id}`)
+      })
+      Array(annot.runs || []).slice(0, 8).forEach((run) => {
+        lines.push(`- Run: ${run.step_label || run.step_name || 'run'} #${run.num || run.run_id}`)
+      })
+      Array(annot.manual_review || []).forEach((item) => {
+        if (item?.message) lines.push(`- ${item.message}`)
+      })
+    })
+    return lines.join('\n')
+  }
+
   buildImportValidationHtml(iv) {
     if (!iv || iv.skip_name_checks) return ''
     if (iv.error) {
@@ -824,15 +918,33 @@ export default class extends Controller {
     collisions.forEach((c) => {
       h += '<li><code class="text-xs">' + this.escapeHtml(c.path || '') + '</code>'
       if ((c.dependent_run_count || 0) > 0) {
-        h += ` <span class="text-amber-800">(${c.dependent_run_count} pipeline runs reference it)</span>`
+        h += ` <span class="text-amber-800">(${c.dependent_run_count} pipeline runs would be deleted on overwrite)</span>`
       }
       h += '</li>'
     })
     h += '</ul><p class="mb-2">Choose how to proceed:</p>'
-    h += '<label class="flex items-center gap-2 mb-1 cursor-pointer"><input type="radio" name="import-collision-res" value="keep_both" class="import-collision-radio"> Keep both (add version suffix .vN)</label>'
-    h += '<label class="flex items-center gap-2 mb-1 cursor-pointer"><input type="radio" name="import-collision-res" value="overwrite" class="import-collision-radio"> Overwrite (only when no runs reference the column)</label>'
-    h += '<label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="import-collision-res" value="skip" class="import-collision-radio"> Cancel import</label></div>'
+    h += '<label class="flex items-center gap-2 mb-1 cursor-pointer"><input type="radio" name="import-collision-res" value="keep_both" class="import-collision-radio"> Keep both (rename existing to .bkp.N; import keeps the canonical name)</label>'
+    h += '<label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="import-collision-res" value="overwrite" class="import-collision-radio"> Overwrite existing metadata</label>'
+    h += '<div id="import-overwrite-implications" class="hidden mt-3 p-3 bg-white border border-amber-300 rounded-md text-sm text-gray-800">'
+    h += '<p class="font-semibold mb-2">Overwrite implications</p>'
+    h += '<div id="import-overwrite-dependents" class="whitespace-pre-wrap text-xs max-h-36 overflow-y-auto"></div>'
+    h += '</div></div>'
     return h
+  }
+
+  updateOverwriteImplicationsPanel() {
+    const warnings = this.element.querySelector('#import-warnings')
+    if (!warnings) return
+    const panel = warnings.querySelector('#import-overwrite-implications')
+    const dependentsEl = warnings.querySelector('#import-overwrite-dependents')
+    if (!panel || !dependentsEl) return
+    if (window._importCollisionResolution !== 'overwrite') {
+      panel.classList.add('hidden')
+      return
+    }
+    const payload = { dependents: this.lastImportValidation?.dependents || null }
+    dependentsEl.textContent = this.formatDependentsSummary(payload)
+    panel.classList.remove('hidden')
   }
 
   updateImportSubmitEnabled() {
@@ -858,6 +970,85 @@ export default class extends Controller {
       return
     }
     submitBtn.disabled = false
+  }
+
+  renderImportPreviewHtml(preview, fallbackLines) {
+    if (!preview || !Array.isArray(preview.columns)) {
+      const lines = Array.isArray(fallbackLines) ? fallbackLines : []
+      if (!lines.length) return ''
+      return `<div class="border border-gray-200 rounded-md bg-gray-50 p-3 text-sm font-mono max-h-56 overflow-auto">${lines.map((l) =>
+        `<div class="py-0.5 border-b border-gray-100 last:border-0 whitespace-nowrap">${this.escapeHtml(l)}</div>`
+      ).join('')}</div>`
+    }
+
+    const summary = preview.summary || {}
+    const columns = preview.columns || []
+    const rows = Array.isArray(preview.rows) ? preview.rows : []
+    const names = Array.isArray(summary.metadata_names) ? summary.metadata_names : []
+
+    let html = '<div class="border border-gray-200 rounded-md bg-white p-3 text-sm space-y-3">'
+    html += '<div class="flex flex-wrap gap-x-4 gap-y-1 text-gray-700">'
+    html += `<span><span class="font-medium text-gray-900">${summary.metadata_count || 0}</span> metadata column(s)</span>`
+    html += `<span><span class="font-medium text-gray-900">${summary.row_count || 0}</span> row(s)</span>`
+    if ((summary.duplicate_count || 0) > 0) {
+      html += `<span><span class="font-medium text-amber-800">${summary.duplicate_count}</span> duplicate identifier(s) removed</span>`
+    }
+    if (summary.loom_identifier_count != null && summary.matched_identifier_count != null) {
+      html += `<span><span class="font-medium text-gray-900">${summary.matched_identifier_count}</span> / ${summary.loom_identifier_count} identifiers match the loom</span>`
+      if ((summary.unmatched_identifier_count || 0) > 0) {
+        html += `<span class="text-amber-800">${summary.unmatched_identifier_count} unmatched</span>`
+      }
+    }
+    if (summary.truncated) {
+      html += `<span class="text-gray-500">showing first ${summary.preview_row_count || rows.length}</span>`
+    }
+    html += '</div>'
+
+    if (names.length) {
+      html += `<div class="text-xs text-gray-600">Columns: ${names.map((n) => `<code class="text-xs">${this.escapeHtml(n)}</code>`).join(', ')}</div>`
+    }
+
+    const valueCols = columns.filter((c) => c.role === 'value')
+    if (valueCols.some((c) => (c.sample_values || []).length || c.inferred_type)) {
+      html += '<div class="text-xs text-gray-600 space-y-1">'
+      valueCols.forEach((c) => {
+        const samples = Array.isArray(c.sample_values) ? c.sample_values : []
+        const typeLabel = c.inferred_type ? ` (${c.inferred_type}` + (c.distinct_count != null ? `, ${c.distinct_count} distinct` : '') + ')' : ''
+        html += `<div><span class="font-medium text-gray-800">${this.escapeHtml(c.name || '')}</span>${this.escapeHtml(typeLabel)}`
+        if (samples.length) {
+          html += `: ${samples.map((s) => this.escapeHtml(String(s))).join(', ')}`
+          if (c.distinct_count != null && c.distinct_count > samples.length) html += ', ...'
+        }
+        html += '</div>'
+      })
+      html += '</div>'
+    }
+
+    if ((summary.unmatched_samples || []).length) {
+      html += `<div class="text-xs text-amber-800">Unmatched examples: ${summary.unmatched_samples.map((s) => this.escapeHtml(String(s))).join(', ')}</div>`
+    }
+
+    if (columns.length && rows.length) {
+      html += '<div class="border border-gray-200 rounded overflow-auto max-h-56">'
+      html += '<table class="min-w-full text-xs">'
+      html += '<thead class="bg-gray-50 sticky top-0"><tr>'
+      columns.forEach((c) => {
+        html += `<th class="px-2 py-1.5 text-left font-semibold text-gray-700 border-b border-gray-200 whitespace-nowrap">${this.escapeHtml(c.name || '')}</th>`
+      })
+      html += '</tr></thead><tbody>'
+      rows.forEach((row, idx) => {
+        const bg = idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'
+        html += `<tr class="${bg}">`
+        columns.forEach((_, colIdx) => {
+          html += `<td class="px-2 py-1 border-b border-gray-100 whitespace-nowrap font-mono text-gray-800">${this.escapeHtml(row[colIdx] == null ? '' : String(row[colIdx]))}</td>`
+        })
+        html += '</tr>'
+      })
+      html += '</tbody></table></div>'
+    }
+
+    html += '</div>'
+    return html
   }
 
   escapeHtml(text) {

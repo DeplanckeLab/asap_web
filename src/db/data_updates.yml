@@ -37,6 +37,13 @@
   updates:
     has_std_view: false
 
+# Import metadata: show run list (dashboard) and created annots in std_view Results.
+- model: Step
+  find_by: { name: "import_metadata" }
+  updates:
+    has_std_view: true
+    has_std_dashboard: true
+
 # PCA step was stored with docker_image_id 2 while the ASAP run image in use is 3.
 # prepare_steps_with_status only loads steps for Basic.get_asap_docker(project.version),
 # so a mismatched docker_image_id hides PCA from the pipeline panel. Skips if already fixed.

@@ -129,10 +129,9 @@ task :parse, [:project_key] => [:environment] do |t, args|
     if conn.data_source_exists?('tmp_fos')
       conn.execute("DELETE FROM tmp_fos WHERE run_id IN (SELECT id FROM runs WHERE project_id = #{project.id.to_i} AND id != #{run.id.to_i})")
     end
-    runs_scope.delete_all
-
-    # Delete checkpoints and their embedded comments for this project.
+    # Checkpoints (heatmap kind) FK to runs; delete before runs_scope.delete_all.
     Checkpoint.where(project_id: project.id).delete_all
+    runs_scope.delete_all
 
     # Delete all sub-directories in project directory.
     if File.exist?(project_dir)

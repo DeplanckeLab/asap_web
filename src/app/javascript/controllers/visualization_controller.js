@@ -638,6 +638,13 @@ export default class extends Controller {
     this.composeSelectionSetCache = new Map()
     this.composeSelectionCoordinatesCache = new Map()
     this.composeSelectionPreviewRequestId = 0
+    this.composeMode = 'selection'
+    this.composeBatchFanoutAnnotId = null
+    this.composeBatchPreviewCatIdx = null
+    this.composeBatchMetadataNameManual = false
+    this.composeBatchPendingPayload = null
+    this.composeBatchFanoutOptions = []
+    this.composeBatchCategorySets = null
     this.selectionStatusPollingTimer = null
     this.selectionStatesSubscription = null
     this.selectionStatesRefreshTimer = null
@@ -16584,7 +16591,14 @@ export default class extends Controller {
         if (!step || typeof step !== 'object') return false
         const operandA = String(step.operand_a || step.operandA || '')
         const operandB = String(step.operand_b || step.operandB || '')
-        return [operandA, operandB].some((operand) => operand.startsWith('saved:') && !existingSelectionIds.has(operand.replace('saved:', '')))
+        return [operandA, operandB].some((operand) => {
+          if (operand.startsWith('saved:')) {
+            return !existingSelectionIds.has(operand.replace('saved:', ''))
+          }
+          // Category operands (cat:<annot_id>:<cat_idx>) remain valid after metadata
+          // versioning because the archived annot keeps the same annot_id.
+          return false
+        })
       })
       if (hasMissingComposeRef) return true
     }
@@ -17168,10 +17182,19 @@ export default class extends Controller {
     if (!overlay) return
     overlay.style.display = 'flex'
 
+    this.composeMode = this.composeMode === 'batch' ? 'batch' : 'selection'
+    if (this.composeMode === 'batch' && !this.isComposeBatchAllowed()) {
+      this.composeMode = 'selection'
+    }
+    this.composeBatchPendingPayload = null
     this.populateComposeSelectionEmbeddings()
+    this.populateComposeBatchFanoutMetadata()
+    this.applyComposeModeUi()
     this.populateComposeSelectionOperands()
     this.renderComposeSelectionSteps()
+    this.refreshComposeBatchMetadataNameField()
     this.updateComposeSelectionPreview()
+    this.refreshComposeBatchSizesPanel()
   }
 
   closeComposeSelectionModal() {
@@ -18449,8 +18472,10 @@ export default class extends Controller {
       const operationLabel = this.composeOperationLabel(operation)
       const operandAKey = String(step.operand_a || step.operandA || '')
       const operandBKey = String(step.operand_b || step.operandB || '')
-      const operandALabel = this.composeOperandLabelForDetails(operandAKey, selectionLabelById, stepResultLabelByKey)
-      const operandBLabel = this.composeOperandLabelForDetails(operandBKey, selectionLabelById, stepResultLabelByKey)
+      const operandAStoredMeta = this.composeStoredOperandMetaFromStep(step, 'a')
+      const operandBStoredMeta = this.composeStoredOperandMetaFromStep(step, 'b')
+      const operandALabel = this.composeOperandLabelForDetails(operandAKey, selectionLabelById, stepResultLabelByKey, operandAStoredMeta)
+      const operandBLabel = this.composeOperandLabelForDetails(operandBKey, selectionLabelById, stepResultLabelByKey, operandBStoredMeta)
       const resultCount = Number(step.result_count || step.resultCount || 0)
 
       stepResultLabelByKey.set(`__step__:${stepIndex}`, `Step ${stepIndex} result`)
@@ -18522,29 +18547,64 @@ export default class extends Controller {
     container.innerHTML = rows.join('')
   }
 
-  composeOperandLabelForDetails(key, selectionLabelById, stepResultLabelByKey) {
+  composeOperandLabelForDetails(key, selectionLabelById, stepResultLabelByKey, storedMeta = null) {
     if (!key) {
-      return { text: 'Unknown operand', deleted: false }
+      return { text: 'Unknown operand', deleted: false, obsolete: false }
     }
     const normalized = String(key)
     if (normalized === '__current__') {
-      return { text: 'Current virtual result', deleted: false }
+      return { text: 'Current virtual result', deleted: false, obsolete: false }
     }
     if (normalized.startsWith('__step__:')) {
       return {
         text: stepResultLabelByKey.get(normalized) || `Step ${normalized.replace('__step__:', '')} result`,
-        deleted: false
+        deleted: false,
+        obsolete: false
       }
     }
     if (normalized.startsWith('saved:')) {
       const selectionId = normalized.replace('saved:', '')
       const label = selectionLabelById.get(selectionId)
       if (label) {
-        return { text: label, deleted: false }
+        return { text: label, deleted: false, obsolete: false }
       }
-      return { text: 'Deleted selection', deleted: true }
+      return { text: 'Deleted selection', deleted: true, obsolete: false }
     }
-    return { text: normalized, deleted: false }
+    if (normalized.startsWith('cat:')) {
+      const parsed = this.parseComposeCategoryOperandKey(normalized)
+      const liveMeta = parsed ? this.getComposeCategoryOperandMeta(normalized) : null
+      if (liveMeta) {
+        return {
+          text: this.composeCategoryOperandLabel(liveMeta.metadataName, liveMeta.categoryName),
+          deleted: false,
+          obsolete: false
+        }
+      }
+      const metadataName = String(
+        storedMeta?.metadata_name || storedMeta?.metadataName || ''
+      ).trim()
+      const categoryName = String(
+        storedMeta?.category_name || storedMeta?.categoryName || ''
+      ).trim()
+      if (metadataName || categoryName) {
+        // After compliance/consensus/import versioning the live panel no longer shows
+        // this annot, but the archived annot_id (and stored names) still describe it.
+        return {
+          text: this.composeCategoryOperandLabel(
+            metadataName || (parsed ? `Metadata ${parsed.metadataId}` : 'Metadata'),
+            categoryName || (parsed ? `category ${parsed.catIdx}` : 'category')
+          ),
+          deleted: false,
+          obsolete: false
+        }
+      }
+      return {
+        text: parsed ? `Metadata ${parsed.metadataId}: category ${parsed.catIdx}` : 'Unknown metadata category',
+        deleted: false,
+        obsolete: false
+      }
+    }
+    return { text: normalized, deleted: false, obsolete: false }
   }
 
   renderComposeOperandDetailsLabel(labelInfo) {
@@ -18552,7 +18612,7 @@ export default class extends Controller {
       return this.escapeHtml(String(labelInfo || 'Unknown operand'))
     }
     const text = this.escapeHtml(String(labelInfo.text || 'Unknown operand'))
-    if (labelInfo.deleted) {
+    if (labelInfo.deleted || labelInfo.obsolete) {
       return `<span style="color:#b91c1c;font-weight:600;">${text}</span>`
     }
     return text
@@ -18564,7 +18624,11 @@ export default class extends Controller {
     if (!(this.composeSelectionIntermediateResults instanceof Array)) this.composeSelectionIntermediateResults = []
     if (!(this.composeSelectionSetCache instanceof Map)) this.composeSelectionSetCache = new Map()
     if (!(this.composeSelectionCoordinatesCache instanceof Map)) this.composeSelectionCoordinatesCache = new Map()
+    if (!(this.composeCategoryOperandMeta instanceof Map)) this.composeCategoryOperandMeta = new Map()
     if (!Number.isFinite(this.composeSelectionPreviewRequestId)) this.composeSelectionPreviewRequestId = 0
+    if (this.composeMode !== 'batch' && this.composeMode !== 'selection') this.composeMode = 'selection'
+    if (!(this.composeBatchFanoutOptions instanceof Array)) this.composeBatchFanoutOptions = []
+    if (this.composeBatchMetadataNameManual !== true) this.composeBatchMetadataNameManual = false
   }
 
   getPreferredSavedCellSetOptionValues(items) {
@@ -18613,21 +18677,23 @@ export default class extends Controller {
     const operandBSelect = document.getElementById('compose-selection-operand-b')
     if (!operandASelect || !operandBSelect) return
 
+    this.ensureComposeSelectionStateInitialized()
     const loomFile = this.getCurrentLoomFileForRequest()
     const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
 
     const currentAValue = operandASelect.value
     const currentBValue = operandBSelect.value
-    const options = []
+    const virtualOptions = []
+    const savedOptions = []
 
     if (this.composeSelectionCurrentSet instanceof Set) {
-      options.push({ value: '__current__', label: `Current virtual result (${this.composeSelectionCurrentSet.size.toLocaleString()} cells)` })
+      virtualOptions.push({ value: '__current__', label: `Current virtual result (${this.composeSelectionCurrentSet.size.toLocaleString()} cells)` })
     }
 
     if (Array.isArray(this.composeSelectionIntermediateResults) && this.composeSelectionIntermediateResults.length > 0) {
       this.composeSelectionIntermediateResults.forEach((entry) => {
         if (!entry || !(entry.cellSet instanceof Set)) return
-        options.push({
+        virtualOptions.push({
           value: `__step__:${entry.stepIndex}`,
           label: `Step ${entry.stepIndex} result (${entry.cellSet.size.toLocaleString()} cells)`
         })
@@ -18635,13 +18701,16 @@ export default class extends Controller {
     }
 
     items.forEach((item) => {
-      options.push({
+      savedOptions.push({
         value: `saved:${item.id}`,
         label: this.composeSelectionOptionLabel(item)
       })
     })
 
-    const optionMarkup = options.map((opt) => `<option value="${this.escapeHtml(opt.value)}">${this.escapeHtml(opt.label)}</option>`).join('')
+    const categoryOptions = this.collectComposeCategoryOperandOptions()
+    const fanoutOptions = this.composeMode === 'batch' ? this.buildComposeFanoutOperandOptions() : []
+    const options = [...fanoutOptions, ...virtualOptions, ...savedOptions, ...categoryOptions]
+    const optionMarkup = this.buildComposeOperandSelectMarkup(virtualOptions, savedOptions, categoryOptions, fanoutOptions)
     operandASelect.innerHTML = optionMarkup
     operandBSelect.innerHTML = optionMarkup
 
@@ -18662,7 +18731,177 @@ export default class extends Controller {
       operandBSelect.value = options[0].value
     }
 
-    this.applyDefaultSavedCellSetOperands(operandASelect, operandBSelect, options)
+    if (this.composeMode !== 'batch') {
+      this.applyDefaultSavedCellSetOperands(operandASelect, operandBSelect, options)
+    } else if (validValues.has('__fanout__')) {
+      if (!validValues.has(currentAValue) || !operandASelect.value) {
+        operandASelect.value = '__fanout__'
+      }
+      if (!operandBSelect.value || operandBSelect.value === '__fanout__') {
+        const fallback = options.find((opt) => opt.value !== '__fanout__')
+        if (fallback) operandBSelect.value = fallback.value
+      }
+    }
+  }
+
+  buildComposeOperandSelectMarkup(virtualOptions, savedOptions, categoryOptions, fanoutOptions = []) {
+    const renderOptions = (list) => (list || []).map((opt) => (
+      `<option value="${this.escapeHtml(opt.value)}">${this.escapeHtml(opt.label)}</option>`
+    )).join('')
+
+    const groups = []
+    if (fanoutOptions.length > 0) {
+      groups.push(`<optgroup label="Batch fan-out">${renderOptions(fanoutOptions)}</optgroup>`)
+    }
+    if (virtualOptions.length > 0) {
+      groups.push(`<optgroup label="Virtual results">${renderOptions(virtualOptions)}</optgroup>`)
+    }
+    if (savedOptions.length > 0) {
+      groups.push(`<optgroup label="Saved selections">${renderOptions(savedOptions)}</optgroup>`)
+    }
+    if (categoryOptions.length > 0) {
+      groups.push(`<optgroup label="Metadata categories">${renderOptions(categoryOptions)}</optgroup>`)
+    }
+    if (groups.length === 0) return ''
+    return groups.join('')
+  }
+
+  collectComposeCategoryOperandOptions() {
+    this.ensureComposeSelectionStateInitialized()
+    this.composeCategoryOperandMeta.clear()
+
+    const selectionMetadataIds = new Set(
+      (this.savedSelections || [])
+        .map((item) => String(item.metadataId || '').trim())
+        .filter((id) => id.length > 0)
+    )
+
+    const options = []
+    const seen = new Set()
+    document.querySelectorAll('.category-annot-btn[data-metadata-id][data-cat-idx][data-cat-name]').forEach((btn) => {
+      const metadataId = String(btn.dataset.metadataId || '').trim()
+      if (!metadataId || selectionMetadataIds.has(metadataId)) return
+
+      const metadataName = String(
+        btn.dataset.metadataName ||
+        this.dataManager?.getMetadataNameById?.(metadataId) ||
+        `Metadata ${metadataId}`
+      ).trim()
+      if (/\.sel_\d+(\b|$)/i.test(metadataName)) return
+
+      const catIdxRaw = btn.dataset.catIdx
+      if (catIdxRaw === undefined || catIdxRaw === null || String(catIdxRaw).trim() === '') return
+      const catIdx = Number(catIdxRaw)
+      if (!Number.isInteger(catIdx) || catIdx < 0) return
+
+      const categoryName = String(btn.dataset.catName || '').trim()
+      if (!categoryName) return
+
+      const value = this.buildComposeCategoryOperandKey(metadataId, catIdx)
+      if (seen.has(value)) return
+      seen.add(value)
+
+      const meta = {
+        key: value,
+        metadataId,
+        catIdx,
+        metadataName,
+        categoryName
+      }
+      this.composeCategoryOperandMeta.set(value, meta)
+      options.push({
+        value,
+        label: this.composeCategoryOperandLabel(metadataName, categoryName),
+        ...meta
+      })
+    })
+
+    options.sort((a, b) => String(a.label).localeCompare(String(b.label)))
+    return options
+  }
+
+  buildComposeCategoryOperandKey(metadataId, catIdx) {
+    return `cat:${String(metadataId)}:${Number(catIdx)}`
+  }
+
+  parseComposeCategoryOperandKey(operandValue) {
+    const normalized = String(operandValue || '')
+    if (!normalized.startsWith('cat:')) return null
+    const parts = normalized.split(':')
+    if (parts.length < 3) return null
+    const metadataId = String(parts[1] || '').trim()
+    const catIdx = Number(parts[2])
+    if (!metadataId || !Number.isInteger(catIdx) || catIdx < 0) return null
+    return { metadataId, catIdx }
+  }
+
+  composeCategoryOperandLabel(metadataName, categoryName) {
+    const meta = String(metadataName || 'Metadata').trim() || 'Metadata'
+    const category = String(categoryName || 'category').trim() || 'category'
+    return `${meta}: ${category}`
+  }
+
+  getComposeCategoryOperandMeta(operandValue) {
+    this.ensureComposeSelectionStateInitialized()
+    const key = String(operandValue || '')
+    if (this.composeCategoryOperandMeta.has(key)) {
+      return this.composeCategoryOperandMeta.get(key)
+    }
+    const parsed = this.parseComposeCategoryOperandKey(key)
+    if (!parsed) return null
+    const buttons = document.querySelectorAll('.category-annot-btn[data-metadata-id][data-cat-idx][data-cat-name]')
+    let btn = null
+    for (let i = 0; i < buttons.length; i++) {
+      const candidate = buttons[i]
+      if (String(candidate.dataset.metadataId || '') !== String(parsed.metadataId)) continue
+      if (Number(candidate.dataset.catIdx) !== parsed.catIdx) continue
+      btn = candidate
+      break
+    }
+    if (!btn) return null
+    const metadataName = String(
+      btn.dataset.metadataName ||
+      this.dataManager?.getMetadataNameById?.(parsed.metadataId) ||
+      `Metadata ${parsed.metadataId}`
+    ).trim()
+    const categoryName = String(btn.dataset.catName || '').trim()
+    if (!categoryName) return null
+    const meta = {
+      key,
+      metadataId: parsed.metadataId,
+      catIdx: parsed.catIdx,
+      metadataName,
+      categoryName
+    }
+    this.composeCategoryOperandMeta.set(key, meta)
+    return meta
+  }
+
+  composeCategoryOperandExists(operandValue) {
+    return !!this.getComposeCategoryOperandMeta(operandValue)
+  }
+
+  composeStoredOperandMetaFromStep(step, side) {
+    if (!step || typeof step !== 'object') return null
+    const prefix = side === 'b' ? 'operand_b' : 'operand_a'
+    const camelPrefix = side === 'b' ? 'operandB' : 'operandA'
+    const metadataName = step[`${prefix}_metadata_name`] || step[`${camelPrefix}MetadataName`]
+    const categoryName = step[`${prefix}_category_name`] || step[`${camelPrefix}CategoryName`]
+    const annotId = step[`${prefix}_annot_id`] || step[`${camelPrefix}AnnotId`]
+    const catIdx = step[`${prefix}_cat_idx`] ?? step[`${camelPrefix}CatIdx`]
+    if (metadataName == null && categoryName == null && annotId == null && catIdx == null) {
+      return null
+    }
+    return {
+      metadata_name: metadataName,
+      category_name: categoryName,
+      annot_id: annotId,
+      cat_idx: catIdx,
+      metadataName,
+      categoryName,
+      annotId,
+      catIdx
+    }
   }
 
   populateComposeSelectionEmbeddings() {
@@ -18852,6 +19091,33 @@ export default class extends Controller {
   async resolveComposeOperandSelection(operandValue) {
     if (!operandValue) return null
 
+    if (operandValue === '__fanout__') {
+      if (this.composeMode !== 'batch') return null
+      const fanout = this.getComposeBatchFanoutOption()
+      if (!fanout) return null
+      const previewCatIdx = this.getComposeBatchPreviewCatIdx()
+      const category = (fanout.categories || []).find((entry) => Number(entry.catIdx) === Number(previewCatIdx))
+        || (fanout.categories || [])[0]
+      if (!category) return null
+      const meta = {
+        key: this.buildComposeCategoryOperandKey(fanout.metadataId, category.catIdx),
+        metadataId: fanout.metadataId,
+        catIdx: category.catIdx,
+        metadataName: fanout.metadataName,
+        categoryName: category.categoryName
+      }
+      const cellSet = await this.getCellSetForCategoryOperand(meta)
+      return {
+        key: '__fanout__',
+        label: this.composeFanoutOperandLabel(fanout.metadataName),
+        cellSet,
+        metadataId: fanout.metadataId,
+        catIdx: category.catIdx,
+        metadataName: fanout.metadataName,
+        categoryName: category.categoryName
+      }
+    }
+
     if (operandValue === '__current__') {
       if (!(this.composeSelectionCurrentSet instanceof Set)) return null
       return {
@@ -18874,6 +19140,21 @@ export default class extends Controller {
       }
     }
 
+    if (operandValue.startsWith('cat:')) {
+      const meta = this.getComposeCategoryOperandMeta(operandValue)
+      if (!meta) return null
+      const cellSet = await this.getCellSetForCategoryOperand(meta)
+      return {
+        key: operandValue,
+        label: this.composeCategoryOperandLabel(meta.metadataName, meta.categoryName),
+        cellSet,
+        metadataId: meta.metadataId,
+        catIdx: meta.catIdx,
+        metadataName: meta.metadataName,
+        categoryName: meta.categoryName
+      }
+    }
+
     if (!operandValue.startsWith('saved:')) return null
     const selectionId = operandValue.replace('saved:', '')
     const item = (this.savedSelections || []).find((entry) => String(entry.id) === selectionId)
@@ -18885,6 +19166,46 @@ export default class extends Controller {
       label: this.composeSelectionOptionLabel(item),
       cellSet
     }
+  }
+
+  async getCellSetForCategoryOperand(meta) {
+    this.ensureComposeSelectionStateInitialized()
+    if (!meta || !meta.metadataId) return new Set()
+
+    const cacheKey = String(meta.key || this.buildComposeCategoryOperandKey(meta.metadataId, meta.catIdx))
+    if (this.composeSelectionSetCache.has(cacheKey)) {
+      return new Set(this.composeSelectionSetCache.get(cacheKey))
+    }
+
+    const metadataId = String(meta.metadataId)
+    const categoryName = String(meta.categoryName || '')
+    if (!categoryName) {
+      throw new Error(`Category name is missing for metadata ${metadataId}`)
+    }
+
+    let metadataVector = this.ensureComposeMetadataVectorValues(metadataId, this.loadedMetadataVectors?.[metadataId] || null)
+    if (!metadataVector || !Array.isArray(metadataVector.values)) {
+      const diskVector = await this.memoryManager.loadMetadataFromIndexedDB(metadataId)
+      metadataVector = this.ensureComposeMetadataVectorValues(metadataId, diskVector)
+    }
+    if (!metadataVector || !Array.isArray(metadataVector.values)) {
+      await this.loadSingleMetadataVectorSilently(metadataId)
+      metadataVector = this.ensureComposeMetadataVectorValues(metadataId, this.loadedMetadataVectors?.[metadataId] || null)
+    }
+    if (!metadataVector || !Array.isArray(metadataVector.values)) {
+      throw new Error(`Metadata vector is not available for ${meta.metadataName || metadataId}`)
+    }
+
+    const target = String(categoryName)
+    const cellSet = new Set()
+    for (let index = 0; index < metadataVector.values.length; index++) {
+      if (String(metadataVector.values[index]) === target) {
+        cellSet.add(index)
+      }
+    }
+
+    this.composeSelectionSetCache.set(cacheKey, new Set(cellSet))
+    return cellSet
   }
 
   async getCellSetForSelectionItem(item) {
@@ -19105,7 +19426,15 @@ export default class extends Controller {
         operandBLabel: operandB.label,
         operandACount: operandA.cellSet.size,
         operandBCount: operandB.cellSet.size,
-        resultCount: resultSet.size
+        resultCount: resultSet.size,
+        operandAAnnotId: operandA.metadataId || null,
+        operandACatIdx: Number.isInteger(operandA.catIdx) ? operandA.catIdx : null,
+        operandAMetadataName: operandA.metadataName || null,
+        operandACategoryName: operandA.categoryName || null,
+        operandBAnnotId: operandB.metadataId || null,
+        operandBCatIdx: Number.isInteger(operandB.catIdx) ? operandB.catIdx : null,
+        operandBMetadataName: operandB.metadataName || null,
+        operandBCategoryName: operandB.categoryName || null
       })
       this.composeSelectionIntermediateResults.push({
         stepIndex,
@@ -19142,13 +19471,10 @@ export default class extends Controller {
       return
     }
 
+    const batchMode = this.composeMode === 'batch'
     container.innerHTML = this.composeSelectionSteps.map((step, index) => {
       const effectiveStepIndex = Number(step.stepIndex || (index + 1))
-      return `
-        <div style="padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 6px; background: #f9fafb;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px;">
-            <div style="font-size: 12px; font-weight: 600; color: #111827;">Step ${effectiveStepIndex}: ${this.escapeHtml(this.composeOperationLabel(step.operation))}</div>
-            <div style="display:flex;align-items:center;gap:6px;">
+      const saveButton = batchMode ? '' : `
               <button type="button"
                       style="padding: 6px; background-color: #3b82f6; color: white; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;"
                       title="Save this intermediate result"
@@ -19156,7 +19482,13 @@ export default class extends Controller {
                       onmouseout="this.style.backgroundColor='#3b82f6'"
                       onclick="if (window.visualizationController) window.visualizationController.composeSaveIntermediateStep(${effectiveStepIndex})">
                 <i class="fas fa-save" style="font-size: 12px;"></i>
-              </button>
+              </button>`
+      return `
+        <div style="padding: 8px; border: 1px solid #e5e7eb; border-radius: 6px; margin-bottom: 6px; background: #f9fafb;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px;">
+            <div style="font-size: 12px; font-weight: 600; color: #111827;">Step ${effectiveStepIndex}: ${this.escapeHtml(this.composeOperationLabel(step.operation))}</div>
+            <div style="display:flex;align-items:center;gap:6px;">
+              ${saveButton}
               <button type="button"
                       style="padding: 6px; background-color: #d1d5db; color: #374151; border-radius: 4px; border: none; cursor: pointer; transition: background-color 0.2s;"
                       title="Delete this intermediate step"
@@ -19173,6 +19505,8 @@ export default class extends Controller {
         </div>
       `
     }).join('')
+    this.refreshComposeBatchMetadataNameField()
+    this.refreshComposeBatchSizesPanel()
   }
 
   async composeSaveIntermediateStep(stepIndex) {
@@ -19211,14 +19545,64 @@ export default class extends Controller {
     return (this.composeSelectionSteps || [])
       .filter((step) => Number(step.stepIndex || 0) > 0 && Number(step.stepIndex || 0) <= numericMax)
       .sort((a, b) => Number(a.stepIndex || 0) - Number(b.stepIndex || 0))
-      .map((step) => ({
-        step_index: Number(step.stepIndex || 0),
-        operation: String(step.operation || ''),
-        operand_a: String(step.operandAKey || ''),
-        operand_b: String(step.operandBKey || ''),
-        result_count: Number(step.resultCount || 0)
-      }))
+      .map((step) => {
+        const payload = {
+          step_index: Number(step.stepIndex || 0),
+          operation: String(step.operation || ''),
+          operand_a: String(step.operandAKey || ''),
+          operand_b: String(step.operandBKey || ''),
+          result_count: Number(step.resultCount || 0)
+        }
+        this.appendComposeOperandNameFieldsToSavePayload(payload, 'operand_a', {
+          annot_id: step.operandAAnnotId,
+          cat_idx: step.operandACatIdx,
+          metadata_name: step.operandAMetadataName,
+          category_name: step.operandACategoryName
+        }, step.operandAKey)
+        this.appendComposeOperandNameFieldsToSavePayload(payload, 'operand_b', {
+          annot_id: step.operandBAnnotId,
+          cat_idx: step.operandBCatIdx,
+          metadata_name: step.operandBMetadataName,
+          category_name: step.operandBCategoryName
+        }, step.operandBKey)
+        return payload
+      })
       .filter((step) => step.step_index > 0 && step.operation.length > 0)
+  }
+
+  appendComposeOperandNameFieldsToSavePayload(payload, prefix, meta, operandKey) {
+    if (!payload || !prefix) return
+    let resolved = meta && typeof meta === 'object' ? { ...meta } : {}
+    const key = String(operandKey || payload[prefix] || '')
+    if (key.startsWith('cat:')) {
+      const parsed = this.parseComposeCategoryOperandKey(key)
+      const liveMeta = this.getComposeCategoryOperandMeta(key)
+      if (parsed) {
+        if (resolved.annot_id == null) resolved.annot_id = parsed.metadataId
+        if (resolved.cat_idx == null) resolved.cat_idx = parsed.catIdx
+      }
+      if (liveMeta) {
+        if (!resolved.metadata_name) resolved.metadata_name = liveMeta.metadataName
+        if (!resolved.category_name) resolved.category_name = liveMeta.categoryName
+        if (resolved.annot_id == null) resolved.annot_id = liveMeta.metadataId
+        if (resolved.cat_idx == null) resolved.cat_idx = liveMeta.catIdx
+      }
+    } else {
+      return
+    }
+
+    if (resolved.annot_id != null && String(resolved.annot_id).trim() !== '') {
+      payload[`${prefix}_annot_id`] = String(resolved.annot_id)
+    }
+    if (resolved.cat_idx != null && Number.isFinite(Number(resolved.cat_idx))) {
+      payload[`${prefix}_cat_idx`] = Number(resolved.cat_idx)
+    }
+    if (resolved.metadata_name) {
+      payload[`${prefix}_metadata_name`] = String(resolved.metadata_name)
+    }
+    if (resolved.category_name) {
+      payload[`${prefix}_category_name`] = String(resolved.category_name)
+    }
   }
 
   composeDeleteIntermediateStep(stepIndex) {
@@ -19277,6 +19661,577 @@ export default class extends Controller {
     }
 
     return Array.from(toDelete)
+  }
+
+  setComposeMode(mode) {
+    this.ensureComposeSelectionStateInitialized()
+    if (mode === 'batch' && !this.isComposeBatchAllowed()) {
+      this.showComposeSelectionStatus('Batch compose is available to admins only.', 'error')
+      this.composeMode = 'selection'
+    } else {
+      this.composeMode = mode === 'batch' ? 'batch' : 'selection'
+    }
+    this.composeBatchPendingPayload = null
+    this.applyComposeModeUi()
+    this.populateComposeBatchFanoutMetadata()
+    this.populateComposeSelectionOperands()
+    this.renderComposeSelectionSteps()
+    this.refreshComposeBatchMetadataNameField()
+    this.updateComposeSelectionPreview()
+    this.refreshComposeBatchSizesPanel()
+  }
+
+  isComposeBatchAllowed() {
+    return this.element?.dataset?.isAdmin === 'true'
+  }
+
+  applyComposeModeUi() {
+    const batchMode = this.composeMode === 'batch'
+    const selectionBtn = document.getElementById('compose-mode-selection-btn')
+    const batchBtn = document.getElementById('compose-mode-batch-btn')
+    const batchControls = document.getElementById('compose-batch-controls')
+    const batchSavePanel = document.getElementById('compose-batch-save-panel')
+    const batchSizes = document.getElementById('compose-batch-sizes')
+    const conflictPanel = document.getElementById('compose-batch-conflict-panel')
+
+    if (selectionBtn) {
+      selectionBtn.style.background = batchMode ? '#fff' : '#2563eb'
+      selectionBtn.style.color = batchMode ? '#374151' : '#fff'
+      selectionBtn.style.borderColor = batchMode ? '#d1d5db' : '#2563eb'
+    }
+    if (batchBtn) {
+      batchBtn.style.background = batchMode ? '#2563eb' : '#fff'
+      batchBtn.style.color = batchMode ? '#fff' : '#374151'
+      batchBtn.style.borderColor = batchMode ? '#2563eb' : '#d1d5db'
+    }
+    if (batchControls) batchControls.style.display = batchMode ? 'block' : 'none'
+    if (batchSavePanel) batchSavePanel.style.display = batchMode ? 'block' : 'none'
+    if (batchSizes) batchSizes.style.display = batchMode ? 'block' : 'none'
+    if (conflictPanel && !batchMode) conflictPanel.style.display = 'none'
+  }
+
+  composeFanoutOperandLabel(metadataName) {
+    const name = String(metadataName || 'metadata').trim() || 'metadata'
+    return `Each category of ${name}`
+  }
+
+  buildComposeFanoutOperandOptions() {
+    const fanout = this.getComposeBatchFanoutOption()
+    if (!fanout) return []
+    return [{
+      value: '__fanout__',
+      label: this.composeFanoutOperandLabel(fanout.metadataName)
+    }]
+  }
+
+  collectComposeBatchFanoutOptions() {
+    const selectionMetadataIds = new Set(
+      (this.savedSelections || [])
+        .map((item) => String(item.metadataId || '').trim())
+        .filter((id) => id.length > 0)
+    )
+    const byId = new Map()
+    document.querySelectorAll('.category-annot-btn[data-metadata-id][data-cat-idx][data-cat-name]').forEach((btn) => {
+      const metadataId = String(btn.dataset.metadataId || '').trim()
+      if (!metadataId || selectionMetadataIds.has(metadataId)) return
+      const metadataName = String(
+        btn.dataset.metadataName ||
+        this.dataManager?.getMetadataNameById?.(metadataId) ||
+        `Metadata ${metadataId}`
+      ).trim()
+      if (/\.sel_\d+(\b|$)/i.test(metadataName)) return
+      const catIdx = Number(btn.dataset.catIdx)
+      if (!Number.isInteger(catIdx) || catIdx < 0) return
+      const categoryName = String(btn.dataset.catName || '').trim()
+      if (!categoryName) return
+      if (!byId.has(metadataId)) {
+        byId.set(metadataId, {
+          metadataId,
+          metadataName,
+          basename: this.composeMetadataBasename(metadataName),
+          categories: []
+        })
+      }
+      const entry = byId.get(metadataId)
+      if (!entry.categories.some((cat) => Number(cat.catIdx) === catIdx)) {
+        entry.categories.push({ catIdx, categoryName })
+      }
+    })
+    const options = Array.from(byId.values())
+    options.forEach((entry) => {
+      entry.categories.sort((a, b) => String(a.categoryName).localeCompare(String(b.categoryName)))
+    })
+    options.sort((a, b) => String(a.metadataName).localeCompare(String(b.metadataName)))
+    return options
+  }
+
+  composeMetadataBasename(metadataName) {
+    return String(metadataName || '')
+      .replace(/^\/col_attrs\//, '')
+      .replace(/^\/row_attrs\//, '')
+      .trim()
+  }
+
+  // One structural name segment: dots become underscores so '.' stays a field separator.
+  composeBatchNameElement(rawName) {
+    return String(rawName || '')
+      .replace(/^\/col_attrs\//, '')
+      .replace(/^\/row_attrs\//, '')
+      .trim()
+      .replace(/\./g, '_')
+      .replace(/[^\w\-]+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '')
+  }
+
+  composeSanitizeBatchBasename(rawName) {
+    let basename = String(rawName || '').trim().replace(/^\/col_attrs\//, '')
+    // Allow '.' as structural separators; '=' / '()' inside the operand field for multi-step recipes.
+    basename = basename.replace(/[^\w.\-=()]+/g, '_').replace(/_+/g, '_').replace(/^[._=]+|[._=]+$/g, '')
+    if (!basename) return ''
+    if (!basename.endsWith('.batch_compose')) basename = `${basename}.batch_compose`
+    return basename
+  }
+
+  composeBatchOperandNameFromKey(operandKey) {
+    const key = String(operandKey || '')
+    if (!key || key === '__fanout__' || key === '__current__' || key.startsWith('__step__:')) return null
+    if (key.startsWith('cat:')) {
+      const meta = this.getComposeCategoryOperandMeta(key)
+      return this.composeBatchNameElement(meta?.metadataName || '') || null
+    }
+    if (key.startsWith('saved:')) {
+      const selectionId = key.replace('saved:', '')
+      const item = (this.savedSelections || []).find((entry) => String(entry.id) === selectionId)
+      return this.composeBatchNameElement(item?.name || `selection_${selectionId}`) || null
+    }
+    return null
+  }
+
+  composeBatchStepOperandRef(operandKey, stepExprsByIndex, previousExpr) {
+    const key = String(operandKey || '')
+    if (key === '__fanout__') return null
+    if (key === '__current__') return previousExpr || null
+    if (key.startsWith('__step__:')) {
+      const stepIndex = Number(key.replace('__step__:', ''))
+      if (Number.isInteger(stepIndex) && stepExprsByIndex.has(stepIndex)) {
+        return stepExprsByIndex.get(stepIndex)
+      }
+      return previousExpr || null
+    }
+    return this.composeBatchOperandNameFromKey(key)
+  }
+
+  composeBatchCombineStepExpr(left, right, operation, useParens) {
+    const token = this.composeOperationToken(operation)
+    let expr = null
+    if (left && right) {
+      expr = `${left}_${token}_${right}`
+    } else if (left) {
+      expr = `${left}_${token}`
+    } else if (right) {
+      expr = `${token}_${right}`
+    } else {
+      expr = token
+    }
+    if (useParens) return `(${expr})`
+    return expr
+  }
+
+  composeAutoBatchMetadataBasename() {
+    const fanout = this.getComposeBatchFanoutOption()
+    const fanoutBase = this.composeBatchNameElement(fanout?.basename || fanout?.metadataName || 'metadata') || 'metadata'
+    const steps = Array.isArray(this.composeSelectionSteps) ? this.composeSelectionSteps : []
+    if (steps.length === 0) {
+      return `${fanoutBase}.with.batch.batch_compose`
+    }
+
+    const useParens = steps.length > 1
+    const stepExprsByIndex = new Map()
+    let previousExpr = null
+    steps.forEach((step) => {
+      const left = this.composeBatchStepOperandRef(step.operandAKey, stepExprsByIndex, previousExpr)
+      const right = this.composeBatchStepOperandRef(step.operandBKey, stepExprsByIndex, previousExpr)
+      // Single-step with only one concrete operand: keep the short form (no op token).
+      let expr
+      if (!useParens && ((left && !right) || (!left && right))) {
+        expr = left || right
+      } else if (!useParens && left && right) {
+        expr = `${left}=${right}`
+      } else {
+        expr = this.composeBatchCombineStepExpr(left, right, step.operation, useParens)
+      }
+      previousExpr = expr
+      stepExprsByIndex.set(Number(step.stepIndex), expr)
+    })
+
+    const operands = previousExpr || 'batch'
+    // Fixed shape: {fanout}.with.{operands}.batch_compose  (4 '.'-separated parts)
+    return `${fanoutBase}.with.${operands}.batch_compose`
+  }
+
+  populateComposeBatchFanoutMetadata() {
+    this.ensureComposeSelectionStateInitialized()
+    const select = document.getElementById('compose-batch-fanout-metadata')
+    if (!select) return
+    this.composeBatchFanoutOptions = this.collectComposeBatchFanoutOptions()
+    const current = String(this.composeBatchFanoutAnnotId || select.value || '')
+    select.innerHTML = this.composeBatchFanoutOptions.map((opt) => (
+      `<option value="${this.escapeHtml(opt.metadataId)}">${this.escapeHtml(opt.metadataName)}</option>`
+    )).join('')
+    if (this.composeBatchFanoutOptions.some((opt) => String(opt.metadataId) === current)) {
+      select.value = current
+    } else if (this.composeBatchFanoutOptions[0]) {
+      select.value = this.composeBatchFanoutOptions[0].metadataId
+    }
+    this.composeBatchFanoutAnnotId = select.value || null
+    this.populateComposeBatchPreviewCategories()
+  }
+
+  populateComposeBatchPreviewCategories() {
+    const select = document.getElementById('compose-batch-preview-category')
+    if (!select) return
+    const fanout = this.getComposeBatchFanoutOption()
+    const categories = fanout?.categories || []
+    const current = String(
+      this.composeBatchPreviewCatIdx != null
+        ? this.composeBatchPreviewCatIdx
+        : select.value
+    )
+    select.innerHTML = categories.map((cat) => (
+      `<option value="${this.escapeHtml(String(cat.catIdx))}">${this.escapeHtml(cat.categoryName)}</option>`
+    )).join('')
+    if (categories.some((cat) => String(cat.catIdx) === current)) {
+      select.value = current
+    } else if (categories[0]) {
+      select.value = String(categories[0].catIdx)
+    }
+    this.composeBatchPreviewCatIdx = select.value !== '' ? Number(select.value) : null
+  }
+
+  getComposeBatchFanoutOption() {
+    const select = document.getElementById('compose-batch-fanout-metadata')
+    const metadataId = String(this.composeBatchFanoutAnnotId || select?.value || '')
+    return (this.composeBatchFanoutOptions || []).find((opt) => String(opt.metadataId) === metadataId) || null
+  }
+
+  getComposeBatchPreviewCatIdx() {
+    const select = document.getElementById('compose-batch-preview-category')
+    const raw = select?.value
+    const parsed = Number(raw)
+    if (Number.isInteger(parsed) && parsed >= 0) return parsed
+    return this.composeBatchPreviewCatIdx
+  }
+
+  onComposeBatchFanoutChanged() {
+    const select = document.getElementById('compose-batch-fanout-metadata')
+    this.composeBatchFanoutAnnotId = select?.value || null
+    this.composeBatchMetadataNameManual = false
+    this.populateComposeBatchPreviewCategories()
+    this.populateComposeSelectionOperands()
+    this.refreshComposeBatchMetadataNameField()
+    this.updateComposeSelectionPreview()
+    this.refreshComposeBatchSizesPanel()
+  }
+
+  composeOperationToken(operation) {
+    if (operation === 'intersection') return 'AND'
+    if (operation === 'difference_ab' || operation === 'difference_ba') return 'DIFF'
+    if (operation === 'xor') return 'XOR'
+    return 'OR'
+  }
+
+  refreshComposeBatchMetadataNameField() {
+    if (this.composeMode !== 'batch') return
+    const input = document.getElementById('compose-batch-metadata-name')
+    if (!input) return
+    if (this.composeBatchMetadataNameManual && String(input.value || '').trim()) {
+      input.value = this.composeSanitizeBatchBasename(input.value)
+      return
+    }
+    input.value = this.composeAutoBatchMetadataBasename()
+    this.composeBatchMetadataNameManual = false
+  }
+
+  onComposeBatchMetadataNameInput() {
+    const input = document.getElementById('compose-batch-metadata-name')
+    if (!input) return
+    if (!String(input.value || '').trim()) {
+      this.composeBatchMetadataNameManual = false
+      this.refreshComposeBatchMetadataNameField()
+      return
+    }
+    this.composeBatchMetadataNameManual = true
+  }
+
+  async resolveComposeOperandForBatch(operandValue, fanoutCategory, intermediateByStep) {
+    const key = String(operandValue || '')
+    if (key === '__fanout__') {
+      const fanout = this.getComposeBatchFanoutOption()
+      if (!fanout || !fanoutCategory) return new Set()
+      const meta = {
+        key: this.buildComposeCategoryOperandKey(fanout.metadataId, fanoutCategory.catIdx),
+        metadataId: fanout.metadataId,
+        catIdx: fanoutCategory.catIdx,
+        metadataName: fanout.metadataName,
+        categoryName: fanoutCategory.categoryName
+      }
+      return this.getCellSetForCategoryOperand(meta)
+    }
+    if (key === '__current__') {
+      const maxStep = Math.max(0, ...Array.from(intermediateByStep.keys()))
+      if (maxStep > 0 && intermediateByStep.has(maxStep)) return new Set(intermediateByStep.get(maxStep))
+      return new Set()
+    }
+    if (key.startsWith('__step__:')) {
+      const stepIndex = Number(key.replace('__step__:', ''))
+      if (!Number.isInteger(stepIndex) || !intermediateByStep.has(stepIndex)) return new Set()
+      return new Set(intermediateByStep.get(stepIndex))
+    }
+    const resolved = await this.resolveComposeOperandSelection(key)
+    return resolved?.cellSet instanceof Set ? new Set(resolved.cellSet) : new Set()
+  }
+
+  async composeEvaluateBatchRecipe() {
+    this.ensureComposeSelectionStateInitialized()
+    const fanout = this.getComposeBatchFanoutOption()
+    if (!fanout) throw new Error('Select a fan-out metadata first.')
+    const steps = Array.isArray(this.composeSelectionSteps) ? this.composeSelectionSteps : []
+    if (steps.length === 0) throw new Error('Add at least one operation that uses Each category of the fan-out metadata.')
+    const usesFanout = steps.some((step) => String(step.operandAKey) === '__fanout__' || String(step.operandBKey) === '__fanout__')
+    if (!usesFanout) throw new Error('At least one step must use the fan-out operand (Each category of ...).')
+
+    const results = []
+    for (const category of fanout.categories) {
+      const intermediateByStep = new Map()
+      let current = new Set()
+      for (const step of steps) {
+        const setA = await this.resolveComposeOperandForBatch(step.operandAKey, category, intermediateByStep)
+        const setB = await this.resolveComposeOperandForBatch(step.operandBKey, category, intermediateByStep)
+        current = this.applySetOperation(setA, setB, step.operation)
+        intermediateByStep.set(Number(step.stepIndex), new Set(current))
+      }
+      results.push({
+        categoryName: category.categoryName,
+        catIdx: category.catIdx,
+        cellSet: current
+      })
+    }
+    this.composeBatchCategorySets = results
+    return results
+  }
+
+  composeBuildBatchLabels(categorySets, operationToken, cellCount) {
+    const membership = Array.from({ length: cellCount }, () => [])
+    ;(categorySets || []).forEach((entry) => {
+      const name = String(entry.categoryName || '')
+      if (!name || !(entry.cellSet instanceof Set)) return
+      entry.cellSet.forEach((idx) => {
+        const i = Number(idx)
+        if (!Number.isInteger(i) || i < 0 || i >= cellCount) return
+        if (!membership[i].includes(name)) membership[i].push(name)
+      })
+    })
+    const token = String(operationToken || 'OR')
+    return membership.map((names) => {
+      if (!names || names.length === 0) return ''
+      if (names.length === 1) return names[0]
+      return [...names].sort((a, b) => a.localeCompare(b)).join(` ${token} `)
+    })
+  }
+
+  async refreshComposeBatchSizesPanel() {
+    const panel = document.getElementById('compose-batch-sizes')
+    if (!panel) return
+    if (this.composeMode !== 'batch') {
+      panel.style.display = 'none'
+      return
+    }
+    panel.style.display = 'block'
+    if (!Array.isArray(this.composeSelectionSteps) || this.composeSelectionSteps.length === 0) {
+      panel.innerHTML = '<div style="font-size:12px;color:#6b7280;padding:4px;">Per-category sizes appear after you add operations.</div>'
+      return
+    }
+    panel.innerHTML = '<div style="font-size:12px;color:#6b7280;padding:4px;">Computing per-category sizes...</div>'
+    try {
+      const categorySets = await this.composeEvaluateBatchRecipe()
+      const cellCount = Number(this.getCellCountFromServerData() || 0)
+      const lastOp = this.composeSelectionSteps[this.composeSelectionSteps.length - 1]?.operation
+      const labels = this.composeBuildBatchLabels(categorySets, this.composeOperationToken(lastOp), cellCount)
+      const counts = new Map()
+      labels.forEach((label) => {
+        const key = label === '' ? '(unassigned)' : label
+        counts.set(key, (counts.get(key) || 0) + 1)
+      })
+      const rows = Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+      panel.innerHTML = `
+        <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:6px;">Batch result sizes</div>
+        ${rows.map(([name, count]) => `
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#374151;padding:2px 0;">
+            <span>${this.escapeHtml(name)}</span>
+            <span>${count.toLocaleString()}</span>
+          </div>
+        `).join('')}
+      `
+    } catch (error) {
+      panel.innerHTML = `<div style="font-size:12px;color:#991b1b;padding:4px;">${this.escapeHtml(error.message || 'Failed to compute sizes')}</div>`
+    }
+  }
+
+  formatBatchComposeDependentsSummary(payload) {
+    const dependents = payload?.dependents || {}
+    const summary = dependents.summary || {}
+    const lines = [
+      `Selections: ${summary.selection_count || 0}`,
+      `Pipeline runs that would be deleted: ${summary.run_ids_to_delete_count || 0}`,
+      `Manual annotations on metadata: ${summary.cla_count || 0}`
+    ]
+    Array(dependents.annots || []).forEach((annot) => {
+      Array(annot.selections || []).slice(0, 8).forEach((sel) => {
+        lines.push(`- Selection: ${sel.selection_name || sel.run_id}`)
+      })
+      Array(annot.runs || []).slice(0, 8).forEach((run) => {
+        lines.push(`- Run: ${run.step_label || run.step_name || 'run'} #${run.num || run.run_id}`)
+      })
+      Array(annot.manual_review || []).forEach((item) => {
+        if (item?.message) lines.push(`- ${item.message}`)
+      })
+    })
+    return lines.join('\n')
+  }
+
+  showComposeBatchConflictPanel(payload) {
+    const panel = document.getElementById('compose-batch-conflict-panel')
+    const message = document.getElementById('compose-batch-conflict-message')
+    const dependents = document.getElementById('compose-batch-conflict-dependents')
+    const renameInput = document.getElementById('compose-batch-conflict-rename-name')
+    if (!panel) return
+    panel.style.display = 'block'
+    if (message) message.textContent = payload?.message || 'Metadata already exists.'
+    if (dependents) dependents.textContent = this.formatBatchComposeDependentsSummary(payload)
+    if (renameInput) renameInput.value = this.composeSanitizeBatchBasename(payload?.suggested_previous_name || '')
+  }
+
+  composeCancelBatchConflict() {
+    const panel = document.getElementById('compose-batch-conflict-panel')
+    if (panel) panel.style.display = 'none'
+    this.composeBatchPendingPayload = null
+    this.showComposeSelectionStatus('Batch save cancelled.', 'info')
+  }
+
+  async composeResolveBatchConflict(policy) {
+    if (!this.composeBatchPendingPayload) {
+      this.showComposeSelectionStatus('No pending batch save to resolve.', 'error')
+      return
+    }
+    const normalizedPolicy = String(policy || '')
+    if (!['rename', 'archive', 'delete'].includes(normalizedPolicy)) {
+      this.showComposeSelectionStatus('Unknown conflict policy.', 'error')
+      return
+    }
+    if (normalizedPolicy === 'delete') {
+      const accepted = window.confirm(
+        `${this.formatBatchComposeDependentsSummary(this.composeBatchPendingPayload.conflictPayload || {})}\n\nReplace previous metadata and delete the listed dependents? This cannot be undone.`
+      )
+      if (!accepted) return
+    }
+    let previousNewName = null
+    if (normalizedPolicy === 'rename') {
+      const renameInput = document.getElementById('compose-batch-conflict-rename-name')
+      previousNewName = this.composeSanitizeBatchBasename(renameInput?.value || '')
+      if (!previousNewName) {
+        this.showComposeSelectionStatus('Enter a free rename target ending with .batch_compose.', 'error')
+        return
+      }
+    }
+    await this.composePostBatchMetadata({
+      ...this.composeBatchPendingPayload.requestBody,
+      previous_metadata_policy: normalizedPolicy,
+      previous_metadata_new_name: previousNewName
+    })
+  }
+
+  async composeSaveBatchMetadata() {
+    this.ensureComposeSelectionStateInitialized()
+    if (this.composeMode !== 'batch') return
+    if (!this.isComposeBatchAllowed()) {
+      this.showComposeSelectionStatus('Batch compose is available to admins only.', 'error')
+      return
+    }
+    try {
+      const fanout = this.getComposeBatchFanoutOption()
+      if (!fanout) {
+        this.showComposeSelectionStatus('Select a fan-out metadata first.', 'error')
+        return
+      }
+      const categorySets = await this.composeEvaluateBatchRecipe()
+      const cellCount = Number(this.getCellCountFromServerData() || 0)
+      if (!Number.isFinite(cellCount) || cellCount <= 0) {
+        this.showComposeSelectionStatus('Could not determine cell count for label vector.', 'error')
+        return
+      }
+      const lastOp = this.composeSelectionSteps[this.composeSelectionSteps.length - 1]?.operation
+      const labels = this.composeBuildBatchLabels(categorySets, this.composeOperationToken(lastOp), cellCount)
+      const nameInput = document.getElementById('compose-batch-metadata-name')
+      const metadataBasename = this.composeSanitizeBatchBasename(nameInput?.value || this.composeAutoBatchMetadataBasename())
+      if (!metadataBasename) {
+        this.showComposeSelectionStatus('Batch metadata name is required.', 'error')
+        return
+      }
+      if (nameInput) nameInput.value = metadataBasename
+
+      const requestBody = {
+        loom_file: this.getCurrentLoomFileForRequest(),
+        fanout_annot_id: Number(fanout.metadataId),
+        metadata_basename: metadataBasename,
+        compose_steps: this.composeBuildStepsForSave(),
+        labels
+      }
+      this.composeBatchPendingPayload = { requestBody, conflictPayload: null }
+      await this.composePostBatchMetadata(requestBody)
+    } catch (error) {
+      this.showComposeSelectionStatus(`Batch save failed: ${error.message}`, 'error')
+    }
+  }
+
+  async composePostBatchMetadata(requestBody) {
+    const projectIdentifier = this.getProjectIdentifier()
+    this.showComposeSelectionStatus('Saving batch compose metadata...', 'info')
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/save_batch_compose_metadata`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify(requestBody)
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (response.status === 409 || payload.status === 'requires_choice') {
+      this.composeBatchPendingPayload = {
+        requestBody: { ...requestBody },
+        conflictPayload: payload
+      }
+      delete this.composeBatchPendingPayload.requestBody.previous_metadata_policy
+      delete this.composeBatchPendingPayload.requestBody.previous_metadata_new_name
+      this.showComposeBatchConflictPanel(payload)
+      this.showComposeSelectionStatus('Choose how to handle the existing metadata name.', 'info')
+      return
+    }
+    if (!response.ok || payload.status !== 'ok') {
+      throw new Error(payload.message || `Failed to save batch metadata (HTTP ${response.status})`)
+    }
+    const conflictPanel = document.getElementById('compose-batch-conflict-panel')
+    if (conflictPanel) conflictPanel.style.display = 'none'
+    this.composeBatchPendingPayload = null
+    this.showComposeSelectionStatus(
+      `Created ${payload.metadata_path || requestBody.metadata_basename} with ${Number(payload.nber_cats || 0).toLocaleString()} categories. Reloading...`,
+      'success'
+    )
+    setTimeout(() => {
+      window.location.reload()
+    }, 900)
   }
 
   showComposeSelectionStatus(message, tone = 'info') {

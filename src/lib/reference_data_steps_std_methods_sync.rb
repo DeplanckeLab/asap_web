@@ -3,12 +3,14 @@
 require "json"
 require "set"
 
-# Applies Step, StdMethod, and Version rows from a JSON snapshot produced by
-# ReferenceDataCompare / bin/rake reference_data:export.
+# Applies Step, StdMethod, Version, DockerImage, and DockerBuild rows from a JSON
+# snapshot produced by ReferenceDataCompare / bin/rake reference_data:export.
 #
 # Matching: Step by +name+ for full sync; Step, StdMethod, and Version by +id+ when
 # +max_version_id+ is set (legacy prod/dev alignment). StdMethod names must be unique
 # per snapshot +step_id+ for full sync only.
+# DockerImage is matched by name+tag (and by id when legacy sync). DockerBuild is
+# matched by digest.
 # Foreign keys +docker_image_id+, +version_id+, +speed_id+ are remapped for the
 # target database using snapshot side tables when ids differ.
 # Version rows (env_json, tools_json, docker_json, activated, ...) are applied by id
@@ -24,7 +26,8 @@ class ReferenceDataStepsStdMethodsSync
     "StdMethod" => %w[
       attr_layout_json attrs_json command_json obj_attrs_json output_json
     ],
-    "Version" => %w[env_json tools_json docker_json]
+    "Version" => %w[env_json tools_json docker_json],
+    "DockerImage" => %w[tools_json]
   }.freeze
 
   TIMESTAMP_COLUMNS = %w[created_at updated_at activated_at].freeze
@@ -43,12 +46,13 @@ class ReferenceDataStepsStdMethodsSync
     versions_in = filter_legacy_version_ids!(fetch_optional_records!("Version"))
     steps_in = filter_legacy_version!(fetch_records!("Step"))
     methods_in = filter_legacy_version!(fetch_records!("StdMethod"))
+    docker_images_in = fetch_optional_records!("DockerImage")
+    docker_builds_in = fetch_optional_records!("DockerBuild")
 
     docker_by_src_id = index_optional_model!("DockerImage")
     version_by_src_id = index_optional_model!("Version")
     speed_by_src_id = index_optional_model!("Speed")
 
-    docker_remap = build_docker_image_remap(steps_in + methods_in, docker_by_src_id)
     version_remap = build_version_remap(steps_in + methods_in, version_by_src_id)
     speed_remap = build_speed_remap(methods_in, speed_by_src_id)
 
@@ -57,6 +61,12 @@ class ReferenceDataStepsStdMethodsSync
     snapshot_step_id_lookup = build_step_id_lookup(steps_in)
 
     summary = {
+      docker_images_created: 0,
+      docker_images_updated: 0,
+      docker_images_unchanged: 0,
+      docker_builds_created: 0,
+      docker_builds_updated: 0,
+      docker_builds_unchanged: 0,
       versions_created: 0,
       versions_updated: 0,
       versions_unchanged: 0,
@@ -70,6 +80,12 @@ class ReferenceDataStepsStdMethodsSync
     }
 
     ActiveRecord::Base.transaction(requires_new: true) do
+      apply_docker_images!(docker_images_in, summary)
+      docker_remap = build_docker_image_remap(
+        steps_in + methods_in + docker_builds_in,
+        docker_by_src_id
+      )
+      apply_docker_builds!(docker_builds_in, docker_remap, summary)
       apply_versions!(versions_in, summary)
       apply_steps!(steps_in, docker_remap, version_remap, summary)
       apply_std_methods!(
@@ -85,7 +101,7 @@ class ReferenceDataStepsStdMethodsSync
       raise ActiveRecord::Rollback if @dry_run
     end
 
-    print_summary(summary, versions_in, steps_in)
+    print_summary(summary, versions_in, steps_in, docker_images_in, docker_builds_in)
     summary
   end
 
@@ -258,11 +274,20 @@ class ReferenceDataStepsStdMethodsSync
       if src.nil?
         raise SyncError,
               "docker_image_id #{src_id} referenced but DockerImage id #{src_id} is missing from snapshot. " \
-              "Export with MODELS=Step,StdMethod,DockerImage,Version,Speed (include DockerImage)."
+              "Export with MODELS=Step,StdMethod,DockerImage,DockerBuild,Version,Speed (include DockerImage)."
       end
 
       dst = DockerImage.find_by(name: src["name"].to_s, tag: src["tag"].to_s)
+      if dst.nil? && match_by_id?
+        dst = DockerImage.find_by(id: src_id)
+      end
       unless dst
+        # apply_docker_images! already ran; dry-run skips creates so use a provisional id.
+        if @dry_run
+          remap[src_id] = src_id
+          next
+        end
+
         raise SyncError,
               "No target DockerImage for snapshot id #{src_id} name=#{src['name'].inspect} tag=#{src['tag'].inspect}"
       end
@@ -350,6 +375,104 @@ class ReferenceDataStepsStdMethodsSync
     attrs = row.except("id")
     encode_json_columns!("Version", attrs)
     attrs
+  end
+
+  def prepare_docker_image_row(row)
+    attrs = row.except("id")
+    encode_json_columns!("DockerImage", attrs)
+    attrs
+  end
+
+  def prepare_docker_build_row(row, docker_remap)
+    attrs = row.except("id")
+    src_docker_image_id = attrs["docker_image_id"]
+    raise SyncError, "DockerBuild row without docker_image_id: #{row.inspect}" if src_docker_image_id.nil?
+
+    attrs["docker_image_id"] = remap_fk(src_docker_image_id, docker_remap)
+    attrs
+  end
+
+  def apply_docker_images!(docker_images_in, summary)
+    return if docker_images_in.empty?
+
+    docker_images_in.sort_by { |row| row["id"].to_i }.each do |src|
+      src_id = src["id"]
+      raise SyncError, "DockerImage row without id: #{src.inspect}" if src_id.nil?
+
+      name = src["name"].to_s
+      tag = src["tag"].to_s
+      raise SyncError, "DockerImage id=#{src_id} missing name or tag" if name.empty? || tag.empty?
+
+      prepared = prepare_docker_image_row(src)
+      label = "id=#{src_id} name=#{name.inspect} tag=#{tag.inspect}"
+      record = DockerImage.find_by(name: name, tag: tag)
+      record = DockerImage.find_by(id: src_id) if record.nil? && match_by_id?
+
+      if record.nil?
+        puts "[#{mode_label}] create DockerImage #{label}"
+        summary[:docker_images_created] += 1
+        next if @dry_run
+
+        if match_by_id?
+          DockerImage.create!(prepared.merge("id" => src_id))
+        else
+          DockerImage.create!(prepared)
+        end
+        next
+      end
+
+      if record_attributes_match?(record, prepared)
+        summary[:docker_images_unchanged] += 1
+        next
+      end
+
+      puts "[#{mode_label}] update DockerImage #{label} (target id=#{record.id})"
+      log_verbose_diff!(record, prepared)
+      summary[:docker_images_updated] += 1
+      next if @dry_run
+
+      record.update!(prepared)
+    end
+  end
+
+  def apply_docker_builds!(docker_builds_in, docker_remap, summary)
+    return if docker_builds_in.empty?
+
+    docker_builds_in.sort_by { |row| row["id"].to_i }.each do |src|
+      src_id = src["id"]
+      digest = src["digest"].to_s
+      raise SyncError, "DockerBuild row without digest: #{src.inspect}" if digest.empty?
+
+      prepared = prepare_docker_build_row(src, docker_remap)
+      label = "id=#{src_id} tag=#{prepared['tag'].inspect} digest=#{digest}"
+      record = DockerBuild.find_by(digest: digest)
+
+      if record.nil?
+        puts "[#{mode_label}] create DockerBuild #{label}"
+        summary[:docker_builds_created] += 1
+        next if @dry_run
+
+        if match_by_id? && !src_id.nil?
+          DockerBuild.create!(prepared.merge("id" => src_id))
+        else
+          DockerBuild.create!(prepared)
+        end
+        next
+      end
+
+      comparable = prepared.except("created_at")
+      if record_attributes_match?(record, comparable)
+        summary[:docker_builds_unchanged] += 1
+        next
+      end
+
+      puts "[#{mode_label}] update DockerBuild #{label} (target id=#{record.id})"
+      log_verbose_diff!(record, comparable)
+      summary[:docker_builds_updated] += 1
+      next if @dry_run
+
+      record.update!(comparable)
+    end
   end
 
   def apply_versions!(versions_in, summary)
@@ -732,9 +855,17 @@ class ReferenceDataStepsStdMethodsSync
     @dry_run ? "dry-run" : "apply"
   end
 
-  def print_summary(summary, versions_in, steps_in)
+  def print_summary(summary, versions_in, steps_in, docker_images_in = [], docker_builds_in = [])
     puts ""
     puts "Summary (#{mode_label})"
+    if docker_images_in.any?
+      puts "  docker_images: created=#{summary[:docker_images_created]} updated=#{summary[:docker_images_updated]} unchanged=#{summary[:docker_images_unchanged]}"
+      puts "  snapshot docker_images: #{docker_images_in.size}"
+    end
+    if docker_builds_in.any?
+      puts "  docker_builds: created=#{summary[:docker_builds_created]} updated=#{summary[:docker_builds_updated]} unchanged=#{summary[:docker_builds_unchanged]}"
+      puts "  snapshot docker_builds: #{docker_builds_in.size}"
+    end
     if versions_in.any?
       puts "  versions: created=#{summary[:versions_created]} updated=#{summary[:versions_updated]} unchanged=#{summary[:versions_unchanged]}"
       puts "  snapshot versions: #{versions_in.size}"

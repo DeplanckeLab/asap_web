@@ -612,7 +612,13 @@ export default class extends Controller {
     this.validateButtonTarget.disabled = true
     this.setModalStatus("Creating consensus annotation...", false)
     try {
-      const response = await fetch(this.exportUrlValue, {
+      const requestBody = {
+        ontology_term_type_id: this.typeSelectTarget.value,
+        project_ids: this.selectedProjectIds(),
+        equal_rank_choices: this.equalRankChoices,
+        collision_choices: this.collisionChoices
+      }
+      let response = await fetch(this.exportUrlValue, {
         method: "POST",
         headers: {
           Accept: "application/json",
@@ -620,14 +626,37 @@ export default class extends Controller {
           "X-CSRF-Token": this.csrfToken()
         },
         credentials: "same-origin",
-        body: JSON.stringify({
-          ontology_term_type_id: this.typeSelectTarget.value,
-          project_ids: this.selectedProjectIds(),
-          equal_rank_choices: this.equalRankChoices,
-          collision_choices: this.collisionChoices
-        })
+        body: JSON.stringify(requestBody)
       })
-      const payload = await response.json().catch(() => ({}))
+      let payload = await response.json().catch(() => ({}))
+
+      if (payload.status === "requires_choice") {
+        const policy = this.choosePreviousMetadataPolicy(payload)
+        if (!policy) {
+          this.setModalStatus("Consensus update cancelled.", true)
+          this.refreshValidateEnabled()
+          return
+        }
+        this.setModalStatus(
+          policy === "delete"
+            ? "Deleting previous metadata and creating consensus annotation..."
+            : "Archiving previous metadata and creating consensus annotation...",
+          false
+        )
+        requestBody.previous_metadata_policy = policy
+        response = await fetch(this.exportUrlValue, {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+            "X-CSRF-Token": this.csrfToken()
+          },
+          credentials: "same-origin",
+          body: JSON.stringify(requestBody)
+        })
+        payload = await response.json().catch(() => ({}))
+      }
+
       if (!response.ok || payload.status !== "ok") {
         throw new Error(payload.message || "Failed to create consensus annotation")
       }
@@ -646,6 +675,45 @@ export default class extends Controller {
       this.setModalStatus(error.message || "Failed to create consensus annotation", true)
       this.refreshValidateEnabled()
     }
+  }
+
+  choosePreviousMetadataPolicy(payload) {
+    const dependentsText = this.formatDependentsSummary(payload)
+    const keep = window.confirm(
+      `${payload?.message || "Previous metadata exists."}\n\n${dependentsText}\n\nOK = Keep previous metadata as .bkp.N\nCancel = Consider deleting previous metadata instead`
+    )
+    if (keep) return "archive"
+    const del = window.confirm(
+      `${dependentsText}\n\nDelete previous metadata and the listed dependents? This cannot be undone.\n\nOK = Delete\nCancel = Abort`
+    )
+    return del ? "delete" : null
+  }
+
+  formatDependentsSummary(payload) {
+    const dependents = payload?.dependents || {}
+    const summary = dependents.summary || {}
+    const lines = [
+      `Selections: ${summary.selection_count || 0}`,
+      `Pipeline runs that would be deleted: ${summary.run_ids_to_delete_count || 0}`,
+      `Manual annotations on metadata: ${summary.cla_count || 0}`
+    ]
+    const reviews = []
+    Array(dependents.annots || []).forEach((annot) => {
+      Array(annot.manual_review || []).forEach((item) => {
+        if (item?.message) reviews.push(`- ${item.message}`)
+      })
+      Array(annot.selections || []).slice(0, 8).forEach((sel) => {
+        reviews.push(`- Selection: ${sel.selection_name || sel.run_id}`)
+      })
+      Array(annot.runs || []).slice(0, 8).forEach((run) => {
+        reviews.push(`- Run: ${run.step_label || run.step_name || "run"} #${run.num || run.run_id}`)
+      })
+    })
+    if (reviews.length > 0) {
+      lines.push("", "Details:")
+      lines.push(...reviews.slice(0, 20))
+    }
+    return lines.join("\n")
   }
 
   escapeHtml(value) {

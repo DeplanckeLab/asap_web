@@ -405,6 +405,46 @@ class ComplianceController < ApplicationController
     errors = []
     t_total = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
+    policy = params[:previous_metadata_policy].presence || params[:previousMetadataPolicy]
+    changed_paths = fixes.filter_map do |field_path, fix_data|
+      next if fix_data[:action].blank? || fix_data[:action] == 'skip'
+      field_path.to_s.presence
+    end.uniq
+    existing_annots = @project.annots.where(name: changed_paths, latest_version: true).to_a
+    if existing_annots.any?
+      loom_relative = existing_annots.map(&:filepath).find(&:present?) || File.basename(loom_path.to_s)
+      gate = MetadataRewritePolicyGate.call(
+        project: @project,
+        annots: existing_annots,
+        loom_file: loom_relative,
+        previous_metadata_policy: policy
+      )
+      if gate[:requires_choice]
+        respond_to do |format|
+          format.json do
+            render json: {
+              status: 'requires_choice',
+              message: 'Previous metadata exists for one or more fields. Choose whether to keep it as .bkp.N or delete it (and its dependents).',
+              dependents: gate[:dependents],
+              options: gate[:options]
+            }, status: :conflict
+          end
+          format.html do
+            redirect_to fix_compliance_project_path(@project),
+                        alert: 'Choose whether to keep previous metadata as .bkp.N or delete it before applying fixes.'
+          end
+        end
+        return
+      end
+      unless gate[:ok]
+        respond_to do |format|
+          format.json { render json: { status: 'error', message: gate[:error] }, status: :unprocessable_entity }
+          format.html { redirect_to fix_compliance_project_path(@project), alert: gate[:error] }
+        end
+        return
+      end
+    end
+
     # ── Phase 1: Plan all LOOM operations and DB changes ──
     # Build a list of batched LOOM operations and corresponding DB change descriptors,
     # without executing any Python/Docker calls yet.
@@ -1568,9 +1608,10 @@ class ComplianceController < ApplicationController
   # Returns { loom_ops: [...], db_change: { ... } } or nil if nothing to do.
   # Does NOT execute any Python calls -- only builds the operations list.
   #
-  # If the existing Annot is not referenced by any process (Cla, AnnotCellSet,
-  # OtProject, Run JSON), the field is overwritten in place without creating
-  # a .vX backup -- there is nothing that depends on the old data.
+  # If an Annot already exists at the field path, always archive it to .bkp.N and
+  # create a new Annot at the canonical name. In-place overwrite would reuse the
+  # same annot_id while categories change, which breaks stable category references
+  # (compose operands, CLA cat_idx, etc.).
   def plan_field_fix(project, loom_path, field_path, action, fix_data, versioned_paths)
     ops = []
 
@@ -1583,24 +1624,15 @@ class ComplianceController < ApplicationController
     skip_versioning = false
 
     if current_annot
-      needs_backup = annot_referenced_by_processes?(current_annot, project)
+      current_version = current_annot.version_nber || 0
+      next_version = current_version + 1
+      archive_path = MetadataCollisionBackupNaming.next_path(project, field_path)
 
-      if needs_backup
-        current_version = current_annot.version_nber || 0
-        next_version = current_version + 1
-        archive_path = "#{field_path}.v#{current_version}"
-
-        unless versioned_paths[field_path]
-          ops << { op: 'rename', from: field_hdf5, to: strip_leading_slash(archive_path) }
-          versioned_paths[field_path] = archive_path
-        else
-          archive_path = versioned_paths[field_path]
-        end
+      unless versioned_paths[field_path]
+        ops << { op: 'rename', from: field_hdf5, to: strip_leading_slash(archive_path) }
+        versioned_paths[field_path] = archive_path
       else
-        # Not referenced: overwrite in place, no .vX backup needed
-        skip_versioning = true
-        next_version = current_annot.version_nber || 1
-        Rails.logger.info("[Compliance Fix] #{field_path} not referenced by any process, overwriting in place")
+        archive_path = versioned_paths[field_path]
       end
     end
 
@@ -1611,7 +1643,7 @@ class ComplianceController < ApplicationController
       actual_source = adjust_source_if_versioned(source_path, versioned_paths)
       ops << { op: 'copy', source: strip_leading_slash(actual_source), target: field_hdf5 }
 
-      # Store the actual source path (which may be .vX after versioning) so the
+      # Store the actual source path (which may be .bkp.N after archiving) so the
       # recorded mapping points to where the original data really lives.
       applied_entry = { field: field_path, action: 'mapped', source: actual_source }
 
@@ -1789,7 +1821,7 @@ class ComplianceController < ApplicationController
     versioned_paths[source_path] || source_path
   end
 
-  # Archive an existing metadata field under a versioned name (.v{N}), write new
+  # Archive an existing metadata field under a backup name (.bkp.N), write new
   # data in its place, and create a proper Annot record for the replacement.
   #
   # This single function replaces the old backup_existing_metadata +
@@ -1812,7 +1844,7 @@ class ComplianceController < ApplicationController
   # Returns the new Annot record, or nil if creation was skipped / failed.
   # +expected_archive_paths+ is an optional hash from the main-file pass that
   # maps { field_path => archive_path }.  When processing variant LOOMs
-  # (rename_annot: false) we must use the same .v{N} archive names that the
+  # (rename_annot: false) we must use the same .bkp.N archive names that the
   # main pass chose, because by the time variants are processed the DB already
   # reflects the new Annot (latest_version: true, version_nber: N+1).
   def version_and_replace_metadata(project, loom_path, field_path, versioned_paths, rename_annot: true, expected_archive_paths: {})
@@ -1820,13 +1852,15 @@ class ComplianceController < ApplicationController
 
     # -- Step A: determine version number and archive path --
     field_exists_in_loom = metadata_exists_in_loom?(loom_path, field_path)
+    current_annot = nil
+    archive_path = nil
+    next_version = 1
 
     if expected_archive_paths[field_path]
       # Variant pass: reuse the archive path determined during main-file processing
       archive_path = expected_archive_paths[field_path]
-      # Extract version from archive path (e.g. "/col_attrs/tissue.v1" -> 1)
-      current_version = archive_path[/\.v(\d+)\z/, 1].to_i
-      next_version = current_version + 1
+      current_annot = project.annots.find_by(name: field_path, latest_version: true)
+      next_version = (current_annot&.version_nber || 0) + 1
     else
       # Main pass: look up current Annot to determine version
       current_annot = project.annots.find_by(name: field_path, latest_version: true)
@@ -1836,7 +1870,7 @@ class ComplianceController < ApplicationController
       unless archive_path
         current_version = current_annot&.version_nber || 0
         next_version = current_version + 1
-        archive_path = "#{field_path}.v#{current_version}"
+        archive_path = MetadataCollisionBackupNaming.next_path(project, field_path)
       end
 
       # -- Step B: archive the old field in the LOOM --
@@ -2172,8 +2206,8 @@ class ComplianceController < ApplicationController
   #
   # operations: array of hashes, each with an 'op' key and operation-specific fields:
   #   { op: 'check_exists', field: 'col_attrs/tissue' }
-  #   { op: 'rename', from: 'col_attrs/tissue', to: 'col_attrs/tissue.v1' }
-  #   { op: 'copy', source: 'col_attrs/tissue.v1', target: 'col_attrs/tissue' }
+  #   { op: 'rename', from: 'col_attrs/tissue', to: 'col_attrs/tissue.bkp.1' }
+  #   { op: 'copy', source: 'col_attrs/tissue.bkp.1', target: 'col_attrs/tissue' }
   #   { op: 'resolve_paired', source: 'col_attrs/X', target: 'col_attrs/Y', map: { ... } }
   #   { op: 'set_value', target: 'col_attrs/sex', value: 'female' }
   #   { op: 'set_global_attr', attr_name: 'title', value: 'My Dataset' }

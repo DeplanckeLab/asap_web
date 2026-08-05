@@ -23,6 +23,10 @@ namespace :reference_data do
       self.table_name = "docker_images"
     end
 
+    class SourceDockerBuild < SourceReferenceBase
+      self.table_name = "docker_builds"
+    end
+
     class SourceVersion < SourceReferenceBase
       self.table_name = "versions"
     end
@@ -107,6 +111,7 @@ namespace :reference_data do
         steps: step_rows,
         std_methods: std_method_rows,
         docker_images: SourceDockerImage.order(:id).map(&:attributes),
+        docker_builds: SourceDockerBuild.order(:id).map(&:attributes),
         versions: SourceVersion.order(:id).map(&:attributes),
         speeds: SourceSpeed.order(:id).map(&:attributes)
       }
@@ -121,6 +126,7 @@ namespace :reference_data do
           "Step" => rows[:steps],
           "StdMethod" => rows[:std_methods],
           "DockerImage" => rows[:docker_images],
+          "DockerBuild" => rows[:docker_builds],
           "Version" => rows[:versions],
           "Speed" => rows[:speeds]
         }
@@ -170,9 +176,10 @@ namespace :reference_data do
       build_temp_snapshot_from_rows!(rows, label: "production_legacy")
     end
 
-    desc "Sync Step, StdMethod, and Version from SNAPSHOT=export.json (DRY_RUN=1, VERBOSE=1). " \
+    desc "Sync Step, StdMethod, Version, DockerImage, and DockerBuild from SNAPSHOT=export.json (DRY_RUN=1, VERBOSE=1). " \
          "Version rows include env_json, tools_json, docker_json, and activated status. " \
-         "Export with MODELS=Step,StdMethod,DockerImage,Version,Speed as needed."
+         "DockerImage matched by name+tag; DockerBuild matched by digest. " \
+         "Export with MODELS=Step,StdMethod,DockerImage,DockerBuild,Version,Speed as needed."
     task sync: :environment do
       path = ENV["SNAPSHOT"].to_s.strip
       generated_snapshot = nil
@@ -189,7 +196,7 @@ namespace :reference_data do
         puts ""
         puts "Generate the snapshot from a reference environment, for example:"
         puts "  bin/rake reference_data:export LABEL=dev OUT=/tmp/ref.json \\"
-        puts "    MODELS=Step,StdMethod,DockerImage,Version,Speed"
+        puts "    MODELS=Step,StdMethod,DockerImage,DockerBuild,Version,Speed"
         exit 1
       end
 
@@ -205,7 +212,7 @@ namespace :reference_data do
       generated_snapshot&.close!
     end
 
-    desc "Apply Step, StdMethod, and Version from development to the current DB (production). " \
+    desc "Apply Step, StdMethod, Version, DockerImage, and DockerBuild from development to the current DB (production). " \
          "Match by primary key id; version id < MAX_VERSION_ID (default 9, includes v8). " \
          "Version sync includes env_json and activated status. " \
          "Hidden steps included; obsolete std_methods excluded. " \
@@ -233,7 +240,7 @@ namespace :reference_data do
         exit 1
       end
 
-      puts "Applying development Step/StdMethod/Version (id < #{max_version_id}, including hidden steps) to production"
+      puts "Applying development Step/StdMethod/Version/DockerImage/DockerBuild (id < #{max_version_id}, including hidden steps) to production"
       puts "  dry_run=#{dry}  match_by=id"
 
       ReferenceDataStepsStdMethodsSync.new(

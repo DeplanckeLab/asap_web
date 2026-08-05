@@ -602,10 +602,11 @@ export default class extends Controller {
     }
 
     try {
-      const formData = new FormData(form)
       const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || ''
+      let formData = new FormData(form)
+      formData.delete('previous_metadata_policy')
 
-      const response = await fetch(form.action, {
+      let response = await fetch(form.action, {
         method: 'POST',
         headers: {
           'X-CSRF-Token': csrfToken,
@@ -614,7 +615,36 @@ export default class extends Controller {
         body: formData
       })
 
-      const data = await response.json()
+      let data = await response.json().catch(() => ({}))
+
+      if (data.status === 'requires_choice') {
+        this.removeOverlay()
+        const policy = this.choosePreviousMetadataPolicy(data)
+        if (!policy) {
+          if (this.hasSubmitButtonTarget) {
+            this.submitButtonTarget.disabled = false
+            this.submitButtonTarget.textContent = 'Apply to the LOOM file'
+          }
+          return
+        }
+        this.showOverlay(
+          policy === 'delete'
+            ? 'Deleting previous metadata and applying fixes...'
+            : 'Archiving previous metadata and applying fixes...'
+        )
+        formData = new FormData(form)
+        formData.delete('previous_metadata_policy')
+        formData.append('previous_metadata_policy', policy)
+        response = await fetch(form.action, {
+          method: 'POST',
+          headers: {
+            'X-CSRF-Token': csrfToken,
+            'Accept': 'application/json'
+          },
+          body: formData
+        })
+        data = await response.json().catch(() => ({}))
+      }
 
       if (data.status === 'error') {
         this.removeOverlay()
@@ -644,6 +674,28 @@ export default class extends Controller {
       }
       alert('An error occurred while applying fixes. Please try again.')
     }
+  }
+
+  choosePreviousMetadataPolicy(payload) {
+    const dependentsText = this.formatDependentsSummary(payload)
+    const keep = window.confirm(
+      `${payload?.message || 'Previous metadata exists.'}\n\n${dependentsText}\n\nOK = Keep previous metadata as .bkp.N\nCancel = Consider deleting previous metadata instead`
+    )
+    if (keep) return 'archive'
+    const del = window.confirm(
+      `${dependentsText}\n\nDelete previous metadata and the listed dependents? This cannot be undone.\n\nOK = Delete\nCancel = Abort`
+    )
+    return del ? 'delete' : null
+  }
+
+  formatDependentsSummary(payload) {
+    const dependents = payload?.dependents || {}
+    const summary = dependents.summary || {}
+    return [
+      `Selections: ${summary.selection_count || 0}`,
+      `Pipeline runs that would be deleted: ${summary.run_ids_to_delete_count || 0}`,
+      `Manual annotations on metadata: ${summary.cla_count || 0}`
+    ].join('\n')
   }
 
   subscribeToCompliance(projectId) {

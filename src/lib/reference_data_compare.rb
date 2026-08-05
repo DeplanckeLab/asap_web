@@ -7,6 +7,7 @@ require "time"
 class ReferenceDataCompare
   DEFAULT_MODELS = %w[
     DockerImage
+    DockerBuild
     Version
     Step
     StdMethod
@@ -50,7 +51,7 @@ class ReferenceDataCompare
           ruby bin/compare_reference_data.rb compare --left /tmp/asap-dev.json --right /tmp/asap-prod.json
 
         Optional:
-          --models Step,StdMethod,DockerImage,Version
+          --models Step,StdMethod,DockerImage,DockerBuild,Version
           --include-timestamps
       MSG
     end

@@ -17,11 +17,11 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access annotations].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
   before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
-  before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection]
+  before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection save_batch_compose_metadata]
   before_action :authorize_project_owner_access, only: %i[export_consensus_annotation preview_consensus_annotation]
   GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
   GENE_DETAILS_CACHE_TTL = 24.hours
@@ -1262,6 +1262,12 @@ class ProjectsController < ApplicationController
       # Reset parsing step status
       parsing_step = parsing_step_for_project(@project)
       if parsing_step
+        # Zero other steps' counters immediately. Their runs still exist until
+        # parse.rake reset_mode cleanup, but the header must not keep showing
+        # stale success/failed counts once the new parsing starts.
+        ProjectStep.where(project_id: @project.id).where.not(step_id: parsing_step.id)
+                   .update_all(status_id: nil, error_message: nil, nber_runs_json: '{}', updated_at: Time.current)
+
         project_step = ProjectStep.find_by(project_id: @project.id, step_id: parsing_step.id)
         if project_step
           project_step.update!(status_id: 1) # Set to waiting
@@ -2786,7 +2792,16 @@ class ProjectsController < ApplicationController
       fu_id: staged[:fu].id,
       duplicates: staged[:duplicates],
       preview_lines: final_content.first(20),
-      total_lines: final_content.size
+      total_lines: final_content.size,
+      preview: MetadataImportPreviewBuilder.call(
+        final_content: final_content,
+        duplicates: staged[:duplicates],
+        metadata_type_id: metadata_type_id,
+        input_type_id: input_type_id,
+        name: header_name.presence || name,
+        project: @project,
+        loom_file: params[:loom_file]
+      )
     }
     response[:header_name] = header_name if header_name.present?
 
@@ -2886,7 +2901,16 @@ class ProjectsController < ApplicationController
       total_lines: final_content.size,
       metadata_type_id: metadata_type_id,
       input_type_id: input_type_id,
-      import_validation: import_validation_json(validation)
+      import_validation: import_validation_json(validation),
+      preview: MetadataImportPreviewBuilder.call(
+        final_content: final_content,
+        duplicates: staged[:duplicates],
+        metadata_type_id: metadata_type_id,
+        input_type_id: input_type_id,
+        name: nil,
+        project: @project,
+        loom_file: params[:loom_file]
+      )
     }
 
     render json: response
@@ -2927,7 +2951,8 @@ class ProjectsController < ApplicationController
       name: name,
       header_name: header_name,
       has_header: has_header,
-      collision_resolution: collision_resolution
+      collision_resolution: collision_resolution,
+      loom_file: loom_file
     )
     unless submission[:ok]
       payload = { status: 'error', message: submission[:error] }
@@ -2981,7 +3006,7 @@ class ProjectsController < ApplicationController
     }
 
     h_command = {
-      program: "rake parse_metadata[#{new_run.id}]",
+      program: "rails parse_metadata[#{new_run.id}]",
       host_name: 'localhost',
       opts: [],
       args: []
@@ -2991,6 +3016,9 @@ class ProjectsController < ApplicationController
       command_json: h_command.to_json,
       attrs_json: h_attrs.to_json
     )
+
+    Basic.upd_project_step(@project, import_metadata_step.id)
+    Basic.exec_run(Rails.logger, new_run)
 
     render json: { status: 'ok', run_id: new_run.id }
   end
@@ -3107,27 +3135,74 @@ class ProjectsController < ApplicationController
       return render json: { status: 'error', message: built[:error] }, status: :unprocessable_entity
     end
 
-    backup = ConsensusAnnotationMetadataBackupService.call(
-      project: @project,
-      loom_file: built[:loom_file],
-      metadata_path: built[:metadata_path],
-      new_labels: built[:labels]
-    )
-    unless backup[:ok]
-      return render json: { status: 'error', message: backup[:error] }, status: :unprocessable_entity
+    policy = params[:previous_metadata_policy].presence || params[:previousMetadataPolicy]
+    replacing_paths = []
+    [
+      [built[:metadata_path], built[:labels]],
+      [built[:ontology_id_path], built[:ontology_term_ids]]
+    ].each do |path, labels|
+      annot = @project.annots.where(name: path, latest_version: true).order(id: :desc).first
+      next unless annot
+      next unless consensus_metadata_labels_would_change?(annot, built[:loom_file], labels)
+
+      replacing_paths << path
     end
 
-    ontology_id_backup = ConsensusAnnotationMetadataBackupService.call(
-      project: @project,
-      loom_file: built[:loom_file],
-      metadata_path: built[:ontology_id_path],
-      new_labels: built[:ontology_term_ids]
-    )
-    unless ontology_id_backup[:ok]
-      return render json: { status: 'error', message: ontology_id_backup[:error] }, status: :unprocessable_entity
+    if replacing_paths.any?
+      gate = MetadataRewritePolicyGate.call(
+        project: @project,
+        paths: replacing_paths,
+        loom_file: built[:loom_file],
+        previous_metadata_policy: policy
+      )
+      if gate[:requires_choice]
+        return render json: {
+          status: 'requires_choice',
+          message: 'Previous consensus metadata exists. Choose whether to keep it as a versioned backup or delete it (and its dependents).',
+          dependents: gate[:dependents],
+          options: gate[:options]
+        }, status: :conflict
+      end
+      unless gate[:ok]
+        return render json: { status: 'error', message: gate[:error] }, status: :unprocessable_entity
+      end
     end
 
-    if backup[:unchanged] && ontology_id_backup[:unchanged]
+    previous_policy = policy.to_s
+    if previous_policy != 'delete'
+      backup = ConsensusAnnotationMetadataBackupService.call(
+        project: @project,
+        loom_file: built[:loom_file],
+        metadata_path: built[:metadata_path],
+        new_labels: built[:labels]
+      )
+      unless backup[:ok]
+        return render json: { status: 'error', message: backup[:error] }, status: :unprocessable_entity
+      end
+
+      ontology_id_backup = ConsensusAnnotationMetadataBackupService.call(
+        project: @project,
+        loom_file: built[:loom_file],
+        metadata_path: built[:ontology_id_path],
+        new_labels: built[:ontology_term_ids]
+      )
+      unless ontology_id_backup[:ok]
+        return render json: { status: 'error', message: ontology_id_backup[:error] }, status: :unprocessable_entity
+      end
+    else
+      backup = {
+        ok: true,
+        backed_up: false,
+        unchanged: !replacing_paths.include?(built[:metadata_path])
+      }
+      ontology_id_backup = {
+        ok: true,
+        backed_up: false,
+        unchanged: !replacing_paths.include?(built[:ontology_id_path])
+      }
+    end
+
+    if backup[:unchanged] && ontology_id_backup[:unchanged] && previous_policy != 'delete'
       payload = {
         status: 'ok',
         metadata_path: built[:metadata_path],
@@ -3358,6 +3433,191 @@ class ProjectsController < ApplicationController
     render json: {
       status: 'ok',
       item: response_item
+    }
+  end
+
+  # POST /projects/:id/save_batch_compose_metadata
+  # Writes one multi-category annot from a batch-compose label vector (not .sel_N).
+  # Admin-only while the batch compose gate is experimental.
+  def save_batch_compose_metadata
+    unless admin?
+      render json: { status: 'error', message: 'Batch compose is available to admins only' }, status: :forbidden
+      return
+    end
+
+    unless analyzable?(@project)
+      render json: { status: 'error', message: 'Not authorized' }, status: :forbidden
+      return
+    end
+
+    unless @project.filesystem_project_data_present?
+      render json: {
+        status: 'error',
+        message: 'Project data files are not available on this server. Unarchive the project before saving batch compose metadata.'
+      }, status: :unprocessable_entity
+      return
+    end
+
+    loom_file = params[:loom_file].to_s.strip
+    fanout_annot_id = params[:fanout_annot_id].to_i
+    labels = Array(params[:labels]).map { |v| v.nil? ? '' : v.to_s }
+    compose_steps = sanitize_compose_steps(params[:compose_steps])
+    metadata_basename = normalize_batch_compose_basename(params[:metadata_basename])
+    previous_policy = (params[:previous_metadata_policy].presence || params[:previousMetadataPolicy]).to_s.strip.downcase.presence
+    previous_new_name = params[:previous_metadata_new_name].presence || params[:previousMetadataNewName]
+
+    if loom_file.blank?
+      render json: { status: 'error', message: 'loom_file is required' }, status: :unprocessable_entity
+      return
+    end
+    if metadata_basename.blank?
+      render json: { status: 'error', message: 'metadata_basename is required' }, status: :unprocessable_entity
+      return
+    end
+    if labels.empty?
+      render json: { status: 'error', message: 'labels are required' }, status: :unprocessable_entity
+      return
+    end
+
+    fanout_annot = Annot.find_by(id: fanout_annot_id, project_id: @project.id)
+    unless fanout_annot
+      render json: { status: 'error', message: 'Fan-out metadata not found' }, status: :unprocessable_entity
+      return
+    end
+
+    metadata_path = "/col_attrs/#{metadata_basename}"
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    loom_path = project_dir + loom_file
+    unless File.exist?(loom_path)
+      render json: { status: 'error', message: "Loom file not found: #{loom_file}" }, status: :unprocessable_entity
+      return
+    end
+
+    stable_ids = H5DataService.get_metadata_vector(loom_path.to_s, '/col_attrs/_StableID')
+    n_cells = stable_ids.is_a?(Array) ? stable_ids.length : 0
+    if n_cells <= 0 || labels.length != n_cells
+      render json: {
+        status: 'error',
+        message: "labels length (#{labels.length}) must match loom cell count (#{n_cells})"
+      }, status: :unprocessable_entity
+      return
+    end
+
+    existing_annot = @project.annots.where(name: metadata_path, latest_version: true).order(id: :desc).first
+    if existing_annot
+      inventory = AnnotDependentsInventory.call(project: @project, annot: existing_annot)
+      dependents = AnnotDependentsInventory.merge_results([inventory])
+      suggested_version_name = MetadataFileImportValidation.next_versioned_path(@project, metadata_path).to_s.sub(%r{\A/col_attrs/}, '')
+      suggested_previous_name = suggest_batch_compose_rename_basename(metadata_basename)
+
+      if previous_policy.blank?
+        render json: {
+          status: 'requires_choice',
+          message: 'Metadata already exists at this name. Keep the previous metadata under a new name, or replace it (deleting dependents).',
+          dependents: dependents,
+          suggested_previous_name: suggested_previous_name,
+          suggested_version_name: suggested_version_name,
+          existing_metadata_path: metadata_path,
+          options: [
+            {
+              policy: 'rename',
+              label: 'Rename previous metadata to a custom name (.batch_compose)',
+              description: 'Move the existing annot aside under a free name ending in .batch_compose, then write the new result at the canonical name.'
+            },
+            {
+              policy: 'archive',
+              label: 'Keep previous metadata as automatic .bkp.N',
+              description: 'Rename the existing annot to existing_name.bkp.N automatically, then write the new result at the canonical name.'
+            },
+            {
+              policy: 'delete',
+              label: 'Replace previous metadata and delete dependents',
+              description: 'Deletes the previous annot/loom column and the dependent items listed below, then writes the new result.'
+            }
+          ]
+        }, status: :conflict
+        return
+      end
+
+      case previous_policy
+      when 'rename'
+        rename_basename = normalize_batch_compose_basename(previous_new_name.presence || suggested_previous_name)
+        if rename_basename.blank?
+          render json: { status: 'error', message: 'previous_metadata_new_name is required for rename' }, status: :unprocessable_entity
+          return
+        end
+        rename_path = "/col_attrs/#{rename_basename}"
+        if rename_path == metadata_path
+          render json: { status: 'error', message: 'Rename target must differ from the canonical batch compose name' }, status: :unprocessable_entity
+          return
+        end
+        if @project.annots.exists?(name: rename_path) || H5DataService.metadata_dataset_exists?(loom_path.to_s, rename_path)
+          render json: { status: 'error', message: "Rename target already exists: #{rename_basename}" }, status: :unprocessable_entity
+          return
+        end
+        renamed = MetadataAnnotRenameService.call(
+          project: @project,
+          loom_file: loom_file,
+          metadata_path: metadata_path,
+          new_metadata_path: rename_path
+        )
+        unless renamed[:ok]
+          render json: { status: 'error', message: renamed[:error] }, status: :unprocessable_entity
+          return
+        end
+      when 'archive'
+        archived = MetadataAnnotVersionArchiveService.call(
+          project: @project,
+          loom_file: loom_file,
+          metadata_path: metadata_path
+        )
+        unless archived[:ok]
+          render json: { status: 'error', message: archived[:error] }, status: :unprocessable_entity
+          return
+        end
+      when 'delete'
+        gate = MetadataRewritePolicyGate.call(
+          project: @project,
+          paths: [metadata_path],
+          loom_file: loom_file,
+          previous_metadata_policy: 'delete'
+        )
+        unless gate[:ok]
+          render json: { status: 'error', message: gate[:error] || 'Failed to replace previous metadata' }, status: :unprocessable_entity
+          return
+        end
+      else
+        render json: { status: 'error', message: "Unknown previous_metadata_policy: #{previous_policy}" }, status: :unprocessable_entity
+        return
+      end
+    end
+
+    persisted = BatchComposeMetadataPersistService.call(
+      project: @project,
+      loom_file: loom_file,
+      metadata_path: metadata_path,
+      metadata_basename: metadata_basename,
+      labels: labels,
+      user_id: current_user&.id || @project.user_id,
+      provenance: {
+        fanout_annot_id: fanout_annot.id,
+        fanout_annot_name: fanout_annot.name,
+        compose_steps: compose_steps
+      }
+    )
+    unless persisted[:ok]
+      render json: { status: 'error', message: persisted[:error] }, status: :unprocessable_entity
+      return
+    end
+
+    render json: {
+      status: 'ok',
+      annot_id: persisted[:annot_id],
+      metadata_path: persisted[:metadata_path],
+      metadata_basename: persisted[:metadata_basename],
+      nber_cats: persisted[:nber_cats],
+      nber_cols: persisted[:nber_cols],
+      previous_metadata_policy: previous_policy
     }
   end
 
@@ -5473,6 +5733,13 @@ class ProjectsController < ApplicationController
     annot_id = params[:annot_id].presence || params.dig(:cla, :annot_id)
     annot = Annot.find_by(id: annot_id.to_i, project_id: @project.id)
     return render(json: { status: 'error', errors: ['Annotation not found'] }, status: :not_found) unless annot
+
+    if annot.name.to_s.start_with?('/col_attrs/_asap_consensus_')
+      return render json: {
+        status: 'error',
+        errors: ['Manual annotations are not allowed on consensus annotation metadata. Annotate the underlying clusterings or other non-consensus categorical metadata instead.']
+      }, status: :unprocessable_entity
+    end
 
     list_cats = Basic.safe_parse_json(annot.list_cat_json, [])
     cat_idx = (params[:cat_idx].presence || params.dig(:cla, :cat_idx)).to_i
@@ -8894,13 +9161,15 @@ class ProjectsController < ApplicationController
       {
         skip_name_checks: false,
         error: validation[:error],
+        dependents: validation[:dependents],
         checks: validation[:checks].map do |c|
           {
             path: c.path,
             authorized: c.authorized,
             auth_message: c.auth_message,
             collision: c.collision,
-            dependent_run_count: c.dependent_run_ids.size
+            dependent_run_count: Array(c.dependent_run_ids).size,
+            dependents: c.dependents
           }
         end
       }
@@ -11674,6 +11943,23 @@ class ProjectsController < ApplicationController
       nil
     end
 
+    def consensus_metadata_labels_would_change?(annot, loom_file, new_labels)
+      return true unless new_labels.is_a?(Array)
+
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+      loom_path = project_dir + (loom_file.presence || annot.filepath).to_s
+      return true unless File.exist?(loom_path)
+
+      existing = H5DataService.get_metadata_vector(loom_path.to_s, annot.name.to_s)
+      return true unless existing.is_a?(Array)
+      return true unless existing.length == new_labels.length
+
+      !existing.each_with_index.all? { |value, idx| value.to_s == new_labels[idx].to_s }
+    rescue StandardError => e
+      Rails.logger.warn("[consensus_metadata_labels_would_change?] Annot##{annot.id}: #{e.message}")
+      true
+    end
+
     def sanitize_compose_steps(raw_steps)
       return nil unless raw_steps.is_a?(Array)
 
@@ -11687,16 +11973,77 @@ class ProjectsController < ApplicationController
         result_count = step_hash['result_count'] || step_hash[:result_count]
         next unless step_index.present? && operation.present?
 
-        {
+        payload = {
           step_index: step_index.to_i,
           operation: operation.to_s,
           operand_a: operand_a.to_s,
           operand_b: operand_b.to_s,
           result_count: result_count.to_i
         }
+        payload.merge!(sanitize_compose_operand_identity_fields(step_hash, 'operand_a'))
+        payload.merge!(sanitize_compose_operand_identity_fields(step_hash, 'operand_b'))
+        payload
       end.compact
 
       normalized.any? ? normalized : nil
+    end
+
+    def normalize_batch_compose_basename(raw_name)
+      basename = raw_name.to_s.strip
+      basename = basename.sub(%r{\A/col_attrs/}, '')
+      # Allow '.' as structural separators; '=' / '()' inside the operand field.
+      basename = basename.gsub(/[^\w.\-=()]+/, '_').gsub(/_+/, '_').gsub(/\A[._=]+|[._=]+\z/, '')
+      return '' if basename.blank?
+
+      basename = "#{basename}.batch_compose" unless basename.end_with?('.batch_compose')
+      basename
+    end
+
+    def suggest_batch_compose_rename_basename(canonical_basename)
+      base = canonical_basename.to_s.sub(/\.batch_compose\z/, '')
+      base = 'batch_compose_previous' if base.blank?
+      # Keep a free name ending in .batch_compose; prefer inserting _previous on the operand field.
+      if (m = base.match(/\A([^.]+)\.with\.(.+)\z/))
+        candidate = normalize_batch_compose_basename("#{m[1]}.with.#{m[2]}_previous")
+      else
+        candidate = normalize_batch_compose_basename("#{base.gsub('.', '_')}_previous")
+      end
+      n = 2
+      while @project.annots.exists?(name: "/col_attrs/#{candidate}")
+        if (m = base.match(/\A([^.]+)\.with\.(.+)\z/))
+          candidate = normalize_batch_compose_basename("#{m[1]}.with.#{m[2]}_previous#{n}")
+        else
+          candidate = normalize_batch_compose_basename("#{base.gsub('.', '_')}_previous#{n}")
+        end
+        n += 1
+      end
+      candidate
+    end
+
+    def sanitize_compose_operand_identity_fields(step_hash, prefix)
+      return {} unless step_hash.is_a?(Hash) && prefix.present?
+
+      metadata_name = step_hash["#{prefix}_metadata_name"] || step_hash[:"#{prefix}_metadata_name"]
+      category_name = step_hash["#{prefix}_category_name"] || step_hash[:"#{prefix}_category_name"]
+      annot_id = step_hash["#{prefix}_annot_id"] || step_hash[:"#{prefix}_annot_id"]
+      cat_idx = if step_hash.key?("#{prefix}_cat_idx")
+                  step_hash["#{prefix}_cat_idx"]
+                elsif step_hash.key?(:"#{prefix}_cat_idx")
+                  step_hash[:"#{prefix}_cat_idx"]
+                end
+
+      out = {}
+      out[:"#{prefix}_metadata_name"] = metadata_name.to_s if metadata_name.present?
+      out[:"#{prefix}_category_name"] = category_name.to_s if category_name.present?
+      if annot_id.present?
+        annot_id_i = annot_id.to_i
+        out[:"#{prefix}_annot_id"] = annot_id_i if annot_id_i.positive?
+      end
+      unless cat_idx.nil? || cat_idx.to_s.strip == ''
+        cat_idx_i = cat_idx.to_i
+        out[:"#{prefix}_cat_idx"] = cat_idx_i if cat_idx_i >= 0
+      end
+      out
     end
 
     def sanitize_selection_source(raw_source)

@@ -3019,6 +3019,9 @@ function openAddMetadataModal() {
   if (warnings) { warnings.classList.add('hidden'); warnings.innerHTML = '' }
   var preview = modal.querySelector('#import-preview')
   if (preview) preview.classList.add('hidden')
+  var formError = modal.querySelector('#import-form-error')
+  if (formError) { formError.classList.add('hidden'); formError.innerHTML = '' }
+  showImportFormStep(modal)
 
   modal.classList.remove('hidden')
 
@@ -3354,27 +3357,141 @@ function vizPickCrossProjectAnnot(modal, sourceProjectId, sourceAnnotId, annotNa
   if (selEl) { selEl.textContent = 'Selected column: ' + annotName + ' (source project ' + sourceProjectId + ')'; selEl.classList.remove('hidden') }
   window._importFuId = null
   window._vizLastImportValidation = null
+  window._importCollisionResolution = ''
   modal.querySelector('#import-warnings')?.classList.add('hidden')
   if (modal.querySelector('#import-warnings')) modal.querySelector('#import-warnings').innerHTML = ''
   modal.querySelector('#import-preview')?.classList.add('hidden')
   modal.querySelector('#import-submit-btn')?.classList.add('hidden')
+  showImportFormStep(modal)
   checkModalForm()
 }
 
 document.addEventListener('change', function(e) {
-  if (!e.target.matches || !e.target.matches('input.import-collision-radio')) return
+  if (!e.target.matches) return
   var modal = document.getElementById('add-metadata-modal')
   if (!modal || !modal.contains(e.target)) return
   if (e.target.closest('[data-controller="data-view"]')) return
-  var sel = modal.querySelector('input.import-collision-radio:checked')
-  window._importCollisionResolution = sel ? sel.value : ''
-  updateVizImportSubmitEnabled(modal)
+  if (e.target.matches('input.import-collision-radio')) {
+    var sel = modal.querySelector('input.import-collision-radio:checked')
+    window._importCollisionResolution = sel ? sel.value : ''
+    updateVizOverwriteImplicationsPanel(modal)
+    updateVizImportSubmitEnabled(modal)
+  }
 })
 
 function escapeHtmlForImportMeta(s) {
   var d = document.createElement('div')
   d.textContent = s == null ? '' : String(s)
   return d.innerHTML
+}
+
+function renderImportPreviewHtmlViz(preview, fallbackLines) {
+  if (!preview || !Array.isArray(preview.columns)) {
+    var lines = Array.isArray(fallbackLines) ? fallbackLines : []
+    if (!lines.length) return ''
+    return '<div class="border border-gray-200 rounded-md bg-gray-50 p-3 text-sm font-mono max-h-56 overflow-auto">' +
+      lines.map(function(l) { return '<div class="py-0.5 border-b border-gray-100 last:border-0 whitespace-nowrap">' + escapeHtmlForImportMeta(l) + '</div>' }).join('') +
+      '</div>'
+  }
+
+  var summary = preview.summary || {}
+  var columns = preview.columns || []
+  var rows = Array.isArray(preview.rows) ? preview.rows : []
+  var names = Array.isArray(summary.metadata_names) ? summary.metadata_names : []
+
+  var html = '<div class="border border-gray-200 rounded-md bg-white p-3 text-sm space-y-3">'
+  html += '<div class="flex flex-wrap gap-x-4 gap-y-1 text-gray-700">'
+  html += '<span><span class="font-medium text-gray-900">' + (summary.metadata_count || 0) + '</span> metadata column(s)</span>'
+  html += '<span><span class="font-medium text-gray-900">' + (summary.row_count || 0) + '</span> row(s)</span>'
+  if ((summary.duplicate_count || 0) > 0) {
+    html += '<span><span class="font-medium text-amber-800">' + summary.duplicate_count + '</span> duplicate identifier(s) removed</span>'
+  }
+  if (summary.loom_identifier_count != null && summary.matched_identifier_count != null) {
+    html += '<span><span class="font-medium text-gray-900">' + summary.matched_identifier_count + '</span> / ' + summary.loom_identifier_count + ' identifiers match the loom</span>'
+    if ((summary.unmatched_identifier_count || 0) > 0) {
+      html += '<span class="text-amber-800">' + summary.unmatched_identifier_count + ' unmatched</span>'
+    }
+  }
+  if (summary.truncated) {
+    html += '<span class="text-gray-500">showing first ' + (summary.preview_row_count || rows.length) + '</span>'
+  }
+  html += '</div>'
+
+  if (names.length) {
+    html += '<div class="text-xs text-gray-600">Columns: ' + names.map(function(n) { return '<code class="text-xs">' + escapeHtmlForImportMeta(n) + '</code>' }).join(', ') + '</div>'
+  }
+
+  var valueCols = columns.filter(function(c) { return c.role === 'value' })
+  if (valueCols.some(function(c) { return (c.sample_values || []).length || c.inferred_type })) {
+    html += '<div class="text-xs text-gray-600 space-y-1">'
+    valueCols.forEach(function(c) {
+      var samples = Array.isArray(c.sample_values) ? c.sample_values : []
+      var typeLabel = c.inferred_type ? (' (' + c.inferred_type + (c.distinct_count != null ? (', ' + c.distinct_count + ' distinct') : '') + ')') : ''
+      html += '<div><span class="font-medium text-gray-800">' + escapeHtmlForImportMeta(c.name || '') + '</span>' + escapeHtmlForImportMeta(typeLabel)
+      if (samples.length) {
+        html += ': ' + samples.map(function(s) { return escapeHtmlForImportMeta(String(s)) }).join(', ')
+        if (c.distinct_count != null && c.distinct_count > samples.length) html += ', ...'
+      }
+      html += '</div>'
+    })
+    html += '</div>'
+  }
+
+  if ((summary.unmatched_samples || []).length) {
+    html += '<div class="text-xs text-amber-800">Unmatched examples: ' + summary.unmatched_samples.map(function(s) { return escapeHtmlForImportMeta(String(s)) }).join(', ') + '</div>'
+  }
+
+  if (columns.length && rows.length) {
+    html += '<div class="border border-gray-200 rounded overflow-auto max-h-56">'
+    html += '<table class="min-w-full text-xs">'
+    html += '<thead class="bg-gray-50 sticky top-0"><tr>'
+    columns.forEach(function(c) {
+      html += '<th class="px-2 py-1.5 text-left font-semibold text-gray-700 border-b border-gray-200 whitespace-nowrap">' + escapeHtmlForImportMeta(c.name || '') + '</th>'
+    })
+    html += '</tr></thead><tbody>'
+    rows.forEach(function(row, idx) {
+      var bg = idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'
+      html += '<tr class="' + bg + '">'
+      columns.forEach(function(_, colIdx) {
+        html += '<td class="px-2 py-1 border-b border-gray-100 whitespace-nowrap font-mono text-gray-800">' + escapeHtmlForImportMeta(row[colIdx] == null ? '' : String(row[colIdx])) + '</td>'
+      })
+      html += '</tr>'
+    })
+    html += '</tbody></table></div>'
+  }
+
+  html += '</div>'
+  return html
+}
+
+function formatImportDependentsSummaryViz(payload) {
+  var dependents = (payload && payload.dependents) || {}
+  var summary = dependents.summary || {}
+  var selectionCount = summary.selection_count || 0
+  var runDeleteCount = summary.run_ids_to_delete_count || 0
+  var claCount = summary.cla_count || 0
+  var lines = [
+    'Selections: ' + selectionCount,
+    'Pipeline runs that would be deleted: ' + runDeleteCount,
+    'Manual annotations on metadata: ' + claCount
+  ]
+  if (!selectionCount && !runDeleteCount && !claCount) {
+    lines.unshift('Nothing would be cascade-deleted.')
+  } else {
+    lines.unshift('Overwrite will also remove:')
+  }
+  ;(dependents.annots || []).forEach(function(annot) {
+    ;(annot.selections || []).slice(0, 8).forEach(function(sel) {
+      lines.push('- Selection: ' + (sel.selection_name || sel.run_id))
+    })
+    ;(annot.runs || []).slice(0, 8).forEach(function(run) {
+      lines.push('- Run: ' + (run.step_label || run.step_name || 'run') + ' #' + (run.num || run.run_id))
+    })
+    ;(annot.manual_review || []).forEach(function(item) {
+      if (item && item.message) lines.push('- ' + item.message)
+    })
+  })
+  return lines.join('\n')
 }
 
 function buildImportValidationHtmlViz(iv) {
@@ -3395,15 +3512,31 @@ function buildImportValidationHtmlViz(iv) {
   collisions.forEach(function(c) {
     h += '<li><code class="text-xs">' + escapeHtmlForImportMeta(c.path || '') + '</code>'
     if ((c.dependent_run_count || 0) > 0) {
-      h += ' <span class="text-amber-800">(' + c.dependent_run_count + ' pipeline runs reference it)</span>'
+      h += ' <span class="text-amber-800">(' + c.dependent_run_count + ' pipeline runs would be deleted on overwrite)</span>'
     }
     h += '</li>'
   })
   h += '</ul><p class="mb-2">Choose how to proceed:</p>'
-  h += '<label class="flex items-center gap-2 mb-1 cursor-pointer"><input type="radio" name="import-collision-res" value="keep_both" class="import-collision-radio"> Keep both (add version suffix .vN)</label>'
-  h += '<label class="flex items-center gap-2 mb-1 cursor-pointer"><input type="radio" name="import-collision-res" value="overwrite" class="import-collision-radio"> Overwrite (only when no runs reference the column)</label>'
-  h += '<label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="import-collision-res" value="skip" class="import-collision-radio"> Cancel import</label></div>'
+  h += '<label class="flex items-center gap-2 mb-1 cursor-pointer"><input type="radio" name="import-collision-res" value="keep_both" class="import-collision-radio"> Keep both (rename existing to .bkp.N; import keeps the canonical name)</label>'
+  h += '<label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="import-collision-res" value="overwrite" class="import-collision-radio"> Overwrite existing metadata</label>'
+  h += '<div id="import-overwrite-implications" class="hidden mt-3 p-3 bg-white border border-amber-300 rounded-md text-sm text-gray-800">'
+  h += '<p class="font-semibold mb-2">Overwrite implications</p>'
+  h += '<div id="import-overwrite-dependents" class="whitespace-pre-wrap text-xs max-h-36 overflow-y-auto"></div>'
+  h += '</div></div>'
   return h
+}
+
+function updateVizOverwriteImplicationsPanel(modal) {
+  if (!modal) return
+  var panel = modal.querySelector('#import-overwrite-implications')
+  var dependentsEl = modal.querySelector('#import-overwrite-dependents')
+  if (!panel || !dependentsEl) return
+  if (window._importCollisionResolution !== 'overwrite') {
+    panel.classList.add('hidden')
+    return
+  }
+  dependentsEl.textContent = formatImportDependentsSummaryViz({ dependents: (window._vizLastImportValidation && window._vizLastImportValidation.dependents) || null })
+  panel.classList.remove('hidden')
 }
 
 function updateVizImportSubmitEnabled(modal) {
@@ -3429,6 +3562,16 @@ function updateVizImportSubmitEnabled(modal) {
     return
   }
   submitBtn.disabled = false
+}
+
+function handleFillExampleContent(btn) {
+  if (btn && btn.closest('[data-controller="data-view"]')) return
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+  var content = modal.querySelector('#import-metadata-content')
+  if (!content) return
+  content.value = content.placeholder || ''
+  checkModalForm()
 }
 
 function handlePreviewMetadata(btn) {
@@ -3459,7 +3602,7 @@ function handlePreviewMetadata(btn) {
       method: 'POST',
       headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'application/json', 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify({ source_project_id: sel.sourceProjectId, source_annot_id: sel.sourceAnnotId })
+      body: JSON.stringify({ source_project_id: sel.sourceProjectId, source_annot_id: sel.sourceAnnotId, loom_file: loomFile })
     })
   } else if (inputMethod === '2') {
     var fileInput = modal.querySelector('#import-metadata-file')
@@ -3503,12 +3646,18 @@ function handlePreviewMetadata(btn) {
       dupBlock = '<div class="p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm text-yellow-800">' + data.duplicates.length + ' duplicate(s) found (' + data.duplicates.map(function(x) { return escapeHtmlForImportMeta(x) }).join(', ') + '). Only first occurrence is kept.</div>'
     }
     warnings.innerHTML = dupBlock + buildImportValidationHtmlViz(data.import_validation)
-    warnings.classList.remove('hidden')
+    if (warnings.innerHTML.trim()) {
+      warnings.classList.remove('hidden')
+    } else {
+      warnings.classList.add('hidden')
+    }
     var preview = modal.querySelector('#import-preview')
     var previewContent = modal.querySelector('#import-preview-content')
-    if (data.preview_lines && data.preview_lines.length > 0) {
-      previewContent.innerHTML = data.preview_lines.map(function(l) { var d = document.createElement('div'); d.textContent = l; return '<div class="py-0.5 border-b border-gray-100 last:border-0 whitespace-nowrap">' + d.innerHTML + '</div>' }).join('')
+    if (data.preview || (data.preview_lines && data.preview_lines.length > 0)) {
+      previewContent.innerHTML = renderImportPreviewHtmlViz(data.preview, data.preview_lines)
       preview.classList.remove('hidden')
+    } else if (preview) {
+      preview.classList.add('hidden')
     }
     if (data.header_name && inputMethod !== '3') {
       var nameInput = modal.querySelector('#import-metadata-name')
@@ -3517,14 +3666,51 @@ function handlePreviewMetadata(btn) {
     var submitBtn = modal.querySelector('#import-submit-btn')
     if (submitBtn) { submitBtn.classList.remove('hidden') }
     updateVizImportSubmitEnabled(modal)
-    btn.classList.add('hidden')
+    var formError = modal.querySelector('#import-form-error')
+    if (formError) { formError.classList.add('hidden'); formError.innerHTML = '' }
+    showImportReviewStep(modal)
   })
   .catch(function(err) {
     btn.textContent = 'Preview'; btn.disabled = false
-    var warnings = modal.querySelector('#import-warnings')
-    warnings.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">Error: ' + err.message + '</div>'
-    warnings.classList.remove('hidden')
+    showImportFormStep(modal)
+    var formError = modal.querySelector('#import-form-error')
+    if (formError) {
+      formError.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">Error: ' + escapeHtmlForImportMeta(err.message) + '</div>'
+      formError.classList.remove('hidden')
+    }
   })
+}
+
+function showImportFormStep(modal) {
+  if (!modal) modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+  modal.querySelector('#import-form-step')?.classList.remove('hidden')
+  modal.querySelector('#import-review-step')?.classList.add('hidden')
+  modal.querySelector('#import-preview-btn')?.classList.remove('hidden')
+  modal.querySelector('#import-submit-btn')?.classList.add('hidden')
+  modal.querySelector('#import-back-btn')?.classList.add('hidden')
+  modal.querySelector('#import-back-arrow-btn')?.classList.add('hidden')
+}
+
+function showImportReviewStep(modal) {
+  if (!modal) modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+  modal.querySelector('#import-form-step')?.classList.add('hidden')
+  modal.querySelector('#import-review-step')?.classList.remove('hidden')
+  modal.querySelector('#import-preview-btn')?.classList.add('hidden')
+  modal.querySelector('#import-submit-btn')?.classList.remove('hidden')
+  modal.querySelector('#import-back-btn')?.classList.remove('hidden')
+  modal.querySelector('#import-back-arrow-btn')?.classList.remove('hidden')
+  var scrollRoot = modal.querySelector('.overflow-y-auto')
+  if (scrollRoot) scrollRoot.scrollTop = 0
+}
+
+function handleBackToImportForm(btn) {
+  if (btn && btn.closest('[data-controller="data-view"]')) return
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+  showImportFormStep(modal)
+  checkModalForm()
 }
 
 function handleSubmitMetadata(btn) {
@@ -3563,11 +3749,10 @@ function handleSubmitMetadata(btn) {
   })
   .then(function(r) {
     return r.json().then(function(data) {
-      if (!r.ok) {
-        var msg = data.message || data.error || ('HTTP error ' + r.status)
-        throw new Error(msg)
-      }
+      data.__httpOk = r.ok
       return data
+    }).catch(function() {
+      return { status: 'error', message: 'HTTP error ' + r.status, __httpOk: r.ok }
     })
   })
   .then(function(data) {

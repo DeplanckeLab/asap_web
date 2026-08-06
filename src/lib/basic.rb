@@ -1121,7 +1121,7 @@ module Basic
       bad_rows = []
       line_num = 0
 
-      File.foreach(file_path.to_s) do |line|
+      File.foreach(file_path.to_s, mode: 'r:ASCII-8BIT') do |line|
         line_num += 1
         fields = raw_text_matrix_split_line(line, delim)
         next if fields.size == 1 && fields[0].to_s.empty?
@@ -1342,7 +1342,7 @@ module Basic
     end
 
     def raw_text_matrix_split_line(line, delim)
-      line.delete_suffix("\n").delete_suffix("\r").split(delim, -1)
+      line.b.delete_suffix("\n").delete_suffix("\r").split(delim.b, -1)
     end
 
     def raw_text_matrix_cell_column_count(field_count, gene_name_col)

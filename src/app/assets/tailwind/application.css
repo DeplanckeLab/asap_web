@@ -1,4 +1,15 @@
-@import "tailwindcss";
+/* Disable auto source detection: it walks the whole app tree and can ingest
+   huge trees under public/data (multi-GB example datasets), blowing watcher RSS.
+   Register only paths that actually contain Tailwind class names. */
+@import "tailwindcss" source(none);
+@source "../../views";
+@source "../../helpers";
+@source "../../javascript";
+@source "../../../public/*.html";
+@source not "../../../public/data";
+@source not "../../../public/data/rcp";
+@source not "../../../log";
+@source not "../../../tmp";
 /* @config "../../../tailwind.config.js"; */
 
 @layer base {

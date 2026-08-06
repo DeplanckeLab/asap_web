@@ -1,0 +1,11 @@
+<h2>ASAP run failed</h2>
+
+<p><strong>Project:</strong> <%= @project.key %> (ID <%= @project.id %>)</p>
+<p><strong>Run:</strong> #<%= @run.id %></p>
+<p><strong>Step:</strong> <%= @step&.label.presence || @step&.name %></p>
+<p><strong>Project URL:</strong> <%= project_url(@project) %></p>
+
+<hr>
+
+<h3>Error</h3>
+<div style="white-space: pre-wrap;"><%= @error_message %></div>

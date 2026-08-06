@@ -748,17 +748,17 @@ task :parse, [:project_key] => [:environment] do |t, args|
             end
         end
 
-        # preparse.v8.py gunzips/archives and records the readable path in output.json.
-        # parse.v8.py TextHandler opens the file as UTF-8 text and does not decompress.
-        if file_type == 'RAW_TEXT' && fu
+        # preparse.v8.py unpacks archives/gz and records the readable member path in output.json.
+        # parse.v8.py opens H5*/text inputs directly (h5py / UTF-8) and does not unzip or decompress.
+        if fu && %w[H5_10x H5AD LOOM RAW_TEXT].include?(file_type.to_s)
           begin
             preparsed_file_path = Basic.resolve_preparsed_input_file_path(fu, project: project)
             if preparsed_file_path.present?
               filepath = Pathname.new(preparsed_file_path)
-              logger.info("[ParseRake] Using preparsed RAW_TEXT file path #{filepath} for v8 parsing")
+              logger.info("[ParseRake] Using preparsed #{file_type} file path #{filepath} for v8 parsing")
             end
           rescue => e
-            logger.warn("[ParseRake] Could not resolve preparsed RAW_TEXT file path: #{e.class} - #{e.message}")
+            logger.warn("[ParseRake] Could not resolve preparsed #{file_type} file path: #{e.class} - #{e.message}")
           end
         end
 

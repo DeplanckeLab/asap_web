@@ -142,6 +142,7 @@ Rails.application.routes.draw do
       get :get_ge_geneset_list
       post :restart
       post :stop
+      post :report_error
     end
   end
   resources :reqs

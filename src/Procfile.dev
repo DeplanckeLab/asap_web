@@ -1,3 +1,4 @@
 web: bin/rails server -b '0.0.0.0'
-css: WATCHMAN_DISABLE=true NODE_OPTIONS=--watch-poll bin/rails tailwindcss:watch
+# TAILWINDCSS_DEBUG skips --minify in watch (cheaper rebuilds). WATCHMAN_DISABLE avoids sock spin in Docker.
+css: WATCHMAN_DISABLE=true TAILWINDCSS_DEBUG=1 NODE_OPTIONS=--watch-poll bin/rails tailwindcss:watch
 

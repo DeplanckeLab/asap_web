@@ -179,9 +179,10 @@ class AnnotsController < ApplicationController
         end
 
         output_json_headers = nil
-        if @annot.headers_json.present?
+        headers_json_raw = @annot.headers_json_value
+        if headers_json_raw.present?
           begin
-            parsed = JSON.parse(@annot.headers_json)
+            parsed = JSON.parse(headers_json_raw)
             output_json_headers = parsed.map(&:to_s) if parsed.is_a?(Array) && parsed.any?
           rescue JSON::ParserError
             output_json_headers = nil

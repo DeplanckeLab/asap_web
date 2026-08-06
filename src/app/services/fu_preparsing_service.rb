@@ -923,13 +923,13 @@ class FuPreparsingService
       prediction_mount_root = Basic.prediction_data_root_mount
       @logger.info("[FuPreparsingService] Prediction volume mount root: #{prediction_mount_root}")
 
-      # Build Docker command
+      # Build Docker command.
+      # Do not mount over /srv: prediction.tool.2.R ships in the asap_run image WORKDIR (/srv).
       docker_cmd = [
         'docker', 'run',
         '--entrypoint', '/bin/sh',
         '--rm',
         '-v', "#{prediction_mount_root}:#{prediction_mount_root}",
-        '-v', '/srv/asap_run/srv:/srv',
         docker_image,
         '-c', r_script_cmd
       ]
@@ -1041,7 +1041,6 @@ class FuPreparsingService
             '--entrypoint', '/bin/sh',
             '--rm',
             '-v', "#{prediction_mount_root}:#{prediction_mount_root}",
-            '-v', '/srv/asap_run/srv:/srv',
             docker_image,
             '-c', r_script_cmd
           ]

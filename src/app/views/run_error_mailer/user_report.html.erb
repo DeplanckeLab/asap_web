@@ -1,0 +1,18 @@
+<h2>ASAP bug report</h2>
+
+<p><strong>From:</strong> <%= @sender_email %></p>
+<p><strong>Project:</strong> <%= @project.key %> (ID <%= @project.id %>)</p>
+<p><strong>Run:</strong> #<%= @run.id %></p>
+<p><strong>Step:</strong> <%= @step&.label.presence || @step&.name %></p>
+<p><strong>Project URL:</strong> <%= project_url(@project) %></p>
+
+<hr>
+
+<h3>Error</h3>
+<div style="white-space: pre-wrap;"><%= @error_message %></div>
+
+<% if @message.present? %>
+  <hr>
+  <h3>User message</h3>
+  <div style="white-space: pre-wrap;"><%= @message %></div>
+<% end %>

@@ -1,6 +1,7 @@
 class RunsController < ApplicationController
-  before_action :set_run, only: [:get_de_gene_list, :get_ge_geneset_list, :show, :edit, :update, :destroy, :restart, :stop]
-  before_action :authorize_publication_snapshot_run_access, only: [:get_de_gene_list, :get_ge_geneset_list, :show]
+  skip_before_action :authenticate_user!, only: [:report_error], raise: false
+  before_action :set_run, only: [:get_de_gene_list, :get_ge_geneset_list, :show, :edit, :update, :destroy, :restart, :stop, :report_error]
+  before_action :authorize_publication_snapshot_run_access, only: [:get_de_gene_list, :get_ge_geneset_list, :show, :report_error]
   before_action :get_base_data, only: [:get_de_gene_list, :get_ge_geneset_list]
   include ApplicationHelper
   
@@ -837,6 +838,41 @@ class RunsController < ApplicationController
     Rails.logger.error("[runs#stop] Run##{@run&.id} failed: #{e.class} - #{e.message}")
     Rails.logger.error(e.backtrace.first(20).join("\n")) if e.backtrace
     render json: { status: 'error', message: e.message }, status: :internal_server_error
+  end
+
+  def report_error
+    unless @run.status_id == 4
+      redirect_back fallback_location: project_path(@project), alert: 'This run is not in a failed state.'
+      return
+    end
+
+    sender_email = if current_user
+                     current_user.email
+                   else
+                     params[:email].to_s.strip
+                   end
+    message = params[:message].to_s.strip
+
+    if sender_email.blank? || !sender_email.match?(URI::MailTo::EMAIL_REGEXP)
+      redirect_back fallback_location: project_path(@project), alert: 'Please provide a valid email address.'
+      return
+    end
+
+    begin
+      RunErrorMailer.user_report(
+        run: @run,
+        sender_email: sender_email,
+        message: message.presence
+      ).deliver_now
+
+      redirect_back fallback_location: project_path(@project), notice: 'Thank you for reporting this issue. We will get back to you shortly.'
+    rescue KeyError, ArgumentError => e
+      Rails.logger.error("[RunsController#report_error] Invalid mail configuration: #{e.class} - #{e.message}")
+      redirect_back fallback_location: project_path(@project), alert: 'Report form is temporarily unavailable. Please try again later.'
+    rescue StandardError => e
+      Rails.logger.error("[RunsController#report_error] Failed to send report for Run##{@run.id}: #{e.class} - #{e.message}")
+      redirect_back fallback_location: project_path(@project), alert: 'Failed to send your report. Please try again later.'
+    end
   end
 
   def destroy

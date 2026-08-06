@@ -220,7 +220,7 @@ class ProjectsController < ApplicationController
     end
 
     # Preload expression matrices (dim = 3) grouped by loom file
-    @expression_matrices_by_loom = Annot.where(project_id: @project.id, dim: 3)
+    @expression_matrices_by_loom = Annot.light.where(project_id: @project.id, dim: 3)
                                         .order(id: :asc)
                                         .group_by(&:filepath)
     
@@ -437,7 +437,7 @@ class ProjectsController < ApplicationController
       
       # Get all annotations with step and run information for ordering
       all_annots = apply_publication_snapshot_to_annots(
-        Annot.where(project_id: @project.id)
+        Annot.light.where(project_id: @project.id)
              .where.not(filepath: nil)
              .includes(:step, :data_type, :data_transformation, run: [:std_method])
              .order(:name)
@@ -712,7 +712,7 @@ class ProjectsController < ApplicationController
 
         @integrate_annots = {}
         @integrate_projects.each do |p|
-          annots = Annot.where(project_id: p.id, dim: 1)
+          annots = Annot.light.where(project_id: p.id, dim: 1)
                         .where('nber_cats > 0 OR list_cat_json IS NOT NULL')
                         .order(:name)
                         .select(&:integration_batch_metadata?)
@@ -2036,7 +2036,7 @@ class ProjectsController < ApplicationController
     if p['run_id1'].present? && p['run_id2'].present? && p['op'].present?
       list_run_ids = [p['run_id1'], p['run_id2']]
       Run.where(id: list_run_ids).each { |r| @h_runs[r.id.to_s] = r }
-      annots = Annot.where(run_id: list_run_ids).to_a
+      annots = Annot.light.where(run_id: list_run_ids).to_a
       @h_annots = {}
       annots.each { |a| @h_annots[a.run_id.to_s] = a }
 
@@ -2099,7 +2099,7 @@ class ProjectsController < ApplicationController
     de_step = Step.where(docker_image_id: asap_docker_image.id, name: 'de').first
     @step = de_step
     @runs = apply_publication_snapshot_to_runs(@project.runs.where(step_id: de_step.id)).includes(:annots).order(created_at: :desc)
-    annots = Annot.where(run_id: @runs.map(&:id)).to_a
+    annots = Annot.light.where(run_id: @runs.map(&:id)).to_a
 
     @h_de_filter = Basic.safe_parse_json(@project.de_filter_json, { 'fc_cutoff' => 2, 'fdr_cutoff' => 0.05 })
 
@@ -2136,7 +2136,7 @@ class ProjectsController < ApplicationController
     asap_docker_image = Basic.get_asap_docker(@project.version)
     de_step = Step.where(docker_image_id: asap_docker_image.id, name: 'de').first
     @runs = apply_publication_snapshot_to_runs(@project.runs.where(step_id: de_step.id)).includes(:annots).order(created_at: :desc)
-    annots = Annot.where(run_id: @runs.map(&:id)).to_a
+    annots = Annot.light.where(run_id: @runs.map(&:id)).to_a
 
     fdr_cutoff = params[:fdr_cutoff].to_f
     fc_cutoff  = params[:fc_cutoff].to_f
@@ -2655,7 +2655,7 @@ class ProjectsController < ApplicationController
 
     # Scope to one loom when the client asks for a specific file (AJAX right panel).
     # Loading every Annot for the project is very slow on large projects.
-    annot_relation = Annot.where(project_id: @project.id).where.not(filepath: nil)
+    annot_relation = Annot.light.where(project_id: @project.id).where.not(filepath: nil)
     annot_relation = annot_relation.where(filepath: @selected_loom_file) if @selected_loom_file.present?
 
     all_annots = apply_publication_snapshot_to_annots(
@@ -5322,8 +5322,8 @@ class ProjectsController < ApplicationController
 
     loom_file = params[:loom_file].presence
     if loom_file.blank?
-      loom_file = Annot.where(project_id: @project.id, dim: 3, name: '/matrix').order(id: :asc).pick(:filepath)
-      loom_file ||= Annot.where(project_id: @project.id, dim: 3).order(id: :asc).pick(:filepath)
+      loom_file = Annot.light.where(project_id: @project.id, dim: 3, name: '/matrix').order(id: :asc).pick(:filepath)
+      loom_file ||= Annot.light.where(project_id: @project.id, dim: 3).order(id: :asc).pick(:filepath)
     end
 
     if loom_file.blank?
@@ -5415,7 +5415,7 @@ class ProjectsController < ApplicationController
     server_url = ENV.fetch('SERVER_URL').to_s.chomp('/')
 
     h_data_types = DataType.pluck(:id, :name).to_h
-    annots = Annot.where(project_id: @project.id).includes(:data_type, run: :std_method).to_a
+    annots = Annot.light.where(project_id: @project.id).includes(:data_type, run: :std_method).to_a
     h_annots_by_path = Hash.new { |h, k| h[k] = [] }
     h_file_details = {}
 
@@ -5484,7 +5484,7 @@ class ProjectsController < ApplicationController
   # GET /projects/:id/project_data_files
   # GET /api/projects/:id/project_data_files
   def project_data_files
-    data_files = Annot.where(project_id: @project.id)
+    data_files = Annot.light.where(project_id: @project.id)
                       .where.not(filepath: [nil, ''])
                       .distinct
                       .pluck(:filepath)
@@ -6474,7 +6474,7 @@ class ProjectsController < ApplicationController
       end
     end
     if annot_ids.any?
-      Annot.where(id: annot_ids.uniq).each do |annot|
+      Annot.light.where(id: annot_ids.uniq).each do |annot|
         @h_annots_for_params[annot.id] = annot
         if annot.ori_run_id.present? && !@h_ori_runs_for_params[annot.ori_run_id]
           ori_run = Run.find_by(id: annot.ori_run_id)
@@ -6979,16 +6979,16 @@ class ProjectsController < ApplicationController
         matrix_annot = Annot.find_by(id: params[:annot_id], project_id: @project.id, filepath: loom_file, dim: 3)
       end
       if matrix_annot.nil? && params[:layer].present?
-        matrix_annot = Annot.where(project_id: @project.id, filepath: loom_file, dim: 3, name: params[:layer]).first
+        matrix_annot = Annot.light.where(project_id: @project.id, filepath: loom_file, dim: 3, name: params[:layer]).first
       end
-      matrix_annot ||= Annot.where(project_id: @project.id, filepath: loom_file, dim: 3, name: '/matrix').first
+      matrix_annot ||= Annot.light.where(project_id: @project.id, filepath: loom_file, dim: 3, name: '/matrix').first
       matrix_name = matrix_annot&.name || '/matrix'
       matrix_annot_id = matrix_annot&.id
 
       Rails.logger.info "Using expression matrix: #{matrix_name} (annot_id: #{matrix_annot_id || 'none'})"
 
       # Find gene metadata with _StableID name
-      gene_metadata = Annot.where(project_id: @project.id, dim: 2, name: '/row_attrs/_StableID')
+      gene_metadata = Annot.light.where(project_id: @project.id, dim: 2, name: '/row_attrs/_StableID')
                              .where("filepath = ?", loom_file)
                              .first
       
@@ -7976,7 +7976,7 @@ class ProjectsController < ApplicationController
     header_h_ori_runs = {}
     header_h_steps    = {}
     if header_annot_ids.any?
-      Annot.where(id: header_annot_ids.uniq).each do |a|
+      Annot.light.where(id: header_annot_ids.uniq).each do |a|
         header_h_annots[a.id] = a
         header_run_ids << a.ori_run_id if a.ori_run_id
       end
@@ -8801,7 +8801,7 @@ class ProjectsController < ApplicationController
       # Get annotations for input_data widgets (needed to find annot_id)
       @h_annots = {}
       successful_runs.each do |run|
-        annots = Annot.where(run_id: run.id, data_type_id: 3).all
+        annots = Annot.light.where(run_id: run.id, data_type_id: 3).all
         annots.each { |a| @h_annots[a.id] = a }
       end
       
@@ -8887,7 +8887,7 @@ class ProjectsController < ApplicationController
       return
     end
 
-    annots = Annot.where(id: annot_ids).to_a
+    annots = Annot.light.where(id: annot_ids).to_a
     unless annots.size == annot_ids.size
       render json: empty_payload.merge(error: 'Some annotations were not found.')
       return
@@ -8920,7 +8920,8 @@ class ProjectsController < ApplicationController
     asap_docker_name = "fabdavid/asap_run:#{asap_docker_image.tag}"
     vol = Basic.prediction_docker_volume_mount_arg
     models_base = Basic.prediction_models_path_for_r
-    cmd = "docker run --entrypoint '/bin/sh' --rm #{vol} -v /srv/asap_run/srv:/srv #{asap_docker_name} -c 'Rscript prediction.tool.2.R predict #{models_base}/#{@project.version_id} #{std_method.id} #{rows} #{cols} 2>&1'"
+    # Do not mount over /srv: prediction.tool.2.R ships in the asap_run image WORKDIR (/srv).
+    cmd = "docker run --entrypoint '/bin/sh' --rm #{vol} #{asap_docker_name} -c 'Rscript prediction.tool.2.R predict #{models_base}/#{@project.version_id} #{std_method.id} #{rows} #{cols} 2>&1'"
 
     pred_text, process_status = Open3.capture2e(cmd)
     Rails.logger.info("[upd_pred] prediction exit=#{process_status&.exitstatus} bytes=#{pred_text.to_s.bytesize} cmd=#{cmd}")
@@ -9632,7 +9633,7 @@ class ProjectsController < ApplicationController
     end
 
     def project_has_embeddings?
-      Annot.where(project_id: @project.id)
+      Annot.light.where(project_id: @project.id)
            .where.not(filepath: nil)
            .where(dim: 1, nber_rows: 2)
            .exists?
@@ -9864,7 +9865,7 @@ class ProjectsController < ApplicationController
       end
 
       @expression_matrices_by_loom = timed_step.call('load_expression_matrices') do
-        Annot.where(project_id: @project.id, dim: 3)
+        Annot.light.where(project_id: @project.id, dim: 3)
              .order(id: :asc)
              .group_by(&:filepath)
       end
@@ -11053,7 +11054,7 @@ class ProjectsController < ApplicationController
       if @selected_loom_file.present?
         all_runs_scope = @project.runs
         @loom_filter_total_runs_count = all_runs_scope.count
-        loom_run_ids = Annot.where(project_id: @project.id, filepath: @selected_loom_file)
+        loom_run_ids = Annot.light.where(project_id: @project.id, filepath: @selected_loom_file)
                             .where.not(run_id: nil)
                             .distinct
                             .pluck(:run_id)
@@ -11363,7 +11364,7 @@ class ProjectsController < ApplicationController
     end
 
     def load_loom_file_list_context
-      all_annots = Annot.where(project_id: @project.id)
+      all_annots = Annot.light.where(project_id: @project.id)
                         .where.not(filepath: nil)
                         .includes(:step, run: [:std_method])
                         .order(:name)
@@ -11384,7 +11385,7 @@ class ProjectsController < ApplicationController
 
     def load_data_context
       @project_type = @project.project_type
-      all_annots = Annot.where(project_id: @project.id)
+      all_annots = Annot.light.where(project_id: @project.id)
                         .where.not(filepath: nil)
                         .includes(:step, run: [:std_method])
                         .order(:name)
@@ -11668,6 +11669,8 @@ class ProjectsController < ApplicationController
       @summary_loom_file_count = 0
       @summary_loom_content_counts = { matrices: 0, col_attrs: 0, row_attrs: 0, global: 0 }
       @summary_shared_users_count = @project.shares.count
+      # Do not use Annot.light here: its multi-column select makes .count emit
+      # COUNT(col1, col2, ...) which PostgreSQL rejects.
       embedding_scope = apply_publication_snapshot_to_annots(Annot.where(project_id: @project.id, nber_rows: 2))
       @summary_embedding_count = embedding_scope.count
       @summary_run_user_count = if defined?(@runs) && @runs.present?
@@ -11681,7 +11684,7 @@ class ProjectsController < ApplicationController
       @summary_checkpoint_comment_count = @project.checkpoints.to_a.sum { |checkpoint| checkpoint.comments.size }
 
       summary_annots = apply_publication_snapshot_to_annots(
-        Annot.where(project_id: @project.id).where.not(filepath: [nil, ''])
+        Annot.light.where(project_id: @project.id).where.not(filepath: [nil, ''])
       ).pluck(:filepath, :name, :dim)
       return if summary_annots.empty?
 
@@ -11870,7 +11873,7 @@ class ProjectsController < ApplicationController
     end
 
     def selection_items_from_annots(loom_file = nil)
-      scope = Annot.where(project_id: @project.id, dim: 1)
+      scope = Annot.light.where(project_id: @project.id, dim: 1)
       scope = scope.where(filepath: loom_file) if loom_file.present?
       scope = scope.where("name LIKE ?", "%.sel_%")
       annots = scope.order(created_at: :desc).to_a
@@ -13574,7 +13577,7 @@ class ProjectsController < ApplicationController
     def get_available_annotations_for_project
       # Get all annotations for this project
       # Include run association for later filtering by step
-      Annot.where(project_id: @project.id)
+      Annot.light.where(project_id: @project.id)
            .includes(:run)
            .all
     end
@@ -13900,7 +13903,7 @@ class ProjectsController < ApplicationController
       return unless meta.is_a?(Hash)
 
       if loom_file.present?
-        embedding_id = Annot.where(project_id: @project.id, filepath: loom_file)
+        embedding_id = Annot.light.where(project_id: @project.id, filepath: loom_file)
                             .where(nber_rows: 2)
                             .order(:id)
                             .pick(:id)
@@ -13944,7 +13947,7 @@ class ProjectsController < ApplicationController
 
     def heatmap_metadata_options_for(loom_file, dim:)
       # display_name is a Ruby method on Annot, not a DB column — order by name in SQL
-      Annot.where(project_id: @project.id, filepath: loom_file, dim: dim)
+      Annot.light.where(project_id: @project.id, filepath: loom_file, dim: dim)
            .includes(:data_type)
            .order(Arel.sql('LOWER(name)'))
            .map do |annot|
@@ -14518,7 +14521,7 @@ class ProjectsController < ApplicationController
       end
 
       if map.empty?
-        loom_files = Annot.where(project_id: project.id).where.not(filepath: [nil, ""]).distinct.pluck(:filepath)
+        loom_files = Annot.light.where(project_id: project.id).where.not(filepath: [nil, ""]).distinct.pluck(:filepath)
         roots.each do |root|
           loom_files.each do |rel|
             loom_path = root + rel.to_s
@@ -15343,7 +15346,7 @@ class ProjectsController < ApplicationController
       # default to /matrix and optionally allow imported layers from parsing output.
       @cell_filtering_matrix_options = ['/matrix']
       if @parsing_run
-        layer_paths = Annot.where(project_id: @project.id, run_id: @parsing_run.id, dim: 3)
+        layer_paths = Annot.light.where(project_id: @project.id, run_id: @parsing_run.id, dim: 3)
                            .pluck(:name)
                            .select { |name| name.to_s.start_with?('/layers/') }
                            .uniq
@@ -15356,7 +15359,7 @@ class ProjectsController < ApplicationController
       # Get annotations for metadata filtering, grouped by source run
       metadata_store_run_ids = ([@parsing_run&.id] + @cell_filtering_runs.map(&:id) + @gene_filtering_runs.map(&:id)).compact.uniq
       metadata_annots = if metadata_store_run_ids.any?
-        Annot.where(project_id: @project.id, store_run_id: metadata_store_run_ids, data_type_id: 3, dim: 1).order(:name).to_a
+        Annot.light.where(project_id: @project.id, store_run_id: metadata_store_run_ids, data_type_id: 3, dim: 1).order(:name).to_a
       else
         []
       end
@@ -15598,7 +15601,7 @@ class ProjectsController < ApplicationController
           end
         end
       end
-      @h_annots_for_params = annot_ids.any? ? Annot.where(id: annot_ids.uniq).index_by(&:id) : {}
+      @h_annots_for_params = annot_ids.any? ? Annot.light.where(id: annot_ids.uniq).index_by(&:id) : {}
       @h_ori_runs_for_params = run_ids.any? ? Run.where(id: run_ids.uniq).index_by(&:id) : {}
       step_ids = @h_ori_runs_for_params.values.map(&:step_id).compact.uniq
       @h_steps_for_params = step_ids.any? ? Step.where(id: step_ids).index_by(&:id) : {}
@@ -15813,7 +15816,7 @@ class ProjectsController < ApplicationController
                          []
                        end
       all_annots = if source_step_ids.any? || source_run_ids.any?
-                     annots_scope = Annot.where(project_id: @project.id)
+                     annots_scope = Annot.light.where(project_id: @project.id)
                      clause = []
                      values = []
                      if source_step_ids.any?
@@ -15938,7 +15941,7 @@ class ProjectsController < ApplicationController
       
       # Get annotations
       @h_annots_by_dim = {}
-      annots = Annot.where(run_id: run.id).all
+      annots = Annot.light.where(run_id: run.id).all
       annots.each { |a| @h_annots_by_dim[a.dim] ||= []; @h_annots_by_dim[a.dim].push(a) }
       
       # Get standard method attributes
@@ -16246,7 +16249,7 @@ class ProjectsController < ApplicationController
 
         if step.has_std_view
           @h_annots_by_dim = {}
-          Annot.where(run_id: run.id).each { |a| @h_annots_by_dim[a.dim] ||= []; @h_annots_by_dim[a.dim].push(a) }
+          Annot.light.where(run_id: run.id).each { |a| @h_annots_by_dim[a.dim] ||= []; @h_annots_by_dim[a.dim].push(a) }
 
           @layout = step.show_view_json.present? ? Basic.safe_parse_json(step.show_view_json, []) : []
 
@@ -16318,7 +16321,7 @@ class ProjectsController < ApplicationController
             end
           end
           if annot_ids.any?
-            Annot.where(id: annot_ids.uniq).each do |annot|
+            Annot.light.where(id: annot_ids.uniq).each do |annot|
               @h_annots_for_params[annot.id] = annot
               if annot.ori_run_id.present? && !@h_ori_runs_for_params[annot.ori_run_id]
                 ori_run = Run.find_by(id: annot.ori_run_id)
@@ -16396,7 +16399,7 @@ class ProjectsController < ApplicationController
           end
         end
         if annot_ids.any?
-          Annot.where(id: annot_ids.uniq).each do |annot|
+          Annot.light.where(id: annot_ids.uniq).each do |annot|
             @h_annots_for_params[annot.id] = annot
             if annot.ori_run_id.present? && !@h_ori_runs_for_params[annot.ori_run_id]
               ori_run = Run.find_by(id: annot.ori_run_id)

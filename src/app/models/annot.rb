@@ -1,6 +1,11 @@
 class Annot < ApplicationRecord
   before_destroy :prevent_deletion_if_locked_from_publication
 
+  # Large JSON payloads that must not be pulled into Puma on project/list pages.
+  HEAVY_COLUMNS = %w[headers_json].freeze
+  # Refuse to persist header arrays larger than this (guards bad upstream payloads).
+  HEADERS_JSON_MAX_SIZE = 10_000
+
   belongs_to :project
   belongs_to :step, optional: true
   belongs_to :run, optional: true
@@ -20,14 +25,45 @@ class Annot < ApplicationRecord
   scope :embeddings, -> { where(data_type_id: DataType.where(name: ['umap', 'tsne', 'pca']).pluck(:id)) }
   scope :metadata, -> { where(data_type_id: DataType.where(name: 'metadata').pluck(:id)) }
   scope :expression, -> { where(data_type_id: DataType.where(name: 'expression').pluck(:id)) }
-  
+  # Omit heavy JSON columns (notably headers_json) for catalog / list queries.
+  # Do not call .count / .sum / other aggregates on this scope: the multi-column
+  # select becomes COUNT(col1, col2, ...) on PostgreSQL and raises UndefinedFunction.
+  # Use Annot.where(...) (no light) or relation.except(:select).count instead.
+  scope :light, -> {
+    cols = (column_names - HEAVY_COLUMNS).map { |c| arel_table[c] }
+    select(*cols)
+  }
+  scope :without_heavy_columns, -> { light }
+
+  # Persist only real, bounded header arrays from finish_run metadata. Never synthesize Value N lists.
+  def self.headers_json_from_meta(meta)
+    return nil unless meta.is_a?(Hash)
+    return nil unless meta['nber_rows'].to_i > 0 && meta['nber_cols'].to_i > 0
+    return nil if meta['on'] == 'EXPRESSION_MATRIX'
+
+    headers = meta['headers']
+    return nil unless headers.is_a?(Array) && headers.any?
+    return nil if headers.size > HEADERS_JSON_MAX_SIZE
+
+    headers.to_json
+  end
+
+  # headers_json if already selected; otherwise one-row fetch (preview / DE only).
+  def headers_json_value
+    if has_attribute?('headers_json')
+      self[:headers_json]
+    else
+      self.class.unscoped.where(id: id).pick(:headers_json)
+    end
+  end
+
   # Get available embeddings for a project
   def self.available_embeddings(project_id)
     # Find runs that created embeddings
     embedding_runs = Run.joins(:step).where(project_id: project_id, steps: { name: Step::EMBEDDING_STEP_NAMES })
     
     # Get annotations created by those runs
-    where(project_id: project_id, ori_run_id: embedding_runs.pluck(:id))
+    light.where(project_id: project_id, ori_run_id: embedding_runs.pluck(:id))
       .order(:name)
   end
   
@@ -37,7 +73,7 @@ class Annot < ApplicationRecord
     runs = Run.joins(:step).where(project_id: project_id)
     
     # Get annotations that are NOT created by dimension reduction runs
-    where(project_id: project_id).order(:name)
+    light.where(project_id: project_id).order(:name)
   end
   
   # Get available loom files for a project
@@ -56,7 +92,7 @@ class Annot < ApplicationRecord
     embedding_runs = Run.joins(:step).where(project_id: project_id, steps: { name: Step::EMBEDDING_STEP_NAMES })
     
     # Get annotations created by those runs for the specific loom file
-    where(project_id: project_id, ori_run_id: embedding_runs.pluck(:id), filepath: filepath)
+    light.where(project_id: project_id, ori_run_id: embedding_runs.pluck(:id), filepath: filepath)
       .order(:name)
   end
   

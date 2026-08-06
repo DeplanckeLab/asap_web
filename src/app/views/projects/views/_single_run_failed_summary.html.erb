@@ -77,6 +77,8 @@
       </div>
     </div>
 
+    <%= render partial: 'projects/views/run_error_report_form', locals: { run: run } if run %>
+
     <div class="bg-white rounded-lg shadow-sm border border-gray-200">
       <div class="px-6 py-5">
         <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Submitted parameters</h4>

@@ -661,7 +661,7 @@ class SlurmJobMonitorJob < ApplicationJob
     
     project = run.project
     step = run.step
-    
+
     run.update(
       status_id: 4,
       error: error_message

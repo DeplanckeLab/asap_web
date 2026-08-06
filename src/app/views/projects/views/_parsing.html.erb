@@ -139,6 +139,11 @@
               </span>
             <% end %>
           <% end %>
+          <% if @parsing_run %>
+            <div class="w-full max-w-2xl mx-auto mt-6 text-left">
+              <%= render partial: 'projects/views/run_error_report_form', locals: { run: @parsing_run } %>
+            </div>
+          <% end %>
         </div>
       <% else %>
         <%# Fallback for any other status (including nil project_step) %>

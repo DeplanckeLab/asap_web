@@ -1608,7 +1608,7 @@ module Basic
         return [transposed, "transposed_row_major json_nr=#{jr} json_nc=#{jc} annot_nr=#{annot.nber_rows} annot_nc=#{annot.nber_cols} outer=#{outer} inner=#{inner}"]
       end
 
-      headers = safe_parse_json(annot.headers_json, [])
+      headers = safe_parse_json(annot.headers_json_value, [])
       hlen = headers.is_a?(Array) ? headers.size : 0
       if hlen >= 5 && (outer == hlen || outer == hlen + 1) && inner > outer * 5
         return [vals, "column_major_via_headers hlen=#{hlen} outer=#{outer} inner=#{inner}"]
@@ -1669,7 +1669,7 @@ module Basic
       n = n_value_cols.to_i
       return { indices: [0, 1, 2, 3, 4], sort_idx: 0 } if n < 5
 
-      headers = safe_parse_json(annot.headers_json, [])
+      headers = safe_parse_json(annot.headers_json_value, [])
       headers = [] unless headers.is_a?(Array)
 
       offset = 0
@@ -4564,7 +4564,7 @@ module Basic
           :store_run_id => (fo) ? fo.run_id : nil,
           :ori_run_id => (ori_annot2) ? ori_annot2.run_id : run.id,
           :ori_step_id => (ori_annot2) ? ori_annot2.step_id : run.step_id,
-          :headers_json => (meta['nber_rows'] and meta['nber_cols'] and meta['nber_rows'] > 0 and meta['nber_cols'] > 0 and meta['on'] != 'EXPRESSION_MATRIX') ? ((meta['headers']) ? meta['headers'].to_json : ((1 .. ((meta['on'] == 'GENE') ? meta['nber_cols'] : meta['nber_rows'])).map{|i| "Value #{i}"}.to_json)) : nil, 
+          :headers_json => Annot.headers_json_from_meta(meta), 
           # :fo_id => (fo) ? fo.id : nil,
           :name => meta['name'],
           :categories_json => (meta['categories']) ? meta['categories'].to_json : nil,
@@ -5224,7 +5224,8 @@ module Basic
 #        cmd = "docker run --entrypoint '/bin/sh' --rm -v /data/asap2:/data/asap2 -v /srv/asap_run/srv:/srv fabdavid/asap_run:v#{h_p[:project].version_id} -c 'Rscript prediction.tool.2.R predict /data/asap2/pred_models/#{h_p[:project].version_id} #{run.std_method_id} " + "#{h_var['nber_rows']} #{h_var['nber_cols']} 2>&1'"
         vol = Basic.prediction_docker_volume_mount_arg
         models_base = Basic.prediction_models_path_for_r
-        cmd = "docker run --entrypoint '/bin/sh' --rm #{vol} -v /srv/asap_run/srv:/srv #{asap_docker_name} -c 'Rscript prediction.tool.2.R predict #{models_base}/#{h_p[:project].version_id} #{run.std_method_id} " + "#{h_var['nber_rows']} #{h_var['nber_cols']} 2>&1'"
+        # Do not mount over /srv: prediction.tool.2.R ships in the asap_run image WORKDIR (/srv).
+        cmd = "docker run --entrypoint '/bin/sh' --rm #{vol} #{asap_docker_name} -c 'Rscript prediction.tool.2.R predict #{models_base}/#{h_p[:project].version_id} #{run.std_method_id} " + "#{h_var['nber_rows']} #{h_var['nber_cols']} 2>&1'"
             logger.debug("PRED_CMD: #{cmd}")
         pred_results_json = `#{cmd}`.split("\n").first #.gsub(/^(\{.+?\})/, "\1")                                                                                                       
         h_pred_results = Basic.safe_parse_json(pred_results_json, {})

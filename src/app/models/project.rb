@@ -25,7 +25,9 @@ class Project < ApplicationRecord
   belongs_to :root_project, class_name: 'Project', foreign_key: 'root_project_id', optional: true, inverse_of: :lineage_clone_projects
   has_many :lineage_clone_projects, class_name: 'Project', foreign_key: 'root_project_id', dependent: :nullify, inverse_of: :root_project
   before_validation :ensure_default_project_origin
-  has_many :annots, dependent: :destroy
+  # Default association omits heavy JSON (headers_json). Use Annot.find / headers_json_value when needed.
+  has_many :annots, -> { light }, dependent: :destroy
+  has_many :annots_light, -> { light }, class_name: 'Annot', foreign_key: :project_id, inverse_of: :project
   has_many :annot_cell_sets, inverse_of: :project
   has_many :ot_projects, dependent: :destroy
   has_many :ott_projects, dependent: :destroy

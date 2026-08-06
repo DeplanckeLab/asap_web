@@ -10,7 +10,9 @@ class Run < ApplicationRecord
   belongs_to :job, optional: true
   belongs_to :docker_build, optional: true
 
-  has_many :annots, dependent: :destroy
+  # Default association omits heavy JSON (headers_json). Use Annot.find / headers_json_value when needed.
+  has_many :annots, -> { light }, dependent: :destroy
+  has_many :annots_light, -> { light }, class_name: 'Annot', foreign_key: :run_id, inverse_of: :run
   has_many :fos, dependent: :destroy
   has_many :checkpoints, dependent: :nullify
   has_one :active_run, dependent: :destroy
@@ -117,12 +119,21 @@ class Run < ApplicationRecord
     (mb / 1024.0).round(4)
   end
 
+  after_update :notify_admins_on_failure, if: :saved_change_to_status_id?
+
   private
 
-    def prevent_deletion_if_locked_from_publication
-      return unless project&.locked_from_publication?(self)
+  def notify_admins_on_failure
+    return unless status_id == 4
+    return if status_id_before_last_save == 4
 
-      errors.add(:base, 'This run was created before publication and cannot be deleted.')
-      throw(:abort)
-    end
+    RunErrorNotifier.notify_admins!(self)
+  end
+
+  def prevent_deletion_if_locked_from_publication
+    return unless project&.locked_from_publication?(self)
+
+    errors.add(:base, 'This run was created before publication and cannot be deleted.')
+    throw(:abort)
+  end
 end

@@ -738,10 +738,15 @@ export default class extends Controller {
       this.updateRunStatusInDOM(runRow, runStatus)
     }
 
-    // Keep DE/Markers subviews stable while runs finish in background.
-    // Their own controllers/widgets handle lightweight status updates and a
-    // full right-panel reload would reset filters, pagination, and scroll.
-    if (this.isStableDeSubviewOpen()) {
+    // Keep forms / subviews stable while runs finish in background.
+    // A full right-panel reload would wipe filters, pagination, scroll, and
+    // unsaved form input (see shouldPreserveRightPanel). Offer a manual
+    // refresh hint instead when a run for this step just succeeded.
+    if (this.shouldPreserveRightPanel()) {
+      const statusIdNum = runStatus.status_id != null ? parseInt(runStatus.status_id, 10) : null
+      if (statusIdNum === 3) {
+        this.offerSubviewRefresh(runStatus)
+      }
       return
     }
 
@@ -877,14 +882,46 @@ export default class extends Controller {
     }
   }
 
-  isStableDeSubviewOpen() {
+  // True when the right panel is showing a form or step subview that must not
+  // be replaced by a websocket-driven step_results / run-panel reload.
+  shouldPreserveRightPanel() {
     if (!this.hasContentTarget) {
       return false
     }
     return !!(
+      this.contentTarget.querySelector('.std-form') ||
       this.contentTarget.querySelector('#markers-container') ||
-      this.contentTarget.querySelector('#de-filter-root')
+      this.contentTarget.querySelector('#de-filter-root') ||
+      this.contentTarget.querySelector('#ge-filter-root') ||
+      this.contentTarget.querySelector('#cluster-comparison-root') ||
+      this.contentTarget.querySelector('#de-gene-list-root') ||
+      this.contentTarget.querySelector('#de-viz-gene-list-root') ||
+      this.contentTarget.querySelector('#ge-geneset-list-root')
     )
+  }
+
+  // Flash the sub-view header refresh control when a successful run finishes
+  // for the step currently shown, without forcing a reload.
+  offerSubviewRefresh(runStatus) {
+    if (!this.hasContentTarget) return
+    if (this.contentTarget.querySelector('.std-form')) return
+
+    const runStepId = runStatus && runStatus.step_id != null ? String(runStatus.step_id) : null
+    const currentStepId = this.currentStepId ? String(this.currentStepId) : null
+    if (runStepId && currentStepId && runStepId !== currentStepId) return
+
+    const root = this.contentTarget.querySelector('[data-subview-refreshable="true"]')
+    if (!root) return
+    const btn = root.querySelector('[data-subview-refresh-btn]')
+    if (!btn) return
+
+    btn.classList.add('subview-refresh-available')
+    btn.title = 'New results available. Click to refresh.'
+  }
+
+  // Kept for any callers / debugging that still use the old name.
+  isStableDeSubviewOpen() {
+    return this.shouldPreserveRightPanel()
   }
 
   // Update the status pill in the right-panel summary header directly from the
@@ -916,18 +953,16 @@ export default class extends Controller {
     this.updateHeaderStatusSummary(data)
     this.forceRefreshParsingPanelOnTerminalStatus(data)
 
-    // Check if right panel is displaying a form (new run form)
-    const hasFormInRightPanel = this.hasContentTarget && this.contentTarget.querySelector('.std-form') !== null
-
-    if (hasFormInRightPanel) {
-      // Still update the badge in the left panel
+    // Keep forms / subviews (new run, compare clusters, DE/markers/GE tables,
+    // gene lists, …) open; only refresh left-panel badges.
+    if (this.shouldPreserveRightPanel()) {
       const updateStepId = data.step_id ? parseInt(data.step_id) : null
       if (updateStepId && (data.h_nber_analyses || data.parsing_status)) {
         this.refreshStepsPanelIfNeeded(data, updateStepId, () => {
-          this.updateStepStatusBadge(updateStepId.toString(), data)
+          this.updateStepStatusBadge(updateStepId.toString(), data, { skipRightPanelReload: true })
         })
       }
-      return // Exit early - don't refresh right panel
+      return
     }
 
     // Preserve currentStepId before refresh (it might get lost during DOM replacement)
@@ -1334,6 +1369,10 @@ export default class extends Controller {
 
   refreshStepsPanel(source = 'unknown') {
     if (this._refreshingStepsPanel) {
+      // Another refresh is in flight; queue one follow-up so the latest
+      // server-side counts are applied after the current fetch settles.
+      this._stepsPanelRefreshQueued = true
+      this._stepsPanelRefreshQueuedSource = source
       return this._refreshingStepsPanelPromise || Promise.resolve()
     }
     this._refreshingStepsPanel = true
@@ -1419,6 +1458,12 @@ export default class extends Controller {
     .finally(() => {
       controller._refreshingStepsPanel = false
       controller._refreshingStepsPanelPromise = null
+      if (controller._stepsPanelRefreshQueued) {
+        controller._stepsPanelRefreshQueued = false
+        const queuedSource = controller._stepsPanelRefreshQueuedSource || 'queued_followup'
+        controller._stepsPanelRefreshQueuedSource = null
+        controller.refreshStepsPanel(queuedSource)
+      }
     })
 
     this._refreshingStepsPanelPromise = refreshPromise
@@ -1459,7 +1504,11 @@ export default class extends Controller {
     if (this._stepsPanelSignatures[key] === signature) {
       return false
     }
-    this._stepsPanelSignatures[key] = signature
+    // Do not advance the committed signature here. Only mark it after a
+    // successful panel refresh so a coalesced in-flight fetch cannot
+    // permanently skip the latest status counts.
+    this._pendingStepsPanelSignatures = this._pendingStepsPanelSignatures || {}
+    this._pendingStepsPanelSignatures[key] = signature
     return true
   }
 
@@ -1478,7 +1527,16 @@ export default class extends Controller {
       return Promise.resolve()
     }
 
-    return this.refreshStepsPanel('status_update').then(runAfterRefresh).catch((error) => {
+    const pendingSignature =
+      this._pendingStepsPanelSignatures && this._pendingStepsPanelSignatures[stepIdStr]
+
+    return this.refreshStepsPanel('status_update').then(() => {
+      if (pendingSignature) {
+        this._stepsPanelSignatures = this._stepsPanelSignatures || {}
+        this._stepsPanelSignatures[stepIdStr] = pendingSignature
+      }
+      runAfterRefresh()
+    }).catch((error) => {
       console.error('[StepSelectorController] Error refreshing steps panel:', error)
       runAfterRefresh()
     })
@@ -1550,6 +1608,7 @@ export default class extends Controller {
     const isParsingStepBroadcast = stepNameLower === 'parsing' && dataStepIdNum === stepIdNum
     const shouldReload =
       !options.skipRightPanelReload &&
+      !this.shouldPreserveRightPanel() &&
       statusChanged &&
       isCurrentStep &&
       !this._isBootstrapping &&
@@ -1562,13 +1621,13 @@ export default class extends Controller {
 
     stepElements.forEach((stepElement) => {
       // Multiple-runs steps render a 2x2 status grid (waiting, running,
-      // completed, failed) in the icon slot, where each cell is tied to a
-      // specific status and is styled based on its per-status count by the
-      // server-rendered _steps_panel partial. Overwriting a single icon
-      // here would corrupt that grid (e.g. painting the top-left "waiting"
-      // cell with the overall "failed" icon). The full grid is refreshed
-      // authoritatively by refreshStepsPanel(); skip the single-icon patch
-      // in that case.
+      // completed, failed). Patch those cells from live websocket counts so
+      // the left pipeline stays in sync with the header even when a full
+      // steps-panel HTML refresh is delayed or coalesced.
+      if (data.h_nber_analyses && dataStepIdNum === stepIdNum) {
+        this.updateMultiRunStatusGrid(stepElement, data.h_nber_analyses)
+      }
+
       const iconContainer = stepElement.querySelector('.flex-shrink-0')
       const iconCount = iconContainer ? iconContainer.querySelectorAll('i').length : 0
       if (iconCount === 1 && statusChanged) {
@@ -2580,6 +2639,88 @@ export default class extends Controller {
       return null
     }
     return this.statusIconsValue.find(s => s.key === statusName)
+  }
+
+  // Patch the multi-run 2x2 pipeline icon grid from live websocket counts.
+  // Keys on the icons are waiting/running/completed/failed (see _steps_panel).
+  updateMultiRunStatusGrid(stepElement, hNberAnalyses) {
+    if (!stepElement || !hNberAnalyses || typeof hNberAnalyses !== 'object') return
+
+    let icons = Array.from(stepElement.querySelectorAll('i[data-pipeline-status-key]'))
+    // Fallback for panels rendered before data-pipeline-status-key existed:
+    // the multi-run grid is always waiting/running/completed/failed in that order.
+    if (!icons.length) {
+      const iconContainer = stepElement.querySelector('.flex-shrink-0')
+      const candidates = iconContainer
+        ? Array.from(iconContainer.querySelectorAll('i')).filter((el) => !el.closest('button'))
+        : []
+      if (candidates.length !== 4) return
+      const fallbackKeys = ['waiting', 'running', 'completed', 'failed']
+      icons = candidates
+      icons.forEach((el, idx) => {
+        el.setAttribute('data-pipeline-status-key', fallbackKeys[idx])
+      })
+    }
+
+    const nberCount = (statusId) => {
+      const v = hNberAnalyses[statusId] ?? hNberAnalyses[String(statusId)]
+      return parseInt(v, 10) || 0
+    }
+
+    const countForKey = (key) => {
+      if (key === 'waiting' || key === 'pending') return nberCount(1)
+      if (key === 'running') return nberCount(2)
+      if (key === 'completed' || key === 'success') return nberCount(3)
+      if (key === 'failed') return nberCount(4) + nberCount(5)
+      return 0
+    }
+
+    const configKeyFor = (key) => {
+      if (key === 'waiting') return 'pending'
+      if (key === 'completed') return 'success'
+      return key
+    }
+
+    const labelFor = (key) => {
+      if (key === 'waiting' || key === 'pending') return 'Waiting'
+      if (key === 'running') return 'Running'
+      if (key === 'completed' || key === 'success') return 'Completed'
+      if (key === 'failed') return 'Failed'
+      return key
+    }
+
+    icons.forEach((iconEl) => {
+      const key = iconEl.getAttribute('data-pipeline-status-key')
+      if (!key) return
+      const count = countForKey(key)
+      const prevCount = parseInt(iconEl.getAttribute('data-pipeline-status-count') || '', 10)
+      const isActive = count > 0
+      const cfg = this.getStatusIconConfig(configKeyFor(key))
+      if (!cfg) return
+
+      const spinClass = isActive && cfg.icon_spin ? ` ${cfg.icon_spin}` : ''
+      const colorClass = isActive ? cfg.active_color : cfg.inactive_color
+      const nextClassName = `${cfg.icon_base}${spinClass} text-sm ${colorClass}`
+      if (iconEl.className !== nextClassName) {
+        iconEl.className = nextClassName
+      }
+      if (!Number.isFinite(prevCount) || prevCount !== count) {
+        iconEl.setAttribute('data-pipeline-status-count', String(count))
+      }
+
+      const tooltipText = `${labelFor(key)} (${count})`
+      if (iconEl.getAttribute('title') !== tooltipText) {
+        iconEl.setAttribute('title', tooltipText)
+      }
+      const tip = iconEl.parentElement && iconEl.parentElement.querySelector('div.absolute')
+      if (tip) {
+        const arrow = tip.querySelector(':scope > div')
+        tip.textContent = tooltipText
+        if (arrow) {
+          tip.appendChild(arrow)
+        }
+      }
+    })
   }
 
   _stepsPanelStepRows() {

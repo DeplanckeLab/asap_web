@@ -1,5 +1,9 @@
 class Run < ApplicationRecord
+  # Terminal statuses persisted to del_runs before destroy (success, failed).
+  TERMINAL_STATUS_IDS_FOR_DEL_RUN = [3, 4].freeze
+
   before_destroy :prevent_deletion_if_locked_from_publication
+  before_destroy :archive_to_del_run!
 
   belongs_to :project
   belongs_to :step
@@ -19,6 +23,31 @@ class Run < ApplicationRecord
 
   scope :dimension_reduction, -> { joins(:step).where(steps: { name: Step::EMBEDDING_STEP_NAMES }) }
   scope :clustering, -> { joins(:step).where(steps: { name: 'clustering' }) }
+  scope :terminal_for_del_run, -> { where(status_id: TERMINAL_STATUS_IDS_FOR_DEL_RUN) }
+
+  # Bulk archive for callers that must use delete_all (no destroy callbacks), e.g. parse reset.
+  def self.archive_scope_to_del_runs!(runs_relation)
+    runs_relation.terminal_for_del_run.find_each { |run| persist_del_run!(run) }
+  end
+
+  # Insert a del_runs row for a run that is about to be deleted.
+  # Always insert (do not upsert): in-place restart may already have left
+  # attempt snapshots for the same run_id, and those must not be overwritten.
+  def self.persist_del_run!(run)
+    snapshot_to_del_run!(run)
+  end
+
+  # Insert a del_runs row — used on in-place restart so prior attrs/status/error
+  # survive when the same runs row is reused (parameters may change later).
+  def self.snapshot_to_del_run!(run)
+    DelRun.create!(del_run_attributes_from(run))
+  end
+
+  def self.del_run_attributes_from(run)
+    del_run_columns = DelRun.column_names
+    attrs = run.attributes.except('id', 'slurm_job_id').slice(*del_run_columns)
+    attrs.merge('run_id' => run.id, 'project_id' => run.project_id)
+  end
 
   def embedding_run?
     step&.embedding_step?
@@ -135,5 +164,11 @@ class Run < ApplicationRecord
 
     errors.add(:base, 'This run was created before publication and cannot be deleted.')
     throw(:abort)
+  end
+
+  def archive_to_del_run!
+    return unless TERMINAL_STATUS_IDS_FOR_DEL_RUN.include?(status_id)
+
+    self.class.persist_del_run!(self)
   end
 end

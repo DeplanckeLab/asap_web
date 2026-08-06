@@ -65,7 +65,7 @@
   <%= render 'runs/de_gene_list_table', compact: true %>
 </div>
 <% else %>
-<div class="bg-white rounded-lg shadow-sm flex flex-col"
+<div id="de-gene-list-root" class="bg-white rounded-lg shadow-sm flex flex-col"
      style="max-height: calc(100vh - 200px);"
      data-analysis-direct-link-path="<%= project_path(@project, { view: 'analysis', step_id: @step.id, sub_view: 'de_filter', gene_list_run_id: @run.id, gene_list_type: params[:type].to_s, gene_list_de_annot_id: @de_gene_list_annot_id }.compact) %>">
   <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">

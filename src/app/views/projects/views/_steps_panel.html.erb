@@ -100,7 +100,10 @@
                       tooltip_text = "#{run_summary_tooltip_label(status_icon[:key])} (#{status_icon[:count]})"
                     %>
                     <div class="relative group" style="display: flex; align-items: center; justify-content: center;">
-                      <i class="<%= icon_class %> text-sm <%= color_class %>"></i>
+                      <i class="<%= icon_class %> text-sm <%= color_class %>"
+                         data-pipeline-status-key="<%= status_icon[:key] %>"
+                         data-pipeline-status-count="<%= status_icon[:count] %>"
+                         title="<%= tooltip_text %>"></i>
                       <div class="absolute left-full top-full ml-2 mt-1 px-2 py-1 text-xs font-medium text-white bg-gray-900 rounded shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-0 pointer-events-none whitespace-nowrap z-50">
                         <%= tooltip_text %>
                         <div class="absolute right-full top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-b-4 border-r-4 border-transparent border-r-gray-900"></div>

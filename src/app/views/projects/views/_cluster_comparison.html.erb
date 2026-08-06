@@ -1,12 +1,17 @@
 <% completed_runs = (@runs&.select { |r| r.status_id == 3 } || []).sort_by { |r| [r.created_at || Time.at(0), r.id] }.reverse %>
 
-<div class="bg-white rounded-lg shadow-sm flex flex-col" style="max-height: calc(100vh - 200px); overflow-y: auto;">
+<div id="cluster-comparison-root"
+     class="bg-white rounded-lg shadow-sm flex flex-col"
+     style="max-height: calc(100vh - 200px); overflow-y: auto;"
+     data-subview-refreshable="true"
+     data-subview-refresh-url="<%= step_results_project_path(@project, step_id: @step.id, view: 'compare_clusters', format: :html) %>">
   <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
     <div class="flex items-center justify-between">
       <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
         Comparison of clusters
       </h3>
       <div class="flex items-center gap-2">
+        <%= render 'projects/views/subview_refresh_button' %>
         <button type="button"
                 class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
                 onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, format: :html) %>')"

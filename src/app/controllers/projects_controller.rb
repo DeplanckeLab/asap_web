@@ -2118,13 +2118,14 @@ class ProjectsController < ApplicationController
     )
 
     @h_stats = run_de_filter(annots, @h_de_filter, de_runs: @runs)
-    @de_table_rows = Basic.de_table_rows_for_runs(@runs.select { |r| r.status_id == 3 })
-
-    @h_std_methods = {}
-    StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s }
 
     respond_to do |format|
-      format.html { render partial: 'projects/views/de_results_table', layout: false }
+      format.html do
+        @de_table_rows = Basic.de_table_rows_for_runs(@runs.select { |r| r.status_id == 3 })
+        @h_std_methods = {}
+        StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s }
+        render partial: 'projects/views/de_results_table', layout: false
+      end
       format.json { render json: { h_stats: @h_stats } }
     end
   end
@@ -13110,14 +13111,17 @@ class ProjectsController < ApplicationController
       )
     end
 
-    h_stats = {}
-    table_rows.each do |row|
+    filter_jobs = table_rows.filter_map do |row|
       p = Basic.de_annot_output_txt_path(project_dir, row[:annot], run_id: row[:run].id)
       next unless File.exist?(p) && File.size(p).positive?
 
-      key = row[:stats_key].to_s
-      h_stats[key] = Basic.de_filter_write_filtered_json!(p, h_de_filter['fdr_cutoff'], h_de_filter['fc_cutoff'])
+      { key: row[:stats_key].to_s, path: p.to_s }
     end
+    h_stats = Basic.de_filter_write_filtered_json_batch!(
+      filter_jobs,
+      h_de_filter['fdr_cutoff'],
+      h_de_filter['fc_cutoff']
+    )
 
     if h_stats.any?
       all_zero = h_stats.values.all? { |v| v['up'].to_i.zero? && v['down'].to_i.zero? }

@@ -569,6 +569,28 @@ p, label, li, td, th, input, select, textarea, button {
   animation-iteration-count: infinite;
 }
 
+@keyframes subview-refresh-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.45); }
+  50% { box-shadow: 0 0 0 6px rgba(37, 99, 235, 0); }
+}
+
+@keyframes subview-refresh-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+button.subview-refresh-available {
+  background-color: #2563eb !important;
+  color: #ffffff !important;
+  border-color: #1d4ed8 !important;
+  animation: subview-refresh-pulse 1.4s ease-in-out infinite;
+}
+
+button.subview-refresh-available .fa-sync-alt {
+  display: inline-block;
+  animation: subview-refresh-spin 1.2s linear infinite;
+}
+
 .cell-filtering-layout-host {
   container-type: inline-size;
   container-name: cell-filtering;

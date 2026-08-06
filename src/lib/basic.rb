@@ -1848,6 +1848,7 @@ module Basic
     end
 
     # Same rules as lib/filter_de.cpp: tab TSV columns 5 = logFC, 7 = FDR; writes filtered.{up,down}.json beside output.txt.
+    # Prefer the compiled filter_de binary (single-threaded, streaming, low memory).
     def de_filter_write_filtered_json!(output_txt_path, fdr_cutoff, fc_cutoff)
       path = output_txt_path.to_s
       return { 'up' => 0, 'down' => 0 } unless File.exist?(path) && File.size(path).positive?
@@ -1855,30 +1856,176 @@ module Basic
       fdr_c = fdr_cutoff.to_f
       fc_val = fc_cutoff.to_f
       fc_val = 1.0 if fc_val <= 0
+
+      native = de_filter_via_native_binary(path, fdr_c, fc_val)
+      return native if native
+
+      de_filter_write_filtered_json_ruby!(path, fdr_c, fc_val)
+    end
+
+    # Filter many output.txt files in one native process (avoids per-file spawn cost).
+    # jobs: [{ key:, path: }, ...]  => { key => { 'up' => N, 'down' => M } }
+    def de_filter_write_filtered_json_batch!(jobs, fdr_cutoff, fc_cutoff)
+      fdr_c = fdr_cutoff.to_f
+      fc_val = fc_cutoff.to_f
+      fc_val = 1.0 if fc_val <= 0
+
+      valid = Array(jobs).map do |job|
+        key = job[:key].to_s
+        path = job[:path].to_s
+        next if key.blank? || path.blank?
+        next unless File.exist?(path) && File.size(path).positive?
+
+        { key: key, path: path }
+      end.compact
+      return {} if valid.empty?
+
+      native = de_filter_via_native_batch(valid, fdr_c, fc_val)
+      return native if native
+
+      valid.each_with_object({}) do |job, acc|
+        acc[job[:key]] = de_filter_write_filtered_json_ruby!(job[:path], fdr_c, fc_val)
+      end
+    end
+
+    def de_filter_binary_path
+      candidates = [
+        Rails.root.join('lib', 'filter_de').to_s,
+        File.expand_path('filter_de', __dir__)
+      ]
+      candidates.find { |p| File.file?(p) && File.executable?(p) }
+    end
+
+    # filter_de --file OUTPUT_TXT FDR FC  -> writes filtered.{up,down}.json; prints "UP DOWN"
+    def de_filter_via_native_binary(path, fdr_c, fc_val)
+      bin = de_filter_binary_path
+      return nil unless bin
+
+      require 'open3'
+      out, err, status = Open3.capture3(bin, '--file', path, fdr_c.to_s, fc_val.to_s)
+      unless status.success?
+        Rails.logger.warn(
+          "[de_filter] native filter_de failed path=#{path} status=#{status.exitstatus} stderr=#{err.to_s.strip.truncate(300)}"
+        )
+        return nil
+      end
+
+      parts = out.to_s.strip.split(/\s+/)
+      if parts.size < 2
+        Rails.logger.warn("[de_filter] native filter_de bad stdout path=#{path} stdout=#{out.to_s.strip.truncate(200)}")
+        return nil
+      end
+
+      up = Integer(parts[0], exception: false)
+      down = Integer(parts[1], exception: false)
+      if up.nil? || down.nil?
+        Rails.logger.warn("[de_filter] native filter_de non-integer counts path=#{path} stdout=#{out.to_s.strip.truncate(200)}")
+        return nil
+      end
+
+      { 'up' => up, 'down' => down }
+    end
+
+    # filter_de --batch FDR FC < paths  -> lines "PATH\tUP\tDOWN"
+    def de_filter_via_native_batch(jobs, fdr_c, fc_val)
+      bin = de_filter_binary_path
+      return nil unless bin
+
+      require 'open3'
+      stdin_data = jobs.map { |j| j[:path] }.join("\n") + "\n"
+      out, err, status = Open3.capture3(bin, '--batch', fdr_c.to_s, fc_val.to_s, stdin_data: stdin_data)
+      unless status.success?
+        Rails.logger.warn(
+          "[de_filter] native filter_de --batch failed status=#{status.exitstatus} stderr=#{err.to_s.strip.truncate(300)}"
+        )
+        return nil
+      end
+
+      by_path = jobs.each_with_object({}) { |j, acc| acc[j[:path]] = j[:key] }
+      result = {}
+      out.to_s.each_line do |line|
+        path, up_s, down_s = line.strip.split("\t")
+        key = by_path[path]
+        next unless key
+
+        up = Integer(up_s, exception: false)
+        down = Integer(down_s, exception: false)
+        next if up.nil? || down.nil?
+
+        result[key] = { 'up' => up, 'down' => down }
+      end
+
+      if result.size != jobs.size
+        Rails.logger.warn(
+          "[de_filter] native filter_de --batch incomplete expected=#{jobs.size} got=#{result.size}"
+        )
+        return nil
+      end
+
+      result
+    end
+
+    def de_filter_write_filtered_json_ruby!(path, fdr_c, fc_val)
       log_fc_c = Math.log2(fc_val)
       vec_up = []
       vec_down = []
       i = 0
-      File.foreach(path, mode: 'rt', encoding: 'UTF-8') do |line|
-        t = line.chomp.split("\t")
-        if t.size > 7 && t[7] != 'NA' && t[5] != 'NA'
-          fdr = Float(t[7]) rescue nil
-          logfc = Float(t[5]) rescue nil
-          if fdr && logfc && fdr <= fdr_c
-            if logfc >= 0 && logfc >= log_fc_c
-              vec_up << i
-            elsif logfc <= 0 && logfc <= -log_fc_c
-              vec_down << i
+
+      File.open(path, 'rb') do |io|
+        io.each_line do |line|
+          col5, col7 = de_filter_tsv_cols_5_and_7(line)
+          if col5 && col7 && col5 != 'NA' && col7 != 'NA'
+            fdr = Float(col7, exception: false)
+            logfc = Float(col5, exception: false)
+            if fdr && logfc && fdr <= fdr_c
+              if logfc >= log_fc_c
+                vec_up << i
+              elsif logfc <= -log_fc_c
+                vec_down << i
+              end
             end
           end
+          i += 1
         end
-        i += 1
       end
-      dir = Pathname.new(File.dirname(path))
+
+      dir = File.dirname(path)
       FileUtils.mkdir_p(dir)
-      File.write((dir + 'filtered.up.json').to_s, "[#{vec_up.join(',')}]")
-      File.write((dir + 'filtered.down.json').to_s, "[#{vec_down.join(',')}]")
+      File.binwrite(File.join(dir, 'filtered.up.json'), "[#{vec_up.join(',')}]")
+      File.binwrite(File.join(dir, 'filtered.down.json'), "[#{vec_down.join(',')}]")
       { 'up' => vec_up.size, 'down' => vec_down.size }
+    end
+
+    # Extract 0-based TSV columns 5 (logFC) and 7 (FDR) without allocating a full split array.
+    def de_filter_tsv_cols_5_and_7(line)
+      len = line.bytesize
+      len -= 1 while len.positive? && (line.getbyte(len - 1) == 10 || line.getbyte(len - 1) == 13)
+      return [nil, nil] if len <= 0
+
+      col = 0
+      start = 0
+      col5 = nil
+      col7 = nil
+      pos = 0
+      while pos < len
+        if line.getbyte(pos) == 9
+          if col == 5
+            col5 = line.byteslice(start, pos - start)
+          elsif col == 7
+            col7 = line.byteslice(start, pos - start)
+            return [col5, col7]
+          end
+          col += 1
+          start = pos + 1
+        end
+        pos += 1
+      end
+      if col == 7
+        col7 = line.byteslice(start, len - start)
+      elsif col == 5
+        col5 = line.byteslice(start, len - start)
+      end
+      [col5, col7]
     end
 
     # GE enrichment reads gene row ids from tmp/<user_id>_<de_run_id>_<fc>_<fdr>_filtered_ids.json
@@ -2019,7 +2166,12 @@ module Basic
       return [] if completed_runs.blank?
 
       run_ids = completed_runs.map(&:id)
+      project_id = completed_runs.first.project_id
       by_run = Annot.where(run_id: run_ids).group_by(&:run_id)
+
+      # One batched lookup for v8 /attrs/de_<run_id>_<k> annots. Avoids the old
+      # per-run fallback that could scan all project annots on every filter refresh.
+      by_de_run_from_name = de_attrs_de_output_annots_by_run_id(project_id, run_ids)
 
       group_annot_ids = completed_runs.map { |r| de_groups_discrete_annot_id_for_de_table(r) }.compact.uniq
       groups_annots_by_id = group_annot_ids.any? ? Annot.where(id: group_annot_ids).index_by(&:id) : {}
@@ -2029,7 +2181,15 @@ module Basic
         gid = de_groups_discrete_annot_id_for_de_table(run)
         groups_annot = gid ? groups_annots_by_id[gid] : nil
 
-        attrs_des = de_attrs_de_output_annots_for_run(run, by_run)
+        from_run = Array(by_run[run.id]).select do |a|
+          m = de_attrs_de_output_matrix_match(a.name)
+          m && m[0] == run.id
+        end
+        attrs_des = (from_run + Array(by_de_run_from_name[run.id])).uniq(&:id).sort_by do |a|
+          m = de_attrs_de_output_matrix_match(a.name)
+          m ? m[1] : 0
+        end
+
         if attrs_des.any?
           attrs_des.each do |a|
             m = de_attrs_de_output_matrix_match(a.name)
@@ -2048,6 +2208,25 @@ module Basic
         end
       end
       rows
+    end
+
+    # Batch-load v8 DE contrast matrix annots keyed by run id from the name.
+    def de_attrs_de_output_annots_by_run_id(project_id, run_ids)
+      rid_list = Array(run_ids).map(&:to_i).uniq
+      return {} if project_id.blank? || rid_list.empty?
+
+      scope = Annot.where(project_id: project_id)
+      candidates =
+        if ApplicationRecord.connection.adapter_name.match?(/postgresql/i)
+          scope.where('name ~* ?', "^(/attrs/|attrs/)de_(#{rid_list.join('|')})_[0-9]+$").to_a
+        else
+          scope.where('name LIKE ? OR name LIKE ?', '%/de_%', 'attrs/de_%').to_a.select do |a|
+            m = de_attrs_de_output_matrix_match(a.name)
+            m && rid_list.include?(m[0])
+          end
+        end
+
+      candidates.group_by { |a| de_attrs_de_output_matrix_match(a.name)&.first }.tap { |h| h.delete(nil) }
     end
 
     # list_cat_json is normally a JSON array of category labels (metadata import / add_cell_sets).

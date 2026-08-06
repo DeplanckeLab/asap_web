@@ -534,23 +534,11 @@ class RunsController < ApplicationController
     store_run_annots.destroy_all ## shouldn't need to add this line if everything happens normally...
     run.fos.destroy_all
     
-    ## remove the run
+    ## remove the run (Run#before_destroy archives terminal runs to del_runs)
     active_run = run.active_run
     active_run.destroy if active_run
-    
-    ## move run in the deleted_runs if it finished or failed                                                                                                                    
-    if [3, 4].include? run.status_id
-      h_run = run.as_json
-      # Remove slurm_job_id as it doesn't exist in del_runs table
-      h_run.delete("slurm_job_id")
-      if ! DelRun.where(h_run).first
-        del_run = DelRun.new(h_run)
-        del_run.run_id = h_run["id"]
-        del_run.save!        
-      end
-    end
-    
-    run.destroy  
+
+    run.destroy
     
       
   end
@@ -671,6 +659,9 @@ class RunsController < ApplicationController
       render json: { status: 'error', message: 'Run has no associated std_method; cannot rebuild command.' }, status: :unprocessable_entity
       return
     end
+
+    # Snapshot current attempt (attrs, status, error, timing) before reusing the row.
+    Run.snapshot_to_del_run!(@run)
 
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
     step_dir = project_dir + @step.name

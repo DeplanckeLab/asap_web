@@ -1,0 +1,10 @@
+<%# Shared header control: quiet until a successful run finishes for this step,
+    then flashes to invite an intentional refresh of the current sub-view. %>
+<button type="button"
+        data-subview-refresh-btn
+        class="px-2 py-1.5 bg-white hover:bg-gray-100 text-gray-600 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"
+        title="Refresh results"
+        onclick="refreshAnalysisSubview(this)"
+        style="flex-shrink: 0;">
+  <i class="fas fa-sync-alt"></i>
+</button>

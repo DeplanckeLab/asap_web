@@ -533,6 +533,46 @@
     }
   }
 
+  // Reload the current analysis sub-view (compare clusters / DE / markers / GE)
+  // while keeping live filter values when possible.
+  function refreshAnalysisSubview(btn) {
+    const root = btn && btn.closest ? btn.closest('[data-subview-refreshable="true"]') : null
+    let url = root && root.getAttribute('data-subview-refresh-url')
+    if (!url || typeof loadFormInRightPanel !== 'function') return
+
+    try {
+      const targetUrl = new URL(url, window.location.origin)
+      const rootId = root.id || ''
+
+      if (rootId === 'de-filter-root') {
+        const fdr = document.getElementById('de-fdr-cutoff')
+        const fc = document.getElementById('de-fc-cutoff')
+        if (fdr && fdr.value !== '') targetUrl.searchParams.set('de_fdr', fdr.value)
+        if (fc && fc.value !== '') targetUrl.searchParams.set('de_fc', fc.value)
+      } else if (rootId === 'ge-filter-root') {
+        const fdr = document.getElementById('ge-fdr-cutoff')
+        if (fdr && fdr.value !== '') targetUrl.searchParams.set('ge_fdr', fdr.value)
+      } else if (rootId === 'markers-container') {
+        const analysis = document.getElementById('markers-analysis')
+        const highlight = document.getElementById('markers-highlight')
+        const maxGenes = document.getElementById('markers-max')
+        const fdr = document.getElementById('markers-fdr')
+        const fc = document.getElementById('markers-fc')
+        if (analysis && analysis.value) targetUrl.searchParams.set('markers_analysis', analysis.value)
+        if (highlight && highlight.value) targetUrl.searchParams.set('markers_highlight', highlight.value)
+        if (maxGenes && maxGenes.value !== '') targetUrl.searchParams.set('markers_max_genes', maxGenes.value)
+        if (fdr && fdr.value !== '') targetUrl.searchParams.set('markers_fdr', fdr.value)
+        if (fc && fc.value !== '') targetUrl.searchParams.set('markers_fc', fc.value)
+      }
+
+      url = targetUrl.pathname + targetUrl.search + targetUrl.hash
+    } catch (e) {
+      // keep base url
+    }
+
+    loadFormInRightPanel(url)
+  }
+
   function loadFormInRightPanel(formUrl) {
     formUrl = appendLoomContextToUrl(formUrl)
     const isGraphRequest = /\/graph(\?|$)/.test(formUrl)

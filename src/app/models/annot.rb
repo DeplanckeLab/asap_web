@@ -282,60 +282,21 @@ class Annot < ApplicationRecord
     data_class_names.intersect?(%w[num_matrix numeric_mdata])
   end
 
-  # Human-readable storage type from data_class_ids (e.g. "integer matrix", "cell metadata (float vector)").
+  # Storage dtype badge:
+  # - global metadata: "string" / "float" / "integer"
+  # - cell/gene metadata: "string vector" / "float vector" / "integer vector"
+  # - expression matrix: "float matrix" / "integer matrix"
   def storage_type_label(project = nil)
-    by_name = data_class_records.index_by(&:name)
-    return nil if by_name.empty?
-
-    row_label = project&.project_type&.row_label || 'rows'
-    col_label = project&.project_type&.col_label || 'columns'
-    row_singular = row_label.singularize
-    col_singular = col_label.singularize
-
-    apply_template = lambda do |dc|
-      template = dc&.label_template
-      return nil if template.blank?
-
-      template.gsub('{row_label_singular}', row_singular)
-              .gsub('{col_label_singular}', col_singular)
-              .gsub('{row_label}', row_label)
-              .gsub('{col_label}', col_label)
-    end
+    dtype = storage_dtype_name
+    return nil if dtype.blank?
 
     if expression_matrix?
-      matrix_dc = by_name['int_matrix'] || by_name['num_matrix'] || by_name['matrix']
-      matrix_dc ||= DataClass.find_by(name: infer_matrix_data_class_name(by_name))
-      label = apply_template.call(matrix_dc)
-      return nil if label.blank?
-
-      label = "#{label} vector" if expression_vector_shape?
-      return label
+      "#{dtype} matrix"
+    elsif global_metadata?
+      dtype
+    else
+      "#{dtype} vector"
     end
-
-    base_dc = by_name['col_mdata'] || by_name['row_mdata'] || by_name['global_mdata'] || by_name['mdata']
-    value_dc = by_name['numeric_mdata'] || by_name['discrete_mdata'] || by_name['string_mdata']
-    if value_dc.nil?
-      inferred_value = infer_metadata_value_data_class_name
-      value_dc = DataClass.find_by(name: inferred_value) if inferred_value
-    end
-
-    parts = []
-    parts << apply_template.call(base_dc) if base_dc
-    if value_dc
-      value_label = apply_template.call(value_dc)
-      shape = metadata_table_shape? ? 'matrix' : 'vector'
-      parts << "(#{value_label} #{shape})"
-    elsif metadata_table_shape?
-      parts << '(matrix)'
-    elsif base_dc
-      parts << '(vector)'
-    end
-
-    label = parts.compact.join(' ').presence
-    return label if label.present?
-
-    other = data_class_records.reject { |dc| dc.category == 'skip' || dc.label_template.blank? }
-    other.filter_map { |dc| apply_template.call(dc) }.uniq.join(', ').presence
   end
 
   def matrix_type_label
@@ -350,28 +311,23 @@ class Annot < ApplicationRecord
 
   private
 
-  def expression_vector_shape?
-    nr = nber_rows.to_i
-    nc = nber_cols.to_i
-    nr.positive? && nc.positive? && (nr == 1 || nc == 1)
-  end
+  def storage_dtype_name
+    names = data_class_names
+    return 'integer' if names.intersect?(%w[int_matrix discrete_mdata integer_mdata])
+    return 'float' if names.intersect?(%w[num_matrix numeric_mdata])
+    return 'string' if names.include?('string_mdata')
 
-  def metadata_table_shape?
-    nber_rows.to_i > 1 && nber_cols.to_i > 1
-  end
-
-  def infer_matrix_data_class_name(by_name)
-    return 'int_matrix' if by_name.key?('int_matrix')
-    return 'num_matrix' if by_name.key?('num_matrix')
-
-    data_type&.name == 'NUMERIC' ? 'num_matrix' : 'matrix'
-  end
-
-  def infer_metadata_value_data_class_name
     case data_type&.name
-    when 'NUMERIC' then 'numeric_mdata'
-    when 'DISCRETE', 'CATEGORICAL' then 'discrete_mdata'
+    when 'STRING' then 'string'
+    when 'NUMERIC' then 'float'
+    when 'DISCRETE', 'CATEGORICAL' then 'integer'
     end
+  end
+
+  def global_metadata?
+    name.to_s.start_with?('/attrs/') ||
+      dim.to_i == 4 ||
+      data_class_names.include?('global_mdata')
   end
 
   def prevent_deletion_if_locked_from_publication

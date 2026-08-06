@@ -356,12 +356,14 @@ module ProjectsHelper
 
   def annot_imported_badge
     content_tag(:span, 'Imported',
-                class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200')
+                class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 border border-green-200',
+                title: 'Present in the loom file before or outside the producing analysis run.')
   end
 
   def annot_asap_pipeline_badge
     content_tag(:span, 'ASAP pipeline',
-                class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200')
+                class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200',
+                title: 'Registered from an analysis run in this project.')
   end
 
   def annot_global_badge

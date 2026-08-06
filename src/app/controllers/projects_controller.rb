@@ -505,6 +505,13 @@ class ProjectsController < ApplicationController
       # Get selected data type from params or default to matrices
       @selected_data_type = params[:data_type].presence || 'matrices'
 
+      if @selected_loom_file.present? && @selected_data_type == 'global'
+        load_global_attr_card_values!(
+          @selected_loom_file,
+          @annots_by_loom_and_type[@selected_loom_file]&.dig(:global) || []
+        )
+      end
+
       if editable?(@project)
         @sim_step_options = helpers.sim_step_options_for_project(@project)
       end
@@ -2722,6 +2729,11 @@ class ProjectsController < ApplicationController
           @annots_by_loom_and_type[@selected_loom_file][:global] << annot
         end
       end
+
+      load_global_attr_card_values!(
+        @selected_loom_file,
+        @annots_by_loom_and_type[@selected_loom_file][:global]
+      ) if @selected_data_type == 'global'
     end
     
     # Store filepath info for use in helper
@@ -11432,6 +11444,51 @@ class ProjectsController < ApplicationController
       end
 
       @selected_data_type = params[:data_type].presence || 'matrices'
+
+      if @selected_loom_file.present? && @selected_data_type == 'global'
+        load_global_attr_card_values!(
+          @selected_loom_file,
+          @annots_by_loom_and_type[@selected_loom_file]&.dig(:global) || []
+        )
+      end
+    end
+
+    # Short plain /attrs/* values for Global Metadata cards in the data view.
+    # Skips JSON payloads and long strings; avoids per-attr docker calls via one batch read.
+    GLOBAL_ATTR_CARD_MAX_CHARS = 200
+    GLOBAL_ATTR_CARD_MAX_MEM = 1024
+
+    def load_global_attr_card_values!(loom_filepath, global_annots)
+      @global_attr_card_values = {}
+      return if loom_filepath.blank?
+
+      candidates = Array(global_annots).select { |annot| global_attr_card_value_candidate?(annot) }
+      return if candidates.empty?
+
+      user_data_dir = ENV['USER_DATA_DIR'] || Rails.root.join('storage', 'user_data').to_s
+      loom_path = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key + loom_filepath
+      return unless File.exist?(loom_path)
+
+      @global_attr_card_values = H5DataService.read_short_global_attr_strings(
+        loom_path.to_s,
+        candidates.map(&:name),
+        max_chars: GLOBAL_ATTR_CARD_MAX_CHARS
+      )
+    rescue StandardError => e
+      Rails.logger.error("[load_global_attr_card_values!] #{e.class}: #{e.message}")
+      @global_attr_card_values = {}
+    end
+
+    def global_attr_card_value_candidate?(annot)
+      return false if annot.blank?
+      return false unless annot.name.to_s.start_with?('/attrs/')
+      return false if annot.nber_rows.to_i > 1
+      return false unless annot.nber_cols.to_i <= 1 || annot.dim.to_i == 4
+
+      mem = annot.mem_size.to_i
+      return false if mem.positive? && mem > GLOBAL_ATTR_CARD_MAX_MEM
+
+      true
     end
 
     # Build filepath metadata from /matrix annotations only, so each loom file

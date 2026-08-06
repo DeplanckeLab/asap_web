@@ -932,6 +932,99 @@ class H5DataService
     end
   end
 
+  # Batch-read length-1 /attrs/* strings for data-view cards.
+  # Returns { "/attrs/name" => "value" } for plain (non-JSON) strings with length <= max_chars.
+  # Skips missing attrs, JSON object/array payloads, and longer values.
+  def self.read_short_global_attr_strings(h5_file, metadata_paths, max_chars: 200)
+    paths = Array(metadata_paths).map(&:to_s).uniq.select { |p| p.start_with?('/attrs/') || p.start_with?('attrs/') }
+    return {} if paths.empty?
+
+    loom_path = Pathname.new(h5_file.to_s)
+    return {} unless File.exist?(loom_path)
+
+    names_path = loom_path.dirname.join(".asap_global_attrs_names_#{Process.pid}_#{SecureRandom.hex(8)}.json")
+    out_path = loom_path.dirname.join(".asap_global_attrs_read_#{Process.pid}_#{SecureRandom.hex(8)}.json")
+    File.write(names_path, paths.to_json)
+
+    script = <<~PYTHON
+      import h5py
+      import json
+      import sys
+
+      loom_path = sys.argv[1]
+      names_path = sys.argv[2]
+      out_path = sys.argv[3]
+      max_chars = int(sys.argv[4])
+
+      with open(names_path, 'r', encoding='utf-8') as fh:
+          paths = json.load(fh)
+
+      result = {}
+      with h5py.File(loom_path, 'r') as f:
+          for path in paths:
+              name = path[1:] if path.startswith('/') else path
+              if name.startswith('attrs/'):
+                  attr_name = name[len('attrs/'):]
+              else:
+                  attr_name = name
+              attrs_path = 'attrs/' + attr_name
+              value = None
+              if attrs_path in f:
+                  ds = f[attrs_path]
+                  if getattr(ds, 'shape', ()) == ():
+                      value = ds[()]
+                  elif len(ds.shape) == 1 and ds.shape[0] >= 1:
+                      value = ds[0]
+                  else:
+                      continue
+              elif attr_name in f.attrs:
+                  value = f.attrs[attr_name]
+              else:
+                  continue
+              if isinstance(value, bytes):
+                  value = value.decode('utf-8')
+              else:
+                  value = str(value)
+              s = value.strip()
+              if len(s) == 0 or len(s) > max_chars:
+                  continue
+              if s.startswith('{') or s.startswith('['):
+                  try:
+                      parsed = json.loads(s)
+                  except Exception:
+                      parsed = None
+                  if isinstance(parsed, (dict, list)):
+                      continue
+              key = path if path.startswith('/') else '/' + path
+              result[key] = value
+
+      with open(out_path, 'w', encoding='utf-8') as fh:
+          json.dump(result, fh)
+      print('OK')
+    PYTHON
+
+    begin
+      stdout, stderr, status = Open3.capture3(
+        'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-',
+        loom_path.to_s, names_path.to_s, out_path.to_s, max_chars.to_i.to_s,
+        stdin_data: script
+      )
+      unless status.success? && stdout.strip.start_with?('OK')
+        Rails.logger.error("Failed to batch-read global attrs: #{stderr.presence || stdout}")
+        return {}
+      end
+      raw = File.read(out_path, encoding: 'utf-8')
+      parsed = JSON.parse(raw)
+      parsed.is_a?(Hash) ? parsed : {}
+    rescue StandardError => e
+      Rails.logger.error("Failed to batch-read global attrs: #{e.class}: #{e.message}")
+      {}
+    ensure
+      File.delete(names_path) if File.exist?(names_path)
+      File.delete(out_path) if File.exist?(out_path)
+    end
+  end
+
   # Write a 1-D string metadata vector. Replaces the dataset if it already exists.
   # Values are staged to a temp JSON file under the loom directory (shared with the run container).
   def self.write_metadata_string_vector!(h5_file, metadata_path, values, already_locked: false)

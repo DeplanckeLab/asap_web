@@ -85,6 +85,7 @@ class AnnotsController < ApplicationController
     @h_sums = {}
     @matrix_preview = nil
     @json_preview = nil
+    @string_preview = nil
 
     # 2D metadata: col_attrs/row_attrs (e.g. PCA) or /attrs/ tables (e.g. DE) when
     # ExtractMetadata returns a matrix of values.
@@ -275,7 +276,7 @@ class AnnotsController < ApplicationController
             values = [raw]
             @h_results['values'] = values
             @preview_data = values
-            @json_preview = parse_annot_json_preview(raw)
+            assign_scalar_attr_preview(raw)
           else
             values = H5DataService.get_metadata_vector(loom_path.to_s, @annot.name)
             @h_results['values'] = values
@@ -283,14 +284,14 @@ class AnnotsController < ApplicationController
             # Get preview (first 100 values)
             @preview_data = values.first(100)
             if @annot.name.start_with?('/attrs/') && values.size == 1
-              @json_preview = parse_annot_json_preview(values.first)
+              assign_scalar_attr_preview(values.first)
             end
           end
 
           # Determine number of columns
           nber_cols = ((@annot.dim == 1) ? @annot.nber_rows : @annot.nber_cols)
 
-          if nber_cols == 1 && @annot.data_type && @json_preview.nil?
+          if nber_cols == 1 && @annot.data_type && @json_preview.nil? && @string_preview.nil?
             if @annot.data_type.name == 'CATEGORICAL' || @annot.data_type_id == 3
               # Categorical data - count categories
               @h_results['values'].each do |e|
@@ -347,7 +348,7 @@ class AnnotsController < ApplicationController
       @data_type_edit_blocked = annot_referenced_by_runs?(@annot)
     end
 
-    load_sim_step_options if editable?(@project) && @annot.imported?
+    load_sim_step_options if editable?(@project) && @annot.imported? && !@annot.name.to_s.start_with?('/attrs/')
 
     render :show, layout: false if @embedded
   end
@@ -641,6 +642,14 @@ class AnnotsController < ApplicationController
   end
 
   def update_sim_step_mapping
+    if @annot.name.to_s.start_with?('/attrs/')
+      respond_to do |format|
+        format.html { redirect_to annot_path(@annot, annot_back_params), alert: 'Global metadata cannot be mapped to an ASAP step.' }
+        format.json { render json: { error: 'Global metadata cannot be mapped to an ASAP step.' }, status: :unprocessable_entity }
+      end
+      return
+    end
+
     unless @annot.imported?
       respond_to do |format|
         format.html { redirect_to annot_path(@annot, annot_back_params), alert: 'Only imported metadata and matrices can be mapped to an ASAP step.' }
@@ -753,6 +762,17 @@ class AnnotsController < ApplicationController
     end
   end
 
+  # Scalar /attrs/*: JSON gets a foldable tree; plain strings show as text (not a 1-row vector).
+  def assign_scalar_attr_preview(raw)
+    parsed = parse_annot_json_preview(raw)
+    if parsed.is_a?(Hash) || parsed.is_a?(Array)
+      @json_preview = parsed
+      @string_preview = nil
+    else
+      @string_preview = raw.to_s
+    end
+  end
+
   # Parse a scalar global-attr value into a Hash/Array when it is JSON; otherwise nil.
   def parse_annot_json_preview(raw)
     return raw if raw.is_a?(Hash) || raw.is_a?(Array)
@@ -761,7 +781,10 @@ class AnnotsController < ApplicationController
     return nil if s.empty?
     return nil unless s.start_with?('{', '[')
 
-    JSON.parse(s)
+    parsed = JSON.parse(s)
+    return parsed if parsed.is_a?(Hash) || parsed.is_a?(Array)
+
+    nil
   rescue JSON::ParserError
     nil
   end

@@ -363,6 +363,16 @@
           // Load the run in the right panel
           var runUrl = '<%= runs_path %>/' + nodeData.run_id;
           if (typeof loadRunInRightPanel === 'function') {
+            // Intentional navigation: lock the shown step before loading so
+            // loadRunInRightPanel does not treat this as a cross-step stray call.
+            const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]');
+            if (stepSelectorElement && window.Stimulus && nodeData.step_id) {
+              const controller = window.Stimulus.getControllerForElementAndIdentifier(stepSelectorElement, 'step-selector');
+              if (controller) {
+                controller.currentStepId = String(nodeData.step_id);
+                controller.element.setAttribute('data-current-step-id', String(nodeData.step_id));
+              }
+            }
             loadRunInRightPanel(runUrl, nodeData.step_id);
           } else {
             // Fallback: select the step

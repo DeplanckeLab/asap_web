@@ -750,6 +750,20 @@ export default class extends Controller {
       return
     }
 
+    const currentStepIdNum = this.currentStepId ? parseInt(this.currentStepId) : null
+    const runStepIdNum = runStatus.step_id != null ? parseInt(runStatus.step_id) : null
+
+    // Right panel stays locked on the step currently shown. Left-panel badges
+    // above already ran; do not navigate to another step when a background run finishes.
+    if (currentStepIdNum && runStepIdNum && currentStepIdNum !== runStepIdNum) {
+      console.log('[RSC.applyRunStatusChange] skip right panel: run step differs from shown step', {
+        currentStepId: currentStepIdNum,
+        runStepId: runStepIdNum,
+        runId: runStatus.run_id
+      })
+      return
+    }
+
     // Decide how to refresh the right panel based on what it is currently
     // showing. Three mutually-exclusive cases:
     //
@@ -771,17 +785,28 @@ export default class extends Controller {
     //    so we reload the full step_results panel.
     const runSummaryPanel = this.contentTarget.querySelector('#run_result_summary_panel')
     const panelRunId = runSummaryPanel && runSummaryPanel.getAttribute('data-run-id')
-    const panelMatchesRun = !!(runSummaryPanel && panelRunId && String(panelRunId) === String(runStatus.run_id))
+    const panelStepId = runSummaryPanel && runSummaryPanel.getAttribute('data-step-id')
+    const panelStepNum = panelStepId ? parseInt(panelStepId, 10) : null
+    const panelStepMatchesShown =
+      currentStepIdNum &&
+      (panelStepNum === currentStepIdNum || runStepIdNum === currentStepIdNum)
+    const panelMatchesRun = !!(
+      runSummaryPanel &&
+      panelRunId &&
+      String(panelRunId) === String(runStatus.run_id) &&
+      panelStepMatchesShown
+    )
     console.log('[RSC.applyRunStatusChange] panel lookup', {
       foundPanel: !!runSummaryPanel,
       panelRunId: panelRunId,
+      panelStepId: panelStepId,
       foundRunRow: !!runRow,
       targetRunId: runStatus.run_id,
+      currentStepId: currentStepIdNum,
+      runStepId: runStepIdNum,
       match: panelMatchesRun
     })
 
-    const currentStepIdNum = this.currentStepId ? parseInt(this.currentStepId) : null
-    const runStepIdNum = runStatus.step_id != null ? parseInt(runStatus.step_id) : null
     const stepForPanel = currentStepIdNum || runStepIdNum
 
     if (panelMatchesRun) {
@@ -789,6 +814,9 @@ export default class extends Controller {
 
       clearTimeout(this.reloadTimeout)
       this.reloadTimeout = setTimeout(() => {
+        if (!this.isShowingStep(stepForPanel) || this.shouldPreserveRightPanel()) {
+          return
+        }
         if (this.isParsingStepId(stepForPanel)) {
           this.loadParsingStepResults(stepForPanel, 'run_status_changed:parsing_results')
           return
@@ -846,6 +874,9 @@ export default class extends Controller {
 
       clearTimeout(this.reloadTimeout)
       this.reloadTimeout = setTimeout(() => {
+        if (!this.isShowingStep(currentStepIdNum) || this.shouldPreserveRightPanel()) {
+          return
+        }
         if (isTerminalStatus && this.isParsingStepId(currentStepIdNum)) {
           this.loadParsingStepResults(currentStepIdNum, 'run_status_changed:parsing_terminal')
           return
@@ -880,6 +911,14 @@ export default class extends Controller {
         }
       }, 0)
     }
+  }
+
+  // True when the right panel is locked on the given step (user-selected or loaded).
+  isShowingStep(stepId) {
+    if (stepId == null || this.currentStepId == null) {
+      return false
+    }
+    return String(this.currentStepId) === String(stepId)
   }
 
   // True when the right panel is showing a form or step subview that must not
@@ -1014,6 +1053,9 @@ export default class extends Controller {
         if (isShowingFailedPanel && this.isParsingInProgressStatus(parsingStatus)) {
           clearTimeout(this.reloadTimeout)
           this.reloadTimeout = setTimeout(() => {
+            if (!this.isShowingStep(currentStepIdNum) || this.shouldPreserveRightPanel()) {
+              return
+            }
             if (this.isParsingStepId(this.currentStepId)) {
               this.loadParsingStepResults(this.currentStepId, 'websocket:parsing_failed_to_progress')
             } else {
@@ -1057,6 +1099,9 @@ export default class extends Controller {
           if (panelRunIdToReload) {
             clearTimeout(this.reloadTimeout)
             this.reloadTimeout = setTimeout(() => {
+              if (!this.isShowingStep(currentStepIdNum) || this.shouldPreserveRightPanel()) {
+                return
+              }
               if (this.isParsingStepId(currentStepIdNum)) {
                 this.loadParsingStepResults(currentStepIdNum, 'websocket:run_panel_reload')
               } else if (this.stepUsesCustomResultsView(currentStepIdNum)) {
@@ -1073,6 +1118,9 @@ export default class extends Controller {
             if (runsTotal > 0 && showingRunsEmptyState) {
               clearTimeout(this.reloadTimeout)
               this.reloadTimeout = setTimeout(() => {
+                if (!this.isShowingStep(currentStepIdNum) || this.shouldPreserveRightPanel()) {
+                  return
+                }
                 if (this.isParsingStepId(this.currentStepId)) {
                   this.loadParsingStepResults(this.currentStepId, 'websocket:runs_empty_state')
                 } else {
@@ -1086,31 +1134,9 @@ export default class extends Controller {
           }
         }
       }
-    } else if (updateStepId && !currentStepIdNum) {
-      if (Date.now() < this._realtimeReloadCooldownUntil) {
-        return
-      }
-      // No step is currently selected, but we got an update for a step - select and load it
-      const stepElement = this.element.querySelector(`[data-step-id="${updateStepId}"]`)
-      if (stepElement) {
-        this.currentStepId = updateStepId.toString()
-        this.element.setAttribute('data-current-step-id', updateStepId.toString())
-        clearTimeout(this.reloadTimeout)
-        this.reloadTimeout = setTimeout(() => {
-          this.loadStepResults(updateStepId, stepElement, true)
-        }, 300)
-      } else {
-        this.refreshStepsPanel()
-        setTimeout(() => {
-          const stepElement2 = this.element.querySelector(`[data-step-id="${updateStepId}"]`)
-          if (stepElement2) {
-            this.currentStepId = updateStepId.toString()
-            this.element.setAttribute('data-current-step-id', updateStepId.toString())
-            this.loadStepResults(updateStepId, stepElement2, true)
-          }
-        }, 500)
-      }
     }
+    // Do not auto-select a step from websocket updates when none is shown.
+    // Initial selection remains connect / selectFirstAvailableStep / URL / localStorage.
 
     // Parsing terminal refresh is handled by forceRefreshParsingPanelOnTerminalStatus.
   }
@@ -1658,6 +1684,9 @@ export default class extends Controller {
     if (shouldReload) {
       clearTimeout(this.reloadTimeout)
       this.reloadTimeout = setTimeout(() => {
+        if (!this.isShowingStep(stepId) || this.shouldPreserveRightPanel()) {
+          return
+        }
         if (this.isParsingStepId(stepId)) {
           this.loadParsingStepResults(stepId, 'updateStepStatusBadge')
         } else {

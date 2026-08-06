@@ -133,8 +133,10 @@ class ProjectsController < ApplicationController
     
     if selective_project_view_loading_enabled?
       with_request_profile('projects#show', view: params[:view]) do
-        @project.ensure_project_steps
         @view_type = resolve_project_view_type(params[:view])
+        # Summary/settings/access/annotations are metadata-only; creating ProjectStep
+        # rows is only needed when the analysis pipeline UI is loaded.
+        @project.ensure_project_steps unless METADATA_ONLY_PROJECT_VIEWS.include?(@view_type)
         return unless authorize_requested_view_access!(@view_type)
         load_view_context_for(@view_type)
         return if performed?
@@ -9664,7 +9666,7 @@ class ProjectsController < ApplicationController
       when 'heatmap'
         load_heatmap_viewer_context
       when 'summary'
-        load_analysis_context
+        # Summary is metadata-only: do not load analysis loom/steps/pipeline context.
         load_summary_context
       when 'analysis'
         load_analysis_context
@@ -9680,7 +9682,6 @@ class ProjectsController < ApplicationController
         load_annotations_context
       else
         @view_type = 'summary'
-        load_analysis_context
         load_summary_context
       end
     end
@@ -11518,37 +11519,7 @@ class ProjectsController < ApplicationController
     end
 
     def load_summary_context
-      @parsing_status = 'success'
-      @parsing_step = parsing_step_for_project(@project)
-      if @parsing_step
-        @parsing_project_step = ProjectStep.find_by(project_id: @project.id, step_id: @parsing_step.id)
-        if @parsing_project_step
-          status_name = @parsing_project_step.status&.name.to_s.downcase
-          @parsing_status = if %w[pending running success failed].include?(status_name)
-                              status_name
-                            else
-                              'success'
-                            end
-        end
-      end
-
-      @time_to_destroy = nil
-      @time_to_destroy = @project.updated_at + 2.days if @project.sandbox? && !current_user
-      @cloned_project = @project.cloned_project if @project.cloned_project_id
-      @runs ||= apply_publication_snapshot_to_runs(@project.runs.includes(:annots))
-      @h_steps ||= @all_project_steps.index_by(&:id)
-
-      @h_all_runs = {}
-      @runs.each { |run| @h_all_runs[run.id] = run }
-      @h_lineage_run_ids_by_step_id = {}
-      @runs.group_by(&:step_id).each { |step_id, runs| @h_lineage_run_ids_by_step_id[step_id] = runs.map(&:id) }
-      @list_filter_run_ids = []
-      @h_children_run_ids = {}
-      @step = @project.step || Step.first
-      @disable_filter = false
-
-      @h_identifier_types = {}
-      IdentifierType.all.each { |it| @h_identifier_types[it.id] = it }
+      @h_identifier_types = IdentifierType.all.index_by(&:id)
       @h_exp_entries = {}
       @project.exp_entries.includes(:identifier_type).each do |exp_entry|
         type_id = exp_entry.identifier_type_id
@@ -11559,27 +11530,30 @@ class ProjectsController < ApplicationController
       @h_articles = {}
       if @project.doi.present?
         dois = @project.doi.split(/\s*,\s*/).map(&:strip).reject(&:blank?)
-        Article.where(doi: dois).each { |article| @h_articles[article.doi] = article }
+        Article.where(doi: dois).each { |article| @h_articles[article.doi] = article } if dois.any?
       end
 
       @project_type = @project.project_type
-      compute_summary_loom_overview
-      @summary_gene_info_by_stable_id = project_cla_gene_info_by_stable_id(@project)
+
+      # One CLA load for counts, gene/ontology resolution, and the summary table.
+      @summary_cla_records = Cla.active.where(project_id: @project.id)
+                                .includes(:annot, :cell_set, :user, :cla_source, :ontology_term_type)
+                                .order(created_at: :desc)
+                                .to_a
+
+      compute_summary_loom_overview(cla_records: @summary_cla_records)
+
+      required_gene_ids = @summary_cla_records.flat_map do |cla|
+        [
+          parse_cla_field(cla.sorted_up_gene_ids.presence || cla.up_gene_ids),
+          parse_cla_field(cla.sorted_down_gene_ids.presence || cla.down_gene_ids)
+        ]
+      end.flatten.map { |value| value.to_s.strip }.reject(&:blank?).uniq
+
+      @summary_gene_info_by_stable_id = project_cla_gene_info_by_stable_id(@project, required_ids: required_gene_ids)
       @summary_gene_symbol_by_id = @summary_gene_info_by_stable_id.transform_values { |info| info[:symbol] }
-      @summary_cot_info_by_id = build_summary_cot_info_map
+      @summary_cot_info_by_id = build_summary_cot_info_map(cla_records: @summary_cla_records)
       @summary_cot_label_by_id = @summary_cot_info_by_id.transform_values { |info| info[:name].presence || info[:identifier] }
-      @non_published_runs_count = if @project.public? && @project.public_at.present?
-        @runs.count { |run| !@project.locked_from_publication?(run) }
-      else
-        0
-      end
-      @klay_data = generate_klay_data
-      @list_cards = generate_list_cards
-      session[:activated_filter] ||= {}
-      session[:activated_filter][@project.id] ||= false
-      session[:clust_comparison] ||= {}
-      session[:clust_comparison][@project.id] ||= {}
-      session[:clust_comparison][@project.id][:op] ||= "1"
 
       assign_summary_submitted_file_link!
     end
@@ -11666,7 +11640,7 @@ class ProjectsController < ApplicationController
       )
     end
 
-    def compute_summary_loom_overview
+    def compute_summary_loom_overview(cla_records: nil)
       @summary_loom_file_count = 0
       @summary_loom_content_counts = { matrices: 0, col_attrs: 0, row_attrs: 0, global: 0 }
       @summary_shared_users_count = @project.shares.count
@@ -11674,15 +11648,22 @@ class ProjectsController < ApplicationController
       # COUNT(col1, col2, ...) which PostgreSQL rejects.
       embedding_scope = apply_publication_snapshot_to_annots(Annot.where(project_id: @project.id, nber_rows: 2))
       @summary_embedding_count = embedding_scope.count
-      @summary_run_user_count = if defined?(@runs) && @runs.present?
-        @runs.map(&:user_id).compact.uniq.size
-      else
-        apply_publication_snapshot_to_runs(@project.runs).where.not(user_id: nil).distinct.count(:user_id)
+      @summary_run_user_count = apply_publication_snapshot_to_runs(@project.runs)
+                                 .where.not(user_id: nil)
+                                 .distinct
+                                 .count(:user_id)
+
+      active_clas = cla_records
+      active_clas = Cla.active.where(project_id: @project.id).to_a if active_clas.nil?
+      @summary_visual_annotation_count = active_clas.size
+      @summary_visual_vote_count = Cla.where(project_id: @project.id)
+                                      .sum(Arel.sql('COALESCE(nber_agree, 0) + COALESCE(nber_disagree, 0)'))
+
+      checkpoint_comments_json = @project.checkpoints.pluck(:comments_json)
+      @summary_checkpoint_count = checkpoint_comments_json.size
+      @summary_checkpoint_comment_count = checkpoint_comments_json.sum do |raw|
+        Array(Basic.safe_parse_json(raw, [])).size
       end
-      @summary_visual_annotation_count = Cla.active.where(project_id: @project.id).count
-      @summary_visual_vote_count = Cla.where(project_id: @project.id).sum(Arel.sql('COALESCE(nber_agree, 0) + COALESCE(nber_disagree, 0)'))
-      @summary_checkpoint_count = @project.checkpoints.count
-      @summary_checkpoint_comment_count = @project.checkpoints.to_a.sum { |checkpoint| checkpoint.comments.size }
 
       summary_annots = apply_publication_snapshot_to_annots(
         Annot.light.where(project_id: @project.id).where.not(filepath: [nil, ''])
@@ -14479,8 +14460,11 @@ class ProjectsController < ApplicationController
       build_summary_cot_info_map.transform_values { |info| info[:name].presence || info[:identifier] }
     end
 
-    def build_summary_cot_info_map
-      cot_ids = Cla.active.where(project_id: @project.id).flat_map do |cla|
+    def build_summary_cot_info_map(cla_records: nil)
+      records = cla_records
+      records = Cla.active.where(project_id: @project.id).to_a if records.nil?
+
+      cot_ids = records.flat_map do |cla|
         parse_cla_field(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids)
       end.map { |value| value.to_s.to_i }.select(&:positive?).uniq
       return {} if cot_ids.empty?
@@ -14506,13 +14490,37 @@ class ProjectsController < ApplicationController
     end
 
     # CLA up/down gene fields store loom /row_attrs/_StableID values (from gene autocomplete),
-    # not asap_data genes.id. Resolve symbols from project loom autocomplete / row attrs.
-    def project_cla_gene_symbol_by_stable_id(project)
-      project_cla_gene_info_by_stable_id(project).transform_values { |info| info[:symbol] }
+    # not asap_data genes.id. Resolve symbols from project autocomplete_genes.json files.
+    # Do not call ExtractMetadata here: reading full Gene/Accession/_StableID vectors from
+    # every loom is far too expensive for page loads. Callers that must resolve missing
+    # symbols against a specific loom should use ensure_project_cla_gene_symbols_for_loom!.
+    def project_cla_gene_symbol_by_stable_id(project, required_ids: nil)
+      project_cla_gene_info_by_stable_id(project, required_ids: required_ids)
+        .transform_values { |info| info[:symbol] }
     end
 
-    def project_cla_gene_info_by_stable_id(project)
+    def project_cla_required_gene_stable_ids(project)
+      return [] unless project
+
+      Cla.active.where(project_id: project.id)
+         .pluck(:sorted_up_gene_ids, :up_gene_ids, :sorted_down_gene_ids, :down_gene_ids)
+         .flat_map do |sorted_up, up, sorted_down, down|
+        [
+          parse_cla_field(sorted_up.presence || up),
+          parse_cla_field(sorted_down.presence || down)
+        ]
+      end.flatten.map { |value| value.to_s.strip }.reject(&:blank?).uniq
+    end
+
+    def project_cla_gene_info_by_stable_id(project, required_ids: nil)
       return {} unless project
+
+      ids = if required_ids.nil?
+              project_cla_required_gene_stable_ids(project)
+            else
+              Array(required_ids).map { |value| value.to_s.strip }.reject(&:blank?).uniq
+            end
+      return {} if ids.empty?
 
       map = {}
       roots = project_data_roots_for_cla_genes(project)
@@ -14521,18 +14529,6 @@ class ProjectsController < ApplicationController
       roots.each do |root|
         Dir.glob(root.join("**/autocomplete_genes.json").to_s).each do |path|
           merge_autocomplete_genes_file_into_info_map!(map, path)
-        end
-      end
-
-      if map.empty?
-        loom_files = Annot.light.where(project_id: project.id).where.not(filepath: [nil, ""]).distinct.pluck(:filepath)
-        roots.each do |root|
-          loom_files.each do |rel|
-            loom_path = root + rel.to_s
-            next unless File.exist?(loom_path)
-
-            merge_loom_row_attrs_into_info_map!(map, loom_path.to_s)
-          end
         end
       end
 

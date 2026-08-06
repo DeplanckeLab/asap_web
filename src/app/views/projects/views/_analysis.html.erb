@@ -793,6 +793,18 @@
       return
     }
 
+    // Refuse overwriting a different already-selected step. Intentional navigation
+    // sets currentStepId first (selectStep / loadStepResults); stray websocket
+    // callbacks must not yank the right panel to another step.
+    if (stepId && controller.currentStepId && String(controller.currentStepId) !== String(stepId)) {
+      console.log('[loadRunInRightPanel] skip: stepId differs from shown step', {
+        stepId: stepId,
+        currentStepId: controller.currentStepId,
+        runUrl: runUrl
+      })
+      return
+    }
+
     window.__analysisRightPanelOverlaySeq = (window.__analysisRightPanelOverlaySeq || 0) + 1
     const overlayTicket = window.__analysisRightPanelOverlaySeq
     const stepResultsSeqWhenRunFetchStarted = controller._stepResultsRequestSeq

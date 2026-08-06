@@ -129,7 +129,7 @@ cp.comments.each do |c|
 summary_checkpoint_comments << { checkpoint_title: cp.title, body: (c['body'] || c[:body] || c['comment']).to_s, user_name: (c['user_name'] || c[:user_name]).to_s, created_at: (c['created_at'] || c[:created_at]).to_s }
 end
 end
-summary_cla_records = Cla.active.where(project_id: @project.id).includes(:annot, :cell_set, :user, :cla_source, :ontology_term_type).order(created_at: :desc).to_a
+summary_cla_records = @summary_cla_records || Cla.active.where(project_id: @project.id).includes(:annot, :cell_set, :user, :cla_source, :ontology_term_type).order(created_at: :desc).to_a
 summary_annotation_type_options = summary_cla_records.group_by(&:ontology_term_type_id).map do |tid, clas|
   ott = clas.first&.ontology_term_type
   label = if tid.nil?

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_05_154500) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_06_163500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -277,6 +277,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_05_154500) do
     t.integer "user_id"
     t.index ["annot_id"], name: "idx_clas_annot_id"
     t.index ["ontology_term_type_id"], name: "index_clas_on_ontology_term_type_id"
+    t.index ["project_id"], name: "index_clas_on_project_id"
   end
 
   create_table "cluster_methods", id: :serial, force: :cascade do |t|
@@ -1244,6 +1245,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_05_154500) do
     t.integer "user_id"
     t.float "waiting_duration"
     t.index ["docker_build_id"], name: "index_runs_on_docker_build_id"
+    t.index ["project_id"], name: "index_runs_on_project_id"
     t.index ["slurm_job_id"], name: "index_runs_on_slurm_job_id"
   end
 
@@ -1289,6 +1291,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_05_154500) do
     t.datetime "updated_at", precision: nil
     t.integer "user_id"
     t.boolean "view_perm", default: true
+    t.index ["project_id"], name: "index_shares_on_project_id"
   end
 
   create_table "speeds", id: :serial, force: :cascade do |t|

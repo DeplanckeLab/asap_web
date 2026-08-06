@@ -4469,6 +4469,105 @@ module Basic
       { changes: changes }
     end
 
+    # DB-only: attr annots whose nber_rows x nber_cols equal the loom /matrix shape
+    # (vector metadata wrongly stamped with matrix dims). No output.json required.
+    # Target shape from dim (or path): CELL => 1 x n_cols, GENE => n_rows x 1, GLOBAL => 1 x 1.
+    # Returns { changes: [...] } (possibly empty).
+    def plan_matrix_shaped_vector_annot_repairs(project_id: nil, run_id: nil)
+      binds = []
+      sql = <<~SQL
+        SELECT a.id AS annot_id,
+               a.run_id,
+               a.project_id,
+               a.name,
+               a.dim,
+               a.nber_rows AS from_rows,
+               a.nber_cols AS from_cols,
+               m.nber_rows AS matrix_rows,
+               m.nber_cols AS matrix_cols
+        FROM annots a
+        INNER JOIN annots m
+          ON m.project_id = a.project_id
+         AND m.filepath = a.filepath
+         AND m.name = '/matrix'
+        WHERE a.run_id IS NOT NULL
+          AND a.dim IS DISTINCT FROM 3
+          AND a.nber_rows > 1
+          AND a.nber_cols > 1
+          AND a.nber_rows = m.nber_rows
+          AND a.nber_cols = m.nber_cols
+          AND (
+            a.name LIKE '/col_attrs/%'
+            OR a.name LIKE '/row_attrs/%'
+            OR a.name LIKE '/attrs/%'
+          )
+      SQL
+      if project_id
+        sql += ' AND a.project_id = ?'
+        binds << project_id
+      end
+      if run_id
+        sql += ' AND a.run_id = ?'
+        binds << run_id
+      end
+      sql += ' ORDER BY a.project_id, a.run_id, a.id'
+
+      rows = if binds.any?
+               ActiveRecord::Base.connection.select_all(
+                 ActiveRecord::Base.sanitize_sql_array([sql, *binds])
+               )
+             else
+               ActiveRecord::Base.connection.select_all(sql)
+             end
+
+      annots_by_id = Annot.where(id: rows.map { |r| r['annot_id'] }).index_by(&:id)
+      changes = []
+      rows.each do |row|
+        annot = annots_by_id[row['annot_id'].to_i]
+        next unless annot
+
+        to_rows, to_cols = inferred_vector_dims_for_annot(
+          annot,
+          matrix_rows: row['matrix_rows'].to_i,
+          matrix_cols: row['matrix_cols'].to_i
+        )
+        next if to_rows.nil? || to_cols.nil?
+        next if annot.nber_rows.to_i == to_rows && annot.nber_cols.to_i == to_cols
+
+        changes << {
+          annot: annot,
+          name: annot.name,
+          from_rows: annot.nber_rows.to_i,
+          from_cols: annot.nber_cols.to_i,
+          to_rows: to_rows,
+          to_cols: to_cols,
+          source: 'matrix_shape+dim'
+        }
+      end
+      { changes: changes }
+    end
+
+    # CELL/dim1 => 1 x n_cells; GENE/dim2 => n_genes x 1; GLOBAL/dim4 => 1 x 1
+    def inferred_vector_dims_for_annot(annot, matrix_rows:, matrix_cols:)
+      axis = case annot.dim.to_i
+             when 1 then :cell
+             when 2 then :gene
+             when 4 then :global
+             else
+               name = annot.name.to_s
+               if name.start_with?('/col_attrs/') then :cell
+               elsif name.start_with?('/row_attrs/') then :gene
+               elsif name.start_with?('/attrs/') then :global
+               end
+             end
+      case axis
+      when :cell then [1, matrix_cols]
+      when :gene then [matrix_rows, 1]
+      when :global then [1, 1]
+      else [nil, nil]
+      end
+    end
+
     def normalize_dataset_path(path)
       s = path.to_s.strip
       return '' if s.empty?

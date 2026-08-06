@@ -159,4 +159,17 @@ class BasicSyncRunAnnotsFromOutputJsonTest < TestBaseWithoutFixtures
     assert_equal 2919, @gene_annot.nber_cols
     assert_equal 27998, @cell_annot.nber_rows
   end
+
+  test 'plan_matrix_shaped_vector_annot_repairs uses dim without output.json' do
+    plan = Basic.plan_matrix_shaped_vector_annot_repairs(run_id: @run.id)
+    by_name = plan[:changes].index_by { |c| c[:name] }
+
+    gene = by_name['/row_attrs/feature_biotype']
+    cell = by_name['/col_attrs/CellID']
+    assert gene, 'expected gene vector candidate'
+    assert cell, 'expected cell vector candidate'
+    assert_equal [27998, 1], [gene[:to_rows], gene[:to_cols]]
+    assert_equal [1, 2919], [cell[:to_rows], cell[:to_cols]]
+    refute by_name.key?('/matrix')
+  end
 end

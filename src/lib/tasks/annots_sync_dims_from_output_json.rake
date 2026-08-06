@@ -2,10 +2,64 @@
 
 namespace :annots do
   desc <<~DESC.gsub(/\n/, ' ').strip
-    Reconcile annot nber_rows/nber_cols from each run's output.json metadata entries.
-    Default: dry-run, and only the vector-corruption case (annot looks 2D but output.json
-    says a 1D vector). Set APPLY=1 to write. ALL_MISMATCHES=1 includes every dim diff.
-    Optional: RUN_ID=123 PROJECT_ID=456
+    Detect/repair vector metadata annots whose nber_rows x nber_cols equal the loom /matrix
+    shape (DB-only; no output.json required). Infers CELL=>1xn, GENE=>nx1, GLOBAL=>1x1.
+    Default is dry-run. Set APPLY=1 to write. Optional: RUN_ID=123 PROJECT_ID=456 LIMIT=50
+  DESC
+  task repair_matrix_shaped_vector_dims: :environment do
+    apply = ENV['APPLY'].to_s.strip == '1'
+    dry_run = !apply
+    run_id = ENV['RUN_ID'].presence&.to_i
+    project_id = ENV['PROJECT_ID'].presence&.to_i
+    limit = ENV['LIMIT'].presence&.to_i
+
+    plan = Basic.plan_matrix_shaped_vector_annot_repairs(
+      project_id: project_id,
+      run_id: run_id
+    )
+    changes = plan[:changes]
+    changes = changes.first(limit) if limit && limit.positive?
+
+    by_run = changes.group_by { |c| [c[:annot].run_id, c[:annot].project_id] }
+
+    puts "annots:repair_matrix_shaped_vector_dims dry_run=#{dry_run} apply=#{apply} " \
+         "run_id=#{run_id.inspect} project_id=#{project_id.inspect} " \
+         "annots=#{changes.size} runs=#{by_run.size}"
+    puts 'No DB writes will be made.' if dry_run
+    puts 'APPLY=1 set: changes will be written.' if apply
+
+    by_run.each do |(rid, pid), run_changes|
+      project = Project.find_by(id: pid)
+      step_name = Run.find_by(id: rid)&.step&.name
+      puts "Run##{rid} project##{pid} key=#{project&.key} step=#{step_name} " \
+           "changes=#{run_changes.size}"
+      run_changes.each do |c|
+        puts "  #{c[:name]} dim=#{c[:annot].dim}: " \
+             "#{c[:from_rows]}x#{c[:from_cols]} -> #{c[:to_rows]}x#{c[:to_cols]}"
+      end
+    end
+
+    unless dry_run
+      changes.each do |change|
+        change[:annot].update!(
+          nber_rows: change[:to_rows],
+          nber_cols: change[:to_cols]
+        )
+      end
+    end
+
+    puts '---'
+    puts "annots_#{dry_run ? 'would_change' : 'changed'}=#{changes.size} " \
+         "runs_#{dry_run ? 'would_change' : 'changed'}=#{by_run.size}"
+    if dry_run && changes.any?
+      puts 'Re-run with APPLY=1 to write these changes.'
+    end
+  end
+
+  desc <<~DESC.gsub(/\n/, ' ').strip
+    Reconcile annot dims from output.json metadata (needs files on disk).
+    Default: dry-run, vector-corruption filter only. APPLY=1 to write.
+    ALL_MISMATCHES=1 includes every dim diff. Optional: RUN_ID= PROJECT_ID=
   DESC
   task sync_dims_from_output_json: :environment do
     apply = ENV['APPLY'].to_s.strip == '1'
@@ -19,7 +73,6 @@ namespace :annots do
     scope = scope.where(project_id: project_id) if project_id
 
     unless run_id || all_mismatches
-      # Fast path: only runs that still have 2D-looking attr annots (corruption candidates).
       suspicious_sql = <<~SQL
         SELECT DISTINCT run_id
         FROM annots
@@ -85,7 +138,6 @@ namespace :annots do
         puts "  #{c[:name]}: #{c[:from_rows]}x#{c[:from_cols]} -> #{c[:to_rows]}x#{c[:to_cols]}"
       end
 
-      # Apply only the filtered change set (avoid writing unrelated mismatches).
       prefix = dry_run ? '[DRY-RUN] ' : ''
       changes.each do |change|
         logger.info(

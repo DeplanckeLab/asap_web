@@ -748,6 +748,19 @@ task :parse, [:project_key] => [:environment] do |t, args|
             end
         end
 
+        # preparse.v8.py gunzips/archives and records the readable path in output.json.
+        # parse.v8.py TextHandler opens the file as UTF-8 text and does not decompress.
+        if file_type == 'RAW_TEXT' && fu
+          begin
+            preparsed_file_path = Basic.resolve_preparsed_input_file_path(fu, project: project)
+            if preparsed_file_path.present?
+              filepath = Pathname.new(preparsed_file_path)
+              logger.info("[ParseRake] Using preparsed RAW_TEXT file path #{filepath} for v8 parsing")
+            end
+          rescue => e
+            logger.warn("[ParseRake] Could not resolve preparsed RAW_TEXT file path: #{e.class} - #{e.message}")
+          end
+        end
 
 #      usage: parse.v8.py -f File to parse [-o Output folder] --filetype File type [--header [RAW_TEXT] Is there a header] [--col [RAW_TEXT] Which column contains row names]                 
 #                   [--sel In case of multiple matrices, which one to use] [--delim [RAW_TEXT] Delimiter to parse columns] --organism Organism --dburl Host URL for DB                        

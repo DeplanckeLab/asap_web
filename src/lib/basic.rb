@@ -4402,6 +4402,8 @@ module Basic
 
     # When a shared step/output.json is read before the current job finishes, annots can get
     # dimensions from a previous run. Reconcile from the on-disk output.json when they differ.
+    # Uses each metadata entry's own nber_rows/nber_cols — never top-level matrix shape
+    # (matrix_dims_from_results prefers those and would corrupt 1D gene/cell vectors).
     def sync_run_annots_from_output_json!(logger, run)
       output_json_path = run_output_dir(run) + 'output.json'
       return false unless File.exist?(output_json_path.to_s)
@@ -4424,9 +4426,8 @@ module Basic
         meta = h_metadata_by_name[normalize_dataset_path(annot.name)]
         next unless meta
 
-        dims = matrix_dims_from_results(h_results, annot.name, h_metadata_by_name)
-        nr = dims['nber_rows']
-        nc = dims['nber_cols']
+        nr = meta['nber_rows']
+        nc = meta['nber_cols']
         next if nr.blank? || nc.blank?
 
         if annot.nber_rows.to_i != nr.to_i || annot.nber_cols.to_i != nc.to_i

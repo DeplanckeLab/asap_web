@@ -158,8 +158,8 @@ module ProjectsHelper
     ''
   end
 
-  # Generate a label for a loom file in the format: <step name> <std_method_name> #<run_number>
-  # If multiple_runs == false, display only <std_method_name> capitalized
+  # Generate a label for a loom file in the format: <step label> #<run_number> (<std_method label>)
+  # If multiple_runs == false, display only the std_method label (fallback to name)
   # @param filepath [String] The filepath of the loom file
   # @return [String] The formatted label
   def loom_file_label(filepath)
@@ -172,25 +172,27 @@ module ProjectsHelper
     run = @loom_file_runs[run_id]
     return filepath unless run
     
-    # Get std_method name
-    std_method_name = run.std_method ? (run.std_method.name.presence || '') : ''
+    std_method_label = if run.std_method
+      run.std_method.label.presence || run.std_method.name.presence || ''
+    else
+      ''
+    end
     
     # Check if step has multiple_runs == false
     if run.step && run.step.multiple_runs == false
-      # Display only capitalized std_method_name
-      return std_method_name.present? ? std_method_name.capitalize : filepath
+      return std_method_label.present? ? std_method_label : filepath
     end
     
-    # Get step name (prefer label, fallback to name)
-    step_name = run.step ? (run.step.label.presence || run.step.name.presence || 'Unknown') : 'Unknown'
+    # Get step label (prefer label, fallback to name)
+    step_label = run.step ? (run.step.label.presence || run.step.name.presence || 'Unknown') : 'Unknown'
     
     # Get run number (prefer num, fallback to id)
     run_number = run.num || run.id
     
     # Build the full label
-    parts = [step_name]
+    parts = [step_label]
     parts << "##{run_number}"
-    parts << "(#{std_method_name})" if std_method_name.present? && std_method_name != 'Unknown'
+    parts << "(#{std_method_label})" if std_method_label.present? && std_method_label != 'Unknown'
     
     parts.join(' ')
   end

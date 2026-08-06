@@ -143,4 +143,20 @@ class BasicSyncRunAnnotsFromOutputJsonTest < TestBaseWithoutFixtures
     assert_equal 27998, @matrix_annot.nber_rows
     assert_equal 2919, @matrix_annot.nber_cols
   end
+
+  test 'dry_run reports changes without writing' do
+    logger = Logger.new(File::NULL)
+
+    Basic.stub(:run_output_dir, ->(_run) { Pathname.new(@tmpdir) }) do
+      plan = Basic.plan_sync_run_annots_from_output_json(@run)
+      assert plan
+      assert_equal 2, plan[:changes].size
+      assert Basic.sync_run_annots_from_output_json!(logger, @run, dry_run: true)
+    end
+
+    @gene_annot.reload
+    @cell_annot.reload
+    assert_equal 2919, @gene_annot.nber_cols
+    assert_equal 27998, @cell_annot.nber_rows
+  end
 end

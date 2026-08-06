@@ -4404,16 +4404,41 @@ module Basic
     # dimensions from a previous run. Reconcile from the on-disk output.json when they differ.
     # Uses each metadata entry's own nber_rows/nber_cols — never top-level matrix shape
     # (matrix_dims_from_results prefers those and would corrupt 1D gene/cell vectors).
-    def sync_run_annots_from_output_json!(logger, run)
+    #
+    # dry_run: when true, logs planned updates but does not write.
+    # Returns true if any annot would be / was updated.
+    def sync_run_annots_from_output_json!(logger, run, dry_run: false)
+      plan = plan_sync_run_annots_from_output_json(run)
+      return false if plan.nil? || plan[:changes].empty?
+
+      prefix = dry_run ? '[DRY-RUN] ' : ''
+      plan[:changes].each do |change|
+        logger.info(
+          "#{prefix}[Basic.sync_run_annots_from_output_json] Run##{run.id} #{change[:name]}: " \
+          "#{change[:from_rows]}x#{change[:from_cols]} -> #{change[:to_rows]}x#{change[:to_cols]}"
+        )
+        next if dry_run
+
+        change[:annot].update!(
+          nber_rows: change[:to_rows],
+          nber_cols: change[:to_cols]
+        )
+      end
+      true
+    end
+
+    # Returns nil if no usable output.json; otherwise { changes: [Hash, ...] }.
+    # Each change: :annot, :name, :from_rows, :from_cols, :to_rows, :to_cols
+    def plan_sync_run_annots_from_output_json(run)
       output_json_path = run_output_dir(run) + 'output.json'
-      return false unless File.exist?(output_json_path.to_s)
+      return nil unless File.exist?(output_json_path.to_s)
 
       h_results = safe_parse_json(File.read(output_json_path), {})
-      return false unless h_results.is_a?(Hash)
+      return nil unless h_results.is_a?(Hash)
 
       metadata = h_results['metadata']
       metadata = metadata.is_a?(Array) ? metadata : (metadata ? [metadata] : [])
-      return false if metadata.empty?
+      return nil if metadata.empty?
 
       h_metadata_by_name = {}
       metadata.each do |m|
@@ -4421,7 +4446,7 @@ module Basic
         h_metadata_by_name[normalize_dataset_path(m['name'])] = m
       end
 
-      updated = false
+      changes = []
       Annot.where(run_id: run.id).find_each do |annot|
         meta = h_metadata_by_name[normalize_dataset_path(annot.name)]
         next unless meta
@@ -4430,19 +4455,18 @@ module Basic
         nc = meta['nber_cols']
         next if nr.blank? || nc.blank?
 
-        if annot.nber_rows.to_i != nr.to_i || annot.nber_cols.to_i != nc.to_i
-          logger.info(
-            "[Basic.sync_run_annots_from_output_json] Run##{run.id} #{annot.name}: " \
-            "#{annot.nber_rows}x#{annot.nber_cols} -> #{nr}x#{nc}"
-          )
-          annot.update!(
-            nber_rows: nr.to_i,
-            nber_cols: nc.to_i
-          )
-          updated = true
-        end
+        next if annot.nber_rows.to_i == nr.to_i && annot.nber_cols.to_i == nc.to_i
+
+        changes << {
+          annot: annot,
+          name: annot.name,
+          from_rows: annot.nber_rows.to_i,
+          from_cols: annot.nber_cols.to_i,
+          to_rows: nr.to_i,
+          to_cols: nc.to_i
+        }
       end
-      updated
+      { changes: changes }
     end
 
     def normalize_dataset_path(path)

@@ -1,6 +1,7 @@
 class DockerImagesController < ApplicationController
   before_action :set_docker_image, only: [:show, :edit, :update, :destroy]
   before_action :ensure_admin!, except: [:index, :show]
+  before_action :ensure_synced_reference_data_writable!, except: [:index, :show]
 
   def index
     @docker_images = DockerImage.order(created_at: :desc)

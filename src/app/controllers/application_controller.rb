@@ -1,7 +1,7 @@
 class ApplicationController < ActionController::Base
   include AdminAuthorization
   include ProjectAuthorization
-  
+
   # Only allow modern browsers supporting webp images, web push, badges, import maps, CSS nesting, and CSS :has.
   allow_browser versions: :modern
 
@@ -16,9 +16,28 @@ class ApplicationController < ActionController::Base
   before_action :init_session
 
   # Make authorization methods available to views
-  helper_method :admin?, :authorized?, :readable?, :exportable?, :exportable_item?, :editable?, :owner?, :owner_or_admin?, :owner_or_admin_obj?, :read_only?, :clonable?, :analyzable?, :analyzable_item?, :annotable?, :annotable_item?, :cla_votable?, :downloadable?, :publication_snapshot_reader?, :annot_visible_under_publication_rules?, :run_visible_under_publication_rules?, :guest_sandbox_project
+  helper_method :admin?, :authorized?, :readable?, :exportable?, :exportable_item?, :editable?, :owner?, :owner_or_admin?, :owner_or_admin_obj?, :read_only?, :clonable?, :analyzable?, :analyzable_item?, :annotable?, :annotable_item?, :cla_votable?, :downloadable?, :publication_snapshot_reader?, :annot_visible_under_publication_rules?, :run_visible_under_publication_rules?, :guest_sandbox_project, :synced_reference_data_writable?, :can_edit_synced_reference_data?
 
   protected
+
+  # Reference data authored on development and synced to production is read-only in the prod UI.
+  def synced_reference_data_writable?
+    !Rails.env.production?
+  end
+
+  def can_edit_synced_reference_data?
+    admin? && synced_reference_data_writable?
+  end
+
+  def ensure_synced_reference_data_writable!
+    return if synced_reference_data_writable?
+
+    redirect_back(
+      fallback_location: root_path,
+      alert: "Reference data synced from development cannot be edited on production. " \
+             "Edit on the development instance, then run the sync task."
+    )
+  end
 
   def enforce_session_cookie_policy
     unless Rails.env.production?

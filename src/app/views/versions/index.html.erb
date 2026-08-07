@@ -7,7 +7,7 @@
         Release notes and changelog for ASAP versions.
       </p>
     </div>
-    <% if admin? %>
+    <% if can_edit_synced_reference_data? %>
       <%= link_to 'New Release', new_version_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
     <% end %>
   </div>
@@ -21,7 +21,7 @@
     <% action_buttons = [
          { text: 'Show', path: version_path(version) }
        ] %>
-    <% action_buttons << { text: 'Edit', path: edit_version_path(version) } if admin? %>
+    <% action_buttons << { text: 'Edit', path: edit_version_path(version) } if can_edit_synced_reference_data? %>
     <%= render 'version', version: version, env_data: env_data, show_actions: true, action_buttons: action_buttons %>
   <% end %>
 

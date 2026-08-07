@@ -1,5 +1,6 @@
 class GuidedTourStepsController < ApplicationController
   before_action :authorize_admin
+  before_action :ensure_synced_reference_data_writable!
   before_action :set_guided_tour
   before_action :set_guided_tour_step, only: [:update, :destroy]
 

@@ -2,6 +2,7 @@ class StdMethodsController < ApplicationController
   skip_before_action :authenticate_user!, only: [:index_filters], raise: false
   before_action :set_std_method, only: [:show, :edit, :update, :destroy]
   before_action :ensure_admin!, except: [:index, :show, :index_filters]
+  before_action :ensure_synced_reference_data_writable!, except: [:index, :show, :index_filters]
 
   def index
     @versions = Version.where('id > 3').order(id: :desc)

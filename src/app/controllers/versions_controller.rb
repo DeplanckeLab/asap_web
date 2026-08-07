@@ -2,6 +2,7 @@ class VersionsController < ApplicationController
   before_action :set_version, only: [:show, :edit, :update, :destroy, :run_stats]
   before_action :load_tool_metadata, only: [:index, :show]
   before_action :ensure_admin!, except: [:index, :show, :last_version, :run_stats]
+  before_action :ensure_synced_reference_data_writable!, except: [:index, :show, :last_version, :run_stats]
   helper_method :tool_metadata_for, :docker_image_record_for
 
   def index

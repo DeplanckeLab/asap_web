@@ -4,7 +4,7 @@
     <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">News item</h1>
     <div class="flex items-center gap-2">
       <%= link_to 'Back to news', news_items_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800' %>
-      <% if admin? %>
+      <% if can_edit_synced_reference_data? %>
         <%= link_to 'Edit', edit_news_item_path(@news_item), class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
         <% if @news_item.github_syncable? %>
           <%= button_to (@news_item.github_synced? ? 'Update on GitHub' : 'Post to GitHub'),

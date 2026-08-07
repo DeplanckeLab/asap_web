@@ -1,5 +1,6 @@
 class GuidedToursController < ApplicationController
   before_action :authorize_admin
+  before_action :ensure_synced_reference_data_writable!, except: [:index, :show, :editor]
   before_action :set_guided_tour, only: [:show, :edit, :update, :destroy]
 
   def index
@@ -45,8 +46,11 @@ class GuidedToursController < ApplicationController
     first_tour = GuidedTour.ordered.first
     if first_tour
       redirect_to guided_tour_path(first_tour)
-    else
+    elsif synced_reference_data_writable?
       redirect_to new_guided_tour_path, notice: 'Create your first guided tour.'
+    else
+      redirect_to guided_tours_path,
+                  alert: 'Guided tours are synced from development and are read-only on production.'
     end
   end
 

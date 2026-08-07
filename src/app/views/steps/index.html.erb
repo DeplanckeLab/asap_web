@@ -7,7 +7,7 @@
         Manage analysis steps available in ASAP.
       </p>
     </div>
-    <% if admin? %>
+    <% if can_edit_synced_reference_data? %>
       <%= link_to 'New Step', new_step_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
     <% end %>
   </div>
@@ -66,7 +66,7 @@
       <table class="min-w-full divide-y divide-gray-200 text-sm">
         <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600">
           <tr>
-            <% if admin? %>
+            <% if can_edit_synced_reference_data? %>
               <th scope="col" class="w-10 px-3 py-2 text-left"></th>
             <% end %>
             <th scope="col" class="px-3 py-2 text-left">ID</th>
@@ -80,7 +80,7 @@
         <tbody
           class="divide-y divide-gray-100 text-sm text-gray-700"
           data-table-row-filter-target="tbody"
-          <% if admin? %>
+          <% if can_edit_synced_reference_data? %>
             data-controller="sortable-list"
             data-sortable-list-url-value="<%= reorder_steps_path %>"
             data-sortable-list-item-selector-value="tr[data-id]"
@@ -92,9 +92,9 @@
               row_filter_text: step_index_row_filter_text(step),
               row_filter_columns: step_index_row_filter_text_table_columns(step)
             } %>
-            <% row_data[:action] = "dragover->sortable-list#dragover drop->sortable-list#drop" if admin? %>
-            <%= tag.tr data: row_data, class: ("hover:bg-gray-50" if admin?) do %>
-              <% if admin? %>
+            <% row_data[:action] = "dragover->sortable-list#dragover drop->sortable-list#drop" if can_edit_synced_reference_data? %>
+            <%= tag.tr data: row_data, class: ("hover:bg-gray-50" if can_edit_synced_reference_data?) do %>
+              <% if can_edit_synced_reference_data? %>
                 <td class="px-3 py-2">
                   <span
                     draggable="true"
@@ -123,7 +123,7 @@
               <td class="px-3 py-2 text-gray-700"><%= step.label.presence || '—' %></td>
               <td class="px-3 py-2 text-right">
                 <%= link_to 'Show', step_path(step), class: 'text-gray-600 hover:text-gray-800' %>
-                <% if admin? %>
+                <% if can_edit_synced_reference_data? %>
                   <span class="mx-2 text-gray-300">|</span>
                   <%= link_to 'Edit', edit_step_path(step), class: 'text-gray-600 hover:text-gray-800' %>
                   <span class="mx-2 text-gray-300">|</span>

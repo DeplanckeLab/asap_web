@@ -14,7 +14,7 @@
           Announcements, features, alerts, and updates from the ASAP team.
         </p>
       </div>
-      <% if admin? %>
+      <% if can_edit_synced_reference_data? %>
         <%= link_to 'New news item', new_news_item_path, class: 'inline-flex items-center px-3 py-2 rounded-md bg-gray-900 text-white text-sm font-medium hover:bg-gray-800 transition' %>
       <% end %>
     </div>

@@ -1,6 +1,7 @@
 class NewsItemsController < ApplicationController
   skip_before_action :authenticate_user!, raise: false
   before_action :ensure_admin!, except: [:index, :show]
+  before_action :ensure_synced_reference_data_writable!, except: [:index, :show]
   before_action :set_news_item, only: [:show, :edit, :update, :destroy, :sync_to_github]
 
   def index

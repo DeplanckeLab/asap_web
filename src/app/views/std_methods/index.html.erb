@@ -7,7 +7,7 @@
         Manage standard methods available in ASAP.
       </p>
     </div>
-    <% if admin? %>
+    <% if can_edit_synced_reference_data? %>
       <%
         new_std_method_query = {}
         new_std_method_query[:version_id] = @selected_version_id if @selected_version_id.present?
@@ -120,7 +120,7 @@
               </td>
               <td class="px-3 py-2 text-right">
                 <%= link_to 'Show', std_method_path(std_method), class: 'text-gray-600 hover:text-gray-800' %>
-                <% if admin? %>
+                <% if can_edit_synced_reference_data? %>
                   <span class="mx-2 text-gray-300">|</span>
                   <%= link_to 'Edit', edit_std_method_path(std_method), class: 'text-gray-600 hover:text-gray-800' %>
                   <span class="mx-2 text-gray-300">|</span>

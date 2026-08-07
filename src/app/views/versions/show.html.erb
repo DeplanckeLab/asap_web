@@ -3,7 +3,7 @@
     <h1 class="text-2xl font-semibold text-gray-900">Release <%= @version.id %></h1>
     <div class="flex items-center gap-2">
       <%= link_to 'Back to releases', versions_path, class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
-      <% if admin? %>
+      <% if can_edit_synced_reference_data? %>
         <%= link_to 'Edit', edit_version_path(@version), class: 'inline-flex items-center px-3 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50' %>
       <% end %>
     </div>
@@ -11,7 +11,7 @@
 
   <%= render 'version', version: @version, env_data: @env_data, show_actions: false %>
 
-  <% if admin? %>
+  <% if can_edit_synced_reference_data? %>
     <div class="flex items-center justify-end gap-3 text-sm">
       <%= link_to 'Delete release', version_path(@version), method: :delete, data: { confirm: 'Are you sure?' }, class: 'text-red-600 hover:text-red-700' %>
     </div>

@@ -2077,12 +2077,83 @@ module Basic
       val.to_s.split(',').map(&:strip).reject(&:empty?)
     end
 
+    # Build up/down gene row ids for GE from a DE /attrs annot in the loom.
+    # Used when de/<run>/output.txt was never materialized by the DE results UI.
+    def ge_filtered_gene_ids_from_de_annot(project_dir, annot, fdr_cutoff, log_fc_cutoff)
+      raise ArgumentError, 'Missing DE annot for gene enrichment' unless annot
+
+      base = project_dir.is_a?(Pathname) ? project_dir : Pathname.new(project_dir.to_s)
+      loom_file = base + annot.filepath
+      raise StandardError, "DE loom not found for gene enrichment (#{loom_file})" unless File.exist?(loom_file.to_s)
+
+      meta_name = annot.name.to_s
+      meta_norm = meta_name.sub(/\Aattrs\//, '/attrs/')
+      h_results = {}
+      vals = nil
+
+      if meta_norm.start_with?('/attrs/')
+        begin
+          h_results = H5DataService.get_attrs_matrix_full_for_de_filter(loom_file.to_s, meta_norm, annot)
+          vals = h_results['values']
+        rescue => e
+          Rails.logger.warn(
+            "[ge_filtered_gene_ids_from_de_annot] h5py failed annot_id=#{annot.id} meta=#{meta_norm}: #{e.class}: #{e.message}"
+          )
+        end
+      end
+
+      unless vals.is_a?(Array) && vals[0].is_a?(Array)
+        cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T ExtractMetadata --scientific -prec 5 -loom #{loom_file} -meta \"#{annot.name}\""
+        h_results = Basic.safe_parse_json(`#{cmd}`.force_encoding(Encoding::ISO_8859_1).encode(Encoding::UTF_8), {})
+        vals = h_results['values']
+      end
+
+      unless vals.is_a?(Array) && vals[0].is_a?(Array)
+        raise StandardError, "Could not load DE matrix for gene enrichment (annot_id=#{annot.id}, meta=#{annot.name})"
+      end
+
+      vals, = de_attrs_values_to_column_major(
+        vals,
+        h_results['nber_rows'].to_i,
+        h_results['nber_cols'].to_i,
+        annot
+      )
+      n_cols = vals.size
+      pack = de_metric_source_indices_for_extract_metadata(annot, n_cols)
+      metric_idxs = pack[:indices]
+      logfc_col = metric_idxs[0]
+      fdr_col = metric_idxs[2]
+      logfc_series = vals[logfc_col]
+      fdr_series = vals[fdr_col]
+      raise StandardError, "DE matrix missing logFC/FDR columns for gene enrichment (annot_id=#{annot.id})" unless logfc_series.is_a?(Array) && fdr_series.is_a?(Array)
+
+      fdr_c = fdr_cutoff.to_f
+      log_fc_c = log_fc_cutoff.to_f
+      vec_up_ids = []
+      vec_down_ids = []
+      n_use = [logfc_series.size, fdr_series.size].min
+      (0...n_use).each do |i|
+        fdr = Float(fdr_series[i]) rescue nil
+        logfc = Float(logfc_series[i]) rescue nil
+        next unless fdr && logfc && fdr <= fdr_c
+
+        if logfc >= 0 && logfc >= log_fc_c
+          vec_up_ids << i
+        elsif logfc <= 0 && logfc <= -log_fc_c
+          vec_down_ids << i
+        end
+      end
+
+      { 'up' => vec_up_ids, 'down' => vec_down_ids }
+    end
+
     def write_ge_filtered_ids_json!(project_dir:, user_id:, input_de_run_id:, fdr_cutoff:, fc_cutoff:, input_de:, h_annots: {})
       run_id = input_de_run_id.to_i
       raise ArgumentError, 'Missing DE run for gene enrichment' unless run_id.positive?
 
       base = project_dir.is_a?(Pathname) ? project_dir : Pathname.new(project_dir.to_s)
       input_de_item = input_de.is_a?(Array) ? input_de.first : input_de
+      annot = nil
       output_txt = nil
       if input_de_item.is_a?(Hash)
         annot_id = (input_de_item['annot_id'] || input_de_item[:annot_id]).to_i
@@ -2091,9 +2162,6 @@ module Basic
         output_txt = de_annot_output_txt_path(base, annot) if annot
       end
       output_txt ||= ((base + 'de') + run_id.to_s) + 'output.txt'
-      unless File.exist?(output_txt.to_s) && File.size(output_txt.to_s).positive?
-        raise StandardError, "DE output file not found for gene enrichment (#{output_txt})"
-      end
 
       fdr_c = fdr_cutoff.to_f
       fc_val = fc_cutoff.to_f
@@ -2101,20 +2169,31 @@ module Basic
       log_fc_c = Math.log2(fc_val)
       vec_up_ids = []
       vec_down_ids = []
-      File.foreach(output_txt.to_s, mode: 'rt', encoding: 'UTF-8') do |line|
-        cols = line.chomp.split("\t")
-        next if cols.size <= 7 || cols[7] == 'NA' || cols[5] == 'NA'
 
-        fdr = Float(cols[7]) rescue nil
-        logfc = Float(cols[5]) rescue nil
-        gene_id = Float(cols[0]) rescue nil
-        next unless fdr && logfc && gene_id && fdr <= fdr_c
+      if File.exist?(output_txt.to_s) && File.size(output_txt.to_s).positive?
+        File.foreach(output_txt.to_s, mode: 'rt', encoding: 'UTF-8') do |line|
+          cols = line.chomp.split("\t")
+          next if cols.size <= 7 || cols[7] == 'NA' || cols[5] == 'NA'
 
-        if logfc >= 0 && logfc >= log_fc_c
-          vec_up_ids << gene_id.to_i
-        elsif logfc <= 0 && logfc <= -log_fc_c
-          vec_down_ids << gene_id.to_i
+          fdr = Float(cols[7]) rescue nil
+          logfc = Float(cols[5]) rescue nil
+          gene_id = Float(cols[0]) rescue nil
+          next unless fdr && logfc && gene_id && fdr <= fdr_c
+
+          if logfc >= 0 && logfc >= log_fc_c
+            vec_up_ids << gene_id.to_i
+          elsif logfc <= 0 && logfc <= -log_fc_c
+            vec_down_ids << gene_id.to_i
+          end
         end
+      else
+        # output.txt is created lazily by the DE results UI (run_de_filter). GE must not
+        # depend on that visit — derive filtered ids from the loom DE matrix instead.
+        raise StandardError, "DE annot not found for gene enrichment (run_id=#{run_id})" unless annot
+
+        filtered = ge_filtered_gene_ids_from_de_annot(base, annot, fdr_c, log_fc_c)
+        vec_up_ids = filtered['up']
+        vec_down_ids = filtered['down']
       end
 
       tmp_dir = base + 'tmp'

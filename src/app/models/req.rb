@@ -31,14 +31,23 @@ class Req < ApplicationRecord
 
     list_of_runs.each_with_index do |(run, _attrs), idx|
       h_p = list_of_h_p[idx]
-      h_res = Basic.set_run(Rails.logger, h_p)
+      begin
+        h_res = Basic.set_run(Rails.logger, h_p)
 
-      if h_res[:error]
-        Basic.upd_run(project, run, { status_id: 4, error: h_res[:error] }, true)
-      else
-        # Always call exec_run - it will handle both sync and async cases
-        # For async runs, this will enqueue RunExecutionJob which submits to SLURM
-        Basic.exec_run(Rails.logger, run)
+        if h_res[:error]
+          Basic.upd_run(project, run, { status_id: 4, error: h_res[:error] }, true)
+        else
+          # Always call exec_run - it will handle both sync and async cases
+          # For async runs, this will enqueue RunExecutionJob which submits to SLURM
+          Basic.exec_run(Rails.logger, run)
+        end
+      rescue => e
+        # Runs are saved as waiting before set_run; without this they stay waiting forever
+        # when preparation raises (e.g. missing DE output.txt for gene enrichment).
+        Rails.logger.error("[Req#set_runs] Run##{run.id} failed: #{e.class}: #{e.message}")
+        Rails.logger.error(e.backtrace.first(15).join("\n")) if e.backtrace
+        Basic.upd_run(project, run, { status_id: 4, error: "#{e.class}: #{e.message}" }, true)
+        run.reload.broadcast_status_change rescue nil
       end
     end
   

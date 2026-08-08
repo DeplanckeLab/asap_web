@@ -2519,6 +2519,8 @@ export default class extends Controller {
       console.warn('[StepSelectorController] Status cell not found in run row (missing data-run-table-status-cell)')
       return
     }
+
+    this.updateRunClustersCellInDOM(runRow, data)
     
     // Update status badge
     const statusBadge = statusCell.querySelector('.inline-flex.items-center')
@@ -2633,6 +2635,20 @@ export default class extends Controller {
     } else {
       console.warn('[StepSelectorController] Duration container not found')
     }
+  }
+
+  // Clustering runs table: patch the Clusters column when finish broadcasts nber_clusters.
+  updateRunClustersCellInDOM(runRow, data) {
+    const clustersCell = runRow.querySelector('td[data-run-table-clusters-cell]')
+    if (!clustersCell) return
+
+    const raw = data.nber_clusters
+    const count = raw == null || raw === '' ? 0 : parseInt(raw, 10)
+    if (!Number.isFinite(count) || count <= 0) return
+
+    clustersCell.setAttribute('data-sort-value', String(count))
+    clustersCell.innerHTML =
+      `<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">${count}</span>`
   }
 
   // Run row badge label + classes from server (Status#ui_label + Tailwind).

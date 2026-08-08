@@ -354,14 +354,9 @@
           <div class="flex-1 min-h-0 px-6 pb-5 overflow-x-auto">
             <% h_clusters_count_by_run_id = {} %>
             <% if @step.name == 'clustering' && @runs.present? %>
-              <% project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key %>
               <% @runs.each do |run| %>
-                <% output_file = project_dir + 'clustering' + run.id.to_s + 'output.json' %>
-                <% if File.exist?(output_file) %>
-                  <% output_data = Basic.safe_parse_json(File.read(output_file), {}) %>
-                  <% clusters_count = output_data['nber_clusters'].to_i %>
-                  <% h_clusters_count_by_run_id[run.id] = clusters_count if clusters_count > 0 %>
-                <% end %>
+                <% clusters_count = run.clustering_nber_clusters.to_i %>
+                <% h_clusters_count_by_run_id[run.id] = clusters_count if clusters_count > 0 %>
               <% end %>
             <% end %>
             <table id="runs-table" class="w-full divide-y divide-gray-200 bg-white" style="table-layout: auto;">
@@ -437,7 +432,7 @@
                     </td>
                     <% if @step.name == 'clustering' %>
                       <% clusters_count = h_clusters_count_by_run_id[run.id].to_i %>
-                      <td class="px-3 py-4 whitespace-nowrap" data-sort-value="<%= clusters_count %>">
+                      <td class="px-3 py-4 whitespace-nowrap" data-sort-value="<%= clusters_count %>" data-run-table-clusters-cell>
                         <% if clusters_count > 0 %>
                           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
                             <%= clusters_count %>

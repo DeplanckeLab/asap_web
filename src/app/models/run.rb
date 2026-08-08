@@ -57,6 +57,21 @@ class Run < ApplicationRecord
     step&.name == 'clustering'
   end
 
+  # Cluster count for UI: prefer Annot#nber_cats, then output.json nber_clusters /
+  # clustering.n_clusters (v8 nested). Returns nil when unknown.
+  def clustering_nber_clusters
+    return nil unless clustering_run?
+
+    cats = annots.filter_map { |a| a.nber_cats.to_i if a.nber_cats.to_i.positive? }.max
+    return cats if cats.present? && cats.positive?
+
+    output_path = Basic.run_output_dir(self) + 'output.json'
+    return nil unless File.exist?(output_path.to_s)
+
+    h = Basic.safe_parse_json(File.read(output_path), {})
+    Basic.clustering_nber_clusters_from_output(h)
+  end
+
   # Reset queue-wait clock fields when the same Run row is reused for a new attempt
   # (re-run, re-parse, project reset). Call before setting status to waiting/submitted.
   def reset_wait_timing!
@@ -87,19 +102,23 @@ class Run < ApplicationRecord
     base = ProjectBroadcastJob.build_payload(project, step_id)
 
     status_record = Status.find_by(id: status_id)
+    run_status = {
+      run_id: id,
+      step_id: step_id,
+      status_id: status_id,
+      status_name: status_record&.name ? status_record.name.humanize : 'Unknown',
+      start_time: start_time&.iso8601,
+      submitted_at: submitted_at&.iso8601,
+      waiting_duration: waiting_duration ? waiting_duration.to_i : nil,
+      duration: duration ? duration.to_i : nil,
+      slurm_job_id: slurm_job_id
+    }
+    nber_clusters = clustering_nber_clusters
+    run_status[:nber_clusters] = nber_clusters if nber_clusters.present?
+
     base.merge!(
       event: 'run_status_changed',
-      run_status: {
-        run_id: id,
-        step_id: step_id,
-        status_id: status_id,
-        status_name: status_record&.name ? status_record.name.humanize : 'Unknown',
-        start_time: start_time&.iso8601,
-        submitted_at: submitted_at&.iso8601,
-        waiting_duration: waiting_duration ? waiting_duration.to_i : nil,
-        duration: duration ? duration.to_i : nil,
-        slurm_job_id: slurm_job_id
-      }
+      run_status: run_status
     )
 
     ActionCable.server.broadcast("project_#{project_id}", base)

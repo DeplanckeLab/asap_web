@@ -7923,7 +7923,8 @@ class ProjectsController < ApplicationController
       duration: run.duration ? run.duration.to_i : nil,
       start_time: run.start_time ? run.start_time.iso8601 : nil,
       submitted_at: run.submitted_at ? run.submitted_at.iso8601 : nil,
-      waiting_duration: run.waiting_duration ? run.waiting_duration.to_i : nil
+      waiting_duration: run.waiting_duration ? run.waiting_duration.to_i : nil,
+      nber_clusters: run.clustering_nber_clusters
     }
   end
 
@@ -16076,6 +16077,7 @@ class ProjectsController < ApplicationController
       begin
         @h_run_attrs = Basic.safe_parse_json(run.attrs_json, {}) if run.attrs_json.present?
         @h_res = Basic.safe_parse_json(File.read(output_json_file), {}) if File.exist?(output_json_file)
+        Basic.ensure_clustering_nber_clusters_key!(@h_res) if @step&.name == 'clustering'
         @h_outputs = Basic.safe_parse_json(run.output_json, {}) if run.output_json.present? && run.output_json.match(/^\{/)
       rescue => e
         Rails.logger.error("[prepare_run_view_data] Error loading run data: #{e.message}")
@@ -16231,6 +16233,7 @@ class ProjectsController < ApplicationController
         begin
           h_attrs = Basic.safe_parse_json(run.attrs_json, {}) if run.attrs_json.present?
           h_res = Basic.safe_parse_json(File.read(output_json_file), {}) if File.exist?(output_json_file)
+          Basic.ensure_clustering_nber_clusters_key!(h_res) if @h_steps[run.step_id]&.name == 'clustering'
           h_outputs = Basic.safe_parse_json(run.output_json, {}) if run.output_json.present? && run.output_json.match(/^\{/)
         rescue => e
           Rails.logger.error("[create_run_cards] Error loading data for run #{run.id}: #{e.message}")
@@ -16378,6 +16381,7 @@ class ProjectsController < ApplicationController
         @h_outputs = {}
         begin
           @h_res = Basic.safe_parse_json(File.read(output_json_file), {}) if File.exist?(output_json_file)
+          Basic.ensure_clustering_nber_clusters_key!(@h_res) if step.name == 'clustering'
           @h_outputs = Basic.safe_parse_json(run.output_json, {}) if run.output_json.present? && run.output_json.match(/^\{/)
         rescue => e
           Rails.logger.error("[render_run_panel_to_string] Error loading run data: #{e.message}")

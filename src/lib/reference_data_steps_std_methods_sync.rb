@@ -80,6 +80,7 @@ class ReferenceDataStepsStdMethodsSync
       docker_images_updated: 0,
       docker_images_unchanged: 0,
       docker_builds_created: 0,
+      docker_builds_created_tags: [],
       docker_builds_updated: 0,
       docker_builds_unchanged: 0,
       versions_created: 0,
@@ -502,6 +503,7 @@ class ReferenceDataStepsStdMethodsSync
       if record.nil?
         puts "[#{mode_label}] create DockerBuild #{label}"
         summary[:docker_builds_created] += 1
+        summary[:docker_builds_created_tags] << prepared["tag"].to_s
         next if @dry_run
 
         DockerBuild.create!(prepared.except("id"))
@@ -991,6 +993,8 @@ class ReferenceDataStepsStdMethodsSync
     end
     if docker_builds_in.any?
       puts "  docker_builds: created=#{summary[:docker_builds_created]} updated=#{summary[:docker_builds_updated]} unchanged=#{summary[:docker_builds_unchanged]}"
+      created_tags = Array(summary[:docker_builds_created_tags]).reject(&:empty?)
+      puts "  docker_builds created tags: #{created_tags.join(', ')}" if created_tags.any?
       puts "  snapshot docker_builds: #{docker_builds_in.size}"
     end
     if versions_in.any?

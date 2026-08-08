@@ -3667,6 +3667,25 @@ module Basic
       return h
     end
 
+    # Cluster count from clustering output.json: legacy top-level nber_clusters,
+    # or v8 nested clustering.n_clusters. Returns nil when absent/invalid.
+    def clustering_nber_clusters_from_output(h_results)
+      return nil unless h_results.is_a?(Hash)
+
+      n = h_results['nber_clusters'].to_i
+      n = h_results.dig('clustering', 'n_clusters').to_i if n <= 0
+      n.positive? ? n : nil
+    end
+
+    # Ensure dashboard output_values key "nber_clusters" is present for v8 nested output.
+    def ensure_clustering_nber_clusters_key!(h_results)
+      return h_results unless h_results.is_a?(Hash)
+
+      n = clustering_nber_clusters_from_output(h_results)
+      h_results['nber_clusters'] = n if n && h_results['nber_clusters'].blank?
+      h_results
+    end
+
     # Extract JSON object(s) printed to stdout by pipeline scripts (R, parse.v8.py).
     def json_objects_from_command_output(output)
       return [] if output.blank?

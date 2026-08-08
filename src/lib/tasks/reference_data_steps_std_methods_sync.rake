@@ -2,6 +2,7 @@
 
 require "tempfile"
 require "json"
+require "open3"
 require_relative "../reference_data_steps_std_methods_sync"
 require_relative "../reference_data_steps_std_methods_compare"
 
@@ -187,6 +188,122 @@ namespace :reference_data do
       build_temp_snapshot_from_rows!(rows, label: "production_legacy")
     end
 
+    def highest_docker_build_tag(tags)
+      tags
+        .map(&:to_s)
+        .select { |tag| tag.match?(/\Av\d+(\.\d+)?\z/) }
+        .max_by { |tag| Gem::Version.new(tag.delete_prefix("v")) }
+    end
+
+    def docker_inspect_format!(container, format)
+      stdout, stderr, status = Open3.capture3(
+        "docker", "inspect", "-f", format, container
+      )
+      unless status.success?
+        raise "docker inspect failed for #{container}: #{stderr.strip}"
+      end
+
+      stdout.strip
+    end
+
+    def run_host_cmd!(*args)
+      puts "+ #{args.join(' ')}"
+      stdout, stderr, status = Open3.capture3(*args)
+      $stdout.print(stdout) unless stdout.empty?
+      $stderr.print(stderr) unless stderr.empty?
+      raise "Command failed (#{status.exitstatus}): #{args.join(' ')}" unless status.success?
+
+      stdout
+    end
+
+    # website has docker.sock but not the compose plugin or the compose project tree.
+    # Run host docker-compose via a one-off alpine container with host paths bind-mounted.
+    def run_compose_on_host!(working_dir:, compose_file:, project:, compose_args:)
+      compose_bin = ENV.fetch("DOCKER_COMPOSE_BIN", "/usr/local/bin/docker-compose")
+      asap_run_dir = ENV.fetch("ASAP_RUN_DIR", "/srv/asap_run_new")
+      cmd = [
+        "docker", "run", "--rm",
+        "-v", "/var/run/docker.sock:/var/run/docker.sock",
+        "-v", "#{compose_bin}:/usr/local/bin/docker-compose:ro",
+        "-v", "#{working_dir}:#{working_dir}",
+        "-v", "#{asap_run_dir}:#{asap_run_dir}",
+        "-w", working_dir,
+        "--entrypoint", "/usr/local/bin/docker-compose",
+        ENV.fetch("COMPOSE_RUNNER_IMAGE", "alpine:latest"),
+        "-p", project,
+        "-f", File.basename(compose_file),
+        *compose_args
+      ]
+      run_host_cmd!(*cmd)
+    end
+
+    # When sync_from_dev creates DockerBuild rows, rebuild the long-running compose asap_run
+    # service with the highest newly created tag that has a Dockerfile on disk.
+    # Set SKIP_COMPOSE=1 to skip (e.g. bulk historical DockerBuild import).
+    def maybe_rebuild_compose_asap_run_after_docker_build_sync!(summary, dry_run:)
+      created_tags = Array(summary[:docker_builds_created_tags]).map(&:to_s).reject(&:empty?)
+      return if created_tags.empty?
+
+      if ENV["SKIP_COMPOSE"].to_s.strip == "1"
+        puts "SKIP_COMPOSE=1: not rebuilding compose asap_run " \
+             "(created DockerBuild tags: #{created_tags.join(', ')})"
+        return
+      end
+
+      asap_run_dir = ENV.fetch("ASAP_RUN_DIR", "/srv/asap_run_new")
+      tag = highest_docker_build_tag(created_tags)
+      if tag.nil?
+        puts "New DockerBuild tags are not version-shaped; not rebuilding compose asap_run: " \
+             "#{created_tags.join(', ')}"
+        return
+      end
+
+      dockerfile_name = "Dockerfile.#{tag}"
+      dockerfile_path = File.join(asap_run_dir, dockerfile_name)
+      unless File.file?(dockerfile_path)
+        puts "Dockerfile missing for created DockerBuild tag #{tag}: #{dockerfile_path}"
+        puts "Add it under #{asap_run_dir}, then rebuild compose asap_run manually."
+        return
+      end
+
+      if dry_run
+        puts "[dry-run] would rebuild compose asap_run with #{dockerfile_name} " \
+             "(created tags: #{created_tags.join(', ')})"
+        return
+      end
+
+      container = ENV.fetch("ASAP_RUN_CONTAINER")
+      image = docker_inspect_format!(container, "{{.Config.Image}}")
+      working_dir = docker_inspect_format!(
+        container, "{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}"
+      )
+      config_files = docker_inspect_format!(
+        container, "{{index .Config.Labels \"com.docker.compose.project.config_files\"}}"
+      )
+      project = docker_inspect_format!(
+        container, "{{index .Config.Labels \"com.docker.compose.project\"}}"
+      )
+      compose_file = config_files.split(",").map(&:strip).reject(&:empty?).first
+
+      if working_dir.empty? || compose_file.nil? || project.empty?
+        raise "Compose labels missing on #{container}; cannot rebuild asap_run automatically"
+      end
+
+      puts "Rebuilding compose asap_run from new DockerBuild tag #{tag}"
+      puts "  image=#{image}  dockerfile=#{dockerfile_path}"
+      puts "  compose project=#{project} dir=#{working_dir} file=#{File.basename(compose_file)}"
+
+      # Build explicitly so production's hardcoded compose dockerfile line cannot pin an older patch.
+      run_host_cmd!("docker", "build", "-t", image, "-f", dockerfile_path, asap_run_dir)
+      run_compose_on_host!(
+        working_dir: working_dir,
+        compose_file: compose_file,
+        project: project,
+        compose_args: ["up", "-d", "--force-recreate", "--no-build", "asap_run"]
+      )
+      puts "Compose asap_run recreated with #{dockerfile_name}"
+    end
+
     # OBSOLETE: name-based snapshot sync. Prefer sync_from_dev for multi-version ASAP.
     desc "[OBSOLETE] Name-based sync from SNAPSHOT=export.json. " \
          "Cannot apply full multi-version exports (duplicate step names). " \
@@ -231,7 +348,8 @@ namespace :reference_data do
          "Version sync includes env_json and activated status. " \
          "NewsItem sync clears user_id and removes target-only rows. " \
          "Hidden steps included; obsolete std_methods excluded. " \
-         "Set DEV_POSTGRES_DB (and DEV_DB_HOST/DEV_DB_PORT). DRY_RUN=1, VERBOSE=1"
+         "If new DockerBuild rows are created, rebuilds compose asap_run from the highest new tag Dockerfile. " \
+         "Set DEV_POSTGRES_DB (and DEV_DB_HOST/DEV_DB_PORT). DRY_RUN=1, VERBOSE=1, SKIP_COMPOSE=1"
     task sync_from_dev: :environment do
       unless Rails.env.production?
         puts "This task writes to the current database. Run with RAILS_ENV=production so the target is production."
@@ -251,19 +369,21 @@ namespace :reference_data do
         puts "Usage:"
         puts "  RAILS_ENV=production bin/rake reference_data:steps_std_methods:sync_from_dev"
         puts "  Set DEV_POSTGRES_DB=asap2_development (and DEV_DB_HOST/DEV_DB_PORT if needed)."
-        puts "Optional: MAX_VERSION_ID=9  DRY_RUN=1  VERBOSE=1"
+        puts "Optional: MAX_VERSION_ID=9  DRY_RUN=1  VERBOSE=1  SKIP_COMPOSE=1"
         exit 1
       end
 
       puts "Applying development Step/StdMethod/Version/DockerImage/DockerBuild/NewsItem (id < #{max_version_id}, including hidden steps) to production"
       puts "  dry_run=#{dry}  match_by=id"
 
-      ReferenceDataStepsStdMethodsSync.new(
+      summary = ReferenceDataStepsStdMethodsSync.new(
         snapshot_path: generated_snapshot.path,
         dry_run: dry,
         verbose: verbose,
         max_version_id: max_version_id
       ).run
+
+      maybe_rebuild_compose_asap_run_after_docker_build_sync!(summary, dry_run: dry)
     ensure
       generated_snapshot&.close!
     end

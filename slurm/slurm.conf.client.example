@@ -87,7 +87,11 @@ Waittime=0
 #SchedulerTimeSlice=30
 SchedulerType=sched/backfill
 SelectType=select/cons_tres
+# Track CPU + memory so predicted --mem from ASAP can reserve RAM for packing.
+# DefMemPerCPU: when a job omits --mem (no prediction yet), use this per CPU
+# instead of reserving the whole node (SLURM's default with CR_Core_Memory).
 SelectTypeParameters=CR_Core_Memory
+DefMemPerCPU=4096
 SchedulerParameters=bf_continue
 #
 #

@@ -85,11 +85,12 @@ class RunExecutionJob < ApplicationJob
 
     Rails.logger.info("[RunExecutionJob] Submitting Run##{run.id} to SLURM")
     
+    # Do not pass memory_mb here: SlurmService sets --mem only from pred_max_ram.
+    # Passing max_ram would constrain jobs that have no prediction model yet.
     slurm_job_id = slurm_service.submit_job(
       run,
       docker_cmd,
       cores: run.nber_cores,
-      memory_mb: run.pred_max_ram || run.max_ram,
       time_limit: run.pred_process_duration
     )
 

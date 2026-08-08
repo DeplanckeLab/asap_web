@@ -13,30 +13,36 @@ class SlurmService
     step = run.step
     user_id = project.user_id
     
-    cores = run.nber_cores || options[:cores] || 1
-    # pred_max_ram is stored in KB (prediction output), while max_ram is stored in MB.
-    # nil means no --mem directive: SLURM imposes no memory cap on the job.
+    cores = (run.nber_cores || options[:cores] || 1).to_i
+    cores = 1 if cores < 1
+    # Only predicted RAM becomes #SBATCH --mem. If there is no prediction model yet
+    # (pred_max_ram nil), omit --mem — no memory constraint on the job.
+    # Note: with SelectTypeParameters=CR_Core_Memory, SLURM treats missing --mem as
+    # "reserve whole node"; set DefMemPerCPU in slurm.conf so the default is a
+    # modest per-CPU share instead, while explicit --mem from predictions still applies.
     memory_mb = if run.pred_max_ram.present?
       (run.pred_max_ram.to_f / 1024.0).ceil
-    elsif run.max_ram.present?
-      run.max_ram.to_f.ceil
-    else
+    elsif options.key?(:memory_mb) && !options[:memory_mb].nil?
+      # Explicit override only (tests / callers). Do not use run.max_ram here:
+      # that is measured usage from a finished run, not a prediction.
       options[:memory_mb].presence&.to_i
     end
 
-    time_limit = (run.pred_process_duration || options[:time_limit] || 3600).to_i
-
-    # Add 5 minutes (300 seconds) buffer to predicted time to account for variability
-    time_limit = time_limit + 300
-
-    # Prediction is often too low for long-running steps (e.g. FindMarkers). Slurm kills the job at --time.
-    min_walltime = 2.hours.to_i
-    time_limit = [time_limit, min_walltime].max
+    # No prediction => no --time cap (partition default). Do not force a short walltime.
+    # When a prediction exists, enforce a floor: predictions are often too low for large
+    # jobs (e.g. Seurat SCT) and Slurm kills at --time.
+    min_walltime = Integer(ENV.fetch('SLURM_MIN_WALLTIME_SECONDS', 24.hours.to_i.to_s))
+    time_limit = if run.pred_process_duration.present?
+      predicted = run.pred_process_duration.to_i
+      [predicted + 300, min_walltime].max
+    elsif options[:time_limit].present?
+      options[:time_limit].to_i
+    end
 
     @logger.info("[SlurmService] Resource requirements for Run##{run_id}:")
     @logger.info("  - CPUs: #{cores} (from nber_cores: #{run.nber_cores})")
-    @logger.info("  - Memory: #{memory_mb ? "#{memory_mb}MB" : "uncapped (no prediction)"} (predicted_kb: #{run.pred_max_ram}, actual_mb: #{run.max_ram})")
-    @logger.info("  - Time limit: #{time_limit}s (#{time_limit / 60}min) (predicted: #{run.pred_process_duration}, min #{min_walltime}s)")
+    @logger.info("  - Memory: #{memory_mb ? "#{memory_mb}MB" : "unconstrained (no --mem)"} (predicted_kb: #{run.pred_max_ram}, actual_mb: #{run.max_ram})")
+    @logger.info("  - Time limit: #{time_limit ? "#{time_limit}s (#{time_limit / 60}min)" : "uncapped (no prediction)"} (predicted: #{run.pred_process_duration.inspect})")
     
     if options[:check_resources] != false
       resource_check = check_resource_availability(cores: cores, memory_mb: memory_mb, time_limit: time_limit)
@@ -426,9 +432,10 @@ class SlurmService
       end
       
       if available_partitions.empty?
+        time_need = time_limit ? "#{time_limit}s" : "uncapped time"
         return {
           available: false,
-          message: "No partitions have sufficient resources (need #{cores} CPUs, #{memory_mb ? "#{memory_mb}MB" : "free headroom"} RAM, #{time_limit}s)"
+          message: "No partitions have sufficient resources (need #{cores} CPUs, #{memory_mb ? "#{memory_mb}MB" : "free headroom"} RAM, #{time_need})"
         }
       else
         return {
@@ -518,12 +525,12 @@ class SlurmService
 
   def check_time_limit(partition_time_limit, required_time)
     return true if partition_time_limit.blank? || partition_time_limit == 'infinite'
-    return true if required_time <= 0
-    
+    return true if required_time.blank? || required_time.to_i <= 0
+
     partition_seconds = parse_time_limit(partition_time_limit)
     return true if partition_seconds == 0
-    
-    required_time <= partition_seconds
+
+    required_time.to_i <= partition_seconds
   end
 
   def parse_time_limit(time_string)
@@ -591,8 +598,8 @@ class SlurmService
       #SBATCH --ntasks=1
       #SBATCH --cpus-per-task=#{options[:cores]}
       #{options[:memory_mb] ? "#SBATCH --mem=#{options[:memory_mb]}M" : ""}
-      #SBATCH --time=#{format_time_limit(options[:time_limit])}
-      #SBATCH --signal=B:USR1@60
+      #{options[:time_limit] ? "#SBATCH --time=#{format_time_limit(options[:time_limit])}" : ""}
+      #{options[:time_limit] ? "#SBATCH --signal=B:USR1@60" : ""}
       #SBATCH --chdir=#{workdir}
 
       set -e

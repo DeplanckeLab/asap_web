@@ -17,16 +17,18 @@ require 'uri'
 #   GITHUB_DISCUSSIONS_CATEGORY_FEATURE
 #   GITHUB_DISCUSSIONS_CATEGORY_ANNOUNCEMENT
 #   GITHUB_DISCUSSIONS_CATEGORY_TIP
+#   GITHUB_DISCUSSIONS_CATEGORY_FIX
 #   GITHUB_DISCUSSIONS_CATEGORY - fallback category name if a type-specific one is unset
 class NewsItems::GithubDiscussionSync
   class Error < StandardError; end
 
   GRAPHQL_URL = 'https://api.github.com/graphql'
-  SYNCABLE_TYPES = %w[release feature announcement tip].freeze
+  SYNCABLE_TYPES = %w[release feature fix announcement tip].freeze
 
   DEFAULT_CATEGORY_BY_TYPE = {
     'release' => 'New releases',
     'feature' => 'Features / Updates',
+    'fix' => 'Fix',
     'announcement' => 'Technical announcements',
     'tip' => 'Tips'
   }.freeze

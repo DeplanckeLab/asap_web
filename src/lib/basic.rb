@@ -6804,6 +6804,15 @@ puts "TEST RUN"
     end
 
     def kill_run(run)
+      # Cancel the batch job first. stop/restart already call SlurmService#cancel_job;
+      # destroy_run only called kill_run, so pending/running SLURM jobs were left behind.
+      if run.respond_to?(:slurm_job_id) && run.slurm_job_id.present?
+        begin
+          SlurmService.new(logger: Rails.logger).cancel_job(run.slurm_job_id)
+        rescue StandardError => e
+          Rails.logger.warn("[Basic.kill_run] scancel failed for Run##{run.id} slurm_job_id=#{run.slurm_job_id}: #{e.class} - #{e.message}")
+        end
+      end
 
       if run.command_json
         h_cmd = JSON.parse(run.command_json)

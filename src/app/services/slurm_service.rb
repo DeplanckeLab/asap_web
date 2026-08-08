@@ -28,21 +28,22 @@ class SlurmService
       options[:memory_mb].presence&.to_i
     end
 
-    # No prediction => no --time cap (partition default). Do not force a short walltime.
-    # When a prediction exists, enforce a floor: predictions are often too low for large
-    # jobs (e.g. Seurat SCT) and Slurm kills at --time.
+    # Every job gets a walltime. Predictions are often too low for large jobs
+    # (e.g. Seurat SCT); Slurm kills at --time, so enforce a 24h floor/default.
     min_walltime = Integer(ENV.fetch('SLURM_MIN_WALLTIME_SECONDS', 24.hours.to_i.to_s))
     time_limit = if run.pred_process_duration.present?
       predicted = run.pred_process_duration.to_i
       [predicted + 300, min_walltime].max
     elsif options[:time_limit].present?
-      options[:time_limit].to_i
+      [options[:time_limit].to_i, min_walltime].max
+    else
+      min_walltime
     end
 
     @logger.info("[SlurmService] Resource requirements for Run##{run_id}:")
     @logger.info("  - CPUs: #{cores} (from nber_cores: #{run.nber_cores})")
     @logger.info("  - Memory: #{memory_mb ? "#{memory_mb}MB" : "unconstrained (no --mem)"} (predicted_kb: #{run.pred_max_ram}, actual_mb: #{run.max_ram})")
-    @logger.info("  - Time limit: #{time_limit ? "#{time_limit}s (#{time_limit / 60}min)" : "uncapped (no prediction)"} (predicted: #{run.pred_process_duration.inspect})")
+    @logger.info("  - Time limit: #{time_limit}s (#{time_limit / 60}min) (predicted: #{run.pred_process_duration.inspect}, min #{min_walltime}s)")
     
     if options[:check_resources] != false
       resource_check = check_resource_availability(cores: cores, memory_mb: memory_mb, time_limit: time_limit)

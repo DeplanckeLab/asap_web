@@ -1046,8 +1046,6 @@ detailsPop.classList.remove('hidden'); detailsPop.style.top = '15%'; detailsPop.
 });
 document.getElementById('summary-visual-details-close-button')?.addEventListener('click', () => detailsPop.classList.add('hidden'));
 makeDraggable(detailsPop, 'summary-visual-details-header');
-const lineageBtn = document.getElementById('summary-lineage-toggle-button'); const lineagePop = document.getElementById('summary-lineage-popover');
-lineageBtn?.addEventListener('click', (e) => { e.stopPropagation(); lineagePop?.classList.remove('hidden'); });
 const cardLink = document.querySelector('[data-summary-visualization-card-link]');
 cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url);
 })();
@@ -1160,6 +1158,7 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
       toggleButton.dataset.initialized = 'true'
       let wasDragged = false
       let isDragging = false
+      let suppressOutsideClick = false
 
       const closePopover = () => {
         lineagePopover.classList.add('hidden')
@@ -1198,6 +1197,7 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
 
         const endDrag = () => {
           isDragging = false
+          if (wasDragged) suppressOutsideClick = true
           document.removeEventListener('mousemove', onMove)
           document.removeEventListener('mouseup', endDrag)
         }
@@ -1210,6 +1210,7 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
         event.stopPropagation()
         if (lineagePopover.classList.contains('hidden')) {
           wasDragged = false
+          suppressOutsideClick = false
           positionPopover()
           lineagePopover.classList.remove('hidden')
           toggleButton.setAttribute('aria-expanded', 'true')
@@ -1225,6 +1226,11 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
 
       document.addEventListener('click', (event) => {
         if (lineagePopover.classList.contains('hidden')) return
+        // A drag release outside the panel still synthesizes a document click; ignore that one.
+        if (suppressOutsideClick) {
+          suppressOutsideClick = false
+          return
+        }
         if (lineagePopover.contains(event.target) || toggleButton.contains(event.target)) return
         closePopover()
       })

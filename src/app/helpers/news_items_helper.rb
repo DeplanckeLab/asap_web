@@ -29,7 +29,8 @@ module NewsItemsHelper
       'amber' => 'ring-amber-400 dark:ring-amber-300',
       'purple' => 'ring-purple-400 dark:ring-purple-300',
       'emerald' => 'ring-emerald-400 dark:ring-emerald-300',
-      'sky' => 'ring-sky-400 dark:ring-sky-300'
+      'sky' => 'ring-sky-400 dark:ring-sky-300',
+      'rose' => 'ring-rose-400 dark:ring-rose-300'
     }.fetch(news_item.color_key, 'ring-gray-400 dark:ring-gray-300')
   end
 

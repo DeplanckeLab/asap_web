@@ -12,6 +12,11 @@ class NewsItem < ApplicationRecord
       default_icon: 'fas fa-bolt',
       color: 'blue'
     },
+    'fix' => {
+      label: 'Fix',
+      default_icon: 'fas fa-wrench',
+      color: 'rose'
+    },
     'announcement' => {
       label: 'Technical announcement',
       default_icon: 'fas fa-bullhorn',
@@ -101,6 +106,17 @@ class NewsItem < ApplicationRecord
       badge_text: 'text-sky-800 dark:text-sky-200',
       details: 'text-sky-700/70 dark:text-sky-300/70',
       highlight_ring: 'ring-sky-400 dark:ring-sky-300'
+    },
+    'rose' => {
+      border: 'border-rose-200 dark:border-rose-500/30',
+      bg: 'bg-rose-50 dark:bg-rose-500/10',
+      title: 'text-rose-900 dark:text-rose-200',
+      body: 'text-rose-800 dark:text-rose-300',
+      icon: 'text-rose-600 dark:text-rose-400',
+      badge_bg: 'bg-rose-100 dark:bg-rose-500/20',
+      badge_text: 'text-rose-800 dark:text-rose-200',
+      details: 'text-rose-700/70 dark:text-rose-300/70',
+      highlight_ring: 'ring-rose-400 dark:ring-rose-300'
     }
   }.freeze
 

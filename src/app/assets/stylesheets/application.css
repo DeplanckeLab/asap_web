@@ -1104,3 +1104,33 @@ button.subview-refresh-available .fa-sync-alt {
   background: #7dd3fc;
 }
 
+.checkpoint-thumb {
+  cursor: zoom-in;
+}
+
+.checkpoint-thumb-hover-preview {
+  position: fixed;
+  z-index: 13050;
+  display: none;
+  pointer-events: none;
+  padding: 4px;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.18);
+}
+
+.checkpoint-thumb-hover-preview.is-visible {
+  display: block;
+}
+
+.checkpoint-thumb-hover-preview img {
+  display: block;
+  max-width: 360px;
+  max-height: min(360px, calc(100vh - 24px));
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  background: #ffffff;
+}
+

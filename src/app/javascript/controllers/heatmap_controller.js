@@ -480,6 +480,21 @@ export default class extends Controller {
     this.openTrackModal("row")
   }
 
+  openImportMetadata(event) {
+    const button = event.currentTarget
+    const typeId = String(
+      (event.params && event.params.metadataType != null)
+        ? event.params.metadataType
+        : (button && button.getAttribute("data-heatmap-metadata-type-param")) || "1"
+    )
+    if (typeof window.openAddMetadataModal === "function") {
+      window.openAddMetadataModal(typeId)
+      return
+    }
+    const modal = document.getElementById("add-metadata-modal")
+    if (modal) modal.classList.remove("hidden")
+  }
+
   openTrackModal(axis) {
     this.pendingTrackAxis = axis
     if (this.hasTrackModalTitleTarget) {
@@ -1446,18 +1461,18 @@ export default class extends Controller {
   }
 
   positionAddTrackButtons() {
-    // Place + controls on the dendrogram corners, clear of heatmap cells, tracks, and refs.
+  // Place add-track controls on the dendrogram corners, clear of heatmap cells, tracks, and refs.
     const size = 22
     const gap = 4
 
-    // Cell metadata +: right of the horizontal (column) tree, bottom of the tree band.
+    // Cell metadata track control: right of the horizontal (column) tree, bottom of the tree band.
     const colTreeBottom = this.layout.pad + this.colTreeH
     const colLeft = this.mx + this.mw + gap
     const colTop = this.colTreeH > 0
       ? colTreeBottom - size - gap
       : Math.max(2, this.my - size - gap)
 
-    // Gene metadata +: above the right side of the vertical (row) tree.
+    // Gene metadata track control: above the right side of the vertical (row) tree.
     const rowTreeRight = this.layout.pad + this.rowTreeW
     const rowLeft = this.rowTreeW > 0
       ? rowTreeRight - size
@@ -1466,14 +1481,14 @@ export default class extends Controller {
 
     if (this.hasAddColTrackBtnTarget) {
       const btn = this.addColTrackBtnTarget
-      btn.style.display = "block"
+      btn.style.display = "flex"
       btn.style.left = `${Math.max(2, Math.min(colLeft, this.containerW - size - 2))}px`
       btn.style.top = `${Math.max(2, colTop)}px`
     }
 
     if (this.hasAddRowTrackBtnTarget) {
       const btn = this.addRowTrackBtnTarget
-      btn.style.display = "block"
+      btn.style.display = "flex"
       btn.style.left = `${Math.max(2, Math.min(rowLeft, this.containerW - size - 2))}px`
       btn.style.top = `${Math.max(2, rowTop)}px`
     }
@@ -4527,7 +4542,7 @@ export default class extends Controller {
       const author = checkpoint.user_name || "Unknown"
       const heatmapThumb = checkpoint.state?.thumbnails?.heatmap
       const thumbHtml = isCheckpointThumbnailDataUrl(heatmapThumb)
-        ? `<img src="${heatmapThumb}" alt="" style="width:96px;height:64px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
+        ? `<img class="checkpoint-thumb" src="${heatmapThumb}" alt="" style="width:96px;height:64px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
         : ""
       return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:${isLoaded ? "#fffbeb" : "#fff"};">
         <div style="display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:12px;align-items:center;">

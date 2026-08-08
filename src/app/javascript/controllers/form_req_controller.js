@@ -462,9 +462,28 @@ export default class extends Controller {
 
     const preserved = {}
     const fields = this.attrsContainerTarget.querySelectorAll('input[name^="attrs["], select[name^="attrs["], textarea[name^="attrs["]')
+    const arrayNamesSeen = new Set()
     fields.forEach((field) => {
       const name = field.name
       if (!name) {
+        return
+      }
+
+      const arrayMatch = name.match(/^attrs\[(.*?)\]\[\]$/)
+      if (arrayMatch) {
+        const attrName = arrayMatch[1]
+        const key = `attrs[${attrName}][]`
+        if (!arrayNamesSeen.has(key)) {
+          preserved[key] = []
+          arrayNamesSeen.add(key)
+        }
+        if (field.type === 'checkbox') {
+          if (field.checked) {
+            preserved[key].push(field.value)
+          }
+        } else if (field.value) {
+          preserved[key].push(field.value)
+        }
         return
       }
 
@@ -481,6 +500,21 @@ export default class extends Controller {
       }
 
       preserved[name] = field.value
+    })
+
+    this.attrsContainerTarget.querySelectorAll('[data-multi-category-filter="true"]').forEach((container) => {
+      const attrName = container.id?.replace(/^attrs_/, '')
+      if (!attrName) {
+        return
+      }
+      const key = `attrs[${attrName}][]`
+      if (!(key in preserved)) {
+        try {
+          preserved[key] = JSON.parse(container.dataset.selectedValues || '[]')
+        } catch (_e) {
+          preserved[key] = []
+        }
+      }
     })
 
     return preserved
@@ -504,12 +538,30 @@ export default class extends Controller {
         return
       }
 
+      if (field.type === 'checkbox' && name.endsWith('[]')) {
+        const selected = Array.isArray(value) ? value.map(String) : []
+        field.checked = selected.includes(String(field.value))
+        return
+      }
+
       if (field.type === 'checkbox') {
         field.checked = Boolean(value)
         return
       }
 
       field.value = value == null ? '' : String(value)
+    })
+
+    this.attrsContainerTarget.querySelectorAll('[data-multi-category-filter="true"]').forEach((container) => {
+      const attrName = container.id?.replace(/^attrs_/, '')
+      if (!attrName) {
+        return
+      }
+      const key = `attrs[${attrName}][]`
+      if (key in preserved) {
+        const values = Array.isArray(preserved[key]) ? preserved[key] : []
+        container.dataset.selectedValues = JSON.stringify(values)
+      }
     })
   }
 
@@ -1721,12 +1773,20 @@ export default class extends Controller {
         const fieldName = reqMatch[1]
         reqData[fieldName] = value
       }
-      // Parse attrs[attr_name] format for attributes
+      // Parse attrs[attr_name] or attrs[attr_name][] for attributes
       else if (key.startsWith('attrs[')) {
-        const attrMatch = key.match(/^attrs\[(.*?)\]$/)
+        const attrMatch = key.match(/^attrs\[(.*?)\](\[\])?$/)
         if (attrMatch) {
           const attrName = attrMatch[1]
-          attrs[attrName] = value
+          const isArray = !!attrMatch[2]
+          if (isArray) {
+            if (!Array.isArray(attrs[attrName])) {
+              attrs[attrName] = []
+            }
+            attrs[attrName].push(value)
+          } else {
+            attrs[attrName] = value
+          }
         }
       }
     }
@@ -1766,13 +1826,27 @@ export default class extends Controller {
     // Collect attributes from attrs_container if any
     if (this.hasAttrsContainerTarget) {
       const attrInputs = this.attrsContainerTarget.querySelectorAll('input, select, textarea')
+      const arrayAttrsSeen = new Set()
       attrInputs.forEach(input => {
         const name = input.name || input.id
         if (name && name.startsWith('attrs[')) {
-          const attrMatch = name.match(/attrs\[(.*?)\]/)
+          const attrMatch = name.match(/^attrs\[(.*?)\](\[\])?$/)
           if (attrMatch) {
             const attrName = attrMatch[1]
-            if (input.type === 'checkbox') {
+            const isArray = !!attrMatch[2]
+            if (isArray) {
+              if (!arrayAttrsSeen.has(attrName)) {
+                attrs[attrName] = []
+                arrayAttrsSeen.add(attrName)
+              }
+              if (input.type === 'checkbox') {
+                if (input.checked) {
+                  attrs[attrName].push(input.value)
+                }
+              } else if (input.value) {
+                attrs[attrName].push(input.value)
+              }
+            } else if (input.type === 'checkbox') {
               attrs[attrName] = input.checked ? input.value : null
             } else if (input.type === 'radio') {
               if (input.checked) {

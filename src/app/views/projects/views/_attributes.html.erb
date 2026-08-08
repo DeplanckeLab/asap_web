@@ -254,7 +254,12 @@
                                         else
                                           h_steps_by_id[annot.step_id] || h_steps_by_id[annot.ori_step_id]
                                         end %>
-                              <% categories = Basic.safe_parse_json(annot.categories_json, {}) %>
+                              <% categories = Basic.safe_parse_json(annot.categories_json, nil) %>
+                              <% if categories.blank? %>
+                                <% list_cat_labels = annot.distinct_category_labels_from_list_cat_json %>
+                                <% categories = list_cat_labels.to_h { |label| [label, nil] } if list_cat_labels.any? %>
+                              <% end %>
+                              <% categories = nil if categories.blank? %>
                               <% annot_data_class_names = annot.data_class_ids.to_s.split(',').map { |dc_id| h_data_classes[dc_id.to_i] }.compact %>
                               <% is_count_dataset = annot_data_class_names.include?('int_matrix') %>
                               <% from_asap_pipeline = !annot.imported %>
@@ -264,7 +269,6 @@
                                    output_filename: annot.filepath,
                                    output_dataset: annot.name,
                                    output_attr_name: annot.attr_name,
-                                   categories: categories,
                                    is_count: is_count_dataset,
                                    nber_rows: annot.nber_rows,
                                    nber_cols: annot.nber_cols,
@@ -273,6 +277,7 @@
                                    step_name: step&.name,
                                    step_rank: step&.rank
                                  } %>
+                              <% data_hash[:categories] = categories if categories.present? %>
                               <% data_value = data_hash.to_json %>
                               <% display_label = [step&.label.presence || step&.name&.humanize, annot.display_name].compact.join(' - ') %>
                               <label class="flex items-start px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
@@ -357,13 +362,30 @@
                   <% elsif attr['list'] %>
                     <% l = attr['list'] %>
                   <% end %>
-                  <% l.unshift([attr['null_name'] || "None", '']) unless attr['not_null'] %>
-                  <%= select_tag form_attr_name, 
-                      options_for_select(l, scalar_value_for_field), 
-                      { class: 'w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white',
-                        id: "attrs_#{attr_name}" } %>
-                  <% if attr['description'].present? %>
-                    <p class="mt-1 text-xs text-gray-500"><%= attr['description'] %></p>
+                  <% if attr['multiple'] || attr_name.to_s == 'cells_metadata_sel' %>
+                    <% selected_multi = Array(attr_val.presence || attr['default']).flatten.map(&:to_s).reject(&:blank?) %>
+                    <div id="attrs_<%= attr_name %>"
+                         data-multi-category-filter="true"
+                         data-null-name="<%= h(attr['null_name'].presence || 'All categories') %>"
+                         data-selected-values="<%= h(selected_multi.to_json) %>"
+                         class="rounded-md border border-gray-300 bg-white">
+                      <div class="px-3 py-2 border-b border-gray-200 text-xs text-gray-500">
+                        <%= attr['null_name'].presence || 'All categories' %> when none selected. Click to select one or more.
+                      </div>
+                      <div data-role="category-options" class="max-h-48 overflow-auto p-2 space-y-1">
+                        <div class="px-2 py-1 text-sm text-gray-500">Select metadata first</div>
+                      </div>
+                    </div>
+                    <p class="mt-1 text-xs text-gray-500">Optionally restrict columns to one or more categories of the chosen metadata. Leave none selected to keep all cells.</p>
+                  <% else %>
+                    <% l.unshift([attr['null_name'] || "None", '']) unless attr['not_null'] %>
+                    <%= select_tag form_attr_name,
+                        options_for_select(l, scalar_value_for_field),
+                        { class: 'w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white',
+                          id: "attrs_#{attr_name}" } %>
+                    <% if attr['description'].present? %>
+                      <p class="mt-1 text-xs text-gray-500"><%= attr['description'] %></p>
+                    <% end %>
                   <% end %>
 
                 <% when 'input_gene_set_item' %>

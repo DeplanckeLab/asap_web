@@ -2176,10 +2176,10 @@ export default class extends Controller {
       const secondaryThumb = checkpoint.state?.thumbnails?.secondary
       const thumbHtml = [
         isCheckpointThumbnailDataUrl(mainThumb)
-          ? `<img src="${mainThumb}" alt="" style="width:72px;height:54px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
+          ? `<img class="checkpoint-thumb" src="${mainThumb}" alt="" style="width:72px;height:54px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
           : '',
         isCheckpointThumbnailDataUrl(secondaryThumb)
-          ? `<img src="${secondaryThumb}" alt="" style="width:72px;height:54px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
+          ? `<img class="checkpoint-thumb" src="${secondaryThumb}" alt="" style="width:72px;height:54px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
           : ''
       ].filter(Boolean).join('')
       return `
@@ -9645,7 +9645,7 @@ export default class extends Controller {
         </button>
       </div>
       <div style="padding:12px 16px;border-bottom:1px solid #e5e7eb;">
-        <input type="text" data-role="query" placeholder="Search metadata names, categories, annotations, ontology terms, gene symbols and Ensembl IDs..." style="width:100%;padding:9px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;color:#111827;outline:none;">
+        <input type="text" data-role="query" placeholder="Search metadata names, categories, annotations, DE results, ontology terms, gene symbols and Ensembl IDs..." style="width:100%;padding:9px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;color:#111827;outline:none;">
       </div>
       <div data-role="results" style="flex:1;min-height:200px;overflow:auto;"></div>
     `
@@ -9715,19 +9715,33 @@ export default class extends Controller {
 
       const rows = results.map((row, idx) => {
         const type = String(row.type || '')
-        const tagLabel = type === 'metadata_name' ? 'Metadata name' : (type === 'category_name' ? 'Category name' : 'Annotation')
+        const tagLabel = type === 'metadata_name'
+          ? 'Metadata name'
+          : (type === 'category_name'
+            ? 'Category name'
+            : (type === 'de_result' ? 'DE result' : 'Annotation'))
         const contextParts = []
-        if (row.metadata_name) contextParts.push(`Metadata: ${this.escapeHtml(String(row.metadata_name))}`)
-        if (row.category_name) contextParts.push(`Category: ${this.escapeHtml(String(row.category_name))}`)
+        let matchLabelHtml = ''
+        let primaryValue = String(row.match_value || '')
+        if (type === 'de_result') {
+          primaryValue = String(row.display_label || row.match_value || '')
+          if (row.metadata_name) contextParts.push(`Global metadata: ${this.escapeHtml(String(row.metadata_name))}`)
+          if (row.match_label && row.match_value && String(row.match_label) !== 'DE result') {
+            contextParts.push(`Matched ${this.escapeHtml(String(row.match_label))}: ${this.escapeHtml(String(row.match_value))}`)
+          }
+        } else {
+          if (row.metadata_name) contextParts.push(`Metadata: ${this.escapeHtml(String(row.metadata_name))}`)
+          if (row.category_name) contextParts.push(`Category: ${this.escapeHtml(String(row.category_name))}`)
+          matchLabelHtml = row.match_label ? `<span style="font-size:11px;color:#6b7280;">${this.escapeHtml(String(row.match_label))}: </span>` : ''
+        }
         const contextHtml = contextParts.length > 0
           ? `<div style="margin-top:4px;font-size:11px;color:#6b7280;">${contextParts.join(' · ')}</div>`
           : ''
-        const matchLabelHtml = row.match_label ? `<span style="font-size:11px;color:#6b7280;">${this.escapeHtml(String(row.match_label))}: </span>` : ''
         return `
           <button type="button" data-search-result-index="${idx}" style="width:100%;text-align:left;padding:10px 12px;border:none;border-bottom:1px solid #f3f4f6;background:#fff;cursor:pointer;">
             <div style="display:flex;align-items:center;gap:8px;">
               <span style="display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:11px;font-weight:600;">${tagLabel}</span>
-              <div style="font-size:13px;color:#111827;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${matchLabelHtml}${this.escapeHtml(String(row.match_value || ''))}</div>
+              <div style="font-size:13px;color:#111827;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${matchLabelHtml}${this.escapeHtml(primaryValue)}</div>
             </div>
             ${contextHtml}
           </button>
@@ -9744,6 +9758,11 @@ export default class extends Controller {
     const metadataId = String(result?.metadata_id || '').trim()
     const categoryName = String(result?.category_name || '').trim()
     const catIdx = Number(result?.cat_idx)
+
+    if (resultType === 'de_result') {
+      await this.openDeResultFromMetadataSearch(result)
+      return
+    }
 
     if (!metadataId) return
 
@@ -17325,17 +17344,26 @@ export default class extends Controller {
     const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
     const canRunNewDe = items.length >= 1
 
+    this.prepareDeSelectionModal({ canRunNewDe })
+    this.switchDeModalTab(canRunNewDe ? 'run' : 'results')
+  }
+
+  prepareDeSelectionModal({ canRunNewDe } = {}) {
+    const loomFile = this.getCurrentLoomFileForRequest()
+    const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
+    const canRun = canRunNewDe !== undefined ? !!canRunNewDe : items.length >= 1
+
     window.visualizationController = this
     const overlay = document.getElementById('de-selection-overlay')
-    if (!overlay) return
+    if (!overlay) return false
     overlay.style.display = 'flex'
     const runButton = document.getElementById('de-selection-run-btn')
     if (runButton) {
       runButton.onclick = (event) => this.submitDeSelectionRun(event)
-      runButton.disabled = !canRunNewDe
-      runButton.style.opacity = canRunNewDe ? '1' : '0.45'
-      runButton.style.cursor = canRunNewDe ? 'pointer' : 'not-allowed'
-      runButton.title = canRunNewDe
+      runButton.disabled = !canRun
+      runButton.style.opacity = canRun ? '1' : '0.45'
+      runButton.style.cursor = canRun ? 'pointer' : 'not-allowed'
+      runButton.title = canRun
         ? 'Run differential expression'
         : `Requires at least 1 saved ${this.getColSetLabel({ plural: false })}`
     }
@@ -17345,8 +17373,8 @@ export default class extends Controller {
     this.populateDeSelectionOperands()
     this.populateDeSelectionMethods()
     this.updateDeSelectionPreview()
-    this.setDeModalRunTabEnabled(canRunNewDe)
-    this.switchDeModalTab(canRunNewDe ? 'run' : 'results')
+    this.setDeModalRunTabEnabled(canRun)
+    return true
   }
 
   setDeModalRunTabEnabled(enabled) {
@@ -17368,6 +17396,74 @@ export default class extends Controller {
     }
   }
 
+  async openDeResultFromMetadataSearch(result) {
+    const annotId = String(result?.annot_id || result?.metadata_id || '').trim()
+    const runId = String(result?.run_id || '').trim()
+    if (!annotId && !runId) return
+
+    const loomFile = this.getCurrentLoomFileForRequest()
+    const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
+    if (!this.prepareDeSelectionModal({ canRunNewDe: items.length >= 1 })) return
+
+    this.switchDeModalTab('results', { reloadResults: false })
+    await this.loadDeVizResults()
+    this.selectDeVizResultFromSearch({ annotId, runId })
+  }
+
+  selectDeVizResultFromSearch({ annotId, runId }) {
+    const area = document.getElementById('de-viz-results-area')
+    if (!area) return
+
+    const escape = (value) => {
+      if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') return CSS.escape(String(value))
+      return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+    }
+
+    const geneListBadges = Array.from(area.querySelectorAll('[data-gene-list-url]'))
+    let badge = null
+    if (annotId) {
+      badge = geneListBadges.find((el) => String(el.getAttribute('data-annot-id') || '').trim() === annotId && el.getAttribute('data-direction') === 'up') ||
+        geneListBadges.find((el) => String(el.getAttribute('data-annot-id') || '').trim() === annotId && el.getAttribute('data-direction') === 'down') ||
+        geneListBadges.find((el) => String(el.getAttribute('data-annot-id') || '').trim() === annotId) ||
+        null
+    }
+    if (!badge && runId) {
+      const runBadges = geneListBadges.filter((el) => String(el.getAttribute('data-run-id') || '').trim() === runId)
+      badge = runBadges.find((el) => {
+        const elAnnotId = String(el.getAttribute('data-annot-id') || '').trim()
+        return !elAnnotId || elAnnotId === annotId
+      }) || runBadges.find((el) => el.getAttribute('data-direction') === 'up') || runBadges[0] || null
+    }
+
+    let row = badge ? badge.closest('tr') : null
+    if (!row && (annotId || runId)) {
+      const rowCandidates = Array.from(area.querySelectorAll('tr')).filter((tr) => {
+        if (annotId && tr.querySelector(`[data-annot-id="${escape(annotId)}"]`)) return true
+        if (runId && tr.querySelector(`[data-run-id="${escape(runId)}"]`)) return true
+        return false
+      })
+      row = rowCandidates[0] || null
+    }
+    if (!row && !badge) return
+
+    if (row) {
+      row.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+      row.style.outline = '2px solid #2563eb'
+      row.style.outlineOffset = '-2px'
+      row.style.backgroundColor = '#eff6ff'
+      if (this._deVizSearchHighlightTimer) clearTimeout(this._deVizSearchHighlightTimer)
+      this._deVizSearchHighlightTimer = setTimeout(() => {
+        row.style.outline = ''
+        row.style.outlineOffset = ''
+        row.style.backgroundColor = ''
+      }, 3500)
+    }
+
+    if (badge && badge.getAttribute('data-gene-list-url')) {
+      this.openDeVizGeneList(badge)
+    }
+  }
+
   closeDeSelectionModal() {
     const overlay = document.getElementById('de-selection-overlay')
     if (!overlay) return
@@ -17375,7 +17471,7 @@ export default class extends Controller {
     this._deVizGeneListState = null
   }
 
-  switchDeModalTab(tab) {
+  switchDeModalTab(tab, { reloadResults = true } = {}) {
     const tabs = ['run', 'results']
     tabs.forEach(function(t) {
       const btn = document.getElementById('de-modal-tab-' + t)
@@ -17391,7 +17487,7 @@ export default class extends Controller {
         panel.style.display = 'none'
       }
     })
-    if (tab === 'results') {
+    if (tab === 'results' && reloadResults) {
       this.backToDeVizResults()
     }
   }
@@ -17418,13 +17514,13 @@ export default class extends Controller {
   loadDeVizResults() {
     this._deVizGeneListState = null
     const area = document.getElementById('de-viz-results-area')
-    if (!area) return
+    if (!area) return Promise.resolve()
     this._setDeVizResultsAreaMode('list')
     area.innerHTML = '<div style="color:#9ca3af;font-size:13px;text-align:center;padding:24px 0;">Loading...</div>'
     const fdr = (document.getElementById('de-viz-fdr-cutoff') || {}).value || '0.05'
     const fc  = (document.getElementById('de-viz-fc-cutoff')  || {}).value || '2'
     const url = this._deVizBaseUrl() + '/viz_de_results?fdr_cutoff=' + encodeURIComponent(fdr) + '&fc_cutoff=' + encodeURIComponent(fc)
-    fetch(url, {
+    return fetch(url, {
       headers: { 'Accept': 'text/html' },
       credentials: 'same-origin'
     })
@@ -17437,7 +17533,7 @@ export default class extends Controller {
 
   backToDeVizResults() {
     this._deVizGeneListState = null
-    this.loadDeVizResults()
+    return this.loadDeVizResults()
   }
 
   openDeVizGeneList(el) {

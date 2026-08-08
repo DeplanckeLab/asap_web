@@ -2464,21 +2464,105 @@ class ProjectsController < ApplicationController
     end
     metadata_label = lambda do |annot|
       raw_name = safe_text.call(annot&.name)
-      cleaned = raw_name.gsub('/col_attrs/', '').gsub('/row_attrs/', '')
+      cleaned = raw_name.gsub('/col_attrs/', '').gsub('/row_attrs/', '').gsub('/attrs/', '').gsub(/\Aattrs\//, '')
       cleaned.present? ? cleaned : "Annotation #{annot&.id}"
+    end
+    global_attr_name = lambda do |annot|
+      name = annot&.name.to_s
+      name.start_with?('/attrs/') || name.start_with?('attrs/')
     end
     query_lc = safe_text.call(query).downcase
 
     metadata_scope = Annot.joins(:data_type)
                          .where(project_id: @project.id, data_types: { name: %w[DISCRETE NUMERIC] })
-                         .select(:id, :name, :categories_json, :list_cat_json, :data_type_id)
+                         .select(:id, :name, :categories_json, :list_cat_json, :data_type_id, :run_id)
     metadata_rows = metadata_scope.to_a
     metadata_by_id = metadata_rows.index_by(&:id)
+
+    asap_docker_image = Basic.get_asap_docker(@project.version)
+    de_step = asap_docker_image && Step.where(docker_image_id: asap_docker_image.id, name: 'de').first
+    de_runs_by_id = {}
+    if de_step
+      de_runs_by_id = apply_publication_snapshot_to_runs(
+        @project.runs.where(step_id: de_step.id, status_id: 3)
+      ).includes(:std_method).index_by(&:id)
+    end
+    de_table_rows_by_annot_id = {}
+    de_table_rows_by_run_id = {}
+    if de_runs_by_id.any?
+      Basic.de_table_rows_for_runs(de_runs_by_id.values).each do |row|
+        run = row[:run]
+        next unless run
+
+        de_table_rows_by_run_id[run.id] ||= []
+        de_table_rows_by_run_id[run.id] << row
+        if row[:annot]
+          de_table_rows_by_annot_id[row[:annot].id] = row
+        end
+      end
+    end
 
     results = []
     seen = Set.new
 
     metadata_rows.each do |metadata|
+      de_run = de_runs_by_id[metadata.run_id]
+      if de_run && global_attr_name.call(metadata)
+        metadata_name = metadata_label.call(metadata)
+        std_method = de_run.std_method
+        method_label = if std_method
+                         safe_text.call(std_method.label.presence || std_method.name.presence || 'N/A')
+                       else
+                         'N/A'
+                       end
+        run_num = de_run.num.presence || de_run.id
+        table_row = de_table_rows_by_annot_id[metadata.id]
+        if table_row.nil?
+          table_row = Array(de_table_rows_by_run_id[de_run.id]).find { |row| row[:annot].nil? } ||
+                      Array(de_table_rows_by_run_id[de_run.id]).first
+        end
+        reference_group = safe_text.call(table_row && table_row[:reference_group])
+        display_label = "DE ##{run_num}"
+        display_label = "#{display_label} · #{method_label}" if method_label.present? && method_label != 'N/A'
+        display_label = "#{display_label} · #{reference_group}" if reference_group.present?
+
+        search_terms = [
+          ['DE result', display_label],
+          ['Metadata name', metadata_name],
+          ['DE run', "##{run_num}"],
+          ['DE run', run_num.to_s],
+          ['Method', method_label],
+          ['Reference group', reference_group],
+          ['DE', 'DE'],
+          ['Differential expression', 'differential expression']
+        ]
+        match = search_terms.find do |_label, value|
+          value.present? && value.to_s.downcase.include?(query_lc)
+        end
+        if match
+          match_label, match_value = match
+          key = "de:#{metadata.id}:#{match_label.downcase}:#{match_value.to_s.downcase}"
+          unless seen.include?(key)
+            results << {
+              type: 'de_result',
+              match_value: match_value.to_s,
+              match_label: match_label,
+              metadata_id: metadata.id,
+              metadata_name: metadata_name,
+              annot_id: metadata.id,
+              run_id: de_run.id,
+              run_num: run_num,
+              method_name: method_label,
+              reference_group: reference_group.presence,
+              display_label: display_label
+            }
+            seen << key
+          end
+        end
+        break if results.length >= limit
+        next
+      end
+
       metadata_name = metadata_label.call(metadata)
       if metadata_name.downcase.include?(query_lc)
         key = "meta:#{metadata.id}:#{metadata_name.downcase}"
@@ -9720,6 +9804,7 @@ class ProjectsController < ApplicationController
       @heatmap_runs = apply_publication_snapshot_to_runs(runs_scope).to_a
       requested_id = params[:run_id].to_i
       @run = @heatmap_runs.find { |r| r.id == requested_id } || @heatmap_runs.first
+      @heatmap_loom_file = @run ? heatmap_loom_file_for_run(@run) : nil
       @heatmap_gene_set_collections = heatmap_gene_set_collections_payload
       @heatmap_gene_set_collection_options = @heatmap_gene_set_collections.map do |collection|
         { id: collection[:id], label: collection[:label] }

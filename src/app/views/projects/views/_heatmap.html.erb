@@ -66,3 +66,7 @@
     <% end %>
   </div>
 </div>
+<% if selected_run %>
+  <%= render 'projects/views/add_metadata_modal' %>
+  <%= render partial: 'projects/views/add_metadata_modal_scripts', locals: { loom_file: @heatmap_loom_file } %>
+<% end %>

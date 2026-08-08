@@ -210,9 +210,9 @@ export default class extends Controller {
       this.hiddenFieldTarget.value = selectedValues.length > 0 ? JSON.stringify(selectedValues[0]) : ''
     }
 
-    this.updateDependentCategorySelect(selectedValues)
-    this.updateDeGroupSelectsFromPrimaryMetadata(selectedValues)
-    this.updateDeGroupCompFromSecondaryMetadata(selectedValues)
+    void this.updateDependentCategorySelect(selectedValues)
+    void this.updateDeGroupSelectsFromPrimaryMetadata(selectedValues)
+    void this.updateDeGroupCompFromSecondaryMetadata(selectedValues)
     this.syncInputMatrixToSelectedGroupsLoom(selectedValues)
     this.syncInputMatrixCountFlags(selectedValues)
     this.broadcastMatrixContextIfNeeded(selectedValues)
@@ -989,55 +989,148 @@ export default class extends Controller {
     return false
   }
 
-  updateDependentCategorySelect(selectedValues) {
+  async updateDependentCategorySelect(selectedValues) {
     const dependentSelect = document.getElementById(`attrs_${this.attrNameValue}_sel`)
     if (!dependentSelect) {
       return
     }
+
+    if (dependentSelect.dataset.multiCategoryFilter === "true") {
+      await this.updateMultiCategoryFilter(dependentSelect, selectedValues)
+      return
+    }
+
     const currentValue = dependentSelect.value
+    const blankOption = Array.from(dependentSelect.options).find((option) => option.value === "")
+    const blankLabel = blankOption ? blankOption.textContent : null
 
     const selected = selectedValues.length > 0 ? selectedValues[0] : null
-    const categories = selected && selected.categories && typeof selected.categories === 'object'
-      ? selected.categories
-      : null
+    const { categories, categoryNames } = await this.resolveCategoriesForDeSelection(selected)
 
-    dependentSelect.innerHTML = ''
+    dependentSelect.innerHTML = ""
 
-    if (!categories) {
-      const option = document.createElement('option')
-      option.value = ''
-      option.textContent = 'Select a category'
-      dependentSelect.appendChild(option)
-      dependentSelect.value = ''
-      dependentSelect.dispatchEvent(new Event('change', { bubbles: true }))
-      return
+    if (blankLabel != null) {
+      const allOption = document.createElement("option")
+      allOption.value = ""
+      allOption.textContent = blankLabel
+      dependentSelect.appendChild(allOption)
     }
 
-    const categoryNames = Object.keys(categories).filter((name) => name !== '').sort()
     if (categoryNames.length === 0) {
-      const option = document.createElement('option')
-      option.value = ''
-      option.textContent = 'No category available'
-      dependentSelect.appendChild(option)
-      dependentSelect.value = ''
-      dependentSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      if (blankLabel == null) {
+        const option = document.createElement("option")
+        option.value = ""
+        option.textContent = selected ? "No category available" : "Select a category"
+        dependentSelect.appendChild(option)
+      }
+      dependentSelect.value = ""
+      dependentSelect.dispatchEvent(new Event("change", { bubbles: true }))
       return
     }
 
-    categoryNames.forEach((categoryName, index) => {
-      const count = categories[categoryName]
-      const option = document.createElement('option')
+    categoryNames.forEach((categoryName) => {
+      const count = categories ? categories[categoryName] : null
+      const option = document.createElement("option")
       option.value = categoryName
       option.textContent = Number.isFinite(Number(count))
         ? `${categoryName} (${count})`
         : categoryName
-      if ((currentValue && categoryName === currentValue) || (!currentValue && index === 0)) {
-        option.selected = true
-      }
       dependentSelect.appendChild(option)
     })
 
-    dependentSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    if (currentValue && categoryNames.includes(currentValue)) {
+      dependentSelect.value = currentValue
+    } else if (blankLabel != null) {
+      dependentSelect.value = ""
+    } else {
+      dependentSelect.value = categoryNames[0]
+    }
+
+    dependentSelect.dispatchEvent(new Event("change", { bubbles: true }))
+  }
+
+  parseMultiCategorySelectedValues(container) {
+    const raw = container.dataset.selectedValues || "[]"
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        return parsed.map((v) => String(v)).filter((v) => v !== "")
+      }
+    } catch (_e) {
+      /* ignore */
+    }
+    return []
+  }
+
+  async updateMultiCategoryFilter(container, selectedValues) {
+    const optionsHost = container.querySelector('[data-role="category-options"]')
+    if (!optionsHost) {
+      return
+    }
+
+    const previouslySelected = new Set([
+      ...this.parseMultiCategorySelectedValues(container),
+      ...Array.from(optionsHost.querySelectorAll('input[type="checkbox"]:checked')).map((input) => input.value)
+    ])
+
+    const selected = selectedValues.length > 0 ? selectedValues[0] : null
+    const { categories, categoryNames } = await this.resolveCategoriesForDeSelection(selected)
+
+    optionsHost.innerHTML = ""
+
+    if (!selected) {
+      const empty = document.createElement("div")
+      empty.className = "px-2 py-1 text-sm text-gray-500"
+      empty.textContent = "Select metadata first"
+      optionsHost.appendChild(empty)
+      container.dataset.selectedValues = "[]"
+      container.dispatchEvent(new Event("change", { bubbles: true }))
+      return
+    }
+
+    if (categoryNames.length === 0) {
+      const empty = document.createElement("div")
+      empty.className = "px-2 py-1 text-sm text-gray-500"
+      empty.textContent = "No category available"
+      optionsHost.appendChild(empty)
+      container.dataset.selectedValues = "[]"
+      container.dispatchEvent(new Event("change", { bubbles: true }))
+      return
+    }
+
+    const attrName = `${this.attrNameValue}_sel`
+    const syncSelected = () => {
+      const values = Array.from(optionsHost.querySelectorAll('input[type="checkbox"]:checked'))
+        .map((input) => input.value)
+        .filter((v) => v !== "")
+      container.dataset.selectedValues = JSON.stringify(values)
+      container.dispatchEvent(new Event("change", { bubbles: true }))
+    }
+
+    categoryNames.forEach((categoryName) => {
+      const count = categories ? categories[categoryName] : null
+      const label = document.createElement("label")
+      label.className = "flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm text-gray-800"
+
+      const checkbox = document.createElement("input")
+      checkbox.type = "checkbox"
+      checkbox.name = `attrs[${attrName}][]`
+      checkbox.value = categoryName
+      checkbox.className = "h-4 w-4 text-blue-600 border-gray-300 rounded"
+      checkbox.checked = previouslySelected.has(categoryName)
+      checkbox.addEventListener("change", syncSelected)
+
+      const text = document.createElement("span")
+      text.textContent = Number.isFinite(Number(count))
+        ? `${categoryName} (${count})`
+        : categoryName
+
+      label.appendChild(checkbox)
+      label.appendChild(text)
+      optionsHost.appendChild(label)
+    })
+
+    syncSelected()
   }
 
   isSecondGroupFromOtherMetadata() {

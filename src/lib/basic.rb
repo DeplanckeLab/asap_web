@@ -2066,9 +2066,25 @@ module Basic
 
     def heatmap_normalize_list(val)
       case val
-      when Array then val.map(&:to_s).reject(&:empty?)
-      when nil then []
-      else val.to_s.split(',').map(&:strip).reject(&:empty?)
+      when Array
+        val.map(&:to_s).reject(&:empty?)
+      when nil
+        []
+      else
+        if val.respond_to?(:to_unsafe_h)
+          return heatmap_normalize_list(val.to_unsafe_h.values)
+        end
+        s = val.to_s.strip
+        return [] if s.empty?
+        if s.start_with?('[')
+          parsed = begin
+            JSON.parse(s)
+          rescue JSON::ParserError
+            nil
+          end
+          return parsed.map(&:to_s).reject(&:empty?) if parsed.is_a?(Array)
+        end
+        s.split(',').map(&:strip).reject(&:empty?)
       end
     end
 

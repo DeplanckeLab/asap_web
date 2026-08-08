@@ -246,6 +246,18 @@
         <div style="padding:12px 14px; border-bottom:1px solid #e5e7eb; flex-shrink:0;">
           <div style="display:flex; align-items:center; gap:8px;">
             <h3 style="margin:0; font-size:14px; font-weight:600; color:#111827; flex:1; min-width:0;">Cell metadata tracks</h3>
+            <% if can_edit_heatmap %>
+              <button type="button"
+                      data-action="heatmap#openImportMetadata"
+                      data-heatmap-metadata-type-param="1"
+                      title="Import metadata"
+                      aria-label="Import metadata"
+                      style="flex-shrink:0; background:none; border:none; color:#9ca3af; cursor:pointer; padding:4px; border-radius:4px; transition:color 0.2s;"
+                      onmouseover="this.style.color='#22c55e'"
+                      onmouseout="this.style.color='#9ca3af'">
+                <i class="fas fa-plus" style="font-size:14px;" aria-hidden="true"></i>
+              </button>
+            <% end %>
             <button type="button"
                     data-action="heatmap#openAddColTrackModal"
                     title="Add cell metadata track"
@@ -254,7 +266,7 @@
                     style="flex-shrink:0; background:none; border:none; color:#9ca3af; cursor:pointer; padding:4px; border-radius:4px; transition:color 0.2s;"
                     onmouseover="this.style.color='#22c55e'"
                     onmouseout="this.style.color='#9ca3af'">
-              <i class="fas fa-plus" style="font-size:14px;" aria-hidden="true"></i>
+              <i class="fas fa-layer-group" style="font-size:13px;" aria-hidden="true"></i>
             </button>
           </div>
         </div>
@@ -262,7 +274,7 @@
           <div data-heatmap-target="colTrackList"
                class="heatmap-track-list"
                style="display:flex; flex-direction:column; gap:6px; min-height:28px;"></div>
-          <p data-heatmap-target="colTrackListEmpty" class="text-xs text-gray-400 mb-0" style="margin:8px 0 0 0;">No cell metadata tracks yet. Use + to add one.</p>
+          <p data-heatmap-target="colTrackListEmpty" class="text-xs text-gray-400 mb-0" style="margin:8px 0 0 0;">No cell metadata tracks yet. Use the layers button to add one.</p>
         </div>
       </div>
       <div id="heatmap-left-divider" class="heatmap-row-resizer" title="Resize panels"></div>
@@ -270,6 +282,18 @@
         <div style="padding:12px 14px; border-bottom:1px solid #e5e7eb; flex-shrink:0; background:#fff;">
           <div style="display:flex; align-items:center; gap:8px;">
             <h3 style="margin:0; font-size:14px; font-weight:600; color:#111827; flex:1; min-width:0;">Gene metadata tracks</h3>
+            <% if can_edit_heatmap %>
+              <button type="button"
+                      data-action="heatmap#openImportMetadata"
+                      data-heatmap-metadata-type-param="2"
+                      title="Import metadata"
+                      aria-label="Import metadata"
+                      style="flex-shrink:0; background:none; border:none; color:#9ca3af; cursor:pointer; padding:4px; border-radius:4px; transition:color 0.2s;"
+                      onmouseover="this.style.color='#22c55e'"
+                      onmouseout="this.style.color='#9ca3af'">
+                <i class="fas fa-plus" style="font-size:14px;" aria-hidden="true"></i>
+              </button>
+            <% end %>
             <button type="button"
                     data-action="heatmap#openAddRowTrackModal"
                     title="Add gene metadata track"
@@ -278,7 +302,7 @@
                     style="flex-shrink:0; background:none; border:none; color:#9ca3af; cursor:pointer; padding:4px; border-radius:4px; transition:color 0.2s;"
                     onmouseover="this.style.color='#22c55e'"
                     onmouseout="this.style.color='#9ca3af'">
-              <i class="fas fa-plus" style="font-size:14px;" aria-hidden="true"></i>
+              <i class="fas fa-layer-group" style="font-size:13px;" aria-hidden="true"></i>
             </button>
           </div>
         </div>
@@ -286,7 +310,7 @@
           <div data-heatmap-target="rowTrackList"
                class="heatmap-track-list"
                style="display:flex; flex-direction:column; gap:6px; min-height:28px;"></div>
-          <p data-heatmap-target="rowTrackListEmpty" class="text-xs text-gray-400 mb-0" style="margin:8px 0 0 0;">No gene metadata tracks yet. Use + to add one.</p>
+          <p data-heatmap-target="rowTrackListEmpty" class="text-xs text-gray-400 mb-0" style="margin:8px 0 0 0;">No gene metadata tracks yet. Use the layers button to add one.</p>
         </div>
       </div>
     </aside>
@@ -459,14 +483,14 @@
                 title="Add cell metadata track"
                 aria-label="Add cell metadata track"
                 class="heatmap-add-track-btn"
-                style="display:none; position:absolute; z-index:4; width:22px; height:22px; padding:0; line-height:20px; text-align:center; border:1px solid #94a3b8; border-radius:4px; background:rgba(255,255,255,0.92); color:#334155; font-size:16px; font-weight:600; cursor:pointer; box-shadow:0 1px 2px rgba(15,23,42,0.12); pointer-events:auto;">+</button>
+                style="display:none; position:absolute; z-index:4; width:22px; height:22px; padding:0; align-items:center; justify-content:center; border:1px solid #94a3b8; border-radius:4px; background:rgba(255,255,255,0.92); color:#334155; cursor:pointer; box-shadow:0 1px 2px rgba(15,23,42,0.12); pointer-events:auto;"><i class="fas fa-layer-group" style="font-size:11px; line-height:1;" aria-hidden="true"></i></button>
         <button type="button"
                 data-heatmap-target="addRowTrackBtn"
                 data-action="heatmap#openAddRowTrackModal"
                 title="Add gene metadata track"
                 aria-label="Add gene metadata track"
                 class="heatmap-add-track-btn"
-                style="display:none; position:absolute; z-index:4; width:22px; height:22px; padding:0; line-height:20px; text-align:center; border:1px solid #94a3b8; border-radius:4px; background:rgba(255,255,255,0.92); color:#334155; font-size:16px; font-weight:600; cursor:pointer; box-shadow:0 1px 2px rgba(15,23,42,0.12); pointer-events:auto;">+</button>
+                style="display:none; position:absolute; z-index:4; width:22px; height:22px; padding:0; align-items:center; justify-content:center; border:1px solid #94a3b8; border-radius:4px; background:rgba(255,255,255,0.92); color:#334155; cursor:pointer; box-shadow:0 1px 2px rgba(15,23,42,0.12); pointer-events:auto;"><i class="fas fa-layer-group" style="font-size:11px; line-height:1;" aria-hidden="true"></i></button>
         <div data-heatmap-target="tooltip"
              style="position:absolute; display:none; z-index:5; pointer-events:none; background:rgba(15,23,42,0.9); color:#fff; padding:4px 8px; border-radius:4px; font-size:12px; max-width:320px; white-space:normal;"></div>
         <div data-heatmap-target="status"
@@ -794,14 +818,14 @@
             title="Add cell metadata track"
             aria-label="Add cell metadata track"
             class="heatmap-add-track-btn"
-            style="display:none; position:absolute; z-index:4; width:22px; height:22px; padding:0; line-height:20px; text-align:center; border:1px solid #94a3b8; border-radius:4px; background:rgba(255,255,255,0.92); color:#334155; font-size:16px; font-weight:600; cursor:pointer; box-shadow:0 1px 2px rgba(15,23,42,0.12); pointer-events:auto;">+</button>
+            style="display:none; position:absolute; z-index:4; width:22px; height:22px; padding:0; align-items:center; justify-content:center; border:1px solid #94a3b8; border-radius:4px; background:rgba(255,255,255,0.92); color:#334155; cursor:pointer; box-shadow:0 1px 2px rgba(15,23,42,0.12); pointer-events:auto;"><i class="fas fa-layer-group" style="font-size:11px; line-height:1;" aria-hidden="true"></i></button>
     <button type="button"
             data-heatmap-target="addRowTrackBtn"
             data-action="heatmap#openAddRowTrackModal"
             title="Add gene metadata track"
             aria-label="Add gene metadata track"
             class="heatmap-add-track-btn"
-            style="display:none; position:absolute; z-index:4; width:22px; height:22px; padding:0; line-height:20px; text-align:center; border:1px solid #94a3b8; border-radius:4px; background:rgba(255,255,255,0.92); color:#334155; font-size:16px; font-weight:600; cursor:pointer; box-shadow:0 1px 2px rgba(15,23,42,0.12); pointer-events:auto;">+</button>
+            style="display:none; position:absolute; z-index:4; width:22px; height:22px; padding:0; align-items:center; justify-content:center; border:1px solid #94a3b8; border-radius:4px; background:rgba(255,255,255,0.92); color:#334155; cursor:pointer; box-shadow:0 1px 2px rgba(15,23,42,0.12); pointer-events:auto;"><i class="fas fa-layer-group" style="font-size:11px; line-height:1;" aria-hidden="true"></i></button>
     <div data-heatmap-target="tooltip"
          style="position:absolute; display:none; z-index:5; pointer-events:none; background:rgba(15,23,42,0.9); color:#fff; padding:4px 8px; border-radius:4px; font-size:12px; max-width:320px; white-space:normal;"></div>
     <div data-heatmap-target="status"
@@ -818,14 +842,14 @@
       <div data-heatmap-target="colTrackList"
            class="heatmap-track-list"
            style="display:flex; flex-direction:column; gap:6px; min-height:28px;"></div>
-      <p data-heatmap-target="colTrackListEmpty" class="text-xs text-gray-400 mb-0" style="margin:0;">No cell metadata tracks yet. Use + on the plot to add one.</p>
+      <p data-heatmap-target="colTrackListEmpty" class="text-xs text-gray-400 mb-0" style="margin:0;">No cell metadata tracks yet. Use the layers button on the plot to add one.</p>
     </div>
     <div style="border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; background:#fff;">
       <div style="font-size:13px; font-weight:600; color:#111827; margin-bottom:8px;">Gene metadata tracks</div>
       <div data-heatmap-target="rowTrackList"
            class="heatmap-track-list"
            style="display:flex; flex-direction:column; gap:6px; min-height:28px;"></div>
-      <p data-heatmap-target="rowTrackListEmpty" class="text-xs text-gray-400 mb-0" style="margin:0;">No gene metadata tracks yet. Use + on the plot to add one.</p>
+      <p data-heatmap-target="rowTrackListEmpty" class="text-xs text-gray-400 mb-0" style="margin:0;">No gene metadata tracks yet. Use the layers button on the plot to add one.</p>
     </div>
   </div>
   <p class="text-xs text-gray-500 mt-2 mb-0">

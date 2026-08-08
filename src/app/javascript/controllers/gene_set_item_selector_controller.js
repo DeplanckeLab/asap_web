@@ -182,8 +182,11 @@ export default class extends Controller {
   formatItemLabelPlain(item) {
     const identifier = String(item.identifier || "").trim()
     const name = String(item.name || "").trim()
+    if (identifier && name) {
+      return identifier === name ? name : `${identifier} ${name}`
+    }
     if (identifier) {
-      return name ? `${identifier} ${name}` : `${identifier} No name`
+      return `${identifier} No name`
     }
     if (name) {
       return name
@@ -194,11 +197,13 @@ export default class extends Controller {
   formatItemLabelHtml(item) {
     const identifier = String(item.identifier || "").trim()
     const name = String(item.name || "").trim()
+    if (identifier && name) {
+      return identifier === name
+        ? this.escapeHtml(name)
+        : `${this.escapeHtml(identifier)} ${this.escapeHtml(name)}`
+    }
     if (identifier) {
-      const nameHtml = name
-        ? ` ${this.escapeHtml(name)}`
-        : ` ${this.formatItemNameHtml("")}`
-      return `${this.escapeHtml(identifier)}${nameHtml}`
+      return `${this.escapeHtml(identifier)} ${this.formatItemNameHtml("")}`
     }
     if (name) {
       return this.escapeHtml(name)

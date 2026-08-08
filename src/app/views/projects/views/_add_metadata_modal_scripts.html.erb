@@ -1,0 +1,861 @@
+<%# Shared Import metadata modal scripts (visualization + heatmap). Requires local: loom_file %>
+<script>
+function openAddMetadataModal(metadataTypeId) {
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+
+  var selectedType = String(metadataTypeId || '1')
+  modal.querySelectorAll('.metadata-type-btn').forEach(function(btn) {
+    if (btn.getAttribute('data-metadata-type') === selectedType) {
+      btn.classList.remove('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200')
+      btn.classList.add('bg-blue-600', 'text-white')
+    } else {
+      btn.classList.remove('bg-blue-600', 'text-white')
+      btn.classList.add('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200')
+    }
+  })
+  var metaTypeInput = modal.querySelector('#import-metadata-type-id')
+  if (metaTypeInput) metaTypeInput.value = selectedType
+
+  modal.querySelectorAll('.input-type-btn').forEach(function(btn) {
+    if (btn.getAttribute('data-input-type') === '2') {
+      btn.classList.remove('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200')
+      btn.classList.add('bg-blue-600', 'text-white')
+    } else {
+      btn.classList.remove('bg-blue-600', 'text-white')
+      btn.classList.add('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200')
+    }
+  })
+  var inputTypeInput = modal.querySelector('#import-input-type-id')
+  if (inputTypeInput) inputTypeInput.value = '2'
+
+  modal.querySelectorAll('.input-method-btn').forEach(function(btn) {
+    if (btn.getAttribute('data-input-method') === '1') {
+      btn.classList.remove('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200')
+      btn.classList.add('bg-blue-600', 'text-white')
+    } else {
+      btn.classList.remove('bg-blue-600', 'text-white')
+      btn.classList.add('bg-gray-100', 'text-gray-700', 'hover:bg-gray-200')
+    }
+  })
+  var inputMethodInput = modal.querySelector('#import-input-method-id')
+  if (inputMethodInput) inputMethodInput.value = '1'
+
+  modal.querySelector('#import-from-project-section')?.classList.add('hidden')
+  modal.querySelector('#import-cross-status')?.classList.add('hidden')
+  if (modal.querySelector('#import-cross-status')) modal.querySelector('#import-cross-status').textContent = ''
+  modal.querySelector('#import-cross-selection')?.classList.add('hidden')
+  if (modal.querySelector('#import-cross-selection')) modal.querySelector('#import-cross-selection').textContent = ''
+  if (modal.querySelector('#import-cross-sources')) modal.querySelector('#import-cross-sources').innerHTML = ''
+  if (modal.querySelector('#import-cross-annots-flat')) modal.querySelector('#import-cross-annots-flat').innerHTML = ''
+  if (modal.querySelector('#import-cross-source-project-key')) modal.querySelector('#import-cross-source-project-key').value = ''
+  modal.querySelector('#import-cross-mode-a')?.classList.remove('hidden')
+  modal.querySelector('#import-cross-mode-b')?.classList.add('hidden')
+  modal.querySelectorAll('.import-cross-mode-radio').forEach(function(r) { r.checked = r.value === 'a' })
+  window._crossProjectSelection = null
+  window._crossProjectPrepareMeta = null
+
+  var delimiter = modal.querySelector('#import-delimiter')
+  if (delimiter) { delimiter.value = '0'; delimiter.disabled = true }
+
+  var nameInput = modal.querySelector('#import-metadata-name')
+  if (nameInput) { nameInput.value = ''; nameInput.disabled = true; nameInput.placeholder = 'Metadata names have to be set in the header of the file' }
+
+  var hasHeader = modal.querySelector('#import-has-header')
+  if (hasHeader) { hasHeader.checked = true; hasHeader.disabled = true }
+
+  var content = modal.querySelector('#import-metadata-content')
+  if (content) { content.value = ''; content.placeholder = '' }
+
+  var fileInput = modal.querySelector('#import-metadata-file')
+  if (fileInput) fileInput.value = ''
+  var fileInfo = modal.querySelector('#import-file-info')
+  if (fileInfo) { fileInfo.classList.add('hidden'); fileInfo.textContent = '' }
+
+  modal.querySelector('#import-copypaste-section')?.classList.remove('hidden')
+  modal.querySelector('#import-upload-section')?.classList.add('hidden')
+  modal.querySelector('#import-delimiter-group')?.classList.remove('hidden')
+  modal.querySelector('#import-name-group')?.classList.remove('hidden')
+  modal.querySelector('#import-has-header-group')?.classList.remove('hidden')
+  modal.querySelector('#import-format-group')?.classList.remove('hidden')
+  modal.querySelector('#import-format-desc-list')?.classList.add('hidden')
+  modal.querySelector('#import-format-desc-matrix')?.classList.remove('hidden')
+  modal.querySelector('#import-format-desc-global')?.classList.add('hidden')
+
+  var previewBtn = modal.querySelector('#import-preview-btn')
+  if (previewBtn) { previewBtn.disabled = true; previewBtn.classList.remove('hidden'); previewBtn.textContent = 'Preview' }
+  var submitBtn = modal.querySelector('#import-submit-btn')
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.classList.add('hidden') }
+
+  var warnings = modal.querySelector('#import-warnings')
+  if (warnings) { warnings.classList.add('hidden'); warnings.innerHTML = '' }
+  var preview = modal.querySelector('#import-preview')
+  if (preview) preview.classList.add('hidden')
+  var formError = modal.querySelector('#import-form-error')
+  if (formError) { formError.classList.add('hidden'); formError.innerHTML = '' }
+  showImportFormStep(modal)
+
+  modal.classList.remove('hidden')
+
+  var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
+  var loomFile = <%= loom_file.to_json %>
+  if (projectId && loomFile) {
+    fetch('/projects/' + projectId + '/sample_identifiers?loom_file=' + encodeURIComponent(loomFile), {
+      headers: { 'Accept': 'application/json' }, credentials: 'same-origin'
+    })
+    .then(function(r) { return r.ok ? r.json() : { cells: [], genes: [] } })
+    .then(function(data) {
+      window._sampleCells = data.cells || []
+      window._sampleGenes = data.genes || []
+      updateModalPlaceholder()
+    })
+    .catch(function() {})
+  }
+}
+window.openAddMetadataModal = openAddMetadataModal
+
+function updateModalPlaceholder() {
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+  var metadataType = modal.querySelector('#import-metadata-type-id')?.value
+  var inputType = modal.querySelector('#import-input-type-id')?.value
+  var content = modal.querySelector('#import-metadata-content')
+  if (!content) return
+  var cells = window._sampleCells && window._sampleCells.length > 0 ? window._sampleCells : ['Cell1', 'Cell2', 'Cell3']
+  var genes = window._sampleGenes && window._sampleGenes.length > 0 ? window._sampleGenes : ['Gene1', 'Gene2', 'Gene3']
+  if (inputType === '2') {
+    var ids = metadataType === '2' ? genes : cells
+    var header = metadataType === '2' ? 'Gene symbols/EnsemblIDs' : 'Cell names'
+    var lines = [header + '\tmetadata_1\tmetadata_2']
+    ids.forEach(function(id, i) { lines.push(id + '\t' + Math.round(Math.random() * 10) + '\t' + (i % 2 === 0 ? 'TypeA' : 'TypeB')) })
+    content.placeholder = lines.join('\n')
+  } else {
+    content.placeholder = (metadataType === '2' ? genes : cells).join('\n')
+  }
+}
+
+function checkModalForm() {
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+  var inputMethod = modal.querySelector('#import-input-method-id')?.value
+  var previewBtn = modal.querySelector('#import-preview-btn')
+  if (!previewBtn) return
+  if (inputMethod === '3') {
+    var sel = window._crossProjectSelection
+    previewBtn.disabled = !(sel && sel.sourceProjectId && sel.sourceAnnotId)
+    return
+  }
+  if (inputMethod === '2') {
+    var fileInput = modal.querySelector('#import-metadata-file')
+    previewBtn.disabled = !(fileInput && fileInput.files && fileInput.files.length > 0)
+    return
+  }
+  var inputType = modal.querySelector('#import-input-type-id')?.value
+  var name = (modal.querySelector('#import-metadata-name')?.value || '').trim()
+  var content = (modal.querySelector('#import-metadata-content')?.value || '').trim()
+  previewBtn.disabled = inputType === '2' ? content === '' : (name === '' || content === '')
+}
+
+function setupModalFormListeners() {
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal || modal._listenersAttached) return
+  modal._listenersAttached = true
+
+  var nameInput = modal.querySelector('#import-metadata-name')
+  if (nameInput) nameInput.addEventListener('input', checkModalForm)
+  var contentInput = modal.querySelector('#import-metadata-content')
+  if (contentInput) {
+    contentInput.addEventListener('input', checkModalForm)
+    contentInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Tab') {
+        e.preventDefault()
+        var start = contentInput.selectionStart, end = contentInput.selectionEnd
+        contentInput.value = contentInput.value.substring(0, start) + '\t' + contentInput.value.substring(end)
+        contentInput.setSelectionRange(start + 1, start + 1)
+      }
+    })
+  }
+  var fileInput = modal.querySelector('#import-metadata-file')
+  if (fileInput) fileInput.addEventListener('change', function() {
+    var info = modal.querySelector('#import-file-info')
+    if (fileInput.files[0] && info) {
+      info.textContent = fileInput.files[0].name + ' (' + (fileInput.files[0].size / 1024).toFixed(1) + ' KB)'
+      info.classList.remove('hidden')
+    }
+    checkModalForm()
+  })
+
+  modal.querySelectorAll('.metadata-type-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var type = btn.getAttribute('data-metadata-type')
+      if (type === '4' && modal.querySelector('#import-input-method-id')?.value === '3') {
+        var im1 = modal.querySelector('.input-method-btn[data-input-method="1"]')
+        if (im1) im1.click()
+      }
+      modal.querySelector('#import-metadata-type-id').value = type
+      modal.querySelectorAll('.metadata-type-btn').forEach(function(b) {
+        if (b.getAttribute('data-metadata-type') === type) { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
+        else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
+      })
+      modal.querySelectorAll('.input-method-btn[data-input-method="3"]').forEach(function(b) {
+        if (type === '4') {
+          b.classList.add('opacity-50', 'cursor-not-allowed')
+          b.setAttribute('disabled', 'disabled')
+        } else {
+          b.classList.remove('opacity-50', 'cursor-not-allowed')
+          b.removeAttribute('disabled')
+        }
+      })
+      updateModalPlaceholder()
+      checkModalForm()
+    })
+  })
+
+  modal.querySelectorAll('.input-type-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var type = btn.getAttribute('data-input-type')
+      modal.querySelector('#import-input-type-id').value = type
+      modal.querySelectorAll('.input-type-btn').forEach(function(b) {
+        if (b.getAttribute('data-input-type') === type) { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
+        else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
+      })
+      var delim = modal.querySelector('#import-delimiter')
+      var name = modal.querySelector('#import-metadata-name')
+      var hh = modal.querySelector('#import-has-header')
+      var descList = modal.querySelector('#import-format-desc-list')
+      var descMatrix = modal.querySelector('#import-format-desc-matrix')
+      if (type === '2') {
+        if (delim) { delim.value = '0'; delim.disabled = true }
+        if (name) { name.disabled = true; name.placeholder = 'Metadata names have to be set in the header of the file' }
+        if (hh) { hh.checked = true; hh.disabled = true }
+        if (descList) descList.classList.add('hidden')
+        if (descMatrix) descMatrix.classList.remove('hidden')
+      } else {
+        if (delim) { delim.value = '0'; delim.disabled = false }
+        if (name) { name.disabled = false; name.placeholder = 'Metadata name (as written in Loom file)' }
+        if (hh) { hh.disabled = false }
+        if (descList) descList.classList.remove('hidden')
+        if (descMatrix) descMatrix.classList.add('hidden')
+      }
+      updateModalPlaceholder()
+      checkModalForm()
+    })
+  })
+
+  modal.querySelectorAll('.input-method-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var method = btn.getAttribute('data-input-method')
+      modal.querySelector('#import-input-method-id').value = method
+      modal.querySelectorAll('.input-method-btn').forEach(function(b) {
+        if (b.getAttribute('data-input-method') === method) { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
+        else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
+      })
+      if (method === '1') {
+        modal.querySelector('#import-copypaste-section')?.classList.remove('hidden')
+        modal.querySelector('#import-upload-section')?.classList.add('hidden')
+        modal.querySelector('#import-from-project-section')?.classList.add('hidden')
+      } else if (method === '2') {
+        modal.querySelector('#import-copypaste-section')?.classList.add('hidden')
+        modal.querySelector('#import-upload-section')?.classList.remove('hidden')
+        modal.querySelector('#import-from-project-section')?.classList.add('hidden')
+      } else if (method === '3') {
+        modal.querySelector('#import-copypaste-section')?.classList.add('hidden')
+        modal.querySelector('#import-upload-section')?.classList.add('hidden')
+        modal.querySelector('#import-from-project-section')?.classList.remove('hidden')
+        vizLoadImportCellSets(modal)
+        vizApplyMatrixModeForCrossProject(modal)
+      }
+      checkModalForm()
+    })
+  })
+
+  modal.querySelectorAll('.import-cross-mode-radio').forEach(function(r) {
+    r.addEventListener('change', function() { vizToggleImportCrossMode(modal) })
+  })
+  modal.querySelector('#import-cross-discover-a-btn')?.addEventListener('click', function() { vizDiscoverMetadataImportModeA(modal) })
+  modal.querySelector('#import-cross-discover-b-btn')?.addEventListener('click', function() { vizDiscoverMetadataImportModeB(modal) })
+  modal.querySelector('#import-from-project-section')?.addEventListener('click', function(e) {
+    var btn = e.target.closest('button.import-cross-annot-btn')
+    if (!btn || btn.disabled) return
+    var sp = parseInt(btn.getAttribute('data-source-project-id'), 10)
+    var aid = parseInt(btn.getAttribute('data-source-annot-id'), 10)
+    var aname = btn.dataset.annotName || ''
+    if (sp > 0 && aid > 0) vizPickCrossProjectAnnot(modal, sp, aid, aname)
+  })
+}
+document.addEventListener('DOMContentLoaded', setupModalFormListeners)
+document.addEventListener('turbo:load', setupModalFormListeners)
+if (document.readyState !== 'loading') setupModalFormListeners()
+
+function vizEscAttr(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+}
+
+function vizLoadImportCellSets(modal) {
+  var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
+  var sel = modal.querySelector('#import-cross-cell-set-id')
+  var status = modal.querySelector('#import-cross-status')
+  if (!projectId || !sel) return
+  fetch('/projects/' + projectId + '/metadata_import_cell_sets', { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+    .then(function(r) { return r.json() })
+    .then(function(data) {
+      if (status) {
+        status.classList.toggle('hidden', !data.error)
+        status.textContent = data.error || ''
+      }
+      var rows = data.cell_sets || []
+      if (!rows.length) { sel.innerHTML = '<option value="">No cell sets</option>'; return }
+      sel.innerHTML = rows.map(function(cs) { return '<option value="' + cs.id + '">' + vizEscAttr(cs.key) + '</option>' }).join('')
+    })
+    .catch(function() { sel.innerHTML = '<option value="">Failed to load</option>' })
+}
+
+function vizToggleImportCrossMode(modal) {
+  var v = modal.querySelector('input.import-cross-mode-radio:checked')?.value || 'a'
+  modal.querySelector('#import-cross-mode-a')?.classList.toggle('hidden', v !== 'a')
+  modal.querySelector('#import-cross-mode-b')?.classList.toggle('hidden', v !== 'b')
+  window._crossProjectSelection = null
+  window._crossProjectPrepareMeta = null
+  if (modal.querySelector('#import-cross-sources')) modal.querySelector('#import-cross-sources').innerHTML = ''
+  if (modal.querySelector('#import-cross-annots-flat')) modal.querySelector('#import-cross-annots-flat').innerHTML = ''
+  modal.querySelector('#import-cross-selection')?.classList.add('hidden')
+  checkModalForm()
+}
+
+function vizApplyMatrixModeForCrossProject(modal) {
+  modal.querySelector('#import-input-type-id').value = '2'
+  modal.querySelectorAll('.input-type-btn').forEach(function(b) {
+    var t = b.getAttribute('data-input-type')
+    if (t === '2') { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
+    else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
+  })
+  var delim = modal.querySelector('#import-delimiter')
+  var name = modal.querySelector('#import-metadata-name')
+  var hh = modal.querySelector('#import-has-header')
+  if (delim) { delim.value = '0'; delim.disabled = true }
+  if (name) { name.disabled = true; name.placeholder = 'Set by column choice' }
+  if (hh) { hh.checked = true; hh.disabled = true }
+}
+
+function vizRenderCrossAnnotRow(a, sourceProjectId) {
+  var ok = a.compatible && a.import_name_allowed_on_target
+  var label = (a.display_name || a.name || '').toString()
+  var why = (!ok && (a.incompatibility_reason || a.import_name_block_reason)) ? (a.incompatibility_reason || a.import_name_block_reason).toString() : ''
+  var reason = why ? ' title="' + vizEscAttr(why) + '"' : ''
+  var disabled = ok ? '' : 'disabled'
+  return '<div><button type="button" class="import-cross-annot-btn text-left w-full px-2 py-1 rounded border border-gray-100 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed" data-source-project-id="' + sourceProjectId + '" data-source-annot-id="' + a.id + '" data-annot-name="' + vizEscAttr(a.name || '') + '" ' + disabled + reason + '>' + escapeHtmlForImportMeta(label) + '</button></div>'
+}
+
+function vizDiscoverMetadataImportModeA(modal) {
+  var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
+  var csId = modal.querySelector('#import-cross-cell-set-id')?.value
+  var box = modal.querySelector('#import-cross-sources')
+  var status = modal.querySelector('#import-cross-status')
+  if (!projectId || !csId) {
+    if (status) { status.textContent = 'Choose a cell set first.'; status.classList.remove('hidden') }
+    return
+  }
+  if (status) status.classList.add('hidden')
+  if (box) box.innerHTML = 'Loading...'
+  window._crossProjectSelection = null
+  window._crossProjectPrepareMeta = null
+  modal.querySelector('#import-cross-selection')?.classList.add('hidden')
+  fetch('/projects/' + projectId + '/discover_metadata_import_sources?cell_set_id=' + encodeURIComponent(csId), { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+    .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j } }) })
+    .then(function(res) {
+      if (!res.ok) {
+        if (box) box.innerHTML = ''
+        if (status) { status.textContent = res.j.error || 'Discovery failed'; status.classList.remove('hidden') }
+        return
+      }
+      var sources = res.j.sources || []
+      if (!sources.length) { if (box) box.innerHTML = '<p class="text-gray-600">No other readable projects with metadata on this cell set.</p>'; return }
+      if (box) {
+        box.innerHTML = sources.map(function(src) {
+          var proj = src.project || {}
+          var pid = proj.id
+          var rows = (src.annots || []).map(function(a) { return vizRenderCrossAnnotRow(a, pid) }).join('')
+          return '<div class="border border-gray-200 rounded p-2 bg-white"><div class="font-medium text-gray-800">' + escapeHtmlForImportMeta(proj.name || '') + ' <span class="text-gray-500 font-mono text-xs">' + escapeHtmlForImportMeta(proj.key || '') + '</span></div><div class="mt-1 space-y-1">' + rows + '</div></div>'
+        }).join('')
+      }
+    })
+    .catch(function(err) {
+      if (box) box.innerHTML = ''
+      if (status) { status.textContent = err.message || 'Request failed'; status.classList.remove('hidden') }
+    })
+}
+
+function vizDiscoverMetadataImportModeB(modal) {
+  var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
+  var key = (modal.querySelector('#import-cross-source-project-key')?.value || '').trim()
+  var box = modal.querySelector('#import-cross-annots-flat')
+  var status = modal.querySelector('#import-cross-status')
+  if (!projectId || !key) {
+    if (status) { status.textContent = 'Enter a source project key.'; status.classList.remove('hidden') }
+    return
+  }
+  if (status) status.classList.add('hidden')
+  if (box) box.innerHTML = 'Loading...'
+  window._crossProjectSelection = null
+  window._crossProjectPrepareMeta = null
+  modal.querySelector('#import-cross-selection')?.classList.add('hidden')
+  fetch('/projects/' + projectId + '/discover_metadata_import_from_project?source_project_key=' + encodeURIComponent(key), { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
+    .then(function(r) { return r.json().then(function(j) { return { ok: r.ok, j: j } }) })
+    .then(function(res) {
+      if (!res.ok) {
+        if (box) box.innerHTML = ''
+        if (status) { status.textContent = res.j.error || 'Discovery failed'; status.classList.remove('hidden') }
+        return
+      }
+      var annots = res.j.annots || []
+      var spid = res.j.source_project && res.j.source_project.id
+      if (!annots.length) { if (box) box.innerHTML = '<p class="text-gray-600">No compatible columns found.</p>'; return }
+      if (box) box.innerHTML = annots.map(function(a) { return vizRenderCrossAnnotRow(a, spid) }).join('')
+    })
+    .catch(function(err) {
+      if (box) box.innerHTML = ''
+      if (status) { status.textContent = err.message || 'Request failed'; status.classList.remove('hidden') }
+    })
+}
+
+function vizPickCrossProjectAnnot(modal, sourceProjectId, sourceAnnotId, annotName) {
+  var metaType = annotName.indexOf('/row_attrs/') === 0 ? '2' : '1'
+  modal.querySelector('#import-metadata-type-id').value = metaType
+  modal.querySelectorAll('.metadata-type-btn').forEach(function(b) {
+    var t = b.getAttribute('data-metadata-type')
+    if (t === metaType) { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
+    else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
+  })
+  window._crossProjectSelection = { sourceProjectId: sourceProjectId, sourceAnnotId: sourceAnnotId }
+  window._crossProjectPrepareMeta = null
+  var selEl = modal.querySelector('#import-cross-selection')
+  if (selEl) { selEl.textContent = 'Selected column: ' + annotName + ' (source project ' + sourceProjectId + ')'; selEl.classList.remove('hidden') }
+  window._importFuId = null
+  window._vizLastImportValidation = null
+  window._importCollisionResolution = ''
+  modal.querySelector('#import-warnings')?.classList.add('hidden')
+  if (modal.querySelector('#import-warnings')) modal.querySelector('#import-warnings').innerHTML = ''
+  modal.querySelector('#import-preview')?.classList.add('hidden')
+  modal.querySelector('#import-submit-btn')?.classList.add('hidden')
+  showImportFormStep(modal)
+  checkModalForm()
+}
+
+document.addEventListener('change', function(e) {
+  if (!e.target.matches) return
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal || !modal.contains(e.target)) return
+  if (e.target.closest('[data-controller="data-view"]')) return
+  if (e.target.matches('input.import-collision-radio')) {
+    var sel = modal.querySelector('input.import-collision-radio:checked')
+    window._importCollisionResolution = sel ? sel.value : ''
+    updateVizOverwriteImplicationsPanel(modal)
+    updateVizImportSubmitEnabled(modal)
+  }
+})
+
+function escapeHtmlForImportMeta(s) {
+  var d = document.createElement('div')
+  d.textContent = s == null ? '' : String(s)
+  return d.innerHTML
+}
+
+function renderImportPreviewHtmlViz(preview, fallbackLines) {
+  if (!preview || !Array.isArray(preview.columns)) {
+    var lines = Array.isArray(fallbackLines) ? fallbackLines : []
+    if (!lines.length) return ''
+    return '<div class="border border-gray-200 rounded-md bg-gray-50 p-3 text-sm font-mono max-h-56 overflow-auto">' +
+      lines.map(function(l) { return '<div class="py-0.5 border-b border-gray-100 last:border-0 whitespace-nowrap">' + escapeHtmlForImportMeta(l) + '</div>' }).join('') +
+      '</div>'
+  }
+
+  var summary = preview.summary || {}
+  var columns = preview.columns || []
+  var rows = Array.isArray(preview.rows) ? preview.rows : []
+  var names = Array.isArray(summary.metadata_names) ? summary.metadata_names : []
+
+  var html = '<div class="border border-gray-200 rounded-md bg-white p-3 text-sm space-y-3">'
+  html += '<div class="flex flex-wrap gap-x-4 gap-y-1 text-gray-700">'
+  html += '<span><span class="font-medium text-gray-900">' + (summary.metadata_count || 0) + '</span> metadata column(s)</span>'
+  html += '<span><span class="font-medium text-gray-900">' + (summary.row_count || 0) + '</span> row(s)</span>'
+  if ((summary.duplicate_count || 0) > 0) {
+    html += '<span><span class="font-medium text-amber-800">' + summary.duplicate_count + '</span> duplicate identifier(s) removed</span>'
+  }
+  if (summary.loom_identifier_count != null && summary.matched_identifier_count != null) {
+    html += '<span><span class="font-medium text-gray-900">' + summary.matched_identifier_count + '</span> / ' + summary.loom_identifier_count + ' identifiers match the loom</span>'
+    if ((summary.unmatched_identifier_count || 0) > 0) {
+      html += '<span class="text-amber-800">' + summary.unmatched_identifier_count + ' unmatched</span>'
+    }
+  }
+  if (summary.truncated) {
+    html += '<span class="text-gray-500">showing first ' + (summary.preview_row_count || rows.length) + '</span>'
+  }
+  html += '</div>'
+
+  if (names.length) {
+    html += '<div class="text-xs text-gray-600">Columns: ' + names.map(function(n) { return '<code class="text-xs">' + escapeHtmlForImportMeta(n) + '</code>' }).join(', ') + '</div>'
+  }
+
+  var valueCols = columns.filter(function(c) { return c.role === 'value' })
+  if (valueCols.some(function(c) { return (c.sample_values || []).length || c.inferred_type })) {
+    html += '<div class="text-xs text-gray-600 space-y-1">'
+    valueCols.forEach(function(c) {
+      var samples = Array.isArray(c.sample_values) ? c.sample_values : []
+      var typeLabel = c.inferred_type ? (' (' + c.inferred_type + (c.distinct_count != null ? (', ' + c.distinct_count + ' distinct') : '') + ')') : ''
+      html += '<div><span class="font-medium text-gray-800">' + escapeHtmlForImportMeta(c.name || '') + '</span>' + escapeHtmlForImportMeta(typeLabel)
+      if (samples.length) {
+        html += ': ' + samples.map(function(s) { return escapeHtmlForImportMeta(String(s)) }).join(', ')
+        if (c.distinct_count != null && c.distinct_count > samples.length) html += ', ...'
+      }
+      html += '</div>'
+    })
+    html += '</div>'
+  }
+
+  if ((summary.unmatched_samples || []).length) {
+    html += '<div class="text-xs text-amber-800">Unmatched examples: ' + summary.unmatched_samples.map(function(s) { return escapeHtmlForImportMeta(String(s)) }).join(', ') + '</div>'
+  }
+
+  if (columns.length && rows.length) {
+    html += '<div class="border border-gray-200 rounded overflow-auto max-h-56">'
+    html += '<table class="min-w-full text-xs">'
+    html += '<thead class="bg-gray-50 sticky top-0"><tr>'
+    columns.forEach(function(c) {
+      html += '<th class="px-2 py-1.5 text-left font-semibold text-gray-700 border-b border-gray-200 whitespace-nowrap">' + escapeHtmlForImportMeta(c.name || '') + '</th>'
+    })
+    html += '</tr></thead><tbody>'
+    rows.forEach(function(row, idx) {
+      var bg = idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'
+      html += '<tr class="' + bg + '">'
+      columns.forEach(function(_, colIdx) {
+        html += '<td class="px-2 py-1 border-b border-gray-100 whitespace-nowrap font-mono text-gray-800">' + escapeHtmlForImportMeta(row[colIdx] == null ? '' : String(row[colIdx])) + '</td>'
+      })
+      html += '</tr>'
+    })
+    html += '</tbody></table></div>'
+  }
+
+  html += '</div>'
+  return html
+}
+
+function formatImportDependentsSummaryViz(payload) {
+  var dependents = (payload && payload.dependents) || {}
+  var summary = dependents.summary || {}
+  var selectionCount = summary.selection_count || 0
+  var runDeleteCount = summary.run_ids_to_delete_count || 0
+  var claCount = summary.cla_count || 0
+  var lines = [
+    'Selections: ' + selectionCount,
+    'Pipeline runs that would be deleted: ' + runDeleteCount,
+    'Manual annotations on metadata: ' + claCount
+  ]
+  if (!selectionCount && !runDeleteCount && !claCount) {
+    lines.unshift('Nothing would be cascade-deleted.')
+  } else {
+    lines.unshift('Overwrite will also remove:')
+  }
+  ;(dependents.annots || []).forEach(function(annot) {
+    ;(annot.selections || []).slice(0, 8).forEach(function(sel) {
+      lines.push('- Selection: ' + (sel.selection_name || sel.run_id))
+    })
+    ;(annot.runs || []).slice(0, 8).forEach(function(run) {
+      lines.push('- Run: ' + (run.step_label || run.step_name || 'run') + ' #' + (run.num || run.run_id))
+    })
+    ;(annot.manual_review || []).forEach(function(item) {
+      if (item && item.message) lines.push('- ' + item.message)
+    })
+  })
+  return lines.join('\n')
+}
+
+function buildImportValidationHtmlViz(iv) {
+  if (!iv || iv.skip_name_checks) return ''
+  if (iv.error) {
+    return '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800 mt-2">' + escapeHtmlForImportMeta(iv.error) + '</div>'
+  }
+  var checks = Array.isArray(iv.checks) ? iv.checks : []
+  var badAuth = checks.filter(function(c) { return !c.authorized })
+  if (badAuth.length) {
+    var msgs = badAuth.map(function(c) { return c.auth_message || 'Name not allowed' }).join(' ')
+    return '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800 mt-2">' + escapeHtmlForImportMeta(msgs) + '</div>'
+  }
+  var collisions = checks.filter(function(c) { return c.collision })
+  if (!collisions.length) return ''
+  var h = '<div class="p-3 bg-amber-50 border border-amber-200 rounded-md text-sm text-amber-900 mt-2">'
+  h += '<p class="font-semibold mb-2">Existing metadata uses the same column path:</p><ul class="list-disc pl-5 mb-3">'
+  collisions.forEach(function(c) {
+    h += '<li><code class="text-xs">' + escapeHtmlForImportMeta(c.path || '') + '</code>'
+    if ((c.dependent_run_count || 0) > 0) {
+      h += ' <span class="text-amber-800">(' + c.dependent_run_count + ' pipeline runs would be deleted on overwrite)</span>'
+    }
+    h += '</li>'
+  })
+  h += '</ul><p class="mb-2">Choose how to proceed:</p>'
+  h += '<label class="flex items-center gap-2 mb-1 cursor-pointer"><input type="radio" name="import-collision-res" value="keep_both" class="import-collision-radio"> Keep both (rename existing to .bkp.N; import keeps the canonical name)</label>'
+  h += '<label class="flex items-center gap-2 cursor-pointer"><input type="radio" name="import-collision-res" value="overwrite" class="import-collision-radio"> Overwrite existing metadata</label>'
+  h += '<div id="import-overwrite-implications" class="hidden mt-3 p-3 bg-white border border-amber-300 rounded-md text-sm text-gray-800">'
+  h += '<p class="font-semibold mb-2">Overwrite implications</p>'
+  h += '<div id="import-overwrite-dependents" class="whitespace-pre-wrap text-xs max-h-36 overflow-y-auto"></div>'
+  h += '</div></div>'
+  return h
+}
+
+function updateVizOverwriteImplicationsPanel(modal) {
+  if (!modal) return
+  var panel = modal.querySelector('#import-overwrite-implications')
+  var dependentsEl = modal.querySelector('#import-overwrite-dependents')
+  if (!panel || !dependentsEl) return
+  if (window._importCollisionResolution !== 'overwrite') {
+    panel.classList.add('hidden')
+    return
+  }
+  dependentsEl.textContent = formatImportDependentsSummaryViz({ dependents: (window._vizLastImportValidation && window._vizLastImportValidation.dependents) || null })
+  panel.classList.remove('hidden')
+}
+
+function updateVizImportSubmitEnabled(modal) {
+  var submitBtn = modal.querySelector('#import-submit-btn')
+  if (!submitBtn) return
+  var iv = window._vizLastImportValidation
+  if (!iv || iv.skip_name_checks) {
+    submitBtn.disabled = false
+    return
+  }
+  if (iv.error) {
+    submitBtn.disabled = true
+    return
+  }
+  var checks = Array.isArray(iv.checks) ? iv.checks : []
+  if (checks.some(function(c) { return !c.authorized })) {
+    submitBtn.disabled = true
+    return
+  }
+  var collisions = checks.filter(function(c) { return c.collision })
+  if (collisions.length) {
+    submitBtn.disabled = !window._importCollisionResolution
+    return
+  }
+  submitBtn.disabled = false
+}
+
+function handleFillExampleContent(btn) {
+  if (btn && btn.closest('[data-controller="data-view"]')) return
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+  var content = modal.querySelector('#import-metadata-content')
+  if (!content) return
+  content.value = content.placeholder || ''
+  checkModalForm()
+}
+
+function handlePreviewMetadata(btn) {
+  if (btn.closest('[data-controller="data-view"]')) return
+  btn.disabled = true
+  btn.textContent = 'Processing...'
+
+  var modal = document.getElementById('add-metadata-modal')
+  var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
+  var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+  var inputMethod = modal.querySelector('#import-input-method-id')?.value
+  var metadataTypeId = modal.querySelector('#import-metadata-type-id')?.value
+  var inputTypeId = modal.querySelector('#import-input-type-id')?.value
+  var delimiter = modal.querySelector('#import-delimiter')?.value
+  var name = modal.querySelector('#import-metadata-name')?.value || ''
+  var hasHeader = modal.querySelector('#import-has-header')?.checked ? '1' : '0'
+  var loomFile = <%= loom_file.to_json %>
+
+  var fetchPromise
+  if (inputMethod === '3') {
+    var sel = window._crossProjectSelection
+    if (!sel || !sel.sourceProjectId || !sel.sourceAnnotId) {
+      btn.textContent = 'Preview'
+      btn.disabled = false
+      return
+    }
+    fetchPromise = fetch('/projects/' + projectId + '/prepare_metadata_from_project_annot', {
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'application/json', 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ source_project_id: sel.sourceProjectId, source_annot_id: sel.sourceAnnotId, loom_file: loomFile })
+    })
+  } else if (inputMethod === '2') {
+    var fileInput = modal.querySelector('#import-metadata-file')
+    if (!fileInput?.files?.[0]) return
+    var formData = new FormData()
+    formData.append('file', fileInput.files[0])
+    formData.append('metadata_type_id', metadataTypeId)
+    formData.append('input_type_id', inputTypeId)
+    formData.append('delimiter', delimiter)
+    formData.append('name', name)
+    formData.append('has_header', hasHeader)
+    formData.append('loom_file', loomFile)
+    fetchPromise = fetch('/projects/' + projectId + '/prepare_metadata', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'application/json' }, credentials: 'same-origin', body: formData })
+  } else {
+    var content = modal.querySelector('#import-metadata-content')?.value || ''
+    fetchPromise = fetch('/projects/' + projectId + '/prepare_metadata', { method: 'POST', headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'application/json', 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ metadata_type_id: metadataTypeId, input_type_id: inputTypeId, delimiter: delimiter, name: name, has_header: hasHeader, content: content, loom_file: loomFile }) })
+  }
+
+  fetchPromise.then(function(r) {
+    return r.json().catch(function() { return {} }).then(function(data) {
+      if (!r.ok) {
+        var msg = data.error || data.message || ('HTTP error ' + r.status)
+        throw new Error(msg)
+      }
+      return data
+    })
+  })
+  .then(function(data) {
+    btn.textContent = 'Preview'
+    window._importFuId = data.fu_id
+    window._importCollisionResolution = ''
+    window._vizLastImportValidation = data.import_validation || null
+    if (inputMethod === '3' && data.metadata_type_id) {
+      window._crossProjectPrepareMeta = { metadataTypeId: String(data.metadata_type_id), inputTypeId: String(data.input_type_id || '2') }
+    } else {
+      window._crossProjectPrepareMeta = null
+    }
+    var warnings = modal.querySelector('#import-warnings')
+    var dupBlock = ''
+    if (data.duplicates && data.duplicates.length > 0) {
+      dupBlock = '<div class="p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm text-yellow-800">' + data.duplicates.length + ' duplicate(s) found (' + data.duplicates.map(function(x) { return escapeHtmlForImportMeta(x) }).join(', ') + '). Only first occurrence is kept.</div>'
+    }
+    warnings.innerHTML = dupBlock + buildImportValidationHtmlViz(data.import_validation)
+    if (warnings.innerHTML.trim()) {
+      warnings.classList.remove('hidden')
+    } else {
+      warnings.classList.add('hidden')
+    }
+    var preview = modal.querySelector('#import-preview')
+    var previewContent = modal.querySelector('#import-preview-content')
+    if (data.preview || (data.preview_lines && data.preview_lines.length > 0)) {
+      previewContent.innerHTML = renderImportPreviewHtmlViz(data.preview, data.preview_lines)
+      preview.classList.remove('hidden')
+    } else if (preview) {
+      preview.classList.add('hidden')
+    }
+    if (data.header_name && inputMethod !== '3') {
+      var nameInput = modal.querySelector('#import-metadata-name')
+      if (nameInput && !nameInput.value.trim()) nameInput.value = data.header_name
+    }
+    var submitBtn = modal.querySelector('#import-submit-btn')
+    if (submitBtn) { submitBtn.classList.remove('hidden') }
+    updateVizImportSubmitEnabled(modal)
+    var formError = modal.querySelector('#import-form-error')
+    if (formError) { formError.classList.add('hidden'); formError.innerHTML = '' }
+    showImportReviewStep(modal)
+  })
+  .catch(function(err) {
+    btn.textContent = 'Preview'; btn.disabled = false
+    showImportFormStep(modal)
+    var formError = modal.querySelector('#import-form-error')
+    if (formError) {
+      formError.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">Error: ' + escapeHtmlForImportMeta(err.message) + '</div>'
+      formError.classList.remove('hidden')
+    }
+  })
+}
+
+function showImportFormStep(modal) {
+  if (!modal) modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+  modal.querySelector('#import-form-step')?.classList.remove('hidden')
+  modal.querySelector('#import-review-step')?.classList.add('hidden')
+  modal.querySelector('#import-preview-btn')?.classList.remove('hidden')
+  modal.querySelector('#import-submit-btn')?.classList.add('hidden')
+  modal.querySelector('#import-back-btn')?.classList.add('hidden')
+  modal.querySelector('#import-back-arrow-btn')?.classList.add('hidden')
+}
+
+function showImportReviewStep(modal) {
+  if (!modal) modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+  modal.querySelector('#import-form-step')?.classList.add('hidden')
+  modal.querySelector('#import-review-step')?.classList.remove('hidden')
+  modal.querySelector('#import-preview-btn')?.classList.add('hidden')
+  modal.querySelector('#import-submit-btn')?.classList.remove('hidden')
+  modal.querySelector('#import-back-btn')?.classList.remove('hidden')
+  modal.querySelector('#import-back-arrow-btn')?.classList.remove('hidden')
+  var scrollRoot = modal.querySelector('.overflow-y-auto')
+  if (scrollRoot) scrollRoot.scrollTop = 0
+}
+
+function handleBackToImportForm(btn) {
+  if (btn && btn.closest('[data-controller="data-view"]')) return
+  var modal = document.getElementById('add-metadata-modal')
+  if (!modal) return
+  showImportFormStep(modal)
+  checkModalForm()
+}
+
+function handleSubmitMetadata(btn) {
+  if (btn.closest('[data-controller="data-view"]')) return
+  btn.disabled = true
+  btn.textContent = 'Importing...'
+
+  var modal = document.getElementById('add-metadata-modal')
+  var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
+  var csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+  var inputMethod = modal.querySelector('#import-input-method-id')?.value
+  var metadataTypeId = modal.querySelector('#import-metadata-type-id')?.value
+  var inputTypeId = modal.querySelector('#import-input-type-id')?.value || '1'
+  if (inputMethod === '3' && window._crossProjectPrepareMeta) {
+    metadataTypeId = window._crossProjectPrepareMeta.metadataTypeId
+    inputTypeId = window._crossProjectPrepareMeta.inputTypeId
+  }
+  var name = modal.querySelector('#import-metadata-name')?.value || ''
+  var hasHeader = modal.querySelector('#import-has-header')?.checked ? '1' : '0'
+  var loomFile = <%= loom_file.to_json %>
+
+  fetch('/projects/' + projectId + '/do_import_metadata', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'application/json', 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({
+      fu_id: window._importFuId,
+      metadata_type_id: metadataTypeId,
+      loom_file: loomFile,
+      input_type_id: inputTypeId,
+      name: name,
+      header_name: '',
+      has_header: hasHeader,
+      collision_resolution: window._importCollisionResolution || ''
+    })
+  })
+  .then(function(r) {
+    return r.json().then(function(data) {
+      data.__httpOk = r.ok
+      return data
+    }).catch(function() {
+      return { status: 'error', message: 'HTTP error ' + r.status, __httpOk: r.ok }
+    })
+  })
+  .then(function(data) {
+    if (data.status !== 'ok') {
+      var msg = data.message || data.error || 'Import failed'
+      var warnings = modal.querySelector('#import-warnings')
+      warnings.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">' + escapeHtmlForImportMeta(msg) + '</div>'
+      warnings.classList.remove('hidden')
+      btn.textContent = 'Import'
+      btn.disabled = false
+      return
+    }
+    modal.classList.add('hidden')
+    if (data.status === 'ok') {
+      window.location.reload()
+    }
+  })
+  .catch(function(err) {
+    btn.textContent = 'Import'; btn.disabled = false
+    var warnings = modal.querySelector('#import-warnings')
+    warnings.innerHTML = '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-800">Import error: ' + escapeHtmlForImportMeta(err.message) + '</div>'
+    warnings.classList.remove('hidden')
+  })
+}
+
+window.handleFillExampleContent = handleFillExampleContent
+window.handlePreviewMetadata = handlePreviewMetadata
+window.handleBackToImportForm = handleBackToImportForm
+window.handleSubmitMetadata = handleSubmitMetadata
+
+</script>

@@ -72,8 +72,9 @@ module HeatmapV8StdMethods
     },
     "cells_metadata_sel" => {
       "label" => "Category filter",
-      "description" => "Optionally restrict columns to a single category of the chosen metadata. Leave on the default to keep all cells.",
+      "description" => "Optionally restrict columns to one or more categories of the chosen metadata. Leave none selected to keep all cells.",
       "widget" => "select",
+      "multiple" => true,
       "requires" => ["cells_metadata"],
       "not_null" => false,
       "null_name" => "All categories",

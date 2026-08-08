@@ -1,6 +1,9 @@
 import "@hotwired/turbo-rails"
 import "controllers"
 import "channels"
+import { installCheckpointThumbnailHoverPreview } from "lib/checkpoint_thumbnail"
+
+installCheckpointThumbnailHoverPreview()
 
 // Fix menu items styling after Turbo navigation
 // This runs globally to ensure menu items have correct white text on black header

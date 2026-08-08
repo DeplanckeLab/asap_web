@@ -652,7 +652,7 @@ summary_search_gene_url = search_gene_project_path(@project)
                         <% if preview_urls.any? %>
                           <div class="flex items-center gap-1">
                             <% preview_urls.each do |preview_url| %>
-                              <img src="<%= preview_url %>" alt="" class="w-[72px] h-[54px] object-cover rounded border border-gray-200 bg-white flex-shrink-0" />
+                              <img src="<%= preview_url %>" alt="" class="checkpoint-thumb w-[72px] h-[54px] object-cover rounded border border-gray-200 bg-white flex-shrink-0" />
                             <% end %>
                           </div>
                         <% else %>
@@ -706,7 +706,7 @@ summary_search_gene_url = search_gene_project_path(@project)
                         <% if group[:preview_urls].any? %>
                           <div class="flex items-center gap-1">
                             <% group[:preview_urls].each do |preview_url| %>
-                              <img src="<%= preview_url %>" alt="" class="w-[72px] h-[54px] object-cover rounded border border-gray-200 bg-white flex-shrink-0" />
+                              <img src="<%= preview_url %>" alt="" class="checkpoint-thumb w-[72px] h-[54px] object-cover rounded border border-gray-200 bg-white flex-shrink-0" />
                             <% end %>
                           </div>
                         <% else %>

@@ -123,11 +123,36 @@ end
 
 summary_embedding_records = Annot.where(project_id: @project.id, nber_rows: 2).includes(:user, run: [:user, :step]).order(:filepath, :name).to_a
 summary_checkpoint_records = @project.checkpoints.includes(:user).order(created_at: :desc).to_a
-summary_checkpoint_comments = []
-summary_checkpoint_records.each do |cp|
-cp.comments.each do |c|
-summary_checkpoint_comments << { checkpoint_title: cp.title, body: (c['body'] || c[:body] || c['comment']).to_s, user_name: (c['user_name'] || c[:user_name]).to_s, created_at: (c['created_at'] || c[:created_at]).to_s }
-end
+summary_checkpoint_comment_groups = summary_checkpoint_records.filter_map do |cp|
+  comments = Array(cp.comments)
+  next if comments.empty?
+
+  checkpoint_state = cp.state.is_a?(Hash) ? cp.state : {}
+  thumbnail_payload = checkpoint_state['thumbnails'].is_a?(Hash) ? checkpoint_state['thumbnails'] : {}
+  preview_urls = [
+    thumbnail_payload['main'],
+    thumbnail_payload['secondary'],
+    thumbnail_payload['heatmap']
+  ].compact.select { |url| url.is_a?(String) && url.start_with?('data:image/jpeg;base64,') }
+
+  {
+    title: cp.display_title,
+    current_auto: cp.current_auto?,
+    preview_urls: preview_urls,
+    open_comments_url: if cp.heatmap?
+                         project_path(@project, view: 'heatmap', run_id: cp.run_id, heatmap_checkpoint_id: cp.id, open_heatmap_comments: 1)
+                       else
+                         project_path(@project, view: 'visualization', checkpoint_id: cp.id, open_checkpoint_comments: 1)
+                       end,
+    comments: comments.map do |c|
+      {
+        body: (c['body'] || c[:body] || c['comment']).to_s,
+        user_name: (c['user_name'] || c[:user_name]).to_s,
+        created_at: (c['created_at'] || c[:created_at]).to_s,
+        updated_at: (c['updated_at'] || c[:updated_at]).to_s
+      }
+    end
+  }
 end
 summary_cla_records = @summary_cla_records || Cla.active.where(project_id: @project.id).includes(:annot, :cell_set, :user, :cla_source, :ontology_term_type).order(created_at: :desc).to_a
 summary_annotation_type_options = summary_cla_records.group_by(&:ontology_term_type_id).map do |tid, clas|
@@ -593,19 +618,66 @@ summary_search_gene_url = search_gene_project_path(@project)
               <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
                   <tr>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Preview</th>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Checkpoint</th>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created by</th>
-                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created/Updated</th>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Comments</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Open</th>
                   </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-100">
                   <% summary_checkpoint_records.each do |checkpoint| %>
+                    <% checkpoint_state = checkpoint.state.is_a?(Hash) ? checkpoint.state : {}
+                       thumbnail_payload = checkpoint_state['thumbnails'].is_a?(Hash) ? checkpoint_state['thumbnails'] : {}
+                       preview_urls = [
+                         thumbnail_payload['main'],
+                         thumbnail_payload['secondary'],
+                         thumbnail_payload['heatmap']
+                       ].compact.select { |url| url.is_a?(String) && url.start_with?('data:image/jpeg;base64,') }
+                       checkpoint_open_url = if checkpoint.heatmap?
+                                               project_path(@project, view: 'heatmap', run_id: checkpoint.run_id, heatmap_checkpoint_id: checkpoint.id)
+                                             else
+                                               project_path(@project, view: 'visualization', checkpoint_id: checkpoint.id)
+                                             end
+                       checkpoint_comments_url = if checkpoint.heatmap?
+                                                   project_path(@project, view: 'heatmap', run_id: checkpoint.run_id, heatmap_checkpoint_id: checkpoint.id, open_heatmap_comments: 1)
+                                                 else
+                                                   project_path(@project, view: 'visualization', checkpoint_id: checkpoint.id, open_checkpoint_comments: 1)
+                                                 end
+                       checkpoint_latest_at = [checkpoint.created_at, checkpoint.updated_at].compact.max
+                       checkpoint_comment_count = checkpoint.comments.size %>
                     <tr>
-                      <td class="px-2 py-1.5 text-xs text-gray-700"><%= checkpoint.title %></td>
+                      <td class="px-2 py-1.5 align-middle">
+                        <% if preview_urls.any? %>
+                          <div class="flex items-center gap-1">
+                            <% preview_urls.each do |preview_url| %>
+                              <img src="<%= preview_url %>" alt="" class="w-[72px] h-[54px] object-cover rounded border border-gray-200 bg-white flex-shrink-0" />
+                            <% end %>
+                          </div>
+                        <% else %>
+                          <span class="text-xs text-gray-400">-</span>
+                        <% end %>
+                      </td>
+                      <td class="px-2 py-1.5 text-xs text-gray-700">
+                        <% if checkpoint.current_auto? %>
+                          <span class="italic text-gray-500"><%= checkpoint.display_title %></span>
+                        <% else %>
+                          <%= checkpoint.title %>
+                        <% end %>
+                      </td>
                       <td class="px-2 py-1.5 text-xs text-gray-600"><%= checkpoint.user&.displayed_name.presence || checkpoint.user&.email.presence || '-' %></td>
-                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= checkpoint.created_at&.strftime("%b %d, %Y") %></td>
-                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= number_with_delimiter(checkpoint.comments.size) %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= checkpoint_latest_at&.strftime("%b %d, %Y %H:%M") %></td>
+                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap">
+                        <% if checkpoint_comment_count.positive? %>
+                          <%= link_to number_with_delimiter(checkpoint_comment_count), checkpoint_comments_url, class: 'text-blue-600 hover:text-blue-800 hover:underline font-medium' %>
+                        <% else %>
+                          <%= number_with_delimiter(checkpoint_comment_count) %>
+                        <% end %>
+                      </td>
+                      <td class="px-2 py-1.5 text-xs whitespace-nowrap">
+                        <%= link_to 'Open', checkpoint_open_url, class: 'text-blue-600 hover:text-blue-800 hover:underline font-medium' %>
+                      </td>
                     </tr>
                   <% end %>
                 </tbody>
@@ -617,33 +689,75 @@ summary_search_gene_url = search_gene_project_path(@project)
         </div>
 
         <div data-summary-detail-section="comments" data-guided-tour="summary-collab-comments-section" class="hidden">
-          <% if summary_checkpoint_comments.any? %>
+          <% if summary_checkpoint_comment_groups.any? %>
             <div class="overflow-x-auto">
               <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
                   <tr>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Preview</th>
                     <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Checkpoint</th>
-                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Comment</th>
-                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">User</th>
-                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Created</th>
+                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-500">Comments</th>
                   </tr>
                 </thead>
-                <tbody class="bg-white divide-y divide-gray-100">
-                  <% summary_checkpoint_comments.each do |comment| %>
-                    <% comment_created_at = if comment[:created_at].present?
-                         begin
-                           Time.zone.parse(comment[:created_at]).strftime("%b %d, %Y")
-                         rescue StandardError
-                           comment[:created_at]
-                         end
-                       else
-                         '-'
-                       end %>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  <% summary_checkpoint_comment_groups.each do |group| %>
                     <tr>
-                      <td class="px-2 py-1.5 text-xs text-gray-600"><%= comment[:checkpoint_title] %></td>
-                      <td class="px-2 py-1.5 text-xs text-gray-700"><%= comment[:body].presence || '-' %></td>
-                      <td class="px-2 py-1.5 text-xs text-gray-600"><%= comment[:user_name].presence || '-' %></td>
-                      <td class="px-2 py-1.5 text-xs text-gray-600 whitespace-nowrap"><%= comment_created_at %></td>
+                      <td class="px-2 py-2 align-top">
+                        <% if group[:preview_urls].any? %>
+                          <div class="flex items-center gap-1">
+                            <% group[:preview_urls].each do |preview_url| %>
+                              <img src="<%= preview_url %>" alt="" class="w-[72px] h-[54px] object-cover rounded border border-gray-200 bg-white flex-shrink-0" />
+                            <% end %>
+                          </div>
+                        <% else %>
+                          <span class="text-xs text-gray-400">-</span>
+                        <% end %>
+                      </td>
+                      <td class="px-2 py-2 text-xs text-gray-700 align-top">
+                        <% if group[:current_auto] %>
+                          <%= link_to group[:title], group[:open_comments_url], class: 'italic text-blue-600 hover:text-blue-800 hover:underline' %>
+                        <% else %>
+                          <%= link_to group[:title], group[:open_comments_url], class: 'text-blue-600 hover:text-blue-800 hover:underline font-medium' %>
+                        <% end %>
+                      </td>
+                      <td class="px-2 py-2 align-top">
+                        <div class="flex flex-col gap-2">
+                          <% group[:comments].each do |comment| %>
+                            <% comment_created_at = if comment[:created_at].present?
+                                 begin
+                                   Time.zone.parse(comment[:created_at])
+                                 rescue StandardError
+                                   nil
+                                 end
+                               end
+                               comment_updated_at = if comment[:updated_at].present?
+                                 begin
+                                   Time.zone.parse(comment[:updated_at])
+                                 rescue StandardError
+                                   nil
+                                 end
+                               end
+                               comment_is_edited = comment_updated_at.present? && (
+                                 comment_created_at.blank? || comment_updated_at > comment_created_at
+                               )
+                               comment_created_label = if comment_created_at.present?
+                                                         comment_created_at.strftime('%b %d, %Y %H:%M')
+                                                       else
+                                                         '-'
+                                                       end %>
+                            <div class="rounded border border-gray-200 bg-gray-50 px-2.5 py-2">
+                              <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 mb-1.5">
+                                <span class="text-[11px] font-semibold text-gray-700"><%= comment[:user_name].presence || 'Unknown' %></span>
+                                <span class="text-[10px] text-gray-500"><%= comment_created_label %></span>
+                                <% if comment_is_edited %>
+                                  <span class="text-[10px] text-gray-500 italic">Edited</span>
+                                <% end %>
+                              </div>
+                              <div class="text-[11px] leading-relaxed text-gray-700 whitespace-pre-wrap break-words"><%= comment[:body].presence || '-' %></div>
+                            </div>
+                          <% end %>
+                        </div>
+                      </td>
                     </tr>
                   <% end %>
                 </tbody>

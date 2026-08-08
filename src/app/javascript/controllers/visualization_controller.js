@@ -20,6 +20,7 @@ import {
 } from "visualization/de_second_metadata_attrs"
 import { resetInputDataWidgetToEmptyPlaceholder } from "lib/reset_input_data_widget_placeholder"
 import { formatNumberWithDelimiter } from "lib/number_format"
+import { dataUrlToJpegThumbnail, isCheckpointThumbnailDataUrl, canvasToJpegThumbnailDataUrl } from "lib/checkpoint_thumbnail"
 import consumer from "channels/consumer"
 
 const VISUALIZATION_ONTOP_UI_ROOT_SELECTOR = [
@@ -2011,6 +2012,31 @@ export default class extends Controller {
     this.saveCheckpoint(normalizedTitle)
   }
 
+  async captureNamedCheckpointThumbnails() {
+    const thumbnails = {}
+
+    if (this.reglRenderer && this.canvas) {
+      const pngDataUrl = this.reglRenderer.captureToDataURL('image/png')
+      if (pngDataUrl) {
+        const composed = await this.composeMainPlotImage(pngDataUrl)
+        const mainJpeg = await dataUrlToJpegThumbnail(composed)
+        if (mainJpeg) {
+          thumbnails.main = mainJpeg
+        }
+      }
+    }
+
+    const secondaryCanvas = this.customPlotManager?.getActivePlotCanvas?.()
+    if (secondaryCanvas) {
+      const secondaryJpeg = canvasToJpegThumbnailDataUrl(secondaryCanvas)
+      if (secondaryJpeg) {
+        thumbnails.secondary = secondaryJpeg
+      }
+    }
+
+    return Object.keys(thumbnails).length > 0 ? thumbnails : null
+  }
+
   async saveCheckpoint(title) {
     const projectIdentifier = this.getProjectIdentifier()
     if (!projectIdentifier) {
@@ -2020,11 +2046,20 @@ export default class extends Controller {
 
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
     const state = this.buildCheckpointState()
+    try {
+      const thumbnails = await this.captureNamedCheckpointThumbnails()
+      if (thumbnails) {
+        state.thumbnails = thumbnails
+      }
+    } catch (error) {
+      console.warn('[Checkpoint] Failed to capture named-checkpoint thumbnails', error)
+    }
     this.checkpointDebug('saveCheckpoint:state', {
       title,
       embedding: state.embedding,
       visualizationEmbedding: state.visualizationEmbedding,
-      loomFile: state.loomFile
+      loomFile: state.loomFile,
+      hasThumbnails: !!(state.thumbnails && Object.keys(state.thumbnails).length)
     })
     const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints`, {
       method: 'POST',
@@ -2137,8 +2172,21 @@ export default class extends Controller {
       const createdAt = checkpoint.created_at ? new Date(checkpoint.created_at).toLocaleString() : ''
       const commentCount = Number(checkpoint.comments_count || 0)
       const checkpointId = this.escapeHtml(checkpoint.id)
+      const mainThumb = checkpoint.state?.thumbnails?.main
+      const secondaryThumb = checkpoint.state?.thumbnails?.secondary
+      const thumbHtml = [
+        isCheckpointThumbnailDataUrl(mainThumb)
+          ? `<img src="${mainThumb}" alt="" style="width:72px;height:54px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
+          : '',
+        isCheckpointThumbnailDataUrl(secondaryThumb)
+          ? `<img src="${secondaryThumb}" alt="" style="width:72px;height:54px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
+          : ''
+      ].filter(Boolean).join('')
       return `
-        <div style="display:grid;grid-template-columns:minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;column-gap:6px;">
+        <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;column-gap:6px;">
+          <div style="display:flex;align-items:center;justify-content:flex-start;gap:4px;min-height:54px;">
+            ${thumbHtml || ''}
+          </div>
           <div style="min-width:0;">
             <div title="${this.escapeHtml(checkpoint.title || '')}" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(checkpoint.title || '')}</div>
             <div style="font-size:11px;color:#6b7280;">${this.escapeHtml(createdAt)} - ${commentCount} comment${commentCount === 1 ? '' : 's'}</div>
@@ -2193,7 +2241,8 @@ export default class extends Controller {
     }).join('')
 
     listContainer.innerHTML = `
-      <div style="display:grid;grid-template-columns:minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #d1d5db;background:#f9fafb;column-gap:6px;position:sticky;top:0;z-index:1;">
+      <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #d1d5db;background:#f9fafb;column-gap:6px;position:sticky;top:0;z-index:1;">
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;">Preview</div>
         <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;">Checkpoint</div>
         <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
           <span style="display:block;">Use as</span>
@@ -3122,18 +3171,45 @@ export default class extends Controller {
     if (!list) return
     const comments = Array.isArray(checkpoint?.comments) ? checkpoint.comments : []
     if (comments.length === 0) {
+      this.editingCheckpointCommentId = null
       list.innerHTML = '<div style="padding: 10px; color: #6b7280;">No comments yet.</div>'
       return
     }
 
+    const editingId = this.editingCheckpointCommentId != null ? String(this.editingCheckpointCommentId) : null
     list.innerHTML = comments.map((comment) => {
       const authoredAt = comment.created_at ? new Date(comment.created_at).toLocaleString() : ''
       const canManage = comment.user_can_manage === true
       const commentId = this.escapeHtml(comment.id || '')
+      const isEdited = this.checkpointCommentIsEdited(comment)
+      const isEditing = editingId != null && String(comment.id) === editingId
+      if (isEditing) {
+        return `
+          <div style="padding:10px;border-bottom:1px solid #e5e7eb;" data-checkpoint-comment-id="${commentId}">
+            <div style="font-size:12px;color:#6b7280;margin-bottom:6px;">
+              ${this.escapeHtml(comment.user_name || 'Unknown')} - ${this.escapeHtml(authoredAt)}${isEdited ? ' <span style="font-style:italic;">Edited</span>' : ''}
+            </div>
+            <textarea data-checkpoint-comment-edit-input="${commentId}"
+                      style="width:100%;min-height:96px;max-height:220px;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;line-height:1.45;resize:vertical;box-sizing:border-box;">${this.escapeHtml(comment.body || '')}</textarea>
+            <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;">
+              <button type="button"
+                      onclick="if (window.visualizationController) window.visualizationController.cancelCheckpointCommentEdit()"
+                      style="padding:4px 10px;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:4px;cursor:pointer;font-size:12px;">
+                Cancel
+              </button>
+              <button type="button"
+                      onclick="if (window.visualizationController) window.visualizationController.saveCheckpointCommentEdit('${commentId}')"
+                      style="padding:4px 10px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;border-radius:4px;cursor:pointer;font-size:12px;">
+                Save
+              </button>
+            </div>
+          </div>
+        `
+      }
       return `
-        <div style="padding:10px;border-bottom:1px solid #e5e7eb;">
+        <div style="padding:10px;border-bottom:1px solid #e5e7eb;" data-checkpoint-comment-id="${commentId}">
           <div style="font-size:12px;color:#6b7280;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <span>${this.escapeHtml(comment.user_name || 'Unknown')} - ${this.escapeHtml(authoredAt)}</span>
+            <span>${this.escapeHtml(comment.user_name || 'Unknown')} - ${this.escapeHtml(authoredAt)}${isEdited ? ' <span style="font-style:italic;">Edited</span>' : ''}</span>
             ${canManage ? `
             <span style="display:inline-flex;align-items:center;gap:6px;">
               <button type="button"
@@ -3153,6 +3229,24 @@ export default class extends Controller {
         </div>
       `
     }).join('')
+
+    if (editingId) {
+      const textarea = list.querySelector(`textarea[data-checkpoint-comment-edit-input="${editingId}"]`)
+      if (textarea) {
+        textarea.focus()
+        const length = textarea.value.length
+        textarea.setSelectionRange(length, length)
+      }
+    }
+  }
+
+  checkpointCommentIsEdited(comment) {
+    if (!comment || !comment.updated_at) return false
+    if (!comment.created_at) return true
+    const updatedAt = new Date(comment.updated_at)
+    const createdAt = new Date(comment.created_at)
+    if (Number.isNaN(updatedAt.getTime()) || Number.isNaN(createdAt.getTime())) return !!comment.updated_at
+    return updatedAt.getTime() > createdAt.getTime()
   }
 
   removeCheckpointCommentTargetOutsideClose() {
@@ -3401,6 +3495,7 @@ export default class extends Controller {
   async onCheckpointCommentTargetChanged() {
     const { targetSelect } = this.getCheckpointCommentModalElements()
     if (!targetSelect) return
+    this.editingCheckpointCommentId = null
     this.currentCommentCheckpointId = targetSelect.value ? String(targetSelect.value) : null
     if (this.currentCommentCheckpointId) {
       this.checkpointCommentVisitedExisting = true
@@ -3557,6 +3652,7 @@ export default class extends Controller {
   closeCheckpointComments() {
     const overlay = document.getElementById('checkpoint-comments-overlay')
     if (!overlay) return
+    this.editingCheckpointCommentId = null
     this._checkpointCommentsBackdropCloseArmed = false
     this.closeCheckpointCommentTargetMenu()
     this.removeCheckpointCommentTargetOutsideClose()
@@ -3772,17 +3868,35 @@ export default class extends Controller {
 
   async editCheckpointComment(commentId) {
     if (!this.currentCommentCheckpointId || !commentId) return
-    const list = document.getElementById('checkpoint-comments-list')
-    if (!list) return
     const checkpoint = (this.checkpointHistory || []).find((item) => String(item.id) === String(this.currentCommentCheckpointId))
     const comments = Array.isArray(checkpoint?.comments) ? checkpoint.comments : []
     const target = comments.find((comment) => String(comment.id) === String(commentId))
-    if (!target) return
+    if (!target || target.user_can_manage !== true) return
 
-    const editedBody = window.prompt('Edit comment:', target.body || '')
-    if (editedBody === null) return
-    const body = editedBody.trim()
-    if (!body) return
+    this.editingCheckpointCommentId = String(commentId)
+    this.renderCheckpointCommentsList(checkpoint)
+  }
+
+  cancelCheckpointCommentEdit() {
+    this.editingCheckpointCommentId = null
+    const checkpoint = (this.checkpointHistory || []).find((item) => String(item.id) === String(this.currentCommentCheckpointId))
+    if (checkpoint) {
+      this.renderCheckpointCommentsList(checkpoint)
+    }
+  }
+
+  async saveCheckpointCommentEdit(commentId) {
+    if (!this.currentCommentCheckpointId || !commentId) return
+    const list = document.getElementById('checkpoint-comments-list')
+    const textarea = list?.querySelector(`textarea[data-checkpoint-comment-edit-input="${commentId}"]`)
+    if (!textarea) return
+
+    const body = String(textarea.value || '').trim()
+    if (!body) {
+      alert('Comment cannot be empty.')
+      textarea.focus()
+      return
+    }
 
     const projectIdentifier = this.getProjectIdentifier()
     if (!projectIdentifier) return
@@ -3810,6 +3924,7 @@ export default class extends Controller {
       return
     }
 
+    this.editingCheckpointCommentId = null
     await this.renderCheckpointCommentsForSelectedTarget()
   }
 
@@ -3842,6 +3957,7 @@ export default class extends Controller {
       return
     }
 
+    this.editingCheckpointCommentId = null
     await this.renderCheckpointCommentsForSelectedTarget()
   }
 
@@ -8086,7 +8202,7 @@ export default class extends Controller {
   }
 
   shouldExcludeCheckpointMatchPath(path, key) {
-    if (key === 'signature' || key === 'version' || key === 'foldState' || key === 'clientSavedAt') return true
+    if (key === 'signature' || key === 'version' || key === 'foldState' || key === 'clientSavedAt' || key === 'thumbnails') return true
 
     const parent = path.join('.')
     if (parent === 'selection' && key === 'activeTab') return true
@@ -8161,7 +8277,8 @@ export default class extends Controller {
       'interaction',
       'signature',
       'version',
-      'clientSavedAt'
+      'clientSavedAt',
+      'thumbnails'
     ]
     removeKeys.forEach((k) => {
       if (Object.prototype.hasOwnProperty.call(clone, k)) delete clone[k]

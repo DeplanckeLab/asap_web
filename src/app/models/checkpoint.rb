@@ -2,6 +2,10 @@ class Checkpoint < ApplicationRecord
   KIND_VISUALIZATION = "visualization".freeze
   KIND_HEATMAP = "heatmap".freeze
   KINDS = [KIND_VISUALIZATION, KIND_HEATMAP].freeze
+  CURRENT_VISUALIZATION_TITLE = "__current_visualization_view__".freeze
+  CURRENT_HEATMAP_TITLE = "__current_heatmap_view__".freeze
+  CURRENT_TITLES = [CURRENT_VISUALIZATION_TITLE, CURRENT_HEATMAP_TITLE].freeze
+  CURRENT_DISPLAY_TITLE = "Current auto checkpoint".freeze
 
   belongs_to :project
   belongs_to :user, optional: true
@@ -44,6 +48,14 @@ class Checkpoint < ApplicationRecord
 
   def visualization?
     kind == KIND_VISUALIZATION
+  end
+
+  def current_auto?
+    CURRENT_TITLES.include?(title)
+  end
+
+  def display_title
+    current_auto? ? CURRENT_DISPLAY_TITLE : title
   end
 
   private

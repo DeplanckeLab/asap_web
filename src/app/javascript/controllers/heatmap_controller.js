@@ -3,6 +3,7 @@ import { ReglHeatmap } from "visualization/regl_heatmap"
 import { GradientManager } from "visualization/gradient_manager"
 import { ColorManager } from "visualization/color_manager"
 import { GeneSetCollectionsController } from "visualization/gene_set_collections_controller"
+import { canvasToJpegThumbnailDataUrl, isCheckpointThumbnailDataUrl } from "lib/checkpoint_thumbnail"
 import consumer from "channels/consumer"
 
 // Interactive expression heatmap viewer.
@@ -4377,7 +4378,43 @@ export default class extends Controller {
     this.saveCheckpoint(normalized)
   }
 
+  captureNamedCheckpointThumbnail() {
+    if (!this.renderer || !this.hasWebglTarget || !this.hasOverlayTarget) {
+      return null
+    }
+
+    this.render()
+
+    const w = this.containerW
+    const h = this.containerH
+    const dpr = this.dpr
+    if (!w || !h) return null
+
+    const composite = document.createElement("canvas")
+    composite.width = Math.max(1, Math.round(w * dpr))
+    composite.height = Math.max(1, Math.round(h * dpr))
+    const ctx = composite.getContext("2d")
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.fillStyle = "#ffffff"
+    ctx.fillRect(0, 0, w, h)
+    ctx.drawImage(this.webglTarget, this.mx, this.my, this.mw, this.mh)
+    ctx.drawImage(this.overlayTarget, 0, 0, w, h)
+
+    const jpeg = canvasToJpegThumbnailDataUrl(composite)
+    return jpeg ? { heatmap: jpeg } : null
+  }
+
   async saveCheckpoint(title) {
+    const state = this.buildCheckpointState()
+    try {
+      const thumbnails = this.captureNamedCheckpointThumbnail()
+      if (thumbnails) {
+        state.thumbnails = thumbnails
+      }
+    } catch (error) {
+      console.warn("[heatmap] Failed to capture named-checkpoint thumbnail", error)
+    }
+
     const response = await fetch(this.checkpointsUrl(), {
       method: "POST",
       headers: {
@@ -4393,7 +4430,7 @@ export default class extends Controller {
           title,
           kind: "heatmap",
           run_id: this.runIdValue,
-          state: this.buildCheckpointState()
+          state
         }
       })
     })
@@ -4488,8 +4525,15 @@ export default class extends Controller {
       const commentCount = Number(checkpoint.comments_count || 0)
       const isLoaded = this.lastLoadedCheckpointId && String(this.lastLoadedCheckpointId) === id
       const author = checkpoint.user_name || "Unknown"
+      const heatmapThumb = checkpoint.state?.thumbnails?.heatmap
+      const thumbHtml = isCheckpointThumbnailDataUrl(heatmapThumb)
+        ? `<img src="${heatmapThumb}" alt="" style="width:96px;height:64px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
+        : ""
       return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:${isLoaded ? "#fffbeb" : "#fff"};">
-        <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+        <div style="display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:12px;align-items:center;">
+          <div style="display:flex;align-items:center;justify-content:flex-start;min-height:64px;">
+            ${thumbHtml || ""}
+          </div>
           <div style="min-width:0;">
             <div style="font-size:13px;font-weight:600;color:#111827;">${this.escape(checkpoint.title || "Untitled")}</div>
             <div style="font-size:11px;color:#6b7280;margin-top:2px;">${this.escape(createdAt)} · ${this.escape(author)} · ${commentCount} comment${commentCount === 1 ? "" : "s"}</div>
@@ -4730,6 +4774,7 @@ export default class extends Controller {
 
   closeCheckpointComments() {
     if (!this.hasCheckpointCommentsOverlayTarget) return
+    this.editingCheckpointCommentId = null
     this.checkpointCommentsOverlayTarget.style.display = "none"
   }
 
@@ -4759,6 +4804,7 @@ export default class extends Controller {
   }
 
   checkpointCommentTargetChanged() {
+    this.editingCheckpointCommentId = null
     this.renderCheckpointComments()
   }
 
@@ -4779,23 +4825,43 @@ export default class extends Controller {
         : "Comments"
     }
     if (!checkpoint) {
+      this.editingCheckpointCommentId = null
       this.checkpointCommentsListTarget.innerHTML = `<div style="padding:12px;color:#6b7280;font-size:13px;">Select or load a checkpoint to view comments.</div>`
       return
     }
     const comments = Array.isArray(checkpoint.comments) ? checkpoint.comments : []
     if (!comments.length) {
+      this.editingCheckpointCommentId = null
       this.checkpointCommentsListTarget.innerHTML = `<div style="padding:12px;color:#6b7280;font-size:13px;">No comments yet.</div>`
       return
     }
+    const editingId = this.editingCheckpointCommentId != null ? String(this.editingCheckpointCommentId) : null
     this.checkpointCommentsListTarget.innerHTML = comments.map((comment) => {
       const authoredAt = comment.created_at ? new Date(comment.created_at).toLocaleString() : ""
       const canManage = comment.user_can_manage === true && this.canAnalyzeValue
       const commentId = this.escape(comment.id || "")
-      return `<div style="padding:10px 16px;border-bottom:1px solid #f3f4f6;">
+      const isEdited = this.checkpointCommentIsEdited(comment)
+      const isEditing = editingId != null && String(comment.id) === editingId
+      if (isEditing) {
+        return `<div style="padding:10px 16px;border-bottom:1px solid #f3f4f6;" data-checkpoint-comment-id="${commentId}">
+          <div style="font-size:12px;font-weight:600;color:#111827;">${this.escape(comment.user_name || "User")}</div>
+          <div style="font-size:11px;color:#6b7280;margin:2px 0 8px;">${this.escape(authoredAt)}${isEdited ? ' <span style="font-style:italic;">Edited</span>' : ""}</div>
+          <textarea data-checkpoint-comment-edit-input="${commentId}"
+                    rows="4"
+                    style="width:100%;border:1px solid #d1d5db;border-radius:6px;padding:8px;font-size:13px;line-height:1.45;resize:vertical;box-sizing:border-box;">${this.escape(comment.body || "")}</textarea>
+          <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;">
+            <button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-gray-100 text-gray-700 rounded border border-gray-300 text-xs"
+              data-action="heatmap#cancelCheckpointCommentEdit">Cancel</button>
+            <button type="button" class="inline-flex items-center px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded border border-blue-600 text-xs"
+              data-action="heatmap#saveCheckpointCommentEdit" data-heatmap-id-param="${commentId}">Save</button>
+          </div>
+        </div>`
+      }
+      return `<div style="padding:10px 16px;border-bottom:1px solid #f3f4f6;" data-checkpoint-comment-id="${commentId}">
         <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
           <div style="min-width:0;">
             <div style="font-size:12px;font-weight:600;color:#111827;">${this.escape(comment.user_name || "User")}</div>
-            <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">${this.escape(authoredAt)}</div>
+            <div style="font-size:11px;color:#6b7280;margin-bottom:4px;">${this.escape(authoredAt)}${isEdited ? ' <span style="font-style:italic;">Edited</span>' : ""}</div>
             <div style="font-size:13px;color:#1f2937;white-space:pre-wrap;">${this.escape(comment.body || "")}</div>
           </div>
           ${canManage ? `<div style="display:flex;gap:4px;flex-shrink:0;">
@@ -4807,6 +4873,24 @@ export default class extends Controller {
         </div>
       </div>`
     }).join("")
+
+    if (editingId) {
+      const textarea = this.checkpointCommentsListTarget.querySelector(`textarea[data-checkpoint-comment-edit-input="${editingId}"]`)
+      if (textarea) {
+        textarea.focus()
+        const length = textarea.value.length
+        textarea.setSelectionRange(length, length)
+      }
+    }
+  }
+
+  checkpointCommentIsEdited(comment) {
+    if (!comment || !comment.updated_at) return false
+    if (!comment.created_at) return true
+    const updatedAt = new Date(comment.updated_at)
+    const createdAt = new Date(comment.created_at)
+    if (Number.isNaN(updatedAt.getTime()) || Number.isNaN(createdAt.getTime())) return !!comment.updated_at
+    return updatedAt.getTime() > createdAt.getTime()
   }
 
   async submitCheckpointComment() {
@@ -4856,11 +4940,27 @@ export default class extends Controller {
     if (!checkpointId || !commentId) return
     const checkpoint = this.checkpointForId(checkpointId)
     const existing = (checkpoint?.comments || []).find((c) => String(c.id) === String(commentId))
-    const nextBody = window.prompt("Edit comment", existing?.body || "")
-    if (nextBody == null) return
-    const body = nextBody.trim()
+    if (!existing || existing.user_can_manage !== true) return
+    this.editingCheckpointCommentId = String(commentId)
+    this.renderCheckpointComments()
+  }
+
+  cancelCheckpointCommentEdit() {
+    this.editingCheckpointCommentId = null
+    this.renderCheckpointComments()
+  }
+
+  async saveCheckpointCommentEdit(event) {
+    if (!this.canAnalyzeValue) return
+    const commentId = event.params.id
+    const checkpointId = this.selectedCommentCheckpointId()
+    if (!checkpointId || !commentId) return
+    const textarea = this.checkpointCommentsListTarget?.querySelector(`textarea[data-checkpoint-comment-edit-input="${commentId}"]`)
+    if (!textarea) return
+    const body = String(textarea.value || "").trim()
     if (!body) {
       alert("Comment cannot be empty.")
+      textarea.focus()
       return
     }
     const response = await fetch(this.checkpointsUrl(checkpointId), {
@@ -4887,6 +4987,7 @@ export default class extends Controller {
       return
     }
     const payload = await response.json()
+    this.editingCheckpointCommentId = null
     this.mergeCheckpointIntoHistory(payload.checkpoint)
     this.renderCheckpointComments()
   }
@@ -4920,6 +5021,7 @@ export default class extends Controller {
       return
     }
     const payload = await response.json()
+    this.editingCheckpointCommentId = null
     this.mergeCheckpointIntoHistory(payload.checkpoint)
     this.populateCheckpointCommentSelect()
     if (this.hasCheckpointCommentSelectTarget) this.checkpointCommentSelectTarget.value = String(checkpointId)

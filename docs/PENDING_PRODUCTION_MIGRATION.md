@@ -113,6 +113,15 @@ ontology data is stale or missing (especially for new ontologies added to
 docker-compose exec website bin/rake load_ontologies
 ```
 
+On production (or when OBO files under `/data/asap/ontologies` are already
+present and should not be re-fetched), reimport into the DB only:
+
+```bash
+docker-compose exec website bin/rake load_ontologies SKIP_DOWNLOAD=1
+```
+
+Optional: limit to one ontology with `ONTOLOGY_TAG=HsapDv` (or `EFO`, etc.).
+
 ---
 
 ## Step 8 -- Compute ontology lineage and relationships

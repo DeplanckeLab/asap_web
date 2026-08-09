@@ -1,4 +1,4 @@
-desc '####################### load ontology terms'
+desc '####################### load ontology terms (SKIP_DOWNLOAD=1: reimport from local files only; ONTOLOGY_TAG=EFO: restrict)'
 task load_ontologies: :environment do
   require 'fileutils'
   require 'shellwords'
@@ -129,7 +129,8 @@ task load_ontologies: :environment do
     end
   end
 
-  puts 'Executing load_ontologies...'
+  skip_download = ENV['SKIP_DOWNLOAD'].present?
+  puts "Executing load_ontologies#{skip_download ? ' (SKIP_DOWNLOAD: local files only, force DB reimport)' : ''}..."
 
   data_dir_value = if defined?(APP_CONFIG) && APP_CONFIG.respond_to?(:[])
                      APP_CONFIG[:data_dir]
@@ -181,7 +182,15 @@ task load_ontologies: :environment do
     end
 
     ori_file = ontology_dir + "#{co.id}.#{co.format}"
-    source_changed = fetch_ontology_file(ori_file, co.file_url)
+    if skip_download
+      unless File.exist?(ori_file)
+        puts "Skipping #{co.tag} (id=#{co.id}): local file missing (#{ori_file})"
+        next
+      end
+      source_changed = true
+    else
+      source_changed = fetch_ontology_file(ori_file, co.file_url)
+    end
 
     obo_file = ori_file
     if co.format == 'owl'
@@ -192,8 +201,13 @@ task load_ontologies: :environment do
       end
     end
 
+    unless File.exist?(obo_file)
+      puts "Skipping #{co.tag} (id=#{co.id}): OBO file missing (#{obo_file})"
+      next
+    end
+
     terms_already_loaded = CellOntologyTerm.where(cell_ontology_id: co.id).exists?
-    if !source_changed && File.exist?(obo_file) && terms_already_loaded
+    if !skip_download && !source_changed && File.exist?(obo_file) && terms_already_loaded
       puts "#{co.tag}: no source changes; skipped"
       next
     end

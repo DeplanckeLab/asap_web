@@ -1,0 +1,711 @@
+# frozen_string_literal: true
+
+require 'uri'
+require 'open3'
+require 'zlib'
+require 'csv'
+
+module ExternalCatalog
+  # Sequential import of one catalog entry into ASAP:
+  # download → preparse → create project → Provider label →
+  # parse → scFAIR validation (sc) → archive.
+  class ProjectImporter
+    RAW_SEL = '/raw/X'
+    DEFAULT_PARSE_TIMEOUT_SEC = 6 * 60 * 60
+    POLL_INTERVAL_SEC = 15
+
+    class Error < StandardError; end
+    class SkipEntry < StandardError; end
+
+    def initialize(
+      user:,
+      version:,
+      logger: Rails.logger,
+      dry_run: false,
+      skip_archive: false,
+      strict: false,
+      parse_timeout_sec: nil,
+      archiver: nil
+    )
+      @user = user
+      @version = version
+      @logger = logger
+      @dry_run = dry_run
+      @skip_archive = skip_archive
+      @strict = strict
+      @parse_timeout_sec = (parse_timeout_sec || ENV.fetch('PARSE_TIMEOUT_SEC', DEFAULT_PARSE_TIMEOUT_SEC)).to_i
+      @archiver = archiver
+      @formats_by_name = FileFormat.all.index_by(&:name)
+      @sc_type = ProjectType.find_by(tag: 'sc') || ProjectType.find_by('name ILIKE ?', '%single%')
+      @bulk_type = ProjectType.find_by(tag: 'bulk') || ProjectType.find_by('name ILIKE ?', '%bulk%')
+      raise Error, 'Single-cell project type not found' unless @sc_type
+      raise Error, 'Bulk project type not found' unless @bulk_type
+    end
+
+    def import_many(entries)
+      results = { ok: [], skipped: [], failed: [] }
+      entries.each do |entry|
+        begin
+          project = import_one(entry)
+          if project == :dry_run
+            results[:skipped] << { entry: entry, reason: 'dry_run' }
+          elsif project
+            results[:ok] << { entry: entry, project: project }
+          else
+            results[:skipped] << { entry: entry, reason: 'no_project' }
+          end
+        rescue SkipEntry => e
+          @logger.warn("[ExternalCatalog] skip #{entry.source}/#{entry.external_id}: #{e.message}")
+          results[:skipped] << { entry: entry, reason: e.message }
+          raise if @strict
+        rescue StandardError => e
+          @logger.error("[ExternalCatalog] fail #{entry.source}/#{entry.external_id}: #{e.class} #{e.message}")
+          @logger.error(e.backtrace.first(20).join("\n")) if e.backtrace
+          results[:failed] << { entry: entry, error: e }
+          raise if @strict
+        end
+      end
+      results
+    end
+
+    def import_one(entry)
+      @logger.info(
+        "[ExternalCatalog] start source=#{entry.source} id=#{entry.external_id} " \
+        "title=#{entry.title.inspect} format=#{entry.format_kind} url=#{entry.url}"
+      )
+
+      provider = ensure_provider!(entry)
+      if already_imported?(provider, entry.external_id)
+        raise SkipEntry, "already imported provider=#{provider.name} key=#{entry.external_id}"
+      end
+
+      organism = resolve_organism!(entry)
+      if @dry_run
+        @logger.info(
+          "[ExternalCatalog][dry-run] would import #{entry.source}/#{entry.external_id} " \
+          "organism_id=#{organism.id} tax_id=#{entry.tax_id} type=#{entry.project_type_tag} " \
+          "dois=#{entry.normalized_dois.inspect} pmids=#{entry.normalized_pmids.inspect} " \
+          "identifiers=#{entry.normalized_identifiers.inspect}"
+        )
+        return :dry_run
+      end
+
+      fu = download_and_preparse!(entry, organism)
+      sel_name, dims, file_type = choose_matrix_selection!(fu, organism)
+      project = create_project!(entry, fu, organism, sel_name, dims, file_type)
+      attach_provider_label!(project, provider, entry)
+      wait_for_parse!(project)
+      attach_reference_metadata!(project, entry)
+      run_scfair_validation!(project) if project_type_for(entry).tag.to_s == 'sc'
+      archive_project!(project) unless @skip_archive
+
+      @logger.info(
+        "[ExternalCatalog] done source=#{entry.source} id=#{entry.external_id} " \
+        "project_id=#{project.id} key=#{project.key}"
+      )
+      project
+    end
+
+    private
+
+    def ensure_provider!(entry)
+      provider = Provider.find_or_create_by!(tag: entry.provider_tag) do |p|
+        p.name = entry.provider_name
+        p.description = "Imported from #{entry.provider_name} catalog"
+      end
+
+      desired_mask =
+        case entry.source.to_s
+        when 'hca'
+          'https://data.humancellatlas.org/explore/projects/#{id}'
+        when 'geo'
+          'https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=#{id}'
+        when 'cellxgene'
+          # ProviderProject key is the CELLxGENE dataset_id.
+          'https://cellxgene.cziscience.com/e/#{id}.cxg/'
+        when 'bgee'
+          # Bgee experiment ids are typically SRA/ENA study accessions (ERP/SRP/…).
+          'https://www.ncbi.nlm.nih.gov/sra/#{id}'
+        end
+
+      if desired_mask.present? && provider.url_mask != desired_mask
+        provider.update!(url_mask: desired_mask)
+      end
+      if provider.name != entry.provider_name
+        provider.update!(name: entry.provider_name)
+      end
+      provider
+    end
+
+    def already_imported?(provider, external_id)
+      pp = ProviderProject.find_by(provider_id: provider.id, key: external_id.to_s)
+      return false unless pp
+
+      pp.projects.where(being_deleted: [false, nil]).exists?
+    end
+
+    def project_type_for(entry)
+      tag = entry.project_type_tag.to_s
+      tag == 'bulk' ? @bulk_type : @sc_type
+    end
+
+    def resolve_organism!(entry)
+      tax_id = entry.tax_id.to_i
+      label = entry.organism_label.to_s.split(';').map(&:strip).reject(&:blank?).first
+
+      if tax_id <= 0 && label.present?
+        tax_id = HcaCatalog::SPECIES_TAX[label.downcase].to_i
+      end
+
+      if tax_id <= 0 && label.present?
+        local = Organism.where('LOWER(name) = ?', label.downcase).where(obsolete: [false, nil]).order(:id).first
+        if local
+          @logger.info("[ExternalCatalog] organism by name #{label.inspect} -> id=#{local.id} tax_id=#{local.tax_id}")
+          return local
+        end
+      end
+
+      if tax_id <= 0
+        raise SkipEntry, "Missing tax_id for #{entry.source}/#{entry.external_id} (#{label})"
+      end
+
+      env_data = Basic.safe_parse_json(@version.env_json, {})
+      db_name = env_data['asap_data_db_name'].to_s.strip
+      raise Error, "Version #{@version.id} missing asap_data_db_name" if db_name.blank?
+
+      remote_orgs = RemoteOrganism.list_for_version(db_name)
+      matches = remote_orgs.select { |o| o['tax_id'].to_i == tax_id }
+      if matches.empty?
+        raise SkipEntry, "No ASAP organism for tax_id=#{tax_id} (#{label})"
+      end
+
+      chosen =
+        matches.find { |o| o['short_name'].to_s.split.size == 1 } ||
+        matches.min_by { |o| o['id'].to_i }
+
+      organism = Organism.find_by(id: chosen['id'])
+      raise SkipEntry, "Organism id=#{chosen['id']} not in local organisms table" unless organism
+
+      @logger.info(
+        "[ExternalCatalog] organism tax_id=#{tax_id} -> id=#{organism.id} " \
+        "name=#{organism.name} short_name=#{chosen['short_name']}"
+      )
+      organism
+    end
+
+    def download_and_preparse!(entry, organism)
+      original_name = entry.filename.presence ||
+                      URI.parse(entry.url).path.to_s.split('/').last.presence ||
+                      'input_file'
+      original_name = original_name.gsub(/[()\[\]#?$]/, '')
+      ext = ProjectInputFinalizerService.extract_upload_extension(original_name)
+      ext = '.bin' if ext.blank?
+      input_filename = "input_file#{ext}"
+
+      fu = Fu.create!(
+        user_id: @user.id,
+        upload_file_name: input_filename,
+        upload_file_size: 0,
+        status: 'downloading',
+        name: original_name,
+        url: entry.url
+      )
+
+      FuDownloadFromUrlJob.perform_now(
+        fu.id,
+        entry.url,
+        organism_id: organism.id,
+        version_id: @version.id
+      )
+      fu.reload
+
+      unless %w[preparsed completed uploaded].include?(fu.status.to_s)
+        raise Error, "Download/preparse failed for Fu##{fu.id} status=#{fu.status}"
+      end
+
+      if entry.format_kind.to_s == 'series_matrix'
+        convert_series_matrix_fu!(fu, entry, organism)
+        fu.reload
+        unless %w[preparsed completed uploaded].include?(fu.status.to_s)
+          raise Error, "series_matrix re-preparse failed for Fu##{fu.id} status=#{fu.status}"
+        end
+      elsif entry.source.to_s == 'geo' && entry.format_kind.to_s == 'counts_table'
+        normalize_counts_table_fu!(fu, entry, organism)
+        fu.reload
+      end
+
+      fu
+    end
+
+    def text_delimiter_for(entry)
+      name = entry.filename.to_s.downcase
+      return ',' if name.end_with?('.csv', '.csv.gz')
+      return "\t" if name.end_with?('.tsv', '.tsv.gz') ||
+                    name.end_with?('.txt', '.txt.gz') ||
+                    entry.format_kind.to_s == 'series_matrix'
+
+      ''
+    end
+
+    def re_preparse_text_fu!(fu, organism, delimiter:)
+      return if delimiter.blank?
+
+      @logger.info("[ExternalCatalog] re-preparsing Fu##{fu.id} as RAW_TEXT delimiter=#{delimiter.inspect}")
+      fu.update!(status: 'preparsing')
+      FuPreparsingService.new(
+        fu,
+        organism_id: organism.id,
+        version_id: @version.id,
+        delimiter: delimiter
+      ).call
+      fu.update!(status: 'preparsed')
+    end
+
+    COUNTS_ANNOTATION_HEADERS = %w[
+      geneid gene_id gene genes id_ref id chr chromosome chrom start end strand length
+      gene_name gene_symbol symbol description biotype feature name
+    ].freeze
+
+    # Deposit often includes featureCounts annotation columns; keep gene id + numeric samples only.
+    def normalize_counts_table_fu!(fu, entry, organism)
+      src = fu.upload_dir.join(fu.upload_file_name)
+      raise Error, "Missing counts table for Fu##{fu.id}" unless File.exist?(src)
+
+      delimiter = text_delimiter_for(entry)
+      delimiter = ',' if delimiter.blank? && entry.filename.to_s.downcase.include?('.csv')
+      delimiter = "\t" if delimiter.blank?
+
+      raw =
+        if src.to_s.end_with?('.gz')
+          Zlib::GzipReader.open(src) { |gz| gz.read }
+        else
+          File.read(src)
+        end
+      raw = raw.to_s.sub(/\A\uFEFF/, '')
+
+      require 'csv'
+      table = CSV.parse(raw, headers: true, col_sep: delimiter, liberal_parsing: true)
+      raise SkipEntry, "counts table empty for #{entry.external_id}" if table.headers.blank? || table.size < 2
+
+      headers = table.headers.map { |h| h.to_s.strip }
+      gene_header = headers.first
+      raise SkipEntry, "counts table missing gene column for #{entry.external_id}" if gene_header.blank?
+
+      sample_headers = headers.drop(1).reject do |h|
+        COUNTS_ANNOTATION_HEADERS.include?(h.to_s.downcase.strip)
+      end
+      if sample_headers.empty?
+        raise SkipEntry, "counts table has no sample columns for #{entry.external_id}"
+      end
+
+      # Keep only columns that look numeric on a sample of rows.
+      probe = table.first([50, table.size].min)
+      numeric_headers = sample_headers.select do |h|
+        vals = probe.map { |row| row[h].to_s.strip }.reject(&:blank?)
+        next false if vals.empty?
+
+        ok = vals.count { |v| v.match?(/\A[+-]?\d+(\.\d+)?([eE][+-]?\d+)?\z/) }
+        ok.fdiv(vals.size) >= 0.9
+      end
+      if numeric_headers.size < 2
+        raise SkipEntry,
+              "counts table has too few numeric sample columns (#{numeric_headers.size}) for #{entry.external_id}"
+      end
+
+      out_name = 'input_file.txt'
+      out_path = fu.upload_dir.join(out_name)
+      CSV.open(out_path, 'w', col_sep: "\t") do |csv|
+        csv << ([gene_header] + numeric_headers)
+        table.each do |row|
+          gene = row[gene_header].to_s.strip
+          next if gene.blank?
+
+          values = numeric_headers.map do |h|
+            v = row[h].to_s.strip
+            v.presence || '0'
+          end
+          csv << ([gene] + values)
+        end
+      end
+
+      File.delete(src) if src.to_s != out_path.to_s && File.exist?(src)
+      fu.update!(
+        upload_file_name: out_name,
+        upload_file_size: File.size(out_path),
+        name: "#{File.basename(entry.filename.to_s.sub(/\.gz\z/i, ''))}.tsv",
+        status: 'preparsing'
+      )
+      FuPreparsingService.new(
+        fu,
+        organism_id: organism.id,
+        version_id: @version.id,
+        delimiter: ''
+      ).call
+      fu.update!(status: 'preparsed')
+    end
+
+    # GEO series_matrix is SOFT metadata wrapping a tab table; ASAP needs the table alone.
+    def convert_series_matrix_fu!(fu, entry, organism)
+      src = fu.upload_dir.join(fu.upload_file_name)
+      raise Error, "Missing series_matrix file for Fu##{fu.id}" unless File.exist?(src)
+
+      raw =
+        if src.to_s.end_with?('.gz')
+          Zlib::GzipReader.open(src) { |gz| gz.read }
+        else
+          File.read(src)
+        end
+
+      lines = raw.to_s.lines.map(&:chomp)
+      begin_idx = lines.index { |l| l.strip == '!series_matrix_table_begin' }
+      end_idx = lines.index { |l| l.strip == '!series_matrix_table_end' }
+      unless begin_idx && end_idx && end_idx > begin_idx + 1
+        raise SkipEntry, "series_matrix has no expression table for #{entry.external_id}"
+      end
+
+      table_lines = lines[(begin_idx + 1)...end_idx].reject(&:blank?)
+      if table_lines.size < 2
+        raise SkipEntry, "series_matrix expression table empty for #{entry.external_id}"
+      end
+
+      cleaned = table_lines.map do |line|
+        line.split("\t").map { |cell| cell.to_s.gsub(/\A"|"\z/, '') }.join("\t")
+      end
+
+      out_name = 'input_file.txt'
+      out_path = fu.upload_dir.join(out_name)
+      File.write(out_path, "#{cleaned.join("\n")}\n")
+      File.delete(src) if src.to_s != out_path.to_s && File.exist?(src)
+
+      fu.update!(
+        upload_file_name: out_name,
+        upload_file_size: File.size(out_path),
+        name: "#{File.basename(entry.filename.to_s, '.gz')}.tsv",
+        status: 'preparsing'
+      )
+      FuPreparsingService.new(
+        fu,
+        organism_id: organism.id,
+        version_id: @version.id,
+        delimiter: ''
+      ).call
+      fu.update!(status: 'preparsed')
+    end
+
+    def choose_matrix_selection!(fu, organism)
+      output_path = fu.upload_dir.join('output.json')
+      raise Error, "Missing preparsing output.json for Fu##{fu.id}" unless File.exist?(output_path)
+
+      output = Basic.safe_parse_json(File.read(output_path), {})
+      file_type = Basic.effective_preparsing_file_type(output).presence || output['detected_format'].to_s
+      groups = Array(output['list_groups'])
+      paths = groups.map { |g| g['group'].to_s }.reject(&:blank?)
+
+      if paths.empty?
+        # Some formats still parse with empty list_groups in edge cases; persist type only.
+        return [nil, {}, file_type]
+      end
+
+      sel_name = nil
+      if file_type.to_s.upcase == 'H5AD'
+        sel_name =
+          if paths.include?(RAW_SEL)
+            RAW_SEL
+          elsif paths.size == 1
+            normalize_sel_path(paths.first)
+          else
+            raise Error, "Ambiguous H5AD matrices without #{RAW_SEL}: #{paths.join(', ')}"
+          end
+
+        if sel_name == RAW_SEL
+          @logger.info("[ExternalCatalog] re-preparsing Fu##{fu.id} with sel=#{RAW_SEL}")
+          fu.update!(status: 'preparsing')
+          FuPreparsingService.new(
+            fu,
+            organism_id: organism.id,
+            version_id: @version.id,
+            sel: RAW_SEL
+          ).call
+          fu.update!(status: 'preparsed')
+          output = Basic.safe_parse_json(File.read(output_path), {})
+          groups = Array(output['list_groups'])
+          file_type = Basic.effective_preparsing_file_type(output).presence || file_type
+        end
+      elsif file_type.to_s.upcase == 'RAW_TEXT'
+        sel_name = nil
+      elsif paths.size == 1
+        # LOOM / RDS / single archive member — keep group name when useful for archives.
+        sel_name = paths.first
+        sel_name = nil if file_type.to_s.upcase == 'LOOM'
+      elsif %w[ARCHIVE ARCHIVE_COMPRESSED COMPRESSED].include?(file_type.to_s.upcase)
+        raise Error, "Ambiguous archive members: #{paths.join(', ')}"
+      else
+        sel_name = paths.first
+      end
+
+      selected =
+        if sel_name
+          groups.find { |g| g['group'].to_s == sel_name } || groups.first
+        else
+          groups.first
+        end
+      dims = {
+        nber_rows: selected && (selected['nber_rows'] || selected['nb_genes']),
+        nber_cols: selected && (selected['nber_cols'] || selected['nb_cells'])
+      }
+      [sel_name, dims, file_type]
+    end
+
+    def normalize_sel_path(path)
+      p = path.to_s
+      return p if p.start_with?('/')
+      return '/X' if p == 'X'
+
+      "/layers/#{p}"
+    end
+
+    def create_project!(entry, fu, organism, sel_name, dims, file_type)
+      parsing_attrs = { file_type: file_type.presence || 'H5AD' }
+      if sel_name.present? && parsing_attrs[:file_type].to_s.upcase != 'RAW_TEXT'
+        parsing_attrs[:sel_name] = sel_name
+      end
+      parsing_attrs[:nber_rows] = dims[:nber_rows] if dims[:nber_rows].present?
+      parsing_attrs[:nber_cols] = dims[:nber_cols] if dims[:nber_cols].present?
+
+      # GEO bulk rectangular tables (series_matrix extracted TSV or deposited counts).
+      if entry.source.to_s == 'geo' && %w[series_matrix counts_table].include?(entry.format_kind.to_s)
+        parsing_attrs[:file_type] = 'RAW_TEXT'
+        parsing_attrs[:has_header] = '1'
+        parsing_attrs[:gene_name_col] = 'first'
+        # Counts are normalized to TSV; series_matrix conversion also writes TSV.
+        # ASAP uses empty string for tab (a literal "\t" breaks --delim in the parse command).
+        parsing_attrs[:delimiter] = ''
+        parsing_attrs.delete(:sel_name)
+      end
+
+      ptype = project_type_for(entry)
+      project = Project.new(
+        user_id: @user.id,
+        key: Project.generate_unique_key,
+        name: entry.project_name,
+        description: "Imported from #{entry.provider_name} (#{entry.external_id})",
+        organism_id: organism.id,
+        project_type_id: ptype.id,
+        version_id: @version.id,
+        fu_id: fu.id,
+        nber_rows: dims[:nber_rows],
+        nber_cols: dims[:nber_cols],
+        parsing_attrs_json: parsing_attrs.to_json,
+        status_id: Status.find_by(name: 'pending')&.id || 1
+      )
+      project.save!
+      project.ensure_project_steps
+
+      user_data_dir = ENV['USER_DATA_DIR'] || Rails.root.join('storage', 'user_data').to_s
+      project_dir = Pathname.new(user_data_dir) + project.user_id.to_s + project.key
+      FileUtils.mkdir_p(project_dir)
+
+      ProjectInputFinalizerService.call(
+        project: project,
+        project_dir: project_dir,
+        input_file: fu,
+        formats_by_name: @formats_by_name,
+        logger: @logger
+      )
+
+      project.parse_files({})
+      project
+    end
+
+    def attach_provider_label!(project, provider, entry)
+      pp = ProviderProject.find_or_initialize_by(provider_id: provider.id, key: entry.external_id.to_s)
+      pp.title = entry.project_name(max_length: 255)
+      pp.filename = entry.filename.presence || File.basename(URI.parse(entry.url).path.to_s).presence
+      attrs = Basic.safe_parse_json(pp.attrs_json, {})
+      attrs['source_url'] = entry.url
+      attrs['organism_label'] = entry.organism_label
+      attrs['tax_id'] = entry.tax_id
+      attrs['format_kind'] = entry.format_kind
+      attrs['project_type_tag'] = entry.project_type_tag
+      attrs['dois'] = entry.normalized_dois
+      attrs['pmids'] = entry.normalized_pmids
+      attrs['identifiers'] = entry.normalized_identifiers
+      if entry.source_page_url.present?
+        attrs['source_page_url'] = entry.source_page_url.to_s
+      elsif provider.url_mask.present?
+        attrs['source_page_url'] = provider.url_mask.gsub('#{id}', entry.external_id.to_s)
+      end
+      pp.attrs_json = attrs.to_json
+      pp.save!
+
+      unless project.provider_projects.exists?(id: pp.id)
+        project.provider_projects << pp
+      end
+    end
+
+    # Publication (DOI / PMID → Article + project.doi) and dataset accessions → ExpEntry.
+    def attach_reference_metadata!(project, entry)
+      attach_publications!(project, entry)
+      attach_exp_identifiers!(project, entry)
+    end
+
+    def attach_publications!(project, entry)
+      dois = entry.normalized_dois
+      pmids = entry.normalized_pmids
+      return if dois.empty? && pmids.empty?
+
+      if pmids.any?
+        Fetch.load_articles(pmids.join(';'))
+        pmids.each do |pmid|
+          article = Article.find_by(pmid: pmid)
+          next unless article
+
+          project.articles << article unless project.articles.exists?(id: article.id)
+          dois << ReferenceIds.normalize_doi(article.doi) if article.doi.present?
+        end
+      end
+
+      dois = dois.compact.uniq
+      dois.each do |doi|
+        article = Article.find_by(doi: doi)
+        if article.nil?
+          info = Fetch.doi_info(doi)
+          next if info.blank? || info[:doi].blank?
+
+          article = Article.create!(info)
+        end
+        project.articles << article unless project.articles.exists?(id: article.id)
+      end
+
+      return if dois.empty?
+
+      existing = project.doi.to_s.split(/[\s,;]+/).map { |d| ReferenceIds.normalize_doi(d) }.compact
+      merged = (existing + dois).uniq
+      project.update!(doi: merged.join(', '))
+      @logger.info("[ExternalCatalog] publications project=#{project.key} dois=#{merged.inspect} pmids=#{pmids.inspect}")
+    end
+
+    def attach_exp_identifiers!(project, entry)
+      ids = entry.normalized_identifiers
+      return if ids.empty?
+
+      ids.each do |ref|
+        kind = ref[:kind]
+        value = ref[:value].to_s.strip
+        type_id = ReferenceIds.type_id_for_kind(kind)
+        next if type_id.blank? || value.blank?
+
+        exp_entry =
+          if kind == 'geo_series'
+            Fetch.fetch_gse(value)
+            ExpEntry.find_by(identifier: value, identifier_type_id: type_id) ||
+              ExpEntry.find_or_initialize_by(identifier: value, identifier_type_id: type_id)
+          elsif kind == 'array_express'
+            Fetch.fetch_array_express(value)
+            ExpEntry.find_by(identifier: value, identifier_type_id: type_id) ||
+              ExpEntry.find_or_initialize_by(identifier: value, identifier_type_id: type_id)
+          else
+            ExpEntry.find_or_initialize_by(identifier: value, identifier_type_id: type_id)
+          end
+
+        if exp_entry.new_record?
+          exp_entry.title ||= entry.title.to_s.truncate(255).presence
+          exp_entry.save!
+        elsif exp_entry.changed?
+          exp_entry.save!
+        end
+
+        unless project.exp_entries.exists?(id: exp_entry.id)
+          project.exp_entries << exp_entry
+        end
+      end
+
+      # Copy a DOI onto linked exp_entries when they lack one (propagate_project_doi
+      # expects a single DOI string, so handle comma-separated project.doi here).
+      primary_doi = entry.normalized_dois.first ||
+                    ReferenceIds.normalize_doi(project.doi.to_s.split(/[\s,;]+/).first)
+      if primary_doi.present?
+        project.exp_entries.where(doi: [nil, '']).find_each do |ee|
+          ee.update!(doi: primary_doi)
+        end
+      end
+      @logger.info(
+        "[ExternalCatalog] exp_entries project=#{project.key} " \
+        "ids=#{ids.map { |h| "#{h[:kind]}:#{h[:value]}" }.inspect}"
+      )
+    end
+
+    def wait_for_parse!(project)
+      success_id = Status.find_by(name: 'success')&.id
+      failed_id = Status.find_by(name: 'failed')&.id
+      stopped_id = Status.find_by(name: 'stopped')&.id
+      deadline = Time.now + @parse_timeout_sec
+
+      loop do
+        project.reload
+        loom = project_loom_path(project)
+        if loom && File.exist?(loom) && File.size(loom) > 0
+          run = latest_parsing_run(project)
+          if run.nil? || run.status_id == success_id
+            @logger.info("[ExternalCatalog] parse complete project=#{project.key} loom=#{loom}")
+            return
+          end
+        end
+
+        run = latest_parsing_run(project)
+        if run && [failed_id, stopped_id].include?(run.status_id)
+          raise Error, "Parsing failed for project=#{project.key} run=#{run.id} status_id=#{run.status_id}"
+        end
+
+        if Time.now > deadline
+          raise Error, "Parsing timed out after #{@parse_timeout_sec}s for project=#{project.key}"
+        end
+
+        @logger.info(
+          "[ExternalCatalog] waiting for parse project=#{project.key} " \
+          "run_status=#{run&.status_id} loom=#{loom.inspect}"
+        )
+        sleep POLL_INTERVAL_SEC
+      end
+    end
+
+    def latest_parsing_run(project)
+      asap_docker_image = Basic.get_asap_docker(project.version)
+      return nil unless asap_docker_image
+
+      parsing_step_ids = Step.where(
+        docker_image_id: asap_docker_image.id,
+        version_id: project.version_id,
+        name: 'parsing'
+      ).pluck(:id)
+      return nil if parsing_step_ids.empty?
+
+      Run.where(project_id: project.id, step_id: parsing_step_ids).order(id: :desc).first
+    end
+
+    def project_loom_path(project)
+      user_data_dir = ENV['USER_DATA_DIR'] || Rails.root.join('storage', 'user_data').to_s
+      primary = Pathname.new(user_data_dir).join(project.user_id.to_s, project.key, 'parsing', 'output.loom')
+      return primary.to_s if File.exist?(primary)
+
+      Dir.glob(File.join(user_data_dir, project.user_id.to_s, project.key, '**', '*.loom')).first
+    end
+
+    def run_scfair_validation!(project)
+      @logger.info("[ExternalCatalog] scFAIR validation project=#{project.key}")
+      ScfairValidationJob.perform_now(project.id)
+    end
+
+    def archive_project!(project)
+      raise Error, 'Archive callback not configured' unless @archiver
+
+      @logger.info("[ExternalCatalog] archive project=#{project.key}")
+      result = @archiver.call(project)
+      if result == :failed
+        raise Error, "Archive failed for project=#{project.key}"
+      end
+      @logger.info("[ExternalCatalog] archive result=#{result} project=#{project.key}")
+      result
+    end
+  end
+end

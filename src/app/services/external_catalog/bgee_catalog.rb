@@ -92,7 +92,7 @@ module ExternalCatalog
         dois: dois,
         pmids: pmids,
         identifiers: identifiers,
-        source_page_url: "https://www.ncbi.nlm.nih.gov/sra/#{experiment_id}"
+        source_page_url: "https://www.bgee.org/experiment/#{experiment_id}"
       )
       end
     rescue StandardError => e

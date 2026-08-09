@@ -124,8 +124,8 @@ module ExternalCatalog
           # ProviderProject key is the CELLxGENE dataset_id.
           'https://cellxgene.cziscience.com/e/#{id}.cxg/'
         when 'bgee'
-          # Bgee experiment ids are typically SRA/ENA study accessions (ERP/SRP/…).
-          'https://www.ncbi.nlm.nih.gov/sra/#{id}'
+          # Bgee curated experiment page (ids are typically SRA/ENA study accessions).
+          'https://www.bgee.org/experiment/#{id}'
         end
 
       if desired_mask.present? && provider.url_mask != desired_mask

@@ -269,6 +269,10 @@ import NewsWelcomeCardController from "controllers/news_welcome_card_controller"
 application.register("news-welcome-card", NewsWelcomeCardController)
 console.log('News welcome card controller registered')
 
+import NewsWelcomeCarouselController from "controllers/news_welcome_carousel_controller"
+application.register("news-welcome-carousel", NewsWelcomeCarouselController)
+console.log('News welcome carousel controller registered')
+
 import NewsHighlightController from "controllers/news_highlight_controller"
 application.register("news-highlight", NewsHighlightController)
 console.log('News highlight controller registered')

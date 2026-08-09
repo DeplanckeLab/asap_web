@@ -18,14 +18,9 @@ class NewsItem < ApplicationRecord
       color: 'rose'
     },
     'announcement' => {
-      label: 'Technical announcement',
+      label: 'Technical issue',
       default_icon: 'fas fa-bullhorn',
       color: 'purple'
-    },
-    'alert' => {
-      label: 'Technical alert',
-      default_icon: 'fas fa-fire',
-      color: 'amber'
     },
     'tip' => {
       label: 'Tip',

@@ -8,8 +8,6 @@
     <!-- Centered Content Wrapper -->
     <div class="max-w-4xl mx-auto text-center">
 
-      <%= render "news_items", news_items: @welcome_news_items %>
-      
       <!-- Logo Header (Kept your original H1 classes) -->
       <h1 class="block text-3xl font-bold text-gray-800 sm:text-4xl lg:text-6xl lg:leading-tight dark:text-white">
         <div class="flex justify-center">
@@ -48,6 +46,8 @@
           <%= render "shared/guest_sandbox_note" %>
         <% end %>
       <% end %>
+
+      <%= render "news_items", news_items: @welcome_news_items %>
 
       <% unless user_signed_in? %>
         <% sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '1').to_i %>

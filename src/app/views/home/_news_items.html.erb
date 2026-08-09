@@ -1,31 +1,57 @@
 <% if news_items.present? %>
-  <div class="mb-6 max-w-2xl mx-auto space-y-3 text-left">
-    <% news_items.each do |news_item| %>
-      <% scheme = news_item.color_scheme %>
-      <div class="<%= news_item_card_classes(news_item) %> relative cursor-pointer transition hover:shadow-md"
-           role="link"
-           tabindex="0"
-           data-controller="news-welcome-card"
-           data-action="click->news-welcome-card#open keydown.enter->news-welcome-card#open keydown.space->news-welcome-card#open"
-           data-news-welcome-card-url-value="<%= news_items_path(anchor: "news-item-#{news_item.id}") %>">
-        <div class="flex items-start gap-3">
-          <div class="shrink-0 mt-0.5">
-            <%= news_item_icon_tag(news_item) %>
-          </div>
-          <div class="min-w-0 flex-1 pb-4">
-            <div class="flex flex-wrap items-center gap-2 mb-1">
-              <%= news_item_type_badge(news_item) %>
-              <span class="text-xs text-gray-500 dark:text-gray-400"><%= format_news_published_at(news_item) %></span>
+  <% items = news_items.to_a %>
+
+  <% if items.size >= 3 %>
+    <div class="mt-8 max-w-5xl mx-auto text-left"
+         data-controller="news-welcome-carousel"
+         data-action="keydown->news-welcome-carousel#keydown"
+         tabindex="0"
+         role="region"
+         aria-label="News">
+      <div class="relative">
+        <button type="button"
+                class="absolute left-0 top-1/2 z-10 -translate-y-1/2 -translate-x-1 sm:-translate-x-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-gray-700 shadow-sm transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-default disabled:opacity-40 dark:border-neutral-600 dark:bg-neutral-800/90 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                data-news-welcome-carousel-target="prev"
+                data-action="click->news-welcome-carousel#prev"
+                aria-label="Previous news">
+          <svg class="size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+
+        <button type="button"
+                class="absolute right-0 top-1/2 z-10 -translate-y-1/2 translate-x-1 sm:translate-x-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white/90 text-gray-700 shadow-sm transition hover:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-default disabled:opacity-40 dark:border-neutral-600 dark:bg-neutral-800/90 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                data-news-welcome-carousel-target="next"
+                data-action="click->news-welcome-carousel#next"
+                aria-label="Next news">
+          <svg class="size-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+
+        <div class="overflow-x-auto snap-x snap-mandatory scroll-smooth flex gap-3 px-1 py-1
+                    [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden
+                    [mask-image:linear-gradient(to_right,transparent,black_2.5rem,black_calc(100%-2.5rem),transparent)]
+                    [-webkit-mask-image:linear-gradient(to_right,transparent,black_2.5rem,black_calc(100%-2.5rem),transparent)]"
+             data-news-welcome-carousel-target="track">
+          <% items.each do |news_item| %>
+            <div class="w-[85%] sm:w-[48%] lg:w-[40%] shrink-0 snap-start"
+                 data-news-welcome-carousel-target="item">
+              <%= render "home/news_welcome_card", news_item: news_item %>
             </div>
-            <p class="text-sm font-semibold <%= scheme[:title] %>">
-              <%= raw news_item.title %>
-            </p>
-          </div>
+          <% end %>
         </div>
-        <span class="absolute bottom-2 right-3 text-xs italic <%= scheme[:details] %>">
-          more details
-        </span>
       </div>
-    <% end %>
-  </div>
+    </div>
+  <% elsif items.size == 2 %>
+    <div class="mt-8 max-w-4xl mx-auto flex flex-col sm:flex-row sm:justify-center gap-3 text-left"
+         role="region"
+         aria-label="News">
+      <% items.each do |news_item| %>
+        <div class="w-full sm:w-[min(100%,22rem)]">
+          <%= render "home/news_welcome_card", news_item: news_item %>
+        </div>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="mt-8 max-w-2xl mx-auto text-left">
+      <%= render "home/news_welcome_card", news_item: items.first %>
+    </div>
+  <% end %>
 <% end %>

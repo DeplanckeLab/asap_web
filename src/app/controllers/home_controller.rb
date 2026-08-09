@@ -27,21 +27,9 @@ class HomeController < ApplicationController
     @atlas_terms = atlas_terms(@atlas)
 
     base_scope = Project
-      .left_outer_joins(:shares)
       .where(being_deleted: false)
-      .distinct
-
-    unless admin?
-      if current_user
-        base_scope = base_scope.where(
-          'projects.public = :public OR projects.user_id = :user_id OR shares.user_id = :user_id',
-          public: true,
-          user_id: current_user.id
-        )
-      else
-        base_scope = base_scope.where(public: true)
-      end
-    end
+      .where(public: true)
+      .where(cloned_project_id: nil)
 
     atlas_filter_sql = searchable_project_fields_sql
     atlas_conditions = @atlas_terms.map { "#{atlas_filter_sql} LIKE ?" }.join(' OR ')
@@ -55,7 +43,7 @@ class HomeController < ApplicationController
 
     @projects = base_scope
       .includes(:project_type, :organism, :archive_status, :user)
-      .order(updated_at: :desc)
+      .order(created_at: :desc)
       .limit(200)
   end
 

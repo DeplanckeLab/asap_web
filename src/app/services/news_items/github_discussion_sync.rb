@@ -6,32 +6,19 @@ require 'uri'
 
 # One-way ASAP news -> GitHub Discussions sync (create or update).
 #
-# Each news type is posted under its own Discussions category (thread section).
+# Each news type is posted under a Discussions category whose name matches the
+# ASAP news type label in NewsItem::NEWS_TYPES (no separate name mapping).
 #
 # Required ENV:
 #   GITHUB_DISCUSSIONS_TOKEN  - PAT or GitHub App token with discussions:write
 #
 # Optional ENV:
 #   GITHUB_DISCUSSIONS_REPO   - "owner/name" (default: DeplanckeLab/ASAP)
-#   GITHUB_DISCUSSIONS_CATEGORY_RELEASE
-#   GITHUB_DISCUSSIONS_CATEGORY_FEATURE
-#   GITHUB_DISCUSSIONS_CATEGORY_ANNOUNCEMENT
-#   GITHUB_DISCUSSIONS_CATEGORY_TIP
-#   GITHUB_DISCUSSIONS_CATEGORY_FIX
-#   GITHUB_DISCUSSIONS_CATEGORY - fallback category name if a type-specific one is unset
 class NewsItems::GithubDiscussionSync
   class Error < StandardError; end
 
   GRAPHQL_URL = 'https://api.github.com/graphql'
   SYNCABLE_TYPES = %w[release feature fix announcement tip].freeze
-
-  DEFAULT_CATEGORY_BY_TYPE = {
-    'release' => 'New releases',
-    'feature' => 'Features / Updates',
-    'fix' => 'Fix',
-    'announcement' => 'Technical announcements',
-    'tip' => 'Tips'
-  }.freeze
 
   Result = Struct.new(:created, :discussion_url, :discussion_number, :node_id, :category_name, keyword_init: true)
 
@@ -109,12 +96,10 @@ class NewsItems::GithubDiscussionSync
 
   def self.category_name_for(news_type)
     type = news_type.to_s
-    env_key = "GITHUB_DISCUSSIONS_CATEGORY_#{type.upcase}"
-    ENV[env_key].to_s.strip.presence ||
-      ENV['GITHUB_DISCUSSIONS_CATEGORY'].to_s.strip.presence ||
-      DEFAULT_CATEGORY_BY_TYPE.fetch(type) do
-        raise Error, "No GitHub Discussions category mapping for news type #{type.inspect}."
-      end
+    label = NewsItem::NEWS_TYPES.dig(type, :label).to_s.strip
+    raise Error, "No ASAP news type label for #{type.inspect}." if label.blank?
+
+    label
   end
 
   private
@@ -122,7 +107,7 @@ class NewsItems::GithubDiscussionSync
   def validate_syncable!
     return if self.class.syncable?(@news_item)
 
-    raise Error, "News type '#{@news_item.news_type}' is not synced to GitHub Discussions (alerts stay on ASAP only)."
+    raise Error, "News type '#{@news_item.news_type}' is not synced to GitHub Discussions."
   end
 
   def validate_config!

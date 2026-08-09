@@ -130,7 +130,16 @@ class ProjectsController < ApplicationController
        return
     end
 
-    
+    # Bare project URLs should open the curated landing visualization checkpoint when set
+    # (legacy landing_page_json behavior). Explicit ?view=... keeps normal navigation.
+    if params[:view].blank? && params[:checkpoint_id].blank?
+      landing_checkpoint = @project.checkpoints.visualization.find_by(is_landing_page: true)
+      if landing_checkpoint
+        redirect_to project_path(@project, view: 'visualization', checkpoint_id: landing_checkpoint.id)
+        return
+      end
+    end
+
     if selective_project_view_loading_enabled?
       with_request_profile('projects#show', view: params[:view]) do
         @view_type = resolve_project_view_type(params[:view])

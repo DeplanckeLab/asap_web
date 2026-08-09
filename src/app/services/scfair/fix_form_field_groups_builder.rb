@@ -56,6 +56,9 @@ module Scfair
       enum_values = enum_values_for(entry, term_field)
       group[:term_valid_values] = enum_values if enum_values.any?
 
+      default_fix_value = entry[:default_fix_value].to_s.presence
+      group[:default_fix_value] = default_fix_value if default_fix_value.present?
+
       enrich_constraints!(group, term_field)
       group
     end
@@ -80,7 +83,20 @@ module Scfair
 
       valid_terms = @rules.ontology_valid_terms(term_field)
       if valid_terms.present?
-        group[:allowed_terms] = valid_terms.map { |identifier, name| { identifier: identifier, name: name } }
+        allowed_terms = valid_terms.map { |identifier, name| { identifier: identifier, name: name } }
+        # Free-choice specials for restricted dropdowns. Values forced by CF-2
+        # when tissue_type is "cell line" (e.g. sex -> na) stay out of the menu;
+        # the cell-line constraint applies them automatically.
+        cell_line_forced = @rules.cell_line_forced_fields
+          .select { |entry| entry[:field].to_s == term_field }
+          .map { |entry| entry[:value].to_s }
+        @rules.special_values_for_field(@format, term_field).each do |value|
+          next if cell_line_forced.include?(value)
+          next if allowed_terms.any? { |term| term[:identifier] == value }
+
+          allowed_terms << { identifier: value, name: value }
+        end
+        group[:allowed_terms] = allowed_terms
       end
 
       banned = @rules.ontology_banned_terms(term_field)

@@ -617,6 +617,16 @@ export default class extends Controller {
 
       let data = await response.json().catch(() => ({}))
 
+      if (!response.ok && data.status !== 'requires_choice') {
+        this.removeOverlay()
+        if (this.hasSubmitButtonTarget) {
+          this.submitButtonTarget.disabled = false
+          this.submitButtonTarget.textContent = 'Apply to the LOOM file'
+        }
+        alert(data.message || `An error occurred while applying fixes (HTTP ${response.status}).`)
+        return
+      }
+
       if (data.status === 'requires_choice') {
         this.removeOverlay()
         const policy = this.choosePreviousMetadataPolicy(data)
@@ -644,6 +654,15 @@ export default class extends Controller {
           body: formData
         })
         data = await response.json().catch(() => ({}))
+        if (!response.ok && data.status !== 'requires_choice') {
+          this.removeOverlay()
+          if (this.hasSubmitButtonTarget) {
+            this.submitButtonTarget.disabled = false
+            this.submitButtonTarget.textContent = 'Apply to the LOOM file'
+          }
+          alert(data.message || `An error occurred while applying fixes (HTTP ${response.status}).`)
+          return
+        }
       }
 
       if (data.status === 'error') {
@@ -1020,14 +1039,19 @@ export default class extends Controller {
       const resolved = resolveData.resolved || {}
       const multiTermMap = resolveData.multi_term_map || {}
       const canonicalNames = resolveData.canonical_names || {}
+      const redirectedFrom = resolveData.redirected_from || {}
 
       // Auto-populate sourceRenames for values whose source text doesn't match
       // the canonical ontology name (e.g. "fat_body" -> "fat body",
       // "malpighian_tubule" -> "Malpighian tubule") and for array-formatted
       // values that need rewriting ("['a','b']" -> "a || b").
+      // Also remap obsolete ontology IDs to their replaced_by/consider successors.
       const sourceRenames = {}
       for (const [original, joinedSource] of Object.entries(multiTermMap)) {
         sourceRenames[original] = joinedSource
+      }
+      for (const [original, successor] of Object.entries(redirectedFrom)) {
+        sourceRenames[original] = successor
       }
       for (const [original, canonical] of Object.entries(canonicalNames)) {
         if (!sourceRenames[original]) {

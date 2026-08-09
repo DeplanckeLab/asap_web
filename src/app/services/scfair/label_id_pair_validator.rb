@@ -98,6 +98,14 @@ module Scfair
       term = CellOntologyTerm.active_original_by_identifier(identifier)
       return nil if term && term.name.to_s == label
 
+      if term.nil?
+        successor = CellOntologyTerm.active_original_or_successor(identifier)
+        if successor
+          message = "ID/label mismatch for obsolete #{identifier}: replace with #{successor.identifier} ('#{successor.name}'), got '#{label}'"
+          return result(status: 'failed', message: message, errors: [{ field: @check_field, message: message }])
+        end
+      end
+
       expected = term&.name || 'n/a'
       message = Rules.label_pair_mismatch_message(identifier, expected, label)
       result(status: 'failed', message: message, errors: [{ field: @check_field, message: message }])

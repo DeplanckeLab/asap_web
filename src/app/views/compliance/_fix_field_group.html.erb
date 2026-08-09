@@ -280,7 +280,14 @@
 
   <% elsif is_auto_ensembl %>
     <div class="bg-green-50 border border-green-200 rounded-lg p-3">
-      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from project version and organism</p>
+      <% ensembl_source = ensembl_info[:source] || ensembl_info['source'] %>
+      <p class="text-sm text-green-800 font-medium mb-2">
+        <% if ensembl_source.to_s == 'parsing' %>
+          Auto-fill from parsing probable Ensembl estimate
+        <% else %>
+          Auto-fill from project version and organism
+        <% end %>
+      </p>
       <div>
         <span class="text-xs font-medium text-gray-600"><%= group[:term_path].sub(%r{\A/attrs/}, '') %></span>
         <p class="text-sm font-mono text-gray-900"><%= ensembl_info[ensembl_auto_key] %></p>
@@ -310,12 +317,15 @@
       # - If exactly 1 term with identifier: set_value (simpler, just write the constant)
       # - If source annotation with multiple terms: map_from
       # - If terms but no source: set_value
+      # - If schema default_fix_value and field has an error: set_value
+      default_fix_value = group[:default_fix_value].to_s
       pf_action = if is_constrained && group_has_no_errors then 'skip'
                   elsif is_constrained then 'set_value'
                   elsif group_has_no_errors then 'skip'
                   elsif pf_single_term then 'set_value'
                   elsif pf_has_source then 'map_from'
                   elsif pf_has_terms then 'set_value'
+                  elsif fg[:term_has_error] && default_fix_value.present? then 'set_value'
                   else 'skip'
                   end
     %>
@@ -580,7 +590,7 @@
                 <option value="<%= term[:identifier] %>"
                         data-name="<%= term[:name] %>"
                         <%= 'selected' if sv_term_prefill == term[:identifier] %>
-                ><%= term[:identifier] %> - <%= term[:name] %></option>
+                ><% if term[:identifier] == term[:name] %><%= term[:identifier] %><% else %><%= term[:identifier] %> - <%= term[:name] %><% end %></option>
               <% end %>
             </select>
           </div>
@@ -801,10 +811,16 @@
                     class="block w-64 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
               <option value="">-- select --</option>
               <% group[:term_valid_values].each do |val| %>
-                <option value="<%= val %>"><%= val %></option>
+                <option value="<%= val %>" <%= 'selected' if default_fix_value == val %>><%= val %></option>
               <% end %>
             </select>
-            <% if group_id == 'is_primary_data' %>
+            <% if group_id == 'feature_is_filtered' %>
+              <div class="mt-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
+                <p class="text-xs text-gray-600">
+                  When this column is missing, set all genes to <strong>false</strong> unless you have a legacy per-gene filter annotation to map from.
+                </p>
+              </div>
+            <% elsif group_id == 'is_primary_data' %>
               <div class="mt-2 px-3 py-2 bg-gray-50 border border-gray-200 rounded-md">
                 <p class="text-xs text-gray-600">
                   Per the scFAIR schema, this MUST be <strong>True</strong> if this is the canonical instance of this cellular observation

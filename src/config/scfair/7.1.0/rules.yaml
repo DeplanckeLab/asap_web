@@ -473,13 +473,15 @@ ontology_fields:
     format_example: MONDO:0000001
   sex_ontology_term_id:
     prefixes: [PATO]
+    # Both are valid schema tokens; CF-2b forces "na" when tissue_type is cell line.
+    # Free-choice UI offers "unknown" (see fix_form.field_groups sex + cell_line_forced_fields).
+    # Allowed PATO set matches scFAIR 7.1.0 schema.md (no intersex).
     special_values: [unknown, na]
     format_example: PATO:0000384
     valid_terms:
       PATO:0000383: female
       PATO:0000384: male
       PATO:0001340: hermaphrodite
-      PATO:0001894: intersex
   tissue_ontology_term_id:
     prefixes: [UBERON, CVCL, WBbt, ZFA, FBbt]
     special_values: []
@@ -701,7 +703,7 @@ fix_form:
       layer: uns
       term_field: ensembl_release
       label: Ensembl Release
-      description: Ensembl release from the project version tool_versions (auto-filled)
+      description: Probable Ensembl release from parsing gene-ID coverage (falls back to project tool_versions)
       display_order: 5
       field_kind: auto_fill
       auto_fill: ensembl_release
@@ -717,7 +719,7 @@ fix_form:
       layer: uns
       term_field: ensembl_assembly
       label: Ensembl Assembly
-      description: Genome assembly for the organism at the project Ensembl release (auto-filled from asap_data)
+      description: Genome assembly from parsing estimate or ASAP lookup at the chosen Ensembl release
       display_order: 7
       field_kind: auto_fill
       auto_fill: ensembl_assembly
@@ -726,7 +728,7 @@ fix_form:
       term_field: assay_ontology_term_id
       label_field: assay
       label: Assay
-      description: Experimental technique used (e.g., 10x 3' v3)
+      description: Experimental assay (e.g. scRNA-seq / 10x), not the sequencer instrument name
       display_order: 3
       field_kind: ontology_pair
       term_format_hint: EFO:XXXXXXX
@@ -771,10 +773,10 @@ fix_form:
       term_field: sex_ontology_term_id
       label_field: sex
       label: Sex
-      description: Biological sex or "unknown" / "na"
+      description: 'Biological sex or "unknown"; "na" only when tissue_type is cell line (CF-2b)'
       display_order: 8
       field_kind: ontology_pair
-      term_format_hint: 'PATO:0000384 (male), PATO:0000383 (female), or "unknown"'
+      term_format_hint: 'PATO:0000383 (female), PATO:0000384 (male), PATO:0001340 (hermaphrodite), or "unknown"'
     - id: tissue
       layer: obs
       term_field: tissue_ontology_term_id
@@ -849,10 +851,11 @@ fix_form:
       layer: var
       term_field: feature_is_filtered
       label: Feature Is Filtered
-      description: Per-gene filter flag (true/false); map from legacy row metadata if needed
+      description: Per-gene filter flag (true/false). When missing, default to false for all genes unless a legacy row column already records filtering.
       display_order: 20
       field_kind: boolean
       allowed_values: ['false', 'true']
+      default_fix_value: 'false'
     - id: feature_biotype
       layer: var
       term_field: feature_biotype

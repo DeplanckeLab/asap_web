@@ -277,7 +277,15 @@ def read_dataset_scalar(group: h5py.Group, key: str) -> Any | None:
     if isinstance(val, np.ndarray) and val.shape == ():
         val = val.item()
     if np.ndim(val) == 0:
+        if isinstance(val, bytes):
+            return val.decode("utf-8", "replace")
         return val
+    # ASAP stores many loom global attrs as length-1 string datasets under attrs/.
+    if isinstance(val, np.ndarray) and val.size == 1:
+        item = val.reshape(-1)[0]
+        if isinstance(item, bytes):
+            return item.decode("utf-8", "replace")
+        return item
     return None
 
 

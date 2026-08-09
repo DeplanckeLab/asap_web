@@ -89,10 +89,29 @@ module Scfair
       case field
       when 'ensembl_release'
         paths << 'uns.ensembl.release'
+        paths << 'var.cross_field.index.release'
       when 'ensembl_database'
         paths << 'uns.ensembl.database'
       when 'ensembl_assembly'
         paths << 'uns.ensembl.assembly'
+      when 'development_stage_ontology_term_id', 'development_stage'
+        paths << 'ontology.organism_specific.development_stage'
+      when 'assay_ontology_term_id', 'assay'
+        paths << 'ontology.semantics.assay_ontology_term_id.lineage'
+      end
+
+      # Ontology semantic / label-pair validators emit field ids like
+      # ontology.semantics.<name>.lineage and obs.label_pairs.<name>, not the
+      # loom path. Include those so the fix form marks the group as errored.
+      if field.present?
+        %w[
+          existence lineage allowed_terms banned_terms forbidden descendants
+          ordering special
+        ].each do |suffix|
+          paths << "ontology.semantics.#{field}.#{suffix}"
+        end
+        paths << "obs.label_pairs.#{field}"
+        paths << "uns.label_pairs.#{field}" if path.start_with?('/attrs/')
       end
 
       paths.uniq
@@ -1701,7 +1720,8 @@ module Scfair
         field_kind: cfg[:field_kind].to_s.to_sym,
         auto_fill: cfg[:auto_fill].to_s.presence,
         term_format_hint: cfg[:term_format_hint].to_s.presence,
-        allowed_values: Array(cfg[:allowed_values]).map(&:to_s).presence
+        allowed_values: Array(cfg[:allowed_values]).map(&:to_s).presence,
+        default_fix_value: cfg[:default_fix_value].to_s.presence
       }.compact.freeze
     end
 

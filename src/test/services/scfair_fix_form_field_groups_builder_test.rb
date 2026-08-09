@@ -80,6 +80,17 @@ class ScfairFixFormFieldGroupsBuilderTest < TestBaseWithoutFixtures
     assert sex[:allowed_terms].any? { |t| t[:identifier] == 'PATO:0000383' }
   end
 
+  test 'includes unknown but not cell-line-forced na in sex allowed_terms' do
+    groups = Scfair::FixFormFieldGroupsBuilder.call
+    sex = groups.find { |g| g[:id] == 'sex' }
+    identifiers = sex[:allowed_terms].map { |t| t[:identifier] }
+
+    assert_includes identifiers, 'unknown'
+    refute_includes identifiers, 'na'
+    unknown = sex[:allowed_terms].find { |t| t[:identifier] == 'unknown' }
+    assert_equal 'unknown', unknown[:name]
+  end
+
   test 'builds experimental_condition as multi-value paired free-text (no ontology prefixes)' do
     groups = Scfair::FixFormFieldGroupsBuilder.call
     experimental = groups.find { |g| g[:id] == 'experimental_condition' }
@@ -150,6 +161,7 @@ class ScfairFixFormFieldGroupsBuilderTest < TestBaseWithoutFixtures
 
     assert_equal %w[gene spike-in].sort, biotype[:term_valid_values].sort
     assert_equal %w[false true], filtered[:term_valid_values]
+    assert_equal 'false', filtered[:default_fix_value]
   end
 
   test 'Rules.fix_form_var_legacy_sources loads from rules.yaml' do

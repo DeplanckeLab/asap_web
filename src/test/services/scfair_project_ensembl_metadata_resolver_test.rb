@@ -1,21 +1,24 @@
 # frozen_string_literal: true
 
 require_relative 'test_base_without_fixtures'
+require 'fileutils'
+require 'json'
+require 'tmpdir'
 
 class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
   VersionStub = Struct.new(:env_data, keyword_init: true)
   OrganismStub = Struct.new(:tax_id, :ensembl_subdomain_id, :ensembl_subdomain, keyword_init: true)
   SubdomainStub = Struct.new(:name, keyword_init: true)
-  ProjectStub = Struct.new(:organism, :version_for_catalog, keyword_init: true)
+  ProjectStub = Struct.new(:organism, :version_for_catalog, :storage_dir, keyword_init: true)
 
-  def build_project(organism:, tool_versions:, remote_db: 'asap_data_v8')
+  def build_project(organism:, tool_versions:, remote_db: 'asap_data_v8', storage_dir: nil)
     version = VersionStub.new(
       env_data: {
         'tool_versions' => tool_versions,
         'asap_data_db_name' => remote_db
       }
     )
-    ProjectStub.new(organism: organism, version_for_catalog: version)
+    ProjectStub.new(organism: organism, version_for_catalog: version, storage_dir: storage_dir)
   end
 
   test 'resolves vertebrate ensembl metadata from version and organism' do
@@ -85,6 +88,40 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
     assert_equal 'EnsemblCOVID-19', result[:ensembl_database]
     assert_equal 'GCA_009858895.3', result[:ensembl_assembly]
     lookup.verify
+  end
+
+
+  test 'prefers probable Ensembl release and assembly from parsing output.json' do
+    organism = OrganismStub.new(
+      tax_id: 10090,
+      ensembl_subdomain_id: 1,
+      ensembl_subdomain: SubdomainStub.new(name: 'vertebrates')
+    )
+    dir = Dir.mktmpdir('scfair-ensembl-parsing')
+    FileUtils.mkdir_p(File.join(dir, 'parsing'))
+    File.write(
+      File.join(dir, 'parsing', 'output.json'),
+      {
+        messages: [
+          "Estimated Ensembl release 100 (earliest release consistent with the most gene IDs: 10/10 genes co-exist there), assembly 'GRCm38.p6'. This is an estimate from gene-ID coverage, not a recorded provenance."
+        ]
+      }.to_json
+    )
+    project = build_project(
+      organism: organism,
+      tool_versions: { 'ensembl_vertebrate' => '116' },
+      storage_dir: dir
+    )
+
+    # Parsing supplies release+assembly; remote lookup must not be required.
+    result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: Object.new)
+
+    assert_equal '100', result[:ensembl_release]
+    assert_equal 'GRCm38.p6', result[:ensembl_assembly]
+    assert_equal 'Ensembl', result[:ensembl_database]
+    assert_equal :parsing, result[:source]
+  ensure
+    FileUtils.remove_entry(dir) if dir && Dir.exist?(dir)
   end
 
   test 'returns nil when project has no organism or version' do

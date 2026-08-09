@@ -44,7 +44,17 @@ module Scfair
           next if special_value?(identifier, allowed_specials)
 
           unless @resolver.exists?(identifier)
-            @errors << { field: "ontology.semantics.#{field_name}.existence", message: "#{identifier}: term not found in ontology DB" }
+            obsolete = CellOntologyTerm.original.find_by(identifier: identifier.to_s)
+            if obsolete&.obsolete?
+              successor = CellOntologyTerm.successor_identifier(identifier)
+              hint = successor.present? ? " (obsolete; consider #{successor})" : ' (obsolete)'
+              @errors << {
+                field: "ontology.semantics.#{field_name}.existence",
+                message: "#{identifier}: obsolete term not allowed for compliance#{hint}"
+              }
+            else
+              @errors << { field: "ontology.semantics.#{field_name}.existence", message: "#{identifier}: term not found in ontology DB" }
+            end
             allowed_check_failed = true
             next
           end
@@ -268,6 +278,19 @@ module Scfair
 
       term = CellOntologyTerm.active_original_by_identifier(identifier)
       return nil if term && term.name.to_s == label
+
+      if term.nil?
+        successor = CellOntologyTerm.active_original_or_successor(identifier)
+        if successor
+          expected = successor.name
+          return {
+            error: {
+              field: "ontology.semantics.#{field_name}.label_pair",
+              message: "ID/label mismatch for obsolete #{identifier}: replace with #{successor.identifier} ('#{expected}'), got '#{label}'"
+            }
+          }
+        end
+      end
 
       expected = term&.name || 'n/a'
       {

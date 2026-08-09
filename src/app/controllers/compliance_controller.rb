@@ -400,7 +400,14 @@ class ComplianceController < ApplicationController
       return
     end
 
-    fixes = params[:fixes] || {}
+    raw_fixes = params[:fixes]
+    fixes = if raw_fixes.is_a?(ActionController::Parameters)
+              raw_fixes.permit!.to_h.with_indifferent_access
+            elsif raw_fixes.is_a?(Hash)
+              raw_fixes.with_indifferent_access
+            else
+              {}.with_indifferent_access
+            end
     applied = []
     errors = []
     t_total = Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -609,20 +616,19 @@ class ComplianceController < ApplicationController
 
     # Map ontology prefixes to cell_ontology_ids, filtered by organism
     ontology_ids = organism_scoped_ontology_ids(prefixes, params[:project_id])
+    ontology_ids = CellOntology.where(id: ontology_ids, obsolete: false).pluck(:id)
     if ontology_ids.empty?
       render json: { results: [], total_count: 0 }
       return
     end
 
-    scope = CellOntologyTerm.where(original: true, cell_ontology_id: ontology_ids)
+    # Avoid joining cell_ontologies here: unqualified name/identifier become ambiguous.
+    scope = CellOntologyTerm.where(original: true, obsolete: false, cell_ontology_id: ontology_ids)
     scope = apply_ontology_term_filters(scope)
 
     # Search by identifier or name
     search_pattern = "%#{query}%"
     matched_scope = scope.where('identifier ILIKE :q OR name ILIKE :q', q: search_pattern)
-
-    # Count total matches before limiting
-    total_count = matched_scope.count
 
     # Sort by relevance:
     #   0 = exact match on identifier (case-insensitive)
@@ -646,10 +652,25 @@ class ComplianceController < ApplicationController
       END, name ASC
     SQL
 
-    results = matched_scope
+    assay_prefixes = Scfair::Rules.ontology_prefixes('assay_ontology_term_id').map(&:to_s).sort
+    assay_field = prefixes.map(&:to_s).sort == assay_prefixes
+    # For assay, over-fetch then keep only lineage-valid terms so instruments do not
+    # fill the limit and leave the dropdown empty.
+    fetch_limit = assay_field ? 1000 : 100
+
+    rows = matched_scope
       .order(Arel.sql(relevance_sql))
-      .limit(100)
-      .pluck(:id, :identifier, :name)
+      .limit(fetch_limit)
+      .pluck(:id, :identifier, :name, :lineage)
+
+    if assay_field
+      rows = filter_assay_autocomplete_rows(rows).first(100)
+      total_count = rows.size
+    else
+      total_count = matched_scope.count
+    end
+
+    results = rows.map { |id, identifier, name, _lineage| [id, identifier, name] }
 
     render json: {
       results: results.map { |id, identifier, name| { id: id, identifier: identifier, name: name, label: "#{identifier} - #{name}" } },
@@ -690,8 +711,11 @@ class ComplianceController < ApplicationController
     multi_term_map = {}
     # Track canonical names when source values don't match exactly
     canonical_names = {}
+    # Identifier remaps when an obsolete ID is redirected to replaced_by/consider.
+    redirected_from = {}
     scope = CellOntologyTerm.where(original: true, cell_ontology_id: ontology_ids)
     scope = apply_ontology_term_filters(scope)
+    active_scope = scope.merge(CellOntologyTerm.with_active_cell_ontology)
 
     # Separate plain values from array-formatted values like "['FBbt:00003733', 'FBbt:00003737']"
     plain_values = []
@@ -707,24 +731,36 @@ class ComplianceController < ApplicationController
     end
 
     if mode == 'by_identifier'
-      # Given identifiers, find names
-      # First resolve all plain identifiers in one query
-      all_identifiers = plain_values + array_values.flat_map { |av| av[:items] }
+      # Given identifiers, find names. Obsolete IDs follow replaced_by/consider.
+      all_identifiers = (plain_values + array_values.flat_map { |av| av[:items] }).uniq
       terms_by_ident = {}
-      scope.where(identifier: all_identifiers.uniq).pluck(:identifier, :name).each do |ident, name|
-        terms_by_ident[ident] = name
+      all_identifiers.each do |ident|
+        active = resolve_active_ontology_term_by_identifier(scope, ident)
+        next unless active
+        next unless ontology_term_allowed_for_prefixes?(active.identifier, prefixes)
+
+        terms_by_ident[ident] = {
+          identifier: active.identifier,
+          name: active.name
+        }
+        redirected_from[ident] = active.identifier if active.identifier != ident
       end
 
       plain_values.each do |ident|
-        resolved[ident] = terms_by_ident[ident] if terms_by_ident[ident]
+        match = terms_by_ident[ident]
+        next unless match
+
+        resolved[ident] = match[:name]
       end
 
       array_values.each do |av|
         resolved_items = av[:items].map { |ident| terms_by_ident[ident] }
         if resolved_items.all?
           # All items resolved: map original string to delimiter-joined identifiers and names
-          resolved[av[:original]] = Scfair::Rules.join_multi_value(resolved_items)
-          multi_term_map[av[:original]] = Scfair::Rules.join_multi_value(av[:items])
+          resolved[av[:original]] = Scfair::Rules.join_multi_value(resolved_items.map { |m| m[:name] })
+          multi_term_map[av[:original]] = Scfair::Rules.join_multi_value(
+            resolved_items.map { |m| m[:identifier] }
+          )
         end
         # If not all resolved, leave it unresolved so the user can fix it manually
       end
@@ -734,9 +770,25 @@ class ComplianceController < ApplicationController
       # value doesn't exactly match the ontology name (e.g. "fat_body" vs "fat body").
       canonical_names = {}
 
-      # Batch-resolve all names in as few queries as possible
+      # Prefer active terms; for organism-restricted ontologies, fall back to
+      # obsolete names and redirect via replaced_by/consider.
       all_names = plain_values.map(&:strip) + array_values.flat_map { |av| av[:items].map(&:strip) }
-      name_to_term = batch_find_ontology_terms_by_name(scope, all_names.uniq)
+      name_to_term = batch_find_ontology_terms_by_name(active_scope, all_names.uniq)
+      unresolved = all_names.uniq.reject { |n| name_to_term.key?(n) }
+      if unresolved.any?
+        obsolete_matches = batch_find_ontology_terms_by_name(scope, unresolved)
+        obsolete_matches.each do |name, match|
+          active = resolve_active_ontology_term_by_identifier(scope, match[:identifier])
+          next unless active
+
+          name_to_term[name] = { identifier: active.identifier, name: active.name }
+          redirected_from[match[:identifier]] = active.identifier if active.identifier != match[:identifier]
+        end
+      end
+
+      name_to_term.select! do |_name, match|
+        ontology_term_allowed_for_prefixes?(match[:identifier], prefixes)
+      end
 
       # Resolve plain names
       plain_values.each do |name|
@@ -759,7 +811,12 @@ class ComplianceController < ApplicationController
       end
     end
 
-    render json: { resolved: resolved, multi_term_map: multi_term_map, canonical_names: canonical_names }
+    render json: {
+      resolved: resolved,
+      multi_term_map: multi_term_map,
+      canonical_names: canonical_names,
+      redirected_from: redirected_from
+    }
   end
 
   # GET /compliance/projects/:id/metadata_fields (JSON)
@@ -810,18 +867,21 @@ class ComplianceController < ApplicationController
   end
 
   # Batch-resolve many names at once using two queries (exact match + underscore-to-space).
+  # Prefer non-obsolete rows when several share a name.
   # Returns a hash { name => { identifier:, name: } } for found terms.
   def batch_find_ontology_terms_by_name(scope, names)
     return {} if names.blank?
 
     result = {}
     remaining = []
+    prefer_active_order = Arel.sql('CASE WHEN cell_ontology_terms.obsolete THEN 1 ELSE 0 END, cell_ontology_terms.id ASC')
 
     # Step 1: batch exact match (case-insensitive) using LOWER()
     lower_map = {}
     names.each { |n| lower_map[n.downcase] = n }
 
     scope.where('LOWER(cell_ontology_terms.name) IN (?)', lower_map.keys)
+         .order(prefer_active_order)
          .pluck('cell_ontology_terms.name', :identifier).each do |db_name, identifier|
       original = lower_map[db_name.downcase]
       next unless original && !result.key?(original)
@@ -838,6 +898,7 @@ class ComplianceController < ApplicationController
       underscore_names.each { |n| spaced_map[n.tr('_', ' ').downcase] = n }
 
       scope.where('LOWER(cell_ontology_terms.name) IN (?)', spaced_map.keys)
+           .order(prefer_active_order)
            .pluck('cell_ontology_terms.name', :identifier).each do |db_name, identifier|
         original = spaced_map[db_name.downcase]
         next unless original && !result.key?(original)
@@ -848,18 +909,71 @@ class ComplianceController < ApplicationController
     result
   end
 
+  # Resolve an identifier to an active original term, following obsolete
+  # replaced_by / consider when the stored ID is obsolete.
+  def resolve_active_ontology_term_by_identifier(scope, identifier)
+    id = identifier.to_s.strip
+    return nil if id.blank?
+
+    active = scope.merge(CellOntologyTerm.with_active_cell_ontology).find_by(identifier: id)
+    return active if active
+
+    successor_id = CellOntologyTerm.successor_identifier(id)
+    return nil if successor_id.blank?
+
+    scope.merge(CellOntologyTerm.with_active_cell_ontology).find_by(identifier: successor_id)
+  end
+
+  # Reject ontology hits that cannot satisfy semantic lineage for the field
+  # implied by the requested prefixes (e.g. assay sequencer instruments).
+  def ontology_term_allowed_for_prefixes?(identifier, prefixes)
+    prefix_list = Array(prefixes).map(&:to_s)
+    assay_prefixes = Scfair::Rules.ontology_prefixes('assay_ontology_term_id').map(&:to_s)
+    return true unless prefix_list.sort == assay_prefixes.sort
+
+    rules = Scfair::OntologySemanticRules.rules_for('assay_ontology_term_id') || {}
+    roots = Array(rules[:any_roots]).map(&:to_s)
+    return true if roots.blank?
+
+    resolver = Scfair::OntologyLineageResolver.new
+    roots.any? { |root| resolver.descendant_of?(identifier, root) }
+  end
+
+  # Fast in-memory assay lineage filter for autocomplete rows
+  # [id, identifier, name, lineage].
+  def filter_assay_autocomplete_rows(rows)
+    rules = Scfair::OntologySemanticRules.rules_for('assay_ontology_term_id') || {}
+    root_ids = Array(rules[:any_roots]).map(&:to_s)
+    return rows if root_ids.blank?
+
+    root_db_ids = CellOntologyTerm.where(identifier: root_ids, original: true, obsolete: false)
+                                  .pluck(:id)
+                                  .map(&:to_s)
+    return rows if root_db_ids.empty?
+
+    root_db_id_set = root_db_ids.to_set
+    rows.select do |id, _identifier, _name, lineage|
+      next true if root_db_id_set.include?(id.to_s)
+
+      lineage.to_s.split(',').any? { |ancestor_id| root_db_id_set.include?(ancestor_id) }
+    end
+  end
+  private :filter_assay_autocomplete_rows
+
   # Find an ontology term by name, case-insensitively.
   # First tries an exact case-insensitive match (with ILIKE wildcards escaped),
   # then tries replacing underscores with spaces (common in LOOM metadata).
+  # Prefers non-obsolete terms.
   def find_ontology_term_by_name(scope, name)
     escaped = name.gsub('%', '\\%').gsub('_', '\\_')
-    match = scope.where('name ILIKE ?', escaped).order(:id).first
+    prefer_active_order = Arel.sql('CASE WHEN obsolete THEN 1 ELSE 0 END, id ASC')
+    match = scope.where('name ILIKE ?', escaped).order(prefer_active_order).first
     return match if match
 
     if name.include?('_')
       spaced = name.tr('_', ' ')
       escaped_spaced = spaced.gsub('%', '\\%').gsub('_', '\\_')
-      scope.where('name ILIKE ?', escaped_spaced).order(:id).first
+      scope.where('name ILIKE ?', escaped_spaced).order(prefer_active_order).first
     end
   end
 
@@ -1396,12 +1510,18 @@ class ComplianceController < ApplicationController
   # Filter ontology prefixes to only those applicable for the project's organism.
   # An ontology is applicable if its tax_ids is blank (universal) or contains
   # the organism's tax_id.
+  # Development-stage fields additionally restrict to the organism's mapped
+  # prefix (e.g. mouse -> MmusDv only), so universal UBERON same-name terms
+  # cannot win over the taxon-specific ontology.
   def filter_prefixes_for_organism(prefixes, project)
     return prefixes if prefixes.blank?
     organism = project.organism
     return prefixes unless organism&.tax_id.present?
 
     tax_id = organism.tax_id.to_s
+    restricted = restrict_development_stage_prefixes(prefixes, tax_id)
+    return restricted if restricted
+
     applicable_tags = CellOntology.where(tag: prefixes).select { |co|
       co.tax_ids.blank? || co.tax_id_list.map(&:to_s).include?(tax_id)
     }.map(&:tag)
@@ -1422,10 +1542,29 @@ class ComplianceController < ApplicationController
     return ontology_ids.map(&:first) unless project&.organism&.tax_id.present?
 
     tax_id_str = project.organism.tax_id.to_s
+    restricted = restrict_development_stage_prefixes(prefixes, tax_id_str)
+    if restricted
+      return CellOntology.where(tag: restricted).pluck(:id)
+    end
+
     ontology_ids.select { |_id, _tag, tax_ids|
       tax_ids.blank? || tax_ids.to_s.split(',').map(&:strip).include?(tax_id_str)
     }.map(&:first)
   end
+
+  # When the requested prefixes are the development_stage set and the organism
+  # has a mapped Dv ontology, return only that prefix. Otherwise nil.
+  def restrict_development_stage_prefixes(prefixes, tax_id)
+    prefix_list = Array(prefixes).map(&:to_s)
+    mapped = Scfair::Rules.organism_dev_stage_mapping["NCBITaxon:#{tax_id}"]
+    return nil if mapped.blank?
+
+    mapped_dev_prefixes = Scfair::Rules.organism_dev_stage_mapping.values.map(&:to_s).uniq
+    return nil unless prefix_list.intersect?(mapped_dev_prefixes)
+
+    [mapped]
+  end
+  private :restrict_development_stage_prefixes
 
   # Build prefill data from existing OtProject records and recent ComplianceMappings.
   # Returns a hash keyed by field_group_id with source annot info and term assignments.
@@ -2415,7 +2554,10 @@ class ComplianceController < ApplicationController
                               else:
                                   if new in f:
                                       del f[new]
-                                  f[new] = f[old][:]
+                                  # Support both scalar (shape ()) and vector datasets.
+                                  # Length-1 /attrs/* strings are common in ASAP looms.
+                                  data = f[old][()]
+                                  f.create_dataset(new, data=data)
                                   del f[old]
                                   file_results[key] = {'status': 'ok'}
 

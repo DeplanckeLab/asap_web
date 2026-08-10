@@ -1438,6 +1438,15 @@ module Basic
       val == true || val == 1 || val.to_s.strip.casecmp('true').zero?
     end
 
+    # Resolve CLI arg/opt raw value: command_json entry value, then run attr, then std_method attr default.
+    # Blank strings are treated as missing so attrs_json defaults still apply (e.g. form sending metric="").
+    def command_json_resolve_param_raw(entry, h_var, std_method_attr)
+      [entry && entry['value'], h_var[entry && entry['param_key']], std_method_attr && std_method_attr['default']].each do |candidate|
+        return candidate unless candidate.nil? || candidate.to_s.strip == ''
+      end
+      nil
+    end
+
     # Bulk pipeline: gene filtering is single-run per loom; resolve its row filter flag path from
     # the selected input_matrix run lineage (same loom filepath). Used by clustering.bulk.v8.R --filter_meta.
     def filter_mdata_from_lineage(project_id, lineage_run_ids, loom_filepath)
@@ -5536,7 +5545,7 @@ module Basic
           h_p[:h_cmd_params]['args'].each do |h_arg|
           logger.debug "H_ARG: " + h_arg.to_json
           std_method_attr = h_std_method_attrs[h_arg['param_key']]
-          raw = h_arg['value'] || h_var[h_arg['param_key']] || ((std_method_attr) && std_method_attr['default'])
+          raw = command_json_resolve_param_raw(h_arg, h_var, std_method_attr)
           logger.debug "VALUE: " + raw.to_json + "[" + h_arg['value'].to_json + "]"
           # Use gsub instead of gsub! to avoid frozen string errors, and ensure we have a mutable string
           value_str = raw.nil? ? ''.dup : raw.to_s.dup
@@ -5551,7 +5560,7 @@ module Basic
       if h_p[:h_cmd_params]['opts']
         h_p[:h_cmd_params]['opts'].each do |opt|
           std_method_attr = h_std_method_attrs[opt['param_key']]
-          raw = opt['value'] || h_var[opt['param_key']] || (std_method_attr && std_method_attr['default'])
+          raw = command_json_resolve_param_raw(opt, h_var, std_method_attr)
           logger.debug "VALUE: #{opt}: " + raw.to_json
           # Use gsub instead of gsub! to avoid frozen string errors, and ensure we have a mutable string
           value_str = raw.nil? ? ''.dup : raw.to_s.dup

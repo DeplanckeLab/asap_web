@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build fabdavid/asap_run for a patch version, retag major/latest, push to the registry,
-# rebuild compose asap_run, and register the build in the development database.
+# point dev/prod compose at that Dockerfile, rebuild compose asap_run, and register the
+# build in the development database.
 #
 # Usage:
 #   ./build_asap_run.sh <version>
@@ -9,10 +10,11 @@
 #
 # Optional env:
 #   ASAP_RUN_DIR   (default /srv/asap_run_new)
-#   ASAP2_DIR      (default /srv/asap2_test)
+#   ASAP2_DIR      (default /srv/asap2_test)  # dev instance
+#   ASAP_DIR       (default /srv/asap)       # prod instance
 #   IMAGE_NAME     (default fabdavid/asap_run)
 #   SKIP_REGISTER=1  skip docker_builds:register rake
-#   SKIP_COMPOSE=1   skip docker compose build/up of asap_run
+#   SKIP_COMPOSE=1   skip compose dockerfile edit and asap_run rebuild
 #   SKIP_PUSH=1      skip docker push
 #   FORCE=1          overwrite an existing local image without prompting
 
@@ -23,7 +25,8 @@ usage() {
   echo "  Example: $0 8.3   or   $0 v8.3"
   echo ""
   echo "Builds ${IMAGE_NAME:-fabdavid/asap_run}:vX.Y from Dockerfile.vX.Y,"
-  echo "tags :latest and :vX, pushes them, rebuilds compose asap_run, and registers DockerBuild."
+  echo "tags :latest and :vX, pushes them, updates docker-compose asap_run dockerfile"
+  echo "in dev and prod (after confirmation), rebuilds compose asap_run, and registers DockerBuild."
   exit 1
 }
 
@@ -49,6 +52,7 @@ fi
 
 ASAP_RUN_DIR="${ASAP_RUN_DIR:-/srv/asap_run_new}"
 ASAP2_DIR="${ASAP2_DIR:-/srv/asap2_test}"
+ASAP_DIR="${ASAP_DIR:-/srv/asap}"
 IMAGE_NAME="${IMAGE_NAME:-fabdavid/asap_run}"
 
 VERSION_NUM="${VERSION_RAW#v}"
@@ -151,6 +155,127 @@ confirm_overwrite_existing_images() {
   exit 1
 }
 
+# Resolve compose file path for an instance (follow docker-compose.yml symlink when present).
+compose_file_for_instance() {
+  local instance_dir="$1"
+  local compose="${instance_dir}/docker-compose.yml"
+  if [[ -L "${compose}" ]]; then
+    local target
+    target="$(readlink "${compose}")"
+    if [[ "${target}" != /* ]]; then
+      target="${instance_dir}/${target}"
+    fi
+    printf '%s\n' "${target}"
+    return 0
+  fi
+  if [[ -f "${compose}" ]]; then
+    printf '%s\n' "${compose}"
+    return 0
+  fi
+  echo "No docker-compose.yml in ${instance_dir}" >&2
+  return 1
+}
+
+# Current asap_run dockerfile declaration (first non-comment dockerfile: line).
+current_asap_run_dockerfile_line() {
+  local compose_file="$1"
+  grep -E '^[[:space:]]*dockerfile:' "${compose_file}" | head -n 1 || true
+}
+
+# Rewrite asap_run dockerfile to DOCKERFILE_NAME.
+# Supports both:
+#   dockerfile: Dockerfile.vX.Y
+#   dockerfile: ${ASAP_RUN_DOCKERFILE:-Dockerfile.vX.Y}
+update_asap_run_dockerfile_in_compose() {
+  local compose_file="$1"
+  local dockerfile_name="$2"
+  local before after
+
+  if [[ ! -f "${compose_file}" ]]; then
+    echo "Compose file not found: ${compose_file}"
+    return 1
+  fi
+
+  before="$(current_asap_run_dockerfile_line "${compose_file}")"
+  if [[ -z "${before}" ]]; then
+    echo "No active dockerfile: line found in ${compose_file}"
+    return 1
+  fi
+
+  if ! grep -Eq '^[[:space:]]*dockerfile:.*Dockerfile\.v[0-9]' "${compose_file}"; then
+    echo "Unexpected dockerfile line in ${compose_file}:"
+    echo "  ${before}"
+    return 1
+  fi
+
+  # Prefer updating the ${ASAP_RUN_DOCKERFILE:-...} default when present; else plain dockerfile.
+  if grep -Eq '^[[:space:]]*dockerfile:[[:space:]]*\$\{ASAP_RUN_DOCKERFILE:-Dockerfile\.v[0-9][^}]*\}' "${compose_file}"; then
+    sed -i -E \
+      "s|^([[:space:]]*dockerfile:[[:space:]]*\\\$\{ASAP_RUN_DOCKERFILE:-)Dockerfile\.v[0-9][^}]*(\})|\1${dockerfile_name}\2|" \
+      "${compose_file}"
+  else
+    sed -i -E \
+      "s|^([[:space:]]*dockerfile:[[:space:]]*)Dockerfile\.v[0-9][^[:space:]]*|\1${dockerfile_name}|" \
+      "${compose_file}"
+  fi
+
+  after="$(current_asap_run_dockerfile_line "${compose_file}")"
+  if [[ "${after}" != *"${dockerfile_name}"* ]]; then
+    echo "Failed to set dockerfile to ${dockerfile_name} in ${compose_file}"
+    echo "  before: ${before}"
+    echo "  after:  ${after}"
+    return 1
+  fi
+
+  echo "Updated ${compose_file}"
+  echo "  ${before}"
+  echo "  -> ${after}"
+}
+
+update_compose_and_rebuild_asap_run() {
+  local instances=("${ASAP2_DIR}" "${ASAP_DIR}")
+  local instance compose_files=() compose labels=()
+  local i
+
+  for instance in "${instances[@]}"; do
+    if [[ ! -d "${instance}" ]]; then
+      echo "Instance directory missing: ${instance}"
+      return 1
+    fi
+    compose="$(compose_file_for_instance "${instance}")" || return 1
+    compose_files+=("${compose}")
+    labels+=("${instance}")
+  done
+
+  echo ""
+  echo "Will set asap_run dockerfile to ${DOCKERFILE_NAME} in:"
+  for i in "${!compose_files[@]}"; do
+    echo "  ${labels[$i]}"
+    echo "    file: ${compose_files[$i]}"
+    echo "    now:  $(current_asap_run_dockerfile_line "${compose_files[$i]}")"
+  done
+  echo "Then run: docker-compose build asap_run (and up -d) in each instance."
+  echo ""
+
+  if ! confirm_yes "Edit both compose files and rebuild asap_run?"; then
+    echo "Skipping compose dockerfile update and asap_run rebuild."
+    return 0
+  fi
+
+  for i in "${!compose_files[@]}"; do
+    update_asap_run_dockerfile_in_compose "${compose_files[$i]}" "${DOCKERFILE_NAME}"
+  done
+
+  for instance in "${instances[@]}"; do
+    echo "Building compose asap_run in ${instance}"
+    (
+      cd "${instance}"
+      docker-compose build asap_run
+      docker-compose up -d asap_run
+    )
+  done
+}
+
 ensure_dockerfile
 confirm_overwrite_existing_images
 
@@ -170,11 +295,7 @@ if [[ "${SKIP_PUSH:-0}" != "1" ]]; then
 fi
 
 if [[ "${SKIP_COMPOSE:-0}" != "1" ]]; then
-  echo "Rebuilding compose asap_run with ${DOCKERFILE_NAME}"
-  cd "${ASAP2_DIR}"
-  export ASAP_RUN_DOCKERFILE="${DOCKERFILE_NAME}"
-  docker-compose build asap_run
-  docker-compose up -d asap_run
+  update_compose_and_rebuild_asap_run
 fi
 
 if [[ "${SKIP_REGISTER:-0}" != "1" ]]; then

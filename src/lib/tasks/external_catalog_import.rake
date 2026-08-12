@@ -44,76 +44,43 @@ namespace :external_catalog do
     end
   end
 
-  def external_catalog_build_importer
+  def external_catalog_build_importer(user: nil)
     ExternalCatalog::ProjectImporter.new(
-      user: external_catalog_resolve_user!,
+      user: user || external_catalog_resolve_user!,
       version: external_catalog_resolve_version!,
       dry_run: external_catalog_bool('DRY_RUN'),
-      skip_archive: external_catalog_bool('SKIP_ARCHIVE'),
+      skip_archive: external_catalog_bool('SKIP_ARCHIVE', default: true),
       strict: external_catalog_bool('STRICT'),
       parse_timeout_sec: ENV['PARSE_TIMEOUT_SEC'],
       archiver: external_catalog_archiver
     )
   end
 
-  def external_catalog_append_filtered(entries, entry, limit:, max_filesize:)
-    return if limit.present? && entries.size >= limit.to_i
-    if max_filesize && entry.filesize.to_i > 0 && entry.filesize.to_i > max_filesize
-      return
-    end
-
-    entries << entry
+  # COUNT, N, or LIMIT — number of projects to create from the candidate table.
+  def external_catalog_count
+    raw = ENV['COUNT'].presence || ENV['N'].presence || ENV['LIMIT'].presence
+    raw&.to_i
   end
 
-  def external_catalog_collect_entries(source:, limit:)
-    max_filesize = ENV['MAX_FILESIZE_BYTES'].presence&.to_i
-    geo_mode = ENV.fetch('GEO_MODE', 'all').to_s
-    entries = []
-
-    collect = lambda do |catalog, scan_limit: limit|
-      catalog.each(limit: scan_limit) do |e|
-        break if limit.present? && entries.size >= limit.to_i
-
-        external_catalog_append_filtered(entries, e, limit: limit, max_filesize: max_filesize)
+  def external_catalog_select_candidates(source:, count:, only_new:, max_filesize:, project_type:)
+    scope = ExternalCatalogCandidate.importable
+    if source.present? && source != 'all'
+      unless ExternalCatalogCandidate::SOURCES.include?(source)
+        raise "SOURCE must be all|#{ExternalCatalogCandidate::SOURCES.join('|')} (got #{source.inspect})"
       end
+
+      scope = scope.for_source(source)
+    end
+    scope = scope.for_project_type(project_type) if project_type.present?
+    scope = scope.not_yet_in_asap if only_new
+    if max_filesize
+      scope = scope.where('filesize = 0 OR filesize <= ?', max_filesize)
     end
 
-    case source
-    when 'cellxgene'
-      scan_limit = max_filesize && limit.present? ? [limit.to_i * 50, 200].max : limit
-      before = entries.size
-      ExternalCatalog::CellxgeneCatalog.new.each(limit: scan_limit) do |e|
-        break if limit.present? && (entries.size - before) >= limit.to_i
-
-        external_catalog_append_filtered(entries, e, limit: nil, max_filesize: max_filesize)
-        break if limit.present? && (entries.size - before) >= limit.to_i
-      end
-    when 'bgee'
-      collect.call(ExternalCatalog::BgeeCatalog.new)
-    when 'hca'
-      scan_limit = max_filesize && limit.present? ? [limit.to_i * 20, 100].max : limit
-      before = entries.size
-      ExternalCatalog::HcaCatalog.new.each(limit: scan_limit) do |e|
-        break if limit.present? && (entries.size - before) >= limit.to_i
-
-        external_catalog_append_filtered(entries, e, limit: nil, max_filesize: max_filesize)
-        break if limit.present? && (entries.size - before) >= limit.to_i
-      end
-    when 'geo'
-      ExternalCatalog::GeoCatalog.new.each(limit: limit, mode: geo_mode) do |e|
-        entries << e
-        break if limit.present? && entries.size >= limit.to_i
-      end
-    when 'all'
-      per = limit
-      %w[cellxgene bgee hca geo].each do |src|
-        part = external_catalog_collect_entries(source: src, limit: per)
-        entries.concat(part)
-      end
-    else
-      raise "SOURCE must be all|cellxgene|bgee|hca|geo (got #{source.inspect})"
-    end
-    entries
+    # Prefer known smaller files first, then most recently synced.
+    scope = scope.order(Arel.sql('CASE WHEN filesize > 0 THEN 0 ELSE 1 END, filesize ASC, last_seen_at DESC NULLS LAST, id ASC'))
+    scope = scope.limit(count) if count.present?
+    scope.to_a
   end
 
   def external_catalog_print_results(results)
@@ -136,70 +103,140 @@ namespace :external_catalog do
     end
   end
 
-  def external_catalog_pick_test_entry(catalog, label:, max_bytes: 250_000_000, scan_limit: 80, **each_opts)
-    preferred = nil
-    fallback = nil
-    catalog.each(limit: scan_limit, **each_opts) do |entry|
-      fallback ||= entry
-      size = entry.filesize.to_i
-      if size > 0 && size <= max_bytes
-        preferred = entry
-        break
-      elsif size <= 0 && preferred.nil?
-        preferred = entry
-        break
-      end
-    end
-    entry = preferred || fallback
-    raise "No #{label} entry found" unless entry
-
-    puts "#{label} test entry: #{entry.external_id} #{entry.title.to_s[0, 80].inspect} " \
-         "tax_id=#{entry.tax_id} format=#{entry.format_kind} filesize=#{entry.filesize} type=#{entry.project_type_tag}"
-    entry
+  def external_catalog_mark_candidate!(candidate, status:, error: nil, project: nil, user: nil)
+    attrs = {
+      import_status: status,
+      import_error: error
+    }
+    attrs[:import_project_id] = project.id if project
+    attrs[:import_user_id] = user.id if user
+    attrs[:import_error] = nil if status == 'idle' && error.nil?
+    candidate.update!(attrs)
   end
 
-  desc 'Import catalogs (SOURCE=all|cellxgene|bgee|hca|geo LIMIT=N DRY_RUN=1 SKIP_ARCHIVE=1 GEO_MODE=all|sc|bulk)'
+  def external_catalog_import_candidates!(candidates, user:, importer:)
+    results = { ok: [], skipped: [], failed: [] }
+    dry_run = external_catalog_bool('DRY_RUN')
+
+    candidates.each do |candidate|
+      entry = candidate.to_entry
+      begin
+        if candidate.already_in_asap?
+          project = candidate.asap_projects.order(id: :desc).first
+          external_catalog_mark_candidate!(candidate, status: 'idle', project: project, user: user)
+          results[:skipped] << { entry: entry, reason: "already imported project=#{project&.key}" }
+          next
+        end
+
+        unless dry_run
+          external_catalog_mark_candidate!(candidate, status: 'importing', user: user)
+        end
+
+        project = importer.import_one(entry)
+        if project == :dry_run
+          results[:skipped] << { entry: entry, reason: 'dry_run' }
+        elsif project
+          external_catalog_mark_candidate!(candidate, status: 'idle', project: project, user: user) unless dry_run
+          results[:ok] << { entry: entry, project: project }
+        else
+          external_catalog_mark_candidate!(
+            candidate,
+            status: 'failed',
+            error: 'Import returned no project',
+            user: user
+          ) unless dry_run
+          results[:failed] << { entry: entry, error: StandardError.new('Import returned no project') }
+        end
+      rescue ExternalCatalog::ProjectImporter::SkipEntry => e
+        project = candidate.asap_projects.order(id: :desc).first
+        if project
+          external_catalog_mark_candidate!(candidate, status: 'idle', project: project, user: user) unless dry_run
+          results[:skipped] << { entry: entry, reason: e.message }
+        else
+          external_catalog_mark_candidate!(candidate, status: 'failed', error: e.message, user: user) unless dry_run
+          results[:skipped] << { entry: entry, reason: e.message }
+        end
+      rescue StandardError => e
+        external_catalog_mark_candidate!(
+          candidate,
+          status: 'failed',
+          error: "#{e.class}: #{e.message}".truncate(2000),
+          user: user
+        ) unless dry_run
+        results[:failed] << { entry: entry, error: e }
+        raise if external_catalog_bool('STRICT')
+      end
+    end
+    results
+  end
+
+  def external_catalog_pick_test_candidate(source, label:, max_bytes: 250_000_000)
+    scope = ExternalCatalogCandidate.importable.for_source(source).not_yet_in_asap
+    preferred = scope.where('filesize > 0 AND filesize <= ?', max_bytes).order(:filesize, :id).first
+    fallback = scope.order(Arel.sql('CASE WHEN filesize > 0 THEN 0 ELSE 1 END, filesize ASC, id ASC')).first
+    candidate = preferred || fallback
+    raise "No #{label} candidate found in external_catalog_candidates (sync first)" unless candidate
+
+    puts "#{label} test candidate: #{candidate.external_id} #{candidate.title.to_s[0, 80].inspect} " \
+         "tax_id=#{candidate.tax_id} format=#{candidate.format_kind} filesize=#{candidate.filesize} " \
+         "type=#{candidate.project_type_tag}"
+    candidate
+  end
+
+  desc 'Import from external_catalog_candidates (COUNT/N/LIMIT, IMPORT_USER_EMAIL|IMPORT_USER_ID, SOURCE, PROJECT_TYPE, ONLY_NEW=1)'
   task import: :environment do
     source = ENV.fetch('SOURCE', 'all').to_s.strip.downcase
-    limit = ENV['LIMIT'].presence&.to_i
-    puts "external_catalog:import SOURCE=#{source} LIMIT=#{limit.inspect} DRY_RUN=#{ENV['DRY_RUN']} " \
-         "SKIP_ARCHIVE=#{ENV['SKIP_ARCHIVE']} GEO_MODE=#{ENV['GEO_MODE']}"
+    count = external_catalog_count
+    only_new = external_catalog_bool('ONLY_NEW', default: true)
+    max_filesize = ENV['MAX_FILESIZE_BYTES'].presence&.to_i
+    project_type = ENV['PROJECT_TYPE'].presence
+    user = external_catalog_resolve_user!
 
-    entries = external_catalog_collect_entries(source: source, limit: limit)
-    puts "Catalog entries selected: #{entries.size}"
-    if entries.empty?
-      puts 'No entries found.'
+    puts "external_catalog:import from candidates SOURCE=#{source} COUNT=#{count.inspect} " \
+         "USER=#{user.email} ONLY_NEW=#{only_new} DRY_RUN=#{ENV['DRY_RUN']} " \
+         "SKIP_ARCHIVE=#{ENV.fetch('SKIP_ARCHIVE', '1')} PROJECT_TYPE=#{project_type.inspect}"
+
+    if ExternalCatalogCandidate.count.zero?
+      raise 'No external_catalog_candidates rows. Run external_catalog:sync_candidates first.'
+    end
+
+    candidates = external_catalog_select_candidates(
+      source: source,
+      count: count,
+      only_new: only_new,
+      max_filesize: max_filesize,
+      project_type: project_type
+    )
+    puts "Candidates selected: #{candidates.size}"
+    if candidates.empty?
+      puts 'No importable candidates found (already in ASAP, importing, or filters too strict).'
       next
     end
 
-    importer = external_catalog_build_importer
-    results = importer.import_many(entries)
+    candidates.each do |c|
+      puts "  - #{c.source}/#{c.external_id} format=#{c.format_kind} size=#{c.filesize} " \
+           "title=#{c.title.to_s[0, 60].inspect}"
+    end
+
+    importer = external_catalog_build_importer(user: user)
+    results = external_catalog_import_candidates!(candidates, user: user, importer: importer)
     external_catalog_print_results(results)
     abort('external_catalog:import had failures') if results[:failed].any?
   end
 
-  desc 'Test import: one entry each from CELLxGENE, Bgee, HCA, GEO (IMPORT_USER_EMAIL required)'
+  desc 'Test import: one candidate each from CELLxGENE, Bgee, HCA, GEO (IMPORT_USER_EMAIL required)'
   task test: :environment do
-    puts 'external_catalog:test — one CELLxGENE + Bgee + HCA + GEO'
-    importer = external_catalog_build_importer
+    puts 'external_catalog:test — one candidate each from CELLxGENE, Bgee, HCA, GEO'
+    user = external_catalog_resolve_user!
+    importer = external_catalog_build_importer(user: user)
 
-    entries = []
-    entries << external_catalog_pick_test_entry(ExternalCatalog::CellxgeneCatalog.new, label: 'CELLxGENE')
-    entries << external_catalog_pick_test_entry(ExternalCatalog::BgeeCatalog.new, label: 'Bgee')
-    entries << external_catalog_pick_test_entry(
-      ExternalCatalog::HcaCatalog.new,
-      label: 'HCA',
-      max_bytes: 150_000_000,
-      scan_limit: 40
-    )
-    entries << external_catalog_pick_test_entry(
-      ExternalCatalog::GeoCatalog.new,
-      label: 'GEO',
-      scan_limit: 30,
-      mode: ENV.fetch('GEO_MODE', 'all')
-    )
+    candidates = []
+    candidates << external_catalog_pick_test_candidate('cellxgene', label: 'CELLxGENE')
+    candidates << external_catalog_pick_test_candidate('bgee', label: 'Bgee')
+    candidates << external_catalog_pick_test_candidate('hca', label: 'HCA', max_bytes: 150_000_000)
+    candidates << external_catalog_pick_test_candidate('geo', label: 'GEO')
 
-    results = importer.import_many(entries)
+    results = external_catalog_import_candidates!(candidates, user: user, importer: importer)
     external_catalog_print_results(results)
     abort('external_catalog:test had failures') if results[:failed].any?
   end

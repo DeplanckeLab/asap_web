@@ -15,12 +15,34 @@ class ExternalCatalogCandidate < ApplicationRecord
 
   scope :for_source, ->(source) { where(source: source) if source.present? }
   scope :for_project_type, ->(tag) { where(project_type_tag: tag) if tag.present? }
+  scope :not_importing, -> { where.not(import_status: 'importing') }
+  scope :importable, -> { where(import_status: %w[idle failed]) }
   scope :search_q, lambda { |q|
     next all if q.blank?
 
     pattern = "%#{sanitize_sql_like(q.to_s.strip)}%"
     where('title ILIKE ? OR external_id ILIKE ? OR filename ILIKE ?', pattern, pattern, pattern)
   }
+
+  # Candidate ids that already have a live ASAP project via ProviderProject.
+  def self.ids_already_in_asap
+    joins(
+      "INNER JOIN providers ON providers.tag = external_catalog_candidates.provider_tag
+       INNER JOIN provider_projects ON provider_projects.provider_id = providers.id
+         AND provider_projects.key = external_catalog_candidates.external_id
+       INNER JOIN projects_provider_projects
+         ON projects_provider_projects.provider_project_id = provider_projects.id
+       INNER JOIN projects ON projects.id = projects_provider_projects.project_id"
+    )
+      .where('projects.being_deleted IS NULL OR projects.being_deleted = ?', false)
+      .distinct
+      .pluck(:id)
+  end
+
+  def self.not_yet_in_asap
+    in_asap = ids_already_in_asap
+    in_asap.empty? ? all : where.not(id: in_asap)
+  end
 
   def provider
     @provider ||= Provider.find_by(tag: provider_tag)

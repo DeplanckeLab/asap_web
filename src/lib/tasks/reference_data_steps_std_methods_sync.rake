@@ -347,9 +347,10 @@ namespace :reference_data do
          "Match by primary key id; version id < MAX_VERSION_ID (default 9, includes v8). " \
          "Version sync includes env_json and activated status. " \
          "NewsItem sync clears user_id and removes target-only rows. " \
+         "Also runs external_catalog:sync_from_dev unless SKIP_EXTERNAL_CATALOG=1. " \
          "Hidden steps included; obsolete std_methods excluded. " \
          "If new DockerBuild rows are created, rebuilds compose asap_run from the highest new tag Dockerfile. " \
-         "Set DEV_POSTGRES_DB (and DEV_DB_HOST/DEV_DB_PORT). DRY_RUN=1, VERBOSE=1, SKIP_COMPOSE=1"
+         "Set DEV_POSTGRES_DB (and DEV_DB_HOST/DEV_DB_PORT). DRY_RUN=1, VERBOSE=1, SKIP_COMPOSE=1, SKIP_EXTERNAL_CATALOG=1"
     task sync_from_dev: :environment do
       unless Rails.env.production?
         puts "This task writes to the current database. Run with RAILS_ENV=production so the target is production."
@@ -384,6 +385,11 @@ namespace :reference_data do
       ).run
 
       maybe_rebuild_compose_asap_run_after_docker_build_sync!(summary, dry_run: dry)
+
+      unless ENV["SKIP_EXTERNAL_CATALOG"].to_s.strip == "1"
+        puts "Syncing external_catalog_candidates from development..."
+        Rake::Task["external_catalog:sync_from_dev"].invoke
+      end
     ensure
       generated_snapshot&.close!
     end

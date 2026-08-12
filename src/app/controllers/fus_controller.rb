@@ -111,6 +111,14 @@ class FusController < ApplicationController
           f.write(chunk_data)
         end
       end
+
+      content_digest = InputFileSha256.update_after_chunk!(
+        upload_dir: upload_dir,
+        chunk_index: chunk_index,
+        chunk_data: chunk_data,
+        file_path: upload_file_path,
+        fu_id: fu.id
+      )
       
       current_size = File.size(upload_file_path)
       chunk_data_size = chunk_data.respond_to?(:bytesize) ? chunk_data.bytesize : chunk_data.size
@@ -149,6 +157,10 @@ class FusController < ApplicationController
       end
       
       update_attrs[:status] = is_complete ? 'uploaded' : 'uploading' if status_can_change
+      if is_complete && content_digest
+        update_attrs[:content_sha256] = content_digest.hexdigest
+        InputFileSha256.clear_state!(fu.id)
+      end
       
       # Update Fu record
       fu.update!(update_attrs)

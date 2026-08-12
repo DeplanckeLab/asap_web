@@ -7,10 +7,15 @@ task load_ontologies: :environment do
     INSERT_BATCH_SIZE = 1_000
     COMPARE_ATTRS = %i[
       cell_ontology_id alt_identifiers identifier name description comment original obsolete tax_id
+      content_json
     ].freeze
 
     def self.verbose?
       ENV['VERBOSE'].present?
+    end
+
+    def self.normalize_multi_value(field, raw)
+      AsapData::OntologyOboParsing.normalize_multi_value(field, raw)
     end
 
     def initialize(cell_ontology)
@@ -105,7 +110,11 @@ task load_ontologies: :environment do
 
     def term_unchanged?(cot, attrs)
       COMPARE_ATTRS.all? do |key|
-        cot.public_send(key) == attrs[key]
+        if key == :content_json
+          Basic.safe_parse_json(cot.content_json, {}) == Basic.safe_parse_json(attrs[:content_json], {})
+        else
+          cot.public_send(key) == attrs[key]
+        end
       end
     end
 
@@ -255,7 +264,7 @@ task load_ontologies: :environment do
             h_term['relationship'][m[1]].push(v)
           elsif ((m = l.match(/^(\w+): (.+?) \!/)) || (m = l.match(/^(\w+): (.+)/))) && multiple_fields.include?(m[1])
             h_term[m[1]] ||= []
-            h_term[m[1]].push(m[2].gsub(/ \!$/, ''))
+            h_term[m[1]].push(OntologyTermLoader.normalize_multi_value(m[1], m[2]))
           elsif (m = l.match(/NCBITaxon:(\d+)/))
             h_term['tax_id'] = m[1]
           end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_12_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_12_213000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -708,6 +708,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_12_010000) do
   end
 
   create_table "fus", id: :integer, default: -> { "nextval('courses_id_seq'::regclass)" }, force: :cascade do |t|
+    t.string "content_sha256", limit: 64
     t.datetime "created_at", precision: nil
     t.text "name"
     t.integer "preparsing_version_id"
@@ -723,6 +724,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_12_010000) do
     t.text "url"
     t.integer "user_id"
     t.boolean "visible"
+    t.index ["content_sha256"], name: "index_fus_on_content_sha256"
     t.index ["preparsing_version_id"], name: "index_fus_on_preparsing_version_id"
   end
 
@@ -1145,6 +1147,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_12_010000) do
     t.text "ge_filter_json"
     t.text "graph_json"
     t.text "group_filename"
+    t.string "input_content_sha256", limit: 64
     t.text "input_filename"
     t.text "key"
     t.text "landing_page_json", default: "{}"
@@ -1187,6 +1190,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_12_010000) do
     t.integer "version_id"
     t.datetime "viewed_at", precision: nil, default: -> { "now()" }
     t.text "write_access"
+    t.index ["input_content_sha256"], name: "index_projects_on_input_content_sha256"
     t.index ["key"], name: "index_projects_on_key_unique", unique: true, where: "((key IS NOT NULL) AND (key <> ''::text))"
     t.index ["project_origin_id"], name: "index_projects_on_project_origin_id"
     t.index ["root_project_id"], name: "index_projects_on_root_project_id"

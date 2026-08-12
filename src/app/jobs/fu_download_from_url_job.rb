@@ -1,6 +1,7 @@
 require 'open-uri'
 require 'uri'
 require 'open3'
+require 'digest'
 
 class FuDownloadFromUrlJob < ApplicationJob
   queue_as :default
@@ -31,33 +32,19 @@ class FuDownloadFromUrlJob < ApplicationJob
       raise e
     end
 
+    content_sha256 = nil
     unless copied_internally
       remote_total_size = fetch_remote_size(url)
       fu.update_column(:upload_file_size, remote_total_size) if remote_total_size.to_i > 0
 
-      # Stream download with curl so bytes are flushed progressively to disk.
-      curl_cmd = [
-        'curl',
-        '-L',
-        '--fail',
-        '--connect-timeout', '30',
-        '--retry', '2',
-        '--retry-delay', '2',
-        '--output', upload_file_path.to_s,
-        url.to_s
-      ]
-
-      combined_output = +''
-      Open3.popen2e(*curl_cmd) do |stdin, stdout_and_stderr, wait_thr|
-        stdin.close
-        combined_output = stdout_and_stderr.read.to_s
-        exit_status = wait_thr.value.exitstatus
-        raise "curl download failed (exit #{exit_status}): #{combined_output}" unless exit_status == 0
-      end
+      # Stream download while updating SHA-256 so preparsing does not re-hash.
+      content_sha256 = stream_download_with_sha256!(url, upload_file_path)
     end
 
     downloaded_size = File.size(upload_file_path)
     raise "Downloaded file is missing or empty" unless File.exist?(upload_file_path) && downloaded_size > 0
+
+    content_sha256 ||= InputFileSha256.hexdigest_file(upload_file_path)
 
     if version_id.blank?
       raise ArgumentError,
@@ -70,9 +57,11 @@ class FuDownloadFromUrlJob < ApplicationJob
 
     fu.update!(
       upload_file_size: downloaded_size,
+      content_sha256: content_sha256,
       status: 'preparsing',
       preparsing_version_id: version_id
     )
+    InputFileSha256.clear_state!(fu.id)
     broadcast(fu.id, status: 'started')
 
     result = FuPreparsingService.new(fu, options).call
@@ -104,6 +93,34 @@ class FuDownloadFromUrlJob < ApplicationJob
   end
 
   private
+
+  def stream_download_with_sha256!(url, dest_path)
+    digest = Digest::SHA256.new
+    File.open(dest_path, 'wb') do |out|
+      Open3.popen3(
+        'curl',
+        '-L',
+        '--fail',
+        '--silent',
+        '--show-error',
+        '--connect-timeout', '30',
+        '--retry', '2',
+        '--retry-delay', '2',
+        '-o', '-',
+        url.to_s
+      ) do |stdin, stdout, stderr, wait_thr|
+        stdin.close
+        while (chunk = stdout.read(1024 * 1024))
+          out.write(chunk)
+          digest.update(chunk)
+        end
+        err = stderr.read.to_s
+        exit_status = wait_thr.value.exitstatus
+        raise "curl download failed (exit #{exit_status}): #{err}" unless exit_status == 0
+      end
+    end
+    digest.hexdigest
+  end
 
   def fetch_remote_size(url)
     head_cmd = ['curl', '-sIL', '--connect-timeout', '20', url.to_s]

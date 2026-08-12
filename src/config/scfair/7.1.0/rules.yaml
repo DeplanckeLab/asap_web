@@ -616,6 +616,7 @@ semantic_rules:
   development_stage_ontology_term_id:
     any_roots: [UBERON:0000105]
     forbidden_branches: [UBERON:0000071]
+    forbidden_exact: [ZFS:0000000]
     allowed_special_values: [na, unknown]
     sorted_multi: true
   tissue_ontology_term_id:

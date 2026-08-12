@@ -51,7 +51,7 @@ class ProjectsController < ApplicationController
     search_results = Project.search(@query, @filters)
     
     # Extract projects from search results with preloaded associations
-    @projects = search_results.records.includes(:project_steps, :project_type, :organism, :annots, :archive_status, :user)
+    @projects = search_results.records.includes(:project_steps, :project_type, :organism, :annots, :archive_status, :user, provider_projects: :provider)
     
     # Get aggregations for filter dropdowns
     @aggregations = search_results.response['aggregations']
@@ -1615,6 +1615,10 @@ class ProjectsController < ApplicationController
       end
       @project.public = true
       @project.public_at = Time.current
+      if @project.input_content_sha256.blank?
+        sha = InputFileSha256.ensure_for_project!(@project)
+        @project.input_content_sha256 = sha if sha.present?
+      end
     elsif !new_public_state && @project.public?
       # Making private
       @project.public = false

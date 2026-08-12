@@ -24,6 +24,7 @@ class FuPreparsingService
 
     working_file = prepare_input_file
     @logger.info("[FuPreparsingService] Working file: #{working_file}")
+    ensure_content_sha256!(working_file)
     @legacy_rds_upload = legacy_rds_preparsing?(working_file)
     preparsing_input = resolve_preparsing_input(working_file)
     run_preparsing(preparsing_input, working_file)
@@ -785,7 +786,23 @@ class FuPreparsingService
       warnings << content unless content.blank?
     end
 
+    duplicate_warning = InputFileSha256.public_project_warning(@fu.content_sha256)
+    warnings << duplicate_warning if duplicate_warning.present?
+
     warnings.compact
+  end
+
+  def ensure_content_sha256!(path)
+    return if @fu.content_sha256.present?
+
+    sha = InputFileSha256.hexdigest_file(path)
+    return if sha.blank?
+
+    @fu.update!(content_sha256: sha)
+    InputFileSha256.clear_state!(@fu.id)
+    @logger.info("[FuPreparsingService] Stored content_sha256 for Fu##{@fu.id}")
+  rescue StandardError => e
+    @logger.warn("[FuPreparsingService] Failed to compute content_sha256 for Fu##{@fu.id}: #{e.class} - #{e.message}")
   end
 
   def primary_dimensions(dataset)

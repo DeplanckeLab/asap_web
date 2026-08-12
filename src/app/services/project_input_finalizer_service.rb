@@ -85,6 +85,10 @@ class ProjectInputFinalizerService
     @project.input_filename = canonical_project_input_filename
     @project.fu_id = @input_file&.id
     @project.extension = ext
+    @project.input_content_sha256 = @input_file&.content_sha256.presence
+    if @project.input_content_sha256.blank? && @input_file
+      @project.input_content_sha256 = InputFileSha256.ensure_for_fu!(@input_file)
+    end
     # Persist these fields before touching files so downstream code has stable metadata.
     @project.save!
 

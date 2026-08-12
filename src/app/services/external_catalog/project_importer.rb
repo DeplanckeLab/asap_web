@@ -97,11 +97,12 @@ module ExternalCatalog
       wait_for_parse!(project)
       attach_reference_metadata!(project, entry)
       run_scfair_validation!(project) if project_type_for(entry).tag.to_s == 'sc'
+      maybe_make_public!(project)
       archive_project!(project) unless @skip_archive
 
       @logger.info(
         "[ExternalCatalog] done source=#{entry.source} id=#{entry.external_id} " \
-        "project_id=#{project.id} key=#{project.key}"
+        "project_id=#{project.id} key=#{project.key} public=#{project.public?}"
       )
       project
     end
@@ -694,6 +695,45 @@ module ExternalCatalog
     def run_scfair_validation!(project)
       @logger.info("[ExternalCatalog] scFAIR validation project=#{project.key}")
       ScfairValidationJob.perform_now(project.id)
+    end
+
+    def visualization_available?(project)
+      Annot.light.where(project_id: project.id)
+           .where.not(filepath: nil)
+           .where(dim: 1, nber_rows: 2)
+           .exists?
+    end
+
+    def maybe_make_public!(project)
+      project.reload
+      unless visualization_available?(project)
+        @logger.info("[ExternalCatalog] skip public project=#{project.key}: no visualization embeddings")
+        return
+      end
+
+      can_publish, reason = project.can_be_public?
+      unless can_publish
+        @logger.info("[ExternalCatalog] skip public project=#{project.key}: #{reason}")
+        return
+      end
+
+      if project.public?
+        @logger.info("[ExternalCatalog] already public project=#{project.key} public_id=#{project.public_id}")
+        return
+      end
+
+      if project.sandbox?
+        @logger.info("[ExternalCatalog] skip public project=#{project.key}: sandbox project")
+        return
+      end
+
+      project.public_id = (Project.maximum(:public_id) || 0) + 1 if project.public_id.nil?
+      project.public = true
+      project.public_at = Time.current
+      project.save!
+      @logger.info(
+        "[ExternalCatalog] made public project=#{project.key} public_id=#{project.public_id}"
+      )
     end
 
     def archive_project!(project)

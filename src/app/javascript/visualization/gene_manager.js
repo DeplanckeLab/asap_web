@@ -369,7 +369,8 @@ export class GeneManager {
       this.controller = resolvedController
     }
 
-    const ready = this.autocompleteLoaded && this.isRendererReadyForGeneSearch(this.controller)
+    // Gene autocomplete is independent of plot readiness; expression coloring waits for the renderer.
+    const ready = this.autocompleteLoaded
 
     if (ready) {
       if (!this.geneSearchVisible) {
@@ -398,27 +399,6 @@ export class GeneManager {
       }
       this.updateGeneSearchAvailabilityMessage('Loading genes…')
     }
-  }
-
-  isRendererReadyForGeneSearch(controller) {
-    if (!controller) return false
-    const renderer = controller.reglRenderer
-    const hasRendererState = !!(renderer && (
-      (typeof renderer.numPoints === 'number' && renderer.numPoints > 0) ||
-      (renderer.positions && renderer.positions.length > 0) ||
-      (renderer.colors && renderer.colors.length > 0)
-    ))
-    const hasCoordinates = Array.isArray(controller.currentCoordinates) && controller.currentCoordinates.length > 0
-    let canvasVisible = false
-    if (controller.canvas && controller.canvas.parentElement) {
-      const parent = controller.canvas.parentElement
-      canvasVisible = parent.offsetWidth > 0 && parent.offsetHeight > 0
-    }
-    if (!canvasVisible) {
-      const plotContainer = document.querySelector('.plot-container')
-      canvasVisible = !!(plotContainer && plotContainer.offsetWidth > 0 && plotContainer.offsetHeight > 0)
-    }
-    return canvasVisible && (hasRendererState || hasCoordinates)
   }
 
   init() {
@@ -910,6 +890,16 @@ export class GeneManager {
     await this.processAllGenes()
   }
 
+  scheduleAutocompleteLoadRetry() {
+    if (this.autocompleteLoaded || this.autocompleteLoadRetryTimer) return
+    this.autocompleteLoadRetryTimer = setTimeout(() => {
+      this.autocompleteLoadRetryTimer = null
+      if (!this.autocompleteLoaded) {
+        this.loadAutocompleteData()
+      }
+    }, 250)
+  }
+
   resolveCurrentLoomFile() {
     const controller = this.resolveVisualizationController()
     if (controller && typeof controller.getCurrentLoomFileForRequest === 'function') {
@@ -936,6 +926,7 @@ export class GeneManager {
     const loomFile = this.resolveCurrentLoomFile()
     if (!loomFile) {
       console.warn('[GeneManager] loadAutocompleteData deferred: loom file is not selected yet')
+      this.scheduleAutocompleteLoadRetry()
       return
     }
 

@@ -521,6 +521,10 @@ export default class extends Controller {
     
     this.currentLoomFile = loomFileToUse
     // console.log('🔍 [DEBUG] Final loom file set:', this.currentLoomFile)
+
+    if (this.geneManager && !this.geneManager.autocompleteLoaded) {
+      this.geneManager.loadAutocompleteData()
+    }
     
     // Ensure embeddingsByLoomValue is not null
     if (!this.embeddingsByLoomValue) {
@@ -1130,6 +1134,14 @@ export default class extends Controller {
           checkpointIdFromUrl: checkpointIdFromUrl || null
         })
         this.setOnlyEmbeddingGroupOpen(this.getCurrentLoomFile())
+        if (this.geneManager && typeof this.geneManager.loadAutocompleteData === 'function') {
+          this.geneManager.loadAutocompleteData()
+        }
+        if (checkpointIdFromUrl.length === 0) {
+          this.loadMetadataCoordinates(selectedEmbeddingId).catch((error) => {
+            console.error('Failed to load pre-selected embedding coordinates:', error)
+          })
+        }
         return
       }
 
@@ -4315,6 +4327,9 @@ export default class extends Controller {
           currentCoordinatesLength: this.currentCoordinates?.length || 0,
           hasRenderer: !!this.reglRenderer
         })
+        if (this.geneManager && typeof this.geneManager.updateGeneSearchVisibility === 'function') {
+          this.geneManager.updateGeneSearchVisibility()
+        }
         this.perfLog('load_metadata_coordinates', {
           metadataId: normalizedMetadataId,
           source: 'network',

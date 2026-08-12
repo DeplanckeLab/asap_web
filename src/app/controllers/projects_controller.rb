@@ -7606,11 +7606,16 @@ class ProjectsController < ApplicationController
             @parsing_errors << "The original matrix contains floats. Many methods will NOT be available if your original file is not a count matrix"
           end
           
-          # Ensembl mapping errors
+          # Ensembl mapping: error only when a meaningful fraction is missing (>= 5%)
           if nber_not_found_genes && nber_not_found_genes > 0
             total_genes = @results['nber_rows'] || 1
             not_found_percentage = (nber_not_found_genes.to_f * 100 / total_genes).round(2)
-            @parsing_errors << "#{nber_not_found_genes} (#{not_found_percentage}%) #{helpers.row_label(@project)} were not found in Ensembl. Did you select the right species (now #{@project.organism&.name || 'Unknown'})? if not, reset the project"
+            msg = "#{nber_not_found_genes} (#{not_found_percentage}%) #{helpers.row_label(@project)} were not found in Ensembl"
+            if not_found_percentage >= 5
+              @parsing_errors << "#{msg}. Did you select the right species (now #{@project.organism&.name || 'Unknown'})? if not, reset the project"
+            else
+              @parsing_infos << msg
+            end
           end
           
           # Validation warnings (info alerts - zero values percentage)

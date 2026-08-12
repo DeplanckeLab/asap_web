@@ -1,0 +1,172 @@
+<% content_for :title, "External catalog - ASAP" %>
+<div class="max-w-7xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div>
+    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">External catalog</h1>
+    <p class="mt-2 text-gray-600 dark:text-gray-300">
+      Candidate datasets from CELLxGENE, Bgee, HCA, and GEO. Create an ASAP project from an entry that is not imported yet.
+    </p>
+  </div>
+
+  <% if notice.present? %>
+    <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-200"><%= notice %></div>
+  <% end %>
+  <% if alert.present? %>
+    <div class="rounded-md bg-red-100 px-4 py-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-200"><%= alert %></div>
+  <% end %>
+
+  <%= form_with url: external_catalog_candidates_path, method: :get, local: true, class: "rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900" do %>
+    <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
+      <div>
+        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Source</label>
+        <%= select_tag :source,
+                       options_for_select([['All sources', '']] + ExternalCatalogCandidate::SOURCES.map { |s| [s, s] }, @source),
+                       class: "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100" %>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Project type</label>
+        <%= select_tag :project_type,
+                       options_for_select([['All types', ''], ['Single-cell', 'sc'], ['Bulk', 'bulk']], @project_type),
+                       class: "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100" %>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">In ASAP</label>
+        <%= select_tag :in_asap,
+                       options_for_select([['Any', ''], ['Already in ASAP', 'yes'], ['Not in ASAP', 'no']], @in_asap),
+                       class: "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100" %>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Search</label>
+        <%= text_field_tag :q, @q,
+                           placeholder: "Title, id, filename",
+                           class: "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100" %>
+      </div>
+    </div>
+    <div class="mt-3 flex items-center gap-3">
+      <%= submit_tag "Filter", class: "inline-flex items-center rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white" %>
+      <%= link_to "Reset", external_catalog_candidates_path, class: "text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200" %>
+      <span class="text-xs text-gray-500 dark:text-gray-400"><%= @total_count %> candidates</span>
+    </div>
+  <% end %>
+
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+      <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-950 dark:text-gray-400">
+        <tr>
+          <th scope="col" class="px-3 py-2 text-left">Source</th>
+          <th scope="col" class="px-3 py-2 text-left">Dataset</th>
+          <th scope="col" class="px-3 py-2 text-left">Organism</th>
+          <th scope="col" class="px-3 py-2 text-left">Format</th>
+          <th scope="col" class="px-3 py-2 text-left">Publication</th>
+          <th scope="col" class="px-3 py-2 text-left">ASAP</th>
+          <th scope="col" class="px-3 py-2 text-left">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-gray-800 dark:text-gray-200">
+        <% @candidates.each do |candidate| %>
+          <% asap_projects = @asap_projects_by_candidate_id[candidate.id] || [] %>
+          <tr>
+            <td class="whitespace-nowrap px-3 py-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <%= candidate.source %>
+              <% if candidate.project_type_tag.present? %>
+                <div class="mt-0.5 normal-case tracking-normal text-gray-400"><%= candidate.project_type_tag %></div>
+              <% end %>
+            </td>
+            <td class="px-3 py-2">
+              <%= link_to (candidate.title.presence || candidate.external_id).to_s.truncate(80),
+                          external_catalog_candidate_path(candidate),
+                          class: "font-medium text-blue-600 hover:underline dark:text-blue-400" %>
+              <div class="mt-0.5 font-mono text-xs text-gray-500 dark:text-gray-400"><%= candidate.external_id %></div>
+              <% if candidate.source_page_url.present? %>
+                <div class="mt-0.5">
+                  <%= link_to "Open source", candidate.source_page_url, target: "_blank", rel: "noopener", class: "text-xs text-gray-500 hover:text-blue-600 dark:text-gray-400" %>
+                </div>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-xs">
+              <%= candidate.organism_label.presence || "—" %>
+              <% if candidate.tax_id.to_i > 0 %>
+                <div class="text-gray-400">tax <%= candidate.tax_id %></div>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-xs">
+              <%= candidate.format_kind.presence || "—" %>
+              <% if candidate.filesize.to_i > 0 %>
+                <div class="text-gray-400"><%= number_to_human_size(candidate.filesize) %></div>
+              <% end %>
+            </td>
+            <td class="px-3 py-2 text-xs">
+              <% dois = candidate.dois %>
+              <% if dois.any? %>
+                <%= link_to dois.first.to_s.truncate(36), "https://doi.org/#{dois.first}", target: "_blank", rel: "noopener", class: "text-blue-600 hover:underline dark:text-blue-400" %>
+                <% if dois.size > 1 %><span class="text-gray-400">+<%= dois.size - 1 %></span><% end %>
+              <% else %>
+                <span class="text-gray-400">—</span>
+              <% end %>
+            </td>
+            <td class="px-3 py-2 text-xs">
+              <% if candidate.importing? %>
+                <span class="inline-flex rounded bg-amber-100 px-2 py-0.5 font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">Importing</span>
+              <% elsif asap_projects.any? %>
+                <% asap_projects.first(3).each do |project| %>
+                  <div>
+                    <%= link_to project.key, project_path(project), class: "text-blue-600 hover:underline dark:text-blue-400" %>
+                    <% if project.public? %><span class="text-emerald-600">public</span><% end %>
+                  </div>
+                <% end %>
+                <% if asap_projects.size > 3 %>
+                  <div class="text-gray-400">+<%= asap_projects.size - 3 %> more</div>
+                <% end %>
+              <% elsif candidate.failed? %>
+                <span class="inline-flex rounded bg-red-100 px-2 py-0.5 font-medium text-red-800 dark:bg-red-900/40 dark:text-red-200">Failed</span>
+                <% if candidate.import_error.present? %>
+                  <div class="mt-0.5 max-w-xs truncate text-red-500" title="<%= candidate.import_error %>"><%= candidate.import_error.to_s.truncate(80) %></div>
+                <% end %>
+              <% else %>
+                <span class="text-gray-400">Not in ASAP</span>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-xs">
+              <%= link_to "Details", external_catalog_candidate_path(candidate), class: "text-gray-600 hover:text-gray-900 dark:text-gray-300" %>
+              <% if candidate.can_create_project? %>
+                <%= button_to "Create project",
+                              create_project_external_catalog_candidate_path(candidate),
+                              method: :post,
+                              form: { class: "inline ml-2" },
+                              class: "inline-flex items-center rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900" %>
+              <% end %>
+            </td>
+          </tr>
+        <% end %>
+        <% if @candidates.empty? %>
+          <tr>
+            <td colspan="7" class="px-3 py-10 text-center text-gray-500 dark:text-gray-400">
+              No candidates match these filters.
+              Sync with <code class="text-xs">rails external_catalog:sync_candidates</code>.
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if @total_count > @per_page %>
+    <% total_pages = (@total_count.to_f / @per_page).ceil %>
+    <div class="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
+      <div>
+        Page <%= @page %> of <%= total_pages %>
+      </div>
+      <div class="flex gap-2">
+        <% if @page > 1 %>
+          <%= link_to "Previous",
+                      external_catalog_candidates_path(request.query_parameters.merge(page: @page - 1)),
+                      class: "rounded-md border border-gray-300 px-3 py-1 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800" %>
+        <% end %>
+        <% if @page < total_pages %>
+          <%= link_to "Next",
+                      external_catalog_candidates_path(request.query_parameters.merge(page: @page + 1)),
+                      class: "rounded-md border border-gray-300 px-3 py-1 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800" %>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+</div>

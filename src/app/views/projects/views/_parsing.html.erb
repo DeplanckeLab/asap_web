@@ -463,6 +463,16 @@
               <i class="fas fa-info-circle text-xs"></i>
             </span>
           <% end %>
+          <% not_found_genes_file = project_dir + 'parsing' + 'not_found_genes.txt' %>
+          <% if File.exist?(not_found_genes_file) && exportable?(@project) %>
+            <%= link_to(get_file_project_path(@project, step: 'parsing', filename: 'not_found_genes.txt'),
+                target: '_blank',
+                class: 'inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors') do %>
+              <i class="fas fa-file-alt"></i>
+              <span>Genes not found in Ensembl</span>
+              <i class="fas fa-external-link-alt text-xs"></i>
+            <% end %>
+          <% end %>
           <% if admin? %>
             <% json_file = project_dir + 'parsing' + 'output.json' %>
             <% if File.exist?(json_file) && exportable?(@project) %>

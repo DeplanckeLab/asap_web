@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_06_163500) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_12_010000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -637,6 +637,38 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_06_163500) do
     t.text "identifier"
     t.integer "identifier_type_id"
     t.datetime "updated_at", precision: nil
+  end
+
+  create_table "external_catalog_candidates", force: :cascade do |t|
+    t.text "attrs_json"
+    t.datetime "created_at", null: false
+    t.text "dois_json"
+    t.string "external_id", null: false
+    t.string "filename"
+    t.bigint "filesize", default: 0, null: false
+    t.string "format_kind"
+    t.text "identifiers_json"
+    t.text "import_error"
+    t.integer "import_project_id"
+    t.string "import_status", default: "idle", null: false
+    t.integer "import_user_id"
+    t.datetime "last_seen_at"
+    t.string "organism_label"
+    t.text "pmids_json"
+    t.string "project_type_tag", default: "sc", null: false
+    t.string "provider_tag", null: false
+    t.string "source", null: false
+    t.text "source_page_url"
+    t.integer "tax_id"
+    t.text "title"
+    t.datetime "updated_at", null: false
+    t.text "url"
+    t.index ["import_status"], name: "index_external_catalog_candidates_on_import_status"
+    t.index ["last_seen_at"], name: "index_external_catalog_candidates_on_last_seen_at"
+    t.index ["project_type_tag"], name: "index_external_catalog_candidates_on_project_type_tag"
+    t.index ["provider_tag"], name: "index_external_catalog_candidates_on_provider_tag"
+    t.index ["source", "external_id"], name: "index_ext_catalog_candidates_on_source_and_external_id", unique: true
+    t.index ["source"], name: "index_external_catalog_candidates_on_source"
   end
 
   create_table "file_formats", id: :serial, force: :cascade do |t|
@@ -1631,6 +1663,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_06_163500) do
   add_foreign_key "exp_entries_sample_identifiers", "sample_identifiers", name: "geo_entries_sample_identifiers_sample_identifier_id_fkey"
   add_foreign_key "exp_entry_identifiers", "exp_entries", name: "exp_entry_identifiers_exp_entry_id_fkey"
   add_foreign_key "exp_entry_identifiers", "identifier_types", name: "exp_entry_identifiers_identifier_type_id_fkey"
+  add_foreign_key "external_catalog_candidates", "projects", column: "import_project_id"
+  add_foreign_key "external_catalog_candidates", "users", column: "import_user_id"
   add_foreign_key "filter_methods", "speeds", name: "filters_speed_id_fkey"
   add_foreign_key "fos", "projects", name: "fos_project_id_fkey"
   add_foreign_key "fos", "runs", name: "fos_run_id_fkey"

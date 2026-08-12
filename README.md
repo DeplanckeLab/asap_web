@@ -91,7 +91,7 @@ Notable in-app documentation:
 - [`src/SLURM_SCHEDULER.md`](src/SLURM_SCHEDULER.md) — job submission, monitoring, rake tasks
 - [`src/public/swagger/openapi.yaml`](src/public/swagger/openapi.yaml) — REST API (also at `/api_documentation` when running)
 - [`docs/reference-data-steps-std-methods-sync.md`](docs/reference-data-steps-std-methods-sync.md) — sync Step / StdMethod (and related) reference data between environments
-- [`docs/external-catalog-import.md`](docs/external-catalog-import.md) — bulk import CELLxGENE / Bgee / HCA / GEO catalogs into ASAP
+- [`docs/external-catalog-import.md`](docs/external-catalog-import.md) — bulk import CELLxGENE / Bgee / HCA / GEO; UAB candidate list + one-click create
 
 ---
 

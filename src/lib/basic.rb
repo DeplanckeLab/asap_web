@@ -4698,6 +4698,31 @@ module Basic
       s.start_with?('/') ? s : "/#{s}"
     end
 
+    # Bulk dim_reduction scripts (e.g. pca.bulk.v8.R) write embeddings to the loom but may
+    # omit a metadata[] block in output.json. UMAP bulk includes metadata; PCA historically did not.
+    # Extract dataset shape from the loom so finish_run can register the annot and wire visualization links.
+    def metadata_from_loom_for_output_dataset(project_dir, relative_filepath, dataset_name, logger = nil)
+      dataset_name = normalize_dataset_path(dataset_name)
+      return nil if dataset_name.empty? || relative_filepath.blank?
+
+      loom_path = project_dir + relative_filepath
+      return nil unless File.exist?(loom_path.to_s)
+
+      meta = H5DataService.extract_metadata_compl(
+        loom_path.to_s,
+        dataset_name,
+        type_name: 'NUMERIC',
+        no_values: true
+      )
+      return nil unless meta.is_a?(Hash) && meta['name'].present?
+
+      meta['name'] = normalize_dataset_path(meta['name'])
+      meta
+    rescue StandardError => e
+      logger&.warn("[Basic.metadata_from_loom_for_output_dataset] #{dataset_name}: #{e.message}")
+      nil
+    end
+
     # Dataset paths declared in step.output_json expected_outputs (with #{var} substitution).
     def resolved_expected_output_datasets(step, h_var = {})
       return [] unless step&.output_json.present?
@@ -6539,17 +6564,23 @@ puts "TEST RUN"
                       h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
                     end
                   end
-                elsif h_results['metadata'] and metadata = h_metadata_by_name[dataset_name]
-                  h_output_files[k][k2]["nber_rows"] = metadata['nber_rows']
-                  h_output_files[k][k2]["nber_cols"] = metadata['nber_cols']
-                  h_output_files[k][k2]["dataset_size"] = metadata['dataset_size']
-                  if metadata['type']
-                    h_output_files[k][k2]["types"].push("#{metadata['type'].downcase}_mdata")
+                elsif dataset_name.present?
+                  metadata = h_metadata_by_name[dataset_name]
+                  metadata ||= metadata_from_loom_for_output_dataset(
+                    project_dir, relative_filepath, dataset_name, logger
+                  )
+                  if metadata
+                    h_output_files[k][k2]["nber_rows"] = metadata['nber_rows']
+                    h_output_files[k][k2]["nber_cols"] = metadata['nber_cols']
+                    h_output_files[k][k2]["dataset_size"] = metadata['dataset_size']
+                    if metadata['type']
+                      h_output_files[k][k2]["types"].push("#{metadata['type'].downcase}_mdata")
+                    end
+                    metadata['output_attr_name'] = k
+                    metadata['data_class_names'] = h_output_files[k][k2]["types"]
+                    new_annot = load_annot(run, metadata, relative_filepath, h_data_types, h_data_classes, logger, finish_run_cache)
+                    h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
                   end
-                  metadata['output_attr_name'] = k
-                  metadata['data_class_names'] = h_output_files[k][k2]["types"]
-                  new_annot = load_annot(run, metadata, relative_filepath, h_data_types, h_data_classes, logger, finish_run_cache)
-                  h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
                 end
               end
             end

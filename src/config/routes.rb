@@ -150,6 +150,11 @@ Rails.application.routes.draw do
   resources :tools
   resources :ratings, only: [:index]
   resources :standalone_compliance_checks, only: [:index, :show]
+  resources :external_catalog_candidates, only: [:index, :show] do
+    member do
+      post :create_project
+    end
+  end
   resources :data_classes
   resources :tool_types
   resources :project_types

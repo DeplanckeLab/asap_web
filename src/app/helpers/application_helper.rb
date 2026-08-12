@@ -300,6 +300,16 @@ module ApplicationHelper
         path: atlases_path,
         icon: "fas fa-atlas"
       },
+      (
+        if uab?
+          {
+            label: "External catalog",
+            description: "Candidate datasets from CELLxGENE, Bgee, HCA, GEO",
+            path: external_catalog_candidates_path,
+            icon: "fas fa-database"
+          }
+        end
+      ),
       {
         label: "File formats",
         description: "Supported upload and export formats",
@@ -318,7 +328,7 @@ module ApplicationHelper
         path: faq_home_index_path,
         icon: "fas fa-question-circle"
       }
-    ]
+    ].compact
   end
 
   def feedback_menu_links

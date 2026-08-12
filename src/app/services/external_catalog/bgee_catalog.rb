@@ -89,11 +89,11 @@ module ExternalCatalog
           project_type_tag: 'sc',
           format_kind: :h5ad,
           filename: file_name,
-        dois: dois,
-        pmids: pmids,
-        identifiers: identifiers,
-        source_page_url: "https://www.bgee.org/experiment/#{experiment_id}"
-      )
+          dois: dois,
+          pmids: pmids,
+          identifiers: identifiers,
+          source_page_url: "https://www.ncbi.nlm.nih.gov/sra/#{experiment_id}"
+        )
       end
     rescue StandardError => e
       @logger.error("[ExternalCatalog::BgeeCatalog] #{experiment_id}: #{e.class} #{e.message}")

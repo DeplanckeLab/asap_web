@@ -238,4 +238,19 @@ namespace :external_catalog do
     puts 'Priority: SC loom > h5ad > RDS > MTX; bulk counts_table > series_matrix > archive_table'
     puts 'Project names for GEO: "GSE12345: series title"'
   end
+
+  desc 'Sync candidate list for UAB UI (SOURCE=all|cellxgene|bgee|hca|geo LIMIT=N GEO_MODE=all|sc|bulk)'
+  task sync_candidates: :environment do
+    source = ENV.fetch('SOURCE', 'all').to_s.strip.downcase
+    limit = ENV['LIMIT'].presence&.to_i
+    geo_mode = ENV.fetch('GEO_MODE', 'all').to_s
+    puts "external_catalog:sync_candidates SOURCE=#{source} LIMIT=#{limit.inspect} GEO_MODE=#{geo_mode}"
+
+    totals = ExternalCatalog::CandidateSync.new.call(source: source, limit: limit, geo_mode: geo_mode)
+    puts "Upserted: #{totals[:upserted]}"
+    totals[:by_source].each do |src, n|
+      puts "  #{src}: #{n}"
+    end
+    puts "Total candidates in DB: #{ExternalCatalogCandidate.count}"
+  end
 end

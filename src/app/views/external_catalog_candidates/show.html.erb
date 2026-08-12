@@ -1,0 +1,133 @@
+<% content_for :title, "#{@candidate.title.to_s.truncate(60)} - External catalog - ASAP" %>
+<div class="max-w-4xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div class="flex items-start justify-between gap-4">
+    <div>
+      <%= link_to "Back to list", external_catalog_candidates_path, class: "text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400" %>
+      <h1 class="mt-2 text-3xl font-semibold text-gray-900 dark:text-white"><%= @candidate.title.presence || @candidate.external_id %></h1>
+      <p class="mt-2 font-mono text-sm text-gray-500 dark:text-gray-400"><%= @candidate.source %> / <%= @candidate.external_id %></p>
+    </div>
+    <% if @candidate.can_create_project? %>
+      <%= button_to "Create ASAP project",
+                    create_project_external_catalog_candidate_path(@candidate),
+                    method: :post,
+                    class: "inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900" %>
+    <% end %>
+  </div>
+
+  <% if notice.present? %>
+    <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-200"><%= notice %></div>
+  <% end %>
+  <% if alert.present? %>
+    <div class="rounded-md bg-red-100 px-4 py-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-200"><%= alert %></div>
+  <% end %>
+
+  <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 space-y-4">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Dataset</h2>
+    <dl class="grid grid-cols-1 gap-3 sm:grid-cols-2 text-sm">
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-gray-500">Provider</dt>
+        <dd class="mt-1 text-gray-900 dark:text-gray-100"><%= @candidate.provider_tag %></dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-gray-500">Type</dt>
+        <dd class="mt-1 text-gray-900 dark:text-gray-100"><%= @candidate.project_type_tag %></dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-gray-500">Organism</dt>
+        <dd class="mt-1 text-gray-900 dark:text-gray-100">
+          <%= @candidate.organism_label.presence || "—" %>
+          <% if @candidate.tax_id.to_i > 0 %> (tax <%= @candidate.tax_id %>)<% end %>
+        </dd>
+      </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-gray-500">Format / file</dt>
+        <dd class="mt-1 text-gray-900 dark:text-gray-100">
+          <%= @candidate.format_kind.presence || "—" %>
+          <% if @candidate.filename.present? %> — <%= @candidate.filename %><% end %>
+          <% if @candidate.filesize.to_i > 0 %> (<%= number_to_human_size(@candidate.filesize) %>)<% end %>
+        </dd>
+      </div>
+      <div class="sm:col-span-2">
+        <dt class="text-xs uppercase tracking-wide text-gray-500">Source page</dt>
+        <dd class="mt-1">
+          <% if @candidate.source_page_url.present? %>
+            <%= link_to @candidate.source_page_url, @candidate.source_page_url, target: "_blank", rel: "noopener", class: "break-all text-blue-600 hover:underline dark:text-blue-400" %>
+          <% else %>
+            <span class="text-gray-400">—</span>
+          <% end %>
+        </dd>
+      </div>
+      <div class="sm:col-span-2">
+        <dt class="text-xs uppercase tracking-wide text-gray-500">Download URL</dt>
+        <dd class="mt-1 break-all text-xs text-gray-600 dark:text-gray-300"><%= @candidate.url.presence || "—" %></dd>
+      </div>
+    </dl>
+  </div>
+
+  <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 space-y-3">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Publication and identifiers</h2>
+    <div class="text-sm">
+      <p class="text-xs uppercase tracking-wide text-gray-500">DOIs</p>
+      <% if @candidate.dois.any? %>
+        <ul class="mt-1 space-y-1">
+          <% @candidate.dois.each do |doi| %>
+            <li><%= link_to doi, "https://doi.org/#{doi}", target: "_blank", rel: "noopener", class: "text-blue-600 hover:underline dark:text-blue-400" %></li>
+          <% end %>
+        </ul>
+      <% else %>
+        <p class="mt-1 text-gray-400">None</p>
+      <% end %>
+    </div>
+    <div class="text-sm">
+      <p class="text-xs uppercase tracking-wide text-gray-500">PubMed IDs</p>
+      <% if @candidate.pmids.any? %>
+        <ul class="mt-1 space-y-1">
+          <% @candidate.pmids.each do |pmid| %>
+            <li><%= link_to pmid, "https://pubmed.ncbi.nlm.nih.gov/#{pmid}/", target: "_blank", rel: "noopener", class: "text-blue-600 hover:underline dark:text-blue-400" %></li>
+          <% end %>
+        </ul>
+      <% else %>
+        <p class="mt-1 text-gray-400">None</p>
+      <% end %>
+    </div>
+    <div class="text-sm">
+      <p class="text-xs uppercase tracking-wide text-gray-500">Accessions</p>
+      <% if @candidate.identifiers.any? %>
+        <ul class="mt-1 space-y-1">
+          <% @candidate.identifiers.each do |ref| %>
+            <li class="font-mono text-xs"><%= ref['kind'] || ref[:kind] %>: <%= ref['value'] || ref[:value] %></li>
+          <% end %>
+        </ul>
+      <% else %>
+        <p class="mt-1 text-gray-400">None</p>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 space-y-3">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">ASAP projects</h2>
+    <% if @candidate.importing? %>
+      <p class="text-sm text-amber-700 dark:text-amber-300">Import in progress. Refresh this page to update status.</p>
+    <% end %>
+    <% if @candidate.failed? && @candidate.import_error.present? %>
+      <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-200">
+        <%= @candidate.import_error %>
+      </div>
+    <% end %>
+    <% if @asap_projects.any? %>
+      <ul class="space-y-2 text-sm">
+        <% @asap_projects.each do |project| %>
+          <li class="flex items-center gap-3">
+            <%= link_to project.key, project_path(project), class: "font-medium text-blue-600 hover:underline dark:text-blue-400" %>
+            <span class="text-gray-600 dark:text-gray-300"><%= project.name.to_s.truncate(80) %></span>
+            <% if project.public? %>
+              <span class="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">public</span>
+            <% end %>
+          </li>
+        <% end %>
+      </ul>
+    <% else %>
+      <p class="text-sm text-gray-500 dark:text-gray-400">Not in ASAP yet.</p>
+    <% end %>
+  </div>
+</div>

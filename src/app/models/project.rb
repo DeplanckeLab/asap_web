@@ -44,6 +44,12 @@ class Project < ApplicationRecord
   has_many :articles, through: :articles_projects
   has_many :exp_entries_projects, dependent: :delete_all
   has_many :exp_entries, through: :exp_entries_projects
+  # Catalog import pointer: keep candidate row, clear link when project is deleted.
+  has_many :external_catalog_candidates,
+           class_name: 'ExternalCatalogCandidate',
+           foreign_key: :import_project_id,
+           dependent: :nullify,
+           inverse_of: :import_project
   has_many :fus
 
   # Project-local Fu storage (fus/<fu_id>/ under this project's directory).

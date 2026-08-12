@@ -68,4 +68,22 @@ class ProjectTest < TestBaseWithoutFixtures
     assert_not Project.exists?(key: key)
     assert_equal 6, key.length
   end
+
+  test "destroy nullifies external_catalog_candidates import_project_id" do
+    project = create_test_project!(name: "Catalog import", key: "cat#{SecureRandom.hex(3)}", user_id: 1)
+    candidate = ExternalCatalogCandidate.create!(
+      source: 'cellxgene',
+      external_id: "ext-#{SecureRandom.hex(4)}",
+      provider_tag: 'CELLxGENE',
+      title: 'Import link test',
+      import_status: 'idle',
+      import_project_id: project.id
+    )
+
+    project.destroy!
+
+    candidate.reload
+    assert_nil candidate.import_project_id
+    assert ExternalCatalogCandidate.exists?(candidate.id)
+  end
 end

@@ -333,7 +333,7 @@
                         <% end %>
                         <% project.provider_projects.filter_map(&:provider).uniq(&:id).each do |provider| %>
                           <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-teal-100 text-teal-800"
-                                title="Provider: <%= provider.display_name %>">
+                                title="Origin: <%= provider.display_name %>">
                             <%= provider.tag.presence || provider.display_name %>
                           </span>
                         <% end %>

@@ -4,7 +4,7 @@ class ExternalCatalogCandidate < ApplicationRecord
   SOURCES = %w[cellxgene bgee hca geo].freeze
   IMPORT_STATUSES = %w[idle importing failed].freeze
 
-  belongs_to :import_project, class_name: 'Project', optional: true
+  belongs_to :import_project, class_name: 'Project', optional: true, inverse_of: :external_catalog_candidates
   belongs_to :import_user, class_name: 'User', optional: true
 
   validates :source, presence: true, inclusion: { in: SOURCES }

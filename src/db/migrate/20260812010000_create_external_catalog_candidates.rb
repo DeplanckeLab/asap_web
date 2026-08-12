@@ -34,7 +34,7 @@ class CreateExternalCatalogCandidates < ActiveRecord::Migration[8.1]
     add_index :external_catalog_candidates, :import_status
     add_index :external_catalog_candidates, :project_type_tag
     add_index :external_catalog_candidates, :last_seen_at
-    add_foreign_key :external_catalog_candidates, :projects, column: :import_project_id
-    add_foreign_key :external_catalog_candidates, :users, column: :import_user_id
+    add_foreign_key :external_catalog_candidates, :projects, column: :import_project_id, on_delete: :nullify
+    add_foreign_key :external_catalog_candidates, :users, column: :import_user_id, on_delete: :nullify
   end
 end

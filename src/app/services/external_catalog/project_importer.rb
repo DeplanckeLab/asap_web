@@ -727,6 +727,8 @@ module ExternalCatalog
         return
       end
 
+      create_landing_visualization_checkpoint!(project)
+
       project.public_id = (Project.maximum(:public_id) || 0) + 1 if project.public_id.nil?
       project.public = true
       project.public_at = Time.current
@@ -734,6 +736,155 @@ module ExternalCatalog
       @logger.info(
         "[ExternalCatalog] made public project=#{project.key} public_id=#{project.public_id}"
       )
+    end
+
+    def create_landing_visualization_checkpoint!(project)
+      embedding = prefer_embedding_annot(project)
+      unless embedding
+        @logger.info("[ExternalCatalog] skip landing checkpoint project=#{project.key}: no embedding annot")
+        return
+      end
+
+      coloring = find_cell_type_annot(project, filepath: embedding.filepath)
+      unless coloring
+        @logger.info(
+          "[ExternalCatalog] skip landing checkpoint project=#{project.key}: " \
+          "no cell_type metadata on loom=#{embedding.filepath}"
+        )
+        return
+      end
+
+      loom_file = embedding.filepath
+      state = landing_checkpoint_state(embedding: embedding, coloring: coloring, loom_file: loom_file)
+
+      Checkpoint.transaction do
+        project.checkpoints.visualization.where(is_landing_page: true).update_all(is_landing_page: false)
+
+        checkpoint = project.checkpoints.visualization.find_or_initialize_by(title: 'Landing page')
+        checkpoint.user = project.user
+        checkpoint.kind = Checkpoint::KIND_VISUALIZATION
+        checkpoint.run_id = nil
+        checkpoint.state = state
+        checkpoint.comments = checkpoint.comments.presence || []
+        checkpoint.is_landing_page = true
+        checkpoint.save!
+        @logger.info(
+          "[ExternalCatalog] landing checkpoint project=#{project.key} " \
+          "checkpoint_id=#{checkpoint.id} emb=#{embedding.id}(#{embedding.name}) " \
+          "color=#{coloring.id}(#{coloring.name}) labels=on"
+        )
+      end
+    end
+
+    def prefer_embedding_annot(project)
+      Annot.light
+           .where(project_id: project.id, dim: 1, nber_rows: 2)
+           .where.not(filepath: nil)
+           .to_a
+           .min_by do |annot|
+        name = annot.name.to_s
+        parsing_rank = annot.filepath.to_s.match?(%r{(^|/)parsing(/|$)}) ? 0 : 1
+        method_rank =
+          if name.match?(/umap/i) then 0
+          elsif name.match?(/tsne|t_sne|t-sne/i) then 1
+          elsif name.match?(/pca/i) then 2
+          else 3
+          end
+        cell_count = -(annot.nber_cols.to_i)
+        [method_rank, parsing_rank, cell_count, annot.id]
+      end
+    end
+
+    def find_cell_type_annot(project, filepath:)
+      scope = Annot.light
+                   .where(project_id: project.id, filepath: filepath, dim: 1, nber_rows: 1)
+                   .where("name ILIKE ?", "%cell_type%")
+                   .where.not("name ILIKE ?", "%ontology%")
+
+      exact = scope.find { |a| a.name.to_s.downcase == '/col_attrs/cell_type' }
+      return exact if exact
+
+      preferred = scope.find do |a|
+        base = a.name.to_s.split('/').last.to_s.downcase.tr(' ', '_')
+        base == 'cell_type'
+      end
+      return preferred if preferred
+
+      scope.min_by(&:id)
+    end
+
+    def landing_checkpoint_state(embedding:, coloring:, loom_file:)
+      {
+        'version' => 1,
+        'loomFile' => loom_file,
+        'embedding' => {
+          'id' => embedding.id.to_s,
+          'loomFile' => loom_file
+        },
+        'visualizationEmbedding' => {
+          'id' => embedding.id.to_s,
+          'loomFile' => loom_file,
+          'name' => embedding.name,
+          'dimension' => nil
+        },
+        'matrix' => {
+          'layer' => nil,
+          'annotId' => nil
+        },
+        'coloring' => {
+          'metadataId' => coloring.id.to_s,
+          'geneSetItem' => nil,
+          'categoryColorOverrides' => {},
+          'customColorRange' => nil,
+          'currentColorScheme' => nil,
+          'gradientScale' => 'normal',
+          'metadataGradients' => {},
+          'history' => []
+        },
+        'filters' => {
+          'selectedCategories' => {},
+          'selectedRanges' => {},
+          'metadataFilterSwitches' => {},
+          'geneFilterSwitches' => {},
+          'globalFiltersEnabled' => true
+        },
+        'adaptColorRangeByMetadataId' => {},
+        'axes' => { 'x' => nil, 'y' => nil },
+        'foldState' => {
+          'metadata' => { coloring.id.to_s => true },
+          'genes' => {}
+        },
+        'panelScroll' => {},
+        'bottomRightPanel' => nil,
+        'genes' => { 'tags' => [] },
+        'display' => {
+          'pointSize' => nil,
+          'categoryOrder' => 'largest-first',
+          'numericalOrder' => 'negative-to-positive',
+          'histogramScale' => 'normal',
+          'histogramIgnoreZeros' => true,
+          'metadataHistogramOptions' => {},
+          'showGrid' => true,
+          'showAxes' => true,
+          'showCategories' => true,
+          'showLabelBoxes' => true,
+          'labelFontSizeMode' => 'auto',
+          'labelFontSize' => 12,
+          'truncateLongLabels' => true,
+          'freezeMovedLabels' => true,
+          'labelPlacementMode' => 'avoid-collisions',
+          'manualLabelLocks' => {}
+        },
+        'customPlotWindow' => nil,
+        'interaction' => {
+          'mode' => 'pick',
+          'bounds' => nil
+        },
+        'selection' => {
+          'selectedCells' => [],
+          'activeTab' => 'gene-sets'
+        }
+      }
     end
 
     def archive_project!(project)

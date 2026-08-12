@@ -77,8 +77,8 @@ namespace :external_catalog do
       scope = scope.where('filesize = 0 OR filesize <= ?', max_filesize)
     end
 
-    # Prefer known smaller files first, then most recently synced.
-    scope = scope.order(Arel.sql('CASE WHEN filesize > 0 THEN 0 ELSE 1 END, filesize ASC, last_seen_at DESC NULLS LAST, id ASC'))
+    # Same order as the catalog UI: alphabetical by title.
+    scope = scope.order(Arel.sql('LOWER(COALESCE(title, \'\')) ASC'), id: :asc)
     scope = scope.limit(count) if count.present?
     scope.to_a
   end

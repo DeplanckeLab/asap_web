@@ -22,7 +22,7 @@ class ExternalCatalogCandidatesController < ApplicationController
     scope = filter_in_asap(scope, @in_asap)
 
     @total_count = scope.count
-    @candidates = scope.order(last_seen_at: :desc, id: :desc)
+    @candidates = scope.order(Arel.sql('LOWER(COALESCE(title, \'\')) ASC'), id: :asc)
                        .offset((@page - 1) * @per_page)
                        .limit(@per_page)
                        .to_a

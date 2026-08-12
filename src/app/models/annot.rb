@@ -331,6 +331,8 @@ class Annot < ApplicationRecord
   end
 
   def prevent_deletion_if_locked_from_publication
+    # Allow cascade when the parent project itself is being destroyed.
+    return if destroyed_by_association
     return unless project&.locked_from_publication?(self)
 
     errors.add(:base, 'This metadata was created before publication and cannot be deleted.')

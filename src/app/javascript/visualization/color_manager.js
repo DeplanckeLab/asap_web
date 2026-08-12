@@ -396,16 +396,9 @@ export class ColorManager {
   
   // Determine appropriate gradient based on value distribution
   determineGradientForValues(values) {
-    // Calculate min and max values
-    let minVal = Infinity
-    let maxVal = -Infinity
-    
-    for (let i = 0; i < values.length; i++) {
-      const val = values[i]
-      if (val < minVal) minVal = val
-      if (val > maxVal) maxVal = val
-    }
-    
+    const minVal = this.controller.dataManager.safeMin(values)
+    const maxVal = this.controller.dataManager.safeMax(values)
+
     // Store min/max for value conversion
     this.controller.gradientMinValue = minVal
     this.controller.gradientMaxValue = maxVal

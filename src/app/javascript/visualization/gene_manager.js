@@ -106,6 +106,17 @@ export class GeneManager {
         .filter((k) => k.startsWith('gene_'))
         .forEach((k) => { delete this.controller.savedRanges[k] })
     }
+
+    // Drop stored gene-expression gradients so the next coloring uses an auto
+    // gradient that matches the new matrix value range (signed vs positive-only).
+    if (this.controller?.metadataGradients instanceof Map) {
+      for (const key of [...this.controller.metadataGradients.keys()]) {
+        const id = String(key)
+        if (id.startsWith('gene_') && !id.startsWith('gene_set_')) {
+          this.controller.metadataGradients.delete(key)
+        }
+      }
+    }
     
     const genesToReload = new Map()
     const addGeneDescriptor = (stableId, symbol = null, ensembl = '', query = null) => {
@@ -195,6 +206,13 @@ export class GeneManager {
       const minVal = controller.dataManager.safeMin(updated.values)
       const maxVal = controller.dataManager.safeMax(updated.values)
       controller.setColorRange(minVal, maxVal)
+    }
+
+    if (controller.gradientManager && typeof controller.gradientManager.loadGradientForMetadata === 'function') {
+      controller.gradientManager.loadGradientForMetadata(nextMetadataId)
+    }
+    if (controller.gradientManager && typeof controller.gradientManager.initializeGradientLegendListeners === 'function') {
+      controller.gradientManager.initializeGradientLegendListeners()
     }
 
     if (typeof controller.updateVisualizationWithMetadataVector === 'function') {

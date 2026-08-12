@@ -593,22 +593,21 @@ export class GradientManager {
     
     // Check if we have a stored gradient for this metadata
     const storedGradient = this.controller.metadataGradients.get(metadataId)
-    
-    if (storedGradient) {
-      // console.log('🎨 Found stored gradient for metadata:', storedGradient)
-      // Restore stored gradient
-      this.controller.gradientControlPoints = storedGradient.gradientControlPoints ? 
-        JSON.parse(JSON.stringify(storedGradient.gradientControlPoints)) : null
-      this.controller.customGradientControlPoints = storedGradient.customGradientControlPoints ? 
-        JSON.parse(JSON.stringify(storedGradient.customGradientControlPoints)) : null
+    const hasCustom = Array.isArray(storedGradient?.customGradientControlPoints) &&
+      storedGradient.customGradientControlPoints.length > 0
+
+    if (hasCustom) {
+      this.controller.gradientControlPoints = storedGradient.gradientControlPoints
+        ? JSON.parse(JSON.stringify(storedGradient.gradientControlPoints))
+        : null
+      this.controller.customGradientControlPoints = JSON.parse(
+        JSON.stringify(storedGradient.customGradientControlPoints)
+      )
       this.controller.gradientScale = storedGradient.gradientScale === 'log' ? 'log' : 'normal'
     } else {
-      // No stored gradient - initialize default
-      // console.log('🎨 No stored gradient found - initializing default gradient')
+      // Auto gradient always follows the current value range (signed vs positive-only vs negative-only).
       this.controller.colorManager.initializeDefaultGradient()
-      this.controller.gradientScale = 'normal'
-      
-      // Save the default gradient for this metadata
+      this.controller.gradientScale = storedGradient?.gradientScale === 'log' ? 'log' : 'normal'
       this.saveGradientForMetadata(metadataId)
     }
 

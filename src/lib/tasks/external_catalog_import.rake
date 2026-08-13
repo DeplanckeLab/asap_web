@@ -348,7 +348,24 @@ namespace :external_catalog do
     puts "Total obsolete candidates in DB: #{ExternalCatalogCandidate.obsolete_only.count}"
   end
 
-  desc 'Backfill catalog collections + public project↔candidate links (provider + content match). DRY_RUN=1 to preview.'
+  desc 'Refresh collection title/description from upstream APIs (SOURCE=cellxgene|hca|all). Also updates matching ASAP project_collections.'
+  task refresh_collection_metadata: :environment do
+    source = ENV.fetch('SOURCE', 'cellxgene').to_s.strip.downcase
+    puts "external_catalog:refresh_collection_metadata SOURCE=#{source}"
+    totals = ExternalCatalog::CollectionMetadataRefresh.new.call(source: source)
+    puts "CELLxGENE collections upserted: #{totals[:cellxgene]}"
+    puts "HCA collection rows ensured: #{totals[:hca]}"
+    puts "ASAP project_collections refreshed: #{totals[:project_collections]}"
+    sample = ExternalCatalogCollection.find_by(source: 'cellxgene', external_key: '05e3d0fc-c9dd-4f14-9163-2b242b3bb5c2')
+    if sample
+      puts "Sample ECC title=#{sample.title.inspect}"
+      puts "Sample ECC description=#{sample.description.to_s[0, 120].inspect}"
+    end
+    pc = ProjectCollection.find_by(source: 'cellxgene', external_key: '05e3d0fc-c9dd-4f14-9163-2b242b3bb5c2')
+    puts "Sample ASAP project_collection title=#{pc&.title.inspect}" if pc
+  end
+
+  desc 'Backfill catalog collections + public project↔candidate links + ASAP project_collections. DRY_RUN=1 to preview.'
   task backfill_public_project_links: :environment do
     dry_run = external_catalog_bool('DRY_RUN')
     puts "external_catalog:backfill_public_project_links DRY_RUN=#{dry_run}"
@@ -361,7 +378,8 @@ namespace :external_catalog do
     if dry_run
       with_provider = public_scope.joins(:provider_projects).distinct.count
       with_sha = public_scope.where.not(input_content_sha256: [nil, '']).count
-      puts "Would scan public projects: #{public_scope.count} (with provider_projects=#{with_provider}, with input sha=#{with_sha})"
+      missing_pc = public_scope.where(project_collection_id: nil).count
+      puts "Would scan public projects: #{public_scope.count} (with provider_projects=#{with_provider}, with input sha=#{with_sha}, missing project_collection=#{missing_pc})"
       puts "Candidates with collection_id: #{ExternalCatalogCandidate.current.where.not(collection_id: [nil, '']).count}"
       next
     end
@@ -376,14 +394,19 @@ namespace :external_catalog do
 
     scanned = 0
     linked_rows = 0
+    assigned_collections = 0
     public_scope.find_each do |project|
       scanned += 1
+      had_collection = project.project_collection_id.present?
       rows = ExternalCatalogCandidate.sync_catalog_links_for_public_project!(project)
       linked_rows += rows.size
+      assigned_collections += 1 if !had_collection && project.reload.project_collection_id.present?
     end
 
     puts "Scanned public projects: #{scanned}"
     puts "link_matched_project calls: #{linked_rows}"
+    puts "Assigned project_collections: #{assigned_collections}"
     puts "external_catalog_candidate_projects total: #{ExternalCatalogCandidateProject.count}"
+    puts "project_collections total: #{ProjectCollection.count}"
   end
 end

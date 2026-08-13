@@ -177,8 +177,11 @@ class ExternalCatalogCandidate < ApplicationRecord
     return [] unless project.public?
     return [] if project.being_deleted
 
-    sync_provider_links_for_public_project!(project) +
+    linked =
+      sync_provider_links_for_public_project!(project) +
       sync_content_match_links_for_public_project!(project)
+    assign_project_collection_for_public_project!(project)
+    linked
   end
 
   # Via ProviderProject keys (clone copies providers; catalog imports attach them).
@@ -243,6 +246,62 @@ class ExternalCatalogCandidate < ApplicationRecord
     linked
   end
 
+  # Assign ASAP project_collections from catalog candidate collection_id when blank.
+  # Does not overwrite an existing (possibly manual) project_collection_id.
+  def self.assign_project_collection_for_public_project!(project)
+    raise ArgumentError, 'project required' unless project
+    return nil unless project.public?
+    return nil if project.being_deleted
+    return nil if project.project_collection_id.present?
+
+    candidates = []
+    project.provider_projects.includes(:provider).find_each do |pp|
+      tag = pp.provider&.tag
+      next if tag.blank?
+
+      candidates.concat(where(provider_tag: tag, external_id: pp.key.to_s).to_a)
+    end
+    if project.respond_to?(:matched_external_catalog_candidates)
+      candidates.concat(project.matched_external_catalog_candidates.to_a)
+    end
+    candidates.uniq!(&:id)
+
+    candidate =
+      candidates.find { |c| c.import_project_id == project.id && c.collection_id.present? } ||
+      candidates.find { |c| %w[cellxgene hca].include?(c.source.to_s) && c.collection_id.present? }
+    return nil unless candidate
+
+    collection_id = candidate.collection_id.to_s.strip
+    return nil if collection_id.blank?
+
+    collection_url =
+      if candidate.source.to_s == 'cellxgene'
+        "https://cellxgene.cziscience.com/collections/#{collection_id}"
+      elsif candidate.source.to_s == 'hca'
+        "https://data.humancellatlas.org/explore/projects/#{collection_id}"
+      else
+        candidate.source_page_url.to_s.presence
+      end
+
+    ecc = candidate.external_catalog_collection
+    title =
+      if ecc&.title.present? && ecc.title != "#{ecc.source} collection #{ecc.external_key}"
+        ecc.title
+      else
+        nil
+      end
+
+    collection = ProjectCollection.upsert_from_catalog!(
+      source: candidate.source.to_s,
+      external_key: collection_id,
+      title: title,
+      description: ecc&.description,
+      source_page_url: collection_url || ecc&.source_page_url
+    )
+    project.update!(project_collection_id: collection.id)
+    collection
+  end
+
   # Ensure external_catalog_collections exist for candidates that already have collection_id.
   def self.backfill_catalog_collections!
     updated = 0
@@ -259,10 +318,12 @@ class ExternalCatalogCandidate < ApplicationRecord
           "https://data.humancellatlas.org/explore/projects/#{collection_id}"
         end
 
+      # Do not use dataset title as collection title — keep placeholder until catalog sync
+      # provides the real collection name.
       catalog_collection = ExternalCatalogCollection.upsert_from_catalog!(
         source: candidate.source.to_s,
         external_key: collection_id,
-        title: candidate.title.to_s.presence,
+        title: nil,
         description: nil,
         source_page_url: collection_url
       )

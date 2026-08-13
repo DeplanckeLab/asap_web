@@ -22,24 +22,37 @@ class ProjectCollection < ApplicationRecord
     user.present? && created_by_user_id.present? && created_by_user_id == user.id
   end
 
+  def self.placeholder_title_for(source, external_key)
+    "#{source} collection #{external_key}"
+  end
+
+  def placeholder_title?
+    external_key.present? && title.to_s == self.class.placeholder_title_for(source, external_key)
+  end
+
   # Upsert catalog-backed umbrella by (source, external_key).
-  # Does not overwrite title/description when the row already exists and those
-  # fields were customized (non-blank local values stay unless blank).
+  # Refreshes title/description when still placeholder / blank; does not overwrite
+  # customized local values.
   def self.upsert_from_catalog!(source:, external_key:, title:, description: nil, source_page_url: nil)
     source = source.to_s.strip
     external_key = external_key.to_s.strip.presence
     raise ArgumentError, 'source required' if source.blank?
     raise ArgumentError, 'external_key required for catalog upsert' if external_key.blank?
 
-    title = title.to_s.strip.presence || "#{source} collection #{external_key}"
+    placeholder = placeholder_title_for(source, external_key)
+    incoming_title = title.to_s.strip.presence
     record = find_or_initialize_by(source: source, external_key: external_key)
     if record.new_record?
-      record.title = title
+      record.title = incoming_title || placeholder
       record.description = description.to_s.presence
       record.source_page_url = source_page_url.to_s.presence
     else
-      record.title = title if record.title.blank?
-      record.description = description.to_s.presence if record.description.blank?
+      if incoming_title.present? && (record.title.blank? || record.title == placeholder)
+        record.title = incoming_title
+      end
+      if description.present? && record.description.blank?
+        record.description = description.to_s
+      end
       if record.source_page_url.blank? && source_page_url.present?
         record.source_page_url = source_page_url.to_s
       end

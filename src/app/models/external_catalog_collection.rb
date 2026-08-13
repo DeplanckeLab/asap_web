@@ -14,30 +14,35 @@ class ExternalCatalogCollection < ApplicationRecord
   scope :for_source, ->(source) { where(source: source) if source.present? }
   scope :ordered_by_title, -> { order(Arel.sql("LOWER(COALESCE(title, '')) ASC"), id: :asc) }
 
+  def self.placeholder_title_for(source, external_key)
+    "#{source} collection #{external_key}"
+  end
+
+  # Upsert catalog-backed umbrella by (source, external_key).
+  # Refreshes title/description when still placeholder / blank; does not overwrite
+  # customized local values.
   def self.upsert_from_catalog!(source:, external_key:, title:, description: nil, source_page_url: nil)
     source = source.to_s.strip
     external_key = external_key.to_s.strip.presence
     raise ArgumentError, 'source required' if source.blank?
     raise ArgumentError, 'external_key required' if external_key.blank?
 
-    title = title.to_s.strip.presence || "#{source} collection #{external_key}"
+    placeholder = placeholder_title_for(source, external_key)
+    incoming_title = title.to_s.strip.presence
     record = find_or_initialize_by(source: source, external_key: external_key)
     if record.new_record?
-      record.title = title
+      record.title = incoming_title || placeholder
       record.description = description.to_s.presence
       record.source_page_url = source_page_url.to_s.presence
     else
-      record.title = title if record.title.blank?
-      record.description = description.to_s.presence if record.description.blank?
+      if incoming_title.present? && (record.title.blank? || record.title == placeholder)
+        record.title = incoming_title
+      end
+      if description.present? && record.description.blank?
+        record.description = description.to_s
+      end
       if record.source_page_url.blank? && source_page_url.present?
         record.source_page_url = source_page_url.to_s
-      end
-      # Refresh title/description from upstream when still matching the auto placeholder.
-      if record.title == "#{source} collection #{external_key}" && title.present?
-        record.title = title
-      end
-      if record.description.blank? && description.present?
-        record.description = description.to_s
       end
     end
     record.save!
@@ -46,6 +51,10 @@ class ExternalCatalogCollection < ApplicationRecord
 
   def display_title
     title.to_s.presence || "Collection ##{id}"
+  end
+
+  def placeholder_title?
+    title.to_s == self.class.placeholder_title_for(source, external_key)
   end
 
   # Unique live ASAP projects linked via candidates in this collection.

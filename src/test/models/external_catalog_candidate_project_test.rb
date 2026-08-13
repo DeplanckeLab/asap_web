@@ -125,4 +125,42 @@ class ExternalCatalogCandidateProjectTest < ActiveSupport::TestCase
     assert_equal 'content_match',
                  candidate.reload.external_catalog_candidate_projects.find_by!(project_id: duplicate.id).link_kind
   end
+
+  test 'sync_catalog_links assigns project_collection from candidate collection_id' do
+    provider = Provider.find_or_create_by!(tag: 'CELLxGENE') do |p|
+      p.name = 'CELLxGENE'
+    end
+    external_id = "ds-#{SecureRandom.hex(4)}"
+    collection_key = SecureRandom.uuid
+    candidate = register_for_test_cleanup(
+      ExternalCatalogCandidate.create!(
+        source: 'cellxgene',
+        external_id: external_id,
+        provider_tag: 'CELLxGENE',
+        title: 'Dataset in collection',
+        url: 'https://example.com/c.h5ad',
+        import_status: 'idle',
+        tax_id: 9606,
+        collection_id: collection_key
+      )
+    )
+    pp = ProviderProject.find_or_create_by!(provider_id: provider.id, key: external_id) do |row|
+      row.title = 'PP'
+    end
+    project = create_test_project!(
+      name: 'Needs collection',
+      key: "col#{SecureRandom.hex(3)}",
+      public: true,
+      public_at: Time.current,
+      public_id: (Project.maximum(:public_id) || 0) + 1
+    )
+    project.provider_projects << pp unless project.provider_projects.exists?(id: pp.id)
+    candidate.update!(import_project_id: project.id)
+
+    ExternalCatalogCandidate.sync_catalog_links_for_public_project!(project)
+    project.reload
+    assert project.project_collection_id.present?
+    assert_equal 'cellxgene', project.project_collection.source
+    assert_equal collection_key, project.project_collection.external_key
+  end
 end

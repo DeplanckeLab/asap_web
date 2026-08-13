@@ -404,6 +404,21 @@ summary_search_gene_url = search_gene_project_path(@project)
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-3">
   <div class="xl:col-span-2 bg-white rounded-lg border border-gray-200 p-4" data-guided-tour="summary-repository-panel">
     <p class="dashboard-card-title text-gray-900 flex items-center gap-2 mb-4"><i class="fas fa-link text-gray-500"></i><span>Source repository links</span></p>
+    <% summary_collection = @project.project_collection %>
+    <% if summary_collection.present? %>
+      <p class="badge-text text-gray-600 mb-3">
+        Collection:
+        <% if summary_collection.source_page_url.present? %>
+          <%= link_to summary_collection.display_title,
+                      summary_collection.source_page_url,
+                      target: '_blank',
+                      rel: 'noopener noreferrer',
+                      class: 'text-blue-600 hover:text-blue-800 hover:underline' %>
+        <% else %>
+          <span class="text-gray-700"><%= summary_collection.display_title %></span>
+        <% end %>
+      </p>
+    <% end %>
     <% if @h_exp_entries && @h_exp_entries.keys.any? %>
       <div class="mt-3 space-y-4">
         <% @h_exp_entries.each do |type_id, exp_entries| %>

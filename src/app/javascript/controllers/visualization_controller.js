@@ -60,7 +60,8 @@ export default class extends Controller {
     rowLabel: String,
     colLabel: String,
     projectTypeTag: String,
-    cellIdAnnotIdsByLoom: Object
+    cellIdAnnotIdsByLoom: Object,
+    entryCheckpointTitle: String
   }
   
   // Optional targets - manually check with querySelector
@@ -201,7 +202,7 @@ export default class extends Controller {
       // work can take a while before the checkpoint itself starts loading, and
       // edits made during that window would be overwritten by the restore.
       this.initialCheckpointEntryLoading = true
-      this.setCheckpointViewLoading(true, 'Loading checkpoint')
+      this.setCheckpointViewLoading(true, 'Loading checkpoint', this.entryCheckpointTitleForLoading())
     }
 
     if (!this.boundDeSelectionRunClick) {
@@ -2351,6 +2352,19 @@ export default class extends Controller {
     return title
   }
 
+  entryCheckpointTitleForLoading() {
+    if (this.hasEntryCheckpointTitleValue) {
+      const fromPage = String(this.entryCheckpointTitleValue || '').trim()
+      if (fromPage.length > 0) return fromPage
+    }
+    const params = new URLSearchParams(window.location.search)
+    const checkpointIdFromUrl = String(params.get('checkpoint_id') || '').trim()
+    if (checkpointIdFromUrl.length > 0) {
+      return this.resolveCheckpointTitleFromHistory(checkpointIdFromUrl)
+    }
+    return ''
+  }
+
   resolveCheckpointTitleFromHistory(checkpointId) {
     if (checkpointId == null || checkpointId === '') return ''
     const item = (this.checkpointHistory || []).find((checkpoint) => String(checkpoint?.id) === String(checkpointId))
@@ -2542,7 +2556,7 @@ export default class extends Controller {
     this.currentCheckpointReadyForOverwrite = false
     this.restoredCurrentCheckpointOnEntry = false
     this.initialCheckpointEntryLoading = true
-    this.setCheckpointViewLoading(true, 'Loading checkpoint', '')
+    this.setCheckpointViewLoading(true, 'Loading checkpoint', this.entryCheckpointTitleForLoading())
     try {
       await this.fetchCheckpointHistory()
 
@@ -2550,11 +2564,9 @@ export default class extends Controller {
       const checkpointIdFromUrl = params.get('checkpoint_id')
       const shouldOpenCommentsFromUrl = ['1', 'true', 'yes'].includes(String(params.get('open_checkpoint_comments') || '').toLowerCase())
       if (checkpointIdFromUrl) {
-        this.setCheckpointViewLoading(
-          true,
-          'Loading checkpoint',
-          this.resolveCheckpointTitleFromHistory(checkpointIdFromUrl)
-        )
+        const urlTitle = this.resolveCheckpointTitleFromHistory(checkpointIdFromUrl) ||
+          this.entryCheckpointTitleForLoading()
+        this.setCheckpointViewLoading(true, 'Loading checkpoint', urlTitle)
         await this.loadCheckpointById(checkpointIdFromUrl)
         if (shouldOpenCommentsFromUrl) {
           await this.openCheckpointComments()
@@ -3044,7 +3056,8 @@ export default class extends Controller {
     let checkpoint = null
     let persistedBaselineForComments = null
     try {
-      const knownTitle = this.resolveCheckpointTitleFromHistory(checkpointId)
+      const knownTitle = this.resolveCheckpointTitleFromHistory(checkpointId) ||
+        this.entryCheckpointTitleForLoading()
       this.setCheckpointViewLoading(true, 'Loading checkpoint', knownTitle)
 
       const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(checkpointId)}`, {
@@ -3063,7 +3076,8 @@ export default class extends Controller {
       checkpoint = payload.checkpoint
       if (!checkpoint || !checkpoint.state) return
 
-      this.setCheckpointViewLoading(true, 'Loading checkpoint', this.checkpointDisplayTitle(checkpoint))
+      const loadedTitle = this.checkpointDisplayTitle(checkpoint) || knownTitle
+      this.setCheckpointViewLoading(true, 'Loading checkpoint', loadedTitle)
 
       persistedBaselineForComments = JSON.parse(JSON.stringify(checkpoint.state))
 

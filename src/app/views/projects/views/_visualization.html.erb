@@ -128,6 +128,12 @@ cell_id_annot_ids_by_loom = {}
 end
 project_type_tag = @project&.project_type&.tag.to_s
 annotation_tool_available = @project&.single_cell?
+
+entry_checkpoint = nil
+if params[:checkpoint_id].present?
+  entry_checkpoint = @project.checkpoints.visualization.find_by(id: params[:checkpoint_id])
+end
+entry_checkpoint_title = entry_checkpoint&.display_title.to_s
 %>
 
 <div data-controller="visualization"
@@ -146,6 +152,7 @@ annotation_tool_available = @project&.single_cell?
      data-visualization-project-type-tag-value="<%= project_type_tag %>"
      data-visualization-annotation-tool-available-value="<%= annotation_tool_available ? 'true' : 'false' %>"
      data-visualization-cell-id-annot-ids-by-loom-value="<%= cell_id_annot_ids_by_loom.to_json %>"
+     data-visualization-entry-checkpoint-title-value="<%= h(entry_checkpoint_title) %>"
      data-is-admin="<%= admin? ? 'true' : 'false' %>"
      style="display: flex; flex-direction: row; height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden;">
   

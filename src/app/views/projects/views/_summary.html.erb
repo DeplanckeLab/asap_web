@@ -88,17 +88,106 @@ font-size: inherit;
   else
     'Project files are archived. Click the Unarchive button at the top of this page to restore the data and enable downloads.'
   end
-downloaded_from_sources = @project.provider_projects.filter_map do |pp|
-  provider = pp.provider
-  next unless provider
-
-  page_url = pp.source_page_url
-  if page_url.present?
-    link_to provider.name, page_url, target: '_blank', rel: 'noopener noreferrer', class: "text-blue-600 hover:text-blue-800 hover:underline"
-  else
-    content_tag(:span, provider.name, class: "text-gray-700")
+summary_collection = @project.project_collection
+summary_collection_source = summary_collection&.source.to_s
+summary_provider_collection_source = lambda do |provider|
+  case provider.tag.to_s
+  when 'CELLxGENE' then 'cellxgene'
+  when 'HCA' then 'hca'
+  when 'GEO' then 'geo'
+  when 'Bgee' then 'bgee'
+  else provider.tag.to_s.downcase
   end
 end
+summary_provider_link_label = lambda do |pp|
+  provider = pp.provider
+  if provider.nil?
+    nil
+  else
+    page_url = pp.source_page_url
+    if page_url.present?
+      link_to provider.name, page_url, target: '_blank', rel: 'noopener noreferrer', class: 'text-blue-600 hover:text-blue-800 hover:underline'
+    else
+      content_tag(:span, provider.name, class: 'text-gray-700')
+    end
+  end
+end
+summary_collection_parenthetical = lambda do
+  if summary_collection.blank?
+    nil
+  else
+    collection_title =
+      if summary_collection.source_page_url.present?
+        link_to summary_collection.display_title,
+                summary_collection.source_page_url,
+                target: '_blank',
+                rel: 'noopener noreferrer',
+                class: 'text-blue-600 hover:text-blue-800 hover:underline'
+      else
+        content_tag(:span, summary_collection.display_title, class: 'text-gray-700')
+      end
+    safe_join([' (collection ', collection_title, ')'])
+  end
+end
+
+summary_provider_rows = @project.provider_projects.select { |pp| pp.provider.present? }
+summary_primary_pp =
+  if summary_collection_source.present?
+    summary_provider_rows.find { |pp| summary_provider_collection_source.call(pp.provider) == summary_collection_source }
+  end
+summary_primary_pp ||= summary_provider_rows.first
+summary_secondary_pps = summary_provider_rows.reject { |pp| summary_primary_pp && pp.id == summary_primary_pp.id }
+
+summary_downloaded_from_html = nil
+if summary_primary_pp
+  primary_label = summary_provider_link_label.call(summary_primary_pp)
+  attach_collection =
+    summary_collection.present? &&
+    summary_collection_source.present? &&
+    summary_provider_collection_source.call(summary_primary_pp.provider) == summary_collection_source
+  summary_downloaded_from_html =
+    if attach_collection
+      safe_join([primary_label, summary_collection_parenthetical.call])
+    else
+      primary_label
+    end
+elsif summary_collection.present?
+  collection_title =
+    if summary_collection.source_page_url.present?
+      link_to summary_collection.display_title,
+              summary_collection.source_page_url,
+              target: '_blank',
+              rel: 'noopener noreferrer',
+              class: 'text-blue-600 hover:text-blue-800 hover:underline'
+    else
+      content_tag(:span, summary_collection.display_title, class: 'text-gray-700')
+    end
+  summary_downloaded_from_html = safe_join(['collection ', collection_title])
+end
+
+# Manual collection on a project whose providers do not match collection.source.
+if summary_downloaded_from_html.present? &&
+   summary_collection.present? &&
+   summary_primary_pp &&
+   summary_provider_collection_source.call(summary_primary_pp.provider) != summary_collection_source
+  summary_downloaded_from_html = safe_join([summary_downloaded_from_html, summary_collection_parenthetical.call])
+end
+
+summary_also_exists_in = summary_secondary_pps.filter_map do |pp|
+  provider_label = summary_provider_link_label.call(pp)
+  next unless provider_label
+
+  attach_collection =
+    summary_collection.present? &&
+    summary_collection_source.present? &&
+    summary_provider_collection_source.call(pp.provider) == summary_collection_source
+  if attach_collection
+    safe_join([provider_label, summary_collection_parenthetical.call])
+  else
+    provider_label
+  end
+end
+
 summary_parsing_attrs = begin JSON.parse(@project.parsing_attrs_json.to_s); rescue; {}; end
 summary_integration_source_keys = Basic.integration_source_keys(summary_parsing_attrs)
 summary_integration_projects_by_key = summary_integration_source_keys.any? ? Project.where(key: summary_integration_source_keys).index_by(&:key) : {}
@@ -404,21 +493,6 @@ summary_search_gene_url = search_gene_project_path(@project)
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-3">
   <div class="xl:col-span-2 bg-white rounded-lg border border-gray-200 p-4" data-guided-tour="summary-repository-panel">
     <p class="dashboard-card-title text-gray-900 flex items-center gap-2 mb-4"><i class="fas fa-link text-gray-500"></i><span>Source repository links</span></p>
-    <% summary_collection = @project.project_collection %>
-    <% if summary_collection.present? %>
-      <p class="badge-text text-gray-600 mb-3">
-        Collection:
-        <% if summary_collection.source_page_url.present? %>
-          <%= link_to summary_collection.display_title,
-                      summary_collection.source_page_url,
-                      target: '_blank',
-                      rel: 'noopener noreferrer',
-                      class: 'text-blue-600 hover:text-blue-800 hover:underline' %>
-        <% else %>
-          <span class="text-gray-700"><%= summary_collection.display_title %></span>
-        <% end %>
-      </p>
-    <% end %>
     <% if @h_exp_entries && @h_exp_entries.keys.any? %>
       <div class="mt-3 space-y-4">
         <% @h_exp_entries.each do |type_id, exp_entries| %>
@@ -477,7 +551,16 @@ summary_search_gene_url = search_gene_project_path(@project)
         <% end %>
       </div>
     <% end %>
-    <% if downloaded_from_sources.any? %><p class="badge-text text-gray-600 mt-3">Downloaded from <%= safe_join(downloaded_from_sources, ', ') %></p><% end %>
+    <% if summary_downloaded_from_html.present? || summary_also_exists_in.any? %>
+      <div class="badge-text text-gray-600 mt-3 space-y-1">
+        <% if summary_downloaded_from_html.present? %>
+          <p>Downloaded from <%= summary_downloaded_from_html %>.</p>
+        <% end %>
+        <% summary_also_exists_in.each do |label| %>
+          <p>Also exists in <%= label %>.</p>
+        <% end %>
+      </div>
+    <% end %>
   </div>
 
   <div class="bg-white rounded-lg border border-gray-200 p-4" data-guided-tour="summary-publications-panel">

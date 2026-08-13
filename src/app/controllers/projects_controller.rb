@@ -11789,8 +11789,8 @@ class ProjectsController < ApplicationController
       end
 
       @project_type = @project.project_type
-      # Used by the Source repository links card (collection title + provider page URL).
-      @project.association(:project_collection).load if @project.project_collection_id.present?
+      # Prefetch for the Source repository links card (collection title + provider URL).
+      @project.project_collection if @project.project_collection_id.present?
 
       # One CLA load for counts, gene/ontology resolution, and the summary table.
       @summary_cla_records = Cla.active.where(project_id: @project.id)

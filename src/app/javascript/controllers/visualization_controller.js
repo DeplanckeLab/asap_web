@@ -727,6 +727,7 @@ export default class extends Controller {
     }, 1500)
 
     this.loadInitialCheckpointOnEntry().finally(() => {
+      this.ensureDefaultEmbeddingAfterCheckpointEntry()
       this.scheduleAutoMetadataPreload()
     })
 
@@ -1114,7 +1115,28 @@ export default class extends Controller {
     setTimeout(() => {
       const params = new URLSearchParams(window.location.search)
       const checkpointIdFromUrl = String(params.get('checkpoint_id') || '').trim()
+      const checkpointEntryPending = (
+        checkpointIdFromUrl.length > 0 ||
+        this.initialCheckpointEntryLoading === true
+      )
       const selectedEmbeddingId = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '').trim() : ''
+
+      // Checkpoint entry owns embedding selection + coordinate fetch. Applying a default
+      // embedding here races ExtractMetadata on the same loom (first-load 500s).
+      if (checkpointEntryPending) {
+        this.checkpointDebug('initializeEmbeddingSelectionUI:skip-default-apply-checkpoint-entry', {
+          selectedEmbeddingId: selectedEmbeddingId || null,
+          currentLoomFile: this.getCurrentLoomFile(),
+          checkpointIdFromUrl: checkpointIdFromUrl || null,
+          initialCheckpointEntryLoading: this.initialCheckpointEntryLoading === true
+        })
+        this.setOnlyEmbeddingGroupOpen(this.getCurrentLoomFile() || defaultInfo.loomFile)
+        if (this.geneManager && typeof this.geneManager.loadAutocompleteData === 'function') {
+          this.geneManager.loadAutocompleteData()
+        }
+        return
+      }
+
       if (selectedEmbeddingId.length > 0) {
         const selectedIsServerDefault = (
           this.hasDefaultEmbeddingIdValue &&
@@ -1122,9 +1144,8 @@ export default class extends Controller {
           selectedEmbeddingId === String(this.defaultEmbeddingIdValue || '').trim()
         )
 
-        // Keep URL checkpoint restore untouched, but do not let server-side fallback
-        // preselection block ranked default embedding selection.
-        if (checkpointIdFromUrl.length === 0 && selectedIsServerDefault) {
+        // Do not let server-side fallback preselection block ranked default embedding selection.
+        if (selectedIsServerDefault) {
           this.checkpointDebug('initializeEmbeddingSelectionUI:replace-server-default-with-ranked-default', {
             selectedEmbeddingId,
             serverDefaultEmbeddingId: String(this.defaultEmbeddingIdValue || ''),
@@ -1140,17 +1161,15 @@ export default class extends Controller {
         this.checkpointDebug('initializeEmbeddingSelectionUI:skip-default-apply', {
           selectedEmbeddingId,
           currentLoomFile: this.getCurrentLoomFile(),
-          checkpointIdFromUrl: checkpointIdFromUrl || null
+          checkpointIdFromUrl: null
         })
         this.setOnlyEmbeddingGroupOpen(this.getCurrentLoomFile())
         if (this.geneManager && typeof this.geneManager.loadAutocompleteData === 'function') {
           this.geneManager.loadAutocompleteData()
         }
-        if (checkpointIdFromUrl.length === 0) {
-          this.loadMetadataCoordinates(selectedEmbeddingId).catch((error) => {
-            console.error('Failed to load pre-selected embedding coordinates:', error)
-          })
-        }
+        this.loadMetadataCoordinates(selectedEmbeddingId).catch((error) => {
+          console.error('Failed to load pre-selected embedding coordinates:', error)
+        })
         return
       }
 
@@ -2577,6 +2596,7 @@ export default class extends Controller {
       const loadedCurrentCheckpoint = await this.loadCurrentCheckpointOnEntry()
       if (loadedCurrentCheckpoint) {
         this.restoredCurrentCheckpointOnEntry = true
+        this._checkpointEntryAppliedVisualizationState = true
         return
       }
 
@@ -2600,6 +2620,59 @@ export default class extends Controller {
     const navigationEntry = performance.getEntriesByType('navigation')[0]
     const navigationType = navigationEntry?.type || null
     return navigationType === 'reload' || performance?.navigation?.type === 1
+  }
+
+  // After checkpoint entry finishes (or finds nothing), ensure an embedding is loaded.
+  // initializeEmbeddingSelectionUI skips default apply while checkpoint entry is pending
+  // to avoid racing ExtractMetadata on the same loom.
+  ensureDefaultEmbeddingAfterCheckpointEntry() {
+    if (!this.hasMetadataSelectTarget) return
+
+    const selectedEmbeddingId = String(this.metadataSelectTarget.value || '').trim()
+    const hasCoordinates = Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
+    if (hasCoordinates) return
+
+    const defaultInfo = this.determineDefaultEmbedding()
+    const checkpointApplied = this._checkpointEntryAppliedVisualizationState === true
+    const selectedIsServerDefault = (
+      this.hasDefaultEmbeddingIdValue &&
+      String(this.defaultEmbeddingIdValue || '').trim().length > 0 &&
+      selectedEmbeddingId.length > 0 &&
+      selectedEmbeddingId === String(this.defaultEmbeddingIdValue || '').trim()
+    )
+
+    // No checkpoint restored: prefer ranked default over server-side fallback preselection.
+    if (!checkpointApplied && defaultInfo && (selectedEmbeddingId.length === 0 || selectedIsServerDefault)) {
+      this.checkpointDebug('ensureDefaultEmbeddingAfterCheckpointEntry:apply-default', {
+        selectedEmbeddingId: selectedEmbeddingId || null,
+        selectedIsServerDefault,
+        rankedEmbeddingId: String(defaultInfo.embedding?.id || ''),
+        rankedLoomFile: defaultInfo.loomFile
+      })
+      this.applyEmbeddingSelection(defaultInfo.embedding.id, defaultInfo.loomFile)
+      this.setOnlyEmbeddingGroupOpen(defaultInfo.loomFile)
+      return
+    }
+
+    if (selectedEmbeddingId.length > 0) {
+      this.checkpointDebug('ensureDefaultEmbeddingAfterCheckpointEntry:load-selected', {
+        selectedEmbeddingId,
+        checkpointApplied
+      })
+      this.setOnlyEmbeddingGroupOpen(this.getCurrentLoomFile())
+      this.loadMetadataCoordinates(selectedEmbeddingId).catch((error) => {
+        console.error('Failed to load embedding coordinates after checkpoint entry:', error)
+      })
+      return
+    }
+
+    if (!defaultInfo) return
+    this.checkpointDebug('ensureDefaultEmbeddingAfterCheckpointEntry:apply-default-empty-select', {
+      rankedEmbeddingId: String(defaultInfo.embedding?.id || ''),
+      rankedLoomFile: defaultInfo.loomFile
+    })
+    this.applyEmbeddingSelection(defaultInfo.embedding.id, defaultInfo.loomFile)
+    this.setOnlyEmbeddingGroupOpen(defaultInfo.loomFile)
   }
 
   scheduleAutoMetadataPreload() {
@@ -3135,6 +3208,7 @@ export default class extends Controller {
         checkpointId: String(checkpoint.id || checkpointId),
         blockers: this.collectCheckpointUiBlockers()
       })
+      this._checkpointEntryAppliedVisualizationState = true
     } catch (error) {
       console.error('Error applying checkpoint state:', error)
       this.checkpointTrace('loadCheckpointById:apply-error', {

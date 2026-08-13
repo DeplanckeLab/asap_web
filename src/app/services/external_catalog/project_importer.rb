@@ -13,6 +13,26 @@ module ExternalCatalog
     RAW_SEL = '/raw/X'
     DEFAULT_PARSE_TIMEOUT_SEC = 6 * 60 * 60
     POLL_INTERVAL_SEC = 15
+    LANDING_CHECKPOINT_TITLE_SUFFIX = ' colored by cell type with labels'
+    LEGACY_LANDING_CHECKPOINT_TITLES = [
+      'Landing page',
+      'Scatter plot colored by cell type metadata with labels',
+      'UMAP colored by cell type metadata with labels',
+      't-SNE colored by cell type metadata with labels',
+      'PCA colored by cell type metadata with labels',
+      "Scatter plot#{LANDING_CHECKPOINT_TITLE_SUFFIX}"
+    ].freeze
+    EMBEDDING_METHOD_LABELS = {
+      umap: 'UMAP',
+      tsne: 't-SNE',
+      pca: 'PCA'
+    }.freeze
+    # Prefer UMAP, then t-SNE, then PCA when guessing from annot names.
+    EMBEDDING_METHOD_RANK = {
+      umap: 0,
+      tsne: 1,
+      pca: 2
+    }.freeze
 
     class Error < StandardError; end
     class SkipEntry < StandardError; end
@@ -765,11 +785,14 @@ module ExternalCatalog
       state = landing_checkpoint_state(embedding: embedding, coloring: coloring, loom_file: loom_file)
       label_font = state.dig('display', 'labelFontSizeMode')
       label_size = state.dig('display', 'labelFontSize')
+      title = landing_checkpoint_title_for(embedding)
 
       Checkpoint.transaction do
         project.checkpoints.visualization.where(is_landing_page: true).update_all(is_landing_page: false)
 
-        checkpoint = project.checkpoints.visualization.find_or_initialize_by(title: 'Landing page')
+        checkpoint = find_existing_landing_checkpoint(project, title: title) ||
+                     project.checkpoints.visualization.new
+        checkpoint.title = title
         checkpoint.user = project.user
         checkpoint.kind = Checkpoint::KIND_VISUALIZATION
         checkpoint.run_id = nil
@@ -779,7 +802,8 @@ module ExternalCatalog
         checkpoint.save!
         @logger.info(
           "[ExternalCatalog] landing checkpoint project=#{project.key} " \
-          "checkpoint_id=#{checkpoint.id} emb=#{embedding.id}(#{embedding.name}) " \
+          "checkpoint_id=#{checkpoint.id} title=#{title.inspect} " \
+          "emb=#{embedding.id}(#{embedding.name}) " \
           "color=#{coloring.id}(#{coloring.name}) labels=on " \
           "labelFont=#{label_font}:#{label_size}"
         )
@@ -792,17 +816,44 @@ module ExternalCatalog
            .where.not(filepath: nil)
            .to_a
            .min_by do |annot|
-        name = annot.name.to_s
         parsing_rank = annot.filepath.to_s.match?(%r{(^|/)parsing(/|$)}) ? 0 : 1
-        method_rank =
-          if name.match?(/umap/i) then 0
-          elsif name.match?(/tsne|t_sne|t-sne/i) then 1
-          elsif name.match?(/pca/i) then 2
-          else 3
-          end
+        method_rank = embedding_method_rank(annot.name)
         cell_count = -(annot.nber_cols.to_i)
         [method_rank, parsing_rank, cell_count, annot.id]
       end
+    end
+
+    def detect_embedding_method(name)
+      text = name.to_s
+      return :umap if text.match?(/(?:\b|_)umap(?:\b|_)/i)
+      return :tsne if text.match?(/(?:\b|_)(?:tsne|t_sne|t-sne)(?:\b|_)/i)
+      return :pca if text.match?(/(?:\b|_)pca(?:\b|_)/i)
+
+      nil
+    end
+
+    def embedding_method_rank(name)
+      method = detect_embedding_method(name)
+      EMBEDDING_METHOD_RANK.fetch(method, 3)
+    end
+
+    def embedding_method_label(name)
+      method = detect_embedding_method(name)
+      EMBEDDING_METHOD_LABELS[method] || 'Scatter plot'
+    end
+
+    def landing_checkpoint_title_for(embedding)
+      "#{embedding_method_label(embedding.name)}#{LANDING_CHECKPOINT_TITLE_SUFFIX}"
+    end
+
+    def find_existing_landing_checkpoint(project, title:)
+      known_titles = (
+        EMBEDDING_METHOD_LABELS.values.map { |label| "#{label}#{LANDING_CHECKPOINT_TITLE_SUFFIX}" } +
+        LEGACY_LANDING_CHECKPOINT_TITLES +
+        [title]
+      ).uniq
+
+      project.checkpoints.visualization.where(title: known_titles).order(:id).first
     end
 
     def find_cell_type_annot(project, filepath:)

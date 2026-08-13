@@ -2715,9 +2715,12 @@ annotation_tool_available = @project&.single_cell?
 <%= render 'projects/views/saved_selection_item_template' %>
 
 <div id="checkpoint-loading-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.35); z-index: 12500; justify-content: center; align-items: center;">
-  <div style="background: white; border: 1px solid #d1d5db; border-radius: 10px; padding: 18px 22px; min-width: 220px; display: flex; align-items: center; justify-content: center; gap: 10px;">
-    <i class="fas fa-spinner fa-spin" style="font-size: 15px; color: #374151;"></i>
-    <span id="checkpoint-loading-message" style="font-size: 14px; color: #111827; font-weight: 500;">Loading checkpoint</span>
+  <div style="background: white; border: 1px solid #d1d5db; border-radius: 10px; padding: 18px 22px; min-width: 220px; max-width: min(480px, 92vw); display: flex; align-items: center; justify-content: center; gap: 10px;">
+    <i class="fas fa-spinner fa-spin" style="font-size: 15px; color: #374151; flex-shrink: 0;"></i>
+    <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0;">
+      <span id="checkpoint-loading-message" style="font-size: 14px; color: #111827; font-weight: 500;">Loading checkpoint</span>
+      <span id="checkpoint-loading-name" style="display: none; font-size: 12px; color: #4b5563; font-weight: 400; line-height: 1.35; word-break: break-word;"></span>
+    </div>
   </div>
 </div>
 

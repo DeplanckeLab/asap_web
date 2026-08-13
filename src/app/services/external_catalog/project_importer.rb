@@ -99,11 +99,7 @@ module ExternalCatalog
       wait_for_parse!(project)
       attach_reference_metadata!(project, entry)
       run_scfair_validation!(project) if project_type_for(entry).tag.to_s == 'sc'
-      if @skip_publish
-        @logger.info("[ExternalCatalog] skip public project=#{project.key}: SKIP_PUBLISH")
-      else
-        maybe_make_public!(project)
-      end
+      finalize_project_visibility!(project)
       archive_project!(project) unless @skip_archive
 
       @logger.info(
@@ -710,10 +706,17 @@ module ExternalCatalog
            .exists?
     end
 
-    def maybe_make_public!(project)
+    def finalize_project_visibility!(project)
       project.reload
       unless visualization_available?(project)
-        @logger.info("[ExternalCatalog] skip public project=#{project.key}: no visualization embeddings")
+        @logger.info("[ExternalCatalog] skip landing/public project=#{project.key}: no visualization embeddings")
+        return
+      end
+
+      create_landing_visualization_checkpoint!(project)
+
+      if @skip_publish
+        @logger.info("[ExternalCatalog] skip public project=#{project.key}: SKIP_PUBLISH")
         return
       end
 
@@ -732,8 +735,6 @@ module ExternalCatalog
         @logger.info("[ExternalCatalog] skip public project=#{project.key}: sandbox project")
         return
       end
-
-      create_landing_visualization_checkpoint!(project)
 
       project.public_id = (Project.maximum(:public_id) || 0) + 1 if project.public_id.nil?
       project.public = true

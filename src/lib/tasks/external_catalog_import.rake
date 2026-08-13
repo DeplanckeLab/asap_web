@@ -185,7 +185,7 @@ namespace :external_catalog do
   end
 
   desc 'Import from external_catalog_candidates (COUNT/N/LIMIT, IMPORT_USER_EMAIL|IMPORT_USER_ID, SOURCE, PROJECT_TYPE, ONLY_NEW=1). ' \
-       'SKIP_ARCHIVE=1 (default). SKIP_PUBLISH=1 skips landing checkpoint + making the project public.'
+       'SKIP_ARCHIVE=1 (default). SKIP_PUBLISH=1 still creates the landing checkpoint but does not make the project public.'
   task import: :environment do
     source = ENV.fetch('SOURCE', 'all').to_s.strip.downcase
     count = external_catalog_count

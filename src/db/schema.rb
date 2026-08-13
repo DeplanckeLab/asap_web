@@ -644,7 +644,6 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
     t.string "collection_id"
     t.datetime "created_at", null: false
     t.text "dois_json"
-    t.boolean "obsolete", default: false, null: false
     t.string "external_id", null: false
     t.string "filename"
     t.bigint "filesize", default: 0, null: false
@@ -655,6 +654,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
     t.string "import_status", default: "idle", null: false
     t.integer "import_user_id"
     t.datetime "last_seen_at"
+    t.boolean "obsolete", default: false, null: false
     t.string "organism_label"
     t.text "pmids_json"
     t.string "project_type_tag", default: "sc", null: false

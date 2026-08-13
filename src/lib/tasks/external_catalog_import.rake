@@ -50,6 +50,7 @@ namespace :external_catalog do
       version: external_catalog_resolve_version!,
       dry_run: external_catalog_bool('DRY_RUN'),
       skip_archive: external_catalog_bool('SKIP_ARCHIVE', default: true),
+      skip_publish: external_catalog_bool('SKIP_PUBLISH'),
       strict: external_catalog_bool('STRICT'),
       parse_timeout_sec: ENV['PARSE_TIMEOUT_SEC'],
       archiver: external_catalog_archiver
@@ -183,7 +184,8 @@ namespace :external_catalog do
     candidate
   end
 
-  desc 'Import from external_catalog_candidates (COUNT/N/LIMIT, IMPORT_USER_EMAIL|IMPORT_USER_ID, SOURCE, PROJECT_TYPE, ONLY_NEW=1)'
+  desc 'Import from external_catalog_candidates (COUNT/N/LIMIT, IMPORT_USER_EMAIL|IMPORT_USER_ID, SOURCE, PROJECT_TYPE, ONLY_NEW=1). ' \
+       'SKIP_ARCHIVE=1 (default). SKIP_PUBLISH=1 skips landing checkpoint + making the project public.'
   task import: :environment do
     source = ENV.fetch('SOURCE', 'all').to_s.strip.downcase
     count = external_catalog_count
@@ -194,7 +196,8 @@ namespace :external_catalog do
 
     puts "external_catalog:import from candidates SOURCE=#{source} COUNT=#{count.inspect} " \
          "USER=#{user.email} ONLY_NEW=#{only_new} DRY_RUN=#{ENV['DRY_RUN']} " \
-         "SKIP_ARCHIVE=#{ENV.fetch('SKIP_ARCHIVE', '1')} PROJECT_TYPE=#{project_type.inspect}"
+         "SKIP_ARCHIVE=#{ENV.fetch('SKIP_ARCHIVE', '1')} " \
+         "SKIP_PUBLISH=#{ENV.fetch('SKIP_PUBLISH', '0')} PROJECT_TYPE=#{project_type.inspect}"
 
     if ExternalCatalogCandidate.count.zero?
       raise 'No external_catalog_candidates rows. Run external_catalog:sync_candidates first.'

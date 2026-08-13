@@ -23,6 +23,7 @@ module ExternalCatalog
       logger: Rails.logger,
       dry_run: false,
       skip_archive: false,
+      skip_publish: false,
       strict: false,
       parse_timeout_sec: nil,
       archiver: nil
@@ -32,6 +33,7 @@ module ExternalCatalog
       @logger = logger
       @dry_run = dry_run
       @skip_archive = skip_archive
+      @skip_publish = skip_publish
       @strict = strict
       @parse_timeout_sec = (parse_timeout_sec || ENV.fetch('PARSE_TIMEOUT_SEC', DEFAULT_PARSE_TIMEOUT_SEC)).to_i
       @archiver = archiver
@@ -97,7 +99,11 @@ module ExternalCatalog
       wait_for_parse!(project)
       attach_reference_metadata!(project, entry)
       run_scfair_validation!(project) if project_type_for(entry).tag.to_s == 'sc'
-      maybe_make_public!(project)
+      if @skip_publish
+        @logger.info("[ExternalCatalog] skip public project=#{project.key}: SKIP_PUBLISH")
+      else
+        maybe_make_public!(project)
+      end
       archive_project!(project) unless @skip_archive
 
       @logger.info(

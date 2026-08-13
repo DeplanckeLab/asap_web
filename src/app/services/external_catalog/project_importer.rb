@@ -933,7 +933,7 @@ module ExternalCatalog
           'showLabelBoxes' => true,
           'labelFontSizeMode' => label_font[:mode],
           'labelFontSize' => label_font[:size],
-          'truncateLongLabels' => true,
+          'truncateLongLabels' => false,
           'freezeMovedLabels' => true,
           'labelPlacementMode' => 'avoid-collisions',
           'manualLabelLocks' => {}

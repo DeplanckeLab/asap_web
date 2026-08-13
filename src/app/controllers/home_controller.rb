@@ -26,25 +26,11 @@ class HomeController < ApplicationController
     @query = params[:q].to_s.strip
     @atlas_terms = atlas_terms(@atlas)
 
-    base_scope = Project
-      .where(being_deleted: false)
-      .where(public: true)
-      .where(cloned_project_id: nil)
-
-    atlas_filter_sql = searchable_project_fields_sql
-    atlas_conditions = @atlas_terms.map { "#{atlas_filter_sql} LIKE ?" }.join(' OR ')
-    atlas_values = @atlas_terms.map { |term| "%#{ActiveRecord::Base.sanitize_sql_like(term.downcase)}%" }
-    base_scope = base_scope.where([atlas_conditions, *atlas_values])
-
-    if @query.present?
-      query_value = "%#{ActiveRecord::Base.sanitize_sql_like(@query.downcase)}%"
-      base_scope = base_scope.where("#{atlas_filter_sql} LIKE ?", query_value)
+    if @atlas == 'hca'
+      load_hca_atlas_catalog_groups!
+    else
+      load_keyword_atlas_project_groups!
     end
-
-    @projects = base_scope
-      .includes(:project_type, :organism, :archive_status, :user)
-      .order(created_at: :desc)
-      .limit(200)
   end
 
   def api_documentation
@@ -386,7 +372,146 @@ class HomeController < ApplicationController
     end
   end
 
+  def load_keyword_atlas_project_groups!
+    base_scope = Project
+      .where(being_deleted: false)
+      .where(public: true)
+      .where(cloned_project_id: nil)
+      .left_joins(:project_collection)
+
+    atlas_filter_sql = searchable_project_fields_sql
+    atlas_conditions = @atlas_terms.map { "#{atlas_filter_sql} LIKE ?" }.join(' OR ')
+    atlas_values = @atlas_terms.map { |term| "%#{ActiveRecord::Base.sanitize_sql_like(term.downcase)}%" }
+    base_scope = base_scope.where([atlas_conditions, *atlas_values])
+
+    if @query.present?
+      query_value = "%#{ActiveRecord::Base.sanitize_sql_like(@query.downcase)}%"
+      base_scope = base_scope.where("#{atlas_filter_sql} LIKE ?", query_value)
+    end
+
+    @projects = base_scope
+      .includes(:project_type, :organism, :archive_status, :user, :project_collection)
+      .order(Arel.sql('public_id ASC NULLS LAST'), Arel.sql("LOWER(COALESCE(projects.name, '')) ASC"), id: :asc)
+      .limit(200)
+      .to_a
+
+    @atlas_uses_catalog_collections = false
+    @project_collection_groups = group_atlas_projects_by_collection(@projects)
+  end
+
+  # HCA: unique ASAP projects under each external_catalog_collection, with linked catalog entries.
+  def load_hca_atlas_catalog_groups!
+    @atlas_uses_catalog_collections = true
+    collections = ExternalCatalogCollection.for_source('hca').ordered_by_title.includes(:external_catalog_candidates)
+    groups = []
+    projects_seen = []
+
+    collections.each do |collection|
+      candidates = collection.external_catalog_candidates.select { |c| !c.obsolete? }
+      next if candidates.empty?
+
+      project_to_entries = hca_projects_with_entries_for_candidates(candidates)
+      next if project_to_entries.empty?
+
+      rows = project_to_entries.map do |project, entries|
+        {
+          project: project,
+          catalog_entries: entries
+        }
+      end
+
+      if @query.present?
+        q = @query.downcase
+        rows = rows.select do |row|
+          project = row[:project]
+          haystack = [
+            project.name, project.key, project.description,
+            collection.title, collection.description,
+            *row[:catalog_entries].map { |e| [e.title, e.external_id, e.filename] }
+          ].flatten.compact.map { |v| v.to_s.downcase }.join(' ')
+          haystack.include?(q)
+        end
+      end
+      next if rows.empty?
+
+      rows.sort_by! do |row|
+        p = row[:project]
+        [p.public_id || 1_000_000_000, p.name.to_s.downcase, p.id]
+      end
+
+      projects_seen.concat(rows.map { |r| r[:project] })
+      groups << {
+        collection: collection,
+        title: collection.display_title,
+        description: collection.description.to_s.presence,
+        project_rows: rows,
+        projects: rows.map { |r| r[:project] }
+      }
+    end
+
+    @project_collection_groups = groups.first(100)
+    @projects = projects_seen.uniq(&:id)
+  end
+
+  def hca_projects_with_entries_for_candidates(candidates)
+    result = Hash.new { |h, k| h[k] = [] }
+    provider = Provider.find_by(tag: 'HCA')
+
+    candidates.each do |candidate|
+      projects = []
+      if candidate.import_project_id.present? && candidate.import_project && !candidate.import_project.being_deleted
+        projects << candidate.import_project if candidate.import_project.public?
+      end
+      if provider
+        pp = ProviderProject.find_by(provider_id: provider.id, key: candidate.external_id.to_s)
+        if pp
+          projects.concat(pp.projects.where(public: true, being_deleted: [false, nil]).to_a)
+        end
+      end
+      projects.uniq(&:id).each do |project|
+        result[project] << candidate unless result[project].any? { |c| c.id == candidate.id }
+      end
+    end
+    result
+  end
+
   def searchable_project_fields_sql
-    "LOWER(COALESCE(projects.name, '') || ' ' || COALESCE(projects.key, '') || ' ' || COALESCE(projects.description, ''))"
+    "LOWER(" \
+      "COALESCE(projects.name, '') || ' ' || " \
+      "COALESCE(projects.key, '') || ' ' || " \
+      "COALESCE(projects.description, '') || ' ' || " \
+      "COALESCE(project_collections.title, '') || ' ' || " \
+      "COALESCE(project_collections.description, '')" \
+    ")"
+  end
+
+  def group_atlas_projects_by_collection(projects)
+    grouped = projects.group_by(&:project_collection_id)
+    collections_by_id = projects.filter_map(&:project_collection).uniq(&:id).index_by(&:id)
+
+    collection_sections =
+      collections_by_id.values
+        .sort_by { |c| [c.display_title.to_s.downcase, c.id] }
+        .map do |collection|
+          {
+            collection: collection,
+            title: collection.display_title,
+            description: collection.description.to_s.presence,
+            projects: grouped[collection.id] || [],
+            project_rows: (grouped[collection.id] || []).map { |p| { project: p, catalog_entries: [] } }
+          }
+        end
+
+    ungrouped = grouped[nil] || []
+    if ungrouped.any?
+      collection_sections << {
+        collection: nil,
+        title: 'Ungrouped',
+        description: 'Public projects that are not assigned to a collection.',
+        projects: ungrouped,
+        project_rows: ungrouped.map { |p| { project: p, catalog_entries: [] } }
+      }
+    end
+    collection_sections
   end
 end

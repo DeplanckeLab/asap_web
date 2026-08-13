@@ -1395,12 +1395,28 @@ class ProjectsController < ApplicationController
       end
 
       respond_to do |format|
-        if @project.update(project_params)
-          format.html { redirect_to @project, notice: "Project was successfully updated." }
+        begin
+          ActiveRecord::Base.transaction do
+            apply_project_collection_assignment!
+            unless @project.update(project_params)
+              raise ActiveRecord::RecordInvalid, @project
+            end
+          end
+          redirect_view = params.key?(:project_collection_assignment) ? 'settings' : nil
+          format.html do
+            if redirect_view
+              redirect_to project_path(@project, view: redirect_view), notice: "Project was successfully updated."
+            else
+              redirect_to @project, notice: "Project was successfully updated."
+            end
+          end
           format.json { render :show, status: :ok, location: @project }
-        else
-          format.html { render :edit, status: :unprocessable_entity }
-          format.json { render json: @project.errors, status: :unprocessable_entity }
+        rescue ArgumentError, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound => e
+          message = e.is_a?(ActiveRecord::RecordInvalid) ? @project.errors.full_messages.to_sentence : e.message
+          format.html do
+            redirect_to project_path(@project, view: 'settings'), alert: message
+          end
+          format.json { render json: { error: message }, status: :unprocessable_entity }
         end
       end
     end
@@ -1626,6 +1642,9 @@ class ProjectsController < ApplicationController
     end
 
     if @project.save
+      if @project.public?
+        ExternalCatalogCandidate.sync_catalog_links_for_public_project!(@project)
+      end
       status_text = @project.public? ? 'public' : 'private'
       respond_to do |format|
         format.html { redirect_to project_path(@project, view: 'summary'), notice: "Project is now #{status_text}." }
@@ -11633,6 +11652,81 @@ class ProjectsController < ApplicationController
     def load_settings_context
       @shares = @project.shares.includes(:user).to_a
       @project_types = ProjectType.order(:name) if @project.project_type_id.nil? && @project.version_id.to_i < 8
+      @current_project_collection = @project.project_collection
+      @project_collections =
+        if admin?
+          ProjectCollection.ordered_by_title.to_a
+        else
+          scope = ProjectCollection.manual.created_by(current_user).ordered_by_title
+          list = scope.to_a
+          if @current_project_collection && list.none? { |c| c.id == @current_project_collection.id }
+            # Show current membership for context; assignment rules still apply on save.
+            list = [@current_project_collection] + list
+          end
+          list
+        end
+      @can_edit_any_project_collection = admin?
+    end
+
+    # Assign / clear / create umbrella collection for this project (one collection max).
+    # Admin: any collection + metadata. Owner: clear, create manual, or assign to own manuals only.
+    def apply_project_collection_assignment!
+      return unless params.key?(:project_collection_assignment)
+
+      assignment = params.require(:project_collection_assignment).permit(
+        :mode, :project_collection_id, :title, :description
+      )
+      mode = assignment[:mode].to_s.strip
+      case mode
+      when 'none', ''
+        @project.project_collection_id = nil
+      when 'existing'
+        collection_id = assignment[:project_collection_id].to_i
+        raise ArgumentError, 'Select a collection' if collection_id <= 0
+
+        collection = ProjectCollection.find(collection_id)
+        authorize_project_collection_assignment!(collection, editing_metadata: true)
+
+        title = assignment[:title].to_s.strip
+        raise ArgumentError, 'Collection title is required' if title.blank?
+
+        if admin? || collection.owned_by?(current_user)
+          collection.update!(
+            title: title,
+            description: assignment[:description].to_s.presence
+          )
+        end
+        @project.project_collection_id = collection.id
+      when 'new'
+        unless admin? || owner?(@project)
+          raise ArgumentError, 'Only the project owner or an admin can create a collection'
+        end
+
+        title = assignment[:title].to_s.strip
+        raise ArgumentError, 'Collection title is required' if title.blank?
+
+        collection = ProjectCollection.create_manual!(
+          title: title,
+          description: assignment[:description],
+          created_by_user: current_user
+        )
+        @project.project_collection_id = collection.id
+      else
+        raise ArgumentError, "Unknown collection assignment mode: #{mode}"
+      end
+      @project.save!
+    end
+
+    def authorize_project_collection_assignment!(collection, editing_metadata: false)
+      return if admin?
+      raise ArgumentError, 'Only the project owner or an admin can change collection membership' unless owner?(@project)
+
+      if collection.catalog_backed?
+        raise ArgumentError, 'Catalog collections can only be managed by an admin. Clear membership or create your own collection.'
+      end
+      unless collection.owned_by?(current_user)
+        raise ArgumentError, 'You can only assign this project to a collection you created'
+      end
     end
 
     def load_compliance_context

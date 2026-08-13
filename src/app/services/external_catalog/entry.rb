@@ -17,6 +17,8 @@ module ExternalCatalog
     :identifiers,
     :source_page_url,
     :collection_id,
+    :collection_title,
+    :collection_description,
     keyword_init: true
   ) do
     def provider_name

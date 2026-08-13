@@ -126,7 +126,8 @@ class InputFileSha256
         name = project.display_name.to_s.strip
         name.present? ? "#{key} (#{name})" : key
       end
-      "This file was already used to create public project(s): #{labels.join(', ')}. Creating another project from it is allowed."
+      "This file was already used to create public project(s): #{labels.join(', ')}. " \
+        "Creating another project from it is allowed, but cloning an existing public project is faster than re-parsing."
     end
 
     private

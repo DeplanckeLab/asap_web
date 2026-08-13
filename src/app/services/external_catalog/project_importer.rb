@@ -4,15 +4,18 @@ require 'uri'
 require 'open3'
 require 'zlib'
 require 'csv'
+require 'fileutils'
+require 'digest'
 
 module ExternalCatalog
   # Sequential import of one catalog entry into ASAP:
-  # download → preparse → create project → Provider label →
+  # download → preparse → (content-sha256+preparsing link or create project) → Provider label →
   # parse → scFAIR validation (sc) → archive.
   class ProjectImporter
     RAW_SEL = '/raw/X'
     DEFAULT_PARSE_TIMEOUT_SEC = 6 * 60 * 60
     POLL_INTERVAL_SEC = 15
+    PREPARSING_FINGERPRINT_KEYS = %w[file_type sel_name delimiter gene_name_col has_header].freeze
     LANDING_CHECKPOINT_TITLE_SUFFIX = ' colored by cell type with labels'
     LEGACY_LANDING_CHECKPOINT_TITLES = [
       'Landing page',
@@ -112,9 +115,27 @@ module ExternalCatalog
         return :dry_run
       end
 
+      @last_import_outcome = nil
       fu = download_and_preparse!(entry, organism)
       sel_name, dims, file_type = choose_matrix_selection!(fu, organism)
-      project = create_project!(entry, fu, organism, sel_name, dims, file_type)
+      parsing_attrs = build_parsing_attrs(entry, sel_name, dims, file_type)
+      preparsing_fp = preparsing_fingerprint(parsing_attrs)
+      content_sha = InputFileSha256.ensure_for_fu!(fu)
+      existing = find_live_project_by_content_and_preparsing(content_sha, preparsing_fp)
+      if existing
+        @logger.info(
+          "[ExternalCatalog] content+preparsing match source=#{entry.source}/#{entry.external_id} " \
+          "sha=#{content_sha} fp=#{preparsing_fp} -> existing project_id=#{existing.id} key=#{existing.key}; " \
+          'linking provider instead of creating a new project'
+        )
+        link_existing_project!(existing, entry, provider)
+        discard_unused_fu!(fu)
+        @last_import_outcome = :linked
+        return existing
+      end
+
+      project = create_project!(entry, fu, organism, parsing_attrs, preparsing_fp)
+      attach_project_collection!(project, entry)
       attach_provider_label!(project, provider, entry)
       wait_for_parse!(project)
       attach_reference_metadata!(project, entry)
@@ -126,10 +147,79 @@ module ExternalCatalog
         "[ExternalCatalog] done source=#{entry.source} id=#{entry.external_id} " \
         "project_id=#{project.id} key=#{project.key} public=#{project.public?}"
       )
+      @last_import_outcome = :created
       project
     end
 
+    attr_reader :last_import_outcome
+
     private
+
+    def find_live_project_by_content_and_preparsing(sha, fingerprint)
+      return nil if sha.blank? || fingerprint.blank?
+
+      Project.where(input_content_sha256: sha.to_s, input_preparsing_fingerprint: fingerprint.to_s)
+             .where(being_deleted: [false, nil])
+             .order(Arel.sql('CASE WHEN public THEN 0 ELSE 1 END'), id: :asc)
+             .first
+    end
+
+    def preparsing_fingerprint(attrs)
+      h = attrs.is_a?(Hash) ? attrs.deep_stringify_keys : {}
+      payload = PREPARSING_FINGERPRINT_KEYS.index_with { |k| h[k].nil? ? nil : h[k].to_s }
+      Digest::SHA256.hexdigest(payload.to_json)
+    end
+
+    def build_parsing_attrs(entry, sel_name, dims, file_type)
+      parsing_attrs = { file_type: file_type.presence || 'H5AD' }
+      if sel_name.present? && parsing_attrs[:file_type].to_s.upcase != 'RAW_TEXT'
+        parsing_attrs[:sel_name] = sel_name
+      end
+      parsing_attrs[:nber_rows] = dims[:nber_rows] if dims[:nber_rows].present?
+      parsing_attrs[:nber_cols] = dims[:nber_cols] if dims[:nber_cols].present?
+
+      if entry.source.to_s == 'geo' && %w[series_matrix counts_table].include?(entry.format_kind.to_s)
+        parsing_attrs[:file_type] = 'RAW_TEXT'
+        parsing_attrs[:has_header] = '1'
+        parsing_attrs[:gene_name_col] = 'first'
+        parsing_attrs[:delimiter] = ''
+        parsing_attrs.delete(:sel_name)
+      end
+      parsing_attrs
+    end
+
+    # Attach this catalog entry's provider onto an existing ASAP project that already
+    # has the same input file content and preparsing params. Also merge identifiers /
+    # publications from this source. Candidate↔project join + optional import_project_id
+    # are set by the importer caller.
+    def link_existing_project!(project, entry, provider)
+      attach_provider_label!(project, provider, entry)
+      attach_reference_metadata!(project, entry)
+      if project.project_collection_id.blank?
+        attach_project_collection!(project, entry)
+      end
+      @logger.info(
+        "[ExternalCatalog] linked source=#{entry.source}/#{entry.external_id} " \
+        "provider=#{provider.tag} onto project=#{project.key}"
+      )
+      project
+    end
+
+    def discard_unused_fu!(fu)
+      return unless fu
+
+      upload_dir = begin
+        fu.upload_dir
+      rescue StandardError
+        nil
+      end
+      fu.destroy!
+      if upload_dir && upload_dir.exist?
+        FileUtils.rm_rf(upload_dir)
+      end
+    rescue StandardError => e
+      @logger.warn("[ExternalCatalog] could not discard unused Fu##{fu&.id}: #{e.class} #{e.message}")
+    end
 
     def ensure_provider!(entry)
       provider = Provider.find_or_create_by!(tag: entry.provider_tag) do |p|
@@ -487,25 +577,7 @@ module ExternalCatalog
       "/layers/#{p}"
     end
 
-    def create_project!(entry, fu, organism, sel_name, dims, file_type)
-      parsing_attrs = { file_type: file_type.presence || 'H5AD' }
-      if sel_name.present? && parsing_attrs[:file_type].to_s.upcase != 'RAW_TEXT'
-        parsing_attrs[:sel_name] = sel_name
-      end
-      parsing_attrs[:nber_rows] = dims[:nber_rows] if dims[:nber_rows].present?
-      parsing_attrs[:nber_cols] = dims[:nber_cols] if dims[:nber_cols].present?
-
-      # GEO bulk rectangular tables (series_matrix extracted TSV or deposited counts).
-      if entry.source.to_s == 'geo' && %w[series_matrix counts_table].include?(entry.format_kind.to_s)
-        parsing_attrs[:file_type] = 'RAW_TEXT'
-        parsing_attrs[:has_header] = '1'
-        parsing_attrs[:gene_name_col] = 'first'
-        # Counts are normalized to TSV; series_matrix conversion also writes TSV.
-        # ASAP uses empty string for tab (a literal "\t" breaks --delim in the parse command).
-        parsing_attrs[:delimiter] = ''
-        parsing_attrs.delete(:sel_name)
-      end
-
+    def create_project!(entry, fu, organism, parsing_attrs, preparsing_fp)
       ptype = project_type_for(entry)
       project = Project.new(
         user_id: @user.id,
@@ -516,9 +588,10 @@ module ExternalCatalog
         project_type_id: ptype.id,
         version_id: @version.id,
         fu_id: fu.id,
-        nber_rows: dims[:nber_rows],
-        nber_cols: dims[:nber_cols],
+        nber_rows: parsing_attrs[:nber_rows],
+        nber_cols: parsing_attrs[:nber_cols],
         parsing_attrs_json: parsing_attrs.to_json,
+        input_preparsing_fingerprint: preparsing_fp,
         status_id: Status.find_by(name: 'pending')&.id || 1
       )
       project.save!
@@ -538,6 +611,31 @@ module ExternalCatalog
 
       project.parse_files({})
       project
+    end
+
+    def attach_project_collection!(project, entry)
+      collection_id = entry.collection_id.to_s.strip.presence
+      return if collection_id.blank?
+      return if project.project_collection_id.present?
+
+      collection_url =
+        case entry.source.to_s
+        when 'cellxgene'
+          "https://cellxgene.cziscience.com/collections/#{collection_id}"
+        when 'hca'
+          "https://data.humancellatlas.org/explore/projects/#{collection_id}"
+        else
+          entry.source_page_url.to_s.presence
+        end
+
+      collection = ProjectCollection.upsert_from_catalog!(
+        source: entry.source.to_s,
+        external_key: collection_id,
+        title: entry.collection_title,
+        description: entry.collection_description,
+        source_page_url: collection_url
+      )
+      project.update!(project_collection_id: collection.id)
     end
 
     def attach_provider_label!(project, provider, entry)

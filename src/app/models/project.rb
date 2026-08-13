@@ -21,6 +21,7 @@ class Project < ApplicationRecord
   belongs_to :version, optional: true
   belongs_to :archive_status, optional: true
   belongs_to :project_origin
+  belongs_to :project_collection, optional: true, inverse_of: :projects
   belongs_to :cloned_project, class_name: 'Project', foreign_key: 'cloned_project_id', optional: true
   belongs_to :root_project, class_name: 'Project', foreign_key: 'root_project_id', optional: true, inverse_of: :lineage_clone_projects
   has_many :lineage_clone_projects, class_name: 'Project', foreign_key: 'root_project_id', dependent: :nullify, inverse_of: :root_project
@@ -50,6 +51,10 @@ class Project < ApplicationRecord
            foreign_key: :import_project_id,
            dependent: :nullify,
            inverse_of: :import_project
+  has_many :external_catalog_candidate_projects, dependent: :delete_all, inverse_of: :project
+  has_many :matched_external_catalog_candidates,
+           through: :external_catalog_candidate_projects,
+           source: :external_catalog_candidate
   has_many :fus
 
   # Project-local Fu storage (fus/<fu_id>/ under this project's directory).

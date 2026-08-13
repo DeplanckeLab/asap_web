@@ -2,12 +2,17 @@
 
 class ExternalCatalogCandidate < ApplicationRecord
   SOURCES = %w[cellxgene bgee hca geo].freeze
+  # Prefer better-annotated sources first when SOURCE=all (importer + catalog UI).
+  IMPORT_SOURCE_ORDER = %w[cellxgene bgee hca geo].freeze
   IMPORT_STATUSES = %w[idle importing failed].freeze
   SERIES_IDENTIFIER_KINDS = %w[geo_series array_express bioproject ega_study].freeze
   COLLECTION_URL_RE = %r{/collections/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})}i
 
   belongs_to :import_project, class_name: 'Project', optional: true, inverse_of: :external_catalog_candidates
   belongs_to :import_user, class_name: 'User', optional: true
+  belongs_to :external_catalog_collection, optional: true, inverse_of: :external_catalog_candidates
+  has_many :external_catalog_candidate_projects, dependent: :delete_all, inverse_of: :external_catalog_candidate
+  has_many :matched_projects, through: :external_catalog_candidate_projects, source: :project
 
   before_validation :assign_series_fields
 
@@ -35,16 +40,23 @@ class ExternalCatalogCandidate < ApplicationRecord
       pattern, pattern, pattern, pattern, pattern
     )
   }
-  # Logical browse/import order: source, series (DOI/GEO/collection), organism, title.
+  # Logical browse/import order: preferred source, DOI/GEO/collection series, organism, title.
   scope :ordered_for_catalog, lambda {
     order(
-      Arel.sql('source ASC'),
+      Arel.sql(import_source_order_sql),
       Arel.sql("COALESCE(series_key, '') ASC"),
       Arel.sql('tax_id ASC NULLS LAST'),
       Arel.sql("LOWER(COALESCE(title, '')) ASC"),
       id: :asc
     )
   }
+
+  def self.import_source_order_sql
+    cases = IMPORT_SOURCE_ORDER.each_with_index.map do |source, index|
+      "WHEN #{connection.quote(source)} THEN #{index}"
+    end
+    "CASE source #{cases.join(' ')} ELSE #{IMPORT_SOURCE_ORDER.size} END ASC"
+  end
 
   # Candidate ids that already have a live ASAP project via ProviderProject.
   def self.ids_already_in_asap
@@ -116,10 +128,16 @@ class ExternalCatalogCandidate < ApplicationRecord
   end
 
   def asap_projects
+    ids = []
+    ids << import_project_id if import_project_id.present?
+    ids.concat(external_catalog_candidate_projects.pluck(:project_id))
     pp = provider_project
-    return Project.none unless pp
+    if pp
+      ids.concat(pp.projects.where(being_deleted: [false, nil]).pluck(:id))
+    end
+    return Project.none if ids.empty?
 
-    pp.projects.where(being_deleted: [false, nil])
+    Project.where(id: ids.uniq, being_deleted: [false, nil])
   end
 
   def already_in_asap?
@@ -131,6 +149,129 @@ class ExternalCatalogCandidate < ApplicationRecord
     return false if import_project_id.blank?
 
     import_project.present? && !import_project.being_deleted
+  end
+
+  # Record a many-to-many match. Does not change import_project_id (official import only).
+  # Prefer keeping an 'import' link_kind if one already exists for this pair.
+  def link_matched_project!(project, link_kind: 'content_match')
+    raise ArgumentError, 'project required' unless project
+    kind = link_kind.to_s
+    raise ArgumentError, "Unknown link_kind #{kind}" unless ExternalCatalogCandidateProject::LINK_KINDS.include?(kind)
+
+    row = external_catalog_candidate_projects.find_or_initialize_by(project_id: project.id)
+    if row.new_record?
+      row.link_kind = kind
+      row.save!
+    elsif row.link_kind != 'import' && kind == 'import'
+      row.update!(link_kind: 'import')
+    end
+    row
+  end
+
+  # Link a public ASAP project to catalog candidates when it becomes reportable.
+  # Covers clones (shared ProviderProject) and independently created projects that reuse
+  # the same input bytes + preparsing options (user may ignore the preparsing warning).
+  # Non-public / deleted projects are skipped — they are not useful to report.
+  def self.sync_catalog_links_for_public_project!(project)
+    raise ArgumentError, 'project required' unless project
+    return [] unless project.public?
+    return [] if project.being_deleted
+
+    sync_provider_links_for_public_project!(project) +
+      sync_content_match_links_for_public_project!(project)
+  end
+
+  # Via ProviderProject keys (clone copies providers; catalog imports attach them).
+  def self.sync_provider_links_for_public_project!(project)
+    raise ArgumentError, 'project required' unless project
+    return [] unless project.public?
+    return [] if project.being_deleted
+
+    linked = []
+    project.provider_projects.includes(:provider).find_each do |pp|
+      tag = pp.provider&.tag
+      next if tag.blank?
+      key = pp.key.to_s
+      next if key.blank?
+
+      where(provider_tag: tag, external_id: key).find_each do |candidate|
+        kind = candidate.import_project_id == project.id ? 'import' : 'provider_match'
+        linked << candidate.link_matched_project!(project, link_kind: kind)
+      end
+    end
+    linked
+  end
+
+  # Via same input_content_sha256 + input_preparsing_fingerprint as projects already
+  # tied to candidates (import_project_id, join rows, or shared providers).
+  def self.sync_content_match_links_for_public_project!(project)
+    raise ArgumentError, 'project required' unless project
+    return [] unless project.public?
+    return [] if project.being_deleted
+
+    sha = project.input_content_sha256.to_s.presence
+    fp = project.input_preparsing_fingerprint.to_s.presence
+    return [] if sha.blank? || fp.blank?
+
+    sibling_ids = Project.where(
+      input_content_sha256: sha,
+      input_preparsing_fingerprint: fp
+    ).where('being_deleted IS NOT TRUE').where.not(id: project.id).pluck(:id)
+    return [] if sibling_ids.empty?
+
+    candidate_ids = ExternalCatalogCandidateProject.where(project_id: sibling_ids).pluck(:external_catalog_candidate_id)
+    candidate_ids.concat(where(import_project_id: sibling_ids).pluck(:id))
+
+    ProviderProject.joins(:projects, :provider)
+                   .where(projects: { id: sibling_ids })
+                   .pluck('providers.tag', 'provider_projects.key')
+                   .uniq
+                   .each do |tag, key|
+      next if tag.blank? || key.blank?
+
+      candidate_ids.concat(where(provider_tag: tag, external_id: key.to_s).pluck(:id))
+    end
+
+    candidate_ids = candidate_ids.uniq
+    return [] if candidate_ids.empty?
+
+    linked = []
+    where(id: candidate_ids).find_each do |candidate|
+      kind = candidate.import_project_id == project.id ? 'import' : 'content_match'
+      linked << candidate.link_matched_project!(project, link_kind: kind)
+    end
+    linked
+  end
+
+  # Ensure external_catalog_collections exist for candidates that already have collection_id.
+  def self.backfill_catalog_collections!
+    updated = 0
+    current.where.not(collection_id: [nil, '']).find_each do |candidate|
+      next unless %w[cellxgene hca].include?(candidate.source.to_s)
+
+      collection_id = candidate.collection_id.to_s.strip
+      next if collection_id.blank?
+
+      collection_url =
+        if candidate.source.to_s == 'cellxgene'
+          "https://cellxgene.cziscience.com/collections/#{collection_id}"
+        else
+          "https://data.humancellatlas.org/explore/projects/#{collection_id}"
+        end
+
+      catalog_collection = ExternalCatalogCollection.upsert_from_catalog!(
+        source: candidate.source.to_s,
+        external_key: collection_id,
+        title: candidate.title.to_s.presence,
+        description: nil,
+        source_page_url: collection_url
+      )
+      next if candidate.external_catalog_collection_id == catalog_collection.id
+
+      candidate.update_column(:external_catalog_collection_id, catalog_collection.id)
+      updated += 1
+    end
+    updated
   end
 
   def importing?
@@ -195,7 +336,9 @@ class ExternalCatalogCandidate < ApplicationRecord
       pmids: pmids,
       identifiers: identifiers,
       source_page_url: source_page_url,
-      collection_id: collection_id
+      collection_id: collection_id.presence || external_catalog_collection&.external_key,
+      collection_title: external_catalog_collection&.title,
+      collection_description: external_catalog_collection&.description
     )
   end
 
@@ -206,6 +349,24 @@ class ExternalCatalogCandidate < ApplicationRecord
     collection_id =
       entry.collection_id.to_s.presence ||
       collection_id_from_source_page_url(entry.source_page_url)
+
+    catalog_collection = nil
+    if collection_id.present? && %w[cellxgene hca].include?(entry.source.to_s)
+      collection_url =
+        if entry.source.to_s == 'cellxgene'
+          "https://cellxgene.cziscience.com/collections/#{collection_id}"
+        elsif entry.source.to_s == 'hca'
+          "https://data.humancellatlas.org/explore/projects/#{collection_id}"
+        end
+      catalog_collection = ExternalCatalogCollection.upsert_from_catalog!(
+        source: entry.source.to_s,
+        external_key: collection_id,
+        title: entry.collection_title,
+        description: entry.collection_description,
+        source_page_url: collection_url || entry.source_page_url
+      )
+    end
+
     record.assign_attributes(
       provider_tag: entry.provider_tag,
       title: entry.title.to_s.presence || entry.external_id.to_s,
@@ -218,6 +379,7 @@ class ExternalCatalogCandidate < ApplicationRecord
       url: entry.url,
       source_page_url: entry.source_page_url,
       collection_id: collection_id,
+      external_catalog_collection_id: catalog_collection&.id,
       dois_json: entry.normalized_dois.to_json,
       pmids_json: entry.normalized_pmids.to_json,
       identifiers_json: entry.normalized_identifiers.to_json,

@@ -53,6 +53,111 @@
       </div>
     <% end %>
 
+    <!-- Project collection (umbrella) -->
+    <div class="bg-gray-50 rounded-lg p-6"
+         data-controller="project-collection-settings">
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">Project collection</h3>
+      <p class="text-sm text-gray-600 mb-4">
+        Group this project under one umbrella collection.
+        A project can belong to only one collection.
+        <% if @can_edit_any_project_collection %>
+          As admin you can assign any collection and edit its title/description.
+        <% else %>
+          You can clear membership, create a new collection, or assign to a collection you created.
+          Catalog-backed collections are managed by admins.
+        <% end %>
+      </p>
+
+      <%= form_with url: project_path(@project), method: :patch, local: true, class: "space-y-4" do %>
+        <%
+          current_mode =
+            if @current_project_collection.present?
+              'existing'
+            else
+              'none'
+            end
+          assignable_collections = Array(@project_collections).select do |collection|
+            @can_edit_any_project_collection || collection.owned_by?(current_user)
+          end
+        %>
+        <div>
+          <label for="project_collection_mode" class="block text-sm font-medium text-gray-900 mb-2">Membership</label>
+          <select id="project_collection_mode"
+                  name="project_collection_assignment[mode]"
+                  data-project-collection-settings-target="mode"
+                  data-action="change->project-collection-settings#onModeChange"
+                  class="w-full max-w-md px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+            <option value="none" <%= 'selected' if current_mode == 'none' %>>No collection</option>
+            <% if assignable_collections.any? || @can_edit_any_project_collection %>
+              <option value="existing" <%= 'selected' if current_mode == 'existing' && (@can_edit_any_project_collection || @current_project_collection&.owned_by?(current_user)) %>>Existing collection</option>
+            <% end %>
+            <option value="new">Create new collection</option>
+          </select>
+          <% if @current_project_collection&.catalog_backed? && !@can_edit_any_project_collection %>
+            <p class="mt-2 text-xs text-gray-500">
+              Current: <%= @current_project_collection.display_title %> (<%= @current_project_collection.source %>).
+              Choose "No collection" or create your own to change membership.
+            </p>
+          <% end %>
+        </div>
+
+        <div data-project-collection-settings-target="existingFields"
+             class="<%= (current_mode == 'existing' && (@can_edit_any_project_collection || @current_project_collection&.owned_by?(current_user))) ? '' : 'hidden' %> space-y-4">
+          <div>
+            <label for="project_collection_id" class="block text-sm font-medium text-gray-900 mb-2">Collection</label>
+            <select id="project_collection_id"
+                    name="project_collection_assignment[project_collection_id]"
+                    data-project-collection-settings-target="collectionSelect"
+                    data-action="change->project-collection-settings#onCollectionChange"
+                    class="w-full max-w-xl px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+              <option value="">Select a collection</option>
+              <% assignable_collections.each do |collection| %>
+                <option value="<%= collection.id %>"
+                        data-title="<%= collection.title.to_s %>"
+                        data-description="<%= collection.description.to_s %>"
+                        <%= 'selected' if @current_project_collection&.id == collection.id %>>
+                  <%= collection.display_title %>
+                  <% if collection.source.present? && collection.source != 'manual' %>
+                    (<%= collection.source %>)
+                  <% end %>
+                </option>
+              <% end %>
+            </select>
+          </div>
+        </div>
+
+        <div data-project-collection-settings-target="metadataFields"
+             class="<%= current_mode == 'none' ? 'hidden' : '' %> space-y-4">
+          <div>
+            <label for="project_collection_title" class="block text-sm font-medium text-gray-900 mb-2">Collection title</label>
+            <input type="text"
+                   id="project_collection_title"
+                   name="project_collection_assignment[title]"
+                   value="<%= @current_project_collection&.title %>"
+                   data-project-collection-settings-target="title"
+                   class="w-full max-w-xl px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                   placeholder="Umbrella title shared by member projects" />
+          </div>
+          <div>
+            <label for="project_collection_description" class="block text-sm font-medium text-gray-900 mb-2">Collection description</label>
+            <textarea id="project_collection_description"
+                      name="project_collection_assignment[description]"
+                      rows="3"
+                      data-project-collection-settings-target="description"
+                      class="w-full max-w-xl px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                      placeholder="Optional description"><%= @current_project_collection&.description %></textarea>
+          </div>
+        </div>
+
+        <div>
+          <button type="submit"
+                  class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700">
+            Save collection
+          </button>
+        </div>
+      <% end %>
+    </div>
+
     <!-- Privacy Settings -->
     <div class="bg-gray-50 rounded-lg p-6" data-controller="public-toggle" 
          data-public-toggle-url-value="<%= toggle_public_project_path(@project) %>"
@@ -593,7 +698,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <h3 class="text-sm font-semibold text-gray-900 mb-2">Project owner</h3>
             <p class="text-xs text-gray-600 mb-2">The owner has full control of the project. In addition to Analyze and Export, this includes:</p>
             <ul class="list-disc list-inside space-y-1 text-xs text-gray-700">
-              <li>Edit project settings (privacy, project type, and user rights)</li>
+              <li>Edit project settings (privacy, project type, collection, and user rights)</li>
               <li>Invite, update, and remove shared users</li>
               <li>Publish or unpublish the project</li>
               <li>Delete the project</li>

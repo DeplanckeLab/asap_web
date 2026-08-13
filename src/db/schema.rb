@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_13_190000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -639,11 +639,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
     t.datetime "updated_at", precision: nil
   end
 
+  create_table "external_catalog_candidate_projects", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "external_catalog_candidate_id", null: false
+    t.string "link_kind", default: "content_match", null: false
+    t.bigint "project_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["external_catalog_candidate_id", "project_id"], name: "index_ext_catalog_cand_projects_on_candidate_and_project", unique: true
+    t.index ["external_catalog_candidate_id"], name: "index_ext_catalog_cand_projects_on_candidate_id"
+    t.index ["link_kind"], name: "index_external_catalog_candidate_projects_on_link_kind"
+    t.index ["project_id"], name: "index_ext_catalog_cand_projects_on_project_id"
+  end
+
   create_table "external_catalog_candidates", force: :cascade do |t|
     t.text "attrs_json"
     t.string "collection_id"
     t.datetime "created_at", null: false
     t.text "dois_json"
+    t.bigint "external_catalog_collection_id"
     t.string "external_id", null: false
     t.string "filename"
     t.bigint "filesize", default: 0, null: false
@@ -667,6 +680,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
     t.datetime "updated_at", null: false
     t.text "url"
     t.index ["collection_id"], name: "index_external_catalog_candidates_on_collection_id"
+    t.index ["external_catalog_collection_id"], name: "index_ext_catalog_candidates_on_collection_id"
     t.index ["import_status"], name: "index_external_catalog_candidates_on_import_status"
     t.index ["last_seen_at"], name: "index_external_catalog_candidates_on_last_seen_at"
     t.index ["obsolete"], name: "index_external_catalog_candidates_on_obsolete"
@@ -675,6 +689,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
     t.index ["series_key"], name: "index_external_catalog_candidates_on_series_key"
     t.index ["source", "external_id"], name: "index_ext_catalog_candidates_on_source_and_external_id", unique: true
     t.index ["source"], name: "index_external_catalog_candidates_on_source"
+  end
+
+  create_table "external_catalog_collections", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "description"
+    t.string "external_key", null: false
+    t.string "source", null: false
+    t.text "source_page_url"
+    t.text "title", null: false
+    t.datetime "updated_at", null: false
+    t.index ["source", "external_key"], name: "index_ext_catalog_collections_on_source_and_external_key", unique: true
   end
 
   create_table "file_formats", id: :serial, force: :cascade do |t|
@@ -1057,6 +1082,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
     t.index ["key"], name: "key_project_cell_sets"
   end
 
+  create_table "project_collections", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "created_by_user_id"
+    t.text "description"
+    t.string "external_key"
+    t.string "source", null: false
+    t.text "source_page_url"
+    t.text "title", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_by_user_id"], name: "index_project_collections_on_created_by_user_id"
+    t.index ["source", "external_key"], name: "index_project_collections_on_source_and_external_key", unique: true, where: "(external_key IS NOT NULL)"
+  end
+
   create_table "project_dim_reductions", id: :serial, force: :cascade do |t|
     t.text "attrs_json"
     t.datetime "created_at", precision: nil
@@ -1155,6 +1193,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
     t.text "group_filename"
     t.string "input_content_sha256", limit: 64
     t.text "input_filename"
+    t.string "input_preparsing_fingerprint", limit: 64
     t.text "key"
     t.text "landing_page_json", default: "{}"
     t.text "landing_page_key"
@@ -1175,6 +1214,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
     t.integer "pid"
     t.integer "pmid"
     t.integer "project_cell_set_id"
+    t.bigint "project_collection_id"
     t.integer "project_origin_id", default: 1, null: false
     t.integer "project_type_id"
     t.boolean "public", default: false
@@ -1196,8 +1236,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
     t.integer "version_id"
     t.datetime "viewed_at", precision: nil, default: -> { "now()" }
     t.text "write_access"
+    t.index ["input_content_sha256", "input_preparsing_fingerprint"], name: "index_projects_on_input_sha_and_preparsing_fp"
     t.index ["input_content_sha256"], name: "index_projects_on_input_content_sha256"
     t.index ["key"], name: "index_projects_on_key_unique", unique: true, where: "((key IS NOT NULL) AND (key <> ''::text))"
+    t.index ["project_collection_id"], name: "index_projects_on_project_collection_id"
     t.index ["project_origin_id"], name: "index_projects_on_project_origin_id"
     t.index ["root_project_id"], name: "index_projects_on_root_project_id"
   end
@@ -1673,6 +1715,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
   add_foreign_key "exp_entries_sample_identifiers", "sample_identifiers", name: "geo_entries_sample_identifiers_sample_identifier_id_fkey"
   add_foreign_key "exp_entry_identifiers", "exp_entries", name: "exp_entry_identifiers_exp_entry_id_fkey"
   add_foreign_key "exp_entry_identifiers", "identifier_types", name: "exp_entry_identifiers_identifier_type_id_fkey"
+  add_foreign_key "external_catalog_candidate_projects", "external_catalog_candidates", on_delete: :cascade
+  add_foreign_key "external_catalog_candidate_projects", "projects", on_delete: :cascade
+  add_foreign_key "external_catalog_candidates", "external_catalog_collections", on_delete: :nullify
   add_foreign_key "external_catalog_candidates", "projects", column: "import_project_id", on_delete: :nullify
   add_foreign_key "external_catalog_candidates", "users", column: "import_user_id", on_delete: :nullify
   add_foreign_key "filter_methods", "speeds", name: "filters_speed_id_fkey"
@@ -1724,6 +1769,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
   add_foreign_key "ot_projects", "projects", name: "ot_projects_project_id_fkey"
   add_foreign_key "ott_projects", "ontology_term_types", name: "ott_projects_ontology_term_type_id_fkey"
   add_foreign_key "ott_projects", "projects", name: "ott_projects_project_id_fkey"
+  add_foreign_key "project_collections", "users", column: "created_by_user_id", on_delete: :nullify
   add_foreign_key "project_dim_reductions", "dim_reductions", name: "project_dim_reductions_dim_reduction_id_fkey"
   add_foreign_key "project_dim_reductions", "jobs", name: "project_dim_reductions_job_id_fkey"
   add_foreign_key "project_dim_reductions", "projects", name: "project_dim_reductions_project_id_fkey"
@@ -1743,6 +1789,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
   add_foreign_key "projects", "norms", name: "projects_norm_id_fkey"
   add_foreign_key "projects", "organisms", name: "fk_organism_id"
   add_foreign_key "projects", "project_cell_sets", name: "projects_project_cell_set_id_fkey"
+  add_foreign_key "projects", "project_collections", on_delete: :nullify
   add_foreign_key "projects", "project_origins"
   add_foreign_key "projects", "project_types", name: "projects_project_type_id_fkey"
   add_foreign_key "projects", "projects", column: "root_project_id", on_delete: :nullify

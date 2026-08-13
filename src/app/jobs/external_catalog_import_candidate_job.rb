@@ -36,14 +36,11 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
 
     if candidate.already_in_asap?
       project = candidate.asap_projects.order(id: :desc).first
-      candidate.update!(
-        import_status: 'idle',
-        import_error: nil,
-        import_project_id: project&.id
-      )
+      candidate.update!(import_status: 'idle', import_error: nil)
+      candidate.link_matched_project!(project, link_kind: 'provider_match') if project
       Rails.logger.info(
         "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} already in ASAP " \
-        "project=#{project&.key}"
+        "project=#{project&.key} (matched, import_project_id unchanged)"
       )
       return
     end
@@ -68,19 +65,24 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       return
     end
 
-    candidate.update!(
-      import_status: 'idle',
-      import_error: nil,
-      import_project_id: result.id
+    created = importer.last_import_outcome == :created
+    attrs = { import_status: 'idle', import_error: nil }
+    attrs[:import_project_id] = result.id if created
+    candidate.update!(attrs)
+    candidate.link_matched_project!(
+      result,
+      link_kind: created ? 'import' : 'content_match'
     )
     Rails.logger.info(
-      "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} done " \
-      "project=#{result.id} key=#{result.key}"
+      "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} " \
+      "outcome=#{importer.last_import_outcome} project=#{result.id} key=#{result.key} " \
+      "import_project_id=#{candidate.import_project_id}"
     )
   rescue ExternalCatalog::ProjectImporter::SkipEntry => e
     project = candidate&.asap_projects&.order(id: :desc)&.first
     if project
-      candidate.update!(import_status: 'idle', import_error: nil, import_project_id: project.id)
+      candidate.update!(import_status: 'idle', import_error: nil)
+      candidate.link_matched_project!(project, link_kind: 'provider_match')
     else
       candidate&.update!(import_status: 'failed', import_error: e.message.to_s.truncate(2000))
     end

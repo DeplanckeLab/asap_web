@@ -92,16 +92,9 @@ downloaded_from_sources = @project.provider_projects.filter_map do |pp|
   provider = pp.provider
   next unless provider
 
-  attrs = begin
-    JSON.parse(pp.attrs_json.to_s)
-  rescue StandardError
-    {}
-  end
-  page_url = attrs['source_page_url'].to_s.presence
-  page_url ||= provider.url_mask.gsub('#{id}', pp.key.to_s) if provider.url_mask.present?
-
+  page_url = pp.source_page_url
   if page_url.present?
-    link_to provider.name, page_url, target: '_blank', class: "text-blue-600 hover:text-blue-800 hover:underline"
+    link_to provider.name, page_url, target: '_blank', rel: 'noopener noreferrer', class: "text-blue-600 hover:text-blue-800 hover:underline"
   else
     content_tag(:span, provider.name, class: "text-gray-700")
   end

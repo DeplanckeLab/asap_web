@@ -20,6 +20,15 @@ class ProviderProject < ApplicationRecord
     return {} unless attrs_json.present?
     JSON.parse(attrs_json) rescue {}
   end
+
+  # URL of this project on the provider's website (attrs source_page_url, else url_mask + key).
+  def source_page_url
+    url = parsed_attrs['source_page_url'].to_s.presence
+    return url if url.present?
+    return nil unless provider&.url_mask.present? && key.present?
+
+    provider.url_mask.gsub('#{id}', key.to_s)
+  end
 end
 
 

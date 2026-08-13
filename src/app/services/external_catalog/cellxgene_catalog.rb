@@ -28,10 +28,18 @@ module ExternalCatalog
         detail = fetch_collection(collection_id)
         datasets = detail[:datasets] || detail['datasets'] || []
         collection_refs = collection_reference_fields(detail, collection_id)
+        collection_title = (detail[:name] || detail['name'] || detail[:title] || detail['title']).to_s.presence
+        collection_description = (detail[:description] || detail['description']).to_s.presence
         datasets.each do |dataset|
           break if limit.present? && yielded >= limit.to_i
 
-          entries_for_dataset(dataset, collection_refs, collection_id: collection_id).each do |entry|
+          entries_for_dataset(
+            dataset,
+            collection_refs,
+            collection_id: collection_id,
+            collection_title: collection_title,
+            collection_description: collection_description
+          ).each do |entry|
             break if limit.present? && yielded >= limit.to_i
 
             yield entry
@@ -62,7 +70,7 @@ module ExternalCatalog
       JSON.parse(response.body, symbolize_names: true)
     end
 
-    def entries_for_dataset(dataset, collection_refs = {}, collection_id: nil)
+    def entries_for_dataset(dataset, collection_refs = {}, collection_id: nil, collection_title: nil, collection_description: nil)
       dataset_id = dataset[:dataset_id] || dataset['dataset_id']
       title = dataset[:title] || dataset['name'] || dataset_id.to_s
       tax_id, organism_label = extract_organism(dataset)
@@ -91,7 +99,9 @@ module ExternalCatalog
           pmids: refs[:pmids],
           identifiers: refs[:identifiers],
           source_page_url: refs[:source_page_url],
-          collection_id: collection_id.to_s.presence
+          collection_id: collection_id.to_s.presence,
+          collection_title: collection_title.to_s.presence,
+          collection_description: collection_description.to_s.presence
         )
       end
     end

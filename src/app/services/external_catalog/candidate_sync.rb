@@ -3,7 +3,7 @@
 module ExternalCatalog
   # Upserts ExternalCatalogCandidate rows from live catalog APIs.
   class CandidateSync
-    SOURCES = %w[cellxgene bgee hca geo].freeze
+    SOURCES = ExternalCatalogCandidate::IMPORT_SOURCE_ORDER
 
     def initialize(logger: Rails.logger)
       @logger = logger

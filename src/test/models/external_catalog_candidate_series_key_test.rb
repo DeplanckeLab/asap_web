@@ -119,4 +119,50 @@ class ExternalCatalogCandidateSeriesKeyTest < ActiveSupport::TestCase
   ensure
     ExternalCatalogCandidate.where(id: [a&.id, b&.id, c&.id].compact).delete_all
   end
+
+  test 'ordered_for_catalog prefers CELLxGENE then Bgee then HCA then GEO' do
+    suffix = SecureRandom.hex(3)
+    geo = ExternalCatalogCandidate.create!(
+      source: 'geo',
+      external_id: "GSE#{suffix}",
+      provider_tag: 'GEO',
+      title: 'Geo last',
+      import_status: 'idle',
+      tax_id: 9606,
+      url: 'https://example.com/geo'
+    )
+    hca = ExternalCatalogCandidate.create!(
+      source: 'hca',
+      external_id: "hca-#{suffix}",
+      provider_tag: 'HCA',
+      title: 'Hca third',
+      import_status: 'idle',
+      tax_id: 9606,
+      url: 'https://example.com/hca'
+    )
+    bgee = ExternalCatalogCandidate.create!(
+      source: 'bgee',
+      external_id: "bgee-#{suffix}",
+      provider_tag: 'Bgee',
+      title: 'Bgee second',
+      import_status: 'idle',
+      tax_id: 9606,
+      url: 'https://example.com/bgee'
+    )
+    cxg = ExternalCatalogCandidate.create!(
+      source: 'cellxgene',
+      external_id: "cxg-#{suffix}",
+      provider_tag: 'CELLxGENE',
+      title: 'Cellxgene first',
+      import_status: 'idle',
+      tax_id: 9606,
+      url: 'https://example.com/cxg'
+    )
+
+    ordered = ExternalCatalogCandidate.where(id: [geo.id, hca.id, bgee.id, cxg.id]).ordered_for_catalog.to_a
+    assert_equal %w[cellxgene bgee hca geo], ordered.map(&:source)
+    assert_equal ExternalCatalogCandidate::IMPORT_SOURCE_ORDER, ExternalCatalog::CandidateSync::SOURCES
+  ensure
+    ExternalCatalogCandidate.where(id: [geo&.id, hca&.id, bgee&.id, cxg&.id].compact).delete_all
+  end
 end

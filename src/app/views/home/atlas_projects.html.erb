@@ -22,7 +22,13 @@
         <% end %>
         <div>
           <h1 class="text-3xl font-bold text-gray-900 mb-2"><%= @atlas_title %> projects</h1>
-          <p class="text-gray-600">Dedicated listing for projects tagged with <%= @atlas_title %> terms.</p>
+          <p class="text-gray-600">
+            <% if @atlas_uses_catalog_collections %>
+              Public ASAP projects grouped by HCA project (catalog collection). Shared files appear once with linked catalog entries.
+            <% else %>
+              Public projects grouped by collection when available.
+            <% end %>
+          </p>
         </div>
       </div>
     </div>
@@ -46,59 +52,121 @@
     <div class="mb-4 text-sm text-gray-600">
       <% if @projects.any? %>
         Showing <%= @projects.size %> matching projects
+        in <%= @project_collection_groups.size %> <%= 'group'.pluralize(@project_collection_groups.size) %>
       <% else %>
         No matching projects
       <% end %>
     </div>
 
     <% if @projects.any? %>
-      <div class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-gray-50">
-            <tr>
-              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
-              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Organism</th>
-              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
-              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody class="bg-white divide-y divide-gray-200">
-            <% @projects.each do |project| %>
-              <tr class="hover:bg-gray-100 cursor-pointer transition-colors"
-                  onclick="window.location='<%= project_path(project) %>'">
-                <td class="px-6 py-4">
-                  <div class="text-sm font-medium text-gray-900"><%= project.display_name %></div>
-                  <div class="flex items-center gap-2 mt-0.5">
-                    <% if project.key.present? %>
-                      <span class="text-xs text-gray-400 font-mono"><%= project.key %></span>
+      <div class="space-y-8">
+        <% @project_collection_groups.each do |group| %>
+          <section class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+              <h2 class="text-lg font-semibold text-gray-900"><%= group[:title] %></h2>
+              <% if group[:description].present? %>
+                <p class="mt-1 text-sm text-gray-600"><%= truncate(group[:description], length: 280) %></p>
+              <% end %>
+              <% if group[:collection].respond_to?(:source_page_url) && group[:collection].source_page_url.present? %>
+                <p class="mt-1 text-xs">
+                  <%= link_to "Open source collection", group[:collection].source_page_url,
+                              target: "_blank", rel: "noopener",
+                              class: "text-blue-600 hover:underline" %>
+                </p>
+              <% end %>
+              <p class="mt-1 text-xs text-gray-500"><%= group[:projects].size %> <%= 'project'.pluralize(group[:projects].size) %></p>
+            </div>
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-white">
+                  <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Project</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Organism</th>
+                    <% if @atlas_uses_catalog_collections %>
+                      <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Catalog entries</th>
+                    <% else %>
+                      <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
                     <% end %>
-                    <% if project.public_id.present? %>
-                      <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-green-100 text-green-800">ASAP<%= project.public_id %></span>
-                    <% end %>
-                  </div>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  <%= project.project_type&.name.presence || '-' %>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  <%= project.organism&.name.presence || '-' %>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  <%= project.created_at&.strftime("%b %d, %Y") %>
-                </td>
-                <td class="px-6 py-4 whitespace-nowrap text-sm">
-                  <%= link_to "View", project_path(project), class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100" %>
-                </td>
-              </tr>
-            <% end %>
-          </tbody>
-        </table>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  <% rows = group[:project_rows].presence || group[:projects].map { |p| { project: p, catalog_entries: [] } } %>
+                  <% rows.each do |row| %>
+                    <% project = row[:project] %>
+                    <tr class="hover:bg-gray-100 transition-colors">
+                      <td class="px-6 py-4 cursor-pointer" onclick="window.location='<%= project_path(project) %>'">
+                        <div class="text-sm font-medium text-gray-900"><%= project.display_name %></div>
+                        <div class="flex items-center gap-2 mt-0.5">
+                          <% if project.key.present? %>
+                            <span class="text-xs text-gray-400 font-mono"><%= project.key %></span>
+                          <% end %>
+                          <% if project.public_id.present? %>
+                            <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-green-100 text-green-800">ASAP<%= project.public_id %></span>
+                          <% end %>
+                        </div>
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <%= project.project_type&.name.presence || '-' %>
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <%= project.organism&.name.presence || '-' %>
+                      </td>
+                      <% if @atlas_uses_catalog_collections %>
+                        <td class="px-6 py-4 text-sm text-gray-600">
+                          <% entries = Array(row[:catalog_entries]) %>
+                          <% if entries.any? %>
+                            <ul class="space-y-1">
+                              <% entries.first(5).each do |entry| %>
+                                <li>
+                                  <% if entry.source_page_url.present? %>
+                                    <%= link_to (entry.title.presence || entry.external_id).to_s.truncate(60),
+                                                entry.source_page_url,
+                                                target: "_blank", rel: "noopener",
+                                                class: "text-blue-600 hover:underline" %>
+                                  <% else %>
+                                    <span><%= (entry.title.presence || entry.external_id).to_s.truncate(60) %></span>
+                                  <% end %>
+                                  <% if entry.filename.present? %>
+                                    <span class="text-xs text-gray-400"><%= entry.filename.to_s.truncate(40) %></span>
+                                  <% end %>
+                                </li>
+                              <% end %>
+                              <% if entries.size > 5 %>
+                                <li class="text-xs text-gray-400">+<%= entries.size - 5 %> more</li>
+                              <% end %>
+                            </ul>
+                          <% else %>
+                            <span class="text-gray-400">—</span>
+                          <% end %>
+                        </td>
+                      <% else %>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          <%= project.created_at&.strftime("%b %d, %Y") %>
+                        </td>
+                      <% end %>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm">
+                        <%= link_to "View", project_path(project), class: "inline-flex items-center px-2.5 py-1.5 text-xs font-medium rounded-md text-blue-700 bg-blue-50 hover:bg-blue-100" %>
+                      </td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        <% end %>
       </div>
     <% else %>
       <div class="text-center py-12 bg-white rounded-lg border border-gray-200">
         <h3 class="text-sm font-medium text-gray-900">No projects found</h3>
-        <p class="mt-1 text-sm text-gray-500">Try a different filter term.</p>
+        <p class="mt-1 text-sm text-gray-500">
+          <% if @atlas_uses_catalog_collections %>
+            Sync HCA candidates and import projects, or try a different filter.
+          <% else %>
+            Try a different filter term.
+          <% end %>
+        </p>
       </div>
     <% end %>
   </div>

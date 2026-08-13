@@ -331,11 +331,23 @@
                             v<%= project.version_id %>
                           </span>
                         <% end %>
-                        <% project.provider_projects.filter_map(&:provider).uniq(&:id).each do |provider| %>
-                          <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-teal-100 text-teal-800"
-                                title="Origin: <%= provider.display_name %>">
-                            <%= provider.tag.presence || provider.display_name %>
-                          </span>
+                        <% project.provider_projects.select(&:provider).uniq(&:provider_id).each do |pp| %>
+                          <% provider = pp.provider %>
+                          <% label = provider.tag.presence || provider.display_name %>
+                          <% badge_class = "inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-teal-100 text-teal-800" %>
+                          <% if pp.source_page_url.present? %>
+                            <%= link_to label, pp.source_page_url,
+                                  target: '_blank',
+                                  rel: 'noopener noreferrer',
+                                  class: "#{badge_class} hover:bg-teal-200",
+                                  title: "Origin: #{provider.display_name}",
+                                  onclick: "event.stopPropagation()" %>
+                          <% else %>
+                            <span class="<%= badge_class %>"
+                                  title="Origin: <%= provider.display_name %>">
+                              <%= label %>
+                            </span>
+                          <% end %>
                         <% end %>
                       </div>
                     </div>

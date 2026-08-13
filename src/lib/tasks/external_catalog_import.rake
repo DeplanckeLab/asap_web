@@ -89,7 +89,9 @@ namespace :external_catalog do
     results[:ok].each do |row|
       e = row[:entry]
       p = row[:project]
-      puts "  #{e.source}/#{e.external_id} -> project #{p.id} key=#{p.key} name=#{p.name.inspect}"
+      outcome = row[:outcome]
+      suffix = outcome.present? ? " (#{outcome})" : ''
+      puts "  #{e.source}/#{e.external_id} -> project #{p.id} key=#{p.key} name=#{p.name.inspect}#{suffix}"
     end
     puts "SKIPPED: #{results[:skipped].size}"
     results[:skipped].each do |row|
@@ -104,15 +106,31 @@ namespace :external_catalog do
     end
   end
 
-  def external_catalog_mark_candidate!(candidate, status:, error: nil, project: nil, user: nil)
+  def external_catalog_mark_candidate!(
+    candidate,
+    status:,
+    error: nil,
+    project: nil,
+    user: nil,
+    set_import_project: false,
+    link_kind: nil
+  )
     attrs = {
       import_status: status,
       import_error: error
     }
-    attrs[:import_project_id] = project.id if project
+    if project && set_import_project
+      attrs[:import_project_id] = project.id
+    end
     attrs[:import_user_id] = user.id if user
     attrs[:import_error] = nil if status == 'idle' && error.nil?
     candidate.update!(attrs)
+    return unless project
+
+    kind =
+      link_kind.presence ||
+      (set_import_project ? 'import' : 'content_match')
+    candidate.link_matched_project!(project, link_kind: kind)
   end
 
   def external_catalog_import_candidates!(candidates, user:, importer:)
@@ -124,7 +142,16 @@ namespace :external_catalog do
       begin
         if candidate.already_in_asap?
           project = candidate.asap_projects.order(id: :desc).first
-          external_catalog_mark_candidate!(candidate, status: 'idle', project: project, user: user)
+          unless dry_run
+            external_catalog_mark_candidate!(
+              candidate,
+              status: 'idle',
+              project: project,
+              user: user,
+              set_import_project: false,
+              link_kind: 'provider_match'
+            )
+          end
           results[:skipped] << { entry: entry, reason: "already imported project=#{project&.key}" }
           next
         end
@@ -137,8 +164,18 @@ namespace :external_catalog do
         if project == :dry_run
           results[:skipped] << { entry: entry, reason: 'dry_run' }
         elsif project
-          external_catalog_mark_candidate!(candidate, status: 'idle', project: project, user: user) unless dry_run
-          results[:ok] << { entry: entry, project: project }
+          unless dry_run
+            created = importer.last_import_outcome == :created
+            external_catalog_mark_candidate!(
+              candidate,
+              status: 'idle',
+              project: project,
+              user: user,
+              set_import_project: created,
+              link_kind: created ? 'import' : 'content_match'
+            )
+          end
+          results[:ok] << { entry: entry, project: project, outcome: importer.last_import_outcome }
         else
           external_catalog_mark_candidate!(
             candidate,
@@ -151,7 +188,16 @@ namespace :external_catalog do
       rescue ExternalCatalog::ProjectImporter::SkipEntry => e
         project = candidate.asap_projects.order(id: :desc).first
         if project
-          external_catalog_mark_candidate!(candidate, status: 'idle', project: project, user: user) unless dry_run
+          unless dry_run
+            external_catalog_mark_candidate!(
+              candidate,
+              status: 'idle',
+              project: project,
+              user: user,
+              set_import_project: false,
+              link_kind: 'provider_match'
+            )
+          end
           results[:skipped] << { entry: entry, reason: e.message }
         else
           external_catalog_mark_candidate!(candidate, status: 'failed', error: e.message, user: user) unless dry_run
@@ -185,6 +231,8 @@ namespace :external_catalog do
   end
 
   desc 'Import from external_catalog_candidates (COUNT/N/LIMIT, IMPORT_USER_EMAIL|IMPORT_USER_ID, SOURCE, PROJECT_TYPE, ONLY_NEW=1). ' \
+       'Without SOURCE (or SOURCE=all), candidates are taken in order CELLxGENE, Bgee, HCA, GEO. ' \
+       'Duplicate file content (SHA-256) links the provider onto the existing ASAP project instead of creating another. ' \
        'SKIP_ARCHIVE=1 (default). SKIP_PUBLISH=1 still creates the landing checkpoint but does not make the project public.'
   task import: :environment do
     source = ENV.fetch('SOURCE', 'all').to_s.strip.downcase
@@ -198,6 +246,9 @@ namespace :external_catalog do
          "USER=#{user.email} ONLY_NEW=#{only_new} DRY_RUN=#{ENV['DRY_RUN']} " \
          "SKIP_ARCHIVE=#{ENV.fetch('SKIP_ARCHIVE', '1')} " \
          "SKIP_PUBLISH=#{ENV.fetch('SKIP_PUBLISH', '0')} PROJECT_TYPE=#{project_type.inspect}"
+    if source == 'all'
+      puts "Source priority: #{ExternalCatalogCandidate::IMPORT_SOURCE_ORDER.join(' -> ')}"
+    end
 
     if ExternalCatalogCandidate.count.zero?
       raise 'No external_catalog_candidates rows. Run external_catalog:sync_candidates first.'
@@ -295,5 +346,44 @@ namespace :external_catalog do
     end
     puts "Total active candidates in DB: #{ExternalCatalogCandidate.current.count}"
     puts "Total obsolete candidates in DB: #{ExternalCatalogCandidate.obsolete_only.count}"
+  end
+
+  desc 'Backfill catalog collections + public project↔candidate links (provider + content match). DRY_RUN=1 to preview.'
+  task backfill_public_project_links: :environment do
+    dry_run = external_catalog_bool('DRY_RUN')
+    puts "external_catalog:backfill_public_project_links DRY_RUN=#{dry_run}"
+
+    unless ActiveRecord::Base.connection.table_exists?(:external_catalog_candidate_projects)
+      raise 'Table external_catalog_candidate_projects missing — run migrations first'
+    end
+
+    public_scope = Project.where(public: true).where('projects.being_deleted IS NOT TRUE')
+    if dry_run
+      with_provider = public_scope.joins(:provider_projects).distinct.count
+      with_sha = public_scope.where.not(input_content_sha256: [nil, '']).count
+      puts "Would scan public projects: #{public_scope.count} (with provider_projects=#{with_provider}, with input sha=#{with_sha})"
+      puts "Candidates with collection_id: #{ExternalCatalogCandidate.current.where.not(collection_id: [nil, '']).count}"
+      next
+    end
+
+    if ActiveRecord::Base.connection.table_exists?(:external_catalog_collections)
+      n = ExternalCatalogCandidate.backfill_catalog_collections!
+      puts "Linked candidates to external_catalog_collections: #{n}"
+      puts "external_catalog_collections total: #{ExternalCatalogCollection.count}"
+    else
+      puts 'Skip collection backfill (external_catalog_collections missing)'
+    end
+
+    scanned = 0
+    linked_rows = 0
+    public_scope.find_each do |project|
+      scanned += 1
+      rows = ExternalCatalogCandidate.sync_catalog_links_for_public_project!(project)
+      linked_rows += rows.size
+    end
+
+    puts "Scanned public projects: #{scanned}"
+    puts "link_matched_project calls: #{linked_rows}"
+    puts "external_catalog_candidate_projects total: #{ExternalCatalogCandidateProject.count}"
   end
 end

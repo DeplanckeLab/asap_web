@@ -95,6 +95,7 @@ class InputFileSha256Test < ActiveSupport::TestCase
     assert_includes warning, "ASAP#{public_match.public_id}"
     assert_includes warning, "Public match"
     assert_includes warning, "Creating another project from it is allowed"
+    assert_includes warning, "cloning an existing public project is faster"
     assert_nil InputFileSha256.public_project_warning(other_sha + "x")
     private_only = InputFileSha256.public_project_warning(Digest::SHA256.hexdigest("no-public"))
     assert_nil private_only

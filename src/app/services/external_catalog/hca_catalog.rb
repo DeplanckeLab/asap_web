@@ -128,13 +128,19 @@ module ExternalCatalog
 
       project = (hit['projects'] || []).first || {}
       project_id = Array(project['projectId']).first
-      title = Array(project['projectTitle']).first.presence || file['name'].to_s
+      project_title = Array(project['projectTitle']).first.presence
+      title = project_title.presence || file['name'].to_s
       filename = file['name'].to_s
       file_uuid = file['uuid'].presence || hit['entryId']
       external_id = "#{project_id}::#{file_uuid}"
 
       tax_id, organism_label = extract_species(hit)
       dois, pmids, identifiers = hca_reference_fields(project_id)
+      meta = project_id.present? ? fetch_project_meta(project_id) : nil
+      collection_description =
+        if meta.is_a?(Hash)
+          Array(meta['projectDescription']).first.presence || meta['projectDescription'].to_s.presence
+        end
 
       Entry.new(
         source: 'hca',
@@ -152,7 +158,10 @@ module ExternalCatalog
         identifiers: identifiers,
         source_page_url: (
           project_id.present? ? "https://data.humancellatlas.org/explore/projects/#{project_id}" : nil
-        )
+        ),
+        collection_id: project_id.to_s.presence,
+        collection_title: project_title,
+        collection_description: collection_description
       )
     end
 

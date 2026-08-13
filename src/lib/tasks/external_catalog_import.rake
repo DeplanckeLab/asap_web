@@ -77,8 +77,8 @@ namespace :external_catalog do
       scope = scope.where('filesize = 0 OR filesize <= ?', max_filesize)
     end
 
-    # Same order as the catalog UI: alphabetical by title.
-    scope = scope.order(Arel.sql('LOWER(COALESCE(title, \'\')) ASC'), id: :asc)
+    # Same order as the catalog UI: source, DOI/GEO/collection series, organism, title.
+    scope = scope.ordered_for_catalog
     scope = scope.limit(count) if count.present?
     scope.to_a
   end
@@ -285,9 +285,12 @@ namespace :external_catalog do
 
     totals = ExternalCatalog::CandidateSync.new.call(source: source, limit: limit, geo_mode: geo_mode)
     puts "Upserted: #{totals[:upserted]}"
+    puts "Marked obsolete: #{totals[:marked_obsolete]}"
+    puts "Deleted test entries (blank URL): #{totals[:deleted_test]}"
     totals[:by_source].each do |src, n|
       puts "  #{src}: #{n}"
     end
-    puts "Total candidates in DB: #{ExternalCatalogCandidate.count}"
+    puts "Total active candidates in DB: #{ExternalCatalogCandidate.current.count}"
+    puts "Total obsolete candidates in DB: #{ExternalCatalogCandidate.obsolete_only.count}"
   end
 end

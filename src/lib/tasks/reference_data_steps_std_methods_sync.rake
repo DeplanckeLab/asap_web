@@ -347,7 +347,8 @@ namespace :reference_data do
          "Match by primary key id; version id < MAX_VERSION_ID (default 9, includes v8). " \
          "Version sync includes env_json and activated status. " \
          "NewsItem sync clears user_id and removes target-only rows. " \
-         "Also runs external_catalog:sync_from_dev unless SKIP_EXTERNAL_CATALOG=1. " \
+         "Also runs external_catalog:sync_from_dev unless SKIP_EXTERNAL_CATALOG=1 " \
+         "(marks missing catalog entries obsolete; deletes blank-URL test entries only). " \
          "Hidden steps included; obsolete std_methods excluded. " \
          "If new DockerBuild rows are created, rebuilds compose asap_run from the highest new tag Dockerfile. " \
          "Set DEV_POSTGRES_DB (and DEV_DB_HOST/DEV_DB_PORT). DRY_RUN=1, VERBOSE=1, SKIP_COMPOSE=1, SKIP_EXTERNAL_CATALOG=1"

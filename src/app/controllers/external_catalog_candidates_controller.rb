@@ -3,7 +3,8 @@
 class ExternalCatalogCandidatesController < ApplicationController
   before_action :authenticate_user!
   before_action :authorize_uab
-  before_action :set_candidate, only: %i[show create_project]
+  before_action :ensure_synced_reference_data_writable!, only: %i[destroy]
+  before_action :set_candidate, only: %i[show create_project destroy]
 
   PER_PAGE = 25
 
@@ -15,14 +16,14 @@ class ExternalCatalogCandidatesController < ApplicationController
     @page = [params[:page].to_i, 1].max
     @per_page = PER_PAGE
 
-    scope = ExternalCatalogCandidate.all
+    scope = ExternalCatalogCandidate.current
     scope = scope.for_source(@source) if @source.present?
     scope = scope.for_project_type(@project_type) if @project_type.present?
     scope = scope.search_q(@q) if @q.present?
     scope = filter_in_asap(scope, @in_asap)
 
     @total_count = scope.count
-    @candidates = scope.order(Arel.sql('LOWER(COALESCE(title, \'\')) ASC'), id: :asc)
+    @candidates = scope.ordered_for_catalog
                        .offset((@page - 1) * @per_page)
                        .limit(@per_page)
                        .to_a
@@ -31,6 +32,11 @@ class ExternalCatalogCandidatesController < ApplicationController
   end
 
   def show
+    if @candidate.obsolete?
+      redirect_to external_catalog_candidates_path, alert: 'This candidate is obsolete and no longer listed.'
+      return
+    end
+
     @asap_projects = @candidate.asap_projects.order(id: :desc).to_a
   end
 
@@ -55,6 +61,20 @@ class ExternalCatalogCandidatesController < ApplicationController
                 notice: 'Import started. Refresh this page to see progress.'
   end
 
+  def destroy
+    unless @candidate.can_mark_obsolete?
+      redirect_back(
+        fallback_location: external_catalog_candidate_path(@candidate),
+        alert: 'This candidate is already obsolete.'
+      )
+      return
+    end
+
+    @candidate.mark_obsolete!
+    redirect_to external_catalog_candidates_path,
+                notice: 'Candidate marked obsolete. Sync to production to apply there.'
+  end
+
   private
 
   def set_candidate
@@ -62,7 +82,9 @@ class ExternalCatalogCandidatesController < ApplicationController
   end
 
   def create_blocked_message
-    if @candidate.importing?
+    if @candidate.obsolete?
+      'This candidate is obsolete and no longer listed.'
+    elsif @candidate.importing?
       'Import already in progress for this candidate.'
     elsif @candidate.already_in_asap?
       'An ASAP project already exists for this dataset.'

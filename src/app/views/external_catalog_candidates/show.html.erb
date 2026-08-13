@@ -6,12 +6,21 @@
       <h1 class="mt-2 text-3xl font-semibold text-gray-900 dark:text-white"><%= @candidate.title.presence || @candidate.external_id %></h1>
       <p class="mt-2 font-mono text-sm text-gray-500 dark:text-gray-400"><%= @candidate.source %> / <%= @candidate.external_id %></p>
     </div>
-    <% if @candidate.can_create_project? %>
-      <%= button_to "Create ASAP project",
-                    create_project_external_catalog_candidate_path(@candidate),
-                    method: :post,
-                    class: "inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900" %>
-    <% end %>
+    <div class="flex items-start gap-2">
+      <% if @candidate.can_create_project? %>
+        <%= button_to "Create ASAP project",
+                      create_project_external_catalog_candidate_path(@candidate),
+                      method: :post,
+                      class: "inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900" %>
+      <% end %>
+      <% if synced_reference_data_writable? && @candidate.can_mark_obsolete? %>
+        <%= button_to "Mark obsolete",
+                      external_catalog_candidate_path(@candidate),
+                      method: :delete,
+                      form: { data: { turbo_confirm: "Mark this candidate obsolete? It will stay out of the active catalog after syncing to production." } },
+                      class: "inline-flex items-center rounded-md border border-red-200 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 dark:border-red-500/40 dark:text-red-300 dark:hover:bg-red-500/10" %>
+      <% end %>
+    </div>
   </div>
 
   <% if notice.present? %>

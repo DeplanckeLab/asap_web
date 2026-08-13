@@ -9,7 +9,7 @@ module ExternalCatalog
       @logger = logger
     end
 
-    # Returns { upserted:, by_source: { 'cellxgene' => n, ... } }
+    # Returns { upserted:, marked_obsolete:, deleted_test:, by_source: { ... } }
     def call(source: 'all', limit: nil, geo_mode: 'all')
       sources =
         case source.to_s.strip.downcase
@@ -19,11 +19,18 @@ module ExternalCatalog
           raise ArgumentError, "SOURCE must be all|#{SOURCES.join('|')} (got #{source.inspect})"
         end
 
-      totals = { upserted: 0, by_source: Hash.new(0) }
+      totals = {
+        upserted: 0,
+        marked_obsolete: 0,
+        deleted_test: 0,
+        by_source: Hash.new(0)
+      }
       sources.each do |src|
-        n = sync_source(src, limit: limit, geo_mode: geo_mode)
-        totals[:upserted] += n
-        totals[:by_source][src] = n
+        result = sync_source(src, limit: limit, geo_mode: geo_mode)
+        totals[:upserted] += result[:upserted]
+        totals[:marked_obsolete] += result[:marked_obsolete]
+        totals[:deleted_test] += result[:deleted_test]
+        totals[:by_source][src] = result[:upserted]
       end
       totals
     end
@@ -32,12 +39,47 @@ module ExternalCatalog
 
     def sync_source(source, limit:, geo_mode:)
       upserted = 0
+      seen_external_ids = []
       each_entry(source, limit: limit, geo_mode: geo_mode) do |entry|
         ExternalCatalogCandidate.upsert_from_entry!(entry)
+        seen_external_ids << entry.external_id.to_s
         upserted += 1
       end
-      @logger.info("[ExternalCatalog::CandidateSync] source=#{source} upserted=#{upserted}")
-      upserted
+
+      marked_obsolete = 0
+      deleted_test = 0
+      # Partial syncs must not mark the rest of the source as obsolete.
+      if limit.blank?
+        prune = prune_missing_for_source!(source, seen_external_ids)
+        marked_obsolete = prune[:marked_obsolete]
+        deleted_test = prune[:deleted_test]
+      end
+
+      @logger.info(
+        "[ExternalCatalog::CandidateSync] source=#{source} upserted=#{upserted} " \
+        "marked_obsolete=#{marked_obsolete} deleted_test=#{deleted_test}"
+      )
+      { upserted: upserted, marked_obsolete: marked_obsolete, deleted_test: deleted_test }
+    end
+
+    def prune_missing_for_source!(source, seen_external_ids)
+      marked_obsolete = 0
+      deleted_test = 0
+      scope = ExternalCatalogCandidate.for_source(source)
+      scope = scope.where.not(external_id: seen_external_ids) if seen_external_ids.any?
+      scope.find_each do |candidate|
+        if candidate.test_entry? && !candidate.has_attached_asap_projects?
+          candidate.destroy!
+          deleted_test += 1
+          next
+        end
+
+        next if candidate.obsolete?
+
+        candidate.update!(obsolete: true)
+        marked_obsolete += 1
+      end
+      { marked_obsolete: marked_obsolete, deleted_test: deleted_test }
     end
 
     def each_entry(source, limit:, geo_mode:)

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_12_221000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_13_070000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -641,8 +641,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_12_221000) do
 
   create_table "external_catalog_candidates", force: :cascade do |t|
     t.text "attrs_json"
+    t.string "collection_id"
     t.datetime "created_at", null: false
     t.text "dois_json"
+    t.boolean "obsolete", default: false, null: false
     t.string "external_id", null: false
     t.string "filename"
     t.bigint "filesize", default: 0, null: false
@@ -657,16 +659,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_12_221000) do
     t.text "pmids_json"
     t.string "project_type_tag", default: "sc", null: false
     t.string "provider_tag", null: false
+    t.string "series_key"
     t.string "source", null: false
     t.text "source_page_url"
     t.integer "tax_id"
     t.text "title"
     t.datetime "updated_at", null: false
     t.text "url"
+    t.index ["collection_id"], name: "index_external_catalog_candidates_on_collection_id"
     t.index ["import_status"], name: "index_external_catalog_candidates_on_import_status"
     t.index ["last_seen_at"], name: "index_external_catalog_candidates_on_last_seen_at"
+    t.index ["obsolete"], name: "index_external_catalog_candidates_on_obsolete"
     t.index ["project_type_tag"], name: "index_external_catalog_candidates_on_project_type_tag"
     t.index ["provider_tag"], name: "index_external_catalog_candidates_on_provider_tag"
+    t.index ["series_key"], name: "index_external_catalog_candidates_on_series_key"
     t.index ["source", "external_id"], name: "index_ext_catalog_candidates_on_source_and_external_id", unique: true
     t.index ["source"], name: "index_external_catalog_candidates_on_source"
   end

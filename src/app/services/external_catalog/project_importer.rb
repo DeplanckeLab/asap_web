@@ -756,6 +756,8 @@ module ExternalCatalog
 
       loom_file = embedding.filepath
       state = landing_checkpoint_state(embedding: embedding, coloring: coloring, loom_file: loom_file)
+      label_font = state.dig('display', 'labelFontSizeMode')
+      label_size = state.dig('display', 'labelFontSize')
 
       Checkpoint.transaction do
         project.checkpoints.visualization.where(is_landing_page: true).update_all(is_landing_page: false)
@@ -771,7 +773,8 @@ module ExternalCatalog
         @logger.info(
           "[ExternalCatalog] landing checkpoint project=#{project.key} " \
           "checkpoint_id=#{checkpoint.id} emb=#{embedding.id}(#{embedding.name}) " \
-          "color=#{coloring.id}(#{coloring.name}) labels=on"
+          "color=#{coloring.id}(#{coloring.name}) labels=on " \
+          "labelFont=#{label_font}:#{label_size}"
         )
       end
     end
@@ -814,6 +817,8 @@ module ExternalCatalog
     end
 
     def landing_checkpoint_state(embedding:, coloring:, loom_file:)
+      label_font = landing_label_font_settings(coloring)
+
       {
         'version' => 1,
         'loomFile' => loom_file,
@@ -868,8 +873,8 @@ module ExternalCatalog
           'showAxes' => true,
           'showCategories' => true,
           'showLabelBoxes' => true,
-          'labelFontSizeMode' => 'auto',
-          'labelFontSize' => 12,
+          'labelFontSizeMode' => label_font[:mode],
+          'labelFontSize' => label_font[:size],
           'truncateLongLabels' => true,
           'freezeMovedLabels' => true,
           'labelPlacementMode' => 'avoid-collisions',
@@ -885,6 +890,40 @@ module ExternalCatalog
           'activeTab' => 'gene-sets'
         }
       }
+    end
+
+    # Matches visualization UI: Small = 10 with manual mode.
+    LANDING_LABEL_FONT_SMALL_SIZE = 10
+    LANDING_LABEL_MAX_LENGTH_FOR_DEFAULT_SIZE = 15
+
+    def landing_label_font_settings(coloring)
+      max_len = max_category_label_length(coloring)
+      if max_len > LANDING_LABEL_MAX_LENGTH_FOR_DEFAULT_SIZE
+        { mode: 'manual', size: LANDING_LABEL_FONT_SMALL_SIZE }
+      else
+        { mode: 'auto', size: 12 }
+      end
+    end
+
+    def max_category_label_length(annot)
+      labels = category_labels_for_font_size(annot)
+      return 0 if labels.empty?
+
+      labels.map { |label| label.to_s.length }.max
+    end
+
+    def category_labels_for_font_size(annot)
+      if annot.categories_json.present?
+        parsed = JSON.parse(annot.categories_json)
+        if parsed.is_a?(Hash) && parsed.any?
+          return parsed.keys.map(&:to_s)
+        end
+        if parsed.is_a?(Array) && parsed.any?
+          return parsed.map(&:to_s)
+        end
+      end
+
+      annot.distinct_category_labels_from_list_cat_json
     end
 
     def archive_project!(project)

@@ -3,9 +3,13 @@
 class ExternalCatalogCandidate < ApplicationRecord
   SOURCES = %w[cellxgene bgee hca geo].freeze
   IMPORT_STATUSES = %w[idle importing failed].freeze
+  SERIES_IDENTIFIER_KINDS = %w[geo_series array_express bioproject ega_study].freeze
+  COLLECTION_URL_RE = %r{/collections/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})}i
 
   belongs_to :import_project, class_name: 'Project', optional: true, inverse_of: :external_catalog_candidates
   belongs_to :import_user, class_name: 'User', optional: true
+
+  before_validation :assign_series_fields
 
   validates :source, presence: true, inclusion: { in: SOURCES }
   validates :external_id, presence: true
@@ -16,12 +20,30 @@ class ExternalCatalogCandidate < ApplicationRecord
   scope :for_source, ->(source) { where(source: source) if source.present? }
   scope :for_project_type, ->(tag) { where(project_type_tag: tag) if tag.present? }
   scope :not_importing, -> { where.not(import_status: 'importing') }
-  scope :importable, -> { where(import_status: %w[idle failed]) }
+  scope :importable, -> { current.where(import_status: %w[idle failed]) }
+  # Obsolete = gone from upstream / curated out. Test rows (blank url) may be deleted instead.
+  scope :current, -> { where(obsolete: false) }
+  scope :obsolete_only, -> { where(obsolete: true) }
+  scope :test_entry, -> { where("url IS NULL OR BTRIM(url) = ''") }
+  scope :non_test_entry, -> { where.not("url IS NULL OR BTRIM(url) = ''") }
   scope :search_q, lambda { |q|
     next all if q.blank?
 
     pattern = "%#{sanitize_sql_like(q.to_s.strip)}%"
-    where('title ILIKE ? OR external_id ILIKE ? OR filename ILIKE ?', pattern, pattern, pattern)
+    where(
+      'title ILIKE ? OR external_id ILIKE ? OR filename ILIKE ? OR series_key ILIKE ? OR collection_id ILIKE ?',
+      pattern, pattern, pattern, pattern, pattern
+    )
+  }
+  # Logical browse/import order: source, series (DOI/GEO/collection), organism, title.
+  scope :ordered_for_catalog, lambda {
+    order(
+      Arel.sql('source ASC'),
+      Arel.sql("COALESCE(series_key, '') ASC"),
+      Arel.sql('tax_id ASC NULLS LAST'),
+      Arel.sql("LOWER(COALESCE(title, '')) ASC"),
+      id: :asc
+    )
   }
 
   # Candidate ids that already have a live ASAP project via ProviderProject.
@@ -42,6 +64,45 @@ class ExternalCatalogCandidate < ApplicationRecord
   def self.not_yet_in_asap
     in_asap = ids_already_in_asap
     in_asap.empty? ? all : where.not(id: in_asap)
+  end
+
+  def self.collection_id_from_source_page_url(url)
+    return nil if url.blank?
+
+    match = url.to_s.match(COLLECTION_URL_RE)
+    match && match[1].presence
+  end
+
+  # Stable series key for grouping related datasets.
+  # Priority: DOI > GEO/ArrayExpress/BioProject/EGA accession > CELLxGENE collection.
+  def self.build_series_key(source:, external_id:, dois:, identifiers:, collection_id:)
+    doi = Array(dois).filter_map { |d| ExternalCatalog::ReferenceIds.normalize_doi(d) }.first
+    return "doi:#{doi}" if doi.present?
+
+    if source.to_s == 'geo'
+      gse = external_id.to_s.strip
+      gse = gse.upcase if gse.match?(/\AGSE\d+\z/i)
+      return "geo_series:#{gse}" if gse.present?
+    end
+
+    Array(identifiers).each do |raw|
+      kind, value =
+        if raw.is_a?(Hash)
+          [raw[:kind] || raw['kind'], raw[:value] || raw['value'] || raw[:id] || raw['id']]
+        else
+          [nil, raw]
+        end
+      ident = ExternalCatalog::ReferenceIds.identifier_hash(kind: kind, value: value)
+      next unless ident
+      next unless SERIES_IDENTIFIER_KINDS.include?(ident[:kind].to_s)
+
+      return "#{ident[:kind]}:#{ident[:value].to_s.strip}"
+    end
+
+    cid = collection_id.to_s.strip.presence
+    return "collection:#{cid}" if cid.present?
+
+    nil
   end
 
   def provider
@@ -65,6 +126,13 @@ class ExternalCatalogCandidate < ApplicationRecord
     asap_projects.exists?
   end
 
+  def has_attached_asap_projects?
+    return true if already_in_asap?
+    return false if import_project_id.blank?
+
+    import_project.present? && !import_project.being_deleted
+  end
+
   def importing?
     import_status.to_s == 'importing'
   end
@@ -74,7 +142,21 @@ class ExternalCatalogCandidate < ApplicationRecord
   end
 
   def can_create_project?
-    !already_in_asap? && !importing?
+    !obsolete? && !already_in_asap? && !importing?
+  end
+
+  def test_entry?
+    url.blank?
+  end
+
+  def can_mark_obsolete?
+    !obsolete?
+  end
+
+  def mark_obsolete!
+    raise ArgumentError, 'Candidate is already obsolete' unless can_mark_obsolete?
+
+    update!(obsolete: true)
   end
 
   def dois
@@ -112,7 +194,8 @@ class ExternalCatalogCandidate < ApplicationRecord
       dois: dois,
       pmids: pmids,
       identifiers: identifiers,
-      source_page_url: source_page_url
+      source_page_url: source_page_url,
+      collection_id: collection_id
     )
   end
 
@@ -120,6 +203,9 @@ class ExternalCatalogCandidate < ApplicationRecord
     raise ArgumentError, 'entry required' unless entry
 
     record = find_or_initialize_by(source: entry.source.to_s, external_id: entry.external_id.to_s)
+    collection_id =
+      entry.collection_id.to_s.presence ||
+      collection_id_from_source_page_url(entry.source_page_url)
     record.assign_attributes(
       provider_tag: entry.provider_tag,
       title: entry.title.to_s.presence || entry.external_id.to_s,
@@ -131,10 +217,12 @@ class ExternalCatalogCandidate < ApplicationRecord
       filesize: entry.filesize.to_i,
       url: entry.url,
       source_page_url: entry.source_page_url,
+      collection_id: collection_id,
       dois_json: entry.normalized_dois.to_json,
       pmids_json: entry.normalized_pmids.to_json,
       identifiers_json: entry.normalized_identifiers.to_json,
-      last_seen_at: Time.current
+      last_seen_at: Time.current,
+      obsolete: false
     )
     record.import_status = 'idle' if record.import_status.blank?
     record.save!
@@ -142,6 +230,18 @@ class ExternalCatalogCandidate < ApplicationRecord
   end
 
   private
+
+  def assign_series_fields
+    self.collection_id = collection_id.presence ||
+                         self.class.collection_id_from_source_page_url(source_page_url)
+    self.series_key = self.class.build_series_key(
+      source: source,
+      external_id: external_id,
+      dois: dois,
+      identifiers: identifiers,
+      collection_id: collection_id
+    )
+  end
 
   def parse_json_array(raw)
     return [] if raw.blank?

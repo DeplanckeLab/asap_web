@@ -1308,7 +1308,7 @@ export default class extends Controller {
       if (unresolvedValues.length > 0) {
         statusEl.innerHTML = ''
         const msg = document.createElement('span')
-        msg.textContent = `Resolved ${resolvedCount}/${values.length} values. ${unresolvedValues.length} unresolved (shown first in red). Click on red badges to fix them. `
+        msg.textContent = `Resolved ${resolvedCount}/${values.length} values. ${unresolvedValues.length} unresolved (shown first in red). Click a badge to fix or change it. `
         statusEl.appendChild(msg)
 
         const btn = document.createElement('button')
@@ -1322,7 +1322,7 @@ export default class extends Controller {
         statusEl.className = 'text-xs text-amber-600 font-medium'
       } else {
         statusEl.innerHTML = ''
-        statusEl.textContent = `All ${resolvedCount} values resolved successfully.`
+        statusEl.textContent = `All ${resolvedCount} values resolved successfully. Click a badge to change a term.`
         statusEl.className = 'text-xs text-green-600 italic'
       }
       statusEl.classList.remove('hidden')
@@ -1376,12 +1376,14 @@ export default class extends Controller {
     fixPanel.dataset.fixingValue = originalValue
 
     // Pre-populate accumulated terms if this value was already resolved
-    // (allows editing an existing multi-term assignment)
+    // (allows changing a valid term or editing an existing multi-term assignment).
+    // Fall back to originalValue for the source side when there is no rename --
+    // otherwise valid terms open with an empty identifier/name and cannot be edited.
     const state = this.mapResolveState[groupId]
     this.mapFixAccumulated[groupId] = []
     if (state && state.resolved[originalValue]) {
       const existingResolved = state.resolved[originalValue]
-      const existingSource = state.sourceRenames[originalValue] || ''
+      const existingSource = state.sourceRenames[originalValue] || originalValue
       const resolvedParts = this.splitMultiValue(existingResolved)
       const sourceParts = this.splitMultiValue(existingSource)
       resolvedParts.forEach((part, idx) => {
@@ -1399,6 +1401,11 @@ export default class extends Controller {
 
     // Show the panel with the original value
     if (fixOriginal) fixOriginal.textContent = originalValue
+    const panelLabel = fixPanel.querySelector('[data-map-fix-label]')
+    if (panelLabel) {
+      const isResolved = !!(state && state.resolved[originalValue])
+      panelLabel.textContent = isResolved ? 'Change term:' : 'Replace unresolved term:'
+    }
     fixPanel.classList.remove('hidden')
     fixInput.value = ''
     fixInput.focus()

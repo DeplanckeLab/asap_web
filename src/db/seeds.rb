@@ -783,7 +783,7 @@ else
         page_url: base,
         title: "Run validation",
         focus_element: '[data-guided-tour="compliance-validate-button"]',
-        description: "<p>Use <strong>Re-run Validation</strong> to refresh the report after editing metadata. Editors can open <strong>Fix Compliance Issues</strong> when the project is not yet compliant.</p>",
+        description: "<p>Use <strong>Re-run Validation</strong> to refresh the report after editing metadata. Editors can open <strong>Fix Compliance Issues</strong> when the project is not yet compliant, or <strong>Edit metadata</strong> when it already is.</p>",
         exclude_from_page_replay: true,
         step_actions: [
           { "action" => "wait_for_selector", "selector" => '[data-guided-tour="compliance-validate-button"]', "timeout_ms" => 12000 }

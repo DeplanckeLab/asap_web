@@ -52,7 +52,9 @@ class ProjectsController < ApplicationController
     
     # Extract projects from search results with preloaded associations
     @projects = search_results.records.includes(:project_steps, :project_type, :organism, :annots, :archive_status, :user, provider_projects: :provider)
-    
+    @latest_compliance_passed_by_project_id =
+      ComplianceValidation.latest_passed_by_project_id(@projects.map(&:id))
+
     # Get aggregations for filter dropdowns
     @aggregations = search_results.response['aggregations']
     

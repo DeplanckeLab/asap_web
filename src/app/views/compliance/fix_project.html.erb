@@ -23,10 +23,10 @@
     <% end %>
 
     <h1 class="text-2xl font-bold text-gray-900">
-      Fix Compliance Issues: <%= @project.respond_to?(:name) ? @project.name : "Project #{@project.id}" %>
+      Edit scFAIR metadata: <%= @project.respond_to?(:name) ? @project.name : "Project #{@project.id}" %>
     </h1>
     <p class="text-gray-600 mt-1">
-      Map existing metadata or assign fixed values to resolve compliance errors for <strong><%= display_title %></strong>.
+      Map existing metadata or assign fixed values to update scFAIR fields for <strong><%= display_title %></strong>.
     </p>
     <p class="text-sm text-gray-500 mt-1">
       Fixed values will be applied to <strong>all cells</strong> in the dataset.

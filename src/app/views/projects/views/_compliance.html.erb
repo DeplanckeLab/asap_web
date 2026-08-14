@@ -86,9 +86,9 @@
         <% end %>
         <% if (!@project.is_public? || admin?) && @validation_result %>
           <% if @validation_result[:valid] %>
-            <%= link_to "Edit Metadata",
+            <%= link_to "Edit metadata",
                         fix_compliance_project_path(@project),
-                        class: "px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700" %>
+                        class: "px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700" %>
           <% else %>
             <%= link_to "Fix Compliance Issues",
                         fix_compliance_project_path(@project),

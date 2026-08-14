@@ -403,4 +403,35 @@ module ProjectsHelper
                 class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-700 border border-slate-200',
                 title: annot.data_transformation.description.presence)
   end
+
+  # scFAIR check next to the project title on the search list.
+  # Green when single-cell and latest validation passed; light grey when single-cell
+  # but not compliant / not yet validated; nothing for non-single-cell projects.
+  # latest_passed_by_project_id must be the batch map from the index action.
+  def project_scfair_compliance_list_icon(project, latest_passed_by_project_id)
+    return unless project&.single_cell?
+
+    passed = latest_passed_by_project_id[project.id]
+
+    if passed == true
+      content_tag(
+        :span,
+        content_tag(:i, '', class: 'fas fa-check text-green-600 text-xs'),
+        class: 'inline-flex items-center',
+        title: 'scFAIR compliant'
+      )
+    else
+      title = if passed == false
+                'scFAIR not compliant'
+              else
+                'scFAIR not yet validated'
+              end
+      content_tag(
+        :span,
+        content_tag(:i, '', class: 'fas fa-check text-gray-300 text-xs'),
+        class: 'inline-flex items-center',
+        title: title
+      )
+    end
+  end
 end

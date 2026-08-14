@@ -73,10 +73,16 @@
                         method: :post,
                         class: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700" %>
         <% end %>
-        <% if @validation_result && !@validation_result[:valid] %>
-          <%= link_to "Fix Compliance Issues",
-                      fix_compliance_project_path(@project),
-                      class: "px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600" %>
+        <% if @validation_result %>
+          <% if @validation_result[:valid] %>
+            <%= link_to "Edit metadata",
+                        fix_compliance_project_path(@project),
+                        class: "px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700" %>
+          <% else %>
+            <%= link_to "Fix Compliance Issues",
+                        fix_compliance_project_path(@project),
+                        class: "px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600" %>
+          <% end %>
         <% end %>
         <%= render 'compliance/validation_history_modal', project: @project %>
       </div>

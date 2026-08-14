@@ -136,7 +136,7 @@ module Scfair
         {
           field: entry[:field],
           message: "The last ASAP consensus annotation for #{name} metadata is not the final scFAIR official annotation. " \
-                   "In order to publish this consensus annotation, please click on the \"Edit Metadata\" button and use " \
+                   "In order to publish this consensus annotation, please click on the \"Edit metadata\" button and use " \
                    "the consensus annotation metadata as template."
         }
       end

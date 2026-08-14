@@ -61,7 +61,7 @@ class ScfairConsensusOfficialMetadataValidatorTest < TestBaseWithoutFixtures
         assert_equal '/col_attrs/cell_type', warning[:field]
         assert_match(/cell_type metadata/, warning[:message])
         assert_match(WARNING_SNIPPET, warning[:message])
-        assert_match(/Edit Metadata/, warning[:message])
+        assert_match(/Edit metadata/, warning[:message])
       end
     end
   end

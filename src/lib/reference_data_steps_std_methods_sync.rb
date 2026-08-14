@@ -26,9 +26,11 @@ require "set"
 # NewsItem rows are applied by id when present; +user_id+ is always cleared so
 # author FKs do not break across environments. In id-based mode, target-only news
 # rows are removed so production matches the snapshot set.
-# CellOntology and OntologyTermType rows are applied by id when present (create /
-# update only; no deletes, to avoid breaking FKs from terms / clas / mappings).
-# OntologyTermType is applied after CellOntology so +cell_ontology_ids+ stay valid.
+# CellOntology and OntologyTermType rows are applied by id when present.
+# In id-based mode, target-only CellOntology rows are removed (after clearing
+# join rows and cell_ontology_terms) so production matches the snapshot set.
+# OntologyTermType is applied after CellOntology so +cell_ontology_ids+ stay valid
+# (create / update only; no OntologyTermType deletes — clas / mappings FKs).
 class ReferenceDataStepsStdMethodsSync
   SyncError = Class.new(StandardError)
 
@@ -100,6 +102,7 @@ class ReferenceDataStepsStdMethodsSync
       cell_ontologies_created: 0,
       cell_ontologies_updated: 0,
       cell_ontologies_unchanged: 0,
+      cell_ontologies_deleted: 0,
       ontology_term_types_created: 0,
       ontology_term_types_updated: 0,
       ontology_term_types_unchanged: 0,
@@ -656,6 +659,8 @@ class ReferenceDataStepsStdMethodsSync
             "Run migrations before syncing CellOntology rows."
     end
 
+    source_ids = cell_ontologies_in.map { |row| row["id"].to_i }.to_set
+
     cell_ontologies_in.sort_by { |row| row["id"].to_i }.each do |src|
       src_id = src["id"]
       raise SyncError, "CellOntology row without id: #{src.inspect}" if src_id.nil?
@@ -688,9 +693,36 @@ class ReferenceDataStepsStdMethodsSync
       record.update!(prepared)
     end
 
-    return if @dry_run || cell_ontologies_in.empty?
+    if match_by_id?
+      CellOntology.order(:id).each do |record|
+        next if source_ids.include?(record.id)
+
+        term_count = CellOntologyTerm.where(cell_ontology_id: record.id).count
+        puts "[#{mode_label}] delete CellOntology id=#{record.id} name=#{record.name.inspect} tag=#{record.tag.inspect}" \
+             "#{term_count.positive? ? " (and #{term_count} cell_ontology_terms)" : ''}"
+        summary[:cell_ontologies_deleted] += 1
+        next if @dry_run
+
+        destroy_synced_cell_ontology!(record)
+      end
+    end
+
+    return if @dry_run || (cell_ontologies_in.empty? && summary[:cell_ontologies_deleted].to_i.zero?)
 
     reset_pk_sequence!("cell_ontologies")
+  end
+
+  # CellOntology has dependent: :restrict_with_exception on terms, and a HABTM
+  # join table. Clear both before destroy so target-only rows can be removed.
+  def destroy_synced_cell_ontology!(record)
+    CellOntologyTerm.where(cell_ontology_id: record.id).delete_all
+    if ActiveRecord::Base.connection.table_exists?(:cell_ontologies_organisms)
+      ActiveRecord::Base.connection.exec_delete(
+        "DELETE FROM cell_ontologies_organisms WHERE cell_ontology_id = #{Integer(record.id)}",
+        "SQL"
+      )
+    end
+    record.destroy!
   end
 
   def apply_ontology_term_types!(ontology_term_types_in, summary)
@@ -1130,7 +1162,7 @@ class ReferenceDataStepsStdMethodsSync
     end
     if cell_ontologies_in
       puts "  cell_ontologies: created=#{summary[:cell_ontologies_created]} updated=#{summary[:cell_ontologies_updated]} " \
-           "unchanged=#{summary[:cell_ontologies_unchanged]}"
+           "unchanged=#{summary[:cell_ontologies_unchanged]} deleted=#{summary[:cell_ontologies_deleted]}"
       puts "  snapshot cell_ontologies: #{cell_ontologies_in.size}"
     end
     if ontology_term_types_in

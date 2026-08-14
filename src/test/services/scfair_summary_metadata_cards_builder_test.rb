@@ -85,26 +85,43 @@ class ScfairSummaryMetadataCardsBuilderTest < TestBaseWithoutFixtures
   end
 
   test 'uses label_pairs and attaches ontology urls when available' do
-    CellOntology.create!(
-      name: 'NCBI Taxonomy',
-      tag: 'NCBITaxon',
-      url_mask: 'https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=#{ID_VAL}',
-      obsolete: false
-    )
+    desired_mask = 'https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=#{ID_VAL}'
+    ontology = CellOntology.where('LOWER(tag) = ?', 'ncbitaxon').order(:id).first
+    previous_mask = nil
 
-    validation_result = {
-      'valid' => true,
-      'field_values' => {
-        '/attrs/organism_ontology_term_id#label_pairs' => ['NCBITaxon:9606 || Homo sapiens']
+    if ontology
+      previous_mask = ontology.url_mask
+      ontology.update!(url_mask: desired_mask, obsolete: false)
+    else
+      register_for_test_cleanup(
+        CellOntology.create!(
+          name: 'NCBI Taxonomy',
+          tag: 'NCBITaxon',
+          url_mask: desired_mask,
+          obsolete: false
+        )
+      )
+    end
+
+    begin
+      validation_result = {
+        'valid' => true,
+        'field_values' => {
+          '/attrs/organism_ontology_term_id#label_pairs' => ['NCBITaxon:9606 || Homo sapiens']
+        }
       }
-    }
 
-    cards = Scfair::SummaryMetadataCardsBuilder.call(validation_result: validation_result)
-    organism = cards.find { |card| card[:id] == 'organism' }
-    assert organism
-    term = organism[:terms].first
-    assert_equal 'Homo sapiens', term[:label]
-    assert_equal 'NCBITaxon:9606', term[:identifier]
-    assert_equal 'https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=9606', term[:url]
+      cards = Scfair::SummaryMetadataCardsBuilder.call(validation_result: validation_result)
+      organism = cards.find { |card| card[:id] == 'organism' }
+      assert organism
+      term = organism[:terms].first
+      assert_equal 'Homo sapiens', term[:label]
+      assert_equal 'NCBITaxon:9606', term[:identifier]
+      assert_equal 'https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=9606', term[:url]
+    ensure
+      if ontology&.persisted? && previous_mask && ontology.url_mask != previous_mask
+        ontology.update!(url_mask: previous_mask)
+      end
+    end
   end
 end

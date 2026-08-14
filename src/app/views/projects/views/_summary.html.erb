@@ -525,37 +525,55 @@ summary_search_gene_url = search_gene_project_path(@project)
     </p>
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-3 items-stretch">
       <% summary_scfair_metadata_cards.each do |card| %>
-        <button type="button"
-                class="group h-full min-h-0 flex flex-col text-left rounded-lg border border-gray-100 bg-gray-50/80 p-3 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-1"
-                style="border-left: 4px solid <%= card[:color] %>; --tw-ring-color: <%= card[:color] %>;"
-                data-summary-scfair-metadata-trigger
-                data-card-id="<%= card[:id] %>"
-                data-card-label="<%= card[:label] %>"
-                data-card-color="<%= card[:color] %>"
-                data-card-terms="<%= ERB::Util.html_escape(card[:terms].to_json) %>"
-                aria-label="<%= card[:label] %>: <%= card[:term_count] %> terms">
-          <div class="shrink-0 flex items-start justify-between gap-2 min-h-[1.75rem]">
-            <p class="font-semibold text-gray-900 flex items-start gap-2 min-w-0">
-              <i class="fas <%= card[:icon] %> shrink-0 mt-0.5" style="color: <%= card[:color] %>;" aria-hidden="true"></i>
-              <span class="truncate leading-snug"><%= card[:label] %></span>
-            </p>
-            <span class="badge-text px-2 py-0.5 rounded font-bold whitespace-nowrap shrink-0" style="background-color: <%= card[:color] %>22; color: <%= card[:color] %>;">
-              <%= number_with_delimiter(card[:term_count]) %>
-            </span>
+        <% example_terms = Array(card[:terms]).first(card[:examples].size) %>
+        <div class="relative group h-full min-h-0 flex flex-col text-left rounded-lg border border-gray-100 bg-gray-50/80 p-3 hover:bg-white hover:border-gray-200 hover:shadow-sm transition-all duration-150"
+             style="border-left: 4px solid <%= card[:color] %>;">
+          <button type="button"
+                  class="absolute inset-0 z-0 rounded-lg focus:outline-none focus:ring-2 focus:ring-offset-1"
+                  style="--tw-ring-color: <%= card[:color] %>;"
+                  data-summary-scfair-metadata-trigger
+                  data-card-id="<%= card[:id] %>"
+                  data-card-label="<%= card[:label] %>"
+                  data-card-color="<%= card[:color] %>"
+                  data-card-terms="<%= ERB::Util.html_escape(card[:terms].to_json) %>"
+                  aria-label="<%= card[:label] %>: <%= card[:term_count] %> terms"></button>
+          <div class="relative z-10 pointer-events-none flex flex-col flex-1 min-h-0">
+            <div class="shrink-0 flex items-start justify-between gap-2 min-h-[1.75rem]">
+              <p class="font-semibold text-gray-900 flex items-start gap-2 min-w-0">
+                <i class="fas <%= card[:icon] %> shrink-0 mt-0.5" style="color: <%= card[:color] %>;" aria-hidden="true"></i>
+                <span class="truncate leading-snug"><%= card[:label] %></span>
+              </p>
+              <span class="badge-text px-2 py-0.5 rounded font-bold whitespace-nowrap shrink-0" style="background-color: <%= card[:color] %>22; color: <%= card[:color] %>;">
+                <%= number_with_delimiter(card[:term_count]) %>
+              </span>
+            </div>
+            <div class="flex-1 min-h-0 mt-2">
+              <% if example_terms.any? %>
+                <div class="flex flex-wrap gap-1 content-start">
+                  <% example_terms.each do |term| %>
+                    <% term_label = term[:label].presence || term[:identifier] %>
+                    <% term_url = term[:url].to_s %>
+                    <% if term_url.match?(/\Ahttps?:\/\//i) %>
+                      <a href="<%= term_url %>"
+                         target="_blank"
+                         rel="noopener noreferrer"
+                         data-summary-scfair-metadata-term-link
+                         class="pointer-events-auto badge-text px-2 py-0.5 rounded truncate max-w-full hover:opacity-80"
+                         style="background-color: <%= card[:color] %>22; color: <%= card[:color] %>;"
+                         title="<%= term[:identifier].presence || term_label %>"
+                         aria-label="Open ontology page for <%= term_label %>"><%= term_label %></a>
+                    <% else %>
+                      <span class="badge-text px-2 py-0.5 rounded truncate max-w-full" style="background-color: <%= card[:color] %>22; color: <%= card[:color] %>;"><%= term_label %></span>
+                    <% end %>
+                  <% end %>
+                  <% if card[:term_count] > example_terms.size %>
+                    <span class="badge-text px-2 py-0.5 rounded" style="background-color: <%= card[:color] %>22; color: <%= card[:color] %>;">+<%= card[:term_count] - example_terms.size %> more</span>
+                  <% end %>
+                </div>
+              <% end %>
+            </div>
           </div>
-          <div class="flex-1 min-h-0 mt-2">
-            <% if card[:examples].any? %>
-              <div class="flex flex-wrap gap-1 content-start">
-                <% card[:examples].each do |example| %>
-                  <span class="badge-text px-2 py-0.5 rounded truncate max-w-full" style="background-color: <%= card[:color] %>22; color: <%= card[:color] %>;"><%= example %></span>
-                <% end %>
-                <% if card[:term_count] > card[:examples].size %>
-                  <span class="badge-text px-2 py-0.5 rounded" style="background-color: <%= card[:color] %>22; color: <%= card[:color] %>;">+<%= card[:term_count] - card[:examples].size %> more</span>
-                <% end %>
-              </div>
-            <% end %>
-          </div>
-        </button>
+        </div>
       <% end %>
     </div>
   </div>

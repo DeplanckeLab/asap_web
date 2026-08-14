@@ -8012,17 +8012,32 @@ class ProjectsController < ApplicationController
   end
 
   # GET /projects/search_snapshot
-  # Lightweight fingerprint of the current search-results page (total count +
-  # result IDs). Used by the search page to detect newly submitted / removed
-  # projects and reload without a full manual refresh.
+  # Fingerprint of the current search-results page: total count, result IDs, and
+  # display fields for the current page. The search page flashes a refresh
+  # control when the result set changes, and patches row values in place when
+  # only already-displayed projects changed.
   def search_snapshot
     query, filters = project_search_query_and_filters
+    filters[:skip_aggregations] = true
     search_results = Project.search(query, filters)
     hits = search_results.response['hits']
+    ids = Array(hits['hits']).map { |hit| hit['_id'].to_i }
+
+    projects_by_id = {}
+    if ids.any?
+      Project.where(id: ids).includes(:project_type, :organism, :annots, :archive_status, :user).find_each do |project|
+        projects_by_id[project.id] = project
+      end
+    end
 
     render json: {
       total_count: hits['total']['value'].to_i,
-      ids: Array(hits['hits']).map { |hit| hit['_id'].to_i }
+      ids: ids,
+      projects: ids.filter_map { |id|
+        project = projects_by_id[id]
+        next unless project
+        search_snapshot_project_payload(project)
+      }
     }
   end
 
@@ -9184,6 +9199,37 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def search_snapshot_project_payload(project)
+      project_type = project.project_type
+      run_counts = helpers.project_run_counts(project)
+      payload = {
+        id: project.id,
+        display_name: project.display_name,
+        key: project.key,
+        public_id: project.public_id,
+        version_id: project.version_id,
+        archive_status_icon: project.archive_status_icon_class_for_display,
+        archive_status_label: project.archive_status_label_for_display,
+        project_type_tag: project_type&.tag,
+        project_type_name: project_type&.name,
+        organism: project.organism_display,
+        technology: project.technology_display,
+        cell_count: helpers.number_with_delimiter(project.cell_count),
+        col_label: helpers.col_label(project),
+        gene_count: helpers.number_with_delimiter(project.gene_count),
+        row_label: helpers.row_label(project),
+        updated_at: project.updated_at&.strftime("%b %d, %Y"),
+        run_counts: {
+          pending: run_counts[:pending],
+          running: run_counts[:running],
+          success: run_counts[:success],
+          failed: run_counts[:failed]
+        }
+      }
+      payload[:user_email] = project.user&.email.presence if admin?
+      payload
+    end
+
     def project_search_query_and_filters
       query = params[:q]
       visibility = params[:visibility].presence || (
@@ -9220,13 +9266,7 @@ class ProjectsController < ApplicationController
       path = fu&.file_path&.to_s
       return unless path.present? && File.exist?(path)
 
-      project_input_type = UploadType.id_for('project_input')
-      updates = {}
-      updates[:upload_type] = project_input_type if project_input_type.present?
-      if fu.status.in?(%w[validating validated validation_failed])
-        updates[:status] = 'uploaded'
-      end
-      fu.update!(updates) if updates.present?
+      fu.adopt_as_project_input!
 
       size = File.size(path)
       session[:file_upload] = {

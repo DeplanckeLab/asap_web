@@ -110,6 +110,7 @@ class IsolatedComplianceController extends Controller {
   urlChanged(event) {
     this.urlValue = (event.target.value || "").trim()
     this.file = null
+    this.fuId = null
     this.fileInputTarget.value = ""
     this.renderSourceInfo()
     this.runButtonTarget.disabled = !this.canRun()
@@ -205,10 +206,12 @@ class IsolatedComplianceController extends Controller {
     const base = this.hasNewProjectUrlValue ? this.newProjectUrlValue : "/projects/new"
     const params = new URLSearchParams()
     params.set("from", "scfair_validation")
-    if (this.sourceUrlTarget?.checked && this.urlValue) {
-      params.set("file_url", this.urlValue)
-    } else if (this.fuId) {
+    // Prefer the already downloaded/uploaded Fu so the new-project form can move
+    // it under the project fus directory instead of fetching the file again.
+    if (this.fuId) {
       params.set("fu_id", String(this.fuId))
+    } else if (this.sourceUrlTarget?.checked && this.urlValue) {
+      params.set("file_url", this.urlValue)
     }
     const query = params.toString()
     return query ? `${base}?${query}` : base
@@ -329,6 +332,7 @@ class IsolatedComplianceController extends Controller {
   async run() {
     if (!this.canRun()) return
     this.runButtonTarget.disabled = true
+    this.fuId = null
     this.clearStatusText()
     this.resultWrapTarget.classList.add("hidden")
     this.progressWrapTarget.classList.remove("hidden")
@@ -546,6 +550,7 @@ class IsolatedComplianceController extends Controller {
 
   handleUpdate(data) {
     if (!data) return
+    if (data.fu_id) this.fuId = data.fu_id
     if (data.status === "downloading") {
       this.showTransferProgress("Downloading file...")
       this.updateTransferProgress(
@@ -567,7 +572,6 @@ class IsolatedComplianceController extends Controller {
     }
     if (data.status === "completed") {
       this.stopStatusPoll()
-      if (data.fu_id && !this.fuId) this.fuId = data.fu_id
       const valid = data.result?.valid
       const title = valid
         ? "Validation complete: Compliant"

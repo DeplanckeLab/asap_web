@@ -333,8 +333,10 @@ class FusController < ApplicationController
 
       # Temporary reuse optimization: if same URL was already downloaded by this user, reuse it.
       # Only unattached uploads: a Fu already linked to a project must not be reused for a new project.
+      # Include standalone compliance-check statuses so a file already fetched for
+      # /compliance/file-check can be moved into a new project without a second download.
       reusable_fu = fu_scope_for_current_actor.where(url: normalized_url, project_id: nil)
-                      .where(status: %w[downloading uploaded preparsing preparsed completed])
+                      .where(status: %w[downloading uploaded preparsing preparsed completed validated validation_failed])
                       .order(updated_at: :desc)
                       .detect do |candidate|
         if candidate.status == 'downloading'
@@ -347,6 +349,8 @@ class FusController < ApplicationController
       end
 
       if reusable_fu
+        reusable_fu.adopt_as_project_input!
+        reusable_fu.reload
         upload_path = reusable_fu.file_path
         size = (upload_path && File.exist?(upload_path)) ? File.size(upload_path) : 0
         organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)

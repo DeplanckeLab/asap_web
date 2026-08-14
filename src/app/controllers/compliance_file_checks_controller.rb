@@ -40,7 +40,13 @@ class ComplianceFileChecksController < ApplicationController
       message: 'Downloading file...'
     }
     IsolatedComplianceStatusStore.write(task_id, initial)
-    IsolatedComplianceUrlDownloadJob.perform_later(task_id, url, schema_id, user_id: current_user&.id)
+    IsolatedComplianceUrlDownloadJob.perform_later(
+      task_id,
+      url,
+      schema_id,
+      user_id: current_user&.id,
+      project_key: current_user ? nil : session[:sandbox]
+    )
 
     render json: {
       task_id: task_id,

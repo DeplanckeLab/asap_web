@@ -197,15 +197,20 @@ class Project < ApplicationRecord
         }
       },
       sort: [],
-      aggs: {
+      size: 20,
+      from: 0
+    }
+
+    unless filters[:skip_aggregations]
+      search_definition[:aggs] = {
         organisms: { terms: { field: 'organism_name', size: 500 } },
         project_types: { terms: { field: 'project_type_name', size: 100 } },
         tissues: { terms: { field: 'tissue', size: 2000 } },
         statuses: { terms: { field: 'status_name', size: 50 } }
-      },
-      size: 20,
-      from: 0
-    }
+      }
+    else
+      search_definition[:_source] = false
+    end
 
     # Add pagination
     if filters[:page].present?

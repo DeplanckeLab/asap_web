@@ -133,6 +133,19 @@ class Fu < ApplicationRecord
     candidates.max_by { |name| File.size(upload_dir + name) }
   end
   
+  # Convert a standalone compliance-check Fu into a project-input Fu so the
+  # already downloaded file can be attached to a new project without a second fetch.
+  def adopt_as_project_input!
+    project_input_type = UploadType.id_for('project_input')
+    updates = {}
+    updates[:upload_type] = project_input_type if project_input_type.present? && upload_type != project_input_type
+    if status.in?(%w[validating validated validation_failed])
+      updates[:status] = 'uploaded'
+    end
+    update!(updates) if updates.present?
+    self
+  end
+
   # Check if upload is complete
   def complete?
     return false unless file_path && File.exist?(file_path)

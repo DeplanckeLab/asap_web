@@ -7,7 +7,7 @@ class ApplicationController < ActionController::Base
 
   # Skip authentication for certain actions that can be accessed publicly
   # Authentication will be checked at the action level via readable?/exportable? methods
-  skip_before_action :authenticate_user!, only: [:index, :show, :metadata_coordinates, :metadata_vectors, :gene_expression, :get_file], raise: false
+  skip_before_action :authenticate_user!, only: [:index, :show, :metadata_coordinates, :metadata_vectors, :gene_expression, :get_file, :search_snapshot], raise: false
   before_action :configure_permitted_parameters, if: :devise_controller?
 
   prepend_before_action :enforce_session_cookie_policy

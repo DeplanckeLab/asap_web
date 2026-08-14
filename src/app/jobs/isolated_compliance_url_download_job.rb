@@ -7,18 +7,25 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
 
   PROGRESS_MIN_INTERVAL = 0.5
 
-  def perform(task_id, url, schema_id, user_id: nil)
+  def perform(task_id, url, schema_id, user_id: nil, project_key: nil)
     tmp_path = download_remote_file!(task_id, url)
     detected_format = ComplianceFileCheckQueueService.validate_downloaded_file!(tmp_path)
     final_path = rename_downloaded_file!(tmp_path, task_id, detected_format)
 
-    fu = create_fu_for_downloaded_file!(final_path, url, user_id: user_id)
+    fu = create_fu_for_downloaded_file!(
+      final_path,
+      url,
+      detected_format: detected_format,
+      user_id: user_id,
+      project_key: project_key
+    )
 
     queued_payload = {
       status: 'queued',
       task_id: task_id,
       progress: 5,
-      message: 'Validation queued'
+      message: 'Validation queued',
+      fu_id: fu.id
     }
     write_and_broadcast(task_id, queued_payload)
 
@@ -39,20 +46,23 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
 
   private
 
-  def create_fu_for_downloaded_file!(current_path, source_url, user_id: nil)
-    original_filename = File.basename(URI.parse(source_url.to_s).path).presence ||
-                        File.basename(current_path)
+  def create_fu_for_downloaded_file!(current_path, source_url, detected_format:, user_id: nil, project_key: nil)
+    parsed_url = URI.parse(source_url.to_s.strip)
+    original_filename = File.basename(parsed_url.path).presence || File.basename(current_path)
     original_filename = File.basename(current_path) if original_filename.blank?
+    extension = detected_format == 'loom' ? '.loom' : '.h5ad'
+    input_filename = "input_file#{extension}"
 
     upload_type_id = UploadType.id_for('compliance_file_check')
     fu = Fu.create!(
-      upload_file_name: File.basename(current_path),
+      upload_file_name: input_filename,
       upload_file_size: File.size(current_path),
       name: original_filename,
       status: 'validating',
       upload_type: upload_type_id,
       user_id: user_id,
-      url: source_url.to_s
+      project_key: project_key,
+      url: parsed_url.to_s
     )
 
     fu_dir = fu.upload_dir.to_s

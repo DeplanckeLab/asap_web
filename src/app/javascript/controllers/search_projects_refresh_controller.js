@@ -1,8 +1,14 @@
 import { Controller } from "@hotwired/stimulus"
 
-// Polls a lightweight search fingerprint so the browse/search page picks up
-// newly submitted (or removed) projects without a manual refresh.
+const IDLE_TITLE = "Refresh the project list"
+const LIST_CHANGED_TITLE = "The list of projects changed. Reload the page to see the updates."
+
+// Polls a search fingerprint so the browse/search page can:
+// - flash a refresh control when projects appear, disappear, or reorder
+// - patch displayed fields in place when only already-visible rows changed
 export default class extends Controller {
+  static targets = ["refreshButton", "row"]
+
   static values = {
     url: String,
     totalCount: Number,
@@ -103,18 +109,165 @@ export default class extends Controller {
   applySnapshot(data) {
     if (!data || typeof data !== "object") return
 
-    const nextTotalCount = parseInt(data.total_count, 10) || 0
+    const nextTotalCount = parseInt(data.total_count, 10)
     const nextIds = this.normalizeIds(data.ids)
+    const listChanged =
+      nextTotalCount !== this.knownTotalCount ||
+      !this.idsEqual(nextIds, this.knownIds)
 
-    if (
-      nextTotalCount === this.knownTotalCount &&
-      this.idsEqual(nextIds, this.knownIds)
-    ) {
+    if (listChanged) {
+      this.offerListRefresh()
       return
     }
 
+    this.clearListRefresh()
+    this.applyProjectDetails(data.projects)
+  }
+
+  offerListRefresh() {
+    if (!this.hasRefreshButtonTarget) return
+    this.refreshButtonTarget.classList.add("subview-refresh-available")
+    this.refreshButtonTarget.title = LIST_CHANGED_TITLE
+  }
+
+  clearListRefresh() {
+    if (!this.hasRefreshButtonTarget) return
+    this.refreshButtonTarget.classList.remove("subview-refresh-available")
+    this.refreshButtonTarget.title = IDLE_TITLE
+  }
+
+  reloadPage() {
+    if (this.reloading) return
     this.reloading = true
     this.stopPolling()
     window.location.reload()
+  }
+
+  applyProjectDetails(projects) {
+    if (!Array.isArray(projects)) return
+
+    const runCountsById = {}
+    projects.forEach((project) => {
+      const row = this.rowFor(project.id)
+      if (!row) return
+
+      this.setField(row, "display_name", project.display_name)
+      this.syncCheckbox(row, project)
+      this.updateArchiveStatus(row, project)
+      this.updateOptionalText(row, "key", project.key)
+      this.updateOptionalText(
+        row,
+        "public_id",
+        project.public_id == null || project.public_id === "" ? "" : `ASAP${project.public_id}`
+      )
+      this.updateOptionalText(
+        row,
+        "version_id",
+        project.version_id == null || project.version_id === "" ? "" : `v${project.version_id}`
+      )
+      this.updateProjectType(row, project)
+      this.setField(row, "organism", project.organism)
+      this.setField(row, "technology", project.technology)
+      this.setField(row, "cell_count", project.cell_count)
+      this.setField(row, "col_label", project.col_label)
+      this.setField(row, "gene_count", project.gene_count)
+      this.setField(row, "row_label", project.row_label)
+      this.setField(row, "updated_at", project.updated_at)
+      if (Object.prototype.hasOwnProperty.call(project, "user_email")) {
+        this.setField(row, "user_email", project.user_email || "-")
+      }
+      if (project.run_counts) {
+        runCountsById[String(project.id)] = project.run_counts
+      }
+    })
+
+    this.applyRunCounts(runCountsById)
+  }
+
+  rowFor(projectId) {
+    const id = String(projectId)
+    return this.rowTargets.find((row) => row.dataset.projectId === id)
+  }
+
+  field(row, name) {
+    return row.querySelector(`[data-search-projects-refresh-field="${name}"]`)
+  }
+
+  setField(row, name, value) {
+    const el = this.field(row, name)
+    if (!el) return
+    const next = value == null ? "" : String(value)
+    if (el.textContent !== next) {
+      el.textContent = next
+    }
+  }
+
+  updateOptionalText(row, name, value) {
+    const el = this.field(row, name)
+    if (!el) return
+    const next = value == null ? "" : String(value)
+    if (next) {
+      el.classList.remove("hidden")
+      if (el.textContent !== next) el.textContent = next
+    } else {
+      el.classList.add("hidden")
+    }
+  }
+
+  updateArchiveStatus(row, project) {
+    const wrap = this.field(row, "archive_status")
+    if (!wrap) return
+    const iconClass = project.archive_status_icon
+    if (!iconClass) {
+      wrap.classList.add("hidden")
+      return
+    }
+
+    wrap.classList.remove("hidden")
+    wrap.title = `Archive status: ${project.archive_status_label || ""}`
+    const icon = wrap.querySelector("i")
+    if (icon) {
+      const nextClass = `${iconClass} text-xs`
+      if (icon.className !== nextClass) icon.className = nextClass
+    }
+  }
+
+  updateProjectType(row, project) {
+    const el = this.field(row, "project_type")
+    if (!el) return
+    const tag = project.project_type_tag
+    if (tag) {
+      if (el.dataset.setClass) el.className = el.dataset.setClass
+      el.title = project.project_type_name || ""
+      if (el.textContent !== tag) el.textContent = tag
+    } else {
+      if (el.dataset.unsetClass) el.className = el.dataset.unsetClass
+      el.title = "Project type not set"
+      if (el.textContent !== "?") el.textContent = "?"
+    }
+  }
+
+  syncCheckbox(row, project) {
+    const checkbox = row.querySelector('[data-project-selection-target="checkbox"]')
+    if (!checkbox) return
+    if (project.display_name) checkbox.dataset.projectName = project.display_name
+    checkbox.dataset.projectTypeUnknown = project.project_type_tag ? "false" : "true"
+  }
+
+  applyRunCounts(countsById) {
+    const ids = Object.keys(countsById)
+    if (ids.length === 0) return
+
+    const runStatus = this.application.getControllerForElementAndIdentifier(
+      this.element,
+      "search-run-status"
+    )
+    if (!runStatus) return
+    if (typeof runStatus.applyCounts === "function") {
+      runStatus.applyCounts(countsById)
+    }
+    if (typeof runStatus.schedulePoll === "function") {
+      runStatus.schedulePoll()
+    }
   }
 }

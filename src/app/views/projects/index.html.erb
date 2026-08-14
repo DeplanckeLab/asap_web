@@ -322,21 +322,25 @@
                   <td class="px-6 py-4" onclick="window.location='<%= project_path(project) %>'">
                     <div>
                       <div class="text-sm font-medium text-gray-900">
-                        <span data-search-projects-refresh-field="display_name"><%= project.display_name %></span><%= project_scfair_compliance_list_icon(project, @latest_compliance_passed_by_project_id) %>
+                        <span data-search-projects-refresh-field="display_name"><%= project.display_name %></span>
                       </div>
-                      <div class="flex items-center gap-2 mt-0.5">
+                      <div class="flex flex-nowrap items-center gap-2 mt-0.5 whitespace-nowrap">
                         <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 text-gray-700 <%= 'hidden' if archive_icon.blank? %>"
                               data-search-projects-refresh-field="archive_status"
                               title="Archive status: <%= project.archive_status_label_for_display %>">
                           <i class="<%= archive_icon %> text-xs"></i>
                         </span>
-                        <span class="text-xs text-gray-400 font-mono <%= 'hidden' if project.key.blank? %>"
-                              data-search-projects-refresh-field="key"><%= project.key %></span>
-                        <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-green-100 text-green-800 <%= 'hidden' if project.public_id.blank? %>"
-                              data-search-projects-refresh-field="public_id"><% if project.public_id.present? %>ASAP<%= project.public_id %><% end %></span>
-                        <span class="inline-flex items-center px-1.5 py-0 rounded text-xs font-medium bg-gray-100 text-gray-700 <%= 'hidden' if project.version_id.blank? %>"
-                              data-search-projects-refresh-field="version_id"
-                              title="ASAP release"><% if project.version_id.present? %>v<%= project.version_id %><% end %></span>
+                        <span class="inline-flex items-center gap-0.5">
+                          <span class="text-xs text-gray-400 font-mono <%= 'hidden' if project.key.blank? %>"
+                                data-search-projects-refresh-field="key"><%= project.key %></span>
+                          <span class="items-center px-1.5 py-0 rounded text-xs font-medium bg-green-100 text-green-800 <%= project.public_id.blank? ? 'hidden' : 'inline-flex' %>"
+                                data-search-projects-refresh-field="public_id"
+                                data-search-projects-refresh-visible-display="inline-flex"><% if project.public_id.present? %>ASAP<%= project.public_id %><% end %></span>
+                          <span class="items-center px-1.5 py-0 rounded text-xs font-medium bg-gray-100 text-gray-700 <%= project.version_id.blank? ? 'hidden' : 'inline-flex' %>"
+                                data-search-projects-refresh-field="version_id"
+                                data-search-projects-refresh-visible-display="inline-flex"
+                                title="ASAP release"><% if project.version_id.present? %>v<%= project.version_id %><% end %></span>
+                        </span>
                         <% project.provider_projects.select(&:provider).uniq(&:provider_id).each do |pp| %>
                           <% provider = pp.provider %>
                           <% label = provider.tag.presence || provider.display_name %>
@@ -355,6 +359,7 @@
                             </span>
                           <% end %>
                         <% end %>
+                        <%= project_scfair_compliance_list_icon(project, @latest_compliance_passed_by_project_id) %>
                       </div>
                     </div>
                   </td>

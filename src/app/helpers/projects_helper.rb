@@ -404,7 +404,7 @@ module ProjectsHelper
                 title: annot.data_transformation.description.presence)
   end
 
-  # scFAIR check next to the project title on the search list.
+  # scFAIR check after key / public id / optional origin badges on the search list.
   # Green when single-cell and latest validation passed; light grey when single-cell
   # but not compliant / not yet validated; nothing for non-single-cell projects.
   # latest_passed_by_project_id must be the batch map from the index action.
@@ -417,7 +417,7 @@ module ProjectsHelper
       content_tag(
         :span,
         content_tag(:i, '', class: 'fas fa-check text-green-600 text-xs'),
-        class: 'inline-flex items-center ml-1.5 align-text-bottom',
+        class: 'inline-flex items-center shrink-0',
         title: 'scFAIR compliant'
       )
     else
@@ -429,7 +429,7 @@ module ProjectsHelper
       content_tag(
         :span,
         content_tag(:i, '', class: 'fas fa-check text-gray-300 text-xs'),
-        class: 'inline-flex items-center ml-1.5 align-text-bottom',
+        class: 'inline-flex items-center shrink-0',
         title: title
       )
     end

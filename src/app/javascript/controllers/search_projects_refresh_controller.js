@@ -206,11 +206,14 @@ export default class extends Controller {
     const el = this.field(row, name)
     if (!el) return
     const next = value == null ? "" : String(value)
+    const visibleDisplay = el.dataset.searchProjectsRefreshVisibleDisplay
     if (next) {
       el.classList.remove("hidden")
+      if (visibleDisplay) el.classList.add(visibleDisplay)
       if (el.textContent !== next) el.textContent = next
     } else {
       el.classList.add("hidden")
+      if (visibleDisplay) el.classList.remove(visibleDisplay)
     }
   }
 

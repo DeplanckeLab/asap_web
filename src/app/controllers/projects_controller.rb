@@ -9217,8 +9217,14 @@ class ProjectsController < ApplicationController
         archive_status_label: project.archive_status_label_for_display,
         project_type_tag: project_type&.tag,
         project_type_name: project_type&.name,
-        organism: project.organism_display,
-        technology: project.technology_display,
+        organism: {
+          labels: project.organism&.name.present? ? [project.organism.name] : [],
+          color: helpers.ontology_term_type_color('organism')
+        },
+        technology: {
+          labels: project.compliance_term_names_for('technology'),
+          color: helpers.ontology_term_type_color('technology')
+        },
         cell_count: helpers.number_with_delimiter(project.cell_count),
         col_label: helpers.col_label(project),
         gene_count: helpers.number_with_delimiter(project.gene_count),

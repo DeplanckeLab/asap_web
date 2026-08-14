@@ -379,13 +379,13 @@
                       <%= project_type_set ? project.project_type.tag : '?' %>
                     </span>
                   </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" onclick="window.location='<%= project_path(project) %>'"
+                  <td class="px-6 py-4 text-sm text-gray-500" onclick="window.location='<%= project_path(project) %>'"
                       data-search-projects-refresh-field="organism">
-                    <%= project.organism_display %>
+                    <%= search_project_organism_badges(project) %>
                   </td>
-                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" onclick="window.location='<%= project_path(project) %>'"
+                  <td class="px-6 py-4 text-sm text-gray-500" onclick="window.location='<%= project_path(project) %>'"
                       data-search-projects-refresh-field="technology">
-                    <%= project.technology_display %>
+                    <%= search_project_technology_badges(project) %>
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" onclick="window.location='<%= project_path(project) %>'">
                     <span class="block font-medium text-gray-900" data-search-projects-refresh-field="cell_count"><%= number_with_delimiter(project.cell_count) %></span>

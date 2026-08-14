@@ -166,8 +166,8 @@ export default class extends Controller {
         project.version_id == null || project.version_id === "" ? "" : `v${project.version_id}`
       )
       this.updateProjectType(row, project)
-      this.setField(row, "organism", project.organism)
-      this.setField(row, "technology", project.technology)
+      this.updateTermBadges(row, "organism", project.organism)
+      this.updateTermBadges(row, "technology", project.technology)
       this.setField(row, "cell_count", project.cell_count)
       this.setField(row, "col_label", project.col_label)
       this.setField(row, "gene_count", project.gene_count)
@@ -248,6 +248,38 @@ export default class extends Controller {
       el.title = "Project type not set"
       if (el.textContent !== "?") el.textContent = "?"
     }
+  }
+
+  updateTermBadges(row, fieldName, payload) {
+    const el = this.field(row, fieldName)
+    if (!el) return
+
+    let labels = []
+    let color = "#64748B"
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      labels = Array.isArray(payload.labels) ? payload.labels : []
+      if (payload.color) color = String(payload.color)
+    } else if (typeof payload === "string" && payload.length > 0 && payload !== "Unknown") {
+      labels = payload.split(",").map((part) => part.trim()).filter(Boolean)
+    }
+
+    const terms = labels.map((label) => String(label).trim()).filter(Boolean)
+    const displayTerms = terms.length > 0 ? terms : ["Unknown"]
+    const nextKey = `${color}|${displayTerms.join("\u0001")}`
+    if (el.dataset.badgeKey === nextKey) return
+    el.dataset.badgeKey = nextKey
+
+    const wrap = document.createElement("span")
+    wrap.className = "flex flex-wrap gap-1"
+    displayTerms.forEach((label) => {
+      const badge = document.createElement("span")
+      badge.className = "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
+      badge.style.backgroundColor = `${color}22`
+      badge.style.color = color
+      badge.textContent = label
+      wrap.appendChild(badge)
+    })
+    el.replaceChildren(wrap)
   }
 
   syncCheckbox(row, project) {

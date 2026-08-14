@@ -434,4 +434,51 @@ module ProjectsHelper
       )
     end
   end
+
+  # Color from ontology_term_types (DB color / explore_color), with EXPLORE_STYLES fallback.
+  # Accepts OntologyTermType#name (e.g. "technology") or field_group_id (e.g. "organism").
+  def ontology_term_type_color(name_or_field_group)
+    key = name_or_field_group.to_s
+    ontology_term_type_color_cache[key] ||= begin
+      ott = OntologyTermType.find_by(name: key) || OntologyTermType.find_by(field_group_id: key)
+      style_key = ott&.field_group_id.presence || ott&.name.presence || key
+      ott&.explore_color || OntologyTermType.explore_style_for(style_key)[:color]
+    end
+  end
+
+  # Colored badges matching scFAIR summary metadata chips (color + 22 alpha background).
+  def ontology_term_type_badges(labels, color, unknown_label: 'Unknown')
+    terms = Array(labels).map { |label| label.to_s.strip }.reject(&:blank?)
+    terms = [unknown_label] if terms.empty?
+    hex = color.to_s.presence || '#64748B'
+
+    content_tag(:span, class: 'flex flex-wrap gap-1') do
+      safe_join(
+        terms.map do |label|
+          content_tag(
+            :span,
+            label,
+            class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium',
+            style: "background-color: #{hex}22; color: #{hex};"
+          )
+        end
+      )
+    end
+  end
+
+  def search_project_organism_badges(project)
+    labels = project&.organism&.name.present? ? [project.organism.name] : []
+    ontology_term_type_badges(labels, ontology_term_type_color('organism'))
+  end
+
+  def search_project_technology_badges(project)
+    labels = project ? project.compliance_term_names_for('technology') : []
+    ontology_term_type_badges(labels, ontology_term_type_color('technology'))
+  end
+
+  private
+
+  def ontology_term_type_color_cache
+    @ontology_term_type_color_cache ||= {}
+  end
 end

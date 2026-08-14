@@ -40,6 +40,14 @@ namespace :reference_data do
       self.table_name = "news_items"
     end
 
+    class SourceCellOntology < SourceReferenceBase
+      self.table_name = "cell_ontologies"
+    end
+
+    class SourceOntologyTermType < SourceReferenceBase
+      self.table_name = "ontology_term_types"
+    end
+
     def dev_db_config_for_reference_sync
       database_url = ENV["SOURCE_DATABASE_URL"].to_s.strip
       return { url: database_url } if database_url.present?
@@ -116,6 +124,14 @@ namespace :reference_data do
         if SourceReferenceBase.connection.table_exists?(:news_items)
           SourceNewsItem.order(:id).map(&:attributes)
         end
+      cell_ontologies =
+        if SourceReferenceBase.connection.table_exists?(:cell_ontologies)
+          SourceCellOntology.order(:id).map(&:attributes)
+        end
+      ontology_term_types =
+        if SourceReferenceBase.connection.table_exists?(:ontology_term_types)
+          SourceOntologyTermType.order(:id).map(&:attributes)
+        end
       payload_rows = {
         steps: step_rows,
         std_methods: std_method_rows,
@@ -125,6 +141,8 @@ namespace :reference_data do
         speeds: SourceSpeed.order(:id).map(&:attributes)
       }
       payload_rows[:news_items] = news_items unless news_items.nil?
+      payload_rows[:cell_ontologies] = cell_ontologies unless cell_ontologies.nil?
+      payload_rows[:ontology_term_types] = ontology_term_types unless ontology_term_types.nil?
       payload_rows
     ensure
       SourceReferenceBase.remove_connection
@@ -143,6 +161,8 @@ namespace :reference_data do
         }
       }
       payload["records"]["NewsItem"] = rows[:news_items] if rows.key?(:news_items)
+      payload["records"]["CellOntology"] = rows[:cell_ontologies] if rows.key?(:cell_ontologies)
+      payload["records"]["OntologyTermType"] = rows[:ontology_term_types] if rows.key?(:ontology_term_types)
 
       tmp = Tempfile.new(["reference_data_steps_std_methods", ".json"])
       tmp.write(JSON.pretty_generate(payload))
@@ -343,10 +363,12 @@ namespace :reference_data do
       generated_snapshot&.close!
     end
 
-    desc "Preferred: apply Step, StdMethod, Version, DockerImage, DockerBuild, and NewsItem from development to production. " \
+    desc "Preferred: apply Step, StdMethod, Version, DockerImage, DockerBuild, NewsItem, " \
+         "CellOntology, and OntologyTermType from development to production. " \
          "Match by primary key id; version id < MAX_VERSION_ID (default 9, includes v8). " \
          "Version sync includes env_json and activated status. " \
          "NewsItem sync clears user_id and removes target-only rows. " \
+         "CellOntology and OntologyTermType sync by id (create/update; no deletes). " \
          "Also runs external_catalog:sync_from_dev unless SKIP_EXTERNAL_CATALOG=1 " \
          "(marks missing catalog entries obsolete; deletes blank-URL test entries only). " \
          "Hidden steps included; obsolete std_methods excluded. " \
@@ -375,7 +397,8 @@ namespace :reference_data do
         exit 1
       end
 
-      puts "Applying development Step/StdMethod/Version/DockerImage/DockerBuild/NewsItem (id < #{max_version_id}, including hidden steps) to production"
+      puts "Applying development Step/StdMethod/Version/DockerImage/DockerBuild/NewsItem/CellOntology/OntologyTermType " \
+           "(id < #{max_version_id}, including hidden steps) to production"
       puts "  dry_run=#{dry}  match_by=id"
 
       summary = ReferenceDataStepsStdMethodsSync.new(

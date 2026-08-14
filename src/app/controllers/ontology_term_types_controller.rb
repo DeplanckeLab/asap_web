@@ -1,6 +1,7 @@
 class OntologyTermTypesController < ApplicationController
   before_action :authenticate_user!, except: :index
   before_action :authorize_admin, except: :index
+  before_action :ensure_synced_reference_data_writable!, except: [:index]
   before_action :set_ontology_term_type, only: [:edit, :update, :destroy]
 
   def index

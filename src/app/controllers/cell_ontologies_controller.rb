@@ -2,6 +2,7 @@ class CellOntologiesController < ApplicationController
   before_action :authenticate_user!
   skip_before_action :authenticate_user!, only: [:index, :show], raise: false
   before_action :authorize_admin, except: [:index, :show]
+  before_action :ensure_synced_reference_data_writable!, except: [:index, :show]
   before_action :set_cell_ontology, only: [:show, :edit, :update, :destroy]
 
   def index

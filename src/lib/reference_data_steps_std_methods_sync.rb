@@ -3,13 +3,15 @@
 require "json"
 require "set"
 
-# Applies Step, StdMethod, Version, DockerImage, DockerBuild, and NewsItem rows
-# from a JSON snapshot produced by ReferenceDataCompare / bin/rake
-# reference_data:export, or built in-memory by the rake tasks.
+# Applies Step, StdMethod, Version, DockerImage, DockerBuild, NewsItem,
+# CellOntology, and OntologyTermType rows from a JSON snapshot produced by
+# ReferenceDataCompare / bin/rake reference_data:export, or built in-memory by
+# the rake tasks.
 #
 # Preferred entry point: +reference_data:steps_std_methods:sync_from_dev+, which
-# sets +max_version_id+ and matches Step, StdMethod, Version, and NewsItem by
-# primary key id (required when the same step name exists across pipeline versions).
+# sets +max_version_id+ and matches Step, StdMethod, Version, NewsItem,
+# CellOntology, and OntologyTermType by primary key id (required when the same
+# step name exists across pipeline versions).
 #
 # OBSOLETE: calling without +max_version_id+ (rake +reference_data:steps_std_methods:sync+)
 # matches Step by +name+ only. That mode cannot sync a full multi-version snapshot
@@ -24,6 +26,9 @@ require "set"
 # NewsItem rows are applied by id when present; +user_id+ is always cleared so
 # author FKs do not break across environments. In id-based mode, target-only news
 # rows are removed so production matches the snapshot set.
+# CellOntology and OntologyTermType rows are applied by id when present (create /
+# update only; no deletes, to avoid breaking FKs from terms / clas / mappings).
+# OntologyTermType is applied after CellOntology so +cell_ontology_ids+ stay valid.
 class ReferenceDataStepsStdMethodsSync
   SyncError = Class.new(StandardError)
 
@@ -40,7 +45,7 @@ class ReferenceDataStepsStdMethodsSync
   }.freeze
 
   TIMESTAMP_COLUMNS = %w[created_at updated_at activated_at published_at].freeze
-  BOOLEAN_COLUMNS = %w[activated beta hidden obsolete published show_on_welcome].freeze
+  BOOLEAN_COLUMNS = %w[activated beta hidden obsolete published show_on_welcome multi_value].freeze
 
   def initialize(snapshot_path:, dry_run: false, verbose: false, max_version_id: nil)
     @snapshot_path = snapshot_path
@@ -63,6 +68,8 @@ class ReferenceDataStepsStdMethodsSync
     docker_images_in = fetch_optional_records!("DockerImage")
     docker_builds_in = fetch_optional_records!("DockerBuild")
     news_items_in = fetch_optional_records_if_present!("NewsItem")
+    cell_ontologies_in = fetch_optional_records_if_present!("CellOntology")
+    ontology_term_types_in = fetch_optional_records_if_present!("OntologyTermType")
 
     docker_by_src_id = index_optional_model!("DockerImage")
     version_by_src_id = index_optional_model!("Version")
@@ -90,6 +97,12 @@ class ReferenceDataStepsStdMethodsSync
       news_items_updated: 0,
       news_items_unchanged: 0,
       news_items_deleted: 0,
+      cell_ontologies_created: 0,
+      cell_ontologies_updated: 0,
+      cell_ontologies_unchanged: 0,
+      ontology_term_types_created: 0,
+      ontology_term_types_updated: 0,
+      ontology_term_types_unchanged: 0,
       steps_created: 0,
       steps_updated: 0,
       steps_unchanged: 0,
@@ -108,6 +121,8 @@ class ReferenceDataStepsStdMethodsSync
       apply_docker_builds!(docker_builds_in, docker_remap, summary)
       apply_versions!(versions_in, summary)
       apply_news_items!(news_items_in, summary)
+      apply_cell_ontologies!(cell_ontologies_in, summary)
+      apply_ontology_term_types!(ontology_term_types_in, summary)
       apply_steps!(steps_in, docker_remap, version_remap, summary)
       apply_std_methods!(
         steps_in,
@@ -128,7 +143,9 @@ class ReferenceDataStepsStdMethodsSync
       steps_in,
       docker_images_in,
       docker_builds_in,
-      news_items_in
+      news_items_in,
+      cell_ontologies_in,
+      ontology_term_types_in
     )
     summary
   end
@@ -432,6 +449,18 @@ class ReferenceDataStepsStdMethodsSync
     attrs.select { |column, _value| target_columns.include?(column) }
   end
 
+  def prepare_cell_ontology_row(row)
+    attrs = row.except("id")
+    target_columns = CellOntology.column_names.to_set
+    attrs.select { |column, _value| target_columns.include?(column) }
+  end
+
+  def prepare_ontology_term_type_row(row)
+    attrs = row.except("id")
+    target_columns = OntologyTermType.column_names.to_set
+    attrs.select { |column, _value| target_columns.include?(column) }
+  end
+
   def prepare_docker_build_row(row, docker_remap)
     attrs = row.except("id")
     src_docker_image_id = attrs["docker_image_id"]
@@ -616,6 +645,97 @@ class ReferenceDataStepsStdMethodsSync
     return if @dry_run || news_items_in.empty?
 
     reset_pk_sequence!("news_items")
+  end
+
+  def apply_cell_ontologies!(cell_ontologies_in, summary)
+    return if cell_ontologies_in.nil?
+
+    unless ActiveRecord::Base.connection.table_exists?(:cell_ontologies)
+      raise SyncError,
+            "cell_ontologies table is missing on the target database. " \
+            "Run migrations before syncing CellOntology rows."
+    end
+
+    cell_ontologies_in.sort_by { |row| row["id"].to_i }.each do |src|
+      src_id = src["id"]
+      raise SyncError, "CellOntology row without id: #{src.inspect}" if src_id.nil?
+
+      prepared = prepare_cell_ontology_row(src)
+      name = prepared["name"].to_s
+      tag = prepared["tag"].to_s
+      label = "id=#{src_id} name=#{name.inspect} tag=#{tag.inspect}"
+      record = CellOntology.find_by(id: src_id)
+
+      if record.nil?
+        puts "[#{mode_label}] create CellOntology #{label}"
+        summary[:cell_ontologies_created] += 1
+        next if @dry_run
+
+        CellOntology.create!(prepared.merge("id" => src_id))
+        next
+      end
+
+      if record_attributes_match?(record, prepared)
+        summary[:cell_ontologies_unchanged] += 1
+        next
+      end
+
+      puts "[#{mode_label}] update CellOntology #{label} (target id=#{record.id})"
+      log_verbose_diff!(record, prepared)
+      summary[:cell_ontologies_updated] += 1
+      next if @dry_run
+
+      record.update!(prepared)
+    end
+
+    return if @dry_run || cell_ontologies_in.empty?
+
+    reset_pk_sequence!("cell_ontologies")
+  end
+
+  def apply_ontology_term_types!(ontology_term_types_in, summary)
+    return if ontology_term_types_in.nil?
+
+    unless ActiveRecord::Base.connection.table_exists?(:ontology_term_types)
+      raise SyncError,
+            "ontology_term_types table is missing on the target database. " \
+            "Run migrations before syncing OntologyTermType rows."
+    end
+
+    ontology_term_types_in.sort_by { |row| row["id"].to_i }.each do |src|
+      src_id = src["id"]
+      raise SyncError, "OntologyTermType row without id: #{src.inspect}" if src_id.nil?
+
+      prepared = prepare_ontology_term_type_row(src)
+      name = prepared["name"].to_s
+      label = "id=#{src_id} name=#{name.inspect}"
+      record = OntologyTermType.find_by(id: src_id)
+
+      if record.nil?
+        puts "[#{mode_label}] create OntologyTermType #{label}"
+        summary[:ontology_term_types_created] += 1
+        next if @dry_run
+
+        OntologyTermType.create!(prepared.merge("id" => src_id))
+        next
+      end
+
+      if record_attributes_match?(record, prepared)
+        summary[:ontology_term_types_unchanged] += 1
+        next
+      end
+
+      puts "[#{mode_label}] update OntologyTermType #{label} (target id=#{record.id})"
+      log_verbose_diff!(record, prepared)
+      summary[:ontology_term_types_updated] += 1
+      next if @dry_run
+
+      record.update!(prepared)
+    end
+
+    return if @dry_run || ontology_term_types_in.empty?
+
+    reset_pk_sequence!("ontology_term_types")
   end
 
   def reset_pk_sequence!(table_name)
@@ -983,7 +1103,9 @@ class ReferenceDataStepsStdMethodsSync
     steps_in,
     docker_images_in = [],
     docker_builds_in = [],
-    news_items_in = []
+    news_items_in = [],
+    cell_ontologies_in = nil,
+    ontology_term_types_in = nil
   )
     puts ""
     puts "Summary (#{mode_label})"
@@ -1005,6 +1127,16 @@ class ReferenceDataStepsStdMethodsSync
       puts "  news_items: created=#{summary[:news_items_created]} updated=#{summary[:news_items_updated]} " \
            "unchanged=#{summary[:news_items_unchanged]} deleted=#{summary[:news_items_deleted]}"
       puts "  snapshot news_items: #{news_items_in.size}"
+    end
+    if cell_ontologies_in
+      puts "  cell_ontologies: created=#{summary[:cell_ontologies_created]} updated=#{summary[:cell_ontologies_updated]} " \
+           "unchanged=#{summary[:cell_ontologies_unchanged]}"
+      puts "  snapshot cell_ontologies: #{cell_ontologies_in.size}"
+    end
+    if ontology_term_types_in
+      puts "  ontology_term_types: created=#{summary[:ontology_term_types_created]} updated=#{summary[:ontology_term_types_updated]} " \
+           "unchanged=#{summary[:ontology_term_types_unchanged]}"
+      puts "  snapshot ontology_term_types: #{ontology_term_types_in.size}"
     end
     puts "  steps: created=#{summary[:steps_created]} updated=#{summary[:steps_updated]} unchanged=#{summary[:steps_unchanged]}"
     puts "  std_methods: created=#{summary[:std_methods_created]} updated=#{summary[:std_methods_updated]} unchanged=#{summary[:std_methods_unchanged]}"

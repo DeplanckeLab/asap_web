@@ -10,7 +10,7 @@
         which is largely inspired from the <a href="https://github.com/chanzuckerberg/single-cell-curation/blob/main/schema/7.1.0/README.md" target="_blank">CELLxGENE metadata schema</a>.
       </p>
     </div>
-    <% if admin? %>
+    <% if can_edit_synced_reference_data? %>
       <div>
         <%= link_to "New metadata field",
                     new_ontology_term_type_path,
@@ -18,6 +18,12 @@
       </div>
     <% end %>
   </div>
+
+  <% if admin? && !synced_reference_data_writable? %>
+    <div class="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-400/50 dark:bg-amber-950/30 dark:text-amber-100">
+      Ontology term types are synced from development and are read-only on production.
+    </div>
+  <% end %>
 
   <% if @ontology_term_types.empty? %>
     <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-400/50 dark:bg-amber-950/30 dark:text-amber-100">
@@ -48,7 +54,7 @@
              <!-- <th scope="col" class="px-6 py-3">Lineage terms</th>
               <th scope="col" class="px-6 py-3">Direct terms</th>
               <th scope="col" class="px-6 py-3">Free-text entries</th>-->
-              <% if admin? %>
+              <% if can_edit_synced_reference_data? %>
                 <th scope="col" class="px-6 py-3 text-right">Actions</th>
               <% end %>
             </tr>
@@ -87,7 +93,7 @@
                     <span class="text-gray-400 dark:text-gray-500">—</span>
                   <% end %>
                 </td>
-                <% if admin? %>
+                <% if can_edit_synced_reference_data? %>
                   <td class="px-6 py-4 text-right text-sm">
                     <%= link_to "Edit",
                                 edit_ontology_term_type_path(record),
@@ -107,4 +113,3 @@
     </div>
   <% end %>
 </div>
-

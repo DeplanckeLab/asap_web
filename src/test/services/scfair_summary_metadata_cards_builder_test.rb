@@ -23,15 +23,16 @@ class ScfairSummaryMetadataCardsBuilderTest < TestBaseWithoutFixtures
     assert by_id.key?('organism')
     assert_equal 'Homo sapiens', by_id['organism'][:examples].first
     assert_equal 1, by_id['organism'][:term_count]
+    assert_equal 'NCBITaxon:9606', by_id['organism'][:terms].first[:identifier]
 
     assert by_id.key?('cell_type')
     assert_equal 3, by_id['cell_type'][:term_count]
-    assert_equal ['T cell', 'B cell', 'NK cell'], by_id['cell_type'][:examples]
+    assert_equal ['B cell', 'NK cell', 'T cell'], by_id['cell_type'][:examples]
     assert_equal '#22C55E', by_id['cell_type'][:color]
     assert_equal '#3B82F6', by_id['organism'][:color]
 
     assert by_id.key?('suspension_type')
-    assert_equal ['cell'], by_id['suspension_type'][:terms]
+    assert_equal ['cell'], by_id['suspension_type'][:terms].map { |term| term[:label] }
 
     refute by_id.key?('title')
     refute by_id.key?('schema_version')
@@ -40,5 +41,70 @@ class ScfairSummaryMetadataCardsBuilderTest < TestBaseWithoutFixtures
   test 'returns empty list when field_values are blank' do
     cards = Scfair::SummaryMetadataCardsBuilder.call(validation_result: { 'valid' => true })
     assert_equal [], cards
+  end
+
+  test 'sorts terms with leading numbers first then alphanumerically' do
+    validation_result = {
+      'valid' => true,
+      'field_values' => {
+        '/col_attrs/development_stage' => ['adult || 10-cell stage || 2-cell stage || unknown'],
+        '/col_attrs/development_stage_ontology_term_id' => [
+          'UBERON:0007023 || HsapDv:0000001 || HsapDv:0000002 || unknown'
+        ]
+      }
+    }
+
+    cards = Scfair::SummaryMetadataCardsBuilder.call(validation_result: validation_result)
+    card = cards.find { |entry| entry[:id] == 'development_stage' }
+    assert card
+    assert_equal ['2-cell stage', '10-cell stage', 'adult', 'unknown'], card[:terms].map { |term| term[:label] }
+  end
+
+  test 'omits identifier for non-ontology special and enum values' do
+    validation_result = {
+      'valid' => true,
+      'field_values' => {
+        '/col_attrs/development_stage' => ['adult || unknown'],
+        '/col_attrs/development_stage_ontology_term_id' => ['UBERON:0007023 || unknown'],
+        '/col_attrs/suspension_type' => ['cell']
+      }
+    }
+
+    cards = Scfair::SummaryMetadataCardsBuilder.call(validation_result: validation_result)
+    by_id = cards.index_by { |card| card[:id] }
+
+    stages = by_id.fetch('development_stage')[:terms].index_by { |term| term[:label] }
+    assert_equal 'UBERON:0007023', stages.fetch('adult')[:identifier]
+    assert_nil stages.fetch('unknown')[:identifier]
+    assert_nil stages.fetch('unknown')[:url]
+
+    suspension = by_id.fetch('suspension_type')[:terms].first
+    assert_equal 'cell', suspension[:label]
+    assert_nil suspension[:identifier]
+    assert_nil suspension[:url]
+  end
+
+  test 'uses label_pairs and attaches ontology urls when available' do
+    CellOntology.create!(
+      name: 'NCBI Taxonomy',
+      tag: 'NCBITaxon',
+      url_mask: 'https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=#{id}',
+      obsolete: false
+    )
+
+    validation_result = {
+      'valid' => true,
+      'field_values' => {
+        '/attrs/organism_ontology_term_id#label_pairs' => ['NCBITaxon:9606 || Homo sapiens']
+      }
+    }
+
+    cards = Scfair::SummaryMetadataCardsBuilder.call(validation_result: validation_result)
+    organism = cards.find { |card| card[:id] == 'organism' }
+    assert organism
+    term = organism[:terms].first
+    assert_equal 'Homo sapiens', term[:label]
+    assert_equal 'NCBITaxon:9606', term[:identifier]
+    assert_includes term[:url], 'NCBITaxon:9606'
   end
 end

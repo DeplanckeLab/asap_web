@@ -9,7 +9,7 @@
         Browse the curated list of cell ontologies available in ASAP.
       </p>
     </div>
-    <% if admin? %>
+    <% if can_edit_synced_reference_data? %>
       <div>
         <%= link_to "New cell ontology",
                     new_cell_ontology_path,
@@ -17,6 +17,12 @@
       </div>
     <% end %>
   </div>
+
+  <% if admin? && !synced_reference_data_writable? %>
+    <div class="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-400/50 dark:bg-amber-950/30 dark:text-amber-100">
+      Cell ontologies are synced from development and are read-only on production.
+    </div>
+  <% end %>
 
   <% if @cell_ontologies.empty? %>
     <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-400/50 dark:bg-amber-950/30 dark:text-amber-100">
@@ -34,7 +40,7 @@
       </div>
 
       <div class="overflow-x-auto">
-        <% show_actions = admin? %>
+        <% show_actions = can_edit_synced_reference_data? %>
         <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
           <thead>
             <tr class="bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:bg-gray-950 dark:text-gray-400">
@@ -136,4 +142,3 @@
     </div>
   <% end %>
 </div>
-

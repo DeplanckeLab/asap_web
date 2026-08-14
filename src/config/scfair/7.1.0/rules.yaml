@@ -750,7 +750,7 @@ fix_form:
       description: Developmental stage of the organism
       display_order: 5
       field_kind: ontology_pair
-      term_format_hint: 'HsapDv:XXXXXXX or "unknown"'
+      term_format_hint: 'HsapDv:XXXXXXX or unknown'
     - id: disease
       layer: obs
       term_field: disease_ontology_term_id
@@ -768,7 +768,7 @@ fix_form:
       description: Self-reported ethnicity or "unknown" / "na"
       display_order: 7
       field_kind: ontology_pair
-      term_format_hint: 'HANCESTRO:XXXX or "unknown" or "na"'
+      term_format_hint: 'HANCESTRO:XXXX or unknown or na'
     - id: sex
       layer: obs
       term_field: sex_ontology_term_id
@@ -777,7 +777,7 @@ fix_form:
       description: 'Biological sex or "unknown"; "na" only when tissue_type is cell line (CF-2b)'
       display_order: 8
       field_kind: ontology_pair
-      term_format_hint: 'PATO:0000383 (female), PATO:0000384 (male), PATO:0001340 (hermaphrodite), or "unknown"'
+      term_format_hint: 'PATO:0000383 (female), PATO:0000384 (male), PATO:0001340 (hermaphrodite), or unknown'
     - id: tissue
       layer: obs
       term_field: tissue_ontology_term_id
@@ -795,7 +795,7 @@ fix_form:
       description: 'Optional experimental condition IDs (CHEBI, EFO, uniprot, anti-uniprot) or "na"; multiple values use " || "'
       display_order: 10
       field_kind: ontology_pair
-      term_format_hint: 'CHEBI:16412 || EFO:0001702 or "na"'
+      term_format_hint: 'CHEBI:16412 || EFO:0001702 or na'
     - id: genetic_perturbation_id
       layer: obs
       term_field: genetic_perturbation_id

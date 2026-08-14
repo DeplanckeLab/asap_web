@@ -1510,22 +1510,20 @@ export default class extends Controller {
       return
     }
 
-    const countInfo = totalCount > results.length
-      ? `<div class="px-3 py-1.5 text-xs text-gray-400 bg-gray-50 border-b border-gray-100">Showing ${results.length} of ${totalCount} matches</div>`
-      : `<div class="px-3 py-1.5 text-xs text-gray-400 bg-gray-50 border-b border-gray-100">${totalCount} match${totalCount !== 1 ? 'es' : ''}</div>`
+    const countInfo = document.createElement('div')
+    countInfo.className = 'px-3 py-1.5 text-xs text-gray-400 bg-gray-50 border-b border-gray-100'
+    countInfo.textContent = totalCount > results.length
+      ? `Showing ${results.length} of ${totalCount} matches`
+      : `${totalCount} match${totalCount !== 1 ? 'es' : ''}`
 
-    resultsEl.innerHTML = countInfo + results.map(r =>
-      `<div data-mapfix-item
-            data-identifier="${this.escapeHtml(r.identifier)}"
-            data-name="${this.escapeHtml(r.name)}"
-            data-group-id="${groupId}"
-            data-action="click->compliance-fix#selectMapFixItem"
-            class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0">
-        <span class="font-mono text-blue-700">${this.escapeHtml(r.identifier)}</span>
-        <span class="text-gray-500 ml-1">-</span>
-        <span class="text-gray-800 ml-1">${this.escapeHtml(r.name)}</span>
-      </div>`
-    ).join('')
+    resultsEl.replaceChildren(countInfo)
+    results.forEach(r => {
+      resultsEl.appendChild(this.buildOntologyResultItem(r, {
+        itemAttr: 'data-mapfix-item',
+        action: 'click->compliance-fix#selectMapFixItem',
+        groupId
+      }))
+    })
 
     resultsEl.classList.remove('hidden')
   }
@@ -1580,10 +1578,12 @@ export default class extends Controller {
         selectedEl.classList.remove('hidden')
         selectedEl.innerHTML = terms.map(t =>
           `<span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-700 border border-green-200">` +
-            `<span class="font-mono">${this.escapeHtml(t.identifier)}</span>` +
-            `<span class="text-gray-400">-</span> ${this.escapeHtml(t.name)}` +
+            (t.identifier === t.name
+              ? `<span class="font-mono">${this.escapeHtml(t.identifier)}</span>`
+              : `<span class="font-mono">${this.escapeHtml(t.identifier)}</span>` +
+                `<span class="text-gray-400">-</span> ${this.escapeHtml(t.name)}`) +
             `<button type="button" data-action="click->compliance-fix#removeMapFixTerm" ` +
-              `data-group-id="${groupId}" data-identifier="${this.escapeHtml(t.identifier)}" ` +
+              `data-group-id="${groupId}" data-identifier="${this.escapeAttr(t.identifier)}" ` +
               `class="ml-1 text-red-400 hover:text-red-600 leading-none" title="Remove">x</button>` +
           `</span>`
         ).join('')
@@ -1739,24 +1739,75 @@ export default class extends Controller {
       return
     }
 
-    const countInfo = totalCount > results.length
-      ? `<div class="px-3 py-1.5 text-xs text-gray-400 bg-gray-50 border-b border-gray-100">Showing ${results.length} of ${totalCount} matches</div>`
-      : `<div class="px-3 py-1.5 text-xs text-gray-400 bg-gray-50 border-b border-gray-100">${totalCount} match${totalCount !== 1 ? 'es' : ''}</div>`
+    const countInfo = document.createElement('div')
+    countInfo.className = 'px-3 py-1.5 text-xs text-gray-400 bg-gray-50 border-b border-gray-100'
+    countInfo.textContent = totalCount > results.length
+      ? `Showing ${results.length} of ${totalCount} matches`
+      : `${totalCount} match${totalCount !== 1 ? 'es' : ''}`
 
-    resultsEl.innerHTML = countInfo + results.map(r =>
-      `<div data-autocomplete-item
-            data-identifier="${this.escapeHtml(r.identifier)}"
-            data-name="${this.escapeHtml(r.name)}"
-            data-group-id="${groupId}"
-            data-action="click->compliance-fix#selectAutocompleteItem"
-            class="px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0">
-        <span class="font-mono text-blue-700">${this.escapeHtml(r.identifier)}</span>
-        <span class="text-gray-500 ml-1">-</span>
-        <span class="text-gray-800 ml-1">${this.escapeHtml(r.name)}</span>
-      </div>`
-    ).join('')
+    resultsEl.replaceChildren(countInfo)
+    results.forEach(r => {
+      resultsEl.appendChild(this.buildOntologyResultItem(r, {
+        itemAttr: 'data-autocomplete-item',
+        action: 'click->compliance-fix#selectAutocompleteItem',
+        groupId
+      }))
+    })
 
     resultsEl.classList.remove('hidden')
+  }
+
+  buildOntologyResultItem(r, { itemAttr, action, groupId }) {
+    const item = document.createElement('div')
+    item.setAttribute(itemAttr, '')
+    item.dataset.identifier = r.identifier == null ? '' : String(r.identifier)
+    item.dataset.name = r.name == null ? '' : String(r.name)
+    item.dataset.groupId = groupId
+    item.dataset.action = action
+    item.className = 'px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 border-b border-gray-100 last:border-0'
+
+    const idSpan = document.createElement('span')
+    idSpan.className = 'font-mono text-blue-700'
+    idSpan.textContent = r.identifier == null ? '' : String(r.identifier)
+    item.appendChild(idSpan)
+
+    const isSpecial = r.special === true || r.special === 'true'
+    if (isSpecial || r.identifier === r.name) {
+      if (isSpecial) {
+        const hint = document.createElement('span')
+        hint.className = 'text-gray-400 ml-1'
+        hint.textContent = '(special value)'
+        item.appendChild(hint)
+      }
+      return item
+    }
+
+    const sep = document.createElement('span')
+    sep.className = 'text-gray-500 ml-1'
+    sep.textContent = '-'
+    item.appendChild(sep)
+
+    const nameSpan = document.createElement('span')
+    nameSpan.className = 'text-gray-800 ml-1'
+    nameSpan.textContent = r.name == null ? '' : String(r.name)
+    item.appendChild(nameSpan)
+    return item
+  }
+
+  formatOntologyResultHtml(r) {
+    // Kept for any remaining callers; prefer buildOntologyResultItem.
+    const identifier = this.escapeHtml(r.identifier)
+    const name = this.escapeHtml(r.name)
+    const isSpecial = r.special === true || r.special === 'true'
+    if (isSpecial || r.identifier === r.name) {
+      const specialHint = isSpecial
+        ? ' <span class="text-gray-400">(special value)</span>'
+        : ''
+      return `<span class="font-mono text-blue-700">${identifier}</span>${specialHint}`
+    }
+    return `<span class="font-mono text-blue-700">${identifier}</span>` +
+      `<span class="text-gray-500 ml-1">-</span>` +
+      `<span class="text-gray-800 ml-1">${name}</span>`
   }
 
   hideResults(groupId) {
@@ -1822,8 +1873,11 @@ export default class extends Controller {
 
     const badge = document.createElement('span')
     badge.className = 'inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-800'
-    badge.innerHTML = `<span class="font-mono">${this.escapeHtml(identifier)}</span> <span class="text-blue-600">${this.escapeHtml(name)}</span>` +
-      (isMulti ? `<button type="button" data-action="click->compliance-fix#removeBadge" data-group-id="${groupId}" data-identifier="${this.escapeHtml(identifier)}" data-name="${this.escapeHtml(name)}" class="ml-1 text-blue-500 hover:text-blue-800">&times;</button>` : '')
+    const labelHtml = identifier === name
+      ? `<span class="font-mono">${this.escapeHtml(identifier)}</span>`
+      : `<span class="font-mono">${this.escapeHtml(identifier)}</span> <span class="text-blue-600">${this.escapeHtml(name)}</span>`
+    badge.innerHTML = labelHtml +
+      (isMulti ? `<button type="button" data-action="click->compliance-fix#removeBadge" data-group-id="${groupId}" data-identifier="${this.escapeAttr(identifier)}" data-name="${this.escapeAttr(name)}" class="ml-1 text-blue-500 hover:text-blue-800">&times;</button>` : '')
     container.appendChild(badge)
   }
 
@@ -1946,7 +2000,12 @@ export default class extends Controller {
 
   escapeHtml(str) {
     const div = document.createElement('div')
-    div.textContent = str
+    div.textContent = str == null ? '' : String(str)
     return div.innerHTML
+  }
+
+  // Escape for use inside double-quoted HTML attributes (escapeHtml alone leaves ").
+  escapeAttr(str) {
+    return this.escapeHtml(str).replace(/"/g, '&quot;')
   }
 }

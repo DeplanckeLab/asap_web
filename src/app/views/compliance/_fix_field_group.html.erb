@@ -34,10 +34,11 @@
   has_special_values = group[:special_values].present?
   special_values_csv = has_special_values ? group[:special_values].join(',') : ''
   ontology_rule_attrs = [
-    (has_allowed_terms ? "data-allowed-terms=\"#{allowed_terms_csv}\"" : nil),
-    (has_banned_terms ? "data-excluded-terms=\"#{banned_terms_csv}\"" : nil),
-    (has_special_values ? "data-special-values=\"#{special_values_csv}\"" : nil)
-  ].compact.join(' ')
+    (has_allowed_terms ? %(data-allowed-terms="#{h(allowed_terms_csv)}") : nil),
+    (has_banned_terms ? %(data-excluded-terms="#{h(banned_terms_csv)}") : nil),
+    (has_special_values ? %(data-special-values="#{h(special_values_csv)}") : nil)
+  ].compact.join(' ').html_safe
+  search_placeholder = group[:term_format_hint].present? ? "Type to search (e.g., #{group[:term_format_hint]})" : 'Type to search'
 
   # Check if this field group has a schema constraint forcing its value
   constraint = schema_constraints[group_id]
@@ -375,7 +376,11 @@
             <% pf_terms.first(10).each do |t| %>
               <span class="inline-flex items-center px-2 py-0.5 text-[10px] rounded-full bg-blue-100 text-blue-700 border border-blue-200">
                 <% if t[:identifier] %>
-                  <span class="font-mono"><%= t[:identifier] %></span> - <%= t[:name] %>
+                  <% if t[:identifier] == t[:name] %>
+                    <span class="font-mono"><%= t[:identifier] %></span>
+                  <% else %>
+                    <span class="font-mono"><%= t[:identifier] %></span> - <%= t[:name] %>
+                  <% end %>
                 <% else %>
                   <%= t[:name] %>
                 <% end %>
@@ -619,8 +624,8 @@
                     class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
               <option value="">-- select --</option>
               <% group[:allowed_terms].each do |term| %>
-                <option value="<%= term[:identifier] %>"
-                        data-name="<%= term[:name] %>"
+                <option value="<%= h(term[:identifier]) %>"
+                        data-name="<%= h(term[:name]) %>"
                         <%= 'selected' if sv_term_prefill == term[:identifier] %>
                 ><% if term[:identifier] == term[:name] %><%= term[:identifier] %><% else %><%= term[:identifier] %> - <%= term[:name] %><% end %></option>
               <% end %>
@@ -673,7 +678,7 @@
             <label class="block text-xs font-medium text-gray-700 mb-1">Search ontology term:</label>
             <div class="relative" data-compliance-fix-target="autocompleteWrapper">
               <input type="text"
-                     placeholder="Type to search (e.g., <%= group[:term_format_hint] %>)"
+                     placeholder="<%= h(search_placeholder) %>"
                      autocomplete="off"
                      data-compliance-fix-target="autocompleteInput"
                      data-group-id="<%= group_id %>"
@@ -699,7 +704,11 @@
           <div data-compliance-fix-target="selectedTerms" data-group-id="<%= group_id %>" class="flex flex-wrap gap-2">
             <% if sv_term_prefill.present? %>
               <span class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700 border border-blue-200">
-                <span class="font-mono"><%= sv_term_prefill %></span><% if sv_label_prefill.present? %> - <%= sv_label_prefill %><% end %>
+                <% if sv_label_prefill.blank? || sv_term_prefill == sv_label_prefill %>
+                  <span class="font-mono"><%= sv_term_prefill %></span>
+                <% else %>
+                  <span class="font-mono"><%= sv_term_prefill %></span> - <%= sv_label_prefill %>
+                <% end %>
               </span>
             <% end %>
           </div>
@@ -868,7 +877,7 @@
             <label class="block text-xs font-medium text-gray-700 mb-1">Search ontology term:</label>
             <div class="relative" data-compliance-fix-target="autocompleteWrapper">
               <input type="text"
-                     placeholder="Type to search (e.g., <%= group[:term_format_hint] %>)"
+                     placeholder="<%= h(search_placeholder) %>"
                      autocomplete="off"
                      data-compliance-fix-target="autocompleteInput"
                      data-group-id="<%= group_id %>"

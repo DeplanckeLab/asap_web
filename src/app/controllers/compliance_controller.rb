@@ -1000,7 +1000,13 @@ class ComplianceController < ApplicationController
     Array(special_values).map(&:to_s).select { |value|
       value.downcase.include?(q)
     }.map { |value|
-      { id: nil, identifier: value, name: value, label: "#{value} (special value)" }
+      {
+        id: nil,
+        identifier: value,
+        name: value,
+        label: value,
+        special: true
+      }
     }
   end
   private :matching_special_value_results

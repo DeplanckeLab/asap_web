@@ -54,9 +54,13 @@ module AsapData
       return nil if template.blank?
 
       id = identifier.to_s.strip
+      # Local id after the CURIE prefix (e.g. NCBITaxon:9606 -> 9606).
+      id_val = id.split(":", 2).last.to_s
       underscored = id.tr(":", "_")
       url = template.dup
       url.gsub!(/\{ID_WITH_UNDERSCORE\}/, underscored)
+      url.gsub!(/#\{id_val\}/i, id_val)
+      url.gsub!(/\{ID_VAL\}/, id_val)
       url.gsub!(/#\{id\}/i, id)
       url.gsub!(/\{ID\}/, id)
       url.presence

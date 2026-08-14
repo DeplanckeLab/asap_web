@@ -88,7 +88,7 @@ class ScfairSummaryMetadataCardsBuilderTest < TestBaseWithoutFixtures
     CellOntology.create!(
       name: 'NCBI Taxonomy',
       tag: 'NCBITaxon',
-      url_mask: 'https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=#{id}',
+      url_mask: 'https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=#{ID_VAL}',
       obsolete: false
     )
 
@@ -105,6 +105,6 @@ class ScfairSummaryMetadataCardsBuilderTest < TestBaseWithoutFixtures
     term = organism[:terms].first
     assert_equal 'Homo sapiens', term[:label]
     assert_equal 'NCBITaxon:9606', term[:identifier]
-    assert_includes term[:url], 'NCBITaxon:9606'
+    assert_equal 'https://www.ncbi.nlm.nih.gov/Taxonomy/Browser/wwwtax.cgi?id=9606', term[:url]
   end
 end

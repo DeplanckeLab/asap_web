@@ -619,6 +619,8 @@ class ProjectsController < ApplicationController
       # Get project type
       @project_type = @project.project_type
 
+      assign_summary_collection_context!
+
       compute_summary_loom_overview
       
       # Generate klay data for pipeline visualization
@@ -635,6 +637,7 @@ class ProjectsController < ApplicationController
       session[:clust_comparison][@project.id][:op] ||= "1"
 
       assign_summary_submitted_file_link!
+      assign_summary_scfair_metadata_context!
     end
     
     # For testing, if no embeddings found, use a project that has them
@@ -11829,8 +11832,9 @@ class ProjectsController < ApplicationController
       end
 
       @project_type = @project.project_type
-      # Prefetch for the Source repository links card (collection title + provider URL).
-      @project.project_collection if @project.project_collection_id.present?
+      # Prefetch for the Source repository links card (collection title + provider URL)
+      # and the optional ASAP collection card (details + sibling projects).
+      assign_summary_collection_context!
 
       # One CLA load for counts, gene/ontology resolution, and the summary table.
       @summary_cla_records = Cla.active.where(project_id: @project.id)
@@ -11853,6 +11857,36 @@ class ProjectsController < ApplicationController
       @summary_cot_label_by_id = @summary_cot_info_by_id.transform_values { |info| info[:name].presence || info[:identifier] }
 
       assign_summary_submitted_file_link!
+      assign_summary_scfair_metadata_context!
+    end
+
+    def assign_summary_scfair_metadata_context!
+      @summary_scfair_metadata_cards = []
+      validation = @project.cxg_validation_result
+      return unless validation.present?
+      return unless validation['valid'] == true || validation[:valid] == true
+
+      ott_by_field_group = OntologyTermType.compliance_field_groups.index_by(&:field_group_id)
+      @summary_scfair_metadata_cards = Scfair::SummaryMetadataCardsBuilder.call(
+        validation_result: validation,
+        ontology_term_types_by_field_group_id: ott_by_field_group
+      )
+    end
+
+    def assign_summary_collection_context!
+      @summary_collection = nil
+      @summary_collection_projects = []
+      return if @project.project_collection_id.blank?
+
+      @summary_collection = @project.project_collection
+      return unless @summary_collection
+
+      @summary_collection_projects = @summary_collection.projects
+        .not_deleted
+        .includes(:shares, :project_type, :organism)
+        .order(Arel.sql("LOWER(COALESCE(name, '')) ASC"), :id)
+        .to_a
+        .select { |project| readable?(project) }
     end
 
     def summary_project_data_root(project)

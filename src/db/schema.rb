@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_13_190000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_14_123000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -993,12 +993,14 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_13_190000) do
   create_table "ontology_term_types", id: :serial, force: :cascade do |t|
     t.string "auto_from_project"
     t.text "cell_ontology_ids"
+    t.string "color"
     t.datetime "created_at", precision: nil
     t.text "description"
     t.integer "display_order", default: 99
     t.text "field_group_id"
     t.string "field_type", default: "col_attr"
     t.text "free_text_json"
+    t.string "icon"
     t.text "in_lineage_term_ids"
     t.text "label"
     t.string "label_path"

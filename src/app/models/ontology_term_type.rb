@@ -1,11 +1,40 @@
 class OntologyTermType < ApplicationRecord
   DEFAULT_RANK_RANGE = (1..20).freeze
 
+  # Palette aligned with sc-fair.org/explore category chips (CELLxGENE-inspired).
+  # Used when color/icon columns are blank and as migration seed defaults.
+  EXPLORE_STYLES = {
+    'organism' => { color: '#7C3AED', icon: 'fa-dna' },
+    'assay' => { color: '#D97706', icon: 'fa-flask' },
+    'cell_type' => { color: '#2563EB', icon: 'fa-circle' },
+    'development_stage' => { color: '#9333EA', icon: 'fa-seedling' },
+    'disease' => { color: '#DB2777', icon: 'fa-virus' },
+    'self_reported_ethnicity' => { color: '#059669', icon: 'fa-users' },
+    'sex' => { color: '#EA580C', icon: 'fa-venus-mars' },
+    'tissue' => { color: '#0D9488', icon: 'fa-lungs' },
+    'experimental_condition' => { color: '#4F46E5', icon: 'fa-vial' },
+    'tissue_type' => { color: '#0891B2', icon: 'fa-microscope' },
+    'suspension_type' => { color: '#64748B', icon: 'fa-tint' },
+    'donor_id' => { color: '#78716C', icon: 'fa-user' }
+  }.freeze
+
   # Paired ontology annotation types (linked to fix_form.field_groups via field_group_id).
   # Other fix-form fields are defined in rules.yaml only.
   scope :compliance_field_groups, -> {
     where.not(field_group_id: [nil, '']).order(:display_order)
   }
+
+  def self.explore_style_for(field_group_id)
+    EXPLORE_STYLES[field_group_id.to_s] || { color: '#64748B', icon: 'fa-tag' }
+  end
+
+  def explore_color
+    color.presence || self.class.explore_style_for(field_group_id.presence || name)[:color]
+  end
+
+  def explore_icon
+    icon.presence || self.class.explore_style_for(field_group_id.presence || name)[:icon]
+  end
 
   def cell_ontology_ids_list
     @cell_ontology_ids_list ||= parse_ids(cell_ontology_ids)

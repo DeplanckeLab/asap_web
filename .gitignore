@@ -45,6 +45,7 @@ src/package-lock.json
 **/*.pid
 *~
 *#
+.#*
 *.old
 *.old.*
 *.bkp

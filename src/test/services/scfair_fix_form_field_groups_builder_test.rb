@@ -91,6 +91,14 @@ class ScfairFixFormFieldGroupsBuilderTest < TestBaseWithoutFixtures
     assert_equal 'unknown', unknown[:name]
   end
 
+  test 'exposes free-choice special values for cell_type autocomplete' do
+    groups = Scfair::FixFormFieldGroupsBuilder.call
+    cell_type = groups.find { |g| g[:id] == 'cell_type' }
+
+    assert_equal %w[unknown na], cell_type[:special_values]
+    refute cell_type[:allowed_terms].present?
+  end
+
   test 'builds experimental_condition as multi-value paired free-text (no ontology prefixes)' do
     groups = Scfair::FixFormFieldGroupsBuilder.call
     experimental = groups.find { |g| g[:id] == 'experimental_condition' }

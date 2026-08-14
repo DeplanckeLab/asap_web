@@ -1015,6 +1015,8 @@ export default class extends Controller {
       }
 
       const resolveMode = effectiveSelectedRole === 'term' ? 'by_identifier' : 'by_name'
+      const row = this.fieldRowTargets.find(el => el.dataset.groupId === groupId)
+      const specialValues = row?.dataset.specialValues || ''
       const resolveResponse = await fetch(this.resolveUrlValue, {
         method: 'POST',
         headers: {
@@ -1026,7 +1028,8 @@ export default class extends Controller {
           values: JSON.stringify(values),
           prefixes: prefixes,
           mode: resolveMode,
-          project_id: this.projectIdValue
+          project_id: this.projectIdValue,
+          special_values: specialValues
         })
       })
 
@@ -1426,7 +1429,9 @@ export default class extends Controller {
 
     if (this.debounceTimers[timerKey]) clearTimeout(this.debounceTimers[timerKey])
 
-    if (query.length < 2) {
+    const specialValues = input.dataset.specialValues || ''
+    const minLen = specialValues ? 1 : 2
+    if (query.length < minLen) {
       this.hideMapFixResults(groupId)
       return
     }
@@ -1437,7 +1442,8 @@ export default class extends Controller {
         query,
         input.dataset.prefixes,
         input.dataset.allowedTerms,
-        input.dataset.excludedTerms
+        input.dataset.excludedTerms,
+        specialValues
       )
     }, 250)
   }
@@ -1477,10 +1483,11 @@ export default class extends Controller {
     }
   }
 
-  async fetchMapFixAutocomplete(groupId, query, prefixes, allowedTerms, excludedTerms) {
-    let url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes)}&project_id=${this.projectIdValue}`
+  async fetchMapFixAutocomplete(groupId, query, prefixes, allowedTerms, excludedTerms, specialValues) {
+    let url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes || '')}&project_id=${this.projectIdValue}`
     if (allowedTerms) url += `&allowed_terms=${encodeURIComponent(allowedTerms)}`
     if (excludedTerms) url += `&excluded_terms=${encodeURIComponent(excludedTerms)}`
+    if (specialValues) url += `&special_values=${encodeURIComponent(specialValues)}`
     try {
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } })
       if (!response.ok) return
@@ -1650,7 +1657,9 @@ export default class extends Controller {
     // Debounce: wait 250ms after last keystroke
     if (this.debounceTimers[groupId]) clearTimeout(this.debounceTimers[groupId])
 
-    if (query.length < 2) {
+    const specialValues = input.dataset.specialValues || ''
+    const minLen = specialValues ? 1 : 2
+    if (query.length < minLen) {
       this.hideResults(groupId)
       return
     }
@@ -1661,7 +1670,8 @@ export default class extends Controller {
         query,
         input.dataset.prefixes,
         input.dataset.allowedTerms,
-        input.dataset.excludedTerms
+        input.dataset.excludedTerms,
+        specialValues
       )
     }, 250)
   }
@@ -1701,10 +1711,11 @@ export default class extends Controller {
     }
   }
 
-  async fetchAutocomplete(groupId, query, prefixes, allowedTerms, excludedTerms) {
-    let url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes)}&project_id=${this.projectIdValue}`
+  async fetchAutocomplete(groupId, query, prefixes, allowedTerms, excludedTerms, specialValues) {
+    let url = `${this.autocompleteUrlValue}?term=${encodeURIComponent(query)}&prefixes=${encodeURIComponent(prefixes || '')}&project_id=${this.projectIdValue}`
     if (allowedTerms) url += `&allowed_terms=${encodeURIComponent(allowedTerms)}`
     if (excludedTerms) url += `&excluded_terms=${encodeURIComponent(excludedTerms)}`
+    if (specialValues) url += `&special_values=${encodeURIComponent(specialValues)}`
     try {
       const response = await fetch(url, { headers: { 'Accept': 'application/json' } })
       if (!response.ok) return

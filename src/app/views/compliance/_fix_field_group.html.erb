@@ -31,38 +31,19 @@
   allowed_terms_csv = has_allowed_terms ? group[:allowed_terms].map { |t| t[:identifier] }.join(',') : ''
   has_banned_terms = group[:banned_term_ids].present?
   banned_terms_csv = has_banned_terms ? group[:banned_term_ids].join(',') : ''
+  has_special_values = group[:special_values].present?
+  special_values_csv = has_special_values ? group[:special_values].join(',') : ''
   ontology_rule_attrs = [
     (has_allowed_terms ? "data-allowed-terms=\"#{allowed_terms_csv}\"" : nil),
-    (has_banned_terms ? "data-excluded-terms=\"#{banned_terms_csv}\"" : nil)
+    (has_banned_terms ? "data-excluded-terms=\"#{banned_terms_csv}\"" : nil),
+    (has_special_values ? "data-special-values=\"#{special_values_csv}\"" : nil)
   ].compact.join(' ')
 
   # Check if this field group has a schema constraint forcing its value
   constraint = schema_constraints[group_id]
   is_constrained = constraint.present?
-
-  # Suggested values from project/schema auto-fill (editable -- not locked).
-  auto_suggested_term = if is_auto_organism
-                          organism_info[:ontology_term_id]
-                        elsif is_auto_title
-                          project_title
-                        elsif is_auto_schema_version
-                          schema_version_value
-                        elsif is_auto_schema_reference
-                          schema_reference_value
-                        elsif is_auto_ensembl
-                          ensembl_info[ensembl_auto_key]
-                        end
-  auto_suggested_label = is_auto_organism ? organism_info[:name] : nil
-  auto_suggestion_note = if is_auto_organism
-                           'Suggested from project organism'
-                         elsif is_auto_title
-                           'Suggested from project name'
-                         elsif is_auto_schema_version || is_auto_schema_reference
-                           'Suggested from scFAIR schema'
-                         elsif is_auto_ensembl
-                           ensembl_source = ensembl_info[:source] || ensembl_info['source']
-                           ensembl_source.to_s == 'parsing' ? 'Suggested from parsing probable Ensembl estimate' : 'Suggested from project version and organism'
-                         end
+  is_auto_filled = is_auto_organism || is_auto_title || is_auto_schema_version ||
+                   is_auto_schema_reference || is_auto_ensembl
 %>
 
 <div class="border border-gray-200 rounded-lg p-4"
@@ -72,7 +53,8 @@
      data-label-has-error="<%= (is_paired && fg[:label_has_error]) ? 'true' : 'false' %>"
      data-multi-value="<%= field_multi_value ? 'true' : 'false' %>"
      data-multi-value-sorted="<%= field_multi_value_sorted ? 'true' : 'false' %>"
-     data-is-auto="<%= is_constrained ? 'true' : 'false' %>">
+     data-special-values="<%= special_values_csv %>"
+     data-is-auto="<%= (is_auto_filled || is_constrained) ? 'true' : 'false' %>">
 
   <!-- Group header -->
   <div class="flex items-start justify-between mb-3">
@@ -248,26 +230,87 @@
     current_label_single = label_vals&.size == 1 ? label_vals.first : nil
   %>
 
-  <% if auto_suggestion_note.present? && auto_suggested_term.present? %>
-    <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
-      <p class="text-sm text-green-800 font-medium mb-1"><%= auto_suggestion_note %></p>
-      <div class="<%= auto_suggested_label.present? ? 'grid grid-cols-2 gap-4' : '' %>">
+  <% if is_auto_organism %>
+    <%# ── Organism: auto-fill from project (not manually editable) ── %>
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from project organism</p>
+      <div class="grid grid-cols-2 gap-4">
         <div>
-          <span class="text-xs font-medium text-gray-600"><%= group[:term_path].sub(%r{\A/(attrs|col_attrs|row_attrs)/}, '') %></span>
-          <p class="text-sm font-mono text-gray-900 break-all"><%= auto_suggested_term %></p>
+          <span class="text-xs font-medium text-gray-600">organism_ontology_term_id</span>
+          <p class="text-sm font-mono text-gray-900"><%= organism_info[:ontology_term_id] %></p>
         </div>
-        <% if auto_suggested_label.present? %>
-          <div>
-            <span class="text-xs font-medium text-gray-600"><%= group[:label_path].to_s.sub(%r{\A/(attrs|col_attrs|row_attrs)/}, '') %></span>
-            <p class="text-sm text-gray-900"><%= auto_suggested_label %></p>
-          </div>
-        <% end %>
+        <div>
+          <span class="text-xs font-medium text-gray-600">organism</span>
+          <p class="text-sm text-gray-900"><%= organism_info[:name] %></p>
+        </div>
       </div>
-      <p class="text-xs text-green-700 mt-2">You can keep this suggestion, skip, or set a different value below.</p>
-    </div>
-  <% end %>
 
-  <%# ── Editable field group (including previously auto-only global metadata) ── %>
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= organism_info[:ontology_term_id] %>">
+      <% if group[:label_path] %>
+        <input type="hidden" name="fixes[<%= group[:label_path] %>][action]" value="set_value">
+        <input type="hidden" name="fixes[<%= group[:label_path] %>][value]" value="<%= organism_info[:name] %>">
+      <% end %>
+    </div>
+
+  <% elsif is_auto_title %>
+    <%# ── Title: auto-fill from project name (not manually editable) ── %>
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from project name</p>
+      <div>
+        <span class="text-xs font-medium text-gray-600">title</span>
+        <p class="text-sm text-gray-900"><%= project_title %></p>
+      </div>
+
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= project_title %>">
+    </div>
+
+  <% elsif is_auto_schema_version %>
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from scFAIR schema</p>
+      <div>
+        <span class="text-xs font-medium text-gray-600">schema_version</span>
+        <p class="text-sm font-mono text-gray-900"><%= schema_version_value %></p>
+      </div>
+
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= schema_version_value %>">
+    </div>
+
+  <% elsif is_auto_schema_reference %>
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from scFAIR schema</p>
+      <div>
+        <span class="text-xs font-medium text-gray-600">schema_reference</span>
+        <p class="text-sm text-gray-900 break-all"><%= schema_reference_value %></p>
+      </div>
+
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= schema_reference_value %>">
+    </div>
+
+  <% elsif is_auto_ensembl %>
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+      <% ensembl_source = ensembl_info[:source] || ensembl_info['source'] %>
+      <p class="text-sm text-green-800 font-medium mb-2">
+        <% if ensembl_source.to_s == 'parsing' %>
+          Auto-fill from parsing probable Ensembl estimate
+        <% else %>
+          Auto-fill from project version and organism
+        <% end %>
+      </p>
+      <div>
+        <span class="text-xs font-medium text-gray-600"><%= group[:term_path].sub(%r{\A/attrs/}, '') %></span>
+        <p class="text-sm font-mono text-gray-900"><%= ensembl_info[ensembl_auto_key] %></p>
+      </div>
+
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
+      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= ensembl_info[ensembl_auto_key] %>">
+    </div>
+
+  <% else %>
+    <%# ── Regular field group ── %>
     <%
       # Determine prefill state
       pf = prefill || {}
@@ -281,14 +324,12 @@
       # overwrite a previously applied fix with stale archived source data).
       group_has_no_errors = !fg[:term_has_error] && (!is_paired || !fg[:label_has_error])
 
-      # Prefill set_value from: OtProject term > current LOOM > auto suggestion > default_fix_value
+      # Prefill set_value from: OtProject term > current LOOM > default_fix_value
       default_fix_value = group[:default_fix_value].to_s
       sv_term_prefill = if pf_single_term
                          pf_terms.first[:identifier].to_s
                        elsif current_term_single.present?
                          current_term_single.to_s
-                       elsif auto_suggested_term.present?
-                         auto_suggested_term.to_s
                        elsif default_fix_value.present?
                          default_fix_value
                        else
@@ -298,8 +339,6 @@
                           pf_terms.first[:name].to_s
                         elsif current_label_single.present?
                           current_label_single.to_s
-                        elsif auto_suggested_label.present?
-                          auto_suggested_label.to_s
                         else
                           ''
                         end
@@ -310,7 +349,7 @@
       # - If exactly 1 term with identifier: set_value (simpler, just write the constant)
       # - If source annotation with multiple terms: map_from
       # - If terms but no source: set_value
-      # - If missing and we have auto suggestion or default: set_value
+      # - If missing and we have a prefill/default: set_value
       pf_action = if is_constrained && group_has_no_errors then 'skip'
                   elsif is_constrained then 'set_value'
                   elsif group_has_no_errors then 'skip'
@@ -924,4 +963,5 @@
                data-compliance-fix-target="hiddenAction" data-group-id="<%= group_id %>" data-role="label_action">
       <% end %>
     </div>
+  <% end %>
 </div>

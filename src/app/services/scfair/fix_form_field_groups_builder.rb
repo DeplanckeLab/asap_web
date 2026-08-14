@@ -81,17 +81,20 @@ module Scfair
       group[:multi_value] = @rules.multi_value_field?(term_field)
       group[:multi_value_sorted] = @rules.multi_value_sorted_field?(term_field) if group[:multi_value]
 
+      # Free-choice specials forced by CF-2 for cell lines stay out of menus;
+      # the cell-line constraint applies them automatically.
+      cell_line_forced = @rules.cell_line_forced_fields
+        .select { |entry| entry[:field].to_s == term_field }
+        .map { |entry| entry[:value].to_s }
+      free_specials = @rules.special_values_for_field(@format, term_field).reject { |value|
+        cell_line_forced.include?(value)
+      }
+      group[:special_values] = free_specials if free_specials.any?
+
       valid_terms = @rules.ontology_valid_terms(term_field)
       if valid_terms.present?
         allowed_terms = valid_terms.map { |identifier, name| { identifier: identifier, name: name } }
-        # Free-choice specials for restricted dropdowns. Values forced by CF-2
-        # when tissue_type is "cell line" (e.g. sex -> na) stay out of the menu;
-        # the cell-line constraint applies them automatically.
-        cell_line_forced = @rules.cell_line_forced_fields
-          .select { |entry| entry[:field].to_s == term_field }
-          .map { |entry| entry[:value].to_s }
-        @rules.special_values_for_field(@format, term_field).each do |value|
-          next if cell_line_forced.include?(value)
+        free_specials.each do |value|
           next if allowed_terms.any? { |term| term[:identifier] == value }
 
           allowed_terms << { identifier: value, name: value }

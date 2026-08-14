@@ -304,6 +304,7 @@ class ComplianceController < ApplicationController
     paired_paths = []
     @fixable_groups.each do |fg|
       g = fg[:group]
+      next if g[:auto_from_project]
       all_paths << g[:term_path]
       all_paths << g[:label_path] if g[:label_path].present?
       all_groups << g
@@ -612,9 +613,17 @@ class ComplianceController < ApplicationController
   def ontology_autocomplete
     query = params[:term].to_s.strip
     prefixes = params[:prefixes].to_s.split(',').map(&:strip).reject(&:blank?)
+    special_values = params[:special_values].to_s.split(',').map(&:strip).reject(&:blank?)
 
-    if query.blank? || prefixes.blank?
+    if query.blank? || (prefixes.blank? && special_values.blank?)
       render json: { results: [], total_count: 0 }
+      return
+    end
+
+    special_results = matching_special_value_results(query, special_values)
+
+    if prefixes.blank?
+      render json: { results: special_results, total_count: special_results.size }
       return
     end
 
@@ -622,7 +631,7 @@ class ComplianceController < ApplicationController
     ontology_ids = organism_scoped_ontology_ids(prefixes, params[:project_id])
     ontology_ids = CellOntology.where(id: ontology_ids, obsolete: false).pluck(:id)
     if ontology_ids.empty?
-      render json: { results: [], total_count: 0 }
+      render json: { results: special_results, total_count: special_results.size }
       return
     end
 
@@ -674,11 +683,15 @@ class ComplianceController < ApplicationController
       total_count = matched_scope.count
     end
 
-    results = rows.map { |id, identifier, name, _lineage| [id, identifier, name] }
+    ontology_results = rows.map { |id, identifier, name, _lineage|
+      { id: id, identifier: identifier, name: name, label: "#{identifier} - #{name}" }
+    }
+    seen = ontology_results.map { |r| r[:identifier].to_s }.to_set
+    merged = special_results.reject { |r| seen.include?(r[:identifier].to_s) } + ontology_results
 
     render json: {
-      results: results.map { |id, identifier, name| { id: id, identifier: identifier, name: name, label: "#{identifier} - #{name}" } },
-      total_count: total_count
+      results: merged,
+      total_count: total_count + special_results.size
     }
   end
 
@@ -697,14 +710,16 @@ class ComplianceController < ApplicationController
     end
     prefixes = params[:prefixes].to_s.split(',').map(&:strip).reject(&:blank?)
     mode = params[:mode].to_s
+    special_values = params[:special_values].to_s.split(',').map(&:strip).reject(&:blank?)
+    special_set = special_values.map(&:downcase).to_set
 
-    if values.blank? || prefixes.blank? || !%w[by_identifier by_name].include?(mode)
+    if values.blank? || (prefixes.blank? && special_values.blank?) || !%w[by_identifier by_name].include?(mode)
       render json: { resolved: {}, multi_term_map: {} }
       return
     end
 
-    ontology_ids = organism_scoped_ontology_ids(prefixes, params[:project_id])
-    if ontology_ids.empty?
+    ontology_ids = prefixes.present? ? organism_scoped_ontology_ids(prefixes, params[:project_id]) : []
+    if ontology_ids.empty? && special_values.blank?
       render json: { resolved: {}, multi_term_map: {} }
       return
     end
@@ -717,9 +732,9 @@ class ComplianceController < ApplicationController
     canonical_names = {}
     # Identifier remaps when an obsolete ID is redirected to replaced_by/consider.
     redirected_from = {}
-    scope = CellOntologyTerm.where(original: true, cell_ontology_id: ontology_ids)
-    scope = apply_ontology_term_filters(scope)
-    active_scope = scope.merge(CellOntologyTerm.with_active_cell_ontology)
+    scope = ontology_ids.present? ? CellOntologyTerm.where(original: true, cell_ontology_id: ontology_ids) : CellOntologyTerm.none
+    scope = apply_ontology_term_filters(scope) if ontology_ids.present?
+    active_scope = ontology_ids.present? ? scope.merge(CellOntologyTerm.with_active_cell_ontology) : CellOntologyTerm.none
 
     # Separate plain values from array-formatted values like "['FBbt:00003733', 'FBbt:00003737']"
     plain_values = []
@@ -739,6 +754,12 @@ class ComplianceController < ApplicationController
       all_identifiers = (plain_values + array_values.flat_map { |av| av[:items] }).uniq
       terms_by_ident = {}
       all_identifiers.each do |ident|
+        special = canonical_special_value(ident, special_values)
+        if special
+          terms_by_ident[ident] = { identifier: special, name: special }
+          next
+        end
+
         active = resolve_active_ontology_term_by_identifier(scope, ident)
         next unless active
         next unless ontology_term_allowed_for_prefixes?(active.identifier, prefixes)
@@ -777,9 +798,16 @@ class ComplianceController < ApplicationController
       # Prefer active terms; for organism-restricted ontologies, fall back to
       # obsolete names and redirect via replaced_by/consider.
       all_names = plain_values.map(&:strip) + array_values.flat_map { |av| av[:items].map(&:strip) }
-      name_to_term = batch_find_ontology_terms_by_name(active_scope, all_names.uniq)
+      name_to_term = ontology_ids.present? ? batch_find_ontology_terms_by_name(active_scope, all_names.uniq) : {}
       unresolved = all_names.uniq.reject { |n| name_to_term.key?(n) }
-      if unresolved.any?
+      unresolved.each do |name|
+        special = canonical_special_value(name, special_values)
+        next unless special
+
+        name_to_term[name] = { identifier: special, name: special }
+      end
+      unresolved = all_names.uniq.reject { |n| name_to_term.key?(n) }
+      if unresolved.any? && ontology_ids.present?
         obsolete_matches = batch_find_ontology_terms_by_name(scope, unresolved)
         obsolete_matches.each do |name, match|
           active = resolve_active_ontology_term_by_identifier(scope, match[:identifier])
@@ -791,7 +819,8 @@ class ComplianceController < ApplicationController
       end
 
       name_to_term.select! do |_name, match|
-        ontology_term_allowed_for_prefixes?(match[:identifier], prefixes)
+        special_set.include?(match[:identifier].to_s.downcase) ||
+          ontology_term_allowed_for_prefixes?(match[:identifier], prefixes)
       end
 
       # Resolve plain names
@@ -963,6 +992,24 @@ class ComplianceController < ApplicationController
     end
   end
   private :filter_assay_autocomplete_rows
+
+  def matching_special_value_results(query, special_values)
+    q = query.to_s.strip.downcase
+    return [] if q.blank?
+
+    Array(special_values).map(&:to_s).select { |value|
+      value.downcase.include?(q)
+    }.map { |value|
+      { id: nil, identifier: value, name: value, label: "#{value} (special value)" }
+    }
+  end
+  private :matching_special_value_results
+
+  def canonical_special_value(value, special_values)
+    needle = value.to_s
+    Array(special_values).map(&:to_s).find { |special| special.casecmp?(needle) }
+  end
+  private :canonical_special_value
 
   # Find an ontology term by name, case-insensitively.
   # First tries an exact case-insensitive match (with ILIKE wildcards escaped),

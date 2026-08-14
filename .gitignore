@@ -66,6 +66,9 @@ src/package-lock.json
 # Local Cursor IDE config and rules (not shared via git).
 .cursor/
 
+# Python bytecode cache.
+__pycache__/
+
 # Site-specific copies of SLURM/docs (redacted templates committed as *.example).
 /docs
 /docs/DEPLOYMENT_PERMISSIONS.md

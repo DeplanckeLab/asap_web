@@ -63,6 +63,9 @@ src/package-lock.json
 # Local ops snapshot (not committed). Tracked sources of truth are *.example templates.
 /private/
 
+# Local Cursor IDE config and rules (not shared via git).
+.cursor/
+
 # Site-specific copies of SLURM/docs (redacted templates committed as *.example).
 /docs
 /docs/DEPLOYMENT_PERMISSIONS.md

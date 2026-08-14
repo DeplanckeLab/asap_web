@@ -11878,6 +11878,7 @@ class ProjectsController < ApplicationController
     def assign_summary_collection_context!
       @summary_collection = nil
       @summary_collection_projects = []
+      @summary_collection_resource_links = []
       return if @project.project_collection_id.blank?
 
       @summary_collection = @project.project_collection
@@ -11889,6 +11890,59 @@ class ProjectsController < ApplicationController
         .order(Arel.sql("LOWER(COALESCE(name, '')) ASC"), :id)
         .to_a
         .select { |project| readable?(project) }
+
+      @summary_collection_resource_links = summary_collection_resource_links_for(@project, @summary_collection)
+    end
+
+    # Distinct catalog/manual collection pages that present this project, keyed by source+url.
+    # First entry is the project's primary ProjectCollection when it has a resolvable URL.
+    def summary_collection_resource_links_for(project, primary_collection)
+      links_by_key = {}
+
+      add_link = lambda do |source, url|
+        source = source.to_s
+        url = url.to_s.presence
+        return if source.blank? || url.blank?
+
+        key = "#{source}|#{url}"
+        links_by_key[key] ||= {
+          source: source,
+          url: url,
+          label: ProjectCollection.source_label_for(source)
+        }
+      end
+
+      if primary_collection
+        add_link.call(primary_collection.source, primary_collection.resolved_source_page_url)
+      end
+
+      candidates = []
+      candidates.concat(project.external_catalog_candidates.to_a)
+      candidates.concat(project.matched_external_catalog_candidates.includes(:external_catalog_collection).to_a)
+      project.provider_projects.includes(:provider).each do |pp|
+        tag = pp.provider&.tag
+        next if tag.blank? || pp.key.blank?
+
+        candidates.concat(ExternalCatalogCandidate.where(provider_tag: tag, external_id: pp.key.to_s).to_a)
+      end
+      candidates.uniq!(&:id)
+
+      candidates.each do |candidate|
+        collection_id = candidate.collection_id.to_s.strip
+        next if collection_id.blank?
+
+        ecc = candidate.external_catalog_collection
+        url = ecc&.source_page_url.presence ||
+              ProjectCollection.catalog_collection_url(candidate.source, collection_id)
+        add_link.call(candidate.source, url)
+      end
+
+      links = links_by_key.values
+      primary_source = primary_collection&.source.to_s
+      if primary_source.present?
+        links.sort_by! { |link| link[:source] == primary_source ? 0 : 1 }
+      end
+      links
     end
 
     def summary_project_data_root(project)

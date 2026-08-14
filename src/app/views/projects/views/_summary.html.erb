@@ -638,33 +638,61 @@ summary_search_gene_url = search_gene_project_path(@project)
 
   <% if summary_tier3_has_collection %>
     <% summary_collection_projects = Array(@summary_collection_projects) %>
+    <% summary_collection_project_count = summary_collection_projects.size %>
+    <% summary_collection_resource_links = Array(@summary_collection_resource_links) %>
+    <% summary_primary_collection_link =
+         summary_collection_resource_links.find { |link| link[:source].to_s == @summary_collection.source.to_s } %>
+    <% summary_other_collection_links =
+         if summary_primary_collection_link
+           summary_collection_resource_links.reject { |link|
+             link[:source] == summary_primary_collection_link[:source] &&
+               link[:url] == summary_primary_collection_link[:url]
+           }
+         else
+           summary_collection_resource_links
+         end %>
     <div class="xl:col-span-5 bg-white rounded-lg border border-gray-200 p-4" data-guided-tour="summary-collection-panel">
-      <p class="dashboard-card-title text-gray-900 flex items-center gap-2 mb-4"><i class="fas fa-layer-group text-gray-500"></i><span>Project collection</span></p>
+      <div class="flex items-start justify-between gap-3 mb-4">
+        <p class="dashboard-card-title text-gray-900 flex items-center gap-2 min-w-0">
+          <i class="fas fa-layer-group text-gray-500"></i>
+          <span>Project collection</span>
+        </p>
+        <% if summary_primary_collection_link %>
+          <%= link_to summary_primary_collection_link[:label], summary_primary_collection_link[:url],
+                      target: '_blank', rel: 'noopener noreferrer',
+                      class: 'badge-text shrink-0 px-2 py-0.5 rounded bg-blue-50 text-blue-700 font-medium hover:bg-blue-100' %>
+        <% end %>
+      </div>
       <div class="space-y-3">
         <div>
           <p class="text-gray-900 font-medium leading-snug"><%= @summary_collection.display_title %></p>
-          <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <span class="badge-text px-2 py-0.5 rounded bg-gray-100 text-gray-700"><%= @summary_collection.source %></span>
-            <% if @summary_collection.source_page_url.present? %>
-              <%= link_to "Open source collection", @summary_collection.source_page_url,
-                          target: '_blank', rel: 'noopener',
-                          class: 'badge-text px-2 py-0.5 rounded bg-blue-50 text-blue-700 hover:bg-blue-100' %>
-            <% end %>
-          </div>
+          <% if summary_other_collection_links.any? %>
+            <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <% summary_other_collection_links.each do |link| %>
+                <%= link_to link[:label], link[:url],
+                            target: '_blank', rel: 'noopener noreferrer',
+                            class: 'badge-text px-2 py-0.5 rounded bg-gray-100 text-gray-700 hover:bg-gray-200' %>
+              <% end %>
+            </div>
+          <% end %>
           <% if @summary_collection.description.present? %>
             <p class="mt-2 text-gray-600 leading-snug"><%= truncate(@summary_collection.description, length: 280) %></p>
           <% end %>
-          <p class="mt-2 badge-text text-gray-500">
-            <%= summary_collection_projects.size %> <%= 'project'.pluralize(summary_collection_projects.size) %>
-          </p>
         </div>
-        <% if summary_collection_projects.any? %>
+        <% if summary_collection_project_count.positive? %>
+          <% if summary_collection_project_count == 1 %>
+            <p class="italic text-gray-400">Just this project in this collection</p>
+          <% else %>
+            <p class="badge-text text-gray-500">
+              <%= summary_collection_project_count %> projects in this collection
+            </p>
+          <% end %>
           <div class="max-h-64 overflow-y-auto rounded-lg border border-gray-100 divide-y divide-gray-100">
             <% summary_collection_projects.each do |collection_project| %>
               <% is_current_collection_project = collection_project.id == @project.id %>
               <div class="px-3 py-2 <%= is_current_collection_project ? 'bg-blue-50/60' : 'hover:bg-gray-50' %>">
                 <div class="flex items-start gap-1.5 min-w-0">
-                  <%= link_to collection_project.display_name, project_path(collection_project),
+                  <%= link_to collection_project.display_name, project_path(collection_project, view: 'summary'),
                               class: "font-medium truncate #{is_current_collection_project ? 'text-gray-900' : 'text-blue-700 hover:text-blue-900 hover:underline'}" %>
                 </div>
                 <div class="mt-1 flex flex-wrap items-center gap-1.5">
@@ -682,7 +710,7 @@ summary_search_gene_url = search_gene_project_path(@project)
             <% end %>
           </div>
         <% else %>
-          <p class="italic text-gray-400">No readable projects in this collection.</p>
+          <p class="italic text-gray-400">No readable projects in this collection</p>
         <% end %>
       </div>
     </div>

@@ -2,6 +2,13 @@
 
 class ProjectCollection < ApplicationRecord
   SOURCES = %w[cellxgene manual geo hca bgee].freeze
+  SOURCE_LABELS = {
+    'cellxgene' => 'CELLxGENE',
+    'hca' => 'HCA',
+    'geo' => 'GEO',
+    'bgee' => 'Bgee',
+    'manual' => 'Manual'
+  }.freeze
 
   belongs_to :created_by_user, class_name: 'User', optional: true, foreign_key: :created_by_user_id
   has_many :projects, dependent: :nullify, inverse_of: :project_collection
@@ -20,6 +27,33 @@ class ProjectCollection < ApplicationRecord
 
   def owned_by?(user)
     user.present? && created_by_user_id.present? && created_by_user_id == user.id
+  end
+
+  def self.source_label_for(source)
+    SOURCE_LABELS[source.to_s] || source.to_s
+  end
+
+  def source_label
+    self.class.source_label_for(source)
+  end
+
+  # Public collection page on the originating resource, when known.
+  def resolved_source_page_url
+    return source_page_url.to_s if source_page_url.present?
+
+    self.class.catalog_collection_url(source, external_key)
+  end
+
+  def self.catalog_collection_url(source, external_key)
+    key = external_key.to_s.strip
+    return nil if key.blank?
+
+    case source.to_s
+    when 'cellxgene'
+      "https://cellxgene.cziscience.com/collections/#{key}"
+    when 'hca'
+      "https://data.humancellatlas.org/explore/projects/#{key}"
+    end
   end
 
   def self.placeholder_title_for(source, external_key)

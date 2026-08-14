@@ -680,9 +680,7 @@ summary_search_gene_url = search_gene_project_path(@project)
           <% end %>
         </div>
         <% if summary_collection_project_count.positive? %>
-          <% if summary_collection_project_count == 1 %>
-            <p class="italic text-gray-400">Just this project in this collection</p>
-          <% else %>
+          <% if summary_collection_project_count > 1 %>
             <p class="badge-text text-gray-500">
               <%= summary_collection_project_count %> projects in this collection
             </p>

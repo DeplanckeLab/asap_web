@@ -274,20 +274,25 @@ class ComplianceController < ApplicationController
       fg_id = g[:id]
       next unless @prefill_data[fg_id]
 
-      target_attr = g[:term_path]&.sub(%r{\A/col_attrs/}, '')
-      if target_attr.present? && @available_col_attrs&.include?(target_attr)
-        label_attr = g[:label_path]&.sub(%r{\A/col_attrs/}, '')
-        source_is_target = @prefill_data[fg_id][:source_annot_name] == g[:term_path] ||
-                           @prefill_data[fg_id][:source_annot_name] == g[:label_path]
-        unless source_is_target
-          preferred = if label_attr.present? && @available_col_attrs&.include?(label_attr)
-                        g[:label_path]
-                      else
-                        g[:term_path]
-                      end
-          @prefill_data[fg_id][:source_annot_name] = preferred
-        end
-      end
+      available = case g[:type]
+                  when :global_attr then @available_global_attrs
+                  when :row_attr then @available_row_attrs
+                  else @available_col_attrs
+                  end
+      target_attr = g[:term_path]&.sub(%r{\A/(col_attrs|row_attrs|attrs)/}, '')
+      next if target_attr.blank? || available.blank? || !available.include?(target_attr)
+
+      label_attr = g[:label_path]&.sub(%r{\A/(col_attrs|row_attrs|attrs)/}, '')
+      source_is_target = @prefill_data[fg_id][:source_annot_name] == g[:term_path] ||
+                         @prefill_data[fg_id][:source_annot_name] == g[:label_path]
+      next if source_is_target
+
+      preferred = if label_attr.present? && available.include?(label_attr)
+                    g[:label_path]
+                  else
+                    g[:term_path]
+                  end
+      @prefill_data[fg_id][:source_annot_name] = preferred
     end
 
     # Pre-load current unique values from the LOOM for ALL field groups so that:
@@ -299,7 +304,6 @@ class ComplianceController < ApplicationController
     paired_paths = []
     @fixable_groups.each do |fg|
       g = fg[:group]
-      next if g[:auto_from_project]
       all_paths << g[:term_path]
       all_paths << g[:label_path] if g[:label_path].present?
       all_groups << g

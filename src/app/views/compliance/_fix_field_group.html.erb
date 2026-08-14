@@ -39,6 +39,30 @@
   # Check if this field group has a schema constraint forcing its value
   constraint = schema_constraints[group_id]
   is_constrained = constraint.present?
+
+  # Suggested values from project/schema auto-fill (editable -- not locked).
+  auto_suggested_term = if is_auto_organism
+                          organism_info[:ontology_term_id]
+                        elsif is_auto_title
+                          project_title
+                        elsif is_auto_schema_version
+                          schema_version_value
+                        elsif is_auto_schema_reference
+                          schema_reference_value
+                        elsif is_auto_ensembl
+                          ensembl_info[ensembl_auto_key]
+                        end
+  auto_suggested_label = is_auto_organism ? organism_info[:name] : nil
+  auto_suggestion_note = if is_auto_organism
+                           'Suggested from project organism'
+                         elsif is_auto_title
+                           'Suggested from project name'
+                         elsif is_auto_schema_version || is_auto_schema_reference
+                           'Suggested from scFAIR schema'
+                         elsif is_auto_ensembl
+                           ensembl_source = ensembl_info[:source] || ensembl_info['source']
+                           ensembl_source.to_s == 'parsing' ? 'Suggested from parsing probable Ensembl estimate' : 'Suggested from project version and organism'
+                         end
 %>
 
 <div class="border border-gray-200 rounded-lg p-4"
@@ -48,7 +72,7 @@
      data-label-has-error="<%= (is_paired && fg[:label_has_error]) ? 'true' : 'false' %>"
      data-multi-value="<%= field_multi_value ? 'true' : 'false' %>"
      data-multi-value-sorted="<%= field_multi_value_sorted ? 'true' : 'false' %>"
-     data-is-auto="<%= (is_auto_organism || is_auto_title || is_auto_schema_version || is_auto_schema_reference || is_auto_ensembl || is_constrained) ? 'true' : 'false' %>">
+     data-is-auto="<%= is_constrained ? 'true' : 'false' %>">
 
   <!-- Group header -->
   <div class="flex items-start justify-between mb-3">
@@ -218,87 +242,32 @@
     </div>
   <% end %>
 
-  <% if is_auto_organism %>
-    <%# ── Organism: auto-fill from project ── %>
-    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
-      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from project organism</p>
-      <div class="grid grid-cols-2 gap-4">
+  <%
+    # Current LOOM values for prefilling editable controls (even when already valid).
+    current_term_single = term_vals&.size == 1 ? term_vals.first : nil
+    current_label_single = label_vals&.size == 1 ? label_vals.first : nil
+  %>
+
+  <% if auto_suggestion_note.present? && auto_suggested_term.present? %>
+    <div class="bg-green-50 border border-green-200 rounded-lg p-3 mb-3">
+      <p class="text-sm text-green-800 font-medium mb-1"><%= auto_suggestion_note %></p>
+      <div class="<%= auto_suggested_label.present? ? 'grid grid-cols-2 gap-4' : '' %>">
         <div>
-          <span class="text-xs font-medium text-gray-600">organism_ontology_term_id</span>
-          <p class="text-sm font-mono text-gray-900"><%= organism_info[:ontology_term_id] %></p>
+          <span class="text-xs font-medium text-gray-600"><%= group[:term_path].sub(%r{\A/(attrs|col_attrs|row_attrs)/}, '') %></span>
+          <p class="text-sm font-mono text-gray-900 break-all"><%= auto_suggested_term %></p>
         </div>
-        <div>
-          <span class="text-xs font-medium text-gray-600">organism</span>
-          <p class="text-sm text-gray-900"><%= organism_info[:name] %></p>
-        </div>
-      </div>
-
-      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
-      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= organism_info[:ontology_term_id] %>">
-      <% if group[:label_path] %>
-        <input type="hidden" name="fixes[<%= group[:label_path] %>][action]" value="set_value">
-        <input type="hidden" name="fixes[<%= group[:label_path] %>][value]" value="<%= organism_info[:name] %>">
-      <% end %>
-    </div>
-
-  <% elsif is_auto_title %>
-    <%# ── Title: auto-fill from project name ── %>
-    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
-      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from project name</p>
-      <div>
-        <span class="text-xs font-medium text-gray-600">title</span>
-        <p class="text-sm text-gray-900"><%= project_title %></p>
-      </div>
-
-      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
-      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= project_title %>">
-    </div>
-
-  <% elsif is_auto_schema_version %>
-    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
-      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from scFAIR schema</p>
-      <div>
-        <span class="text-xs font-medium text-gray-600">schema_version</span>
-        <p class="text-sm font-mono text-gray-900"><%= schema_version_value %></p>
-      </div>
-
-      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
-      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= schema_version_value %>">
-    </div>
-
-  <% elsif is_auto_schema_reference %>
-    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
-      <p class="text-sm text-green-800 font-medium mb-2">Auto-fill from scFAIR schema</p>
-      <div>
-        <span class="text-xs font-medium text-gray-600">schema_reference</span>
-        <p class="text-sm text-gray-900 break-all"><%= schema_reference_value %></p>
-      </div>
-
-      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
-      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= schema_reference_value %>">
-    </div>
-
-  <% elsif is_auto_ensembl %>
-    <div class="bg-green-50 border border-green-200 rounded-lg p-3">
-      <% ensembl_source = ensembl_info[:source] || ensembl_info['source'] %>
-      <p class="text-sm text-green-800 font-medium mb-2">
-        <% if ensembl_source.to_s == 'parsing' %>
-          Auto-fill from parsing probable Ensembl estimate
-        <% else %>
-          Auto-fill from project version and organism
+        <% if auto_suggested_label.present? %>
+          <div>
+            <span class="text-xs font-medium text-gray-600"><%= group[:label_path].to_s.sub(%r{\A/(attrs|col_attrs|row_attrs)/}, '') %></span>
+            <p class="text-sm text-gray-900"><%= auto_suggested_label %></p>
+          </div>
         <% end %>
-      </p>
-      <div>
-        <span class="text-xs font-medium text-gray-600"><%= group[:term_path].sub(%r{\A/attrs/}, '') %></span>
-        <p class="text-sm font-mono text-gray-900"><%= ensembl_info[ensembl_auto_key] %></p>
       </div>
-
-      <input type="hidden" name="fixes[<%= group[:term_path] %>][action]" value="set_value">
-      <input type="hidden" name="fixes[<%= group[:term_path] %>][value]" value="<%= ensembl_info[ensembl_auto_key] %>">
+      <p class="text-xs text-green-700 mt-2">You can keep this suggestion, skip, or set a different value below.</p>
     </div>
+  <% end %>
 
-  <% else %>
-    <%# ── Regular field group ── %>
+  <%# ── Editable field group (including previously auto-only global metadata) ── %>
     <%
       # Determine prefill state
       pf = prefill || {}
@@ -312,20 +281,43 @@
       # overwrite a previously applied fix with stale archived source data).
       group_has_no_errors = !fg[:term_has_error] && (!is_paired || !fg[:label_has_error])
 
+      # Prefill set_value from: OtProject term > current LOOM > auto suggestion > default_fix_value
+      default_fix_value = group[:default_fix_value].to_s
+      sv_term_prefill = if pf_single_term
+                         pf_terms.first[:identifier].to_s
+                       elsif current_term_single.present?
+                         current_term_single.to_s
+                       elsif auto_suggested_term.present?
+                         auto_suggested_term.to_s
+                       elsif default_fix_value.present?
+                         default_fix_value
+                       else
+                         ''
+                       end
+      sv_label_prefill = if pf_single_term
+                          pf_terms.first[:name].to_s
+                        elsif current_label_single.present?
+                          current_label_single.to_s
+                        elsif auto_suggested_label.present?
+                          auto_suggested_label.to_s
+                        else
+                          ''
+                        end
+      has_value_prefill = sv_term_prefill.present?
+
       # Pre-select action:
-      # - If already compliant: skip (don't re-process)
+      # - If already compliant: skip (don't re-process) -- user can still switch to edit
       # - If exactly 1 term with identifier: set_value (simpler, just write the constant)
       # - If source annotation with multiple terms: map_from
       # - If terms but no source: set_value
-      # - If schema default_fix_value and field has an error: set_value
-      default_fix_value = group[:default_fix_value].to_s
+      # - If missing and we have auto suggestion or default: set_value
       pf_action = if is_constrained && group_has_no_errors then 'skip'
                   elsif is_constrained then 'set_value'
                   elsif group_has_no_errors then 'skip'
                   elsif pf_single_term then 'set_value'
                   elsif pf_has_source then 'map_from'
                   elsif pf_has_terms then 'set_value'
-                  elsif fg[:term_has_error] && default_fix_value.present? then 'set_value'
+                  elsif fg[:term_has_error] && has_value_prefill then 'set_value'
                   else 'skip'
                   end
     %>
@@ -520,34 +512,38 @@
 
           <% else %>
             <%# ── Non-paired or non-ontology field: simple source selector ── %>
-            <% if fg[:term_has_error] %>
-              <div>
-                <label class="block text-xs font-medium text-gray-700 mb-1">
-                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code>
-                  -- select source metadata:
-                </label>
-                <div class="flex items-center gap-3">
-                  <select name="fixes[<%= group[:term_path] %>][source]"
-                          data-action="change->compliance-fix#previewSource"
-                          data-group-id="<%= group_id %>"
-                          data-role="term"
-                          class="block w-64 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
-                    <option value="">-- select --</option>
-                    <% available_attrs.each do |attr| %>
-                      <option value="<%= path_prefix %><%= attr %>"<%= ' selected' if pf_source == "#{path_prefix}#{attr}" %>><%= attr %></option>
-                    <% end %>
-                  </select>
-                  <span data-compliance-fix-target="preview"
-                        data-preview-for="<%= group_id %>_term"
-                        class="text-xs text-gray-500 italic"></span>
-                </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-700 mb-1">
+                <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code>
+                <% unless fg[:term_has_error] %>
+                  <span class="text-[10px] text-green-600 ml-1">(exists)</span>
+                <% end %>
+                -- select source metadata:
+              </label>
+              <div class="flex items-center gap-3">
+                <select name="fixes[<%= group[:term_path] %>][source]"
+                        data-action="change->compliance-fix#previewSource"
+                        data-group-id="<%= group_id %>"
+                        data-role="term"
+                        class="block w-64 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+                  <option value="">-- select --</option>
+                  <% available_attrs.each do |attr| %>
+                    <option value="<%= path_prefix %><%= attr %>"<%= ' selected' if pf_source == "#{path_prefix}#{attr}" %>><%= attr %></option>
+                  <% end %>
+                </select>
+                <span data-compliance-fix-target="preview"
+                      data-preview-for="<%= group_id %>_term"
+                      class="text-xs text-gray-500 italic"></span>
               </div>
-            <% end %>
+            </div>
 
-            <% if is_paired && fg[:label_has_error] %>
+            <% if is_paired %>
               <div>
                 <label class="block text-xs font-medium text-gray-700 mb-1">
                   <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code>
+                  <% unless fg[:label_has_error] %>
+                    <span class="text-[10px] text-green-600 ml-1">(exists)</span>
+                  <% end %>
                   -- select source metadata:
                 </label>
                 <div class="flex items-center gap-3">
@@ -576,10 +572,6 @@
       <div id="set_value_<%= group_id %>" class="<%= (pf_action == 'set_value' && !is_constrained) ? '' : 'hidden' %> pl-6 space-y-3">
         <% if is_paired && has_ontology && has_allowed_terms %>
           <%# Paired ontology field with restricted values: dropdown instead of autocomplete %>
-          <%
-            sv_term_prefill = pf_single_term ? pf_terms.first[:identifier] : ''
-            sv_label_prefill = pf_single_term ? pf_terms.first[:name] : ''
-          %>
 
           <div>
             <label class="block text-xs font-medium text-gray-700 mb-1">Select value:</label>
@@ -637,11 +629,6 @@
 
         <% elsif is_paired && has_ontology %>
           <%# Paired ontology field: autocomplete that fills both term ID and label %>
-          <%
-            # Prefill values for single-term assignment
-            sv_term_prefill = pf_single_term ? pf_terms.first[:identifier] : ''
-            sv_label_prefill = pf_single_term ? pf_terms.first[:name] : ''
-          %>
 
           <div>
             <label class="block text-xs font-medium text-gray-700 mb-1">Search ontology term:</label>
@@ -671,9 +658,9 @@
 
           <%# Selected terms display + hidden inputs %>
           <div data-compliance-fix-target="selectedTerms" data-group-id="<%= group_id %>" class="flex flex-wrap gap-2">
-            <% if pf_single_term %>
+            <% if sv_term_prefill.present? %>
               <span class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700 border border-blue-200">
-                <span class="font-mono"><%= sv_term_prefill %></span> - <%= sv_label_prefill %>
+                <span class="font-mono"><%= sv_term_prefill %></span><% if sv_label_prefill.present? %> - <%= sv_label_prefill %><% end %>
               </span>
             <% end %>
           </div>
@@ -726,40 +713,44 @@
         <% elsif is_paired %>
           <%# Paired non-ontology field: side by side inputs %>
           <div class="grid grid-cols-2 gap-4">
-            <% if fg[:term_has_error] %>
-              <div>
-                <label class="block text-xs font-medium text-gray-700 mb-1">
-                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code>
-                  <span class="text-gray-400 ml-1">(ontology term ID)</span>
-                </label>
-                <% if has_valid_values %>
-                  <select name="fixes[<%= group[:term_path] %>][value]"
-                          class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
-                    <option value="">-- select --</option>
-                    <% group[:term_valid_values].each do |val| %>
-                      <option value="<%= val %>"><%= val %></option>
-                    <% end %>
-                  </select>
-                <% else %>
-                  <input type="text"
-                         name="fixes[<%= group[:term_path] %>][value]"
-                         placeholder="Enter value..."
-                         class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+            <div>
+              <label class="block text-xs font-medium text-gray-700 mb-1">
+                <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:term_path].split('/').last %></code>
+                <span class="text-gray-400 ml-1">(ontology term ID)</span>
+                <% unless fg[:term_has_error] %>
+                  <span class="text-[10px] text-green-600 ml-1">(exists)</span>
                 <% end %>
-              </div>
-            <% end %>
-            <% if fg[:label_has_error] %>
-              <div>
-                <label class="block text-xs font-medium text-gray-700 mb-1">
-                  <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code>
-                  <span class="text-gray-400 ml-1">(human-readable label)</span>
-                </label>
+              </label>
+              <% if has_valid_values %>
+                <select name="fixes[<%= group[:term_path] %>][value]"
+                        class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+                  <option value="">-- select --</option>
+                  <% group[:term_valid_values].each do |val| %>
+                    <option value="<%= val %>" <%= 'selected' if sv_term_prefill == val %>><%= val %></option>
+                  <% end %>
+                </select>
+              <% else %>
                 <input type="text"
-                       name="fixes[<%= group[:label_path] %>][value]"
-                       placeholder="e.g., human-readable name"
+                       name="fixes[<%= group[:term_path] %>][value]"
+                       value="<%= sv_term_prefill %>"
+                       placeholder="Enter value..."
                        class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
-              </div>
-            <% end %>
+              <% end %>
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-gray-700 mb-1">
+                <code class="text-xs bg-gray-100 px-1 rounded"><%= group[:label_path].split('/').last %></code>
+                <span class="text-gray-400 ml-1">(human-readable label)</span>
+                <% unless fg[:label_has_error] %>
+                  <span class="text-[10px] text-green-600 ml-1">(exists)</span>
+                <% end %>
+              </label>
+              <input type="text"
+                     name="fixes[<%= group[:label_path] %>][value]"
+                     value="<%= sv_label_prefill %>"
+                     placeholder="e.g., human-readable name"
+                     class="block w-full rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
+            </div>
           </div>
           <p class="text-xs text-gray-400">
             Both fields must be coherent: the label should be the human-readable name for the ontology term ID.
@@ -787,6 +778,7 @@
                          data-compliance-fix-target="multiEnumOption"
                          data-group-id="<%= group_id %>"
                          data-action="change->compliance-fix#onMultiEnumChange"
+                         <%= 'checked' if sv_term_prefill.to_s.split(/\s*#{Regexp.escape(multi_value_delimiter.strip)}\s*/).include?(val) %>
                          class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
                   <span><%= val %></span>
                 </label>
@@ -796,7 +788,7 @@
                    name="fixes[<%= group[:term_path] %>][value]"
                    data-compliance-fix-target="termValue"
                    data-group-id="<%= group_id %>"
-                   value="">
+                   value="<%= sv_term_prefill %>">
             <p class="text-xs text-gray-400 mt-2">
               For multiple values, select several options. Values are separated with <code><%= multi_value_delimiter.strip %></code>.
               <% if field_multi_value_sorted && multi_value_requirement.present? %>
@@ -812,7 +804,7 @@
                     class="block w-64 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
               <option value="">-- select --</option>
               <% group[:term_valid_values].each do |val| %>
-                <option value="<%= val %>" <%= 'selected' if default_fix_value == val %>><%= val %></option>
+                <option value="<%= val %>" <%= 'selected' if sv_term_prefill == val %>><%= val %></option>
               <% end %>
             </select>
             <% if group_id == 'feature_is_filtered' %>
@@ -849,11 +841,18 @@
                    data-group-id="<%= group_id %>"
                    class="hidden absolute z-50 w-80 mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto"></div>
             </div>
-            <div data-compliance-fix-target="selectedTerms" data-group-id="<%= group_id %>" class="flex flex-wrap gap-2 mt-2"></div>
+            <div data-compliance-fix-target="selectedTerms" data-group-id="<%= group_id %>" class="flex flex-wrap gap-2 mt-2">
+              <% if sv_term_prefill.present? %>
+                <span class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                  <span class="font-mono"><%= sv_term_prefill %></span>
+                </span>
+              <% end %>
+            </div>
             <input type="text"
                    name="fixes[<%= group[:term_path] %>][value]"
                    data-compliance-fix-target="termValue"
                    data-group-id="<%= group_id %>"
+                   value="<%= sv_term_prefill %>"
                    readonly
                    placeholder="Filled by autocomplete selection"
                    class="block w-80 mt-2 rounded-md border-gray-200 bg-gray-50 shadow-sm text-sm text-gray-600">
@@ -863,6 +862,7 @@
                    name="fixes[<%= group[:term_path] %>][value]"
                    data-compliance-fix-target="termValue"
                    data-group-id="<%= group_id %>"
+                   value="<%= sv_term_prefill %>"
                    placeholder="<%= field_multi_value ? "e.g. value1 #{multi_value_delimiter.strip} value2" : 'Enter value...' %>"
                    class="block w-80 rounded-md border-gray-300 shadow-sm text-sm focus:border-blue-500 focus:ring-blue-500">
             <% if field_multi_value %>
@@ -924,5 +924,4 @@
                data-compliance-fix-target="hiddenAction" data-group-id="<%= group_id %>" data-role="label_action">
       <% end %>
     </div>
-  <% end %>
 </div>

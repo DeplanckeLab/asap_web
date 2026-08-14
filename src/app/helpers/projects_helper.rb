@@ -417,7 +417,7 @@ module ProjectsHelper
       content_tag(
         :span,
         content_tag(:i, '', class: 'fas fa-check text-green-600 text-xs'),
-        class: 'inline-flex items-center',
+        class: 'inline-flex items-center ml-1.5 align-text-bottom',
         title: 'scFAIR compliant'
       )
     else
@@ -429,7 +429,7 @@ module ProjectsHelper
       content_tag(
         :span,
         content_tag(:i, '', class: 'fas fa-check text-gray-300 text-xs'),
-        class: 'inline-flex items-center',
+        class: 'inline-flex items-center ml-1.5 align-text-bottom',
         title: title
       )
     end

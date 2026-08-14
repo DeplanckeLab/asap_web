@@ -321,11 +321,8 @@
                   </td>
                   <td class="px-6 py-4" onclick="window.location='<%= project_path(project) %>'">
                     <div>
-                      <div class="flex items-center gap-1.5">
-                        <div class="text-sm font-medium text-gray-900" data-search-projects-refresh-field="display_name">
-                          <%= project.display_name %>
-                        </div>
-                        <%= project_scfair_compliance_list_icon(project, @latest_compliance_passed_by_project_id) %>
+                      <div class="text-sm font-medium text-gray-900">
+                        <span data-search-projects-refresh-field="display_name"><%= project.display_name %></span><%= project_scfair_compliance_list_icon(project, @latest_compliance_passed_by_project_id) %>
                       </div>
                       <div class="flex items-center gap-2 mt-0.5">
                         <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-gray-100 text-gray-700 <%= 'hidden' if archive_icon.blank? %>"

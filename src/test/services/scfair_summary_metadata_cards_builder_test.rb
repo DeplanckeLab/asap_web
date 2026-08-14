@@ -27,7 +27,8 @@ class ScfairSummaryMetadataCardsBuilderTest < TestBaseWithoutFixtures
     assert by_id.key?('cell_type')
     assert_equal 3, by_id['cell_type'][:term_count]
     assert_equal ['T cell', 'B cell', 'NK cell'], by_id['cell_type'][:examples]
-    assert_equal '#2563EB', by_id['cell_type'][:color]
+    assert_equal '#22C55E', by_id['cell_type'][:color]
+    assert_equal '#3B82F6', by_id['organism'][:color]
 
     assert by_id.key?('suspension_type')
     assert_equal ['cell'], by_id['suspension_type'][:terms]

@@ -1,21 +1,21 @@
 class OntologyTermType < ApplicationRecord
   DEFAULT_RANK_RANGE = (1..20).freeze
 
-  # Palette aligned with sc-fair.org/explore category chips (CELLxGENE-inspired).
+  # Palette aligned with sc-fair.org/explore facet dots (Tailwind *-500).
   # Used when color/icon columns are blank and as migration seed defaults.
   EXPLORE_STYLES = {
-    'organism' => { color: '#7C3AED', icon: 'fa-dna' },
-    'assay' => { color: '#D97706', icon: 'fa-flask' },
-    'cell_type' => { color: '#2563EB', icon: 'fa-circle' },
-    'development_stage' => { color: '#9333EA', icon: 'fa-seedling' },
-    'disease' => { color: '#DB2777', icon: 'fa-virus' },
-    'self_reported_ethnicity' => { color: '#059669', icon: 'fa-users' },
-    'sex' => { color: '#EA580C', icon: 'fa-venus-mars' },
-    'tissue' => { color: '#0D9488', icon: 'fa-lungs' },
-    'experimental_condition' => { color: '#4F46E5', icon: 'fa-vial' },
-    'tissue_type' => { color: '#0891B2', icon: 'fa-microscope' },
-    'suspension_type' => { color: '#64748B', icon: 'fa-tint' },
-    'donor_id' => { color: '#78716C', icon: 'fa-user' }
+    'organism' => { color: '#3B82F6', icon: 'fa-dna' },                 # blue-500
+    'assay' => { color: '#6366F1', icon: 'fa-flask' },                   # indigo-500 (Technology)
+    'cell_type' => { color: '#22C55E', icon: 'fa-circle' },              # green-500
+    'development_stage' => { color: '#F97316', icon: 'fa-clock' },       # orange-500
+    'disease' => { color: '#EF4444', icon: 'fa-virus' },                 # red-500
+    'self_reported_ethnicity' => { color: '#EAB308', icon: 'fa-users' }, # yellow-500 (unused on explore)
+    'sex' => { color: '#EC4899', icon: 'fa-venus-mars' },                # pink-500
+    'tissue' => { color: '#A855F7', icon: 'fa-lungs' },                  # purple-500
+    'experimental_condition' => { color: '#8B5CF6', icon: 'fa-vial' },   # violet-500
+    'tissue_type' => { color: '#06B6D4', icon: 'fa-microscope' },        # cyan-500
+    'suspension_type' => { color: '#14B8A6', icon: 'fa-tint' },          # teal-500
+    'donor_id' => { color: '#78716C', icon: 'fa-user' }                  # stone-500
   }.freeze
 
   # Paired ontology annotation types (linked to fix_form.field_groups via field_group_id).

@@ -49,6 +49,12 @@ module ExportH5adV8StdMethods
       'description' => 'Absolute sibling .h5ad path filled at runtime.',
       'widget' => 'text_field',
       'not_null' => true
+    },
+    'dburl' => {
+      'label' => 'ASAP gene DB URL',
+      'description' => 'HOST:PORT/DBNAME for feature_name alignment (same as parse --dburl).',
+      'widget' => 'text_field',
+      'not_null' => true
     }
   }.freeze
 
@@ -57,7 +63,8 @@ module ExportH5adV8StdMethods
     'opts' => [
       { 'opt' => '-i', 'param_key' => 'input_loom_abs' },
       { 'opt' => '-o', 'param_key' => 'output_h5ad_abs' },
-      { 'opt' => '-d', 'param_key' => 'output_dir' }
+      { 'opt' => '-d', 'param_key' => 'output_dir' },
+      { 'opt' => '--dburl', 'param_key' => 'dburl' }
     ],
     'predict_params' => []
   }.freeze

@@ -3322,7 +3322,9 @@ module Basic
       h_attrs = {
         'input_loom' => loom_rel,
         'input_loom_abs' => loom_abs.to_s,
-        'output_h5ad_abs' => h5ad_abs.to_s
+        'output_h5ad_abs' => h5ad_abs.to_s,
+        # Same docker-network gene DB endpoint as parsing runs (postgres:5434/...).
+        'dburl' => "postgres:5434/#{asap_data_db_name_from_env!(h_env)}"
       }
 
       last_run = Run.where(project_id: project.id, step_id: step.id).order(id: :desc).first

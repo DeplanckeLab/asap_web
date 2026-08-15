@@ -447,22 +447,44 @@ module ProjectsHelper
   end
 
   # Colored badges matching scFAIR summary metadata chips (color + 22 alpha background).
-  def ontology_term_type_badges(labels, color, unknown_label: 'Unknown')
+  # When limit is set and there are more terms, shows the first N plus a "+X more" button
+  # that opens the search-terms-modal (same pattern as summary scFAIR metadata cards).
+  def ontology_term_type_badges(labels, color, unknown_label: 'Unknown', limit: nil, modal_label: nil)
     terms = Array(labels).map { |label| label.to_s.strip }.reject(&:blank?)
     terms = [unknown_label] if terms.empty?
     hex = color.to_s.presence || '#64748B'
+    visible = limit.present? ? terms.first(limit) : terms
+    remaining = limit.present? ? [terms.size - visible.size, 0].max : 0
 
     content_tag(:span, class: 'flex flex-wrap gap-1') do
-      safe_join(
-        terms.map do |label|
-          content_tag(
-            :span,
-            label,
-            class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium',
-            style: "background-color: #{hex}22; color: #{hex};"
-          )
-        end
-      )
+      parts = visible.map do |label|
+        content_tag(
+          :span,
+          label,
+          class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium',
+          style: "background-color: #{hex}22; color: #{hex};"
+        )
+      end
+
+      if remaining.positive?
+        parts << content_tag(
+          :button,
+          "+#{remaining} more",
+          type: 'button',
+          class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium hover:opacity-80 cursor-pointer',
+          style: "background-color: #{hex}22; color: #{hex};",
+          data: {
+            search_terms_modal_trigger: true,
+            card_label: modal_label.presence || 'Terms',
+            card_color: hex,
+            card_terms: terms.to_json
+          },
+          onclick: 'event.stopPropagation()',
+          aria: { label: "Show all #{terms.size} #{modal_label.present? ? modal_label.downcase.pluralize : 'terms'}" }
+        )
+      end
+
+      safe_join(parts)
     end
   end
 
@@ -473,7 +495,12 @@ module ProjectsHelper
 
   def search_project_technology_badges(project)
     labels = project ? project.compliance_term_names_for('technology') : []
-    ontology_term_type_badges(labels, ontology_term_type_color('technology'))
+    ontology_term_type_badges(
+      labels,
+      ontology_term_type_color('technology'),
+      limit: 2,
+      modal_label: 'Technology'
+    )
   end
 
   private

@@ -232,6 +232,10 @@ import SearchProjectsRefreshController from "controllers/search_projects_refresh
 application.register("search-projects-refresh", SearchProjectsRefreshController)
 console.log('Search projects refresh controller registered')
 
+import SearchTermsModalController from "controllers/search_terms_modal_controller"
+application.register("search-terms-modal", SearchTermsModalController)
+console.log('Search terms modal controller registered')
+
 import SortableListController from "controllers/sortable_list_controller"
 application.register("sortable-list", SortableListController)
 console.log('Sortable list controller registered')

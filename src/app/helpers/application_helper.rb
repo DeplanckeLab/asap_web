@@ -223,6 +223,12 @@ module ApplicationHelper
         icon: "fas fa-star"
       },
       {
+        label: "Storage usage",
+        description: "Disk space, largest directories, and project/FU storage categories",
+        path: storage_usages_path,
+        icon: "fas fa-hard-drive"
+      },
+      {
         label: "Guided tours",
         description: "Manage guided tours and their steps",
         path: editor_guided_tours_path,

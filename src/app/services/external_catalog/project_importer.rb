@@ -10,7 +10,7 @@ require 'digest'
 module ExternalCatalog
   # Sequential import of one catalog entry into ASAP:
   # download → preparse → (content-sha256+preparsing link or create project) → Provider label →
-  # parse → scFAIR validation (sc) → archive.
+  # parse → scFAIR validation (sc) → refresh analysis_pipeline → publish → h5ad export → archive.
   class ProjectImporter
     RAW_SEL = '/raw/X'
     DEFAULT_PARSE_TIMEOUT_SEC = 6 * 60 * 60
@@ -141,6 +141,7 @@ module ExternalCatalog
       attach_reference_metadata!(project, entry)
       run_scfair_validation!(project) if project_type_for(entry).tag.to_s == 'sc'
       finalize_project_visibility!(project)
+      Basic.ensure_h5ad_exports_for_project(@logger, project, project.user_id)
       archive_project!(project) unless @skip_archive
 
       @logger.info(
@@ -853,6 +854,8 @@ module ExternalCatalog
         @logger.info("[ExternalCatalog] skip public project=#{project.key}: sandbox project")
         return
       end
+
+      Basic.refresh_analysis_pipeline_for_project(@logger, project)
 
       project.public_id = (Project.maximum(:public_id) || 0) + 1 if project.public_id.nil?
       project.public = true

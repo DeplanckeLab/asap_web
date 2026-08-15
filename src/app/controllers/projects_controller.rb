@@ -1628,7 +1628,11 @@ class ProjectsController < ApplicationController
     end
 
     # Update the public status
+    made_public = false
     if new_public_state && !@project.public?
+      # Refresh /attrs/analysis_pipeline on matrix looms before the project becomes public.
+      Basic.refresh_analysis_pipeline_for_project(Rails.logger, @project)
+
       # Making public - set public_id if not already set
       if @project.public_id.nil?
         max_public_id = Project.maximum(:public_id) || 0
@@ -1640,6 +1644,7 @@ class ProjectsController < ApplicationController
         sha = InputFileSha256.ensure_for_project!(@project)
         @project.input_content_sha256 = sha if sha.present?
       end
+      made_public = true
     elsif !new_public_state && @project.public?
       # Making private
       @project.public = false
@@ -1649,6 +1654,10 @@ class ProjectsController < ApplicationController
     if @project.save
       if @project.public?
         ExternalCatalogCandidate.sync_catalog_links_for_public_project!(@project)
+      end
+      if made_public
+        user_id = current_user&.id || @project.user_id
+        Basic.ensure_h5ad_exports_for_project(Rails.logger, @project, user_id)
       end
       status_text = @project.public? ? 'public' : 'private'
       respond_to do |format|
@@ -5536,7 +5545,10 @@ class ProjectsController < ApplicationController
     server_url = request.base_url.to_s.chomp('/')
 
     h_data_types = DataType.pluck(:id, :name).to_h
-    annots = Annot.light.where(project_id: @project.id).includes(:data_type, run: :std_method).to_a
+    # Use /matrix annots for loom ownership (same rule as build_filepath_info_from_matrix_annots).
+    # Later normalization/scaling layers are also dim 3 on the same filepath and must not
+    # redefine the loom's step label (e.g. cell_filtering loom shown as Normalization).
+    annots = Annot.light.where(project_id: @project.id).includes(:data_type, run: [:step, :std_method]).to_a
     h_annots_by_path = Hash.new { |h, k| h[k] = [] }
     h_file_details = {}
 
@@ -5554,7 +5566,7 @@ class ProjectsController < ApplicationController
         imported: a.imported
       )
 
-      next unless a.dim == 3
+      next unless a.dim == 3 && a.name == '/matrix'
       next if h_file_details[a.filepath]
 
       full_path = project_dir + a.filepath

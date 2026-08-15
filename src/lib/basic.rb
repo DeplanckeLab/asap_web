@@ -3190,6 +3190,80 @@ module Basic
          .find { |r| Basic.safe_parse_json(r.attrs_json, {})['input_loom'].to_s == loom_rel }
     end
 
+    # Loom relative paths that appear in get_loom_files_json / LOOM-H5AD downloads
+    # (dim-3 /matrix annots ending in .loom).
+    def project_matrix_loom_rels(project)
+      Annot.where(project_id: project.id, dim: 3, name: '/matrix')
+           .where.not(filepath: [nil, ''])
+           .distinct
+           .pluck(:filepath)
+           .select { |fp| fp.to_s.match?(/\.loom\z/i) }
+           .sort
+    end
+
+    # Write /attrs/analysis_pipeline on every matrix loom from DB-backed run history.
+    # Called before making a project public so the loom carries up-to-date pipeline metadata.
+    # Returns an array of { loom_rel:, ok:, error:, ... } per loom.
+    def refresh_analysis_pipeline_for_project(logger, project)
+      loom_rels = project_matrix_loom_rels(project)
+      if loom_rels.empty?
+        logger&.info("[refresh_analysis_pipeline_for_project] project=#{project.key} no matrix looms")
+        return []
+      end
+
+      logger&.info(
+        "[refresh_analysis_pipeline_for_project] project=#{project.key} looms=#{loom_rels.size}"
+      )
+      loom_rels.map do |loom_rel|
+        begin
+          result = AnalysisJsonPersistService.call(project: project, loom_filepath: loom_rel)
+          logger&.info(
+            "[refresh_analysis_pipeline_for_project] project=#{project.key} loom=#{loom_rel} " \
+            "annot_id=#{result[:annot_id]} steps=#{result[:nber_steps]}"
+          )
+          { loom_rel: loom_rel, ok: true, error: nil }.merge(result)
+        rescue StandardError => e
+          logger&.error(
+            "[refresh_analysis_pipeline_for_project] project=#{project.key} loom=#{loom_rel} " \
+            "#{e.class}: #{e.message}"
+          )
+          { loom_rel: loom_rel, ok: false, error: e.message }
+        end
+      end
+    end
+
+    # Start (or reuse) export_h5ad runs for every matrix loom in the project.
+    # Used when a project is made public so H5AD siblings are ready for download.
+    # Returns an array of { loom_rel:, run:, h5ad_status:, error: } per loom.
+    def ensure_h5ad_exports_for_project(logger, project, user_id)
+      loom_rels = project_matrix_loom_rels(project)
+      if loom_rels.empty?
+        logger&.info("[ensure_h5ad_exports_for_project] project=#{project.key} no matrix looms")
+        return []
+      end
+
+      logger&.info(
+        "[ensure_h5ad_exports_for_project] project=#{project.key} looms=#{loom_rels.size} " \
+        "user_id=#{user_id}"
+      )
+      loom_rels.map do |loom_rel|
+        begin
+          result = find_or_start_h5ad_export(logger, project, loom_rel, user_id)
+          logger&.info(
+            "[ensure_h5ad_exports_for_project] project=#{project.key} loom=#{loom_rel} " \
+            "status=#{result[:h5ad_status]} run=#{result[:run]&.id} error=#{result[:error]}"
+          )
+          { loom_rel: loom_rel }.merge(result)
+        rescue StandardError => e
+          logger&.error(
+            "[ensure_h5ad_exports_for_project] project=#{project.key} loom=#{loom_rel} " \
+            "#{e.class}: #{e.message}"
+          )
+          { loom_rel: loom_rel, run: nil, h5ad_status: 'missing', error: e.message }
+        end
+      end
+    end
+
     # Create or reuse an export_h5ad Run and submit to SLURM when needed.
     # Always uses the latest asap_run step/std_method and runtime image (compose alias),
     # even when the project pipeline version is older than v8.

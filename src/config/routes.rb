@@ -150,6 +150,7 @@ Rails.application.routes.draw do
   resources :docker_images
   resources :tools
   resources :ratings, only: [:index]
+  resources :storage_usages, only: [:index]
   resources :standalone_compliance_checks, only: [:index, :show]
   resources :external_catalog_candidates, only: [:index, :show, :destroy] do
     member do

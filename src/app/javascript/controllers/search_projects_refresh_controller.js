@@ -265,13 +265,16 @@ export default class extends Controller {
 
     const terms = labels.map((label) => String(label).trim()).filter(Boolean)
     const displayTerms = terms.length > 0 ? terms : ["Unknown"]
-    const nextKey = `${color}|${displayTerms.join("\u0001")}`
+    const limit = fieldName === "technology" ? 2 : null
+    const visible = limit != null ? displayTerms.slice(0, limit) : displayTerms
+    const remaining = limit != null ? Math.max(displayTerms.length - visible.length, 0) : 0
+    const nextKey = `${color}|${displayTerms.join("\u0001")}|${limit || ""}`
     if (el.dataset.badgeKey === nextKey) return
     el.dataset.badgeKey = nextKey
 
     const wrap = document.createElement("span")
     wrap.className = "flex flex-wrap gap-1"
-    displayTerms.forEach((label) => {
+    visible.forEach((label) => {
       const badge = document.createElement("span")
       badge.className = "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
       badge.style.backgroundColor = `${color}22`
@@ -279,6 +282,21 @@ export default class extends Controller {
       badge.textContent = label
       wrap.appendChild(badge)
     })
+    if (remaining > 0) {
+      const more = document.createElement("button")
+      more.type = "button"
+      more.className = "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium hover:opacity-80 cursor-pointer"
+      more.style.backgroundColor = `${color}22`
+      more.style.color = color
+      more.textContent = `+${remaining} more`
+      more.dataset.searchTermsModalTrigger = "true"
+      more.dataset.cardLabel = "Technology"
+      more.dataset.cardColor = color
+      more.dataset.cardTerms = JSON.stringify(displayTerms)
+      more.setAttribute("aria-label", `Show all ${displayTerms.length} technologies`)
+      more.addEventListener("click", (event) => event.stopPropagation())
+      wrap.appendChild(more)
+    }
     el.replaceChildren(wrap)
   }
 

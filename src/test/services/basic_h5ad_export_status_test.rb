@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'test_helper'
+require 'minitest/mock'
 
 class BasicH5adExportStatusTest < ActiveSupport::TestCase
   setup do
@@ -95,5 +96,141 @@ class BasicH5adExportStatusTest < ActiveSupport::TestCase
     assert_equal image.id, std_method.docker_image_id
     assert_equal 'export_h5ad', step.name
     assert_equal 'loom_to_h5ad', std_method.name
+  end
+
+  test 'project_matrix_loom_rels returns distinct dim-3 matrix loom paths' do
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: @project.id,
+        user_id: @user.id,
+        name: '/matrix',
+        dim: 3,
+        filepath: 'parsing/output.loom',
+        nber_rows: 10,
+        nber_cols: 5
+      ),
+      Annot.create!(
+        project_id: @project.id,
+        user_id: @user.id,
+        name: '/col_attrs/CellID',
+        dim: 1,
+        filepath: 'parsing/output.loom',
+        nber_rows: 1,
+        nber_cols: 5
+      ),
+      Annot.create!(
+        project_id: @project.id,
+        user_id: @user.id,
+        name: '/matrix',
+        dim: 3,
+        filepath: 'cell_filtering/output.loom',
+        nber_rows: 8,
+        nber_cols: 4
+      ),
+      Annot.create!(
+        project_id: @project.id,
+        user_id: @user.id,
+        name: '/matrix',
+        dim: 3,
+        filepath: 'parsing/output.h5ad',
+        nber_rows: 10,
+        nber_cols: 5
+      )
+    )
+
+    assert_equal(
+      ['cell_filtering/output.loom', 'parsing/output.loom'],
+      Basic.project_matrix_loom_rels(@project)
+    )
+  end
+
+  test 'ensure_h5ad_exports_for_project starts export for each matrix loom' do
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: @project.id,
+        user_id: @user.id,
+        name: '/matrix',
+        dim: 3,
+        filepath: 'parsing/output.loom',
+        nber_rows: 10,
+        nber_cols: 5
+      ),
+      Annot.create!(
+        project_id: @project.id,
+        user_id: @user.id,
+        name: '/matrix',
+        dim: 3,
+        filepath: 'cell_filtering/output.loom',
+        nber_rows: 8,
+        nber_cols: 4
+      )
+    )
+    FileUtils.mkdir_p(@project_dir + 'cell_filtering')
+    File.write(@project_dir + 'cell_filtering/output.loom', 'loom-bytes')
+
+    started = []
+    Basic.stub(
+      :find_or_start_h5ad_export,
+      lambda { |_logger, project, loom_rel, user_id|
+        assert_equal @project.id, project.id
+        assert_equal @user.id, user_id
+        started << loom_rel
+        { run: nil, h5ad_status: 'pending', error: nil }
+      }
+    ) do
+      results = Basic.ensure_h5ad_exports_for_project(Rails.logger, @project, @user.id)
+      assert_equal 2, results.size
+      assert_equal ['cell_filtering/output.loom', 'parsing/output.loom'], started.sort
+    end
+  end
+
+  test 'ensure_h5ad_exports_for_project returns empty when no matrix looms' do
+    results = Basic.ensure_h5ad_exports_for_project(Rails.logger, @project, @user.id)
+    assert_equal [], results
+  end
+
+  test 'refresh_analysis_pipeline_for_project updates each matrix loom' do
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: @project.id,
+        user_id: @user.id,
+        name: '/matrix',
+        dim: 3,
+        filepath: 'parsing/output.loom',
+        nber_rows: 10,
+        nber_cols: 5
+      ),
+      Annot.create!(
+        project_id: @project.id,
+        user_id: @user.id,
+        name: '/matrix',
+        dim: 3,
+        filepath: 'cell_filtering/output.loom',
+        nber_rows: 8,
+        nber_cols: 4
+      )
+    )
+    FileUtils.mkdir_p(@project_dir + 'cell_filtering')
+    File.write(@project_dir + 'cell_filtering/output.loom', 'loom-bytes')
+
+    called = []
+    AnalysisJsonPersistService.stub(
+      :call,
+      lambda { |project:, loom_filepath:|
+        assert_equal @project.id, project.id
+        called << loom_filepath
+        { ok: true, loom_filepath: loom_filepath, annot_id: 1, nber_steps: 0 }
+      }
+    ) do
+      results = Basic.refresh_analysis_pipeline_for_project(Rails.logger, @project)
+      assert_equal 2, results.size
+      assert results.all? { |r| r[:ok] }
+      assert_equal ['cell_filtering/output.loom', 'parsing/output.loom'], called.sort
+    end
+  end
+
+  test 'refresh_analysis_pipeline_for_project returns empty when no matrix looms' do
+    results = Basic.refresh_analysis_pipeline_for_project(Rails.logger, @project)
+    assert_equal [], results
   end
 end

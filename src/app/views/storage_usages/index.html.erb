@@ -1,0 +1,206 @@
+<% content_for :title, "Storage usage - ASAP" %>
+<%
+  archive_labels = Project::ARCHIVE_STATE_DISPLAY
+%>
+<div class="max-w-6xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-8">
+  <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div>
+      <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">Storage usage</h1>
+      <p class="mt-2 text-gray-600 dark:text-gray-300">
+        Read-only overview of disk space under project users data and global FU uploads.
+      </p>
+      <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        Computed at <%= @report[:computed_at] %>
+        (cached up to 5 minutes).
+        Users: <code class="text-xs"><%= @report[:users_dir] %></code>
+        · FUs: <code class="text-xs"><%= @report[:fus_dir] %></code>
+      </p>
+    </div>
+    <div>
+      <%= link_to "Refresh now", storage_usages_path(refresh: 1),
+            class: "inline-flex items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700" %>
+    </div>
+  </div>
+
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Filesystem</h2>
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+        <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-950 dark:text-gray-400">
+          <tr>
+            <th scope="col" class="px-3 py-2 text-left">Mount</th>
+            <th scope="col" class="px-3 py-2 text-left">Size</th>
+            <th scope="col" class="px-3 py-2 text-left">Used</th>
+            <th scope="col" class="px-3 py-2 text-left">Available</th>
+            <th scope="col" class="px-3 py-2 text-left">Use</th>
+            <th scope="col" class="px-3 py-2 text-left">Covered paths</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-gray-800 dark:text-gray-200">
+          <% @report[:filesystems].each do |fs| %>
+            <tr>
+              <td class="whitespace-nowrap px-3 py-2"><%= fs[:mounted_on] %></td>
+              <td class="whitespace-nowrap px-3 py-2"><%= number_to_human_size(fs[:size_bytes]) %></td>
+              <td class="whitespace-nowrap px-3 py-2"><%= number_to_human_size(fs[:used_bytes]) %></td>
+              <td class="whitespace-nowrap px-3 py-2"><%= number_to_human_size(fs[:avail_bytes]) %></td>
+              <td class="whitespace-nowrap px-3 py-2"><%= fs[:capacity] %></td>
+              <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400"><%= Array(fs[:paths]).join(', ') %></td>
+            </tr>
+          <% end %>
+          <% if @report[:filesystems].blank? %>
+            <tr>
+              <td colspan="6" class="px-3 py-4 text-center text-gray-500 dark:text-gray-400">No filesystem stats available.</td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+    <p class="text-sm text-gray-600 dark:text-gray-300">
+      Classified total under users:
+      <span class="font-medium text-gray-900 dark:text-white"><%= number_to_human_size(@report[:users_total_bytes]) %></span>
+      · under fus:
+      <span class="font-medium text-gray-900 dark:text-white"><%= number_to_human_size(@report[:fus_total_bytes]) %></span>
+    </p>
+  </section>
+
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">By category</h2>
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+        <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-950 dark:text-gray-400">
+          <tr>
+            <th scope="col" class="px-3 py-2 text-left">Category</th>
+            <th scope="col" class="px-3 py-2 text-right">Entries</th>
+            <th scope="col" class="px-3 py-2 text-right">Size</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-gray-800 dark:text-gray-200">
+          <% @report[:categories].each do |row| %>
+            <tr>
+              <td class="px-3 py-2"><%= row[:label] %></td>
+              <td class="whitespace-nowrap px-3 py-2 text-right"><%= row[:count] %></td>
+              <td class="whitespace-nowrap px-3 py-2 text-right"><%= number_to_human_size(row[:bytes]) %></td>
+            </tr>
+          <% end %>
+          <% if @report[:categories].blank? %>
+            <tr>
+              <td colspan="3" class="px-3 py-4 text-center text-gray-500 dark:text-gray-400">No classified entries found.</td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Largest directories under users</h2>
+    <p class="text-sm text-gray-600 dark:text-gray-300">Top user directories by total size.</p>
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+        <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-950 dark:text-gray-400">
+          <tr>
+            <th scope="col" class="px-3 py-2 text-left">User dir</th>
+            <th scope="col" class="px-3 py-2 text-right">Size</th>
+            <th scope="col" class="px-3 py-2 text-left">Path</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-gray-800 dark:text-gray-200">
+          <% @report[:largest_user_dirs].each do |row| %>
+            <tr>
+              <td class="whitespace-nowrap px-3 py-2"><%= row[:label] %></td>
+              <td class="whitespace-nowrap px-3 py-2 text-right"><%= number_to_human_size(row[:bytes]) %></td>
+              <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400"><%= row[:path] %></td>
+            </tr>
+          <% end %>
+          <% if @report[:largest_user_dirs].blank? %>
+            <tr>
+              <td colspan="3" class="px-3 py-4 text-center text-gray-500 dark:text-gray-400">No user directories found.</td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Largest directories under fus</h2>
+    <p class="text-sm text-gray-600 dark:text-gray-300">Top entries directly under the global FU upload root.</p>
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+        <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-950 dark:text-gray-400">
+          <tr>
+            <th scope="col" class="px-3 py-2 text-left">Entry</th>
+            <th scope="col" class="px-3 py-2 text-right">Size</th>
+            <th scope="col" class="px-3 py-2 text-left">Path</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-gray-800 dark:text-gray-200">
+          <% @report[:largest_fus_dirs].each do |row| %>
+            <tr>
+              <td class="whitespace-nowrap px-3 py-2"><%= row[:label] %></td>
+              <td class="whitespace-nowrap px-3 py-2 text-right"><%= number_to_human_size(row[:bytes]) %></td>
+              <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400"><%= row[:path] %></td>
+            </tr>
+          <% end %>
+          <% if @report[:largest_fus_dirs].blank? %>
+            <tr>
+              <td colspan="3" class="px-3 py-4 text-center text-gray-500 dark:text-gray-400">No fus entries found.</td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Largest classified entries</h2>
+    <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+      <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+        <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-950 dark:text-gray-400">
+          <tr>
+            <th scope="col" class="px-3 py-2 text-left">Category</th>
+            <th scope="col" class="px-3 py-2 text-right">Size</th>
+            <th scope="col" class="px-3 py-2 text-left">Name</th>
+            <th scope="col" class="px-3 py-2 text-left">User</th>
+            <th scope="col" class="px-3 py-2 text-left">Project</th>
+            <th scope="col" class="px-3 py-2 text-left">FU</th>
+            <th scope="col" class="px-3 py-2 text-left">Archive</th>
+            <th scope="col" class="px-3 py-2 text-left">Path</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-gray-800 dark:text-gray-200">
+          <% @report[:top_entries].each do |entry| %>
+            <% status_id = entry[:archive_status_id] %>
+            <tr>
+              <td class="px-3 py-2"><%= entry[:label] %></td>
+              <td class="whitespace-nowrap px-3 py-2 text-right"><%= number_to_human_size(entry[:bytes]) %></td>
+              <td class="whitespace-nowrap px-3 py-2"><%= entry[:name] %></td>
+              <td class="whitespace-nowrap px-3 py-2"><%= entry[:user_id] || '-' %></td>
+              <td class="whitespace-nowrap px-3 py-2 text-xs">
+                <% if entry[:project_id] %>
+                  <%= entry[:project_key] %> (#<%= entry[:project_id] %>)
+                <% else %>
+                  -
+                <% end %>
+              </td>
+              <td class="whitespace-nowrap px-3 py-2"><%= entry[:fu_id] || '-' %></td>
+              <td class="whitespace-nowrap px-3 py-2 text-xs">
+                <% if status_id %>
+                  <%= archive_labels.dig(status_id, :label) || status_id %>
+                <% else %>
+                  -
+                <% end %>
+              </td>
+              <td class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400"><%= entry[:path] %></td>
+            </tr>
+          <% end %>
+          <% if @report[:top_entries].blank? %>
+            <tr>
+              <td colspan="8" class="px-3 py-4 text-center text-gray-500 dark:text-gray-400">No entries found.</td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>

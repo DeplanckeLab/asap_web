@@ -1,6 +1,43 @@
 require_relative "../services/test_base_without_fixtures"
+require "fileutils"
 
 class ProjectTest < TestBaseWithoutFixtures
+  test "destroy removes project directory and local archive tgz under USER_DATA_DIR" do
+    tmp_root = Dir.mktmpdir("project-destroy-fs")
+    previous_user_data_dir = ENV["USER_DATA_DIR"]
+    ENV["USER_DATA_DIR"] = File.join(tmp_root, "projects")
+    FileUtils.mkdir_p(ENV["USER_DATA_DIR"])
+
+    begin
+      user = register_for_test_cleanup(
+        User.create!(email: "proj_destroy_fs_#{SecureRandom.hex(4)}@example.com", password: "password123")
+      )
+      project = create_test_project!(
+        name: "Destroy filesystem",
+        key: "dfs#{SecureRandom.hex(3)}",
+        user_id: user.id
+      )
+
+      project_dir = project.data_dir
+      archive_file = Pathname.new("#{project_dir}.tgz")
+      FileUtils.mkdir_p(project_dir + "fus" + "1")
+      File.write(project_dir + "input_file", "data")
+      File.write(archive_file, "tgz")
+
+      assert File.directory?(project_dir.to_s)
+      assert File.exist?(archive_file.to_s)
+
+      project.destroy!
+      @records_for_test_cleanup.delete(project)
+
+      assert_not File.exist?(project_dir.to_s), "Expected project dir to be removed: #{project_dir}"
+      assert_not File.exist?(archive_file.to_s), "Expected archive tgz to be removed: #{archive_file}"
+    ensure
+      ENV["USER_DATA_DIR"] = previous_user_data_dir
+      FileUtils.rm_rf(tmp_root) if tmp_root.present?
+    end
+  end
+
   test "update_archive_metadata does not touch updated_at" do
     project = create_test_project!(name: "Archive metadata", key: "arc#{SecureRandom.hex(3)}")
     original_updated_at = project.updated_at

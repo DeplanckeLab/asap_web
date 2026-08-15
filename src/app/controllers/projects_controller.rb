@@ -783,9 +783,8 @@ class ProjectsController < ApplicationController
       if editable?(existing_project)
         # Clear Fu records that reference this project to avoid foreign key constraint violations
         Fu.where(project_id: existing_project.id).update_all(project_id: nil)
-        
-        # Simple deletion - just destroy the project record
-        # In production, you might want to also clean up files and related records
+
+        # Destroy DB row; Project after_commit removes USER_DATA_DIR/<user>/<key>/ (and .tgz).
         existing_project.destroy
       end
     end

@@ -9,6 +9,10 @@ class Project < ApplicationRecord
   # Remove fus rows first (raw delete). Upload rows must not block project delete if
   # association-dependent cleanup is skipped or the running app is an older image.
   before_destroy :purge_fus_for_project_destroy!, prepend: true
+  # Drop the on-disk project tree after the DB row is gone. Done in after_commit so a
+  # large rm_rf does not hold the destroy transaction open (UI destroy previously left
+  # USER_DATA_DIR/<user>/<key>/ behind as orphan project directories).
+  after_commit :remove_project_filesystem_after_destroy!, on: :destroy
   # Terminal runs are archived via Run#before_destroy when dependent: :destroy runs.
 
   # Associations
@@ -968,6 +972,45 @@ class Project < ApplicationRecord
 
   def purge_fus_for_project_destroy!
     Fu.where(project_id: id).delete_all
+  end
+
+  def remove_project_filesystem_after_destroy!
+    return if key.blank?
+
+    root = Pathname.new(ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s).cleanpath
+    project_dir = data_dir.cleanpath
+    archive_file = Pathname.new("#{project_dir}.tgz")
+
+    # Only delete a project-scoped path under USER_DATA_DIR (never the root itself).
+    unless project_dir.to_s.start_with?("#{root}/") && project_dir.basename.to_s == key
+      Rails.logger.error(
+        "[Project#remove_project_filesystem_after_destroy!] refused unsafe path " \
+        "project_id=#{id} key=#{key.inspect} path=#{project_dir}"
+      )
+      return
+    end
+
+    if File.exist?(project_dir.to_s)
+      FileUtils.rm_rf(project_dir.to_s)
+      Rails.logger.info(
+        "[Project#remove_project_filesystem_after_destroy!] removed #{project_dir} " \
+        "(project_id=#{id} key=#{key})"
+      )
+    end
+
+    if File.exist?(archive_file.to_s)
+      FileUtils.rm_f(archive_file.to_s)
+      Rails.logger.info(
+        "[Project#remove_project_filesystem_after_destroy!] removed #{archive_file} " \
+        "(project_id=#{id} key=#{key})"
+      )
+    end
+  rescue StandardError => e
+    Rails.logger.error(
+      "[Project#remove_project_filesystem_after_destroy!] project_id=#{id} key=#{key.inspect} " \
+      "error=#{e.class}: #{e.message}"
+    )
+    raise
   end
 
   def sanitize_non_raw_text_parsing_attrs!

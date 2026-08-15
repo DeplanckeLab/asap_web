@@ -2543,6 +2543,10 @@ export class CustomPlotManager {
     // Apply filtering
     const filteredSet = filteredIndices ? new Set(filteredIndices) : null
     const dataByCategory = {}
+    const xLabels = this.controller.dataManager.getCategoryLabels(xVector)
+    if (!xLabels) {
+      throw new Error(`Discrete metadata ${xVector?.id} is missing compression_info.categories`)
+    }
     let yDomainMin = Infinity
     let yDomainMax = -Infinity
     let yDisplayMin = Infinity
@@ -2552,7 +2556,7 @@ export class CustomPlotManager {
       if (filteredSet && !filteredSet.has(i)) {
         continue
       }
-      const category = xValues[i]
+      const category = String(xLabels[xValues[i]])
       const y = yValues[i]
       const displayY = this.transformValueForScale(y, yScaleDef)
       if (!Number.isFinite(displayY)) {
@@ -2745,12 +2749,11 @@ export class CustomPlotManager {
     let categoryToStableIndex = null
 
     if (canResolveStableCategoryIndex) {
-      let allCategories
-      if (xVector?.compression_info?.categories && Array.isArray(xVector.compression_info.categories)) {
-        allCategories = [...xVector.compression_info.categories]
-      } else {
-        allCategories = [...new Set(xValues)]
+      const labels = this.controller.dataManager.getCategoryLabels(xVector)
+      if (!labels) {
+        throw new Error(`Discrete metadata ${xVector?.id} is missing compression_info.categories`)
       }
+      const allCategories = [...labels]
 
       const stableSortedCategories = this.controller.getStableSortedCategories(xValues, allCategories)
       categoryToStableIndex = new Map()

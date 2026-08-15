@@ -163,7 +163,7 @@ export class DataManager {
     return this.controller.memoryManager.checkMemoryHealth()
   }
 
-  // Calculate centroids for each category
+  // Calculate centroids for each category (categories are label strings; values are codes)
   calculateCategoryCentroids(values, categories) {
     const calcStartTime = performance.now()
     
@@ -175,9 +175,8 @@ export class DataManager {
     }
     
     const centroids = {}
-    
-    // Initialize centroids
-    categories.forEach(category => {
+    const labelByCode = categories
+    categories.forEach((category) => {
       centroids[category] = { x: 0, y: 0, count: 0 }
     })
     
@@ -196,8 +195,9 @@ export class DataManager {
         const isVisible = !visibleSet || visibleSet.has(cellIndex)
         
         if (isVisible) {
-          const category = values[cellIndex]
-          if (centroids[category]) {
+          const code = values[cellIndex]
+          const category = labelByCode[code]
+          if (category != null && centroids[category]) {
             const coord = this.controller.currentCoordinates[cellIndex]
             if (coord && coord.length >= 2) {
               centroids[category].x += coord[0]
@@ -224,6 +224,31 @@ export class DataManager {
       
       return centroids
     }
+
+    // Non-ReGL path: same code→label resolution using currentCoordinates when available
+    if (this.controller.currentCoordinates && values) {
+      const visibleSet = this.controller.currentVisibleCells ? new Set(this.controller.currentVisibleCells) : null
+      for (let cellIndex = 0; cellIndex < this.controller.currentCoordinates.length; cellIndex++) {
+        if (visibleSet && !visibleSet.has(cellIndex)) continue
+        const code = values[cellIndex]
+        const category = labelByCode[code]
+        if (category == null || !centroids[category]) continue
+        const coord = this.controller.currentCoordinates[cellIndex]
+        if (coord && coord.length >= 2) {
+          centroids[category].x += coord[0]
+          centroids[category].y += coord[1]
+          centroids[category].count += 1
+        }
+      }
+      Object.keys(centroids).forEach(category => {
+        if (centroids[category].count > 0) {
+          centroids[category].x /= centroids[category].count
+          centroids[category].y /= centroids[category].count
+        }
+      })
+    }
+
+    return centroids
   }
 
   // Calculate bounds for coordinates
@@ -471,17 +496,75 @@ export class DataManager {
   }
 
   // Decompress discrete metadata vector from binary data
+  isDiscreteMetadata(vector) {
+    const dataType = vector?.data_type
+    return dataType === 'DISCRETE' || dataType === 'STRING'
+  }
+
+  getCategoryLabels(vector) {
+    const categories = vector?.compression_info?.categories
+    if (Array.isArray(categories) && categories.length > 0) {
+      return categories
+    }
+    return null
+  }
+
+  allocateCategoryCodeArray(cellCount, categoryCount) {
+    if (categoryCount <= 0x100) return new Uint8Array(cellCount)
+    if (categoryCount <= 0x10000) return new Uint16Array(cellCount)
+    return new Uint32Array(cellCount)
+  }
+
+  // Discrete values are category codes (TypedArray). Labels live in compression_info.categories.
+  getCategoryCode(vector, cellIndex) {
+    return vector.values[cellIndex]
+  }
+
+  getCategoryLabel(vector, cellIndex) {
+    const labels = this.getCategoryLabels(vector)
+    const code = this.getCategoryCode(vector, cellIndex)
+    if (!labels) {
+      throw new Error('Discrete metadata is missing compression_info.categories')
+    }
+    return labels[code]
+  }
+
+  labelToCode(vector, label) {
+    const labels = this.getCategoryLabels(vector)
+    if (!labels) {
+      throw new Error('Discrete metadata is missing compression_info.categories')
+    }
+    const needle = String(label)
+    for (let i = 0; i < labels.length; i++) {
+      if (String(labels[i]) === needle) return i
+    }
+    return -1
+  }
+
+  codesMatchingLabels(vector, labelSet) {
+    const labels = this.getCategoryLabels(vector)
+    if (!labels) {
+      throw new Error('Discrete metadata is missing compression_info.categories')
+    }
+    const selected = new Set(Array.from(labelSet).map(String))
+    const codes = new Set()
+    for (let i = 0; i < labels.length; i++) {
+      if (selected.has(String(labels[i]))) codes.add(i)
+    }
+    return codes
+  }
+
   decompressDiscreteMetadataVector(binaryData, compressionInfo) {
-    // console.log('Decompressing discrete metadata vector:', compressionInfo)
-    // console.log('Binary data type:', typeof binaryData, 'Binary data:', binaryData)
-    
     // Handle optimized case: single category (no data needed)
     if (compressionInfo.single_category) {
       const { categories, category_index, length } = compressionInfo
-      const categoryValue = categories[category_index] || 'Unknown'
-      const categoryValues = new Array(length).fill(categoryValue)
-      // console.log(`Optimized single-category metadata: ${length} cells, all "${categoryValue}"`) */
-      return categoryValues
+      if (!Array.isArray(categories) || categories.length === 0) {
+        throw new Error('Single-category discrete metadata is missing compression_info.categories')
+      }
+      const code = category_index || 0
+      const codes = this.allocateCategoryCodeArray(length, categories.length)
+      codes.fill(code)
+      return codes
     }
     
     // Check if binaryData is valid
@@ -490,7 +573,10 @@ export class DataManager {
     }
     
     const { categories, bit_width, cell_count } = compressionInfo
-    const indices = []
+    if (!Array.isArray(categories) || categories.length === 0) {
+      throw new Error('Discrete metadata is missing compression_info.categories')
+    }
+    const codes = this.allocateCategoryCodeArray(cell_count, categories.length)
     
     // Convert Base64 string to ArrayBuffer if needed
     let arrayBuffer
@@ -516,7 +602,7 @@ export class DataManager {
     // Create a DataView for reading binary data
     const view = new DataView(arrayBuffer)
     
-    // Read indices based on bit width
+    // Read category codes based on bit width (keep as TypedArray — do not expand to strings)
     switch (bit_width) {
       case 1:
         // Special case: unpack 8 indices per byte for 1-bit encoding
@@ -524,39 +610,29 @@ export class DataManager {
           const byteIndex = Math.floor(i / 8)
           const bitIndex = i % 8
           const byte = view.getUint8(byteIndex)
-          const index = (byte >> bitIndex) & 1
-          indices.push(index)
+          codes[i] = (byte >> bitIndex) & 1
         }
         break
       case 8:
         for (let i = 0; i < cell_count; i++) {
-          indices.push(view.getUint8(i))
+          codes[i] = view.getUint8(i)
         }
         break
       case 16:
         for (let i = 0; i < cell_count; i++) {
-          indices.push(view.getUint16(i * 2, true)) // little-endian
+          codes[i] = view.getUint16(i * 2, true) // little-endian
         }
         break
       case 32:
         for (let i = 0; i < cell_count; i++) {
-          indices.push(view.getUint32(i * 4, true)) // little-endian
+          codes[i] = view.getUint32(i * 4, true) // little-endian
         }
         break
       default:
         throw new Error(`Unsupported bit width: ${bit_width}`)
     }
     
-    // Convert indices back to category names
-    const categoryValues = indices.map(index => categories[index] || 'Unknown')
-    
-    // console.log(`Decompressed ${cell_count} discrete values:`, {
-     // first10: categoryValues.slice(0, 10),
-     // uniqueValues: [...new Set(categoryValues)].length,
-     // categories: categories.length
-     // }) */
-    
-    return categoryValues
+    return codes
   }
 
   // Decompress continuous metadata vector from binary data
@@ -630,9 +706,14 @@ export class DataManager {
     if (!vectorData) {
       return null
     }
+
+    const isDiscrete = vectorData.data_type === 'DISCRETE' || vectorData.data_type === 'STRING'
+    const hasValues = vectorData.values && typeof vectorData.values.length === 'number' && vectorData.values.length > 0
+    // Legacy IndexedDB entries may still store per-cell category name strings.
+    // Discrete values must be TypedArray category codes.
+    const hasLegacyStringCategories = isDiscrete && hasValues && typeof vectorData.values[0] === 'string'
     
-    const hasValues = vectorData.values && typeof vectorData.values.length === 'number'
-    if (hasValues) {
+    if (hasValues && !hasLegacyStringCategories) {
       const expectedLength = vectorData.compression_info?.cell_count
       if (!expectedLength || vectorData.values.length === expectedLength || vectorData.values.length > 0) {
         return vectorData
@@ -677,6 +758,28 @@ export class DataManager {
         )
       } else {
         console.warn(`⚠️ [DataManager] Metadata ${metadataId} is missing compression_info - cannot ensure values are loaded`)
+      }
+      return vectorData
+    }
+
+    // Convert legacy per-cell category name strings to TypedArray codes.
+    if (hasLegacyStringCategories) {
+      const labels = Array.isArray(compressionInfo.categories) ? compressionInfo.categories : null
+      if (!labels || labels.length === 0) {
+        throw new Error(`Discrete metadata ${metadataId} has string values but no compression_info.categories`)
+      }
+      const labelToCode = new Map(labels.map((label, code) => [String(label), code]))
+      const codes = this.allocateCategoryCodeArray(vectorData.values.length, labels.length)
+      for (let i = 0; i < vectorData.values.length; i++) {
+        const code = labelToCode.get(String(vectorData.values[i]))
+        if (code === undefined) {
+          throw new Error(`Discrete metadata ${metadataId} has unknown category label at cell ${i}`)
+        }
+        codes[i] = code
+      }
+      vectorData.values = codes
+      if (this.controller.loadedMetadataVectors) {
+        this.controller.loadedMetadataVectors[metadataId] = vectorData
       }
       return vectorData
     }
@@ -906,6 +1009,7 @@ export class DataManager {
     // Show checkboxes for this metadata now that it's loaded
     // console.log(`🔍 [DEBUG] Calling showCheckboxesForMetadata for metadata ${metadataId}`) */
     this.controller.uiManager.showCheckboxesForMetadata(metadataId)
+    this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
     
     // Clear incremental state when new metadata is loaded
     this.controller.clearIncrementalState()
@@ -1026,6 +1130,7 @@ export class DataManager {
 
     // Update the current visible cells state
     this.controller.currentVisibleCells = filteredIndices
+    this.bumpFilterGeneration()
     
     // Update current selection to only include visible cells
     this.updateSelectionBasedOnFiltering(filteredIndices)
@@ -1867,7 +1972,21 @@ export class DataManager {
       return categories.map((category) => String(category))
     }
     if (vector?.values) {
-      return Array.from(new Set(Array.from(vector.values).map((category) => String(category))))
+      const labels = this.getCategoryLabels(vector)
+      if (!labels) {
+        throw new Error(`Discrete metadata ${metadataId} has values but no compression_info.categories`)
+      }
+      // values are category codes — map unique codes to labels
+      const observed = []
+      const seen = new Set()
+      const codes = vector.values
+      for (let i = 0; i < codes.length; i++) {
+        const code = codes[i]
+        if (seen.has(code)) continue
+        seen.add(code)
+        observed.push(String(labels[code]))
+      }
+      return observed
     }
 
     const metadataElement = document.querySelector(`[data-metadata-item="${metadataId}"]`)
@@ -1893,9 +2012,62 @@ export class DataManager {
         : null
     )
     if (vector?.values) {
-      return Array.from(new Set(Array.from(vector.values).map((category) => String(category))))
+      if (Array.isArray(vector._observedCategories)) {
+        return vector._observedCategories
+      }
+      const labels = this.getCategoryLabels(vector)
+      if (!labels) {
+        throw new Error(`Discrete metadata ${metadataId} has values but no compression_info.categories`)
+      }
+      const observed = []
+      const seen = new Set()
+      const codes = vector.values
+      const labelCount = labels.length
+      for (let i = 0; i < codes.length; i++) {
+        const code = codes[i]
+        if (seen.has(code)) continue
+        seen.add(code)
+        observed.push(String(labels[code]))
+        // All category codes observed — no need to scan remaining cells.
+        if (seen.size >= labelCount) break
+      }
+      vector._observedCategories = observed
+      return observed
     }
     return null
+  }
+
+  // Continuous slider / filter extents. Prefer compression_info (O(1)); fall back to one cached scan.
+  getContinuousValueExtents(metadataId, metadataVector = null) {
+    const vector = metadataVector || (
+      this.controller.loadedMetadataVectors
+        ? (this.controller.loadedMetadataVectors[metadataId] || this.controller.loadedMetadataVectors[String(metadataId)])
+        : null
+    )
+    if (!vector || !vector.values) return null
+
+    const info = vector.compression_info
+    if (
+      info &&
+      Number.isFinite(Number(info.min_val)) &&
+      Number.isFinite(Number(info.max_val))
+    ) {
+      return { min: Number(info.min_val), max: Number(info.max_val) }
+    }
+
+    if (
+      vector._valueExtents &&
+      Number.isFinite(vector._valueExtents.min) &&
+      Number.isFinite(vector._valueExtents.max)
+    ) {
+      return vector._valueExtents
+    }
+
+    const min = this.safeMin(vector.values)
+    const max = this.safeMax(vector.values)
+    if (!Number.isFinite(min) || !Number.isFinite(max)) return null
+    vector._valueExtents = { min, max }
+    return vector._valueExtents
   }
 
   getDiscreteCategoryUniverseSize(metadataId) {
@@ -1935,16 +2107,15 @@ export class DataManager {
     if (!selectedRange || selectedRange.min === undefined || selectedRange.max === undefined) return false
     if (!Number.isFinite(Number(selectedRange.min)) || !Number.isFinite(Number(selectedRange.max))) return false
 
-    const metadataVector = this.controller.loadedMetadataVectors
-      ? (this.controller.loadedMetadataVectors[metadataId] || this.controller.loadedMetadataVectors[String(metadataId)])
-      : null
-    if (!metadataVector || !metadataVector.values) return false
+    const extents = this.getContinuousValueExtents(metadataId)
+    if (!extents) return false
 
-    const minVal = this.safeMin(metadataVector.values)
-    const maxVal = this.safeMax(metadataVector.values)
-    if (!Number.isFinite(minVal) || !Number.isFinite(maxVal)) return false
-
-    return !this.isContinuousRangeFullCoverage(selectedRange.min, selectedRange.max, minVal, maxVal)
+    return !this.isContinuousRangeFullCoverage(
+      selectedRange.min,
+      selectedRange.max,
+      extents.min,
+      extents.max
+    )
   }
 
   // Shared tolerance for "full range" decisions (slider UI, selectedRanges, global filter tool).
@@ -1982,6 +2153,7 @@ export class DataManager {
         cleared = true
       }
     })
+    if (cleared) this.controller.markCheckpointMatchDirty?.()
     return cleared
   }
 
@@ -1994,6 +2166,7 @@ export class DataManager {
       min: Number(range.min),
       max: Number(range.max)
     }
+    this.controller.markCheckpointMatchDirty?.()
   }
 
   // Count how many metadata have filtering constraints, regardless of global toggle state
@@ -2183,9 +2356,15 @@ export class DataManager {
       categoryOrder: this.controller.categoryOrder,
       customColorRange: this.controller.customColorRange,
       currentColorScheme: this.controller.currentColorScheme,
-      filteredIndices: this.controller.currentVisibleCells,
-      gradientHash: gradientHash // Include gradient in hash for proper cache invalidation
+      filterGeneration: this.controller.filterGeneration || 0,
+      selectionGeneration: this.controller.selectionGeneration || 0,
+      gradientHash: gradientHash
     })
+  }
+
+  bumpFilterGeneration() {
+    this.controller.filterGeneration = (this.controller.filterGeneration || 0) + 1
+    this.controller.markCheckpointMatchDirty?.()
   }
 
   // Get total count for a category
@@ -2193,10 +2372,15 @@ export class DataManager {
     if (!this.controller.currentMetadataVector || !this.controller.currentMetadataVector.values) {
       return 0
     }
+
+    const vector = this.controller.currentMetadataVector
+    const code = this.labelToCode(vector, categoryName)
+    if (code < 0) return 0
     
     let count = 0
-    for (let i = 0; i < this.controller.currentMetadataVector.values.length; i++) {
-      if (this.controller.currentMetadataVector.values[i] === categoryName) {
+    const values = vector.values
+    for (let i = 0; i < values.length; i++) {
+      if (values[i] === code) {
         count++
       }
     }
@@ -2213,12 +2397,17 @@ export class DataManager {
     if (!this.controller.currentVisibleCells || this.controller.currentVisibleCells.length === this.controller.currentMetadataVector.values.length) {
       return this.getTotalCountForCategory(categoryName)
     }
+
+    const vector = this.controller.currentMetadataVector
+    const code = this.labelToCode(vector, categoryName)
+    if (code < 0) return 0
     
     // Count visible cells for this category
     let visibleCount = 0
+    const values = vector.values
     for (let i = 0; i < this.controller.currentVisibleCells.length; i++) {
       const cellIndex = this.controller.currentVisibleCells[i]
-      if (this.controller.currentMetadataVector.values[cellIndex] === categoryName) {
+      if (values[cellIndex] === code) {
         visibleCount++
       }
     }
@@ -2447,6 +2636,7 @@ export class DataManager {
       
       // Update the current visible cells state immediately
       this.controller.currentVisibleCells = filteredIndices
+    this.bumpFilterGeneration()
       
       // Update visualization synchronously to hide filtered points immediately
       // This prevents the glitch where all points are briefly visible

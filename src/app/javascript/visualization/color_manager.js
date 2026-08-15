@@ -38,30 +38,30 @@ export class ColorManager {
       if (data_type === 'DISCRETE') {
         // Cache the color map to avoid recalculating for every point
         if (!this.controller._cachedColorMap || this.controller._cachedColorMapMetadataId !== coloringMetadataVector.id) {
-          // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
-          // Otherwise fall back to unique categories from values
-          // This ensures colors remain stable even when categories have 0 visible cells
-          let allCategories
-          if (compression_info && compression_info.categories) {
-            allCategories = [...compression_info.categories]
-          } else {
-            allCategories = [...new Set(values.filter(v => v !== null && v !== undefined))]
+          const labels = this.controller.dataManager.getCategoryLabels(coloringMetadataVector)
+          if (!labels) {
+            throw new Error(`Discrete metadata ${coloringMetadataVector.id} is missing compression_info.categories`)
           }
+          const allCategories = [...labels]
           
           const stableSortedCategories = this.controller.getStableSortedCategories(values, allCategories)
           
-          // Create color map using stable sorted order with per-category overrides
+          // Create color map using stable sorted order with per-category overrides (keyed by label)
           const discreteColorMap = this.createDiscreteColorMap(stableSortedCategories, coloringMetadataVector.id)
           this.controller._cachedColorMap = {}
-          stableSortedCategories.forEach((cat, idx) => {
-            this.controller._cachedColorMap[cat] = discreteColorMap[cat]
-          })
+          const colorByCode = new Array(labels.length)
+          for (let code = 0; code < labels.length; code++) {
+            const label = labels[code]
+            const color = discreteColorMap[label]
+            this.controller._cachedColorMap[label] = color
+            colorByCode[code] = color
+          }
+          this.controller._cachedColorByCode = colorByCode
           
           this.controller._cachedColorMapMetadataId = coloringMetadataVector.id
         }
         
-        // _cachedColorMap is a plain object, not a Map
-        baseColor = this.controller._cachedColorMap[value] || 0x3b82f6
+        baseColor = this.controller._cachedColorByCode[value] || 0x3b82f6
       } else if (data_type === 'NUMERIC') {
         // For numeric data, use the continuous color mapping
         // Get effective color range (respects user-set range slider)
@@ -154,7 +154,7 @@ export class ColorManager {
     }
     
     // If we don't have cached colors, we need to calculate them
-    if (!this.controller.cachedColorsByCellIndex || this.controller.cachedColorsByCellIndex.size === 0) {
+    if (!(this.controller.cachedColorsByCellIndex instanceof Uint32Array) || this.controller.cachedColorsByCellIndex.length === 0) {
       return true
     }
     
@@ -207,7 +207,6 @@ export class ColorManager {
   calculateAndCacheColors(coloringMetadataVector) {
     if (!coloringMetadataVector || !coloringMetadataVector.values) {
       // No coloring metadata, use default colors
-      this.controller.cachedColorsByCellIndex = new Map()
       
       // Determine number of points from displayOrder, currentCoordinates, or renderer
       let numPoints = 0
@@ -220,10 +219,13 @@ export class ColorManager {
       }
       
       if (numPoints > 0) {
+        this.controller.ensurePointColorArrays(numPoints)
         for (let i = 0; i < numPoints; i++) {
           const isSelected = this.controller.selectedCells && this.controller.selectedCells.has(i)
-          this.controller.cachedColorsByCellIndex.set(i, isSelected ? this.controller.getSelectionHighlightColorInt() : 0x3b82f6)
+          this.controller.cachedColorsByCellIndex[i] = isSelected ? this.controller.getSelectionHighlightColorInt() : 0x3b82f6
         }
+      } else {
+        this.controller.cachedColorsByCellIndex = null
       }
       
       this.controller.lastColoringMetadataId = null
@@ -235,48 +237,46 @@ export class ColorManager {
     // console.log(`🎨 [CACHE] Calculating colors for ${coloringMetadataVector.values.length} points`)
     const startTime = performance.now()
     
-    this.controller.cachedColorsByCellIndex = new Map()
+    this.controller.ensurePointColorArrays(coloringMetadataVector.values.length)
     const { data_type, values, compression_info } = coloringMetadataVector
     
     if (data_type === 'DISCRETE' || data_type === 'STRING') {
-      // Discrete metadata coloring
-      
-      // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
-      // Otherwise fall back to unique categories from values
-      // This ensures colors remain stable even when categories have 0 visible cells
-      let allCategories
-      if (compression_info && compression_info.categories) {
-        allCategories = [...compression_info.categories]
-      } else {
-        allCategories = [...new Set(values)]
+      // Discrete metadata coloring — values are codes; labels in compression_info.categories
+      const labels = this.controller.dataManager.getCategoryLabels(coloringMetadataVector)
+      if (!labels) {
+        throw new Error(`Discrete metadata ${coloringMetadataVector.id} is missing compression_info.categories`)
       }
+      const allCategories = [...labels]
       
       // Use stable sorted categories (always largest-first) for consistent color assignment
       // This ensures colors match between legend and points regardless of display order
       const stableSortedCategories = this.controller.getStableSortedCategories(values, allCategories)
       
-      // Build category-to-index map using stable sorted order
+      // Build category-to-index map using stable sorted order (keys are labels)
       let categoryToIndex = {}
       stableSortedCategories.forEach((cat, idx) => {
         categoryToIndex[cat] = idx
       })
       
       const discreteColorMap = this.createDiscreteColorMap(stableSortedCategories, coloringMetadataVector.id)
-
-      // Cache colors for all points
-      for (let i = 0; i < values.length; i++) {
-        const category = values[i]
-        const categoryIndex = categoryToIndex[category] || 0
-        const fallbackColorValue = this.getCategoryColors()[categoryIndex % this.getCategoryColors().length]
+      const palette = this.getCategoryColors()
+      const colorByCode = new Array(labels.length)
+      for (let code = 0; code < labels.length; code++) {
+        const label = labels[code]
+        const categoryIndex = categoryToIndex[label] || 0
+        const fallbackColorValue = palette[categoryIndex % palette.length]
         const fallbackColor = typeof fallbackColorValue === 'string'
           ? parseInt(fallbackColorValue.replace('#', ''), 16)
           : fallbackColorValue
-        const color = discreteColorMap[category] !== undefined ? discreteColorMap[category] : fallbackColor
+        colorByCode[code] = discreteColorMap[label] !== undefined ? discreteColorMap[label] : fallbackColor
+      }
+
+      // Cache colors for all points
+      for (let i = 0; i < values.length; i++) {
+        const color = colorByCode[values[i]] !== undefined ? colorByCode[values[i]] : 0x3b82f6
         const isSelected = this.controller.selectedCells && this.controller.selectedCells.has(i)
-        this.controller.cachedColorsByCellIndex.set(i, isSelected ? this.controller.getSelectionHighlightColorInt() : color)
-        if (this.controller.originalPointColors) {
-          this.controller.originalPointColors.set(i, color)
-        }
+        this.controller.cachedColorsByCellIndex[i] = isSelected ? this.controller.getSelectionHighlightColorInt() : color
+        this.controller.originalPointColors[i] = color
       }
       
     } else if (data_type === 'NUMERIC') {
@@ -315,10 +315,8 @@ export class ColorManager {
           }
         }
         const isSelected = this.controller.selectedCells && this.controller.selectedCells.has(i)
-        this.controller.cachedColorsByCellIndex.set(i, isSelected ? this.controller.getSelectionHighlightColorInt() : color)
-        if (this.controller.originalPointColors) {
-          this.controller.originalPointColors.set(i, color)
-        }
+        this.controller.cachedColorsByCellIndex[i] = isSelected ? this.controller.getSelectionHighlightColorInt() : color
+        this.controller.originalPointColors[i] = color
       }
       
       // Cache the color range for future comparisons
@@ -330,35 +328,36 @@ export class ColorManager {
     this.controller.lastColoringMetadataId = coloringMetadataVector.id
     
     const elapsed = performance.now() - startTime
-    // console.log(`🎨 [CACHE] Cached colors for ${this.controller.cachedColorsByCellIndex.size} points in ${elapsed.toFixed(2)}ms`)
+    // console.log(`🎨 [CACHE] Cached colors for ${this.controller.cachedColorsByCellIndex.length} points in ${elapsed.toFixed(2)}ms`)
   }
 
   // Clear color cache when coloring metadata changes
   clearColorMapCache() {
     this.controller._cachedColorMap = null
+    this.controller._cachedColorByCode = null
     this.controller._cachedColorMapMetadataId = null
     this.controller._cachedCentroids = null
     this.controller._cachedCentroidsKey = null
-    this.controller.cachedColorsByCellIndex = new Map()
+    this.controller.cachedColorsByCellIndex = null
     this.controller.lastColoringMetadataId = null
     this.controller.lastColorRange = null
     this.controller.lastGradientScale = null
+    this.invalidateCategoryColorOverrides()
   }
 
   // Create discrete color map for categories
   createDiscreteColorMap(categories, metadataId) {
     // Use the centralized color palette from the server
     const colors = this.getCategoryColors()
+    const overrides = this.getCategoryColorOverrides(metadataId)
     
     const colorMap = {}
     categories.forEach((category, index) => {
-      // Check if we have a stored color for this category in this metadata
-      const storageKey = `category_color_${metadataId}_${category}`
-      const storedColor = localStorage.getItem(storageKey)
+      const storedColor = overrides.get(String(category))
       
       if (storedColor) {
         // Convert hex string to packed RGB number
-        colorMap[category] = parseInt(storedColor.replace('#', ''), 16)
+        colorMap[category] = parseInt(String(storedColor).replace('#', ''), 16)
       } else {
         // Use default color
         colorMap[category] = colors[index % colors.length]
@@ -366,6 +365,39 @@ export class ColorManager {
     })
     
     return colorMap
+  }
+
+  // Read all category_color_${metadataId}_* overrides once (avoids per-category localStorage in hot path)
+  getCategoryColorOverrides(metadataId) {
+    const key = String(metadataId)
+    if (this._categoryColorOverrideCache && this._categoryColorOverrideCacheMetadataId === key) {
+      return this._categoryColorOverrideCache
+    }
+
+    const prefix = `category_color_${metadataId}_`
+    const overrides = new Map()
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const storageKey = localStorage.key(i)
+        if (!storageKey || !storageKey.startsWith(prefix)) continue
+        const category = storageKey.slice(prefix.length)
+        const storedColor = localStorage.getItem(storageKey)
+        if (storedColor) overrides.set(String(category), storedColor)
+      }
+    } catch (error) {
+      console.warn('Failed to batch-load category color overrides:', error)
+    }
+
+    this._categoryColorOverrideCache = overrides
+    this._categoryColorOverrideCacheMetadataId = key
+    return overrides
+  }
+
+  invalidateCategoryColorOverrides(metadataId = null) {
+    if (metadataId == null || String(metadataId) === this._categoryColorOverrideCacheMetadataId) {
+      this._categoryColorOverrideCache = null
+      this._categoryColorOverrideCacheMetadataId = null
+    }
   }
 
   // Initialize default gradient based on value distribution

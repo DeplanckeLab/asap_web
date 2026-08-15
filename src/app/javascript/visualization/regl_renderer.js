@@ -407,6 +407,33 @@ export class ReglRenderer {
    * Update colors for all points in draw order.
    * Supports Map<number, number> and typed arrays (Uint32Array/Array<number>).
    */
+  /**
+   * Fast path: upload a pre-expanded Float32Array of RGBA (length = numPoints * 4).
+   */
+  updateColorsFloat32(floatColors) {
+    const startTime = performance.now()
+    if (!this.colors || !this.colorBuffer) {
+      console.error('🎨 [ReGL] ERROR: Cannot update colors - colors array or colorBuffer missing')
+      return this
+    }
+    if (!(floatColors instanceof Float32Array) || floatColors.length !== this.numPoints * 4) {
+      throw new Error(`updateColorsFloat32 expected Float32Array of length ${this.numPoints * 4}, got ${floatColors?.length}`)
+    }
+    this.colors.set(floatColors)
+    this.colorBuffer.subdata(this.colors)
+    const elapsed = performance.now() - startTime
+    try {
+      if (localStorage.getItem('vizPerfLogging') === '1') {
+        console.log(`[PERF] regl_updateColorsFloat32: ${elapsed.toFixed(2)}ms`, {
+          points: this.numPoints
+        })
+      }
+    } catch (error) {
+      // Ignore localStorage access errors
+    }
+    return this
+  }
+
   updateColors(colorData) {
     const startTime = performance.now()
     

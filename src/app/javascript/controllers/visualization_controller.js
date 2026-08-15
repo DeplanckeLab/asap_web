@@ -344,7 +344,10 @@ export default class extends Controller {
     if (!this._stablePaletteIndexCache) this._stablePaletteIndexCache = new Map()
     
     // Color cache for visibility updates (performance optimization)
-    this.cachedColorsByCellIndex = new Map() // Cache colors by cell index for fast lookup
+    // Allocated as Uint32Array via ensurePointColorArrays when cell count is known
+    this.cachedColorsByCellIndex = null
+    this.filterGeneration = 0
+    this.selectionGeneration = 0
     this.lastColoringMetadataId = null // Track which metadata was used for last color calculation
     this.lastColorRange = null // Track color range for continuous metadata
     
@@ -371,7 +374,11 @@ export default class extends Controller {
     this.customColorRange = null // { min: number, max: number } or null for auto
     
     // Initialize category display order preference
-    this.categoryOrder = 'largest-first' // 'largest-first', 'smallest-first', or 'random'
+    // Default: largest-first (painter's algorithm). 'fixed' remains available as the fastest option.
+    this.categoryOrder = 'largest-first'
+    this._userSetCategoryOrder = false
+    this._userSetPointSize = false
+    this.LARGE_DATASET_CELL_THRESHOLD = 500000
     
     // Initialize numerical display order preference for continuous metadata
     this.numericalOrder = 'negative-to-positive' // 'negative-to-positive', 'positive-to-negative', 'abs-min-to-max', 'abs-max-to-min', or 'random'
@@ -664,7 +671,8 @@ export default class extends Controller {
     this.selectionStatesRefreshTimer = null
     this.selectionStatesRefreshGeneration = 0
     this.lastSelectionCompletionSignature = null
-    this.originalPointColors = new Map() // Store original colors for reset functionality
+    // Allocated as Uint32Array via ensurePointColorArrays when cell count is known
+    this.originalPointColors = null
     this.draggingLabel = null // Track which label is being dragged
     this.clickingOnLabel = false // Track if we're clicking on a label
     this.labelDragMoved = false
@@ -722,6 +730,7 @@ export default class extends Controller {
       this.performanceManager.createDiagnosticButton()
     }, 3000) // Wait 3 seconds after connection
     
+    this._checkpointMatchDirty = true
     this.checkpointMatchTimer = window.setInterval(() => {
       this.refreshCurrentCheckpointMatch()
     }, 1500)
@@ -2127,7 +2136,7 @@ export default class extends Controller {
     const checkpoint = payload.checkpoint
     this.mergeCheckpointIntoHistory(checkpoint)
     this.currentMatchedCheckpointId = checkpoint.id
-    this.refreshCurrentCheckpointMatch()
+    this.refreshCurrentCheckpointMatch({ force: true })
   }
 
   async openCheckpointHistory(event) {
@@ -2172,7 +2181,7 @@ export default class extends Controller {
     const payload = await response.json()
     this.checkpointHistory = Array.isArray(payload.checkpoints) ? payload.checkpoints : []
     this.updateCheckpointHistoryButtonState()
-    this.refreshCurrentCheckpointMatch()
+    this.refreshCurrentCheckpointMatch({ force: true })
   }
 
   renderCheckpointHistory() {
@@ -2721,7 +2730,9 @@ export default class extends Controller {
         }
 
         // Remaining metadata can warm the cache in the background.
-        await this.preloadAllMetadata({ forceMemoryPromotion: true })
+        // Never force-promote every vector into RAM after checkpoint: on large projects
+        // that decompresses hundreds of full-length vectors and freezes the UI.
+        await this.preloadAllMetadata({ forceMemoryPromotion: false })
         if (this.perfLoggingEnabled()) {
           this.logPerf('pipeline_preloadAllMetadata_done', 0, {
             loadedMetadataCount: Object.keys(this.loadedMetadataVectors || {}).length
@@ -3103,7 +3114,7 @@ export default class extends Controller {
       this.currentMatchedCheckpointId = null
     }
     this.renderCheckpointHistory()
-    this.refreshCurrentCheckpointMatch()
+    this.refreshCurrentCheckpointMatch({ force: true })
   }
 
   async loadCheckpoint(event) {
@@ -3185,7 +3196,8 @@ export default class extends Controller {
       })
 
       await this.applyCheckpointState(checkpoint.state)
-      await this.checkAllMetadataStatusBeforePreload()
+      // Status icons are refreshed by scheduleAutoMetadataPreload (throttled).
+      // Do not stampede IndexedDB here — that freezes the UI right after the overlay hides.
       this.checkpointDebug('loadCheckpointById:after-apply', {
         selectedEmbeddingId: this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : null,
         currentLoomFile: this.currentLoomFile,
@@ -3219,7 +3231,7 @@ export default class extends Controller {
     } finally {
       this.isApplyingCheckpointState = false
       if (checkpoint?.id && this.lastLoadedCheckpointId && String(this.lastLoadedCheckpointId) === String(checkpoint.id)) {
-        this.refreshCurrentCheckpointMatch()
+        this.refreshCurrentCheckpointMatch({ force: true })
       }
       this.closeCheckpointHistory()
       this.uiManager?.hideMetadataDropdownSpinner?.()
@@ -4649,9 +4661,7 @@ export default class extends Controller {
     if (this.colorUpdateCache) {
       this.colorUpdateCache.clear()
     }
-    if (this.cachedColorsByCellIndex) {
-      this.cachedColorsByCellIndex.clear()
-    }
+    this.cachedColorsByCellIndex = null
     this.lastColorUpdateHash = null
     this.lastColoringMetadataId = null
     this.lastColorRange = null
@@ -4691,19 +4701,16 @@ export default class extends Controller {
     const rendererStart = performance.now()
     // Set positions in ReGL renderer
     this.reglRenderer.setPositions(screenCoordinates)
+
+    // Density-based defaults for large datasets (category order + dot size)
+    this.applyDefaultDisplaySettingsForCellCount(coordinates.length)
     
     // Set initial point size
     this.reglRenderer.setPointSize(this.currentPointSize || 4)
     
-    // Populate originalPointColors with default colors for all cells
+    // Populate originalPointColors / cachedColorsByCellIndex with default colors for all cells
     // This ensures selected cells can be shown even if no coloring is active
-    if (this.originalPointColors) {
-      this.originalPointColors.clear()
-    }
-    const defaultColor = 0x3b82f6 // Default blue
-    for (let i = 0; i < coordinates.length; i++) {
-      this.originalPointColors.set(i, defaultColor)
-    }
+    this.ensurePointColorArrays(coordinates.length)
     // console.log(`🎯 [ReGL] Populated originalPointColors with ${coordinates.length} default colors`)
     
     // Render first frame
@@ -4728,6 +4735,9 @@ export default class extends Controller {
     this.numPoints = coordinates.length
     this.spritesRenderType = 'default'
     this.currentVisibleCells = null
+    if (this.dataManager && typeof this.dataManager.bumpFilterGeneration === 'function') {
+      this.dataManager.bumpFilterGeneration()
+    }
     this.updateSelectionCount()
     
     const elapsed = performance.now() - startTime
@@ -5359,18 +5369,23 @@ export default class extends Controller {
         
         if (storeSuccess) {
           const info = vectorData.compression_info
-          // console.log(`💾 [DISK] Successfully stored metadata ${vectorData.name} to disk (${info.type}): ${info.binary_size} bytes`)
-          
-          // Update status icon to show it's in database (orange check)
-          const orangeTime = performance.now()
-          // console.log(`🔍 [DISK] Setting ${metadataId} to in-db (orange) after disk storage at ${orangeTime.toFixed(2)}ms`)
-          // console.log(`🔍 [DEBUG] Disk storage completed for metadata ${metadataId} (${vectorData.name})`)
-          this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db')
+          // Do not downgrade an in-memory (green) vector to orange just because
+          // a background disk warm-up stored a copy in IndexedDB.
+          const alreadyInMemory = !!(
+            this.loadedMetadataVectors?.[metadataId] ||
+            this.loadedMetadataVectors?.[String(metadataId)] ||
+            this.loadedMetadataVectors?.[Number(metadataId)]
+          )
+          if (alreadyInMemory) {
+            this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+          } else {
+            this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db')
+          }
           
           // Show checkboxes for this metadata now that it's available on disk
           this.uiManager.showCheckboxesForMetadata(metadataId)
           
-          return { success: true, cached: false, size: info.binary_size, orangeTime: orangeTime }
+          return { success: true, cached: false, size: info.binary_size, orangeTime: performance.now() }
         } else {
           throw new Error('Failed to store metadata to IndexedDB')
         }
@@ -5646,35 +5661,43 @@ export default class extends Controller {
     }
 
     const runPromise = (async () => {
-    // console.log('🔍 [STATUS] Checking status of all metadata before preloading...')
-    
     try {
-      // Get all metadata buttons from the UI
       let metadataButtons = document.querySelectorAll('button[data-metadata-id]')
       
-      // If no buttons found, wait a bit and try again (UI might not be ready yet)
       if (metadataButtons.length === 0) {
-        // console.log('🔍 [STATUS] No metadata buttons found yet, waiting 500ms and retrying...')
         await new Promise(resolve => setTimeout(resolve, 500))
         metadataButtons = document.querySelectorAll('button[data-metadata-id]')
         
         if (metadataButtons.length === 0) {
-          // console.log('🔍 [STATUS] Still no metadata buttons found, skipping status check')
           return
         }
       }
 
-      // console.log(`🔍 [STATUS] Checking status for ${metadataButtons.length} metadata items before preloading...`)
-      
-      // Process all metadata status checks in parallel since DB checks are now instant
-      const startTime = performance.now()
-      const allPromises = Array.from(metadataButtons).map(button => this.checkSingleMetadataStatus(button))
-      await Promise.all(allPromises)
-      const endTime = performance.now()
-      
-      // console.log(`🔍 [STATUS] Completed status check for all ${metadataButtons.length} metadata items in ${(endTime - startTime).toFixed(2)}ms`)
-      
-      // console.log('🔍 [STATUS] Completed status check for all metadata before preloading')
+      // Cap concurrency and yield so IndexedDB status scans do not freeze the UI.
+      const buttons = Array.from(metadataButtons)
+      const concurrency = 8
+      let nextIndex = 0
+
+      const worker = async () => {
+        while (nextIndex < buttons.length) {
+          const index = nextIndex++
+          const button = buttons[index]
+          try {
+            await this.checkSingleMetadataStatus(button)
+          } catch (error) {
+            console.error('Error checking metadata status:', error)
+          }
+          if (index % concurrency === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 0))
+          }
+        }
+      }
+
+      const workers = []
+      for (let i = 0; i < Math.min(concurrency, buttons.length); i++) {
+        workers.push(worker())
+      }
+      await Promise.all(workers)
     } catch (error) {
       console.error('Error in metadata status checking before preload:', error)
     }
@@ -5699,19 +5722,26 @@ export default class extends Controller {
       // Check if metadata is in memory first (fastest check)
       const isInMemory = this.dataManager.getMetadataVectorById(metadataId)
       if (isInMemory) {
-        // console.log(`🔍 [STATUS] Metadata ${metadataId} found in memory - setting to green`)
+        this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+        this.uiManager.showCheckboxesForMetadata(metadataId)
+        return
+      }
+
+      // Also accept raw key hits (string/number) without going through getMetadataVectorById edge cases
+      if (
+        this.loadedMetadataVectors?.[metadataId] ||
+        this.loadedMetadataVectors?.[String(metadataId)] ||
+        this.loadedMetadataVectors?.[Number(metadataId)]
+      ) {
         this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
         this.uiManager.showCheckboxesForMetadata(metadataId)
         return
       }
 
       // Check if metadata is in database (IndexedDB) - now optimized for speed
-      const dbCheckStart = performance.now()
       const isInDatabase = await this.checkMetadataInDatabase(metadataId)
-      const dbCheckTime = performance.now() - dbCheckStart
       
       if (isInDatabase) {
-        // console.log(`🔍 [STATUS] Metadata ${metadataId} found in database but not in memory - setting to orange`)
         this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db')
         this.uiManager.showCheckboxesForMetadata(metadataId)
         return
@@ -6107,6 +6137,9 @@ export default class extends Controller {
             await this.waitUntilMetadataNotLoading(metadataId)
           }
           if (this.loadedMetadataVectors[metadataId]) {
+            // Keep icon green for vectors already promoted to memory.
+            this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+            this.uiManager.showCheckboxesForMetadata(metadataId)
             // Special logging for sex and age
             const metadataName = this.dataManager.getMetadataNameById(metadataId)
             if (metadataName && (metadataName.toLowerCase().includes('sex') || metadataName.toLowerCase().includes('age'))) {
@@ -6120,6 +6153,8 @@ export default class extends Controller {
                 path: 'already-in-memory'
               })
             }
+            // Yield so checkpoint UI stays interactive during long disk warm-ups.
+            await new Promise((resolve) => setTimeout(resolve, 0))
             continue
           }
 
@@ -6236,34 +6271,14 @@ export default class extends Controller {
                   // console.log(`🔍 [SEX/AGE DEBUG] Successfully preloaded ${metadataName} (${metadataId}) to disk${retry > 0 ? ` on retry ${retry}` : ''}`)
                 }
                 
-                // Try to load the newly stored metadata to memory if there's space
-                // console.log(`🔍 [MEMORY] Attempting to load metadata ${metadataId} to memory after disk storage`)
-                const newMetadataLoadStart = performance.now()
-                // console.log(`🔍 [MEMORY] Starting memory load for new metadata ${metadataId} at ${newMetadataLoadStart.toFixed(2)}ms`)
-                try {
-                  const memoryMetadata = await this.dataManager.loadSingleMetadataVector(metadataId, { loomFile: metadataLoomFile })
-                  const newMetadataLoadEnd = performance.now()
-                  const newMetadataLoadDuration = (newMetadataLoadEnd - newMetadataLoadStart).toFixed(2)
-                  // console.log(`🔍 [MEMORY] Completed memory load for new metadata ${metadataId} in ${newMetadataLoadDuration}ms`)
-                  // console.log(`🔍 [MEMORY] loadSingleMetadataVector result for ${metadataId}:`, memoryMetadata ? 'success' : 'failed')
-                  if (memoryMetadata) {
-                    const greenTime = performance.now()
-                    const orangeDuration = result.orangeTime ? (greenTime - result.orangeTime).toFixed(2) : 'unknown'
-                    // console.log(`🔍 [MEMORY] Loaded newly stored metadata ${metadataId} to memory`)
-                    // Update status icon to show it's in memory (green check)
-                    // console.log(`🔍 [MEMORY] Setting ${metadataId} to in-memory (green) after memory loading at ${greenTime.toFixed(2)}ms`)
-                    // console.log(`🔍 [DEBUG] Memory loading completed for metadata ${metadataId}`)
-                    // console.log(`⏱️ [TIMER] Orange status duration for ${metadataId}: ${orangeDuration}ms`)
-                    this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
-                    
-                    // Show checkboxes for newly loaded metadata
-                    this.uiManager.showCheckboxesForMetadata(metadataId)
-                  } else {
-                    // console.log(`🔍 [MEMORY] loadSingleMetadataVector returned null/undefined for ${metadataId}`)
-                  }
-                } catch (error) {
-                  // console.log(`🔍 [MEMORY] Could not load metadata ${metadataId} to memory (buffer full or error):`, error.message)
-                  // console.log(`🔍 [MEMORY] Error details:`, error)
+                // Disk-only preload mode: do not decompress into JS memory after each store.
+                // On large projects that repeatedly freezes the main thread (Firefox "slowing down").
+                // Memory load happens on demand when the user colors/filters/expands that metadata.
+                if (shouldPreloadAllMetadata) {
+                  this.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+                  this.uiManager.showCheckboxesForMetadata(metadataId)
+                } else {
+                  this.uiManager.updateMetadataStatusIcon(metadataId, 'in-db')
                 }
                 
                 success = true
@@ -6460,14 +6475,18 @@ export default class extends Controller {
       })
     }
     
-    // Update category distribution bar plots for all unfolded metadata sections
-    // This ensures bar plots are shown when coloring is active
+    // Update category distribution bar plots after the scatter paints
     const barplotsStart = perfEnabled ? performance.now() : 0
-    this.dataManager.updateAllCategoryDistributions()
+    this.scheduleAfterFirstPaint(() => {
+      this.dataManager.updateAllCategoryDistributions()
+      if (perfEnabled) {
+        this.logPerf('pipeline_after_updateAllCategoryDistributions', performance.now() - barplotsStart, {
+          metadataId: this.currentMetadataVector?.id ?? null,
+          deferred: true
+        })
+      }
+    })
     if (perfEnabled) {
-      this.logPerf('pipeline_after_updateAllCategoryDistributions', performance.now() - barplotsStart, {
-        metadataId: this.currentMetadataVector?.id ?? null
-      })
       this.logPerf('pipeline_updateVisualization_total', performance.now() - pipelineStart, {
         metadataId: this.currentMetadataVector?.id ?? null,
         dataType: data_type,
@@ -6571,28 +6590,36 @@ export default class extends Controller {
       if (coloringMetadataVector.data_type === 'DISCRETE' || coloringMetadataVector.data_type === 'STRING') {
         // Discrete metadata coloring with category ordering
         const categoryColors = this.colorManager.getCategoryColors()
-        this.cachedColorsByCellIndex = new Map()
+        this.ensurePointColorArrays(this.displayOrder.length)
         
-        // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
-        // Otherwise fall back to unique categories from values
-        // This ensures colors remain stable even when categories have 0 visible cells
-        let allCategories
-        if (coloringMetadataVector.compression_info && coloringMetadataVector.compression_info.categories) {
-          allCategories = [...coloringMetadataVector.compression_info.categories]
-        } else {
-          allCategories = [...new Set(coloringMetadataVector.values)]
+        // Labels live in compression_info.categories; values are category codes.
+        const labels = this.dataManager.getCategoryLabels(coloringMetadataVector)
+        if (!labels) {
+          throw new Error(`Discrete metadata ${coloringMetadataVector.id} is missing compression_info.categories`)
         }
+        const allCategories = [...labels]
         
         // Use stable sorted categories (always largest-first) for consistent color assignment
         // This ensures colors match between legend and points regardless of display order
         const stableSortedCategories = this.getStableSortedCategories(coloringMetadataVector.values, allCategories)
         
-        // Build category-to-index map using stable sorted order
+        // Build category-to-index map using stable sorted order (keys are labels)
         let categoryToIndex = {}
         stableSortedCategories.forEach((cat, idx) => {
           categoryToIndex[cat] = idx
         })
         const discreteColorMap = this.colorManager.createDiscreteColorMap(stableSortedCategories, coloringMetadataVector.id)
+
+        const colorByCode = new Array(labels.length)
+        for (let code = 0; code < labels.length; code++) {
+          const label = labels[code]
+          const categoryIndex = categoryToIndex[label] || 0
+          const colorValue = categoryColors[categoryIndex % categoryColors.length]
+          const fallbackColor = typeof colorValue === 'string'
+            ? parseInt(colorValue.replace('#', ''), 16)
+            : colorValue
+          colorByCode[code] = discreteColorMap[label] !== undefined ? discreteColorMap[label] : fallbackColor
+        }
         
         // console.log(`🎨 [ReGL] ${stableSortedCategories.length} categories, ${categoryColors.length} colors available`)
         
@@ -6600,19 +6627,13 @@ export default class extends Controller {
         // Storing 0x00000000 in caches breaks later lookups via `value || defaultBlue` because 0 is falsy.
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
           const cellIndex = this.displayOrder[drawPos]
-          const category = coloringMetadataVector.values[cellIndex]
-          const categoryIndex = categoryToIndex[category] || 0
-          const colorValue = categoryColors[categoryIndex % categoryColors.length]
-
-          const fallbackColor = typeof colorValue === 'string'
-            ? parseInt(colorValue.replace('#', ''), 16)
-            : colorValue
-          const metadataColor = discreteColorMap[category] !== undefined ? discreteColorMap[category] : fallbackColor
+          const code = coloringMetadataVector.values[cellIndex]
+          const metadataColor = colorByCode[code] !== undefined ? colorByCode[code] : 0x3b82f6
           
-          this.originalPointColors.set(cellIndex, metadataColor)
+          this.originalPointColors[cellIndex] = metadataColor
           const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
           const pointColor = isSelected ? this.getSelectionHighlightColorInt() : metadataColor
-          this.cachedColorsByCellIndex.set(cellIndex, pointColor)
+          this.cachedColorsByCellIndex[cellIndex] = pointColor
 
           const isVisible = !visibleSet || visibleSet.has(cellIndex)
           colorMap[drawPos] = isVisible ? pointColor : 0x00000000
@@ -6620,9 +6641,9 @@ export default class extends Controller {
         this.lastColoringMetadataId = coloringMetadataVector.id
         this.lastColorRange = null
         
-        // Update colors in ReGL
+        // Update colors in ReGL (float RGBA upload — no per-point hex unpack in renderer)
         const updateColorsStart = performance.now()
-        this.reglRenderer.updateColors(colorMap)
+        this.uploadPackedColors(colorMap)
         const updateColorsMs = performance.now() - updateColorsStart
         this.reglRenderer.render()
         this.logPerf('coloring_discrete_updateColors', updateColorsMs, {
@@ -6630,13 +6651,38 @@ export default class extends Controller {
           metadataId: coloringMetadataVector.id
         })
         
+        // Fixed order: keep identity draw order (CellxGene-like; no O(n log n) sort)
+        if (this.categoryOrder === 'fixed') {
+          this._lastCategoryOrderApplied = 'fixed'
+          if (perfEnabled) {
+            this.logPerf('coloring_total', performance.now() - startTime, {
+              points: this.displayOrder.length,
+              metadataId: coloringMetadataVector.id,
+              metadataType: coloringMetadataVector.data_type,
+              path: 'fixed'
+            })
+          }
+          this.rendererManager.renderGrid()
+          this.rendererManager.renderAxes()
+          this.rendererManager.renderCategoryLabels()
+          this.scheduleAfterFirstPaint(() => {
+            this.customPlotManager.refresh2DPlotIfOpen()
+            if (this.geneManager && typeof this.geneManager.refreshGeneCategoryBoxplots === 'function') {
+              this.geneManager.refreshGeneCategoryBoxplots()
+            }
+          })
+          this.lastColorUpdateHash = currentColorHash
+          this.colorUpdateCache.set('lastColorMap', colorMap)
+          return
+        }
+
         // Check if we need to reorder points for category display
         // Only reorder if this is the first time loading this metadata or if order preference changed
         const needsReordering = !this._lastCategoryOrderApplied || this._lastCategoryOrderApplied !== this.categoryOrder
         
         if (needsReordering) {
           // console.log('📊 [ReGL] Applying category display order (first time or order changed)...')
-          // console.log(`📊 [ReGL] originalPointColors size: ${this.originalPointColors.size}, displayOrder length: ${this.displayOrder.length}`)
+          // console.log(`📊 [ReGL] originalPointColors length: ${this.originalPointColors.length}, displayOrder length: ${this.displayOrder.length}`)
           this._lastCategoryOrderApplied = this.categoryOrder
           
           // Reorder points in buffer (this will re-render and redraw overlay)
@@ -6660,11 +6706,13 @@ export default class extends Controller {
           const elapsed = performance.now() - startTime
           // console.log(`🎨 [ReGL] Color update with reordering completed in ${elapsed.toFixed(2)}ms`)
           
-          // Refresh 2D plot if open
-          this.customPlotManager.refresh2DPlotIfOpen()
-          if (this.geneManager && typeof this.geneManager.refreshGeneCategoryBoxplots === 'function') {
-            this.geneManager.refreshGeneCategoryBoxplots()
-          }
+          // Refresh 2D plot if open (after first paint)
+          this.scheduleAfterFirstPaint(() => {
+            this.customPlotManager.refresh2DPlotIfOpen()
+            if (this.geneManager && typeof this.geneManager.refreshGeneCategoryBoxplots === 'function') {
+              this.geneManager.refreshGeneCategoryBoxplots()
+            }
+          })
           return // Early exit - reordering already rendered everything
         }
         
@@ -6672,7 +6720,7 @@ export default class extends Controller {
         // Continuous/numeric metadata coloring
         const values = coloringMetadataVector.values
         const compressionInfo = coloringMetadataVector.compression_info
-        this.cachedColorsByCellIndex = new Map()
+        this.ensurePointColorArrays(this.displayOrder.length)
         
         // console.log(`🎨 [ReGL] Applying continuous coloring for ${values.length} points`)
         
@@ -6720,10 +6768,10 @@ export default class extends Controller {
             }
           }
           
-          this.originalPointColors.set(cellIndex, metadataColor)
+          this.originalPointColors[cellIndex] = metadataColor
           const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
           const pointColor = isSelected ? this.getSelectionHighlightColorInt() : metadataColor
-          this.cachedColorsByCellIndex.set(cellIndex, pointColor)
+          this.cachedColorsByCellIndex[cellIndex] = pointColor
 
           const isVisible = !visibleSet || visibleSet.has(cellIndex)
           colorMap[drawPos] = isVisible ? pointColor : 0x00000000
@@ -6742,7 +6790,7 @@ export default class extends Controller {
         
         // Update colors in ReGL (but don't render yet, we'll reorder first)
         const updateColorsStart = performance.now()
-        this.reglRenderer.updateColors(colorMap)
+        this.uploadPackedColors(colorMap)
         const updateColorsMs = performance.now() - updateColorsStart
 
         // Check if we need to reorder points for numeric display
@@ -6814,15 +6862,16 @@ export default class extends Controller {
       const defaultColor = 0x3b82f6
       let visibleCount = 0
       let hiddenCount = 0
+      this.ensurePointColorArrays(this.displayOrder.length)
       
       for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
         const cellIndex = this.displayOrder[drawPos]
         const isVisible = !visibleSet || visibleSet.has(cellIndex)
         
-        this.originalPointColors.set(cellIndex, defaultColor)
+        this.originalPointColors[cellIndex] = defaultColor
         const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
         const pointColor = isSelected ? this.getSelectionHighlightColorInt() : defaultColor
-        this.cachedColorsByCellIndex.set(cellIndex, pointColor)
+        this.cachedColorsByCellIndex[cellIndex] = pointColor
         colorMap[drawPos] = isVisible ? pointColor : 0x00000000
         if (isVisible) {
           visibleCount++
@@ -6841,7 +6890,7 @@ export default class extends Controller {
       // Update colors in ReGL
       // console.log('🎨 [RENDER] Updating ReGL renderer with default blue colors...')
       const updateColorsStart = performance.now()
-      this.reglRenderer.updateColors(colorMap)
+      this.uploadPackedColors(colorMap)
       const updateColorsMs = performance.now() - updateColorsStart
       this.reglRenderer.render()
       this.logPerf('coloring_default_updateColors', updateColorsMs, {
@@ -6884,15 +6933,14 @@ export default class extends Controller {
     this.recordPerformanceMetrics('ColorUpdate', elapsed)
     // console.log(`🎨 [ReGL] Color update completed in ${elapsed.toFixed(2)}ms`)
     
-    // Refresh 2D plot if open
-    this.customPlotManager.refresh2DPlotIfOpen()
-    
-    // Refresh fixed tooltip if one is displayed
-    this.refreshFixedTooltipIfNeeded()
-
-    if (this.geneManager && typeof this.geneManager.refreshGeneCategoryBoxplots === 'function') {
-      this.geneManager.refreshGeneCategoryBoxplots()
-    }
+    // Refresh secondary UI after the scatter paints
+    this.scheduleAfterFirstPaint(() => {
+      this.customPlotManager.refresh2DPlotIfOpen()
+      this.refreshFixedTooltipIfNeeded()
+      if (this.geneManager && typeof this.geneManager.refreshGeneCategoryBoxplots === 'function') {
+        this.geneManager.refreshGeneCategoryBoxplots()
+      }
+    })
   }
 
   // Create color map for discrete categories
@@ -6910,31 +6958,29 @@ export default class extends Controller {
   // Get categories sorted by frequency based on user preference
   getSortedCategories(values, categories) {
     if (this.categoryOrder === 'random') {
-      return this.shuffleArrayInPlace(categories)
+      return this.shuffleArrayInPlace([...categories])
     }
 
-    // Calculate category frequencies
-    const categoryFrequencies = {}
-    values.forEach(value => {
-      categoryFrequencies[value] = (categoryFrequencies[value] || 0) + 1
-    })
-    
-    // Sort categories by frequency based on user preference
-    const sorted = categories.sort((a, b) => {
-      const freqA = categoryFrequencies[a] || 0
-      const freqB = categoryFrequencies[b] || 0
-      
+    // values are category codes; categories[code] is the label string
+    const frequencies = new Array(categories.length).fill(0)
+    for (let i = 0; i < values.length; i++) {
+      const code = values[i]
+      if (code >= 0 && code < frequencies.length) frequencies[code]++
+    }
+
+    const sorted = categories.map((label, code) => ({ label, freq: frequencies[code] }))
+    sorted.sort((a, b) => {
       if (this.categoryOrder === 'smallest-first') {
-        return freqA - freqB // Ascending order (smallest first)
-      } else {
-        return freqB - freqA // Descending order (largest first) - default
+        return a.freq - b.freq
       }
+      return b.freq - a.freq
     })
-    return sorted
+    return sorted.map((entry) => entry.label)
   }
 
   // Get categories in a STABLE order for color assignment (always largest-first)
-  // This ensures colors are consistent regardless of user's display preference
+  // This ensures colors are consistent regardless of user's display preference.
+  // Returns LABEL strings (for createDiscreteColorMap / legends); frequency is by code.
   getStableSortedCategories(values, categories) {
     if (!values || !categories || categories.length === 0) return []
     const valuesRefId = this.getValuesRefCacheId(values)
@@ -6943,18 +6989,16 @@ export default class extends Controller {
     const cached = this._stableSortedCategoriesCache.get(cacheKey)
     if (cached) return cached
 
-    const categoryFrequencies = {}
+    const frequencies = new Array(categories.length).fill(0)
     for (let i = 0; i < values.length; i++) {
-      const value = values[i]
-      categoryFrequencies[value] = (categoryFrequencies[value] || 0) + 1
+      const code = values[i]
+      if (code >= 0 && code < frequencies.length) frequencies[code]++
     }
-    
-    // Always sort largest-first for stable color assignment
-    const sorted = [...categories].sort((a, b) => {
-      const freqA = categoryFrequencies[a] || 0
-      const freqB = categoryFrequencies[b] || 0
-      return freqB - freqA // Always descending (largest first)
-    })
+
+    const sorted = categories
+      .map((label, code) => ({ label, freq: frequencies[code] }))
+      .sort((a, b) => b.freq - a.freq)
+      .map((entry) => entry.label)
     this._stableSortedCategoriesCache.set(cacheKey, sorted)
     return sorted
   }
@@ -6977,6 +7021,7 @@ export default class extends Controller {
   // Clear the cached color map (call this when metadata changes)
   clearColorMapCache() {
     this._cachedColorMap = null
+    this._cachedColorByCode = null
     this._cachedCentroids = null
     this._cachedCentroidsKey = null
     if (this._stableSortedCategoriesCache) this._stableSortedCategoriesCache.clear()
@@ -7569,16 +7614,164 @@ export default class extends Controller {
     return 0x9ca3af
   }
 
+  ensurePointColorArrays(cellCount, fillColor = 0x3b82f6) {
+    if (!(this.originalPointColors instanceof Uint32Array) || this.originalPointColors.length !== cellCount) {
+      this.originalPointColors = new Uint32Array(cellCount)
+      this.originalPointColors.fill(fillColor)
+    }
+    if (!(this.cachedColorsByCellIndex instanceof Uint32Array) || this.cachedColorsByCellIndex.length !== cellCount) {
+      this.cachedColorsByCellIndex = new Uint32Array(cellCount)
+      this.cachedColorsByCellIndex.fill(fillColor)
+    }
+  }
+
+  // Dot size from cell count: >500k → 1px, <10 → 8px, log-interpolated between (0.5 steps).
+  defaultPointSizeForCellCount(cellCount) {
+    const n = Number(cellCount) || 0
+    if (n < 10) return 8
+    if (n > this.LARGE_DATASET_CELL_THRESHOLD) return 1
+    const t = (Math.log(n) - Math.log(10)) / (Math.log(this.LARGE_DATASET_CELL_THRESHOLD) - Math.log(10))
+    const size = 8 + t * (1 - 8)
+    return Math.round(size * 2) / 2
+  }
+
+  syncCategoryOrderSelect() {
+    const categoryOrderSelect = document.getElementById('category-order-select')
+    if (categoryOrderSelect && categoryOrderSelect.value !== this.categoryOrder) {
+      categoryOrderSelect.value = this.categoryOrder
+    }
+  }
+
+  setCategoryOrder(order, options = {}) {
+    const allowed = new Set(['fixed', 'largest-first', 'smallest-first', 'random'])
+    const next = allowed.has(order) ? order : 'largest-first'
+    this.categoryOrder = next
+    if (options.userSet === true) {
+      this._userSetCategoryOrder = true
+    } else if (options.userSet === false) {
+      this._userSetCategoryOrder = false
+    }
+    this._lastCategoryOrderApplied = null
+    this.syncCategoryOrderSelect()
+  }
+
+  applyDefaultDisplaySettingsForCellCount(cellCount, options = {}) {
+    const force = !!options.force
+    const n = Number(cellCount) || 0
+    if (n <= 0) return
+
+    if (force || !this._userSetCategoryOrder) {
+      this.setCategoryOrder('largest-first', { userSet: false })
+    } else {
+      this.syncCategoryOrderSelect()
+    }
+
+    if (force || !this._userSetPointSize) {
+      const size = this.defaultPointSizeForCellCount(n)
+      this.currentPointSize = size
+      if (this.reglRenderer) this.reglRenderer.setPointSize(size)
+      const slider = document.getElementById('point-size-slider')
+      const valueDisplay = document.getElementById('point-size-value')
+      if (slider) slider.value = String(size)
+      if (valueDisplay) valueDisplay.textContent = size.toFixed(1)
+    }
+  }
+
+  resetDisplayOrderToIdentity() {
+    if (!this.currentCoordinates) return
+    const n = this.currentCoordinates.length
+    this.displayOrder = new Array(n)
+    for (let i = 0; i < n; i++) this.displayOrder[i] = i
+    this._displayOrderWasReset = true
+
+    if (!this.reglRenderer || !this.currentBounds) return
+
+    const screenCoordinates = new Float32Array(n * 2)
+    for (let i = 0; i < n; i++) {
+      const [dataX, dataY] = this.currentCoordinates[i]
+      screenCoordinates[i * 2] = this.interactionHandler.normalizeX(dataX, this.currentBounds)
+      screenCoordinates[i * 2 + 1] = this.interactionHandler.normalizeY(dataY, this.currentBounds)
+    }
+    this.reglRenderer.updatePositions(screenCoordinates)
+  }
+
+  // Pack packed RGB/RGBA ints into a Float32Array RGBA buffer for a direct GPU upload.
+  packedColorsToFloat32(colorMap) {
+    const n = colorMap.length
+    const out = new Float32Array(n * 4)
+    const byteToFloat = this.reglRenderer?.byteToFloat
+    for (let i = 0; i < n; i++) {
+      const hexColor = colorMap[i]
+      const offset = i * 4
+      if (hexColor === 0x00000000 || hexColor === 0) {
+        out[offset] = 0
+        out[offset + 1] = 0
+        out[offset + 2] = 0
+        out[offset + 3] = 0
+      } else if (hexColor > 0xFFFFFF) {
+        if (byteToFloat) {
+          out[offset] = byteToFloat[(hexColor >>> 24) & 0xFF]
+          out[offset + 1] = byteToFloat[(hexColor >>> 16) & 0xFF]
+          out[offset + 2] = byteToFloat[(hexColor >>> 8) & 0xFF]
+          out[offset + 3] = byteToFloat[hexColor & 0xFF]
+        } else {
+          out[offset] = ((hexColor >>> 24) & 0xFF) / 255
+          out[offset + 1] = ((hexColor >>> 16) & 0xFF) / 255
+          out[offset + 2] = ((hexColor >>> 8) & 0xFF) / 255
+          out[offset + 3] = (hexColor & 0xFF) / 255
+        }
+      } else if (byteToFloat) {
+        out[offset] = byteToFloat[(hexColor >> 16) & 0xFF]
+        out[offset + 1] = byteToFloat[(hexColor >> 8) & 0xFF]
+        out[offset + 2] = byteToFloat[hexColor & 0xFF]
+        out[offset + 3] = 1.0
+      } else {
+        out[offset] = ((hexColor >> 16) & 0xFF) / 255
+        out[offset + 1] = ((hexColor >> 8) & 0xFF) / 255
+        out[offset + 2] = (hexColor & 0xFF) / 255
+        out[offset + 3] = 1.0
+      }
+    }
+    return out
+  }
+
+  uploadPackedColors(colorMap) {
+    if (!this.reglRenderer) return
+    if (typeof this.reglRenderer.updateColorsFloat32 === 'function') {
+      this.reglRenderer.updateColorsFloat32(this.packedColorsToFloat32(colorMap))
+    } else {
+      this.reglRenderer.updateColors(colorMap)
+    }
+  }
+
+  scheduleAfterFirstPaint(callback) {
+    if (typeof callback !== 'function') return
+    const run = () => {
+      try {
+        callback()
+      } catch (error) {
+        console.error('Deferred visualization UI update failed:', error)
+      }
+    }
+    requestAnimationFrame(() => {
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(() => run(), { timeout: 500 })
+      } else {
+        setTimeout(run, 0)
+      }
+    })
+  }
+
   getOriginalPointColor(cellIndex, fallback = 0x3b82f6) {
-    if (this.originalPointColors && this.originalPointColors.has(cellIndex)) {
-      return this.originalPointColors.get(cellIndex)
+    if (this.originalPointColors instanceof Uint32Array && cellIndex >= 0 && cellIndex < this.originalPointColors.length) {
+      return this.originalPointColors[cellIndex]
     }
     return fallback
   }
 
   getCachedPointColor(cellIndex, fallback = 0x3b82f6) {
-    if (this.cachedColorsByCellIndex && this.cachedColorsByCellIndex.has(cellIndex)) {
-      return this.cachedColorsByCellIndex.get(cellIndex)
+    if (this.cachedColorsByCellIndex instanceof Uint32Array && cellIndex >= 0 && cellIndex < this.cachedColorsByCellIndex.length) {
+      return this.cachedColorsByCellIndex[cellIndex]
     }
     return this.getOriginalPointColor(cellIndex, fallback)
   }
@@ -8096,6 +8289,7 @@ export default class extends Controller {
       display: {
         pointSize: this.currentPointSize,
         categoryOrder: this.categoryOrder,
+        categoryOrderUserSet: this._userSetCategoryOrder === true,
         numericalOrder: this.numericalOrder,
         histogramScale: this.histogramScale === 'log' ? 'log' : 'normal',
         histogramIgnoreZeros: this.histogramIgnoreZeros !== false,
@@ -8596,9 +8790,15 @@ export default class extends Controller {
     this.updateCheckpointHistoryButtonState()
   }
 
-  refreshCurrentCheckpointMatch() {
+  markCheckpointMatchDirty() {
+    this._checkpointMatchDirty = true
+  }
+
+  refreshCurrentCheckpointMatch({ force = false } = {}) {
     if (this.isApplyingCheckpointState) return
     if (this.isRefreshingCheckpointMatch) return
+    // Idle pages must not rebuild/stringify full viz state every 1.5s.
+    if (!force && this._checkpointMatchDirty !== true) return
 
     const commentsBtn = document.getElementById('checkpoint-comments-btn')
     if (!commentsBtn) return
@@ -8607,6 +8807,7 @@ export default class extends Controller {
     if (history.length === 0) {
       this.currentMatchedCheckpointId = null
       this.updateCheckpointCommentsButtonState(0, true)
+      this._checkpointMatchDirty = false
       return
     }
 
@@ -8635,6 +8836,7 @@ export default class extends Controller {
         this.updateCheckpointCommentsButtonState(0, true)
         this.logCheckpointMismatch(previousMatchedCheckpointId, currentState, currentSignature, history)
       }
+      this._checkpointMatchDirty = false
     } finally {
       this.isRefreshingCheckpointMatch = false
     }
@@ -8840,7 +9042,25 @@ export default class extends Controller {
     }
 
     if (state.display) {
-      this.categoryOrder = state.display.categoryOrder || this.categoryOrder
+      const cellCountForDefaults =
+        (Array.isArray(this.currentCoordinates) && this.currentCoordinates.length) ||
+        this.numPoints ||
+        0
+      const savedCategoryOrder = state.display.categoryOrder
+      const categoryOrderUserSet = state.display.categoryOrderUserSet === true
+
+      // Honor an explicit user choice from the checkpoint. Otherwise use the
+      // default (large to small). Random points (fixed) stays available as an option.
+      if (categoryOrderUserSet && savedCategoryOrder) {
+        this.setCategoryOrder(savedCategoryOrder, { userSet: true })
+      } else {
+        this._userSetCategoryOrder = false
+        if (cellCountForDefaults > 0) {
+          this.applyDefaultDisplaySettingsForCellCount(cellCountForDefaults)
+        } else {
+          this.setCategoryOrder(savedCategoryOrder || 'largest-first', { userSet: false })
+        }
+      }
       this.numericalOrder = state.display.numericalOrder || this.numericalOrder
       if (state.display.histogramScale === 'log' || state.display.histogramScale === 'normal') {
         this.histogramScale = state.display.histogramScale
@@ -8895,6 +9115,7 @@ export default class extends Controller {
       if (pointSizeSlider && state.display.pointSize) {
         pointSizeSlider.value = String(state.display.pointSize)
         this.currentPointSize = Number(state.display.pointSize)
+        this._userSetPointSize = true
         this.uiManager.updatePointSize(this.currentPointSize)
       }
 
@@ -8952,10 +9173,14 @@ export default class extends Controller {
       })
     }
 
-    // Load only expanded-panel vectors for barplots now (coloring + filter vectors are already loaded).
-    // Full metadata preload continues later in the background and must not block this.
+    // Load expanded-panel vectors for barplots in the background.
+    // Do not await: the scatter is already colored and the loading overlay must not wait on this.
     if ((this._pendingExpandedMetadataIds?.size || 0) > 0) {
-      await this.flushPendingExpandedMetadataAfterPreload()
+      this.scheduleAfterFirstPaint(() => {
+        this.flushPendingExpandedMetadataAfterPreload().catch((error) => {
+          console.error('Background expanded metadata flush after checkpoint failed:', error)
+        })
+      })
     } else if (this.currentMetadataVector) {
       this.scheduleDrawCategoryDistributionsForExpandedMetadata()
     }
@@ -8989,7 +9214,7 @@ export default class extends Controller {
       this.syncEmbeddingUiToLoadedEmbedding(this.metadataData.id, this.metadataData.name || null)
     }
     this.updateAllRangeSliderButtonAppearances()
-    this.refreshCurrentCheckpointMatch()
+    this.refreshCurrentCheckpointMatch({ force: true })
     this.checkpointDebug('applyCheckpointState:completed', {
       finalSelectedEmbeddingId: this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : null,
       finalCurrentLoomFile: this.currentLoomFile,
@@ -9214,6 +9439,13 @@ export default class extends Controller {
         currentMetadataId: this.currentMetadataId || null,
         currentMetadataVectorId: this.currentMetadataVector?.id || null
       })
+      // Ensure the active coloring metadata shows green even if Font Awesome
+      // replaced icons before an earlier status pass ran.
+      if (loadedColorVector || this.loadedMetadataVectors?.[normalizedColoringMetadataId] ||
+          this.loadedMetadataVectors?.[Number(normalizedColoringMetadataId)]) {
+        this.uiManager.updateMetadataStatusIcon(normalizedColoringMetadataId, 'in-memory')
+        this.uiManager.showCheckboxesForMetadata(normalizedColoringMetadataId)
+      }
       // Barplots need coloring vector; draw after paint for already-expanded panels.
       if (perfEnabled) {
         this.logPerf('pipeline_restoreColoring_beforeScheduleDraw', performance.now() - coloringRestoreStart, {
@@ -11773,15 +12005,12 @@ export default class extends Controller {
         return
       }
       
-      // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
-      // Otherwise fall back to unique categories from values
-      // This ensures colors remain stable even when categories have 0 visible cells
-      let allCategories
-      if (metadataVector.compression_info && metadataVector.compression_info.categories) {
-        allCategories = [...metadataVector.compression_info.categories]
-      } else {
-        allCategories = [...new Set(metadataVector.values)]
+      // Labels live in compression_info.categories; values are category codes.
+      const labels = this.dataManager.getCategoryLabels(metadataVector)
+      if (!labels) {
+        throw new Error(`Discrete metadata ${metadataId} is missing compression_info.categories`)
       }
+      const allCategories = [...labels]
       
       const stableSortedCategories = this.getStableSortedCategories(metadataVector.values, allCategories)
       
@@ -11929,11 +12158,11 @@ export default class extends Controller {
     if (dt !== 'DISCRETE' && dt !== 'STRING') return -1
 
     let allCategories
-    if (vector.compression_info && vector.compression_info.categories) {
-      allCategories = [...vector.compression_info.categories]
-    } else {
-      allCategories = [...new Set(vector.values)]
+    const labels = this.dataManager.getCategoryLabels(vector)
+    if (!labels) {
+      throw new Error(`Discrete metadata ${mid} is missing compression_info.categories`)
     }
+    allCategories = [...labels]
     const valuesRefId = this.getValuesRefCacheId(vector.values)
     const categoriesKey = allCategories.map(c => String(c)).join('\u0001')
     const cacheKey = `${String(mid)}|${valuesRefId}|${allCategories.length}|${categoriesKey}`
@@ -11954,13 +12183,15 @@ export default class extends Controller {
   
   // Get color for a category (using the same color palette as the plot)
   getCategoryColor(categoryName, index, metadataId) {
-    // Always check if we have a stored color for this category in this specific metadata
-    const storageKey = `category_color_${metadataId}_${categoryName}`
-    const storedColor = localStorage.getItem(storageKey)
-    
-    if (storedColor) {
-      //console.log(`Using stored color for "${categoryName}" in metadata ${metadataId}: ${storedColor}`)
-      return storedColor
+    // Batch-loaded overrides (one localStorage scan per metadata id)
+    if (this.colorManager && typeof this.colorManager.getCategoryColorOverrides === 'function') {
+      const overrides = this.colorManager.getCategoryColorOverrides(metadataId)
+      const storedColor = overrides.get(String(categoryName))
+      if (storedColor) return storedColor
+    } else {
+      const storageKey = `category_color_${metadataId}_${categoryName}`
+      const storedColor = localStorage.getItem(storageKey)
+      if (storedColor) return storedColor
     }
 
     const stableIdx = this.getStablePaletteIndexForCategory(metadataId, categoryName)
@@ -12437,6 +12668,9 @@ export default class extends Controller {
         // Store the color with metadata-specific key
         const storageKey = `category_color_${metadataId}_${categoryName}`
         localStorage.setItem(storageKey, newColor)
+        if (this.colorManager && typeof this.colorManager.invalidateCategoryColorOverrides === 'function') {
+          this.colorManager.invalidateCategoryColorOverrides(metadataId)
+        }
 
         // Clear the cached color map so plot will use updated colors
         this._cachedColorMap = null
@@ -14916,17 +15150,7 @@ export default class extends Controller {
 
   // Get total count for a category (unfiltered)
   getTotalCountForCategory(categoryName) {
-    if (!this.currentMetadataVector || !this.currentMetadataVector.values) {
-      return 0
-    }
-    
-    let count = 0
-    for (let i = 0; i < this.currentMetadataVector.values.length; i++) {
-      if (this.currentMetadataVector.values[i] === categoryName) {
-        count++
-      }
-    }
-    return count
+    return this.dataManager.getTotalCountForCategory(categoryName)
   }
 
 
@@ -14935,25 +15159,7 @@ export default class extends Controller {
 
   // Get visible count for a category (considering current filtering)
   getVisibleCountForCategory(categoryName) {
-    if (!this.currentMetadataVector || !this.currentMetadataVector.values) {
-      return 0
-    }
-    
-    // If no filtering is applied, return total count
-    if (!this.currentVisibleCells || this.currentVisibleCells.length === this.currentMetadataVector.values.length) {
-      return this.dataManager.getTotalCountForCategory(categoryName)
-    }
-    
-    // Count visible cells for this category
-    let visibleCount = 0
-    for (let i = 0; i < this.currentVisibleCells.length; i++) {
-      const cellIndex = this.currentVisibleCells[i]
-      if (this.currentMetadataVector.values[cellIndex] === categoryName) {
-        visibleCount++
-      }
-    }
-    
-    return visibleCount
+    return this.dataManager.getVisibleCountForCategory(categoryName)
   }
 
 
@@ -15201,6 +15407,7 @@ export default class extends Controller {
     selectedIndices.forEach(index => {
       this.selectedCells.add(index)
     })
+    this.markCheckpointMatchDirty()
     const addTime = performance.now() - addStartTime
     if (addTime > 10) {
       console.log(`[SELECTION] Adding ${selectedIndices.length} indices took ${addTime.toFixed(2)}ms`)
@@ -15325,9 +15532,7 @@ export default class extends Controller {
     }
     
     const hasSelections = this.selectedCells.size > 0
-    if (!this.cachedColorsByCellIndex) {
-      this.cachedColorsByCellIndex = new Map()
-    }
+    this.ensurePointColorArrays(this.displayOrder?.length || this.numPoints || 0)
     
     // Reorder displayOrder to put selected cells on top
     if (hasSelections && this.displayOrder && this.currentCoordinates) {
@@ -15354,11 +15559,11 @@ export default class extends Controller {
         
         if (this.selectedCells.has(cellIndex)) {
           colorMap[drawPos] = selectionColor
-          this.cachedColorsByCellIndex.set(cellIndex, selectionColor)
+          this.cachedColorsByCellIndex[cellIndex] = selectionColor
         } else {
           const originalColor = this.getOriginalPointColor(cellIndex)
           colorMap[drawPos] = originalColor
-          this.cachedColorsByCellIndex.set(cellIndex, originalColor)
+          this.cachedColorsByCellIndex[cellIndex] = originalColor
         }
       }
     } else {
@@ -15377,7 +15582,7 @@ export default class extends Controller {
         
         const originalColor = this.getOriginalPointColor(cellIndex)
         colorMap[drawPos] = originalColor
-        this.cachedColorsByCellIndex.set(cellIndex, originalColor)
+        this.cachedColorsByCellIndex[cellIndex] = originalColor
       }
     }
     
@@ -15832,54 +16037,71 @@ export default class extends Controller {
       // console.log('⚠️ [ReGL] Cannot reorder - missing data')
       return
     }
+
+    if (this.categoryOrder === 'fixed') {
+      this.resetDisplayOrderToIdentity()
+      this.uploadPackedColors((() => {
+        const colorMap = new Uint32Array(this.displayOrder.length)
+        for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
+          const cellIndex = this.displayOrder[drawPos]
+          const isVisible = !visibleSet || visibleSet.has(cellIndex)
+          if (!isVisible) {
+            colorMap[drawPos] = 0x00000000
+          } else {
+            const baseColor = this.getOriginalPointColor(cellIndex)
+            const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
+            colorMap[drawPos] = isSelected ? this.getSelectionHighlightColorInt() : baseColor
+          }
+        }
+        return colorMap
+      })())
+      this.reglRenderer.render()
+      this.rendererManager.renderGrid()
+      this.rendererManager.renderAxes()
+      this.rendererManager.renderCategoryLabels()
+      return
+    }
     
     // console.log('📊 [ReGL] Reordering display order for category...')
     const startTime = performance.now()
     
     const values = this.currentMetadataVector.values
-    
-    // Calculate category frequencies from CURRENT display order
-    const categoryFrequencies = {}
-    for (let i = 0; i < this.displayOrder.length; i++) {
-      const cellIndex = this.displayOrder[i]
-      const category = values[cellIndex]
-      categoryFrequencies[category] = (categoryFrequencies[category] || 0) + 1
+    const labels = this.dataManager.getCategoryLabels(this.currentMetadataVector)
+    if (!labels) {
+      throw new Error('Discrete metadata is missing compression_info.categories for category reorder')
     }
     
-    // Sort categories by frequency (or shuffle for random)
-    let sortedCategories = Object.keys(categoryFrequencies)
+    // Frequency by category code (values are codes)
+    const categoryFrequencies = new Array(labels.length).fill(0)
+    for (let i = 0; i < this.displayOrder.length; i++) {
+      const cellIndex = this.displayOrder[i]
+      const code = values[cellIndex]
+      if (code >= 0 && code < categoryFrequencies.length) categoryFrequencies[code]++
+    }
+    
+    // Sort category codes by frequency (or shuffle for random)
+    let sortedCodes = labels.map((_, code) => code).filter((code) => categoryFrequencies[code] > 0)
     if (this.categoryOrder === 'random') {
-      this.shuffleArrayInPlace(sortedCategories)
+      this.shuffleArrayInPlace(sortedCodes)
     } else {
-      sortedCategories.sort((a, b) => {
+      sortedCodes.sort((a, b) => {
         const freqA = categoryFrequencies[a]
         const freqB = categoryFrequencies[b]
-        
         if (this.categoryOrder === 'smallest-first') {
-          return freqA - freqB // Ascending (smallest first = background)
-        } else {
-          return freqB - freqA // Descending (largest first = background)
+          return freqA - freqB
         }
+        return freqB - freqA
       })
     }
     
-    // console.log(`📊 [ReGL] Category order (${this.categoryOrder}):`, 
-                // sortedCategories.map(c => `${c}(${categoryFrequencies[c]})`).join(', '))
-    
-    // Create category -> draw order mapping
-    const categoryDrawOrder = {}
-    sortedCategories.forEach((category, order) => {
-      categoryDrawOrder[category] = order
+    const categoryDrawOrder = new Array(labels.length)
+    sortedCodes.forEach((code, order) => {
+      categoryDrawOrder[code] = order
     })
     
-    // Sort the displayOrder array by category
     this.displayOrder.sort((cellA, cellB) => {
-      const catA = values[cellA]
-      const catB = values[cellB]
-      return categoryDrawOrder[catA] - categoryDrawOrder[catB]
+      return categoryDrawOrder[values[cellA]] - categoryDrawOrder[values[cellB]]
     })
-    
-    // console.log(`📊 [ReGL] Reordered displayOrder array (first 5 cells: ${this.displayOrder.slice(0, 5).join(', ')})`)
     
     // Rebuild buffer using new display order
     const screenCoordinates = new Float32Array(this.displayOrder.length * 2)
@@ -15889,7 +16111,6 @@ export default class extends Controller {
       const cellIndex = this.displayOrder[drawPos]
       const [dataX, dataY] = this.currentCoordinates[cellIndex]
       
-      // Normalize to screen coordinates
       screenCoordinates[drawPos * 2] = this.interactionHandler.normalizeX(dataX, this.currentBounds)
       screenCoordinates[drawPos * 2 + 1] = this.interactionHandler.normalizeY(dataY, this.currentBounds)
       
@@ -15903,12 +16124,10 @@ export default class extends Controller {
       }
     }
     
-    // Update ReGL buffers with reordered data
     this.reglRenderer.updatePositions(screenCoordinates)
-    this.reglRenderer.updateColors(colorMap)
+    this.uploadPackedColors(colorMap)
     this.reglRenderer.render()
     
-    // Redraw the Canvas 2D overlay (grid, axes, labels)
     this.rendererManager.renderGrid()
     this.rendererManager.renderAxes()
     this.rendererManager.renderCategoryLabels()
@@ -16433,6 +16652,7 @@ export default class extends Controller {
 
   clearCurrentSelectionAfterSave() {
     this.selectedCells.clear()
+    this.markCheckpointMatchDirty()
     // Invalidate color/order caches so repaint builds a clean draw order.
     this.lastColorUpdateHash = null
     if (this.colorUpdateCache) this.colorUpdateCache.clear()
@@ -21462,8 +21682,8 @@ export default class extends Controller {
       // Use current metadata coloring
       const { color: metadataColor } = this.colorManager.getColorAndAlpha(point.cellId)
       color = this.hexToRgb(metadataColor)
-    } else if (this.originalPointColors && this.originalPointColors.has(point.cellId)) {
-      const originalColor = this.originalPointColors.get(point.cellId)
+    } else if (this.originalPointColors instanceof Uint32Array && point.cellId >= 0 && point.cellId < this.originalPointColors.length) {
+      const originalColor = this.originalPointColors[point.cellId]
       color = this.hexToRgb(originalColor)
     }
     
@@ -21707,6 +21927,7 @@ export default class extends Controller {
   cancelSelection() {
     // Clear the selected cells
     this.selectedCells.clear()
+    this.markCheckpointMatchDirty()
     // Invalidate color/order caches so repaint rebuilds a clean draw order.
     this.lastColorUpdateHash = null
     if (this.colorUpdateCache) this.colorUpdateCache.clear()
@@ -21740,9 +21961,13 @@ export default class extends Controller {
 
   // Store original colors when points are first rendered
   storeOriginalPointColor(cellId, color) {
-    if (!this.originalPointColors.has(cellId)) {
-      this.originalPointColors.set(cellId, color)
+    const cellCount = this.currentCoordinates?.length || this.displayOrder?.length || cellId + 1
+    if (!(this.originalPointColors instanceof Uint32Array) || this.originalPointColors.length !== cellCount) {
+      this.ensurePointColorArrays(cellCount)
+      this.originalPointColors[cellId] = color
+      return
     }
+    // Array already allocated for this cell count — preserve existing entry (first-write semantics)
   }
 
   // Update the selected cells count display
@@ -23820,7 +24045,11 @@ export default class extends Controller {
         this.selectedCategories[metadataId].add(String(category))
       })
     } else {
-      ;[...new Set(metadataVector.values)].forEach((category) => {
+      const labels = this.dataManager.getCategoryLabels(metadataVector)
+      if (!labels) {
+        throw new Error(`Discrete metadata ${metadataId} is missing compression_info.categories`)
+      }
+      labels.forEach((category) => {
         this.selectedCategories[metadataId].add(String(category))
       })
     }
@@ -24588,10 +24817,10 @@ export default class extends Controller {
     const needsColorRecalculation = this.colorManager.shouldRecalculateColors(coloringMetadataVector)
     
     // Also check if cache is empty - if so, populate it
-    const cacheEmpty = !this.cachedColorsByCellIndex || this.cachedColorsByCellIndex.size === 0
+    const cacheEmpty = !(this.cachedColorsByCellIndex instanceof Uint32Array) || this.cachedColorsByCellIndex.length === 0
     // console.log('🎨 [ReGL] Color cache state:', {
-      // exists: !!this.cachedColorsByCellIndex,
-      // size: this.cachedColorsByCellIndex?.size || 0,
+      // exists: !!(this.cachedColorsByCellIndex instanceof Uint32Array),
+      // length: this.cachedColorsByCellIndex?.length || 0,
       // isEmpty: cacheEmpty,
       // needsRecalculation: needsColorRecalculation
     // })
@@ -24604,9 +24833,9 @@ export default class extends Controller {
       }
       this.colorManager.calculateAndCacheColors(coloringMetadataVector)
       // console.log('🎨 [ReGL] Color cache after population:', {
-        // size: this.cachedColorsByCellIndex?.size || 0,
-        // hasSample: this.cachedColorsByCellIndex?.has(0) || false,
-        // sampleColor: this.cachedColorsByCellIndex?.get(0)?.toString(16) || 'none'
+        // length: this.cachedColorsByCellIndex?.length || 0,
+        // hasSample: this.cachedColorsByCellIndex instanceof Uint32Array && this.cachedColorsByCellIndex.length > 0,
+        // sampleColor: this.cachedColorsByCellIndex instanceof Uint32Array && this.cachedColorsByCellIndex.length > 0 ? this.cachedColorsByCellIndex[0].toString(16) : 'none'
       // })
     }
     
@@ -24826,11 +25055,11 @@ export default class extends Controller {
     const startTime = performance.now()
     const cellIndices = []
     const values = metadataVector.values
-    
-    // Use for loop instead of forEach for better performance.
-    // selectedCategories stores string keys (DOM data-category is always a string).
+    // selectedCategories stores category NAME strings; values are category codes.
+    const selectedCodes = this.dataManager.codesMatchingLabels(metadataVector, selectedCategories)
+
     for (let index = 0; index < values.length; index++) {
-      if (selectedCategories.has(String(values[index]))) {
+      if (selectedCodes.has(values[index])) {
         cellIndices.push(index)
       }
     }
@@ -24938,6 +25167,9 @@ export default class extends Controller {
     if (!hasActiveFilterCriteria) {
       // No active filters - safe to clear
       this.currentVisibleCells = null
+      if (this.dataManager && typeof this.dataManager.bumpFilterGeneration === 'function') {
+        this.dataManager.bumpFilterGeneration()
+      }
       // console.log('[CLEAR STATE] Cleared currentVisibleCells (no active filter criteria)')
     } else {
       // Active filter criteria exist - keep currentVisibleCells but mark cache as invalid
@@ -25893,17 +26125,22 @@ export default class extends Controller {
     }
     
     // Get discrete categories and their corresponding numeric values
+    // values are codes; labels live in compression_info.categories
     const discreteValues = this.currentMetadataVector.values
-    const categories = this.currentMetadataVector.categories || [...new Set(discreteValues)]
+    const labels = this.dataManager.getCategoryLabels(this.currentMetadataVector)
+    if (!labels) {
+      throw new Error(`Discrete metadata ${this.currentMetadataVector.id} is missing compression_info.categories`)
+    }
+    const categories = labels.map((label) => String(label))
     
-    // Group numeric values by discrete category
+    // Group numeric values by discrete category label
     const categoryGroups = {}
     categories.forEach(category => {
       categoryGroups[category] = []
     })
     
     values.forEach((numericValue, index) => {
-      const category = discreteValues[index]
+      const category = String(labels[discreteValues[index]])
       if (categoryGroups[category]) {
         categoryGroups[category].push(numericValue)
       }
@@ -26304,6 +26541,16 @@ export default class extends Controller {
     if (perfEnabled) tMark = performance.now()
     
     // Count coloring categories and per-row distributions in one pass.
+    // values are codes; canvas.dataset.category / color maps use LABEL strings.
+    const displayedLabels = this.dataManager.getCategoryLabels(displayedMetadataVector)
+    const coloringLabels = this.dataManager.getCategoryLabels(coloringMetadataVector)
+    if (!displayedLabels) {
+      throw new Error(`Discrete metadata ${metadataId} is missing compression_info.categories`)
+    }
+    if (!coloringLabels) {
+      throw new Error(`Discrete metadata ${coloringMetadataVector.id} is missing compression_info.categories`)
+    }
+
     const coloringCategoryCounts = {}
     const displayedCategories = Array.from(canvases)
       .map(canvas => canvas.dataset.category)
@@ -26322,10 +26569,10 @@ export default class extends Controller {
     for (let i = 0; i < n; i++) {
       if (filteredSet && !filteredSet.has(i)) continue
 
-      const coloringCategory = coloringValues[i]
+      const coloringCategory = String(coloringLabels[coloringValues[i]])
       coloringCategoryCounts[coloringCategory] = (coloringCategoryCounts[coloringCategory] || 0) + 1
 
-      const displayedCategory = String(displayedValues[i])
+      const displayedCategory = String(displayedLabels[displayedValues[i]])
       if (!displayedCategorySet.has(displayedCategory)) continue
 
       const distributionCounts = perDisplayedCategoryCounts[displayedCategory]
@@ -26335,15 +26582,7 @@ export default class extends Controller {
     const aggregateMs = perfEnabled ? (performance.now() - tMark) : 0
     if (perfEnabled) tMark = performance.now()
     
-    // CRITICAL: Use ALL categories from compression_info if available (includes categories with 0 cells)
-    // Otherwise fall back to unique categories from values
-    // This ensures colors remain stable even when categories have 0 visible cells
-    let allCategories
-    if (coloringMetadataVector.compression_info && coloringMetadataVector.compression_info.categories) {
-      allCategories = [...coloringMetadataVector.compression_info.categories]
-    } else {
-      allCategories = [...new Set(coloringMetadataVector.values)]
-    }
+    const allCategories = [...coloringLabels]
     
     const stableSortedCategories = this.getStableSortedCategories(coloringMetadataVector.values, allCategories)
     const rawColoringMetaId = coloringMetadataVector.id
@@ -26538,6 +26777,10 @@ export default class extends Controller {
     if (!metadataItem || !displayedMetadataVector?.values) return
 
     const values = displayedMetadataVector.values
+    const labels = this.dataManager.getCategoryLabels(displayedMetadataVector)
+    if (!labels) {
+      throw new Error(`Discrete metadata is missing compression_info.categories`)
+    }
     const totalCells = values.length
     const totalSelectedCells = filteredSet ? filteredSet.size : totalCells
     const countsByCategory = new Map()
@@ -26545,7 +26788,7 @@ export default class extends Controller {
 
     const tCount = perfEnabled ? performance.now() : 0
     for (let i = 0; i < values.length; i++) {
-      const category = String(values[i])
+      const category = String(labels[values[i]])
       countsByCategory.set(category, (countsByCategory.get(category) || 0) + 1)
       if (!filteredSet || filteredSet.has(i)) {
         selectedCountsByCategory.set(category, (selectedCountsByCategory.get(category) || 0) + 1)
@@ -26698,11 +26941,15 @@ export default class extends Controller {
 
     const displayedValues = displayedMetadataVector.values
     const coloringValues = coloringMetadataVector.values
+    const displayedLabels = this.dataManager.getCategoryLabels(displayedMetadataVector)
+    if (!displayedLabels) {
+      throw new Error(`Discrete metadata ${metadataId} is missing compression_info.categories`)
+    }
     const n = displayedValues.length
     for (let i = 0; i < n; i++) {
       if (filteredSet && !filteredSet.has(i)) continue
 
-      const displayedCategory = String(displayedValues[i])
+      const displayedCategory = String(displayedLabels[displayedValues[i]])
       if (!displayedCategorySet.has(displayedCategory)) continue
 
       const v = coloringValues[i]
@@ -27144,10 +27391,14 @@ export default class extends Controller {
   }
 
   getSharedSelectionDistributionCategoryOrder(coloringMetadataVector, selectionIndices, complementIndices) {
+    const coloringLabels = this.dataManager.getCategoryLabels(coloringMetadataVector)
+    if (!coloringLabels) {
+      throw new Error(`Discrete metadata ${coloringMetadataVector.id} is missing compression_info.categories`)
+    }
     const combinedCounts = {}
     const addCounts = (indices) => {
       for (let s = 0; s < indices.length; s++) {
-        const category = coloringMetadataVector.values[indices[s]]
+        const category = String(coloringLabels[coloringMetadataVector.values[indices[s]]])
         combinedCounts[category] = (combinedCounts[category] || 0) + 1
       }
     }
@@ -27161,19 +27412,18 @@ export default class extends Controller {
   }
 
   drawSelectionDiscreteDistribution(canvas, coloringMetadataVector, selectionIndices, sharedCategoryOrder = null) {
+    const coloringLabels = this.dataManager.getCategoryLabels(coloringMetadataVector)
+    if (!coloringLabels) {
+      throw new Error(`Discrete metadata ${coloringMetadataVector.id} is missing compression_info.categories`)
+    }
     const coloringCategoryCounts = {}
     for (let s = 0; s < selectionIndices.length; s++) {
       const i = selectionIndices[s]
-      const category = coloringMetadataVector.values[i]
+      const category = String(coloringLabels[coloringMetadataVector.values[i]])
       coloringCategoryCounts[category] = (coloringCategoryCounts[category] || 0) + 1
     }
 
-    let allCategories
-    if (coloringMetadataVector.compression_info && coloringMetadataVector.compression_info.categories) {
-      allCategories = [...coloringMetadataVector.compression_info.categories]
-    } else {
-      allCategories = [...new Set(coloringMetadataVector.values)]
-    }
+    const allCategories = [...coloringLabels]
 
     const stableSortedCategories = this.getStableSortedCategories(coloringMetadataVector.values, allCategories)
     const rawColoringMetaId = coloringMetadataVector.id

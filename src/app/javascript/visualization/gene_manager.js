@@ -1859,6 +1859,10 @@ this.currentMatches = allMatches.filter(item => {
     if (!meta || (meta.data_type !== 'DISCRETE' && meta.data_type !== 'STRING')) return null
     const catValues = meta.values
     if (!catValues || catValues.length !== expressionValues.length) return null
+    const labels = ctrl.dataManager.getCategoryLabels(meta)
+    if (!labels) {
+      throw new Error(`Discrete metadata ${meta.id} is missing compression_info.categories`)
+    }
 
     const filteredIndices = ctrl.dataManager && ctrl.dataManager.getIncrementalFilteredIndices()
     const visibleSet = filteredIndices ? new Set(filteredIndices) : null
@@ -1866,8 +1870,8 @@ this.currentMatches = allMatches.filter(item => {
     const map = new Map()
     for (let i = 0; i < expressionValues.length; i++) {
       if (visibleSet && !visibleSet.has(i)) continue
-      const cat = catValues[i]
-      const key = cat === null || cat === undefined ? '' : String(cat)
+      const label = labels[catValues[i]]
+      const key = label === null || label === undefined ? '' : String(label)
       if (!map.has(key)) map.set(key, [])
       map.get(key).push(expressionValues[i])
     }
@@ -1883,31 +1887,21 @@ this.currentMatches = allMatches.filter(item => {
   }
 
   /**
-   * Whether a cell's metadata value matches the annotation popup category (label and/or index).
+   * Whether a cell's metadata value (category code) matches the annotation popup category.
    */
   cellMatchesAnnotCategory (metaVal, catName, catIdx, metaVector) {
     if (metaVal === null || metaVal === undefined) return false
-    const mv = String(metaVal).trim()
-    const cn = catName != null ? String(catName).trim() : ''
-    if (cn !== '') {
-      if (mv === cn) return true
-      if (mv.toLowerCase() === cn.toLowerCase()) return true
-    }
-    const cats = metaVector && metaVector.categories
-    if (Array.isArray(cats) && catIdx != null && catIdx !== '') {
-      const idx = parseInt(catIdx, 10)
-      if (!Number.isNaN(idx) && idx >= 0 && idx < cats.length) {
-        const expected = String(cats[idx]).trim()
-        if (mv === expected) return true
-      }
-    }
+    const dm = this.controller?.dataManager
+    if (!dm || !metaVector || !dm.isDiscreteMetadata(metaVector)) return false
+    const code = Number(metaVal)
+    if (!Number.isFinite(code)) return false
     if (catIdx != null && catIdx !== '') {
-      const idxNum = parseInt(catIdx, 10)
-      if (!Number.isNaN(idxNum)) {
-        if (mv === String(idxNum)) return true
-        const nmv = Number(metaVal)
-        if (Number.isFinite(nmv) && nmv === idxNum) return true
-      }
+      const idx = parseInt(catIdx, 10)
+      if (!Number.isNaN(idx) && code === idx) return true
+    }
+    if (catName != null && String(catName).trim() !== '') {
+      const expected = dm.labelToCode(metaVector, catName)
+      if (expected >= 0 && code === expected) return true
     }
     return false
   }

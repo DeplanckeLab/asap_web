@@ -37,18 +37,24 @@ export class DownloadManager {
     const filteredSet = filteredIndices ? new Set(filteredIndices) : null
     const hasFilters = filteredSet !== null
 
-    const uniqueCategories = [...new Set(displayedMetadataVector.values)]
+    const labels = this.controller.dataManager.getCategoryLabels(displayedMetadataVector)
+    if (!labels) {
+      throw new Error(`Discrete metadata ${displayedMetadataVector.id} is missing compression_info.categories`)
+    }
+    const uniqueCategories = labels.map((label) => String(label))
     const totalCategoryCounts = {}
     const filteredCategoryCounts = {}
 
-    displayedMetadataVector.values.forEach((cat, idx) => {
+    const values = displayedMetadataVector.values
+    for (let idx = 0; idx < values.length; idx++) {
+      const cat = String(labels[values[idx]])
       totalCategoryCounts[cat] = (totalCategoryCounts[cat] || 0) + 1
       if (!hasFilters || filteredSet.has(idx)) {
         filteredCategoryCounts[cat] = (filteredCategoryCounts[cat] || 0) + 1
       }
-    })
+    }
 
-    const sortedCategories = uniqueCategories.sort((a, b) => {
+    const sortedCategories = [...uniqueCategories].sort((a, b) => {
       const countA = hasFilters ? (filteredCategoryCounts[a] || 0) : (totalCategoryCounts[a] || 0)
       const countB = hasFilters ? (filteredCategoryCounts[b] || 0) : (totalCategoryCounts[b] || 0)
       return countB - countA
@@ -228,9 +234,19 @@ export class DownloadManager {
       ? `cell_index\tcell_barcode\t${metadataName}`
       : `cell_index\t${metadataName}`
     const lines = [header]
+    const isDiscrete = this.controller.dataManager.isDiscreteMetadata(metadataVector)
+    const labels = isDiscrete ? this.controller.dataManager.getCategoryLabels(metadataVector) : null
+    if (isDiscrete && !labels) {
+      throw new Error(`Discrete metadata ${metadataId} is missing compression_info.categories`)
+    }
     for (let i = 0; i < values.length; i++) {
       const value = values[i]
-      const cellValue = (value === null || value === undefined) ? '' : String(value)
+      let cellValue
+      if (labels) {
+        cellValue = labels[value] == null ? '' : String(labels[value])
+      } else {
+        cellValue = (value === null || value === undefined) ? '' : String(value)
+      }
       if (includeCellBarcode) {
         const barcode = cellBarcodes[i]
         const barcodeValue = (barcode === null || barcode === undefined) ? '' : String(barcode)
@@ -582,6 +598,18 @@ export class DownloadManager {
       return null
     }
 
+    if (this.controller.dataManager.isDiscreteMetadata(cellIdVector)) {
+      const labels = this.controller.dataManager.getCategoryLabels(cellIdVector)
+      if (!labels) {
+        throw new Error(`Discrete CellID annot ${cellIdAnnotId} is missing compression_info.categories`)
+      }
+      const barcodes = new Array(cellIdVector.values.length)
+      for (let i = 0; i < cellIdVector.values.length; i++) {
+        barcodes[i] = labels[cellIdVector.values[i]]
+      }
+      return barcodes
+    }
+
     return cellIdVector.values
   }
 
@@ -734,12 +762,15 @@ export class DownloadManager {
           const metadataVector = this.controller.dataManager.getMetadataVectorById(parseInt(metadataId))
           if (metadataVector) {
             const metadataName = metadataVector.name || `Metadata ${metadataId}`
-            const allCategories = [...new Set(metadataVector.values)]
+            const allCategories = this.controller.dataManager.getDiscreteCategoryUniverse(
+              parseInt(metadataId, 10),
+              metadataVector
+            ) || []
 
             // Only add if not all categories are selected (i.e., it's actually filtering)
             if (selectedCats.size < allCategories.length) {
               const selectedList = [...selectedCats].join(', ')
-              const unselectedCategories = allCategories.filter(category => !selectedCats.has(category))
+              const unselectedCategories = allCategories.filter(category => !selectedCats.has(String(category)))
               const unselectedList = unselectedCategories.join(', ')
 
               const selectedDetail = `Selected (${selectedCats.size}/${allCategories.length}): ${selectedList || 'none'}`
@@ -799,13 +830,24 @@ export class DownloadManager {
 
   // Add categorical distribution sheet to workbook
   async addCategoricalDistributionSheet(wb, displayedMetadataVector, coloringMetadataVector, sortedCategories, filteredSet) {
-    // Get coloring categories (from filtered cells only)
+    const displayedLabels = this.controller.dataManager.getCategoryLabels(displayedMetadataVector)
+    const coloringLabels = this.controller.dataManager.getCategoryLabels(coloringMetadataVector)
+    if (!displayedLabels) {
+      throw new Error(`Discrete metadata ${displayedMetadataVector.id} is missing compression_info.categories`)
+    }
+    if (!coloringLabels) {
+      throw new Error(`Discrete metadata ${coloringMetadataVector.id} is missing compression_info.categories`)
+    }
+
+    // Get coloring categories (from filtered cells only) — key by label
     const coloringCategoryCounts = {}
-    coloringMetadataVector.values.forEach((cat, idx) => {
+    const coloringValues = coloringMetadataVector.values
+    for (let idx = 0; idx < coloringValues.length; idx++) {
       if (!filteredSet || filteredSet.has(idx)) {
+        const cat = String(coloringLabels[coloringValues[idx]])
         coloringCategoryCounts[cat] = (coloringCategoryCounts[cat] || 0) + 1
       }
-    })
+    }
     const sortedColoringCategories = Object.keys(coloringCategoryCounts).sort((a, b) => {
       return (coloringCategoryCounts[b] || 0) - (coloringCategoryCounts[a] || 0)
     })
@@ -818,18 +860,21 @@ export class DownloadManager {
     const distributionPercentagesData = [[columnHeader, ...sortedColoringCategories.map(cat => `${cat} (% cells)`)]]
 
     sortedCategories.forEach(displayedCategory => {
+      const displayedCode = this.controller.dataManager.labelToCode(displayedMetadataVector, displayedCategory)
       // Find cells in this category (filtered only)
       const cellsInCategory = []
-      for (let i = 0; i < displayedMetadataVector.values.length; i++) {
-        if (displayedMetadataVector.values[i] === displayedCategory && (!filteredSet || filteredSet.has(i))) {
-          cellsInCategory.push(i)
+      if (displayedCode >= 0) {
+        for (let i = 0; i < displayedMetadataVector.values.length; i++) {
+          if (displayedMetadataVector.values[i] === displayedCode && (!filteredSet || filteredSet.has(i))) {
+            cellsInCategory.push(i)
+          }
         }
       }
 
       // Count distribution
       const distribution = {}
       cellsInCategory.forEach(cellIndex => {
-        const coloringCat = coloringMetadataVector.values[cellIndex]
+        const coloringCat = String(coloringLabels[coloringMetadataVector.values[cellIndex]])
         distribution[coloringCat] = (distribution[coloringCat] || 0) + 1
       })
 
@@ -908,10 +953,13 @@ export class DownloadManager {
 
     sortedCategories.forEach(displayedCategory => {
       // Find cells in this category (filtered only)
+      const displayedCode = this.controller.dataManager.labelToCode(displayedMetadataVector, displayedCategory)
       const cellsInCategory = []
-      for (let i = 0; i < displayedMetadataVector.values.length; i++) {
-        if (displayedMetadataVector.values[i] === displayedCategory && (!filteredSet || filteredSet.has(i))) {
-          cellsInCategory.push(i)
+      if (displayedCode >= 0) {
+        for (let i = 0; i < displayedMetadataVector.values.length; i++) {
+          if (displayedMetadataVector.values[i] === displayedCode && (!filteredSet || filteredSet.has(i))) {
+            cellsInCategory.push(i)
+          }
         }
       }
 
@@ -956,10 +1004,13 @@ export class DownloadManager {
 
     sortedCategories.forEach(displayedCategory => {
       // Find cells in this category (filtered only)
+      const displayedCode = this.controller.dataManager.labelToCode(displayedMetadataVector, displayedCategory)
       const cellsInCategory = []
-      for (let i = 0; i < displayedMetadataVector.values.length; i++) {
-        if (displayedMetadataVector.values[i] === displayedCategory && (!filteredSet || filteredSet.has(i))) {
-          cellsInCategory.push(i)
+      if (displayedCode >= 0) {
+        for (let i = 0; i < displayedMetadataVector.values.length; i++) {
+          if (displayedMetadataVector.values[i] === displayedCode && (!filteredSet || filteredSet.has(i))) {
+            cellsInCategory.push(i)
+          }
         }
       }
 
@@ -1064,7 +1115,10 @@ export class DownloadManager {
         if (selectedCats && selectedCats.size > 0) {
           const metadataVector = this.controller.dataManager.getMetadataVectorById(parseInt(metadataId))
           if (metadataVector) {
-            const allCategories = [...new Set(metadataVector.values)]
+            const allCategories = this.controller.dataManager.getDiscreteCategoryUniverse(
+              parseInt(metadataId, 10),
+              metadataVector
+            ) || []
             // Only include if not all categories are selected
             if (selectedCats.size < allCategories.length) {
               const sortedCategories = [...selectedCats].sort()

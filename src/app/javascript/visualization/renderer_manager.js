@@ -360,25 +360,19 @@ export class RendererManager {
     const width = this.controller.overlayCanvas.width
     const height = this.controller.overlayCanvas.height
     
-    // Get the metadata values and categories
+    // Get the metadata values and categories (values are codes; labels in compression_info)
     const values = this.controller.currentMetadataVector.values
-    const categories = this.controller.currentMetadataVector.categories
-    
-    let categoryList = categories
-    if (!categoryList || categoryList.length === 0) {
-      categoryList = [...new Set(values)]
+    const labels = this.controller.dataManager.getCategoryLabels(this.controller.currentMetadataVector)
+    if (!labels || labels.length === 0) {
+      throw new Error(`Discrete metadata ${this.controller.currentMetadataVector.id} is missing compression_info.categories`)
     }
+    const categoryList = [...labels]
 
-    // Calculate centroids
+    // Calculate centroids (keyed by label strings)
     const centroids = this.controller.dataManager.calculateCategoryCentroids(values, categoryList)
 
     // Keep colors stable even when categories currently have 0 visible cells.
-    let allCategories
-    if (this.controller.currentMetadataVector.compression_info && this.controller.currentMetadataVector.compression_info.categories) {
-      allCategories = [...this.controller.currentMetadataVector.compression_info.categories]
-    } else {
-      allCategories = [...new Set(values)]
-    }
+    const allCategories = [...labels]
     
     const stableSortedCategories = this.controller.getStableSortedCategories(values, allCategories)
     const colorMap = this.controller.colorManager.createDiscreteColorMap(stableSortedCategories, this.controller.currentMetadataVector.id)

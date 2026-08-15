@@ -173,9 +173,9 @@ export class MemoryManager {
     }
     
     // Clear original point colors if too many
-    if (this.controller.originalPointColors && this.controller.originalPointColors.size > 10000) {
+    if (this.controller.originalPointColors && this.controller.originalPointColors.length > 10000) {
       // console.log('🗑️ [MEMORY] Clearing original point colors cache')
-      this.controller.originalPointColors.clear()
+      this.controller.originalPointColors = null
     }
     
     // Force garbage collection if available

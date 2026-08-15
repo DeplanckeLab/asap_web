@@ -348,9 +348,9 @@ export class UIManager {
         }
         
         // Check if there's only one category - if so, disable the checkbox
-        if (metadataVector && metadataVector.values) {
-          const uniqueCategories = new Set(metadataVector.values)
-          if (uniqueCategories.size === 1) {
+        if (metadataVector && this.controller.dataManager.isDiscreteMetadata(metadataVector)) {
+          const labels = this.controller.dataManager.getCategoryLabels(metadataVector)
+          if (labels && labels.length === 1) {
             selectAllCheckbox.style.opacity = '0.5'
             selectAllCheckbox.style.cursor = 'not-allowed'
             selectAllCheckbox.style.pointerEvents = 'none'
@@ -446,8 +446,10 @@ export class UIManager {
     
     // Check if there's only one category - if so, disable all category checkboxes
     // (reuse metadataVector from line 311)
-    const hasOnlyOneCategory = metadataVector && metadataVector.values && 
-                               new Set(metadataVector.values).size === 1
+    const labelsForSingleCheck = metadataVector && this.controller.dataManager.isDiscreteMetadata(metadataVector)
+      ? this.controller.dataManager.getCategoryLabels(metadataVector)
+      : null
+    const hasOnlyOneCategory = !!(labelsForSingleCheck && labelsForSingleCheck.length === 1)
     
     categoryCheckboxes.forEach(checkbox => {
       checkbox.style.display = 'flex'
@@ -548,55 +550,66 @@ export class UIManager {
   // Update metadata status icon based on loading state
   // States: 'not-loaded', 'downloading', 'in-db', 'in-memory', 'error'
   updateMetadataStatusIcon(metadataId, state) {
-    const statusIcon = document.querySelector(`.metadata-status-icon[data-metadata-id="${metadataId}"]`)
+    if (metadataId == null || metadataId === '') return
+    const idStr = String(metadataId)
+    const safeId = (typeof CSS !== 'undefined' && typeof CSS.escape === 'function')
+      ? CSS.escape(idStr)
+      : idStr.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+    const statusIcon =
+      document.querySelector(`.metadata-status-icon[data-metadata-id="${safeId}"]`)
     if (!statusIcon) return
-    
+
+    // Font Awesome may replace <i> with <svg>; never skip the circle update when that happens.
     const icon = statusIcon.querySelector('i')
-    if (!icon) return
     
     switch (state) {
       case 'not-loaded':
-        // Gray circle with animated spinner
         statusIcon.style.display = 'flex'
         statusIcon.style.backgroundColor = '#9ca3af'
-        icon.className = 'fas fa-spinner fa-spin'
-        icon.style.color = 'white'
+        if (icon) {
+          icon.className = 'fas fa-spinner fa-spin'
+          icon.style.color = 'white'
+        }
         statusIcon.title = 'Waiting...'
         break
         
       case 'downloading':
-        // Blue circle with spinner
         statusIcon.style.display = 'flex'
         statusIcon.style.backgroundColor = '#3b82f6'
-        icon.className = 'fas fa-spinner fa-spin'
-        icon.style.color = 'white'
+        if (icon) {
+          icon.className = 'fas fa-spinner fa-spin'
+          icon.style.color = 'white'
+        }
         statusIcon.title = 'Downloading from server...'
         break
         
       case 'in-db':
-        // Orange circle with check
         statusIcon.style.display = 'flex'
         statusIcon.style.backgroundColor = '#f59e0b'
-        icon.className = 'fas fa-check'
-        icon.style.color = 'white'
+        if (icon) {
+          icon.className = 'fas fa-check'
+          icon.style.color = 'white'
+        }
         statusIcon.title = 'Metadata in database (on disk)'
         break
         
       case 'in-memory':
-        // Green circle with check
         statusIcon.style.display = 'flex'
         statusIcon.style.backgroundColor = '#10b981'
-        icon.className = 'fas fa-check'
-        icon.style.color = 'white'
+        if (icon) {
+          icon.className = 'fas fa-check'
+          icon.style.color = 'white'
+        }
         statusIcon.title = 'Metadata in memory (fast access)'
         break
 
       case 'error':
-        // Red circle with exclamation
         statusIcon.style.display = 'flex'
         statusIcon.style.backgroundColor = '#dc2626'
-        icon.className = 'fas fa-exclamation'
-        icon.style.color = 'white'
+        if (icon) {
+          icon.className = 'fas fa-exclamation'
+          icon.style.color = 'white'
+        }
         statusIcon.title = 'Error loading metadata'
         break
         
@@ -1361,16 +1374,19 @@ export class UIManager {
       const countElement = parentContainer ? parentContainer.querySelector('.metadata-category-count') : null
       
       if (countElement) {
-        // Count total and visible cells for this category
+        // Count total and visible cells for this category (values are codes; category is a label)
         let totalCount = 0
         let visibleCount = 0
-        
-        for (let i = 0; i < metadataVector.values.length; i++) {
-          if (metadataVector.values[i] === category) {
-            totalCount++
-            // O(1) lookup with Set instead of array iteration
-            if (!visibleSet || visibleSet.has(i)) {
-              visibleCount++
+        const code = this.controller.dataManager.labelToCode(metadataVector, category)
+        if (code >= 0) {
+          const values = metadataVector.values
+          for (let i = 0; i < values.length; i++) {
+            if (values[i] === code) {
+              totalCount++
+              // O(1) lookup with Set instead of array iteration
+              if (!visibleSet || visibleSet.has(i)) {
+                visibleCount++
+              }
             }
           }
         }
@@ -1661,11 +1677,14 @@ export class UIManager {
       }
     }
     
-    // Add event listener for category order dropdown and set current value
+    // Initialize category order dropdown from controller (keeps label in sync with runtime default)
     const categoryOrderSelect = document.getElementById('category-order-select')
     if (categoryOrderSelect) {
-      // Set the selected option based on current preference
-      categoryOrderSelect.value = this.controller.categoryOrder
+      if (typeof this.controller.syncCategoryOrderSelect === 'function') {
+        this.controller.syncCategoryOrderSelect()
+      } else {
+        categoryOrderSelect.value = this.controller.categoryOrder
+      }
       
       // Add event listener
       categoryOrderSelect.addEventListener('change', (e) => {
@@ -1981,9 +2000,13 @@ export class UIManager {
       const { data_type, values } = this.controller.currentMetadataVector
       const value = values[cellId]
       
-      if (data_type === 'DISCRETE') {
-        // For discrete metadata, show the category name
-        categoryInfo = `<br><strong>Category:</strong> ${value}`
+      if (data_type === 'DISCRETE' || data_type === 'STRING') {
+        // For discrete metadata, show the category name (values are codes)
+        const label = this.controller.dataManager.getCategoryLabel(
+          this.controller.currentMetadataVector,
+          cellId
+        )
+        categoryInfo = `<br><strong>Category:</strong> ${label}`
       } else if (data_type === 'NUMERIC') {
         // For continuous metadata, show the numeric value
         categoryInfo = `<br><strong>Value:</strong> ${value.toFixed(3)}`
@@ -2211,7 +2234,7 @@ export class UIManager {
       return
     }
     
-    this.controller.categoryOrder = newOrder
+    this.controller.setCategoryOrder(newOrder, { userSet: true })
     
     // Reset the flag so reordering will happen on next render
     this.controller._lastCategoryOrderApplied = null
@@ -2220,15 +2243,23 @@ export class UIManager {
     this.controller.updateAllCategoryDisplayOrders()
     
     // If we have discrete metadata currently displayed, re-render the plot
-    if (this.controller.currentMetadataVector && this.controller.currentMetadataVector.data_type === 'DISCRETE') {
+    const dataType = this.controller.currentMetadataVector?.data_type
+    if (this.controller.currentMetadataVector && (dataType === 'DISCRETE' || dataType === 'STRING')) {
       // console.log(`📊 [CATEGORY ORDER] ✅ Discrete metadata active - applying new order`)
       
       // IMPORTANT: Don't recreate color map - keep existing color assignments!
       // The color map should remain stable regardless of sort order
-      // Reorder points in buffer for painter's algorithm (ReGL)
       if (this.controller.rendererType === 'regl') {
-        // This function will also redraw the overlay (grid, axes, labels)
-        this.controller.reorderPointsForCategoryDisplay()
+        if (newOrder === 'fixed') {
+          // Restore identity draw order (CellxGene-like; no category painter sort)
+          this.controller.resetDisplayOrderToIdentity()
+          this.controller._lastCategoryOrderApplied = 'fixed'
+          this.controller.renderPointsWithCurrentColoring()
+        } else {
+          // This function will also redraw the overlay (grid, axes, labels)
+          this.controller.reorderPointsForCategoryDisplay()
+          this.controller._lastCategoryOrderApplied = newOrder
+        }
       }
       
       // console.log('📊 [CATEGORY ORDER] Complete!')
@@ -2280,6 +2311,7 @@ export class UIManager {
     // Store the new point size for future renders
     //console.log(`Stimulus updatePointSize: ${this.controller.currentPointSize} -> ${newSize}`)
     this.controller.currentPointSize = newSize
+    this.controller._userSetPointSize = true
     
     //console.log(`Stimulus updating point size to: ${newSize}`)
     

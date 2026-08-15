@@ -103,11 +103,10 @@ class ScfairH5adValidatorService
       return value
 
     def obs_dataset_keys(obs_group):
+      # Only AnnData structural keys are excluded. Single leading "_" (e.g. _Depth)
+      # is a valid column name; scFAIR forbids only the "__" prefix.
       skip = {"_index", "index", "__categories"}
-      return {
-        k for k in obs_group.keys()
-        if k not in skip and not k.startswith("_")
-      }
+      return {k for k in obs_group.keys() if k not in skip}
 
     def metadata_column_keys(group):
       skip = {"_index", "index", "__categories"}

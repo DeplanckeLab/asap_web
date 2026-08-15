@@ -148,6 +148,7 @@ Rails.application.routes.draw do
   end
   resources :reqs
   resources :docker_images
+  resources :docker_builds, only: [:index]
   resources :tools
   resources :ratings, only: [:index]
   resources :storage_usages, only: [:index]

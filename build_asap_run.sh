@@ -16,7 +16,9 @@
 #   SKIP_REGISTER=1  skip docker_builds:register rake
 #   SKIP_COMPOSE=1   skip compose dockerfile edit and asap_run rebuild
 #   SKIP_PUSH=1      skip docker push
-#   FORCE=1          overwrite an existing local image without prompting
+#   FORCE=1          overwrite existing local image tags without prompting;
+#                    also skips the DockerBuild replace prompt when replace is allowed
+#   ALLOW_REPLACE    set automatically by this script after replace confirmation
 
 set -euo pipefail
 
@@ -155,6 +157,86 @@ confirm_overwrite_existing_images() {
   exit 1
 }
 
+# Ask before rebuilding when a DockerBuild row already exists for this patch tag (vX.Y).
+# Replace overwrites that row's fingerprint in place (row kept). Allowed only when every
+# existing row was unused, or only used by operators / ADMIN_EMAILS. Guest or other-user
+# usage rejects immediately (no prompt).
+confirm_replace_existing_docker_build() {
+  if [[ "${SKIP_REGISTER:-0}" == "1" ]]; then
+    return 0
+  fi
+
+  ALLOW_REPLACE=0
+
+  local report
+  report="$(
+    cd "${ASAP2_DIR}"
+    docker-compose exec -T website \
+      bundle exec rails runner \
+      "builds = DockerBuild.where(tag: '${PATCH_TAG}').order(:id).to_a
+       if builds.empty?
+         puts 'NONE'
+       else
+         blocked = 0
+         builds.each do |b|
+           blockers = b.replace_blockers
+           refs = b.reference_count
+           if blockers.any?
+             blocked += 1
+             puts ['BLOCK', b.id, b.digest, refs, blockers.join(' | ')].join(\"\\t\")
+           else
+             puts ['ROW', b.id, b.digest, refs].join(\"\\t\")
+           end
+         end
+         puts(blocked.positive? ? 'BLOCKED' : 'REPLACEABLE')
+       end" 2>/dev/null
+  )"
+  report="$(printf '%s\n' "${report}" | tr -d '\r' | grep -E '^(NONE|ROW|BLOCK|BLOCKED|REPLACEABLE)' || true)"
+
+  if [[ -z "${report}" ]]; then
+    echo "Failed to query DockerBuild rows for ${PATCH_TAG} in development DB."
+    exit 1
+  fi
+
+  if printf '%s\n' "${report}" | grep -qx 'NONE'; then
+    return 0
+  fi
+
+  local status
+  status="$(printf '%s\n' "${report}" | grep -E '^(BLOCKED|REPLACEABLE)$' | tail -n 1)"
+
+  echo "DockerBuild already exists for ${PATCH_TAG}:"
+  printf '%s\n' "${report}" | grep -E '^(ROW|BLOCK)' | while IFS=$'\t' read -r kind build_id digest refs rest; do
+    if [[ "${kind}" == "BLOCK" ]]; then
+      echo "  id=${build_id}  digest=${digest}  refs=${refs}"
+      echo "    blocked by: ${rest}"
+    else
+      echo "  id=${build_id}  digest=${digest}  refs=${refs}"
+    fi
+  done
+  echo ""
+
+  if [[ "${status}" == "BLOCKED" ]]; then
+    echo "Replace refused: ${PATCH_TAG} was used by guest users or users other than operators/admins."
+    echo "Use a new patch version."
+    exit 1
+  fi
+
+  if [[ "${FORCE:-0}" == "1" ]]; then
+    echo "FORCE=1: will overwrite ${PATCH_TAG} fingerprint on the existing DockerBuild row."
+    ALLOW_REPLACE=1
+    return 0
+  fi
+
+  if confirm_yes "Replace this ${PATCH_TAG} by this new build (overwrite fingerprint on existing row)?"; then
+    ALLOW_REPLACE=1
+    return 0
+  fi
+
+  echo "Cancelled."
+  exit 1
+}
+
 # Resolve compose file path for an instance (follow docker-compose.yml symlink when present).
 compose_file_for_instance() {
   local instance_dir="$1"
@@ -278,6 +360,8 @@ update_compose_and_rebuild_asap_run() {
 
 ensure_dockerfile
 confirm_overwrite_existing_images
+ALLOW_REPLACE=0
+confirm_replace_existing_docker_build
 
 echo "Building ${IMAGE_REF_PATCH} from ${DOCKERFILE_PATH}"
 cd "${ASAP_RUN_DIR}"
@@ -301,7 +385,9 @@ fi
 if [[ "${SKIP_REGISTER:-0}" != "1" ]]; then
   echo "Registering DockerBuild for ${IMAGE_REF_MAJOR} in development DB"
   cd "${ASAP2_DIR}"
-  docker-compose exec -T website \
+  docker-compose exec -T \
+    -e "ALLOW_REPLACE=${ALLOW_REPLACE:-0}" \
+    website \
     bundle exec rake docker_builds:register \
     "IMAGE_REF=${IMAGE_REF_MAJOR}" \
     "PATCH_TAG=${PATCH_TAG}"

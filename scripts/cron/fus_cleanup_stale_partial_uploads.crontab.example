@@ -1,0 +1,11 @@
+# Example host crontab entries for ASAP (adjust instance path / RAILS_ENV).
+# Existing production jobs use: cd /srv/asap && docker compose exec -T website ...
+#
+# Partial Fu uploads/downloads (project_id nil, status uploading|downloading):
+# keep for AGE_HOURS (default 12), then delete. Hourly is enough for a 12h TTL.
+
+### ASAP2_TEST: cleanup stale partial Fu uploads
+15 * * * * cd /srv/asap2_test && /usr/bin/docker compose exec -T website bash -lc 'cd /app && DELETE=1 AGE_HOURS=12 bundle exec rake fus:cleanup_stale_partial_uploads' >> /srv/asap2_test/src/log/cron_cleanup_stale_partial_uploads.log 2>&1
+
+### ASAP (production): same job — only after this rake task is deployed under /srv/asap
+# 20 * * * * cd /srv/asap && /usr/bin/docker compose exec -T -e RAILS_ENV=production website bash -lc 'cd /app && DELETE=1 AGE_HOURS=12 bundle exec rake fus:cleanup_stale_partial_uploads' >> /srv/asap/src/log/cron_cleanup_stale_partial_uploads.log 2>&1

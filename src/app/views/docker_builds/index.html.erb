@@ -1,0 +1,65 @@
+<% content_for :title, "Docker Builds - ASAP" %>
+<div class="max-w-6xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div>
+    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">Docker Builds</h1>
+    <p class="mt-2 text-gray-600 dark:text-gray-300">
+      Immutable image builds (RepoDigest) used for run provenance. Read-only.
+    </p>
+  </div>
+
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+      <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-950 dark:text-gray-400">
+        <tr>
+          <th scope="col" class="px-3 py-2 text-left">ID</th>
+          <th scope="col" class="px-3 py-2 text-left">Docker image</th>
+          <th scope="col" class="px-3 py-2 text-left">Build tag</th>
+          <th scope="col" class="px-3 py-2 text-left">Digest</th>
+          <th scope="col" class="px-3 py-2 text-left">Created</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-gray-800 dark:text-gray-200">
+        <% @docker_builds.each do |docker_build| %>
+          <tr>
+            <td class="whitespace-nowrap px-3 py-2 text-gray-500 dark:text-gray-400">
+              #<%= docker_build.id %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2">
+              <% if docker_build.docker_image %>
+                <%= link_to "#{docker_build.docker_image.name}:#{docker_build.docker_image.tag}",
+                            docker_image_path(docker_build.docker_image),
+                            class: "font-medium text-gray-900 hover:text-gray-700 dark:text-gray-100 dark:hover:text-gray-300" %>
+              <% else %>
+                <span class="text-gray-400">–</span>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 font-medium text-gray-900 dark:text-gray-100">
+              <%= docker_build.tag %>
+            </td>
+            <td class="px-3 py-2 font-mono text-xs text-gray-600 dark:text-gray-300">
+              <% layers_url = docker_build.dockerhub_layers_url %>
+              <% if layers_url.present? %>
+                <%= link_to docker_build.digest,
+                            layers_url,
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            class: "hover:text-gray-900 dark:hover:text-gray-100 break-all" %>
+              <% else %>
+                <span class="break-all"><%= docker_build.digest %></span>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+              <%= display_timestamp(docker_build, :created_at) %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if @docker_builds.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+      No docker builds have been recorded yet.
+    </div>
+  <% end %>
+</div>

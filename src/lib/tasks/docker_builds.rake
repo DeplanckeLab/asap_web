@@ -4,7 +4,10 @@ namespace :docker_builds do
   desc "Ensure DockerImage exists, refresh its digest from the local docker image, " \
        "and register a DockerBuild row. " \
        "IMAGE_REF=fabdavid/asap_run:v8 (major catalog tag). " \
-       "Optional PATCH_TAG=v8.3 forces the DockerBuild.tag when set."
+       "Optional PATCH_TAG=v8.3 forces the DockerBuild.tag when set. " \
+       "A new digest for an existing PATCH_TAG overwrites that row's fingerprint in place " \
+       "(row kept) when unused or only used by operators/admins and ALLOW_REPLACE=1. " \
+       "Guest or other-user usage refuses replace (bump the patch version)."
   task register: :environment do
     image_ref = ENV["IMAGE_REF"].to_s.strip
     if image_ref.empty?
@@ -50,16 +53,12 @@ namespace :docker_builds do
 
     build =
       if patch_tag
-        existing = DockerBuild.find_by(digest: digest)
-        if existing
-          if existing.tag != patch_tag || existing.docker_image_id != docker_image.id
-            existing.update!(tag: patch_tag, docker_image: docker_image)
-            puts "Updated DockerBuild id=#{existing.id} tag=#{patch_tag}"
-          end
-          existing
-        else
-          DockerBuild.create!(docker_image: docker_image, tag: patch_tag, digest: digest)
-        end
+        DockerBuild.register_for_patch_tag!(
+          docker_image: docker_image,
+          patch_tag: patch_tag,
+          digest: digest,
+          allow_replace: ENV['ALLOW_REPLACE'].to_s == '1'
+        )
       else
         DockerBuild.find_or_create_for_image_ref!(image_ref)
       end

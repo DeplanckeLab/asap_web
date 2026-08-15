@@ -281,7 +281,7 @@ class StorageUsageReport
     depth = max_depth
 
     size_map
-      .reject { |path, _| path.chomp('/') == root_s }
+      .reject { |path, bytes| path.chomp('/') == root_s || bytes.to_i <= 0 }
       .select do |path, _|
         rel = path.delete_prefix(root_s).delete_prefix('/')
         rel.split('/').size == depth

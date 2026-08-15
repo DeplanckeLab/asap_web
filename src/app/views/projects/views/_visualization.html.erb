@@ -78,6 +78,373 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
     margin: 0;
     padding: 0;
   }
+
+  /* Mobile visualization layout (below lg / 1024px) */
+  #viz-mobile-panel-selector {
+    display: none;
+  }
+
+  .viz-mobile-panel-close-btn {
+    display: none;
+  }
+
+  .viz-panel-header-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: 28px;
+    min-height: 28px;
+    min-width: 28px;
+    padding: 4px 8px;
+    font-size: 12px;
+    line-height: 1;
+    color: #6b7280;
+    background: #f9fafb;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    cursor: pointer;
+    flex-shrink: 0;
+    vertical-align: middle;
+  }
+
+  /* Keep mobile-only close hidden on desktop even when it also has icon-btn styles */
+  .viz-panel-header-icon-btn.viz-mobile-panel-close-btn {
+    display: none;
+  }
+
+  body.viz-mobile-panel-open #project-page-header {
+    display: none !important;
+  }
+
+  @media (max-width: 1023px) {
+    [data-controller="visualization"] {
+      flex-direction: column !important;
+    }
+
+    [data-controller="visualization"] #left-resizer,
+    [data-controller="visualization"] #right-resizer,
+    [data-controller="visualization"] #metadata-divider,
+    [data-controller="visualization"] #right-panel-divider {
+      display: none !important;
+    }
+
+    /* Always hide side columns on mobile; only the active overlay panel is shown below. */
+    [data-controller="visualization"] #left-panel,
+    [data-controller="visualization"] #right-panel {
+      display: none !important;
+    }
+
+    [data-controller="visualization"] #main-panel {
+      width: 100% !important;
+      flex: 1 1 auto !important;
+      min-height: 0 !important;
+      order: 0;
+    }
+
+    [data-controller="visualization"] #main-panel > .viz-toolbar-shell {
+      padding: 8px 10px !important;
+      flex-shrink: 0;
+      box-sizing: border-box;
+      overflow: visible !important;
+    }
+
+    [data-controller="visualization"][data-mobile-panel] #main-panel > .viz-toolbar-shell {
+      display: none !important;
+    }
+
+    [data-controller="visualization"] #visualization-toolbar-row {
+      display: flex !important;
+      flex-wrap: wrap !important;
+      flex-direction: row !important;
+      align-items: center !important;
+      column-gap: 6px !important;
+      row-gap: 6px !important;
+      grid-template-columns: none !important;
+      overflow: visible;
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
+    }
+
+    /* Flatten columns so children can sit on shared flex lines */
+    [data-controller="visualization"] #visualization-toolbar-row > .viz-toolbar-start,
+    [data-controller="visualization"] #visualization-toolbar-row > .viz-toolbar-actions {
+      display: contents !important;
+    }
+
+    /* Line 1 */
+    [data-controller="visualization"] .viz-toolbar-embedding-wrap {
+      flex: 1 1 0 !important;
+      order: 1;
+      min-width: 0 !important;
+      max-width: none !important;
+      width: auto !important;
+    }
+
+    [data-controller="visualization"] #current-coloring-indicator {
+      flex: 1 1 0 !important;
+      order: 2;
+      width: auto !important;
+      max-width: none !important;
+      min-width: 0 !important;
+      overflow: hidden;
+    }
+
+    [data-controller="visualization"] #global-filter-summary {
+      flex: 0 0 auto !important;
+      order: 3;
+      height: 32px !important;
+      padding: 4px 8px !important;
+      gap: 6px !important;
+    }
+
+    [data-controller="visualization"] #global-filter-summary #active-filter-count {
+      font-size: 12px !important;
+    }
+
+    /* Keep filter popup inside the viewport (widget sits on the right) */
+    [data-controller="visualization"] #global-filter-panel {
+      left: auto !important;
+      right: 0 !important;
+      min-width: 0 !important;
+      width: max-content !important;
+      max-width: min(320px, calc(100vw - 24px)) !important;
+      box-sizing: border-box !important;
+    }
+
+    /* Line 2: force a full-width wrap after filter */
+    [data-controller="visualization"] #visualization-toolbar-row .viz-toolbar-secondary {
+      flex: 1 1 100% !important;
+      order: 4;
+      display: flex !important;
+      flex-wrap: wrap !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      gap: 6px 8px !important;
+      min-width: 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+
+    [data-controller="visualization"] #visualization-toolbar-row > .viz-toolbar-start > style {
+      display: none !important;
+    }
+
+    [data-controller="visualization"] #embedding-selection-link {
+      min-width: 0 !important;
+      max-width: 100% !important;
+      width: 100% !important;
+    }
+
+    [data-controller="visualization"] #embedding-selection-link .embedding-link-content {
+      min-width: 0 !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      padding: 6px 10px;
+    }
+
+    [data-controller="visualization"] #embedding-selection-link .embedding-link-name {
+      max-width: 100% !important;
+    }
+
+    [data-controller="visualization"] #embedding-selection-link .embedding-link-origin-full {
+      display: none !important;
+    }
+
+    [data-controller="visualization"] #embedding-selection-link .embedding-link-origin-short {
+      display: inline !important;
+    }
+
+    [data-controller="visualization"] #embedding-selection-link .embedding-link-dimension {
+      display: none !important;
+    }
+
+    [data-controller="visualization"] #current-coloring-link {
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
+    }
+
+    #viz-mobile-panel-selector {
+      display: flex;
+      flex-shrink: 0;
+      width: 100%;
+      gap: 4px;
+      padding: 8px 10px;
+      background: white;
+      border-bottom: 1px solid #e5e7eb;
+      box-sizing: border-box;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      position: relative;
+      /* Keep below project header (z-80) so the global hamburger menu stays on top */
+      z-index: 40;
+      transition: padding 0.28s ease;
+    }
+
+    [data-controller="visualization"][data-mobile-panel] #viz-mobile-panel-selector {
+      /* Sits at the top once header/toolbar are hidden */
+      position: sticky;
+      top: 0;
+    }
+
+    #viz-mobile-panel-selector button {
+      flex: 1 0 auto;
+      min-width: 0;
+      padding: 8px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #374151;
+      background: #f3f4f6;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    #viz-mobile-panel-selector button[aria-pressed="true"] {
+      color: #1d4ed8;
+      background: #dbeafe;
+      border-color: #93c5fd;
+    }
+
+    /* Match magnifier / fold / close header icon buttons */
+    .viz-mobile-panel-close-btn,
+    .viz-panel-header-icon-btn.viz-mobile-panel-close-btn {
+      display: inline-flex;
+    }
+
+    .viz-panel-header-icon-btn {
+      height: 28px;
+      min-height: 28px;
+      min-width: 28px;
+      padding: 4px 8px;
+      font-size: 12px;
+      line-height: 1;
+    }
+
+    #viz-plot-area-wrap {
+      flex: 1 1 auto !important;
+      min-height: 0 !important;
+      padding: 4px !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: center !important;
+      overflow: hidden !important;
+    }
+
+    [data-controller="visualization"] #viz-plot-area-wrap .plot-container {
+      flex: 0 0 auto !important;
+      width: min(100%, calc(100dvh - var(--viz-mobile-chrome-height, 240px))) !important;
+      max-width: 100% !important;
+      aspect-ratio: 1 / 1;
+      height: auto !important;
+      min-height: 0 !important;
+      margin: 0 auto;
+    }
+
+    [data-controller="visualization"] #control-instructions {
+      display: none;
+    }
+
+    #viz-selection-tabs {
+      display: none !important;
+    }
+
+    /* Split view: panel on top, square plot below */
+    [data-controller="visualization"][data-mobile-panel] #viz-plot-area-wrap {
+      flex: 0 0 auto !important;
+      width: 100% !important;
+      height: calc(var(--viz-mobile-plot-size, 200px) + 28px) !important;
+      max-height: calc(var(--viz-mobile-plot-size, 200px) + 28px) !important;
+      margin-top: var(--viz-mobile-panel-region-height, 40vh);
+      padding: 4px !important;
+      justify-content: flex-start !important;
+    }
+
+    [data-controller="visualization"][data-mobile-panel] #viz-plot-area-wrap .plot-container {
+      width: var(--viz-mobile-plot-size, 200px) !important;
+      height: var(--viz-mobile-plot-size, 200px) !important;
+      max-width: 100% !important;
+      aspect-ratio: 1 / 1;
+    }
+
+    /* Active panel host fills the top split region */
+    [data-controller="visualization"][data-mobile-panel="categorical"] #left-panel,
+    [data-controller="visualization"][data-mobile-panel="continuous"] #left-panel,
+    [data-controller="visualization"][data-mobile-panel="genes"] #right-panel,
+    [data-controller="visualization"][data-mobile-panel="cells"] #right-panel,
+    [data-controller="visualization"][data-mobile-panel="gene-sets"] #right-panel {
+      display: flex !important;
+      position: fixed !important;
+      top: var(--viz-mobile-panel-top, 120px);
+      left: 0;
+      right: 0;
+      height: var(--viz-mobile-panel-region-height, 40vh) !important;
+      z-index: 60;
+      width: 100% !important;
+      max-width: none !important;
+      background: white;
+      border: none !important;
+      box-shadow: none !important;
+      overflow: hidden !important;
+      border-bottom: 1px solid #e5e7eb !important;
+    }
+
+    /* Keep the inactive side panel hidden even while an overlay is open */
+    [data-controller="visualization"][data-mobile-panel="categorical"] #right-panel,
+    [data-controller="visualization"][data-mobile-panel="continuous"] #right-panel,
+    [data-controller="visualization"][data-mobile-panel="genes"] #left-panel,
+    [data-controller="visualization"][data-mobile-panel="cells"] #left-panel,
+    [data-controller="visualization"][data-mobile-panel="gene-sets"] #left-panel {
+      display: none !important;
+    }
+
+    [data-controller="visualization"][data-mobile-panel="categorical"] #continuous-metadata-section,
+    [data-controller="visualization"][data-mobile-panel="continuous"] #categorical-metadata-section,
+    [data-controller="visualization"][data-mobile-panel="genes"] #selections-panel,
+    [data-controller="visualization"][data-mobile-panel="cells"] #gene-expression-panel,
+    [data-controller="visualization"][data-mobile-panel="gene-sets"] #gene-expression-panel {
+      display: none !important;
+    }
+
+    [data-controller="visualization"][data-mobile-panel="categorical"] #categorical-metadata-section,
+    [data-controller="visualization"][data-mobile-panel="continuous"] #continuous-metadata-section,
+    [data-controller="visualization"][data-mobile-panel="genes"] #gene-expression-panel,
+    [data-controller="visualization"][data-mobile-panel="cells"] #selections-panel,
+    [data-controller="visualization"][data-mobile-panel="gene-sets"] #selections-panel {
+      height: 100% !important;
+      flex: 1 1 auto !important;
+      min-height: 0 !important;
+      border: none !important;
+      overflow: hidden !important;
+    }
+
+    [data-controller="visualization"][data-mobile-panel] #gene-expression-panel,
+    [data-controller="visualization"][data-mobile-panel] #selections-panel {
+      border-left: none !important;
+    }
+
+    [data-controller="visualization"][data-mobile-panel="genes"] #right-panel,
+    [data-controller="visualization"][data-mobile-panel="cells"] #right-panel,
+    [data-controller="visualization"][data-mobile-panel="gene-sets"] #right-panel {
+      height: var(--viz-mobile-panel-region-height, 40vh) !important;
+      min-height: 0 !important;
+      width: 100% !important;
+    }
+
+    [data-controller="visualization"][data-mobile-panel="categorical"] #left-panel > div,
+    [data-controller="visualization"][data-mobile-panel="continuous"] #left-panel > div {
+      height: 100% !important;
+      min-height: 0 !important;
+      width: 100% !important;
+      display: flex !important;
+      flex-direction: column !important;
+      overflow: hidden !important;
+    }
+  }
 </style>
 <script>
   try {
@@ -162,7 +529,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
   <div id="left-panel" data-guided-tour="visualization-metadata-panel" class="<%= annotation_tool_available ? '' : 'metadata-panel--no-annotation-tool' %>" style="width: 380px; height: 100%; background-color: white; display: flex; flex-direction: column; min-height: 0;">
     <div style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
       <!-- Categorical Metadata Section -->
-      <div data-guided-tour="visualization-categorical-metadata" style="height: 50%; display: flex; flex-direction: column; border-bottom: 1px solid #e5e7eb;">
+      <div id="categorical-metadata-section" data-guided-tour="visualization-categorical-metadata" style="height: 50%; display: flex; flex-direction: column; border-bottom: 1px solid #e5e7eb;">
         <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Categorical Metadata</h3>
@@ -171,9 +538,10 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
               <%= categorical_count %>
             </span>
             <button type="button"
+                    class="viz-panel-header-icon-btn"
                     data-action="click->visualization#foldAllPanelItems"
                     data-panel-kind="categorical-metadata"
-                    style="margin-left: auto; padding: 4px 8px; font-size: 12px; color: #6b7280; background: #f9fafb; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer;"
+                    style="margin-left: auto;"
                     onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
                     onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
                     title="Fold All"
@@ -181,14 +549,23 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
               <i class="fas fa-angles-up" style="font-size: 12px;"></i>
             </button>
             <button type="button"
+                    class="viz-panel-header-icon-btn"
                     data-action="click->visualization#openMetadataSearchPopup"
                     data-search-url="<%= search_visualization_metadata_project_path(@project) %>"
-                    style="padding: 4px 8px; font-size: 12px; color: #6b7280; background: #f9fafb; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer;"
                     onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
                     onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
                     title="Search"
                     aria-label="Search">
               <i class="fas fa-search" style="font-size: 12px;"></i>
+            </button>
+            <button type="button"
+                    class="viz-panel-header-icon-btn viz-mobile-panel-close-btn"
+                    data-action="click->visualization#closeMobilePanel"
+                    onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
+                    onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
+                    title="Close panel"
+                    aria-label="Close panel">
+              <i class="fas fa-times" style="font-size: 12px;" aria-hidden="true"></i>
             </button>
             <% if can_edit_project %>
               <button type="button" onclick="openAddMetadataModal()"
@@ -618,7 +995,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
       </div>
 
       <!-- Continuous Metadata Section -->
-      <div data-guided-tour="visualization-continuous-metadata" style="height: 50%; display: flex; flex-direction: column;">
+      <div id="continuous-metadata-section" data-guided-tour="visualization-continuous-metadata" style="height: 50%; display: flex; flex-direction: column;">
         <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
           <div style="display: flex; align-items: center; gap: 8px;">
             <h3 style="margin: 0; font-size: 18px; font-weight: 600;">Continuous Metadata</h3>
@@ -627,9 +1004,10 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
               <%= continuous_count %>
             </span>
             <button type="button"
+                    class="viz-panel-header-icon-btn"
                     data-action="click->visualization#foldAllPanelItems"
                     data-panel-kind="continuous-metadata"
-                    style="margin-left: auto; padding: 4px 8px; font-size: 12px; color: #6b7280; background: #f9fafb; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer;"
+                    style="margin-left: auto;"
                     onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
                     onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
                     title="Fold All"
@@ -637,14 +1015,23 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
               <i class="fas fa-angles-up" style="font-size: 12px;"></i>
             </button>
             <button type="button"
+                    class="viz-panel-header-icon-btn"
                     data-action="click->visualization#openMetadataSearchPopup"
                     data-search-url="<%= search_visualization_metadata_project_path(@project) %>"
-                    style="padding: 4px 8px; font-size: 12px; color: #6b7280; background: #f9fafb; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer;"
                     onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
                     onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
                     title="Search"
                     aria-label="Search">
               <i class="fas fa-search" style="font-size: 12px;"></i>
+            </button>
+            <button type="button"
+                    class="viz-panel-header-icon-btn viz-mobile-panel-close-btn"
+                    data-action="click->visualization#closeMobilePanel"
+                    onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
+                    onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
+                    title="Close panel"
+                    aria-label="Close panel">
+              <i class="fas fa-times" style="font-size: 12px;" aria-hidden="true"></i>
             </button>
             <% if can_edit_project %>
               <button type="button" onclick="openAddMetadataModal()"
@@ -894,12 +1281,12 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
   <!-- Main Content: UMAP Plot -->
   <div id="main-panel" data-guided-tour="visualization-plot-area" style="flex: 1; height: 100%; background-color: #f9fafb; display: flex; flex-direction: column; overflow: hidden; min-height: 0;">
     <!-- Menu Bar -->
-    <div style="display: flex; flex-direction: column; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
+    <div class="viz-toolbar-shell" style="display: flex; flex-direction: column; padding: 16px; background-color: white; border-bottom: 1px solid #e5e7eb;">
       <div id="visualization-toolbar-row"
            style="display: grid; grid-template-columns: 220px minmax(0, 1fr); column-gap: 8px; row-gap: 0; width: 100%; align-items: start; box-sizing: border-box;">
       <!-- Left: embedding + coloring stacked with a tight gap -->
-      <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 220px; min-width: 220px; max-width: 220px;">
-        <div style="display: flex; align-items: center; gap: 6px; position: relative; width: 100%;">
+      <div class="viz-toolbar-start" style="display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 220px; min-width: 220px; max-width: 220px;">
+        <div class="viz-toolbar-embedding-wrap" style="display: flex; align-items: center; gap: 6px; position: relative; width: 100%;">
           <a href="#"
              id="embedding-selection-link"
              data-guided-tour="visualization-embedding-picker"
@@ -910,7 +1297,14 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
              data-dimension-label="<%= default_dimension_label %>"
              style="display: flex; text-decoration: none; color: inherit; cursor: pointer; width: 100%; min-width: 0;">
             <div class="embedding-link-content" style="width: 100%; box-sizing: border-box;">
-              <span class="embedding-link-name"><%= default_origin_label.present? ? "#{default_origin_label} > #{default_embedding_name_text}" : default_embedding_name_text %></span>
+              <span class="embedding-link-name">
+                <% if default_origin_label.present? %>
+                  <span class="embedding-link-origin-full"><%= default_origin_label %></span>
+                  <span class="embedding-link-origin-short" aria-hidden="true"><%= default_origin_label.to_s.strip[0]&.upcase %>...</span>
+                  <span class="embedding-link-sep"> > </span>
+                <% end %>
+                <span class="embedding-link-embedding" title="<%= default_origin_label.present? ? "#{default_origin_label} > #{default_embedding_name_text}" : default_embedding_name_text %>"><%= default_embedding_name_text %></span>
+              </span>
               <% if default_dimension_label.present? %>
                 <span class="embedding-link-dimension"><%= default_dimension_label %></span>
               <% end %>
@@ -1423,6 +1817,8 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
             background-color: white;
             transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
             min-width: 220px;
+            max-width: 100%;
+            box-sizing: border-box;
           }
           .embedding-link-origin {
             font-size: 11px;
@@ -1430,13 +1826,32 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
             text-transform: capitalize;
           }
           .embedding-link-name {
+            display: flex;
+            align-items: baseline;
+            min-width: 0;
+            max-width: 220px;
+            width: 100%;
             font-size: 13px;
             color: #1f2937;
             font-weight: 600;
-            max-width: 220px;
             white-space: nowrap;
             overflow: hidden;
+          }
+          .embedding-link-origin-full {
+            flex-shrink: 0;
+          }
+          .embedding-link-origin-short {
+            display: none;
+            flex-shrink: 0;
+          }
+          .embedding-link-sep {
+            flex-shrink: 0;
+          }
+          .embedding-link-embedding {
+            min-width: 0;
+            overflow: hidden;
             text-overflow: ellipsis;
+            white-space: nowrap;
           }
           .embedding-link-dimension {
             font-size: 11px;
@@ -1496,7 +1911,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
       </div>
 
       <!-- Right: toolbar actions wrap independently with a tight row gap -->
-      <div style="display: flex; flex-wrap: wrap; justify-content: flex-end; align-content: flex-start; align-items: flex-start; gap: 2px 8px; min-width: 0;">
+      <div class="viz-toolbar-actions" style="display: flex; flex-wrap: wrap; justify-content: flex-end; align-content: flex-start; align-items: flex-start; gap: 2px 8px; min-width: 0;">
         <!-- Global Filter Summary -->
         <div id="global-filter-summary"
              data-guided-tour="visualization-global-filter-bar"
@@ -1516,6 +1931,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
           </div>
         </div>
 
+        <div class="viz-toolbar-secondary" style="display: contents;">
         <!-- Interaction Mode Buttons -->
         <div data-guided-tour="visualization-mode-buttons" style="display: flex; align-items: center; gap: 8px; flex: 0 0 auto;">
                     <div style="display: flex; border: 1px solid #d1d5db; border-radius: 4px; overflow: hidden;">
@@ -1694,10 +2110,45 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                 onmouseout="this.style.backgroundColor='#2563eb'">
           <i class="fas fa-sync"></i>
         </button>-->
+        </div>
       </div>
       </div>
     </div>
-    <div style="flex: 1; padding: 4px; display: flex; flex-direction: column;">
+
+    <div id="viz-mobile-panel-selector" role="toolbar" aria-label="Visualization panels">
+      <button type="button"
+              data-action="click->visualization#openMobilePanel"
+              data-mobile-panel="categorical"
+              aria-pressed="false">
+        Categorical
+      </button>
+      <button type="button"
+              data-action="click->visualization#openMobilePanel"
+              data-mobile-panel="continuous"
+              aria-pressed="false">
+        Continuous
+      </button>
+      <button type="button"
+              data-action="click->visualization#openMobilePanel"
+              data-mobile-panel="genes"
+              aria-pressed="false">
+        <%= row_label(@project).to_s.pluralize.capitalize %>
+      </button>
+      <button type="button"
+              data-action="click->visualization#openMobilePanel"
+              data-mobile-panel="cells"
+              aria-pressed="false">
+        Cell sets
+      </button>
+      <button type="button"
+              data-action="click->visualization#openMobilePanel"
+              data-mobile-panel="gene-sets"
+              aria-pressed="false">
+        Gene sets
+      </button>
+    </div>
+
+    <div id="viz-plot-area-wrap" style="flex: 1; padding: 4px; display: flex; flex-direction: column;">
       <!-- Plot Container -->
       <div class="plot-container" style="flex: 1; border: 1px solid #e5e7eb; border-radius: 8px; background-color: white; position: relative; min-height: 400px; overflow: hidden;">
         <div id="plot-placeholder" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #6b7280;">
@@ -1740,14 +2191,24 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
             <span id="gene-count-badge" style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">-</span>
           </div>
           <button type="button"
+                  class="viz-panel-header-icon-btn"
                   data-action="click->visualization#foldAllPanelItems"
                   data-panel-kind="gene-expression"
-                  style="margin-left: auto; padding: 4px 8px; font-size: 12px; color: #6b7280; background: #f9fafb; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer;"
+                  style="margin-left: auto;"
                   onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
                   onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
                   title="Fold All"
                   aria-label="Fold All">
             <i class="fas fa-angles-up" style="font-size: 12px;"></i>
+          </button>
+          <button type="button"
+                  class="viz-panel-header-icon-btn viz-mobile-panel-close-btn"
+                  data-action="click->visualization#closeMobilePanel"
+                  onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
+                  onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
+                  title="Close panel"
+                  aria-label="Close panel">
+            <i class="fas fa-times" style="font-size: 12px;" aria-hidden="true"></i>
           </button>
         </div>
         <!-- Gene Tags Container with Input -->
@@ -1946,7 +2407,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
     <!-- Bottom Section: Selections Panel -->
     <div id="selections-panel" style="flex: 1; background-color: #f9fafb; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
       <!-- Selection Tabs -->
-      <div style="border-bottom: 1px solid #e5e7eb;">
+      <div id="viz-selection-tabs" style="border-bottom: 1px solid #e5e7eb;">
         <nav style="display: flex; align-items: center; gap: 8px; padding: 0 16px;">
           <button id="cells-tab"
                   data-guided-tour="visualization-cell-sets-tab"
@@ -2125,6 +2586,15 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                       <i class="fas fa-trash" style="font-size:12px;"></i>
                     </button>
                   <% end %>
+                  <button type="button"
+                          class="viz-panel-header-icon-btn viz-mobile-panel-close-btn"
+                          data-action="click->visualization#closeMobilePanel"
+                          onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
+                          onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
+                          title="Close panel"
+                          aria-label="Close panel">
+                    <i class="fas fa-times" style="font-size: 12px;" aria-hidden="true"></i>
+                  </button>
                 </div>
               </div>
               <div id="de-run-feedback" style="display:none;font-size:12px;color:#1d4ed8;margin:0 0 8px 0;"></div>
@@ -2156,6 +2626,15 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                           onmouseover="this.style.backgroundColor='#1d4ed8'"
                           onmouseout="this.style.backgroundColor='#2563eb'">
                     <span style="font-size:14px;font-weight:700;line-height:1;">+</span>
+                  </button>
+                  <button type="button"
+                          class="viz-panel-header-icon-btn viz-mobile-panel-close-btn"
+                          data-action="click->visualization#closeMobilePanel"
+                          onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
+                          onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
+                          title="Close panel"
+                          aria-label="Close panel">
+                    <i class="fas fa-times" style="font-size: 12px;" aria-hidden="true"></i>
                   </button>
                 </div>
               </div>

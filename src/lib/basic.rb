@@ -1402,6 +1402,51 @@ module Basic
       asap_docker_image
     end
 
+    # Latest fabdavid/asap_run DockerImage row by major tag (v8 > v7 > ...).
+    # Used by utility steps that should track the compose asap_run image, not the
+    # project's historical pipeline version.
+    def get_latest_asap_docker
+      name = ENV.fetch('ASAP_DOCKER_NAME')
+      images = DockerImage.where(name: name).to_a
+      return nil if images.empty?
+
+      images.max_by { |di| [asap_docker_major_version(di), di.id.to_i] }
+    end
+
+    # H5AD export always uses the latest asap_run definition and runtime image.
+    def get_asap_docker_for_h5ad_export(_project = nil)
+      get_latest_asap_docker
+    end
+
+    def export_h5ad_step_and_std_method
+      asap_docker_image = get_latest_asap_docker
+      return [nil, nil, nil] unless asap_docker_image
+
+      step = Step.where(docker_image_id: asap_docker_image.id, name: 'export_h5ad').first
+      std_method = StdMethod.where(docker_image_id: asap_docker_image.id, name: 'loom_to_h5ad').first
+      [asap_docker_image, step, std_method]
+    end
+
+    # Patch version env_json docker_images.asap_run to the given DockerImage (name/tag).
+    # Deep-dup so we do not mutate the Version row / cached JSON.
+    def h_env_with_asap_run_docker(h_env, docker_image)
+      env = safe_parse_json(h_env.is_a?(String) ? h_env : h_env.to_json, {})
+      env = {} unless env.is_a?(Hash)
+      images = env['docker_images']
+      images = {} unless images.is_a?(Hash)
+      entry = images['asap_run']
+      entry = {} unless entry.is_a?(Hash)
+      entry = entry.dup
+      entry['name'] = docker_image.name
+      entry['tag'] = docker_image.tag
+      entry['call'] = canonical_asap_run_docker_call if entry['call'].to_s.strip.empty?
+      images = images.dup
+      images['asap_run'] = entry
+      env = env.dup
+      env['docker_images'] = images
+      env
+    end
+
     def asap_docker_major_version(docker_image)
       tag = docker_image&.tag.to_s
       m = tag.match(/\Av?(\d+)/i)
@@ -3085,6 +3130,189 @@ module Basic
 
       return {:run => run}
 
+    end
+
+    # Relative loom path under the project root -> sibling .h5ad path.
+    def h5ad_rel_path_for_loom(loom_rel)
+      loom_rel.to_s.sub(/\.loom\z/i, '.h5ad')
+    end
+
+    def normalize_project_loom_rel(loom_rel)
+      rel = loom_rel.to_s.strip.sub(%r{\A/+}, '')
+      raise ArgumentError, 'input_loom is required' if rel.blank?
+      raise ArgumentError, 'input_loom must be a .loom path' unless rel.match?(/\.loom\z/i)
+      raise ArgumentError, 'input_loom must stay inside the project directory' if rel.include?('..')
+      rel
+    end
+
+    def project_user_dir(project)
+      Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s + project.key
+    end
+
+    # Classify H5AD export readiness for a loom relative path given optional latest Run.
+    # Returns one of: missing, ready, stale, pending, running, failed
+    def h5ad_export_status(project, loom_rel, run: nil)
+      loom_rel = normalize_project_loom_rel(loom_rel)
+      project_dir = project_user_dir(project)
+      loom_abs = project_dir + loom_rel
+      h5ad_abs = project_dir + h5ad_rel_path_for_loom(loom_rel)
+
+      status_id = run&.status_id.to_i
+      if [1, 6].include?(status_id)
+        return 'pending'
+      end
+      if status_id == 2
+        return 'running'
+      end
+      if status_id == 4 || status_id == 5
+        return 'failed'
+      end
+
+      if File.exist?(h5ad_abs) && File.size(h5ad_abs).positive?
+        if File.exist?(loom_abs) && File.ctime(h5ad_abs) < File.mtime(loom_abs)
+          return 'stale'
+        end
+        return 'ready'
+      end
+
+      return 'failed' if status_id == 3 && (!File.exist?(h5ad_abs) || File.size(h5ad_abs) <= 0)
+
+      'missing'
+    end
+
+    def latest_h5ad_export_run(project, loom_rel)
+      loom_rel = normalize_project_loom_rel(loom_rel)
+      _image, step, std_method = export_h5ad_step_and_std_method
+      return nil unless step && std_method
+
+      Run.where(project_id: project.id, step_id: step.id, std_method_id: std_method.id)
+         .order(id: :desc)
+         .find { |r| Basic.safe_parse_json(r.attrs_json, {})['input_loom'].to_s == loom_rel }
+    end
+
+    # Create or reuse an export_h5ad Run and submit to SLURM when needed.
+    # Always uses the latest asap_run step/std_method and runtime image (compose alias),
+    # even when the project pipeline version is older than v8.
+    # Returns { run:, h5ad_status:, error: }
+    def find_or_start_h5ad_export(logger, project, loom_rel, user_id)
+      loom_rel = normalize_project_loom_rel(loom_rel)
+      project_dir = project_user_dir(project)
+      loom_abs = project_dir + loom_rel
+      h5ad_rel = h5ad_rel_path_for_loom(loom_rel)
+      h5ad_abs = project_dir + h5ad_rel
+
+      unless File.exist?(loom_abs)
+        return { run: nil, h5ad_status: 'missing', error: "Loom file not found: #{loom_rel}" }
+      end
+
+      runtime_docker_image, step, std_method = export_h5ad_step_and_std_method
+      unless runtime_docker_image && step && std_method
+        return {
+          run: nil,
+          h5ad_status: 'missing',
+          error: 'export_h5ad / loom_to_h5ad not configured on the latest asap_run docker image'
+        }
+      end
+
+      version = project.version
+      h_env = h_env_with_asap_run_docker(safe_parse_json(version.env_json, {}), runtime_docker_image)
+
+      ProjectStep.find_or_create_by!(project_id: project.id, step_id: step.id) do |ps|
+        ps.status_id = 1
+      end
+
+      existing = latest_h5ad_export_run(project, loom_rel)
+      current_status = h5ad_export_status(project, loom_rel, run: existing)
+
+      if existing && %w[pending running ready].include?(current_status)
+        if %w[pending running].include?(current_status) && existing.slurm_job_id.blank? && [1, 6].include?(existing.status_id.to_i)
+          exec_run(logger, existing)
+          existing.reload
+          current_status = h5ad_export_status(project, loom_rel, run: existing)
+        end
+        return { run: existing, h5ad_status: current_status, error: nil }
+      end
+
+      # Refresh analysis_pipeline on the loom before conversion.
+      begin
+        AnalysisJsonPersistService.call(project: project, loom_filepath: loom_rel)
+      rescue StandardError => e
+        logger.error("[find_or_start_h5ad_export] AnalysisJsonPersistService failed: #{e.class}: #{e.message}")
+        return { run: nil, h5ad_status: current_status, error: "Failed to refresh analysis_pipeline: #{e.message}" }
+      end
+
+      h_cmd_params = safe_parse_json(step.command_json, {})
+      tmp_h = safe_parse_json(std_method.command_json, {})
+      tmp_h.each_key { |k| h_cmd_params[k] = tmp_h[k] }
+
+      h_attrs = {
+        'input_loom' => loom_rel,
+        'input_loom_abs' => loom_abs.to_s,
+        'output_h5ad_abs' => h5ad_abs.to_s
+      }
+
+      last_run = Run.where(project_id: project.id, step_id: step.id).order(id: :desc).first
+      h_run = {
+        project_id: project.id,
+        step_id: step.id,
+        std_method_id: std_method.id,
+        status_id: 6,
+        num: last_run ? last_run.num + 1 : 1,
+        user_id: user_id,
+        async: true,
+        command_json: '{}',
+        attrs_json: h_attrs.to_json,
+        run_parents_json: '[]',
+        output_json: '{}',
+        lineage_run_ids: '',
+        submitted_at: Time.now
+      }
+
+      run = Run.new(h_run)
+      run.save!
+      logger.info(
+        "[find_or_start_h5ad_export] created Run##{run.id} for #{loom_rel} " \
+        "using #{runtime_docker_image.full_name} (project version_id=#{project.version_id})"
+      )
+
+      step_dir = project_dir + step.name
+      Dir.mkdir(step_dir) unless File.exist?(step_dir)
+      output_dir = step_dir + run.id.to_s
+      FileUtils.rm_r(output_dir) if File.exist?(output_dir)
+      Dir.mkdir(output_dir)
+
+      h_data_classes = {}
+      DataClass.all.map { |dc| h_data_classes[dc.id] = dc }
+      h_res_attrs = get_std_method_attrs(std_method, step)
+
+      h_p = {
+        project: project,
+        h_cmd_params: h_cmd_params,
+        run: run,
+        p: h_attrs,
+        h_attrs: h_res_attrs[:h_attrs],
+        step: step,
+        h_data_classes: h_data_classes,
+        std_method: std_method,
+        h_env: h_env,
+        h_annots: {},
+        el_time: Time.now,
+        user_id: user_id
+      }
+      set_res = set_run(logger, h_p)
+      if set_res.is_a?(Hash) && set_res[:error].present?
+        run.update(status_id: 4, error: set_res[:error].to_s)
+        return { run: run, h5ad_status: 'failed', error: set_res[:error].to_s }
+      end
+
+      run.reload
+      exec_run(logger, run)
+      run.reload
+      {
+        run: run,
+        h5ad_status: h5ad_export_status(project, loom_rel, run: run),
+        error: nil
+      }
     end
     
     def recursive_parse_hca list_fields, h_data, h_cur, h_project_sum_matrices

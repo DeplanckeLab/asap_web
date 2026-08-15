@@ -96,10 +96,19 @@ export class ColorManager {
       }
     }
     
-    // Apply visibility filtering (alpha channel)
+    // Apply visibility filtering (alpha channel) — use mask, never Array.includes (O(n) per point)
     let alpha = 1.0
-    if (this.controller.currentVisibleCells && this.controller.currentVisibleCells.length > 0) {
-      alpha = this.controller.currentVisibleCells.includes(pointIndex) ? 1.0 : 0.1
+    const visibleMask = this.controller.currentVisibleMask
+    if (visibleMask) {
+      alpha = visibleMask[pointIndex] ? 1.0 : 0.1
+    } else if (this.controller.currentVisibleCells && this.controller.currentVisibleCells.length > 0) {
+      // Legacy fallback if mask is missing
+      const cells = this.controller.currentVisibleCells
+      let found = false
+      for (let i = 0; i < cells.length; i++) {
+        if (cells[i] === pointIndex) { found = true; break }
+      }
+      alpha = found ? 1.0 : 0.1
     }
     
     return { color: baseColor, alpha: alpha }

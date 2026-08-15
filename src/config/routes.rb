@@ -19,6 +19,7 @@ Rails.application.routes.draw do
       get :get_commands
       get :get_file
       get :get_loom_files_json
+      post :export_h5ad
       get :data_file_metadata_catalog
       get :project_data_files
       get :get_step

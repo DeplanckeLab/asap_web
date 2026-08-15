@@ -326,6 +326,7 @@ export default class extends Controller {
     this.uiManager.updateGlobalFilterSummary()
     if (!this.loadedMetadataVectors) this.loadedMetadataVectors = {} // Store ONLY currently active metadata vectors (not all)
     if (this.currentVisibleCells === undefined) this.currentVisibleCells = null // Track currently visible cells (null = all visible)
+    if (this.currentVisibleMask === undefined) this.currentVisibleMask = null // Uint8Array companion for O(1) visibility checks
     if (this.lastFilterState === undefined) this.lastFilterState = null // Track last filter state for incremental updates
     if (!this.filterCache) this.filterCache = new Map() // Cache for intersection results
     
@@ -594,6 +595,8 @@ export default class extends Controller {
     
     // Add window resize listener
     window.addEventListener('resize', this.resizeHandler)
+
+    this.initializeMobileVizLayout()
     
     this.lastLeftPanelWidth = null
     this.lastMetadataClaLayout = null
@@ -900,6 +903,8 @@ export default class extends Controller {
     if (this.resizeHandler) {
       window.removeEventListener('resize', this.resizeHandler)
     }
+
+    this.teardownMobileVizLayout()
 
     if (this.leftPanelResizeObserver) {
       this.leftPanelResizeObserver.disconnect()
@@ -1765,8 +1770,40 @@ export default class extends Controller {
 
     const nameSpan = document.createElement('span')
     nameSpan.className = 'embedding-link-name'
+
     const embeddingName = info.name || 'Select embedding...'
-    nameSpan.textContent = info.origin ? `${info.origin} > ${embeddingName}` : embeddingName
+    if (info.origin) {
+      const originFull = document.createElement('span')
+      originFull.className = 'embedding-link-origin-full'
+      originFull.textContent = info.origin
+
+      const originShort = document.createElement('span')
+      originShort.className = 'embedding-link-origin-short'
+      originShort.setAttribute('aria-hidden', 'true')
+      const initial = String(info.origin).trim().charAt(0).toUpperCase()
+      originShort.textContent = initial ? `${initial}...` : ''
+
+      const sep = document.createElement('span')
+      sep.className = 'embedding-link-sep'
+      sep.textContent = ' > '
+
+      const embeddingSpan = document.createElement('span')
+      embeddingSpan.className = 'embedding-link-embedding'
+      embeddingSpan.textContent = embeddingName
+      embeddingSpan.title = info.origin ? `${info.origin} > ${embeddingName}` : embeddingName
+
+      nameSpan.appendChild(originFull)
+      nameSpan.appendChild(originShort)
+      nameSpan.appendChild(sep)
+      nameSpan.appendChild(embeddingSpan)
+    } else {
+      const embeddingSpan = document.createElement('span')
+      embeddingSpan.className = 'embedding-link-embedding'
+      embeddingSpan.textContent = embeddingName
+      embeddingSpan.title = embeddingName
+      nameSpan.appendChild(embeddingSpan)
+    }
+
     wrapper.appendChild(nameSpan)
 
     if (info.dimension) {
@@ -11726,7 +11763,7 @@ export default class extends Controller {
       link.style.display = 'none'
     }
 
-    indicator.style.display = 'block'
+    indicator.style.display = 'flex'
     this.updateColoringHistoryControls()
   }
 
@@ -11756,6 +11793,9 @@ export default class extends Controller {
 
     const dataType = String(this.currentMetadataVector?.data_type || '').toUpperCase()
     if (dataType === 'NUMERIC' || dataType === 'CONTINUOUS') {
+      if (this.isMobileVizLayout()) {
+        this.openMobilePanel('continuous')
+      }
       const metadataName = this.getCurrentColoringDisplayName()
       this.expandContinuousMetadataPanel(metadataId, metadataName)
       const metadataItem = document.querySelector(
@@ -11778,7 +11818,11 @@ export default class extends Controller {
     const geneSetInfo = this.extractGeneSetItemColoringFromMetadataId(metadataId)
     if (!geneSetInfo?.itemId) return
 
-    this.setSelectionTab('gene-sets')
+    if (this.isMobileVizLayout()) {
+      this.openMobilePanel('gene-sets')
+    } else {
+      this.setSelectionTab('gene-sets')
+    }
     const itemId = this.escapeAttributeSelectorValue(geneSetInfo.itemId)
     const button = document.querySelector(
       `[data-action*="geneSetWaterDropClicked"][data-gene-set-item-id="${itemId}"]`
@@ -13100,6 +13144,7 @@ export default class extends Controller {
   async handleWindowResize() {
     this.updateMetadataClaColumns()
     this.refreshMetadataCategoriesJumpListeners()
+    this.updateMobileVizChromeHeight()
 
     // Debounce resize events to avoid excessive redraws during drag
     if (this.resizeTimeout) {
@@ -13109,6 +13154,7 @@ export default class extends Controller {
     // Use a longer debounce to prevent flickering during drag
     this.resizeTimeout = setTimeout(() => {
       this.updateMetadataClaColumns()
+      this.updateMobileVizChromeHeight()
       // console.log('🔄 [RESIZE] Window resized, redrawing plot...')
       
       // Check if canvas and renderer are ready
@@ -13126,6 +13172,253 @@ export default class extends Controller {
       // Simply call redrawPlot - it will handle everything
       this.redrawPlot()
     }, 300) // 300ms debounce to prevent flickering during drag
+  }
+
+  isMobileVizLayout() {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false
+    }
+    return window.matchMedia('(max-width: 1023px)').matches
+  }
+
+  initializeMobileVizLayout() {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return
+    }
+    if (!document.getElementById('viz-mobile-panel-selector')) {
+      return
+    }
+
+    this.mobileVizMediaQuery = window.matchMedia('(max-width: 1023px)')
+    this.boundSyncMobileVizLayout = () => this.syncMobileVizLayout()
+    this.boundMobileVizEscape = (event) => {
+      if (event.key !== 'Escape') return
+      if (!this.element?.dataset?.mobilePanel) return
+      this.closeMobilePanel()
+    }
+
+    if (typeof this.mobileVizMediaQuery.addEventListener === 'function') {
+      this.mobileVizMediaQuery.addEventListener('change', this.boundSyncMobileVizLayout)
+    } else if (typeof this.mobileVizMediaQuery.addListener === 'function') {
+      this.mobileVizMediaQuery.addListener(this.boundSyncMobileVizLayout)
+    }
+
+    document.addEventListener('keydown', this.boundMobileVizEscape)
+    this.syncMobileVizLayout({ redraw: false })
+  }
+
+  teardownMobileVizLayout() {
+    if (this.mobileVizMediaQuery && this.boundSyncMobileVizLayout) {
+      if (typeof this.mobileVizMediaQuery.removeEventListener === 'function') {
+        this.mobileVizMediaQuery.removeEventListener('change', this.boundSyncMobileVizLayout)
+      } else if (typeof this.mobileVizMediaQuery.removeListener === 'function') {
+        this.mobileVizMediaQuery.removeListener(this.boundSyncMobileVizLayout)
+      }
+    }
+    this.mobileVizMediaQuery = null
+    this.boundSyncMobileVizLayout = null
+
+    if (this.boundMobileVizEscape) {
+      document.removeEventListener('keydown', this.boundMobileVizEscape)
+      this.boundMobileVizEscape = null
+    }
+
+    if (this._mobileSplitLayoutTimer) {
+      window.clearTimeout(this._mobileSplitLayoutTimer)
+      this._mobileSplitLayoutTimer = null
+    }
+
+    this.closeMobilePanel({ redraw: false })
+    document.body.classList.remove('viz-mobile-panel-open')
+    this.element?.classList?.remove('viz-mobile-layout')
+  }
+
+  syncMobileVizLayout({ redraw = true } = {}) {
+    if (!this.element) return
+
+    const isMobile = this.isMobileVizLayout()
+    this.element.classList.toggle('viz-mobile-layout', isMobile)
+
+    if (!isMobile && this.element.dataset.mobilePanel) {
+      this.closeMobilePanel({ redraw: false })
+    }
+
+    this.updateMobileVizChromeHeight()
+    this.updateMobilePanelSelectorState()
+
+    if (redraw && this.canvas && this.reglRenderer && !this.isPanning && !this.isDrawingLasso && !this.isZooming) {
+      requestAnimationFrame(() => {
+        this.redrawPlot()
+        if (typeof this.refreshHistogramsAndBarplots === 'function') {
+          this.refreshHistogramsAndBarplots()
+        }
+      })
+    }
+  }
+
+  updateMobileVizChromeHeight() {
+    if (!this.element || !this.isMobileVizLayout()) {
+      document.body.classList.remove('viz-mobile-panel-open')
+      return
+    }
+
+    const header = document.getElementById('project-page-header')
+    const toolbarShell = this.element.querySelector('.viz-toolbar-shell')
+    const selector = document.getElementById('viz-mobile-panel-selector')
+    const plotFooter = document.querySelector('#viz-plot-area-wrap > div:last-child')
+    const panelOpen = !!this.element.dataset.mobilePanel
+
+    document.body.classList.toggle('viz-mobile-panel-open', panelOpen)
+
+    const headerHeight = panelOpen ? 0 : (header?.getBoundingClientRect?.().height || 64)
+    const toolbarHeight = panelOpen ? 0 : (toolbarShell?.getBoundingClientRect?.().height || 0)
+    const selectorHeight = selector?.getBoundingClientRect?.().height || 0
+    const footerHeight = plotFooter?.getBoundingClientRect?.().height || 24
+    const chromeHeight = Math.ceil(headerHeight + toolbarHeight + selectorHeight + footerHeight + 24)
+
+    this.element.style.setProperty('--viz-mobile-chrome-height', `${chromeHeight}px`)
+
+    if (!panelOpen) {
+      this.element.style.removeProperty('--viz-mobile-panel-top')
+      this.element.style.removeProperty('--viz-mobile-panel-region-height')
+      this.element.style.removeProperty('--viz-mobile-plot-size')
+      return
+    }
+
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0
+    // Header/toolbar are folded away; selector sits at the top of the screen.
+    const selectorBottom = selector?.getBoundingClientRect?.().bottom
+    const panelTop = Math.ceil(
+      Number.isFinite(selectorBottom) && selectorBottom > 0
+        ? selectorBottom
+        : selectorHeight
+    )
+    const availableBelowChrome = Math.max(180, viewportHeight - panelTop)
+
+    // Keep a usable square plot visible while editing; panel takes the rest above it.
+    const minPlotSize = 140
+    const maxPlotByWidth = Math.max(minPlotSize, viewportWidth - 8)
+    const maxPlotByHeight = Math.max(minPlotSize, Math.floor(availableBelowChrome * 0.45))
+    const plotSize = Math.max(minPlotSize, Math.min(maxPlotByWidth, maxPlotByHeight, 320))
+    const plotAreaHeight = plotSize + 28
+    const panelRegionHeight = Math.max(180, availableBelowChrome - plotAreaHeight)
+
+    this.element.style.setProperty('--viz-mobile-panel-top', `${panelTop}px`)
+    this.element.style.setProperty('--viz-mobile-panel-region-height', `${panelRegionHeight}px`)
+    this.element.style.setProperty('--viz-mobile-plot-size', `${plotSize}px`)
+  }
+
+  scheduleMobileSplitLayoutRefresh({ redraw = false } = {}) {
+    if (this._mobileSplitLayoutTimer) {
+      window.clearTimeout(this._mobileSplitLayoutTimer)
+      this._mobileSplitLayoutTimer = null
+    }
+
+    // Header/toolbar hide instantly; remeasure on the next frame.
+    this._mobileSplitLayoutTimer = window.setTimeout(() => {
+      this._mobileSplitLayoutTimer = null
+      if (!this.element || !this.isMobileVizLayout()) return
+
+      const plotSizeBefore = this.element.style.getPropertyValue('--viz-mobile-plot-size')
+      this.updateMobileVizChromeHeight()
+      const plotSizeAfter = this.element.style.getPropertyValue('--viz-mobile-plot-size')
+      const plotSizeChanged = plotSizeBefore !== plotSizeAfter
+
+      if (
+        (redraw || plotSizeChanged) &&
+        this.canvas &&
+        this.reglRenderer &&
+        !this.isPanning &&
+        !this.isDrawingLasso &&
+        !this.isZooming
+      ) {
+        this.redrawPlot()
+      }
+      if (typeof this.refreshHistogramsAndBarplots === 'function') {
+        this.refreshHistogramsAndBarplots()
+      }
+    }, 0)
+  }
+
+  openMobilePanel(eventOrKey) {
+    if (eventOrKey?.preventDefault) {
+      eventOrKey.preventDefault()
+      eventOrKey.stopPropagation?.()
+    }
+
+    const panelKey = typeof eventOrKey === 'string'
+      ? eventOrKey
+      : (eventOrKey?.currentTarget?.dataset?.mobilePanel || eventOrKey?.target?.dataset?.mobilePanel || '')
+    const normalizedKey = String(panelKey || '').trim()
+    const allowed = new Set(['categorical', 'continuous', 'genes', 'cells', 'gene-sets'])
+    if (!allowed.has(normalizedKey)) return
+
+    if (!this.isMobileVizLayout()) {
+      if (normalizedKey === 'cells' || normalizedKey === 'gene-sets') {
+        this.setSelectionTab(normalizedKey === 'gene-sets' ? 'gene-sets' : 'cells')
+      }
+      return
+    }
+
+    const previousPanel = this.element.dataset.mobilePanel || ''
+    const wasClosed = !previousPanel
+
+    this.element.dataset.mobilePanel = normalizedKey
+
+    if (normalizedKey === 'cells' || normalizedKey === 'gene-sets') {
+      this.setSelectionTab(normalizedKey === 'gene-sets' ? 'gene-sets' : 'cells')
+    }
+
+    this.updateMobilePanelSelectorState()
+    this.updateMobileVizChromeHeight()
+
+    requestAnimationFrame(() => {
+      this.updateMobileVizChromeHeight()
+      if (typeof this.refreshHistogramsAndBarplots === 'function') {
+        this.refreshHistogramsAndBarplots()
+      }
+      if (normalizedKey === 'cells') {
+        this.drawSelectionDistribution?.()
+      }
+
+      // After header/toolbar fold, remeasure and redraw once if the plot box grew/shrank.
+      if (wasClosed) {
+        this.scheduleMobileSplitLayoutRefresh({ redraw: true })
+      }
+    })
+  }
+
+  closeMobilePanel(eventOrOptions) {
+    if (eventOrOptions?.preventDefault) {
+      eventOrOptions.preventDefault()
+      eventOrOptions.stopPropagation?.()
+    }
+
+    const redraw = eventOrOptions?.redraw !== false
+    if (!this.element?.dataset?.mobilePanel) {
+      this.updateMobilePanelSelectorState()
+      return
+    }
+
+    delete this.element.dataset.mobilePanel
+    document.body.classList.remove('viz-mobile-panel-open')
+
+    this.updateMobilePanelSelectorState()
+    this.updateMobileVizChromeHeight()
+
+    if (redraw) {
+      this.scheduleMobileSplitLayoutRefresh({ redraw: true })
+    }
+  }
+
+  updateMobilePanelSelectorState() {
+    const activePanel = this.element?.dataset?.mobilePanel || ''
+    const buttons = document.querySelectorAll('#viz-mobile-panel-selector [data-mobile-panel]')
+    buttons.forEach((button) => {
+      const isActive = button.dataset.mobilePanel === activePanel
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false')
+    })
   }
   
   // Redraw the plot after resize
@@ -15799,28 +16092,110 @@ export default class extends Controller {
       return false
     }
 
-    const hasSameCoordinatesRef = this._viewWarningFullBoundsCoordsRef === this.currentCoordinates
-    const hasSameCoordinatesLength = this._viewWarningFullBoundsCoordsLength === this.currentCoordinates.length
-    if (!hasSameCoordinatesRef || !hasSameCoordinatesLength) {
-      this._viewWarningFullBoundsCache = this.dataManager.calculateBounds(this.currentCoordinates)
-      this._viewWarningFullBoundsCoordsRef = this.currentCoordinates
-      this._viewWarningFullBoundsCoordsLength = this.currentCoordinates.length
-    }
-
-    const fullBounds = this._viewWarningFullBoundsCache
-    if (!fullBounds) {
+    // Compare the current pan/zoom viewport to the cells that should be visible,
+    // not the full dataset. Filters hide cells on purpose; that must not activate
+    // "view limited". The warning is only for pan/zoom clipping those cells.
+    const visibleBounds = this.getViewWarningReferenceBounds()
+    if (!visibleBounds) {
       return false
     }
 
     const epsilon = 1e-9
-    // Restricted means the current view clips the full dataset bounds.
-    // If the view is larger than full bounds (zoomed out), all cells are visible.
+    // Restricted means the current view clips the reference cell bounds.
+    // If the view is larger than those bounds (zoomed out), all relevant cells are visible.
     return (
-      this.currentBounds.minX > fullBounds.minX + epsilon ||
-      this.currentBounds.maxX < fullBounds.maxX - epsilon ||
-      this.currentBounds.minY > fullBounds.minY + epsilon ||
-      this.currentBounds.maxY < fullBounds.maxY - epsilon
+      this.currentBounds.minX > visibleBounds.minX + epsilon ||
+      this.currentBounds.maxX < visibleBounds.maxX - epsilon ||
+      this.currentBounds.minY > visibleBounds.minY + epsilon ||
+      this.currentBounds.maxY < visibleBounds.maxY - epsilon
     )
+  }
+
+  getViewWarningReferenceBounds() {
+    const coordinates = this.currentCoordinates
+    if (!coordinates || coordinates.length === 0) {
+      return null
+    }
+
+    const visibleMask = this.currentVisibleMask
+    const visibleIndices = this.currentVisibleCells
+    const hasFilter = Array.isArray(visibleIndices) || !!visibleMask
+    const filterGeneration = this.filterGeneration || 0
+
+    const cacheValid =
+      this._viewWarningRefBoundsCache &&
+      this._viewWarningRefCoordsRef === coordinates &&
+      this._viewWarningRefCoordsLength === coordinates.length &&
+      this._viewWarningRefFilterGeneration === filterGeneration &&
+      this._viewWarningRefHasFilter === hasFilter
+
+    if (cacheValid) {
+      return this._viewWarningRefBoundsCache
+    }
+
+    let bounds
+    if (!hasFilter) {
+      bounds = this.dataManager.calculateBounds(coordinates)
+    } else {
+      bounds = this.calculateBoundsForVisibleCells(coordinates, visibleMask, visibleIndices)
+    }
+
+    this._viewWarningRefBoundsCache = bounds
+    this._viewWarningRefCoordsRef = coordinates
+    this._viewWarningRefCoordsLength = coordinates.length
+    this._viewWarningRefFilterGeneration = filterGeneration
+    this._viewWarningRefHasFilter = hasFilter
+    return bounds
+  }
+
+  calculateBoundsForVisibleCells(coordinates, visibleMask, visibleIndices) {
+    let minX = Infinity
+    let maxX = -Infinity
+    let minY = Infinity
+    let maxY = -Infinity
+    let found = false
+
+    if (visibleMask && visibleMask.length > 0) {
+      const n = Math.min(coordinates.length, visibleMask.length)
+      for (let i = 0; i < n; i++) {
+        if (!visibleMask[i]) continue
+        const point = coordinates[i]
+        if (!point) continue
+        const x = point[0]
+        const y = point[1]
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+        found = true
+      }
+    } else if (Array.isArray(visibleIndices)) {
+      for (let i = 0; i < visibleIndices.length; i++) {
+        const point = coordinates[visibleIndices[i]]
+        if (!point) continue
+        const x = point[0]
+        const y = point[1]
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+        found = true
+      }
+    }
+
+    if (!found) {
+      return null
+    }
+
+    // Match calculateBounds padding so default (non-zoomed) views do not false-trigger.
+    const paddingX = (maxX - minX) * 0.05
+    const paddingY = (maxY - minY) * 0.01
+    return {
+      minX: minX - paddingX,
+      maxX: maxX + paddingX,
+      minY: minY - paddingY,
+      maxY: maxY + paddingY
+    }
   }
 
   getEffectiveSelectionIndices() {
@@ -21401,6 +21776,10 @@ export default class extends Controller {
   }
 
   async focusMetadataFilterItem(metadataId) {
+    if (this.isMobileVizLayout()) {
+      this.openMobilePanel('categorical')
+    }
+
     const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
     if (!metadataItem) return
 
@@ -21428,6 +21807,10 @@ export default class extends Controller {
   }
 
   async focusGeneFilterItem(metadataId) {
+    if (this.isMobileVizLayout()) {
+      this.openMobilePanel('genes')
+    }
+
     const escapedMetadataId = this.escapeAttributeSelectorValue(metadataId)
     let geneItem = null
 
@@ -24792,51 +25175,26 @@ export default class extends Controller {
     }
     
     const startTime = performance.now()
-    // console.log('🎨 [ReGL] Updating point visibility based on filters')
-    // console.log('🎨 [ReGL] filteredIndices:', filteredIndices ? `Array of ${filteredIndices.length} indices` : 'null (all visible)')
-    if (filteredIndices && filteredIndices.length > 0) {
-      // console.log('🎨 [ReGL] First 10 filtered indices:', filteredIndices.slice(0, 10))
-      // console.log('🎨 [ReGL] Last 10 filtered indices:', filteredIndices.slice(-10))
-    }
-    // console.log('🎨 [ReGL] displayOrder length:', this.displayOrder?.length)
-    
-    // Convert filteredIndices to Set for O(1) lookup
-    // filteredIndices contains ORIGINAL cell indices
-    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
-    // console.log('🎨 [ReGL] filteredSet created:', filteredSet ? `Set with ${filteredSet.size} indices` : 'null (all visible)')
-    if (filteredSet && filteredSet.size > 0) {
-      const sampleIndices = Array.from(filteredSet).slice(0, 5)
-      // console.log('🎨 [ReGL] Sample indices in filteredSet:', sampleIndices)
+    // Prefer Uint8Array mask (O(1) per point) over building a Set of up to 1M+ indices.
+    let visibleMask = this.currentVisibleMask
+    if (filteredIndices && !visibleMask && this.dataManager?.syncVisibleMaskFromIndices) {
+      visibleMask = this.dataManager.syncVisibleMaskFromIndices(filteredIndices)
+    } else if (!filteredIndices) {
+      visibleMask = null
+      this.currentVisibleMask = null
     }
     
     // Get the metadata vector that is actually being used for coloring
     const coloringMetadataVector = this.colorManager.getColoringMetadataVector()
-    // console.log('🎨 [ReGL] Coloring metadata:', coloringMetadataVector ? coloringMetadataVector.id : 'none')
     
     // Check if we need to recalculate colors (only when coloring metadata changes)
     const needsColorRecalculation = this.colorManager.shouldRecalculateColors(coloringMetadataVector)
     
     // Also check if cache is empty - if so, populate it
     const cacheEmpty = !(this.cachedColorsByCellIndex instanceof Uint32Array) || this.cachedColorsByCellIndex.length === 0
-    // console.log('🎨 [ReGL] Color cache state:', {
-      // exists: !!(this.cachedColorsByCellIndex instanceof Uint32Array),
-      // length: this.cachedColorsByCellIndex?.length || 0,
-      // isEmpty: cacheEmpty,
-      // needsRecalculation: needsColorRecalculation
-    // })
     
     if (needsColorRecalculation || cacheEmpty) {
-      if (cacheEmpty) {
-        // console.log('🎨 [ReGL] Color cache is empty, populating with default or calculated colors')
-      } else {
-      // console.log('🎨 [ReGL] Recalculating colors due to coloring metadata change')
-      }
       this.colorManager.calculateAndCacheColors(coloringMetadataVector)
-      // console.log('🎨 [ReGL] Color cache after population:', {
-        // length: this.cachedColorsByCellIndex?.length || 0,
-        // hasSample: this.cachedColorsByCellIndex instanceof Uint32Array && this.cachedColorsByCellIndex.length > 0,
-        // sampleColor: this.cachedColorsByCellIndex instanceof Uint32Array && this.cachedColorsByCellIndex.length > 0 ? this.cachedColorsByCellIndex[0].toString(16) : 'none'
-      // })
     }
     
     // Create color map to hide/show points based on filtering
@@ -24846,56 +25204,32 @@ export default class extends Controller {
     let visibleCount = 0
     let hiddenCount = 0
     
-    // console.log(`🎨 [ReGL] Building color map for ${this.displayOrder.length} points, filteredSet size: ${filteredSet ? filteredSet.size : 'null (all visible)'}`)
-    
-    // Sample a few points to debug visibility logic
-    const samplePositions = [0, 100, 1000, 5000, 10000]
-    
     // Use displayOrder to map draw positions to cell indices
     for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
       const cellIndex = this.displayOrder[drawPos]
-      const shouldBeVisible = !filteredSet || filteredSet.has(cellIndex)
+      const shouldBeVisible = !filteredIndices || (visibleMask ? visibleMask[cellIndex] === 1 : false)
       
       if (shouldBeVisible) {
         // Use cached color (much faster than recalculating). Use .has() — color 0 is falsy
         // and must not fall through to default blue.
         colorMap[drawPos] = this.getCachedPointColor(cellIndex)
         visibleCount++
-        
-        if (samplePositions.includes(drawPos)) {
-          // console.log(`🎨 [ReGL] Sample drawPos ${drawPos}: cellIndex=${cellIndex}, VISIBLE`)
-        }
       } else {
         // Hide point by making it fully transparent (do not overwrite color caches)
         colorMap[drawPos] = 0x00000000
         hiddenCount++
-        
-        if (samplePositions.includes(drawPos)) {
-          // console.log(`🎨 [ReGL] Sample drawPos ${drawPos}: cellIndex=${cellIndex}, HIDDEN (not in filteredSet), color=0x00000000`)
-        }
       }
     }
-    
-    // console.log(`🎨 [ReGL] Color map built: ${visibleCount} visible, ${hiddenCount} hidden, total: ${colorMap.size}`)
-    // console.log('🎨 [ReGL] Sample color map entries:', {
-      // first5: Array.from(colorMap.entries()).slice(0, 5).map(([pos, color]) => `pos${pos}=0x${color.toString(16)}`),
-      // last5: Array.from(colorMap.entries()).slice(-5).map(([pos, color]) => `pos${pos}=0x${color.toString(16)}`)
-    // })
-    // console.log(`🎨 [ReGL] About to call updateColors with ${colorMap.size} color updates`)
     
     // Update colors (which includes alpha channel)
     const colorBuildMs = performance.now() - colorBuildStart
     const updateColorsStart = performance.now()
     this.reglRenderer.updateColors(colorMap)
     const updateColorsTime = performance.now() - updateColorsStart
-    // console.log(`🎨 [ReGL] updateColors completed in ${updateColorsTime.toFixed(2)}ms`)
     
     const renderStart = performance.now()
     this.reglRenderer.render()
     const renderTime = performance.now() - renderStart
-    // console.log(`🎨 [ReGL] render() completed in ${renderTime.toFixed(2)}ms`)
-    
-    // console.log(`🎨 [ReGL] Visibility update completed`)
     
     const elapsed = performance.now() - startTime
     this.logPerf('visibility_buildColorMap', colorBuildMs, {
@@ -24911,7 +25245,6 @@ export default class extends Controller {
       visible: visibleCount,
       hidden: hiddenCount
     })
-    // console.log(`🎨 [ReGL] Total visibility update time: ${visibleCount} visible, ${hiddenCount} hidden in ${elapsed.toFixed(2)}ms`)
   }
 
   // Update the point count display with detailed filtering information
@@ -25052,20 +25385,46 @@ export default class extends Controller {
       return null
     }
 
-    const startTime = performance.now()
-    const cellIndices = []
     const values = metadataVector.values
-    // selectedCategories stores category NAME strings; values are category codes.
     const selectedCodes = this.dataManager.codesMatchingLabels(metadataVector, selectedCategories)
+    const labels = this.dataManager.getCategoryLabels(metadataVector)
+    const lookupSize = Array.isArray(labels) ? labels.length : 0
+    const codeLookup = lookupSize > 0 ? new Uint8Array(lookupSize) : null
+    if (codeLookup) {
+      selectedCodes.forEach((code) => {
+        if (code >= 0 && code < codeLookup.length) codeLookup[code] = 1
+      })
+    }
 
-    for (let index = 0; index < values.length; index++) {
-      if (selectedCodes.has(values[index])) {
-        cellIndices.push(index)
+    let count = 0
+    if (codeLookup) {
+      for (let index = 0; index < values.length; index++) {
+        const code = values[index]
+        if (code >= 0 && code < codeLookup.length && codeLookup[code]) count++
+      }
+    } else {
+      for (let index = 0; index < values.length; index++) {
+        if (selectedCodes.has(values[index])) count++
       }
     }
 
-    const endTime = performance.now()
-    // console.log(`Found ${cellIndices.length} cells for discrete metadata ${metadataId} in ${(endTime - startTime).toFixed(2)}ms`)
+    const cellIndices = new Array(count)
+    let j = 0
+    if (codeLookup) {
+      for (let index = 0; index < values.length; index++) {
+        const code = values[index]
+        if (code >= 0 && code < codeLookup.length && codeLookup[code]) {
+          cellIndices[j++] = index
+        }
+      }
+    } else {
+      for (let index = 0; index < values.length; index++) {
+        if (selectedCodes.has(values[index])) {
+          cellIndices[j++] = index
+        }
+      }
+    }
+
     return cellIndices
   }
 
@@ -25074,9 +25433,6 @@ export default class extends Controller {
     // Debug logging for gene filtering
     if (metadataId && metadataId.startsWith('gene_')) {
       // console.log(`🔍 [GENE FILTER] getCellsForMetadataRange called for gene: ${metadataId}`)
-      // console.log(`🔍 [GENE FILTER] Range:`, range)
-      // console.log(`🔍 [GENE FILTER] loadedMetadataVectors keys:`, Object.keys(this.loadedMetadataVectors || {}))
-      // console.log(`🔍 [GENE FILTER] Has gene in loadedMetadataVectors:`, !!this.loadedMetadataVectors?.[metadataId])
     }
     
     // Find the metadata vector for this metadata ID
@@ -25084,34 +25440,29 @@ export default class extends Controller {
     if (!metadataVector || !metadataVector.values) {
       console.warn(`No metadata vector found for metadata ID: ${metadataId}`)
       if (metadataId && metadataId.startsWith('gene_')) {
-        console.error(`❌ [GENE FILTER] CRITICAL: Gene metadata vector not found!`)
-        console.error(`❌ [GENE FILTER] loadedMetadataVectors:`, this.loadedMetadataVectors)
-        console.error(`❌ [GENE FILTER] currentMetadataVector:`, this.currentMetadataVector)
+        console.error(`GENE FILTER: Gene metadata vector not found!`)
       }
       return []
     }
 
-    // console.log(`🔍 getCellsForMetadataRange called for metadata ${metadataId}:`, {
-      // range,
-      // valuesLength: metadataVector.values.length,
-      // firstFewValues: metadataVector.values.slice(0, 10)
-    // })
-
-    const startTime = performance.now()
-    const cellIndices = []
     const values = metadataVector.values
-    
-    // Use for loop instead of forEach for better performance
+    const min = range.min
+    const max = range.max
+    let count = 0
     for (let index = 0; index < values.length; index++) {
       const value = values[index]
-      if (value >= range.min && value <= range.max) {
-        cellIndices.push(index)
+      if (value >= min && value <= max) count++
+    }
+
+    const cellIndices = new Array(count)
+    let j = 0
+    for (let index = 0; index < values.length; index++) {
+      const value = values[index]
+      if (value >= min && value <= max) {
+        cellIndices[j++] = index
       }
     }
 
-    const endTime = performance.now()
-    // console.log(`🔍 Found ${cellIndices.length} cells for continuous metadata ${metadataId} in range [${range.min}, ${range.max}] in ${(endTime - startTime).toFixed(2)}ms`)
-    // console.log(`🔍 First 10 filtered indices:`, cellIndices.slice(0, 10))
     return cellIndices
   }
 
@@ -25167,15 +25518,13 @@ export default class extends Controller {
     if (!hasActiveFilterCriteria) {
       // No active filters - safe to clear
       this.currentVisibleCells = null
+      this.currentVisibleMask = null
       if (this.dataManager && typeof this.dataManager.bumpFilterGeneration === 'function') {
         this.dataManager.bumpFilterGeneration()
       }
-      // console.log('[CLEAR STATE] Cleared currentVisibleCells (no active filter criteria)')
     } else {
       // Active filter criteria exist - keep currentVisibleCells but mark cache as invalid
       // The filter will be recalculated on next updateCellFiltering() call
-      // console.log('[CLEAR STATE] Preserved currentVisibleCells (active filter criteria exist, will be recalculated)')
-      // Note: currentVisibleCells is kept, but lastFilterState is cleared so it will be recalculated
     }
   }
 
@@ -25459,6 +25808,10 @@ export default class extends Controller {
   // Toggle inline range slider for numeric metadata
   // Expand continuous metadata panel and show histogram (no coloring)
   expandContinuousMetadataPanel(metadataId, metadataName) {
+    if (this.isMobileVizLayout()) {
+      this.openMobilePanel('continuous')
+    }
+
     const metadataCard = document.querySelector(`[data-metadata-item="${metadataId}"]`)
     if (!metadataCard) {
       console.error('Metadata card not found for ID:', metadataId)
@@ -25488,6 +25841,10 @@ export default class extends Controller {
   async expandCategoricalMetadataPanel(metadataId) {
     const normalizedMetadataId = String(metadataId || '').trim()
     if (!normalizedMetadataId) return
+
+    if (this.isMobileVizLayout()) {
+      this.openMobilePanel('categorical')
+    }
 
     const header = document.querySelector(
       `[data-action*="toggleMetadata"][data-metadata-id="${normalizedMetadataId}"]`

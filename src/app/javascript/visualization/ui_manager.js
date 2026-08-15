@@ -1309,37 +1309,40 @@ export class UIManager {
 
   // Update sidebar category counts with visual indicators for ALL categorical metadata
   updateSidebarCategoryCounts() {
-    // PERFORMANCE: This function can be very slow with many metadata loaded
-    // Only update counts for VISIBLE (expanded) metadata to avoid blocking the UI
+    // PERFORMANCE: Only update counts for expanded metadata. One pass per metadata
+    // (not per category) so >1M-cell datasets stay responsive.
     
     const perfStart = performance.now()
     
-    // DEBUG: Log who's calling this function
-    // console.log(`⏱️ [PERF] updateSidebarCategoryCounts called from:`)
-    //console.trace()
-    
-    // Find all category checkboxes that are currently visible (display !== 'none')
     const allCategoryCheckboxes = document.querySelectorAll('.category-checkbox')
     const visibleCheckboxes = Array.from(allCategoryCheckboxes).filter(cb => {
-      // Check if the checkbox's parent container is visible
       const container = cb.closest('[data-metadata-item]')
       if (!container) return false
       
-      // Find the categories div (sibling of the header)
       const header = container.querySelector('[data-action*="toggleMetadata"]')
       if (!header) return false
       
       const categoriesDiv = header.nextElementSibling
       if (!categoriesDiv) return false
       
-      // Only process if categories are expanded (visible)
       return categoriesDiv.style.display !== 'none'
     })
     
-    // console.log(`⏱️ [PERF] updateSidebarCategoryCounts: Processing ${visibleCheckboxes.length}/${allCategoryCheckboxes.length} visible checkboxes`)
-    
-    // Convert currentVisibleCells to Set once for O(1) lookups
-    const visibleSet = this.controller.currentVisibleCells ? new Set(this.controller.currentVisibleCells) : null
+    const visibleMask = this.controller.currentVisibleMask || (
+      this.controller.dataManager?.ensureVisibleMask
+        ? this.controller.dataManager.ensureVisibleMask(this.controller.currentVisibleCells)
+        : null
+    )
+
+    const checkboxesByMetadata = new Map()
+    visibleCheckboxes.forEach((checkbox) => {
+      const metadataId = checkbox.dataset.metadataId
+      if (!checkboxesByMetadata.has(metadataId)) {
+        checkboxesByMetadata.set(metadataId, [])
+      }
+      checkboxesByMetadata.get(metadataId).push(checkbox)
+    })
+
     const debugSummary = new Map()
     const missingMetadata = new Set()
     const logPrefix = '[FILTER COUNTS]'
@@ -1357,44 +1360,52 @@ export class UIManager {
         currentVisibleCells: this.controller.currentVisibleCells ? this.controller.currentVisibleCells.length : null
       })
     }
-    
-    visibleCheckboxes.forEach(checkbox => {
-      const metadataId = checkbox.dataset.metadataId
-      const category = checkbox.dataset.category
-      
-      // Get the metadata vector for this metadata ID (only if already loaded in memory)
+
+    checkboxesByMetadata.forEach((checkboxes, metadataId) => {
       const metadataVector = this.controller.loadedMetadataVectors[metadataId]
       if (!metadataVector || !metadataVector.values) {
         missingMetadata.add(metadataId)
         return
       }
-      
-      // Find the count span - it's the second span in the parent container
-      const parentContainer = checkbox.closest('.metadata-category-row')
-      const countElement = parentContainer ? parentContainer.querySelector('.metadata-category-count') : null
-      
-      if (countElement) {
-        // Count total and visible cells for this category (values are codes; category is a label)
-        let totalCount = 0
-        let visibleCount = 0
-        const code = this.controller.dataManager.labelToCode(metadataVector, category)
-        if (code >= 0) {
-          const values = metadataVector.values
-          for (let i = 0; i < values.length; i++) {
-            if (values[i] === code) {
-              totalCount++
-              // O(1) lookup with Set instead of array iteration
-              if (!visibleSet || visibleSet.has(i)) {
-                visibleCount++
-              }
-            }
+
+      const values = metadataVector.values
+      const labels = this.controller.dataManager.getCategoryLabels(metadataVector)
+      const categoryCount = Array.isArray(labels) ? labels.length : 0
+      const totalCounts = categoryCount > 0 ? new Uint32Array(categoryCount) : null
+      const visibleCounts = categoryCount > 0 ? new Uint32Array(categoryCount) : null
+
+      if (totalCounts && visibleCounts) {
+        for (let i = 0; i < values.length; i++) {
+          const code = values[i]
+          if (code < 0 || code >= categoryCount) continue
+          totalCounts[code]++
+          if (!visibleMask || visibleMask[i]) {
+            visibleCounts[code]++
           }
         }
-        
-        // Update the count display
+      }
+
+      checkboxes.forEach((checkbox) => {
+        const category = checkbox.dataset.category
+        const parentContainer = checkbox.closest('.metadata-category-row')
+        const countElement = parentContainer ? parentContainer.querySelector('.metadata-category-count') : null
+        if (!countElement) {
+          if (checkpointTraceEnabled) {
+            console.warn(`${logPrefix} Missing count element for category`, {
+              metadataId,
+              category,
+              parentFound: !!parentContainer
+            })
+          }
+          return
+        }
+
+        const code = this.controller.dataManager.labelToCode(metadataVector, category)
+        const totalCount = (code >= 0 && totalCounts) ? totalCounts[code] : 0
+        const visibleCount = (code >= 0 && visibleCounts) ? visibleCounts[code] : 0
+
         countElement.textContent = formatNumberWithDelimiter(visibleCount)
-        
-        // Add visual indicators
+
         const debugEntry = debugSummary.get(metadataId) || {
           metadataId,
           categoriesProcessed: 0,
@@ -1417,43 +1428,25 @@ export class UIManager {
         }
 
         if (totalCount > visibleCount) {
-          // Some cells are filtered out - show in red
           countElement.style.color = '#dc2626'
           countElement.style.fontWeight = '600'
-          
-          // Add hover tooltip
           const percentage = ((visibleCount / totalCount) * 100).toFixed(1)
           countElement.title = `${formatNumberWithDelimiter(visibleCount)} of ${formatNumberWithDelimiter(totalCount)} cells (${percentage}% visible after filtering)`
           debugEntry.categoriesReduced += 1
           if (debugEntry.reducedSamples.length < 3) {
-            debugEntry.reducedSamples.push({
-              category,
-              totalCount,
-              visibleCount
-            })
+            debugEntry.reducedSamples.push({ category, totalCount, visibleCount })
           }
         } else {
-          // No filtering - normal appearance
           countElement.style.color = '#6b7280'
           countElement.style.fontWeight = '500'
           countElement.title = `${formatNumberWithDelimiter(totalCount)} cells (100% visible)`
           if (debugEntry.unchangedSamples.length < 3 && totalCount > 0) {
-            debugEntry.unchangedSamples.push({
-              category,
-              totalCount,
-              visibleCount
-            })
+            debugEntry.unchangedSamples.push({ category, totalCount, visibleCount })
           }
         }
 
         debugSummary.set(metadataId, debugEntry)
-      } else if (checkpointTraceEnabled) {
-        console.warn(`${logPrefix} Missing count element for category`, {
-          metadataId,
-          category,
-          parentFound: !!parentContainer
-        })
-      }
+      })
     })
 
     if (checkpointTraceEnabled && (debugSummary.size > 0 || missingMetadata.size > 0)) {
@@ -1480,10 +1473,9 @@ export class UIManager {
     }
     
     const perfTime = performance.now() - perfStart
-    // console.log(`⏱️ [PERF] updateSidebarCategoryCounts completed in ${perfTime.toFixed(2)}ms`)
     
     if (perfTime > 100 && perfLogEnabled) {
-      console.warn(`⚠️ [PERF] updateSidebarCategoryCounts took ${perfTime.toFixed(2)}ms - consider further optimization`)
+      console.warn(`updateSidebarCategoryCounts took ${perfTime.toFixed(2)}ms - consider further optimization`)
     }
   }
 

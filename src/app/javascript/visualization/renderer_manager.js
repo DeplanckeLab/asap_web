@@ -231,19 +231,24 @@ export class RendererManager {
     const maxVal = effectiveRange.max
     // console.log('🎨 [Canvas2D] Effective range:', { minVal, maxVal })
 
-    // Legend dimensions
+    // Legend dimensions — shrink on small plots (e.g. mobile split view).
     const margins = this.getPlotMargins()
-    const legendWidth = 200
-    const legendHeight = 20
-    const padding = 10
-    const legendX = width - legendWidth - margins.right - 10 // Position on right side
-    const legendY = margins.top + 10 // Position at top
+    const overlayScale = this.getPlotOverlayScale()
+    const legendWidth = Math.max(72, Math.round(200 * overlayScale))
+    const legendHeight = Math.max(10, Math.round(20 * overlayScale))
+    const padding = Math.max(4, Math.round(10 * overlayScale))
+    const titleFontSize = Math.max(8, Math.round(12 * overlayScale))
+    const valueFontSize = Math.max(7, Math.round(10 * overlayScale))
+    const titleGap = Math.max(12, Math.round(25 * overlayScale))
+    const valueGap = Math.max(3, Math.round(5 * overlayScale))
+    const legendX = width - legendWidth - margins.right - Math.max(4, Math.round(10 * overlayScale))
+    const legendY = margins.top + Math.max(4, Math.round(10 * overlayScale))
     
     // Calculate background dimensions (includes padding for title and labels)
     const bgX = legendX - padding
-    const bgY = legendY - 25 // Account for title above
+    const bgY = legendY - titleGap // Account for title above
     const bgWidth = legendWidth + (padding * 2)
-    const bgHeight = legendHeight + 40 // Account for title above and labels below
+    const bgHeight = legendHeight + titleGap + Math.max(16, Math.round(20 * overlayScale))
     
     // Store legend bounds for click and hover detection
     this.controller.gradientLegendBounds = {
@@ -273,11 +278,20 @@ export class RendererManager {
 
     // Draw metadata name label above the legend
     ctx.save()
-    ctx.font = 'bold 12px Arial'
+    ctx.font = `bold ${titleFontSize}px Arial`
     ctx.fillStyle = '#333333'
     ctx.textAlign = 'left'
     ctx.textBaseline = 'bottom'
-    ctx.fillText(this.controller.currentMetadataVector.name, legendX, legendY - 5)
+    const metadataName = String(this.controller.currentMetadataVector.name || '')
+    const maxTitleWidth = legendWidth
+    let displayName = metadataName
+    if (ctx.measureText(displayName).width > maxTitleWidth) {
+      while (displayName.length > 1 && ctx.measureText(`${displayName}...`).width > maxTitleWidth) {
+        displayName = displayName.slice(0, -1)
+      }
+      displayName = `${displayName}...`
+    }
+    ctx.fillText(displayName, legendX, legendY - Math.max(2, Math.round(5 * overlayScale)))
     ctx.restore()
 
     // Draw color gradient bar
@@ -306,17 +320,17 @@ export class RendererManager {
 
     // Draw min/max value labels
     ctx.save()
-    ctx.font = '10px Arial'
+    ctx.font = `${valueFontSize}px Arial`
     ctx.fillStyle = '#333333'
     
     // Min label (left-aligned)
     ctx.textAlign = 'left'
     ctx.textBaseline = 'top'
-    ctx.fillText(minVal.toFixed(2), legendX, legendY + legendHeight + 5)
+    ctx.fillText(minVal.toFixed(2), legendX, legendY + legendHeight + valueGap)
     
     // Max label (right-aligned)
     ctx.textAlign = 'right'
-    ctx.fillText(maxVal.toFixed(2), legendX + legendWidth, legendY + legendHeight + 5)
+    ctx.fillText(maxVal.toFixed(2), legendX + legendWidth, legendY + legendHeight + valueGap)
     
     ctx.restore()
 
@@ -738,11 +752,21 @@ export class RendererManager {
     return overlapX * overlapY
   }
 
+  getPlotOverlayScale() {
+    const width = this.controller.overlayCanvas?.width || this.controller.canvas?.width || 800
+    const height = this.controller.overlayCanvas?.height || this.controller.canvas?.height || 600
+    const minSide = Math.min(width, height)
+    // Full size around 500px+; shrink toward ~45% on small mobile plots.
+    return Math.min(1, Math.max(0.45, minSide / 500))
+  }
+
   getAutoLabelFontSize(labelCount) {
-    if (labelCount <= 12) return 16
-    if (labelCount <= 24) return 14
-    if (labelCount <= 45) return 12
-    return 10
+    let size = 10
+    if (labelCount <= 12) size = 16
+    else if (labelCount <= 24) size = 14
+    else if (labelCount <= 45) size = 12
+    const scale = this.getPlotOverlayScale()
+    return Math.max(8, Math.round(size * scale))
   }
 
   doesSegmentIntersectRect(x1, y1, x2, y2, rect) {

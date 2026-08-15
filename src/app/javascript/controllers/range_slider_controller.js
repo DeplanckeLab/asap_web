@@ -598,31 +598,29 @@ export default class extends Controller {
     let selectedByRangeCount = 0
     let selectedByAllFiltersCount = 0
     
-    // Get currently visible cells (after ALL filters)
-    const currentVisibleCells = this.visualizationController?.currentVisibleCells
+    // Prefer visibility mask (O(1) lookup) — avoid building a Set of 1M+ indices.
+    let visibleMask = this.visualizationController?.currentVisibleMask || null
+    if (!visibleMask && this.visualizationController?.currentVisibleCells && this.visualizationController.dataManager?.ensureVisibleMask) {
+      visibleMask = this.visualizationController.dataManager.ensureVisibleMask(
+        this.visualizationController.currentVisibleCells
+      )
+    }
     
-    if (currentVisibleCells) {
-      // Convert to Set for O(1) lookups instead of O(n) includes()
-      const visibleSet = new Set(currentVisibleCells)
-      
-      // Count cells that pass both range and other filters
+    if (visibleMask) {
       for (let i = 0; i < sliderData.values.length; i++) {
         const value = sliderData.values[i]
-        const inRange = value >= this.currentMinValue && value <= this.currentMaxValue
-        
-        if (inRange) {
+        if (value >= this.currentMinValue && value <= this.currentMaxValue) {
           selectedByRangeCount++
-          // O(1) lookup instead of O(n) includes()
-          if (visibleSet.has(i)) {
-            selectedByAllFiltersCount++
-          }
+          if (visibleMask[i]) selectedByAllFiltersCount++
         }
       }
     } else {
-      // No other filters - just count cells in range
-      selectedByRangeCount = sliderData.values.filter(value => 
-        value >= this.currentMinValue && value <= this.currentMaxValue
-      ).length
+      for (let i = 0; i < sliderData.values.length; i++) {
+        const value = sliderData.values[i]
+        if (value >= this.currentMinValue && value <= this.currentMaxValue) {
+          selectedByRangeCount++
+        }
+      }
       selectedByAllFiltersCount = selectedByRangeCount
     }
     
@@ -1125,10 +1123,13 @@ export default class extends Controller {
     const plotWidth = rect.width - leftMargin - rightMargin
     const plotHeight = rect.height - topMargin - bottomMargin
     
-    // Get filtered cell indices (if any filters are active)
-    // This ensures the histogram only shows cells that pass all active filters
-    const filteredIndices = this.visualizationController?.dataManager?.getFilteredCellIndices()
-    const filteredSet = filteredIndices ? new Set(filteredIndices) : null
+    // Prefer existing visibility mask — do not recompute filters or build a 1M+ Set here.
+    let visibleMask = this.visualizationController?.currentVisibleMask || null
+    if (!visibleMask && this.visualizationController?.currentVisibleCells && this.visualizationController.dataManager?.ensureVisibleMask) {
+      visibleMask = this.visualizationController.dataManager.ensureVisibleMask(
+        this.visualizationController.currentVisibleCells
+      )
+    }
     
     // Check if there's a range filter on this metadata
     const rangeFilter = this.visualizationController?.selectedRanges && this.visualizationController.selectedRanges[this.metadataIdValue]
@@ -1136,19 +1137,17 @@ export default class extends Controller {
     
     // Filter values to only include those from filtered cells AND within the selected range (if a range filter exists)
     const filteredValues = []
-    sliderData.values.forEach((value, index) => {
-      // Only include values from cells that pass all filters
-      if (!filteredSet || filteredSet.has(index)) {
-        // If there's a range filter on this metadata, also check that the value is within the range
-        if (hasRangeFilter) {
-          if (value >= rangeFilter.min && value <= rangeFilter.max) {
-            filteredValues.push(value)
-          }
-        } else {
+    for (let index = 0; index < sliderData.values.length; index++) {
+      const value = sliderData.values[index]
+      if (visibleMask && !visibleMask[index]) continue
+      if (hasRangeFilter) {
+        if (value >= rangeFilter.min && value <= rangeFilter.max) {
           filteredValues.push(value)
         }
+      } else {
+        filteredValues.push(value)
       }
-    })
+    }
     
     // Create histogram using only filtered values
     const numBins = 50

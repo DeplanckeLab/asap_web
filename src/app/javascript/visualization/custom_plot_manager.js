@@ -828,7 +828,23 @@ export class CustomPlotManager {
     let startHeight = 0
     let startLeft = 0
     let startTop = 0
+    let resizeFrameId = null
+    let pendingWidth = null
+    let pendingHeight = null
+    let pendingLeft = null
+    let pendingTop = null
     
+    const applyPendingModalSize = () => {
+      resizeFrameId = null
+      if (pendingWidth == null || pendingHeight == null) return
+
+      modal.style.width = pendingWidth + 'px'
+      modal.style.height = pendingHeight + 'px'
+      modal.style.transform = 'none'
+      if (pendingLeft != null) modal.style.left = pendingLeft + 'px'
+      if (pendingTop != null) modal.style.top = pendingTop + 'px'
+    }
+
     const startResize = (e, type) => {
       if (e.button !== 0 && e.type !== 'touchstart') return
       
@@ -842,6 +858,9 @@ export class CustomPlotManager {
       startHeight = rect.height
       startLeft = rect.left
       startTop = rect.top
+      modal.style.left = startLeft + 'px'
+      modal.style.top = startTop + 'px'
+      modal.style.transform = 'none'
       
       e.preventDefault()
       e.stopPropagation()
@@ -879,38 +898,42 @@ export class CustomPlotManager {
       
       newWidth = Math.max(minWidth, Math.min(newWidth, maxWidth))
       newHeight = Math.max(minHeight, Math.min(newHeight, maxHeight))
-      
-      // Apply new size
-      modal.style.width = newWidth + 'px'
-      modal.style.height = newHeight + 'px'
-      modal.style.transform = 'none' // Remove center transform when resizing
-      
-      // Adjust position if needed to keep within viewport
-      const rect = modal.getBoundingClientRect()
-      if (rect.right > window.innerWidth) {
-        modal.style.left = (window.innerWidth - newWidth) + 'px'
+
+      if (newLeft + newWidth > window.innerWidth) {
+        newLeft = Math.max(0, window.innerWidth - newWidth)
       }
-      if (rect.bottom > window.innerHeight) {
-        modal.style.top = (window.innerHeight - newHeight) + 'px'
+      if (newTop + newHeight > window.innerHeight) {
+        newTop = Math.max(0, window.innerHeight - newHeight)
       }
-      if (rect.left < 0) {
-        modal.style.left = '0px'
+      if (newLeft < 0) newLeft = 0
+      if (newTop < 0) newTop = 0
+
+      pendingWidth = newWidth
+      pendingHeight = newHeight
+      pendingLeft = newLeft
+      pendingTop = newTop
+
+      // Only update modal chrome during drag. Full plot redraw runs once on mouseup.
+      if (resizeFrameId == null) {
+        resizeFrameId = window.requestAnimationFrame(applyPendingModalSize)
       }
-      if (rect.top < 0) {
-        modal.style.top = '0px'
-      }
-      
-      // Update canvas size when modal is resized
-      this.update2DPlotCanvasSize()
     }
     
     const stopResize = () => {
-      if (isResizing) {
-        isResizing = false
-        resizeType = null
-        // Update canvas size after resize completes
-        this.update2DPlotCanvasSize()
+      if (!isResizing) return
+
+      isResizing = false
+      resizeType = null
+      if (resizeFrameId != null) {
+        window.cancelAnimationFrame(resizeFrameId)
+        applyPendingModalSize()
       }
+      pendingWidth = null
+      pendingHeight = null
+      pendingLeft = null
+      pendingTop = null
+      // Single redraw after resize completes (not on every mousemove)
+      this.update2DPlotCanvasSize()
     }
     
     // Right edge resize
@@ -932,7 +955,7 @@ export class CustomPlotManager {
     }
     
     document.addEventListener('mousemove', doResize)
-    document.addEventListener('touchmove', doResize)
+    document.addEventListener('touchmove', doResize, { passive: false })
     document.addEventListener('mouseup', stopResize)
     document.addEventListener('touchend', stopResize)
   }
@@ -944,14 +967,20 @@ export class CustomPlotManager {
     
     if (!canvas || !modal || modal.style.display === 'none') return
     
-    const contentArea = canvas.parentElement.parentElement
+    const contentArea = canvas.parentElement?.parentElement
+    if (!contentArea) return
+
     const contentRect = contentArea.getBoundingClientRect()
     const availableWidth = contentRect.width - 32 // padding
     const availableHeight = contentRect.height - 32 // padding
     
     // Set canvas size (use available space, but allow horizontal scroll if wider)
-    const canvasWidth = Math.max(availableWidth, 600) // Minimum 600px width
-    const canvasHeight = Math.max(availableHeight, 400) // Minimum 400px height
+    const canvasWidth = Math.max(Math.floor(availableWidth), 600) // Minimum 600px width
+    const canvasHeight = Math.max(Math.floor(availableHeight), 400) // Minimum 400px height
+
+    if (canvas.width === canvasWidth && canvas.height === canvasHeight) {
+      return
+    }
     
     canvas.width = canvasWidth
     canvas.height = canvasHeight

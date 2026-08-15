@@ -501,7 +501,7 @@ summary_search_gene_url = search_gene_project_path(@project)
               <i class="fas fa-download text-gray-400" aria-hidden="true"></i><span>LOOM/H5AD</span>
             </button>
           <% else %>
-            <button type="button" id="summary-loom-downloads-open-button" class="badge-text flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-gray-100 text-gray-700 font-medium hover:bg-gray-200" data-summary-loom-json-url="<%= get_loom_files_json_project_path(@project.key) %>" data-guided-tour="summary-repro-downloads-trigger" aria-label="LOOM and H5AD downloads"><i class="fas fa-download text-gray-500" aria-hidden="true"></i><span>LOOM/H5AD</span></button>
+            <button type="button" id="summary-loom-downloads-open-button" class="badge-text flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-gray-100 text-gray-700 font-medium hover:bg-gray-200" data-summary-loom-json-url="<%= get_loom_files_json_project_path(@project.key) %>" data-summary-loom-export-url="<%= export_h5ad_project_path(@project.key) %>" data-summary-status-icons="<%= status_icons_json %>" data-guided-tour="summary-repro-downloads-trigger" aria-label="LOOM and H5AD downloads"><i class="fas fa-download text-gray-500" aria-hidden="true"></i><span>LOOM/H5AD</span></button>
           <% end %>
         </div>
         <% if summary_archive_data_unavailable %>
@@ -1660,13 +1660,39 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
     if (!openButton || !overlay || !panel || !body || !closeButton || openButton.dataset.initialized === 'true') return
     openButton.dataset.initialized = 'true'
 
+    let pollTimer = null
+    let latestItems = []
+
+    let statusIconsByKey = {}
+    try {
+      const rawIcons = openButton.dataset.summaryStatusIcons
+      const list = rawIcons ? JSON.parse(rawIcons) : []
+      if (Array.isArray(list)) {
+        list.forEach((entry) => {
+          if (entry && entry.key) statusIconsByKey[entry.key] = entry
+        })
+      }
+    } catch (_err) {
+      statusIconsByKey = {}
+    }
+
     const escapeHtml = (value) => String(value == null ? '' : value)
       .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
 
+    const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+
+    const stopPolling = () => {
+      if (pollTimer) {
+        clearInterval(pollTimer)
+        pollTimer = null
+      }
+    }
+
     const closeModal = () => {
+      stopPolling()
       overlay.classList.add('hidden')
       openButton.setAttribute('aria-expanded', 'false')
     }
@@ -1676,9 +1702,52 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
       openButton.setAttribute('aria-expanded', 'true')
     }
 
+    const statusIconHtml = (h5adStatus, statusId) => {
+      let key = null
+      if (statusId === 1 || statusId === 6 || h5adStatus === 'pending') key = 'pending'
+      else if (statusId === 2 || h5adStatus === 'running') key = 'running'
+      else if (statusId === 3 || h5adStatus === 'ready') key = 'success'
+      else if (statusId === 4 || statusId === 5 || h5adStatus === 'failed') key = 'failed'
+      else if (h5adStatus === 'stale') key = 'waiting'
+      else key = null
+
+      const cfg = key ? statusIconsByKey[key] : null
+      if (!cfg) {
+        if (h5adStatus === 'missing' || h5adStatus === 'stale') {
+          return '<i class="fas fa-circle text-gray-300" style="font-size: 12px;" aria-hidden="true"></i>'
+        }
+        return '<i class="fas fa-circle text-gray-300" style="font-size: 12px;" aria-hidden="true"></i>'
+      }
+      const spin = cfg.icon_spin ? ` ${cfg.icon_spin}` : ''
+      const color = cfg.active_color || 'text-gray-500'
+      return `<i class="${escapeHtml(cfg.icon_base || 'fas fa-circle')}${spin} ${escapeHtml(color)}" style="font-size: 12px;" title="${escapeHtml(cfg.label || key)}" aria-hidden="true"></i>`
+    }
+
+    const h5adCellHtml = (item) => {
+      const status = item.h5ad_status || 'missing'
+      const icon = statusIconHtml(status, item.h5ad_status_id)
+      const loomName = escapeHtml(item.name || '')
+      if (status === 'ready') {
+        return `<div class="flex items-center gap-2">${icon}<a href="${escapeHtml(item.url_h5ad)}" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:text-blue-900 hover:underline font-medium">Download H5AD</a></div>`
+      }
+      if (status === 'pending' || status === 'running') {
+        const label = status === 'running' ? 'Exporting' : 'Queued'
+        return `<div class="flex items-center gap-2">${icon}<span class="text-gray-600 text-sm">${label}</span></div>`
+      }
+      const label = status === 'failed' ? 'Retry export' : (status === 'stale' ? 'Re-export H5AD' : 'Export H5AD')
+      return `<div class="flex items-center gap-2">${icon}<button type="button" class="text-blue-700 hover:text-blue-900 hover:underline font-medium" data-h5ad-export-loom="${loomName}">${label}</button></div>`
+    }
+
+    const needsPolling = (items) => Array.isArray(items) && items.some((item) => {
+      const s = item && item.h5ad_status
+      return s === 'pending' || s === 'running'
+    })
+
     const renderRows = (items) => {
+      latestItems = Array.isArray(items) ? items : []
       if (!Array.isArray(items) || items.length === 0) {
         body.innerHTML = '<p class="text-gray-500 italic">No Loom files listed.</p>'
+        stopPolling()
         return
       }
       const rows = items.map((item) => {
@@ -1687,7 +1756,7 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
         const attrs = item.run_attrs ? `<div class="mt-1">${item.run_attrs}</div>` : ''
         return `<tr class="border-b border-gray-100 align-top">
           <td class="py-2 pr-3"><a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:text-blue-900 hover:underline font-medium">${loomLabel}</a>${sub}</td>
-          <td class="py-2 pr-3"><a href="${escapeHtml(item.url_h5ad)}" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:text-blue-900 hover:underline font-medium">H5AD export</a></td>
+          <td class="py-2 pr-3">${h5adCellHtml(item)}</td>
           <td class="py-2 text-gray-600">${attrs}</td>
         </tr>`
       }).join('')
@@ -1696,11 +1765,83 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
         <th class="pb-2 pr-3">H5AD file</th>
         <th class="pb-2">Run attributes</th>
       </tr></thead><tbody>${rows}</tbody></table></div>`
+
+      if (needsPolling(items)) startPolling()
+      else stopPolling()
     }
 
-    const loadAndShow = async () => {
+    const fetchList = async () => {
       const url = openButton.dataset.summaryLoomJsonUrl
-      if (!url) {
+      if (!url) throw new Error('Missing data URL')
+      const response = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
+      const data = await response.json()
+      if (!response.ok) {
+        const message = (data && data.error) ? data.error : 'Request failed.'
+        throw new Error(message)
+      }
+      if (data && data.error) throw new Error(data.error)
+      return data
+    }
+
+    const startPolling = () => {
+      if (pollTimer) return
+      pollTimer = setInterval(async () => {
+        if (overlay.classList.contains('hidden')) {
+          stopPolling()
+          return
+        }
+        try {
+          const data = await fetchList()
+          renderRows(data)
+        } catch (_err) {
+          // Keep last render; next tick may succeed.
+        }
+      }, 3000)
+    }
+
+    const startExport = async (loomPath) => {
+      const exportUrl = openButton.dataset.summaryLoomExportUrl
+      if (!exportUrl) {
+        body.insertAdjacentHTML('afterbegin', '<p class="text-red-600 mb-2">Missing export URL.</p>')
+        return
+      }
+      const token = csrfToken()
+      const response = await fetch(exportUrl, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': token
+        },
+        body: JSON.stringify({ input_loom: loomPath })
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        const message = (data && data.error) ? data.error : 'Export failed to start.'
+        throw new Error(message)
+      }
+      const refreshed = await fetchList()
+      renderRows(refreshed)
+    }
+
+    body.addEventListener('click', (event) => {
+      const btn = event.target.closest('[data-h5ad-export-loom]')
+      if (!btn) return
+      event.preventDefault()
+      event.stopPropagation()
+      const loomPath = btn.getAttribute('data-h5ad-export-loom')
+      if (!loomPath) return
+      btn.disabled = true
+      startExport(loomPath).catch((err) => {
+        btn.disabled = false
+        const msg = err && err.message ? err.message : 'Export failed to start.'
+        body.insertAdjacentHTML('afterbegin', `<p class="text-red-600 mb-2">${escapeHtml(msg)}</p>`)
+      })
+    })
+
+    const loadAndShow = async () => {
+      if (!openButton.dataset.summaryLoomJsonUrl) {
         body.innerHTML = '<p class="text-red-600">Missing data URL.</p>'
         openModal()
         return
@@ -1708,20 +1849,11 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
       body.innerHTML = '<p class="text-gray-500">Loading</p>'
       openModal()
       try {
-        const response = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'same-origin' })
-        const data = await response.json()
-        if (!response.ok) {
-          const message = (data && data.error) ? data.error : 'Request failed.'
-          body.innerHTML = `<p class="text-red-600">${escapeHtml(message)}</p>`
-          return
-        }
-        if (data && data.error) {
-          body.innerHTML = `<p class="text-red-600">${escapeHtml(data.error)}</p>`
-          return
-        }
+        const data = await fetchList()
         renderRows(data)
-      } catch (_err) {
-        body.innerHTML = '<p class="text-red-600">Unable to load file list.</p>'
+      } catch (err) {
+        const message = err && err.message ? err.message : 'Unable to load file list.'
+        body.innerHTML = `<p class="text-red-600">${escapeHtml(message)}</p>`
       }
     }
 

@@ -1130,6 +1130,11 @@ export class DataManager {
 
     // Update the current visible cells state
     this.controller.currentVisibleCells = filteredIndices
+    if (!filteredIndices) {
+      this.controller.currentVisibleMask = null
+    } else {
+      this.ensureVisibleMask(filteredIndices)
+    }
     this.bumpFilterGeneration()
     
     // Update current selection to only include visible cells
@@ -1138,30 +1143,15 @@ export class DataManager {
     // Update point count display immediately
     this.controller.uiManager.updatePointCountDisplay(filteredIndices)
     
-    // Update expensive filter-related UI only when filtering is/was active.
-    // On pure metadata coloring switches with no active filters, this avoids redundant O(n) work.
-    if (hasFilterNow || hadFilterBefore) {
-      // Update sidebar category counts with visual indicators (for ALL categorical metadata)
-      this.controller.uiManager.updateSidebarCategoryCounts()
-      
-      // Update all range slider counts to reflect combined filtering (for ALL continuous metadata)
-      this.controller.uiManager.updateAllRangeSliderCounts()
-    }
-    
     // Refresh selection summary after every filtering action.
-    // With no lasso selection it shows visible cells count; with lasso it shows lassoed cells.
     this.controller.updateSelectionCount()
     
     // Update global filter summary (count and switch state)
     this.controller.uiManager.updateGlobalFilterSummary()
-    
-    // These are also expensive and only need refresh when filter state is active/changed.
+
+    // Defer expensive O(n) sidebar/plot UI so the scatter visibility update can run first.
     if (hasFilterNow || hadFilterBefore || filterModeChanged) {
-      // Update category distribution bar plots to reflect filtered cells
-      this.updateAllCategoryDistributions()
-      
-      // Redraw all density plots (histograms in range sliders) to reflect filtered cells
-      this.redrawAllDensityPlots()
+      this.scheduleFilterSidebarRefresh()
     }
 
     if (perfEnabled) {
@@ -1610,19 +1600,15 @@ export class DataManager {
   // Incremental filtering - much faster for small changes
   getIncrementalFilteredIndices() {
     if (this.controller.globalFiltersEnabled === false) {
+      this.controller.currentVisibleMask = null
       return null
     }
     
     const hasDiscreteSelections = this.controller.selectedCategories && Object.keys(this.controller.selectedCategories).length > 0
     const hasContinuousSelections = this.controller.selectedRanges && Object.keys(this.controller.selectedRanges).length > 0
     
-    // console.log('🔍 [FILTERING] getIncrementalFilteredIndices called') */
-    // console.log('🔍 [FILTERING] hasDiscreteSelections:', hasDiscreteSelections) */
-    // console.log('🔍 [FILTERING] hasContinuousSelections:', hasContinuousSelections) */
-    // console.log('🔍 [FILTERING] selectedRanges:', this.controller.selectedRanges) */
-    
     if (!hasDiscreteSelections && !hasContinuousSelections) {
-      // No filtering applied, return all cells
+      this.controller.currentVisibleMask = null
       return null
     }
 
@@ -1655,6 +1641,7 @@ export class DataManager {
     const metadataWithSelections = [...new Set([...discreteMetadataWithSelections, ...continuousMetadataWithSelections])]
 
     if (metadataWithSelections.length === 0) {
+      this.controller.currentVisibleMask = null
       return null
     }
 
@@ -1663,13 +1650,12 @@ export class DataManager {
     
     // If this is the same as last state, return current visible cells
     if (this.controller.lastFilterState === currentFilterState && this.controller.currentVisibleCells) {
-      // console.log('Using cached incremental result')
+      this.ensureVisibleMask(this.controller.currentVisibleCells)
       return this.controller.currentVisibleCells
     }
 
     // If we have no current visible cells, do full calculation
     if (!this.controller.currentVisibleCells) {
-      // console.log('No current visible cells - doing full calculation')
       const result = this.getFilteredCellIndices()
       this.controller.lastFilterState = currentFilterState
       return result
@@ -1678,13 +1664,12 @@ export class DataManager {
     // Try incremental update
     const incrementalResult = this.tryIncrementalUpdate(metadataWithSelections)
     if (incrementalResult !== null) {
-      // console.log('Using incremental update')
+      this.syncVisibleMaskFromIndices(incrementalResult)
       this.controller.lastFilterState = currentFilterState
       return incrementalResult
     }
 
     // Fall back to full calculation
-    // console.log('Fallback to full calculation')
     const result = this.getFilteredCellIndices()
     this.controller.lastFilterState = currentFilterState
     return result
@@ -1707,45 +1692,43 @@ export class DataManager {
 
   // Update current selection to only include cells that are currently visible (not filtered out)
   updateSelectionBasedOnFiltering(filteredIndices) {
-    // console.log(`updateSelectionBasedOnFiltering called with filteredIndices:`, filteredIndices ? filteredIndices.length : 'null')
-    // console.log(`Current selectedCells size:`, this.controller.selectedCells ? this.controller.selectedCells.size : 'null')
-    
     if (!this.controller.selectedCells || this.controller.selectedCells.size === 0) {
-      // No current selection, nothing to update
-      // console.log(`No current selection to update`) */
       return
     }
 
-    const originalSelectionSize = this.controller.selectedCells.size
-    
     if (!filteredIndices) {
-      // No filtering applied - all cells are visible, keep current selection
-      // console.log(`Selection unchanged: ${originalSelectionSize} cells (no filtering)`) */
       return
     }
 
-    // Create a set of visible cell indices for O(1) lookup
-    const visibleCellsSet = new Set(filteredIndices)
-    
-    // Filter the current selection to only include visible cells
+    const visibleMask = this.ensureVisibleMask(filteredIndices)
     const filteredSelection = new Set()
     this.controller.selectedCells.forEach(cellId => {
-      if (visibleCellsSet.has(cellId)) {
+      if (visibleMask && visibleMask[cellId]) {
         filteredSelection.add(cellId)
       }
     })
-    
-    // Update the current selection
+
     this.controller.selectedCells = filteredSelection
-    
-    const newSelectionSize = this.controller.selectedCells.size
-    // console.log(`Selection updated: ${originalSelectionSize} → ${newSelectionSize} cells (filtered)`)
-    
-    // Update the selection count display
     this.controller.uiManager.updateSelectedCellsCount()
-    
-    // Update point colors to reflect the new selection
     this.controller.updateSelectedPointColors()
+  }
+
+  scheduleFilterSidebarRefresh() {
+    if (this._filterSidebarRefreshTimer) {
+      clearTimeout(this._filterSidebarRefreshTimer)
+    }
+    this._filterSidebarRefreshTimer = setTimeout(() => {
+      this._filterSidebarRefreshTimer = null
+      const perfEnabled = this.controller.perfLoggingEnabled?.() === true
+      const t0 = perfEnabled ? performance.now() : 0
+      this.controller.uiManager.updateSidebarCategoryCounts()
+      this.controller.uiManager.updateAllRangeSliderCounts()
+      this.updateAllCategoryDistributions()
+      this.redrawAllDensityPlots()
+      if (perfEnabled) {
+        this.controller.logPerf('pipeline_filterSidebarRefresh', performance.now() - t0, {})
+      }
+    }, 32)
   }
 
   // Get the intersection of selected cells across all metadata (full calculation)
@@ -1753,20 +1736,15 @@ export class DataManager {
     if (this.controller.globalFiltersEnabled === false) {
       this.controller.lastFilteredIndices = null
       this.controller.lastFilterStateHash = null
+      this.controller.currentVisibleMask = null
       return null
     }
     
     // Performance optimization: check if filter state has changed
     const currentFilterHash = this.getFilterStateHash()
-    // console.log('🔍 Filter state check:', {
-     // currentHash: currentFilterHash,
-     // lastHash: this.controller.lastFilterStateHash,
-     // hasCachedIndices: this.controller.lastFilteredIndices !== undefined,
-     // selectedCategories: this.controller.selectedCategories
-     // }) */
     
     if (this.controller.lastFilterStateHash === currentFilterHash && this.controller.lastFilteredIndices !== undefined) {
-      // console.log('🔍 Using cached filtered indices (no filter state change)') */
+      this.ensureVisibleMask(this.controller.lastFilteredIndices)
       return this.controller.lastFilteredIndices
     }
     
@@ -1774,38 +1752,21 @@ export class DataManager {
     const hasDiscreteSelections = this.controller.selectedCategories && Object.keys(this.controller.selectedCategories).length > 0
     const hasContinuousSelections = this.controller.selectedRanges && Object.keys(this.controller.selectedRanges).length > 0
     
-    // console.log('🔍 getFilteredCellIndices called:', {
-     // hasDiscreteSelections,
-     // hasContinuousSelections,
-     // selectedCategories: this.controller.selectedCategories,
-     // selectedRanges: this.controller.selectedRanges
-     // }) */
-    
     if (!hasDiscreteSelections && !hasContinuousSelections) {
-      // No filtering applied, return all cells
-      // console.log('🔍 No selections found, returning null (no filtering)') */
-      // Update performance cache
       this.controller.lastFilteredIndices = null
       this.controller.lastFilterStateHash = currentFilterHash
+      this.controller.currentVisibleMask = null
       return null
     }
 
     // Create cache key from current selections
     const cacheKey = this.controller.createFilterCacheKey()
     if (this.controller.filterCache.has(cacheKey)) {
-      // console.log('Using cached filter result')
-      return this.controller.filterCache.get(cacheKey)
+      const cached = this.controller.filterCache.get(cacheKey)
+      this.syncVisibleMaskFromIndices(cached)
+      return cached
     }
 
-    // Check if there are any actual constraints (this will be done more precisely below)
-    // We'll check for constraints in the filtering logic below
-
-    // Get all metadata that have actual constraints (not all categories/values selected)
-    // console.log(`🔍 [FILTER] selectedCategories keys:`, Object.keys(this.controller.selectedCategories)) */
-    Object.keys(this.controller.selectedCategories).forEach(id => {
-      // console.log(`🔍 [FILTER] selectedCategories[${id}] size:`, this.controller.selectedCategories[id]?.size) */
-    })
-    
     const discreteMetadataWithConstraints = Object.keys(this.controller.selectedCategories).filter(metadataId => {
       const selections = this.controller.selectedCategories[metadataId]
       if (!selections || !this.hasUsableMetadataVectorValues(metadataId)) {
@@ -1823,75 +1784,196 @@ export class DataManager {
       return this.isContinuousSelectionConstraining(metadataId, range)
     })
 
-    // Combine all metadata with actual constraints
     const allMetadataWithConstraints = [...new Set([...discreteMetadataWithConstraints, ...continuousMetadataWithConstraints])]
 
-    // console.log(`All metadata in selectedCategories:`, Object.keys(this.controller.selectedCategories))
-    // console.log(`Loaded metadata vectors:`, Object.keys(this.controller.loadedMetadataVectors))
-    // console.log(`Current metadata ID:`, this.controller.currentMetadataId)
-
     if (allMetadataWithConstraints.length === 0) {
-      // No metadata has actual constraints, return all cells
-      // console.log('🔍 No metadata with constraints found, returning null (no filtering)') */
-      // Update performance cache
       this.controller.lastFilteredIndices = null
       this.controller.lastFilterStateHash = currentFilterHash
+      this.controller.currentVisibleMask = null
       return null
     }
 
-    // console.log('🔍 Metadata with constraints:', allMetadataWithConstraints) */
-
-    // Start with cells that match the first metadata's constraints
-    const firstMetadataId = allMetadataWithConstraints[0]
-    let filteredIndices = this.controller.getCellsForMetadata(firstMetadataId)
-    if (!Array.isArray(filteredIndices)) {
-      console.warn(`⚠️ FILTERING ISSUE: first metadata ${firstMetadataId} has no usable values; skipping filter pass`)
+    const cellCount = this.getFilterUniverseSize(allMetadataWithConstraints)
+    if (!cellCount || cellCount <= 0) {
       this.controller.lastFilteredIndices = null
       this.controller.lastFilterStateHash = currentFilterHash
+      this.controller.currentVisibleMask = null
       return null
     }
-    // console.log(`🔍 First metadata ${firstMetadataId} filtered indices:`, filteredIndices ? filteredIndices.length : 'null') */
 
-    // Intersect with each subsequent metadata's constraints using Set for O(1) lookups
-    for (let i = 1; i < allMetadataWithConstraints.length; i++) {
+    // Intersect constraints with Uint8Array masks — avoids building huge Sets of indices.
+    let resultMask = null
+    for (let i = 0; i < allMetadataWithConstraints.length; i++) {
       const metadataId = allMetadataWithConstraints[i]
-      const cellsForThisMetadata = this.controller.getCellsForMetadata(metadataId)
-      if (!Array.isArray(cellsForThisMetadata)) {
-        console.warn(`⚠️ FILTERING ISSUE: metadata ${metadataId} has no usable values; skipping this constraint`)
+      const constraintMask = this.buildConstraintMask(metadataId, cellCount)
+      if (!constraintMask) {
+        console.warn(`FILTERING ISSUE: metadata ${metadataId} has no usable values; skipping this constraint`)
         continue
       }
-      // console.log(`🔍 Metadata ${metadataId} filtered indices:`, cellsForThisMetadata ? cellsForThisMetadata.length : 'null') */
-      
-      // Convert to Set for O(1) lookup instead of O(n) includes()
-      const cellsSet = new Set(cellsForThisMetadata)
-      
-      // Intersection: keep only cells that are in both sets
-      const beforeIntersection = filteredIndices.length
-      filteredIndices = filteredIndices.filter(cellIndex => cellsSet.has(cellIndex))
-      // console.log(`🔍 After intersection with ${metadataId}: ${filteredIndices.length} (was ${beforeIntersection})`) */
-      
-      // If we get 0 cells, log more details to help debug
-      if (filteredIndices.length === 0) {
-        console.warn(`⚠️ FILTERING ISSUE: Intersection resulted in 0 cells!`)
-        console.warn(`⚠️ First metadata had ${beforeIntersection} cells`)
-        console.warn(`⚠️ Second metadata had ${cellsForThisMetadata?.length || 0} cells`)
-        console.warn(`⚠️ This suggests no overlap between constraints`)
+      if (!resultMask) {
+        resultMask = constraintMask
+      } else {
+        for (let cell = 0; cell < cellCount; cell++) {
+          if (resultMask[cell] !== 0 && constraintMask[cell] === 0) {
+            resultMask[cell] = 0
+          }
+        }
       }
     }
 
-    // console.log(`🔍 Final filtered ${filteredIndices ? filteredIndices.length : 'null'} cells from ${this.controller.currentCoordinates?.length || 0} total cells`) */
-    
-    // Cache the result
+    if (!resultMask) {
+      this.controller.lastFilteredIndices = null
+      this.controller.lastFilterStateHash = currentFilterHash
+      this.controller.currentVisibleMask = null
+      return null
+    }
+
+    this.controller.currentVisibleMask = resultMask
+    const filteredIndices = this.maskToIndices(resultMask)
+
     this.controller.filterCache.set(cacheKey, filteredIndices)
-    
-    // Update performance cache
     this.controller.lastFilteredIndices = filteredIndices
     this.controller.lastFilterStateHash = currentFilterHash
-    
+
     const totalTime = performance.now() - startTime
-    // console.log(`🚀 [PERF] getFilteredCellIndices completed in ${totalTime.toFixed(2)}ms`) */
-    
+    if (this.controller.perfLoggingEnabled?.() === true) {
+      this.controller.logPerf('pipeline_getFilteredCellIndices', totalTime, {
+        cellCount,
+        constraintCount: allMetadataWithConstraints.length,
+        filteredCount: filteredIndices.length
+      })
+    }
+
     return filteredIndices
+  }
+
+  getFilterUniverseSize(metadataIds = null) {
+    if (Array.isArray(this.controller.currentCoordinates) && this.controller.currentCoordinates.length > 0) {
+      return this.controller.currentCoordinates.length
+    }
+    if (this.controller.reglRenderer?.numPoints > 0) {
+      return this.controller.reglRenderer.numPoints
+    }
+    if (this.controller.numPoints > 0) {
+      return this.controller.numPoints
+    }
+    const ids = metadataIds || [
+      ...Object.keys(this.controller.selectedCategories || {}),
+      ...Object.keys(this.controller.selectedRanges || {})
+    ]
+    for (let i = 0; i < ids.length; i++) {
+      const vector = this.getMetadataVectorById(ids[i])
+      if (vector?.values?.length) return vector.values.length
+    }
+    return 0
+  }
+
+  buildConstraintMask(metadataId, cellCount) {
+    if (this.controller.selectedCategories[metadataId] !== undefined) {
+      return this.buildDiscreteConstraintMask(metadataId, cellCount)
+    }
+    if (this.controller.selectedRanges[metadataId]) {
+      return this.buildContinuousConstraintMask(metadataId, cellCount, this.controller.selectedRanges[metadataId])
+    }
+    return null
+  }
+
+  buildDiscreteConstraintMask(metadataId, cellCount) {
+    const metadataVector = this.getMetadataVectorById(metadataId)
+    if (!metadataVector?.values) return null
+    const values = metadataVector.values
+    const selectedCodes = this.codesMatchingLabels(metadataVector, this.controller.selectedCategories[metadataId])
+    const labels = this.getCategoryLabels(metadataVector)
+    const lookupSize = Array.isArray(labels) ? labels.length : 0
+    const codeLookup = lookupSize > 0 ? new Uint8Array(lookupSize) : null
+    if (codeLookup) {
+      selectedCodes.forEach((code) => {
+        if (code >= 0 && code < codeLookup.length) codeLookup[code] = 1
+      })
+    }
+    const mask = new Uint8Array(cellCount)
+    const len = Math.min(cellCount, values.length)
+    if (codeLookup) {
+      for (let index = 0; index < len; index++) {
+        const code = values[index]
+        if (code >= 0 && code < codeLookup.length && codeLookup[code]) {
+          mask[index] = 1
+        }
+      }
+    } else {
+      for (let index = 0; index < len; index++) {
+        if (selectedCodes.has(values[index])) mask[index] = 1
+      }
+    }
+    return mask
+  }
+
+  buildContinuousConstraintMask(metadataId, cellCount, range) {
+    const metadataVector = this.getMetadataVectorById(metadataId)
+    if (!metadataVector?.values) return null
+    const values = metadataVector.values
+    const min = range.min
+    const max = range.max
+    const mask = new Uint8Array(cellCount)
+    const len = Math.min(cellCount, values.length)
+    for (let index = 0; index < len; index++) {
+      const value = values[index]
+      if (value >= min && value <= max) mask[index] = 1
+    }
+    return mask
+  }
+
+  maskToIndices(mask) {
+    let count = 0
+    for (let i = 0; i < mask.length; i++) {
+      if (mask[i]) count++
+    }
+    const indices = new Array(count)
+    let j = 0
+    for (let i = 0; i < mask.length; i++) {
+      if (mask[i]) indices[j++] = i
+    }
+    return indices
+  }
+
+  syncVisibleMaskFromIndices(filteredIndices) {
+    if (!filteredIndices) {
+      this.controller.currentVisibleMask = null
+      return null
+    }
+    let cellCount = this.getFilterUniverseSize()
+    if (!cellCount) {
+      let maxIdx = -1
+      for (let i = 0; i < filteredIndices.length; i++) {
+        const idx = filteredIndices[i]
+        if (idx > maxIdx) maxIdx = idx
+      }
+      cellCount = maxIdx + 1
+    }
+    if (!cellCount) {
+      this.controller.currentVisibleMask = null
+      return null
+    }
+    const mask = new Uint8Array(cellCount)
+    for (let i = 0; i < filteredIndices.length; i++) {
+      const idx = filteredIndices[i]
+      if (idx >= 0 && idx < cellCount) mask[idx] = 1
+    }
+    this.controller.currentVisibleMask = mask
+    return mask
+  }
+
+  ensureVisibleMask(filteredIndices = this.controller.currentVisibleCells) {
+    if (!filteredIndices) {
+      this.controller.currentVisibleMask = null
+      return null
+    }
+    const existing = this.controller.currentVisibleMask
+    const cellCount = this.getFilterUniverseSize()
+    if (existing && (!cellCount || existing.length === cellCount)) {
+      return existing
+    }
+    return this.syncVisibleMaskFromIndices(filteredIndices)
   }
 
   // Clean up stale selections for metadata that are no longer loaded

@@ -17,9 +17,9 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access annotations].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection save_batch_compose_metadata]
   before_action :authorize_project_owner_access, only: %i[export_consensus_annotation preview_consensus_annotation]
@@ -1980,29 +1980,12 @@ class ProjectsController < ApplicationController
       
       if authorized
 
-        # Refresh scFAIR analysis_pipeline global metadata from DB before loom/h5ad download.
-        if filepath.to_s.match?(/\.(loom|h5ad)\z/i)
+        # Refresh scFAIR analysis_pipeline on the loom sibling before loom download.
+        # H5AD is produced asynchronously by export_h5ad / loom_to_h5ad (SLURM); get_file only serves.
+        if filepath.to_s.match?(/\.loom\z/i)
           ensure_analysis_json_before_download!(project_root, filepath)
         end
-  
-        ## export to h5ad                                                                                                                                                                                                                          
-        if filepath.to_s.match(/output\.h5ad$/)
-          loom_filepath = filepath.dup.to_s
-          loom_filepath.gsub!(/\.h5ad$/, '.loom')
-          if !File.exist? filepath or (File.exist? filepath and File.ctime(filepath) < File.mtime(loom_filepath))  ## convert everytime                                                                                                           \
-                                                                                                                                                                                                                                                   
-            h_env = Basic.safe_parse_json(@project.version.env_json, {})
-            docker_name = "#{h_env['docker_images']['asap_run']['name']}:#{h_env['docker_images']['asap_run']['tag']}"
-            loom_filepath = filepath.dup.to_s
-            loom_filepath.gsub!(/\.h5ad$/, '.loom')
-            # if !File.exist? project_dir + h5ad_file                                                                                                                                                                                              
-            rscript_cmd = "Rscript -e 'library(\\\"sceasy\\\"); loom_file <- \\\"#{loom_filepath}\\\"; sceasy::convertFormat(loom_file, from=\\\"loom\\\", to=\\\"anndata\\\", outFile=\\\"#{filepath.to_s}\\\")'"
-            data_dir = ENV["DATA_DIR"] || ENV["USER_DATA_DIR"]
-            cmd = "docker run --entrypoint '/bin/sh' --rm -v #{data_dir}:#{data_dir} #{docker_name} -c \"#{rscript_cmd}\""
-            logger.debug("CREATE H5AD file: " + cmd)
-            `#{cmd}`
-          end
-        end
+
         if File.exist? filepath
           if ['exec.err', 'exec.out'].include? filename
             content = File.read(filepath)
@@ -5548,7 +5531,9 @@ class ProjectsController < ApplicationController
                  Pathname.new(user_data_dir) + 'users'
                end
     project_dir = base_dir + @project.user_id.to_s + @project.key
-    server_url = ENV.fetch('SERVER_URL').to_s.chomp('/')
+    # Same-origin base so modal download links stay on this instance (SERVER_URL may
+    # point at another host, e.g. production, on shared/dev .env files).
+    server_url = request.base_url.to_s.chomp('/')
 
     h_data_types = DataType.pluck(:id, :name).to_h
     annots = Annot.light.where(project_id: @project.id).includes(:data_type, run: :std_method).to_a
@@ -5595,6 +5580,17 @@ class ProjectsController < ApplicationController
       next unless details
 
       h5ad_path = rel_path.sub(/loom\z/, 'h5ad')
+      export_run = nil
+      h5ad_status = 'missing'
+      begin
+        if rel_path.to_s.match?(/\.loom\z/i)
+          export_run = Basic.latest_h5ad_export_run(@project, rel_path)
+          h5ad_status = Basic.h5ad_export_status(@project, rel_path, run: export_run)
+        end
+      rescue ArgumentError => e
+        Rails.logger.warn("get_loom_files_json: h5ad status skipped for #{rel_path}: #{e.message}")
+      end
+
       list_files.push(
         name: rel_path,
         file_size: helpers.display_mem(details[:file_size]),
@@ -5604,6 +5600,9 @@ class ProjectsController < ApplicationController
         nber_rows: details[:nber_rows],
         url: "#{server_url}#{get_file_project_path(@project.key, filename: rel_path)}",
         url_h5ad: "#{server_url}#{get_file_project_path(@project.key, filename: h5ad_path)}",
+        h5ad_status: h5ad_status,
+        h5ad_run_id: export_run&.id,
+        h5ad_status_id: export_run&.status_id,
         content: h_annots_by_path[rel_path]
       )
     end
@@ -5615,6 +5614,33 @@ class ProjectsController < ApplicationController
     else
       render json: list_files
     end
+  end
+
+  # POST /projects/:id/export_h5ad
+  # Start (or reuse) a hidden export_h5ad SLURM run for a project-relative loom path.
+  def export_h5ad
+    unless readable?(@project) && exportable?(@project)
+      return render json: { error: 'Not authorized to export this file.' }, status: :forbidden
+    end
+
+    loom_rel = params[:input_loom].presence || params[:filename].presence
+    if loom_rel.blank?
+      return render json: { error: 'input_loom is required' }, status: :bad_request
+    end
+
+    user_id = current_user&.id || @project.user_id
+    result = Basic.find_or_start_h5ad_export(Rails.logger, @project, loom_rel, user_id)
+    if result[:error].present? && result[:run].nil?
+      return render json: { error: result[:error], h5ad_status: result[:h5ad_status] }, status: :unprocessable_entity
+    end
+
+    run = result[:run]
+    render json: {
+      run_id: run&.id,
+      status_id: run&.status_id,
+      h5ad_status: result[:h5ad_status],
+      error: result[:error]
+    }
   end
 
   # GET /projects/:id/project_data_files

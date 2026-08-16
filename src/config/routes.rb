@@ -55,6 +55,8 @@ Rails.application.routes.draw do
       get :graph
       get :pipeline_runs
       get :search_gene
+      get :search_gene_memberships
+      get :search_gene_membership_items
       get :search_gene_set_items
       get :gene_set_collection_items
       get :gene_set_collection_status

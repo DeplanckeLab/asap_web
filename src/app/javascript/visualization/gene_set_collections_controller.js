@@ -1124,6 +1124,20 @@ export class GeneSetCollectionsController {
       throw new Error('Failed to load gene details')
     }
     modal.body.innerHTML = html
+    if (typeof window.loadGeneDetailsMemberships === 'function') {
+      try {
+        await window.loadGeneDetailsMemberships(modal.body)
+      } catch (_err) {
+      }
+    }
+    if (typeof window.bindGeneDetailsMembershipExpanders === 'function') {
+      window.bindGeneDetailsMembershipExpanders(modal.body)
+    } else if (typeof window.enhanceGeneDetailsGeneSetCards === 'function') {
+      try {
+        await window.enhanceGeneDetailsGeneSetCards(modal.body)
+      } catch (_err) {
+      }
+    }
   }
 
   async fetchCollectionItems(collectionId, queryText = '') {

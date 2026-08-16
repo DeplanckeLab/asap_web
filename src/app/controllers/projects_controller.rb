@@ -17,14 +17,15 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access annotations].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
+  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection save_batch_compose_metadata]
   before_action :authorize_project_owner_access, only: %i[export_consensus_annotation preview_consensus_annotation]
   GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
   GENE_DETAILS_CACHE_TTL = 24.hours
+  GENE_MEMBERSHIPS_CACHE_TTL = 1.hour
 
   MANUAL_GENE_SET_COLLECTION_ID = 'manual_local'.freeze
   MANUAL_GENE_SET_COLLECTION_NEW_ID = '__new_manual_collection__'.freeze
@@ -2417,50 +2418,159 @@ class ProjectsController < ApplicationController
   # Resolution order: gene_id; then organism_id + ensembl_id; organism_id + symbol;
   # then global ensembl_id; then global symbol (uses organism indexes when possible).
   def search_gene
-    h_env = Basic.safe_parse_json(@project.version.env_json, {})
-    db_version = asap_data_db_name_for_env(h_env, context: "search_gene")
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    timings = {}
 
-    gid_q = params[:gene_id].to_s.strip
-    ens_q = params[:ensembl_id].to_s.strip
-    sym_q = params[:gene_symbol].to_s.strip
+    db_version = nil
+    timings[:env_ms] = search_gene_step_ms do
+      h_env = Basic.safe_parse_json(@project.version.env_json, {})
+      db_version = asap_data_db_name_for_env(h_env, context: "search_gene")
+    end
+
+    gid_q = nil
+    ens_q = nil
+    sym_q = nil
+    timings[:normalize_ms] = search_gene_step_ms do
+      gid_q = params[:gene_id].to_s.strip
+      ens_q, sym_q = normalize_search_gene_identity_params(
+        ensembl_id: params[:ensembl_id],
+        gene_symbol: params[:gene_symbol]
+      )
+    end
 
     cache_key =
       if gid_q.present? || ens_q.present? || sym_q.present?
         [
-          "search_gene/v4",
+          "search_gene/v5",
           db_version.to_s,
           @project.organism_id.to_s,
           gid_q,
-          ens_q,
+          ens_q.downcase,
           sym_q.downcase
         ]
       end
 
-    payload =
-      if cache_key
-        Rails.cache.fetch(cache_key, expires_in: GENE_DETAILS_CACHE_TTL) do
-          gene_row = search_gene_resolve_remote_gene(db_version)
-          if gene_row
-            { "hit" => true, "attrs" => gene_row.attributes.slice(*GENE_DETAILS_CACHE_ATTRS) }
-          else
-            { "hit" => false }
+    cache_hit = true
+    timings[:resolve_ms] = search_gene_step_ms do
+      payload =
+        if cache_key
+          Rails.cache.fetch(cache_key, expires_in: GENE_DETAILS_CACHE_TTL) do
+            cache_hit = false
+            gene_row = search_gene_resolve_remote_gene(db_version)
+            if gene_row
+              { "hit" => true, "attrs" => gene_row.attributes.slice(*GENE_DETAILS_CACHE_ATTRS) }
+            else
+              { "hit" => false }
+            end
           end
+        else
+          cache_hit = false
+          { "hit" => false }
         end
-      else
-        { "hit" => false }
+
+      if payload["hit"] && payload["attrs"].is_a?(Hash) && payload["attrs"]["id"].to_i <= 0
+        refreshed_gene = search_gene_resolve_remote_gene(db_version)
+        payload["attrs"]["id"] = refreshed_gene.id if refreshed_gene
       end
 
-    if payload["hit"] && payload["attrs"].is_a?(Hash) && payload["attrs"]["id"].to_i <= 0
-      refreshed_gene = search_gene_resolve_remote_gene(db_version)
-      payload["attrs"]["id"] = refreshed_gene.id if refreshed_gene
+      @gene = payload["hit"] ? OpenStruct.new(payload["attrs"]) : nil
     end
 
-    @gene = payload["hit"] ? OpenStruct.new(payload["attrs"]) : nil
-    @gene_set_collection_memberships = build_gene_set_collection_memberships_for_gene(@gene, db_version)
+    # Gene-set memberships are loaded asynchronously (search_gene_memberships).
+    @gene_set_collection_memberships = nil
+    timings[:release_feature_ms] = search_gene_step_ms do
+      @ensembl_release_feature = search_gene_ensembl_release_feature(@gene, db_version)
+    end
+
+    timings[:render_ms] = search_gene_step_ms do
+      response.headers["Cache-Control"] = "no-store, max-age=0"
+      response.headers["Pragma"] = "no-cache"
+      render partial: 'projects/views/gene_details', layout: false
+    end
+
+    timings[:total_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
+    Rails.logger.info(
+      "[search_gene.timing] project=#{@project.key} ens=#{ens_q.presence || '-'} sym=#{sym_q.presence || '-'} " \
+      "gid=#{gid_q.presence || '-'} hit=#{@gene.present?} cache_hit=#{cache_hit} db=#{db_version} " \
+      "env_ms=#{timings[:env_ms]} normalize_ms=#{timings[:normalize_ms]} resolve_ms=#{timings[:resolve_ms]} " \
+      "release_feature_ms=#{timings[:release_feature_ms]} render_ms=#{timings[:render_ms]} total_ms=#{timings[:total_ms]}"
+    )
+  end
+
+  # GET /projects/1/search_gene_memberships
+  # Params: gene_id (preferred), and/or ensembl_id / gene_symbol (same as search_gene).
+  def search_gene_memberships
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    timings = {}
+
+    db_version = nil
+    timings[:env_ms] = search_gene_step_ms do
+      h_env = Basic.safe_parse_json(@project.version.env_json, {})
+      db_version = asap_data_db_name_for_env(h_env, context: "search_gene_memberships")
+    end
+
+    timings[:resolve_ms] = search_gene_step_ms do
+      gene =
+        if params[:gene_id].to_s.strip.match?(/\A\d+\z/) && params[:gene_id].to_i.positive?
+          RemoteGene.find_by_remote_id(params[:gene_id].to_i, version: db_version)
+        end
+      gene ||= search_gene_resolve_remote_gene(db_version)
+      @gene = gene
+    end
+
+    timings[:memberships_ms] = search_gene_step_ms do
+      @gene_set_collection_memberships = build_gene_set_collection_memberships_for_gene(@gene, db_version)
+    end
+
+    timings[:render_ms] = search_gene_step_ms do
+      response.headers["Cache-Control"] = "no-store, max-age=0"
+      response.headers["Pragma"] = "no-cache"
+      if @gene
+        render partial: 'projects/views/gene_details_memberships', layout: false
+      else
+        render html: '<div class="pt-2 border-t border-gray-200"><div class="mt-2 text-sm text-gray-500">Gene set collections unavailable.</div></div>'.html_safe
+      end
+    end
+
+    timings[:total_ms] = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
+    Rails.logger.info(
+      "[search_gene_memberships.timing] project=#{@project.key} gene_id=#{@gene&.id || params[:gene_id]} " \
+      "collections=#{Array(@gene_set_collection_memberships).size} " \
+      "env_ms=#{timings[:env_ms]} resolve_ms=#{timings[:resolve_ms]} " \
+      "memberships_ms=#{timings[:memberships_ms]} render_ms=#{timings[:render_ms]} total_ms=#{timings[:total_ms]}"
+    )
+  end
+
+  # GET /projects/1/search_gene_membership_items
+  # Params: gene_id, collection_id
+  def search_gene_membership_items
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    h_env = Basic.safe_parse_json(@project.version.env_json, {})
+    db_version = asap_data_db_name_for_env(h_env, context: "search_gene_membership_items")
+    collection_id = params[:collection_id].to_s.strip
+
+    gene =
+      if params[:gene_id].to_s.strip.match?(/\A\d+\z/) && params[:gene_id].to_i.positive?
+        RemoteGene.find_by_remote_id(params[:gene_id].to_i, version: db_version)
+      end
+    gene ||= search_gene_resolve_remote_gene(db_version)
+
+    memberships = build_gene_set_collection_memberships_for_gene(gene, db_version)
+    collection = Array(memberships).find { |entry| entry[:id].to_s == collection_id }
+
+    @gene = gene
+    @gene_set_membership_collection_id = collection_id
+    @gene_set_membership_collection_label = collection ? collection[:label].to_s : ''
+    @gene_set_membership_items = collection ? Array(collection[:gene_sets]) : []
 
     response.headers["Cache-Control"] = "no-store, max-age=0"
     response.headers["Pragma"] = "no-cache"
-    render partial: 'projects/views/gene_details', layout: false
+    total_ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
+    Rails.logger.info(
+      "[search_gene_membership_items.timing] project=#{@project.key} gene_id=#{gene&.id || params[:gene_id]} " \
+      "collection_id=#{collection_id} items=#{@gene_set_membership_items.size} total_ms=#{total_ms}"
+    )
+    render partial: 'projects/views/gene_details_membership_items', layout: false
   end
 
   # GET /projects/1/search_gene_set_items
@@ -5512,10 +5622,12 @@ class ProjectsController < ApplicationController
   # GET /projects/1/get_autocomplete_genes?loom_file=...
   # Payload:
   # {
-  #   "schema_version": 2,
+  #   "schema_version": 3,
   #   "search": ["Gene ENSID {stable}", ...],
   #   "h_indexes": { "stable" => idx, ... },
-  #   "aliases": { "ENSID" => { "alt" => [...], "obsolete" => [...] }, ... }
+  #   "aliases": { "ENSID" => { "alt" => [...], "obsolete" => [...] }, ... },
+  #   "feature_names": { "stable" => "release symbol", ... },
+  #   "ensembl_release": 101
   # }
   def get_autocomplete_genes
     user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
@@ -5527,8 +5639,17 @@ class ProjectsController < ApplicationController
       loom_file ||= Annot.light.where(project_id: @project.id, dim: 3).order(id: :asc).pick(:filepath)
     end
 
+    empty_payload = {
+      schema_version: GeneAutocompleteBuilder::SCHEMA_VERSION,
+      search: [],
+      h_indexes: {},
+      aliases: {},
+      feature_names: {},
+      ensembl_release: nil
+    }
+
     if loom_file.blank?
-      render json: { schema_version: GeneAutocompleteBuilder::SCHEMA_VERSION, search: [], h_indexes: {}, aliases: {} }
+      render json: empty_payload
       return
     end
 
@@ -5548,27 +5669,28 @@ class ProjectsController < ApplicationController
 
     loom_path = project_dir + loom_file
     unless File.exist?(loom_path)
-      render json: { schema_version: GeneAutocompleteBuilder::SCHEMA_VERSION, search: [], h_indexes: {}, aliases: {} }
+      render json: empty_payload
       return
     end
-
-    gene_values = []
-    accession_values = []
-    stable_values = []
 
     begin
-      gene_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Gene')
-      accession_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Accession')
-      stable_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
+      vectors = H5DataService.get_metadata_vectors(
+        loom_path.to_s,
+        %w[/row_attrs/Gene /row_attrs/Accession /row_attrs/_StableID /row_attrs/feature_name]
+      )
+      gene_values = vectors['/row_attrs/Gene'] || []
+      accession_values = vectors['/row_attrs/Accession'] || []
+      stable_values = vectors['/row_attrs/_StableID'] || []
+      feature_name_values = vectors['/row_attrs/feature_name']
     rescue => e
       Rails.logger.error("get_autocomplete_genes: failed to extract row attrs from #{loom_path}: #{e.message}")
-      render json: { schema_version: GeneAutocompleteBuilder::SCHEMA_VERSION, search: [], h_indexes: {}, aliases: {} }
+      render json: empty_payload
       return
     end
 
-    size = [gene_values&.length || 0, accession_values&.length || 0, stable_values&.length || 0].min
+    size = [gene_values.length, accession_values.length, stable_values.length].min
     if size <= 0
-      render json: { schema_version: GeneAutocompleteBuilder::SCHEMA_VERSION, search: [], h_indexes: {}, aliases: {} }
+      render json: empty_payload
       return
     end
 
@@ -5580,10 +5702,24 @@ class ProjectsController < ApplicationController
       nil
     end
 
+    ensembl_release = nil
+    begin
+      attrs = H5DataService.read_short_global_attr_strings(loom_path.to_s, ['/attrs/ensembl_release'])
+      ensembl_release = attrs['/attrs/ensembl_release'].to_s.strip
+    rescue StandardError => e
+      Rails.logger.info("get_autocomplete_genes: ensembl_release attr unavailable: #{e.message}")
+    end
+    if ensembl_release.blank?
+      meta = Scfair::ProjectEnsemblMetadataResolver.call(@project)
+      ensembl_release = meta&.dig(:ensembl_release)
+    end
+
     payload = GeneAutocompleteBuilder.build(
       gene_values: gene_values,
       accession_values: accession_values,
       stable_values: stable_values,
+      feature_name_values: feature_name_values,
+      ensembl_release: ensembl_release,
       organism_id: @project.organism_id,
       db_version: db_version
     )
@@ -9534,8 +9670,10 @@ class ProjectsController < ApplicationController
     def search_gene_resolve_remote_gene(db_version)
       org_id = @project.organism_id
       gid_str = params[:gene_id].to_s.strip
-      ens = params[:ensembl_id].to_s.strip
-      sym = params[:gene_symbol].to_s.strip
+      ens, sym = normalize_search_gene_identity_params(
+        ensembl_id: params[:ensembl_id],
+        gene_symbol: params[:gene_symbol]
+      )
 
       if gid_str.match?(/\A\d+\z/)
         gid = gid_str.to_i
@@ -9545,25 +9683,156 @@ class ProjectsController < ApplicationController
         end
       end
 
+      # Prefer Ensembl ID over symbol (IDs are unambiguous; symbols collide across organisms).
       if org_id.present?
+        if ens.present?
+          row = RemoteGene.find_by_organism_and_ensembl(org_id, ens, version: db_version)
+          return row if row
+        end
         if sym.present?
           row = RemoteGene.find_by_organism_and_symbol(org_id, sym, version: db_version)
           return row if row
-        end
-        if ens.present?
-          row = RemoteGene.find_by_organism_and_ensembl(org_id, ens, version: db_version)
+          row = find_remote_gene_by_alias(org_id, sym, db_version)
           return row if row
         end
       end
 
       if ens.present?
-        row = RemoteGene.find_by_ensembl_id(ens, version: db_version)
+        row = RemoteGene.find_by_ensembl_id_flexible(ens, version: db_version)
         return row if row
       end
 
-      return RemoteGene.find_by_gene_symbol(sym, version: db_version) if sym.present?
+      if sym.present?
+        row = RemoteGene.find_by_gene_symbol(sym, version: db_version)
+        return row if row
+        return find_remote_gene_by_alias(nil, sym, db_version)
+      end
 
       nil
+    end
+
+    def search_gene_step_ms
+      t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      yield
+      ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000.0).round(1)
+    end
+
+    ENSEMBL_STABLE_ID_RE = /\b((?:ENS[A-Z]{0,4}G|MGP_[A-Za-z0-9]+_G)\d+)(?:\.\d+)?\b/i
+
+    def normalize_search_gene_identity_params(ensembl_id:, gene_symbol:)
+      ens = ensembl_id.to_s.strip
+      sym = gene_symbol.to_s.strip
+
+      extracted = []
+      [ens, sym].each do |text|
+        text.to_s.scan(ENSEMBL_STABLE_ID_RE) { |match| extracted << match[0] }
+      end
+      extracted = extracted.map { |value| value.to_s.sub(/\.\d+\z/, '') }.uniq
+
+      if extracted.any?
+        ens = extracted.first
+      elsif ens.match?(/\A\[.*\]\z/) || (ens.include?(',') && !ens.match?(ENSEMBL_STABLE_ID_RE))
+        # Corrupted clients sometimes send alt-name blobs as ensembl_id.
+        ens = ''
+      end
+
+      if sym.match?(ENSEMBL_STABLE_ID_RE)
+        sym = sym.gsub(ENSEMBL_STABLE_ID_RE, ' ')
+                 .gsub(/\[.*?\]/, ' ')
+                 .gsub(/\s+/, ' ')
+                 .strip
+      end
+
+      [ens, sym]
+    end
+
+    def find_remote_gene_by_alias(organism_id, query, db_version)
+      q = query.to_s.strip
+      return nil if q.blank?
+
+      RemoteGene.with_remote(db_version) do
+        scope = RemoteGene.all
+        scope = scope.where(organism_id: organism_id) if organism_id.present?
+        # Exact token match inside CSV/text alias fields.
+        quoted = RemoteGene.connection.quote(q.downcase)
+        scope.where(
+          "(',' || LOWER(COALESCE(alt_names, '')) || ',') LIKE '%,' || #{quoted} || ',%' OR " \
+          "(',' || LOWER(COALESCE(obsolete_alt_names, '')) || ',') LIKE '%,' || #{quoted} || ',%'"
+        ).order(:id).first
+      end
+    end
+
+    # Returns { ensembl_release:, feature_name: } from loom-backed autocomplete / request
+    # params. Does not read Ensembl gene.txt dumps.
+    def search_gene_ensembl_release_feature(gene, _db_version)
+      feature_name = params[:feature_name].to_s.strip.presence
+      release = params[:ensembl_release].to_s.strip.presence
+
+      if feature_name.blank?
+        from_cache = search_gene_feature_name_from_autocomplete(gene)
+        feature_name = from_cache[:feature_name]
+        release ||= from_cache[:ensembl_release]
+      end
+
+      # No feature_name → omit the row (do not resolve release alone).
+      return nil if feature_name.blank?
+
+      if release.blank?
+        meta = Scfair::ProjectEnsemblMetadataResolver.call(@project)
+        release = meta&.dig(:ensembl_release)
+      end
+
+      release_i = release.to_i
+      return nil unless release_i.positive?
+
+      {
+        ensembl_release: release_i,
+        ensembl_assembly: nil,
+        ensembl_database: nil,
+        feature_name: feature_name,
+        source: :loom
+      }
+    rescue StandardError => e
+      Rails.logger.warn("[search_gene] release feature_name failed: #{e.class} - #{e.message}")
+      nil
+    end
+
+    def search_gene_feature_name_from_autocomplete(gene)
+      result = { feature_name: nil, ensembl_release: nil }
+      loom_file = params[:loom_file].to_s.strip.presence
+      return result if loom_file.blank?
+
+      user_data_dir = ENV['USER_DATA_DIR'] || Rails.root.join('storage', 'user_data').to_s
+      project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
+      autocomplete_file = project_dir + File.dirname(loom_file) + 'autocomplete_genes.json'
+      return result unless File.exist?(autocomplete_file)
+
+      payload = JSON.parse(File.read(autocomplete_file))
+      result[:ensembl_release] = payload['ensembl_release']
+      feature_names = payload['feature_names']
+      return result unless feature_names.is_a?(Hash) && feature_names.any?
+
+      stable_id = params[:stable_id].to_s.strip
+      if stable_id.present? && feature_names[stable_id].present?
+        result[:feature_name] = feature_names[stable_id].to_s.strip.presence
+        return result
+      end
+
+      # Fallback: match Accession in search lines, then look up by stable.
+      ens = gene&.ensembl_id.to_s.strip
+      if ens.present?
+        Array(payload['search']).each do |line|
+          parsed = parse_loom_autocomplete_gene_entry(line)
+          next unless parsed
+          next unless parsed[:ensembl_id].to_s.casecmp(ens).zero?
+
+          result[:feature_name] = feature_names[parsed[:stable_id]].to_s.strip.presence
+          break
+        end
+      end
+      result
+    rescue StandardError
+      { feature_name: nil, ensembl_release: nil }
     end
 
     def build_gene_set_collection_memberships_for_gene(gene, db_version)
@@ -9574,76 +9843,93 @@ class ProjectsController < ApplicationController
       gene_id = gene&.respond_to?(:id) ? gene.id.to_i : 0
       return memberships unless gene_id.positive?
 
+      cache_key = [
+        'search_gene_memberships/v2',
+        db_version.to_s,
+        @project.id.to_s,
+        @project.organism_id.to_s,
+        current_user_id.to_s,
+        gene_id.to_s
+      ]
+      Rails.cache.fetch(cache_key, expires_in: GENE_MEMBERSHIPS_CACHE_TTL) do
+        build_gene_set_collection_memberships_for_gene_uncached(gene_id, db_version, current_user_id)
+      end
+    rescue StandardError => e
+      Rails.logger.error("[search_gene] Failed to build gene set memberships: #{e.class} - #{e.message}")
+      []
+    end
+
+    def build_gene_set_collection_memberships_for_gene_uncached(gene_id, db_version, current_user_id)
+      memberships = []
       global_type_presentation = gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_GLOBAL)
       imported_type_presentation = gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_IMPORTED)
 
-      if gene_id.positive?
-        RemoteGene.with_remote(db_version) do
-          conn = RemoteGene.connection
-          where_sql = [
-            "(gs.project_id IS NULL AND gs.ref_id IS NOT NULL)",
-            "gs.project_id = #{@project.id}"
-          ]
-          if current_user_id.present?
-            where_sql << "(gs.project_id IS NULL AND gs.user_id = #{current_user_id.to_i} AND gs.ref_id IS NULL)"
+      RemoteGene.with_remote(db_version) do
+        conn = RemoteGene.connection
+        where_sql = [
+          "(gs.project_id IS NULL AND gs.ref_id IS NOT NULL)",
+          "gs.project_id = #{@project.id}"
+        ]
+        if current_user_id.present?
+          where_sql << "(gs.project_id IS NULL AND gs.user_id = #{current_user_id.to_i} AND gs.ref_id IS NULL)"
+        end
+
+        # content is CSV of gene ids with no whitespace in asap_data (verified); avoid REGEXP_REPLACE.
+        escaped_gene_id = conn.quote_string(gene_id.to_s)
+        gene_match_sql = "(',' || COALESCE(gsi.content, '') || ',') LIKE '%,#{escaped_gene_id},%'"
+
+        rows = conn.select_all(<<~SQL)
+          SELECT
+            gs.id AS collection_id,
+            gs.label AS collection_label,
+            gs.ref_id,
+            gs.project_id,
+            ds.label AS database_name,
+            gsi.id AS item_id,
+            gsi.identifier AS item_identifier,
+            gsi.name AS item_name
+          FROM gene_sets gs
+          JOIN gene_set_items gsi ON gsi.gene_set_id = gs.id
+          LEFT JOIN db_sets ds ON ds.id = gs.ref_id
+          WHERE gs.organism_id = #{@project.organism_id.to_i}
+            AND COALESCE(gs.obsolete, FALSE) = FALSE
+            AND (#{where_sql.join(' OR ')})
+            AND #{gene_match_sql}
+          ORDER BY LOWER(COALESCE(gs.label, '')), LOWER(COALESCE(gsi.name, gsi.identifier, ''))
+        SQL
+
+        by_collection = {}
+        rows.each do |row|
+          collection_id = row['collection_id'].to_i
+          next if collection_id <= 0
+
+          entry = by_collection[collection_id]
+          unless entry
+            project_id = row['project_id']&.to_i
+            ref_id = row['ref_id']&.to_i
+            type_data = project_id.blank? && ref_id.present? ? global_type_presentation : imported_type_presentation
+            entry = {
+              id: collection_id,
+              label: row['collection_label'].to_s,
+              database_name: row['database_name'].to_s,
+              match_count: 0,
+              gene_sets: []
+            }.merge(type_data)
+            by_collection[collection_id] = entry
           end
 
-          escaped_gene_id = conn.quote_string(gene_id.to_s)
-          gene_match_sql = "(',' || REGEXP_REPLACE(COALESCE(gsi.content, ''), '\\\\s+', '', 'g') || ',') LIKE '%,#{escaped_gene_id},%'"
+          item_label = row['item_name'].to_s.strip
+          item_identifier = row['item_identifier'].to_s.strip
+          entry[:gene_sets] << {
+            id: row['item_id'].to_i,
+            label: item_label.presence || item_identifier,
+            identifier: item_identifier
+          }
+        end
 
-          rows = conn.select_all(<<~SQL)
-            SELECT
-              gs.id AS collection_id,
-              gs.label AS collection_label,
-              gs.ref_id,
-              gs.project_id,
-              ds.label AS database_name,
-              gsi.id AS item_id,
-              gsi.identifier AS item_identifier,
-              gsi.name AS item_name
-            FROM gene_sets gs
-            JOIN gene_set_items gsi ON gsi.gene_set_id = gs.id
-            LEFT JOIN db_sets ds ON ds.id = gs.ref_id
-            WHERE gs.organism_id = #{@project.organism_id.to_i}
-              AND COALESCE(gs.obsolete, FALSE) = FALSE
-              AND (#{where_sql.join(' OR ')})
-              AND #{gene_match_sql}
-            ORDER BY LOWER(COALESCE(gs.label, '')), LOWER(COALESCE(gsi.name, gsi.identifier, ''))
-          SQL
-
-          by_collection = {}
-          rows.each do |row|
-            collection_id = row['collection_id'].to_i
-            next if collection_id <= 0
-
-            entry = by_collection[collection_id]
-            unless entry
-              project_id = row['project_id']&.to_i
-              ref_id = row['ref_id']&.to_i
-              type_data = project_id.blank? && ref_id.present? ? global_type_presentation : imported_type_presentation
-              entry = {
-                id: collection_id,
-                label: row['collection_label'].to_s,
-                database_name: row['database_name'].to_s,
-                match_count: 0,
-                gene_sets: []
-              }.merge(type_data)
-              by_collection[collection_id] = entry
-            end
-
-            item_label = row['item_name'].to_s.strip
-            item_identifier = row['item_identifier'].to_s.strip
-            entry[:gene_sets] << {
-              id: row['item_id'].to_i,
-              label: item_label.presence || item_identifier,
-              identifier: item_identifier
-            }
-          end
-
-          by_collection.each_value do |entry|
-            entry[:match_count] = entry[:gene_sets].length
-            memberships << entry
-          end
+        by_collection.each_value do |entry|
+          entry[:match_count] = entry[:gene_sets].length
+          memberships << entry
         end
       end
 
@@ -9681,9 +9967,6 @@ class ProjectsController < ApplicationController
       end
 
       memberships.sort_by { |entry| entry[:label].to_s.downcase }
-    rescue StandardError => e
-      Rails.logger.error("[search_gene] Failed to build gene set memberships: #{e.class} - #{e.message}")
-      []
     end
 
     def apply_publication_snapshot_to_runs(relation)

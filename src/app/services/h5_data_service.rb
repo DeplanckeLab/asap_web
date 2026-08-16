@@ -669,6 +669,69 @@ class H5DataService
     end
   end
 
+  # Read multiple 1-D loom metadata vectors in one h5py pass.
+  # Returns { "/row_attrs/Gene" => [...], ... }. Missing paths are omitted (not nil).
+  def self.get_metadata_vectors(h5_file, metadata_paths)
+    paths = Array(metadata_paths).map(&:to_s).map { |p| p.start_with?('/') ? p : "/#{p}" }.uniq
+    return {} if paths.empty?
+
+    loom_path = Pathname.new(h5_file.to_s)
+    raise "Loom file not found: #{loom_path}" unless File.exist?(loom_path)
+
+    script = <<~PYTHON
+      import h5py
+      import json
+      import sys
+      import numpy as np
+
+      def decode(value):
+          if value is None:
+              return ""
+          if isinstance(value, (bytes, np.bytes_)):
+              return value.decode("utf-8", "replace")
+          return str(value)
+
+      def read_vec(f, path):
+          name = path[1:] if path.startswith("/") else path
+          if name not in f:
+              return None
+          node = f[name]
+          if not isinstance(node, h5py.Dataset):
+              return None
+          raw = node[()]
+          if isinstance(raw, np.ndarray):
+              items = raw.ravel().tolist()
+          elif isinstance(raw, (list, tuple)):
+              items = list(raw)
+          else:
+              items = [raw]
+          return [decode(v) for v in items]
+
+      paths = json.loads(sys.argv[2])
+      out = {}
+      with h5py.File(sys.argv[1], "r") as f:
+          for path in paths:
+              values = read_vec(f, path)
+              if values is not None:
+                  out[path if path.startswith("/") else "/" + path] = values
+      print(json.dumps(out))
+    PYTHON
+
+    stdout, stderr, status = Open3.capture3(
+      'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-',
+      loom_path.to_s, paths.to_json,
+      stdin_data: script
+    )
+    unless status.success?
+      Rails.logger.error("[H5DataService] get_metadata_vectors failed: #{stderr.presence || stdout}")
+      raise "Metadata extraction failed for #{paths.join(', ')}: #{stderr.presence || stdout}"
+    end
+
+    JSON.parse(stdout)
+  rescue JSON::ParserError => e
+    raise "Metadata extraction failed: invalid JSON (#{e.message})"
+  end
+
   # Compare pairs of 1-D string metadata vectors in one h5py pass.
   # +pairs+ is an Array of hashes with :a/:b (or "a"/"b") paths (with or without leading slash).
   # Returns an Array of { "a" => path, "b" => path, "equal" => true/false/nil, "missing" => bool }.

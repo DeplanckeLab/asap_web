@@ -209,17 +209,41 @@
     return html
   }
 
-  window.openAnnotationPopupGeneModal = function(ensemblId, searchUrl, geneSymbol, remoteGeneId) {
+  window.openAnnotationPopupGeneModal = function(ensemblId, searchUrl, geneSymbol, remoteGeneId, extras) {
     var overlay = document.getElementById('annotation-popup-gene-modal-overlay')
     var body = document.getElementById('annotation-popup-gene-modal-body')
     var title = document.getElementById('annotation-popup-gene-modal-title')
     if (!overlay || !body || !title) return
+    extras = extras || {}
     var ens = ensemblId != null ? String(ensemblId).trim() : ''
     var sym = geneSymbol != null ? String(geneSymbol).trim() : ''
     var rid = remoteGeneId != null ? String(remoteGeneId).trim() : ''
+    var featureName = extras.featureName != null ? String(extras.featureName).trim() : ''
+    var stableId = extras.stableId != null ? String(extras.stableId).trim() : ''
+    var loomFile = extras.loomFile != null ? String(extras.loomFile).trim() : ''
+    var ensemblRelease = extras.ensemblRelease != null ? String(extras.ensemblRelease).trim() : ''
+    var ensemblRe = /\b((?:ENS[A-Z]{0,4}G|MGP_[A-Za-z0-9]+_G)\d+)(?:\.\d+)?\b/i
+    if (!ensemblRe.test(ens)) {
+      var fromSym = sym.match(ensemblRe)
+      if (fromSym) {
+        ens = fromSym[1]
+        sym = sym.replace(fromSym[0], ' ').replace(/\s+/g, ' ').trim()
+      } else {
+        ens = ''
+      }
+    } else {
+      ens = ens.match(ensemblRe)[1]
+    }
+    if (sym.indexOf('[') >= 0) {
+      sym = sym.replace(/\[.*?\]/g, ' ').replace(/\s+/g, ' ').trim()
+    }
     var parts = []
     if (ens) parts.push('ensembl_id=' + encodeURIComponent(ens))
     if (sym) parts.push('gene_symbol=' + encodeURIComponent(sym))
+    if (featureName) parts.push('feature_name=' + encodeURIComponent(featureName))
+    if (stableId) parts.push('stable_id=' + encodeURIComponent(stableId))
+    if (loomFile) parts.push('loom_file=' + encodeURIComponent(loomFile))
+    if (ensemblRelease) parts.push('ensembl_release=' + encodeURIComponent(ensemblRelease))
     if (parts.length === 0) return
     if (sym) title.textContent = sym
     else if (ens) title.textContent = ens
@@ -240,102 +264,136 @@
     var csrfMeta = document.querySelector('meta[name="csrf-token"]')
     var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : ''
     var url = searchUrl + (searchUrl.indexOf('?') >= 0 ? '&' : '?') + parts.join('&') + '&_ts=' + Date.now()
+    var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+    console.info('[gene-details.timing] search_gene fetch start', { ens: ens, sym: sym, url: url })
     fetch(url, { headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html', 'Cache-Control': 'no-cache' }, credentials: 'same-origin' })
-      .then(function(r) { return r.text() })
-      .then(function(html) {
-        body.innerHTML = html
-        if (window.enhanceGeneDetailsGeneSetCards) {
-          window.enhanceGeneDetailsGeneSetCards(body)
+      .then(function(r) { return r.text().then(function(html) { return { ok: r.ok, status: r.status, html: html } }) })
+      .then(function(result) {
+        var t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+        console.info('[gene-details.timing] search_gene fetch done', {
+          status: result.status,
+          ms: Math.round(t1 - t0),
+          html_bytes: result.html ? result.html.length : 0
+        })
+        body.innerHTML = result.html
+        var afterMemberships = function() {
+          var t3 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+          console.info('[gene-details.timing] popup ready (details+memberships)', { ms_from_start: Math.round(t3 - t0) })
+          if (window.bindGeneDetailsMembershipExpanders) {
+            window.bindGeneDetailsMembershipExpanders(body)
+          }
+        }
+        if (window.loadGeneDetailsMemberships) {
+          window.loadGeneDetailsMemberships(body).then(afterMemberships).catch(afterMemberships)
+        } else {
+          afterMemberships()
         }
       })
-      .catch(function() { body.innerHTML = '<div class="text-red-600 text-sm">Failed to load gene details.</div>' })
+      .catch(function(err) {
+        var tErr = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+        console.warn('[gene-details.timing] search_gene fetch failed', { ms: Math.round(tErr - t0), error: String(err) })
+        body.innerHTML = '<div class="text-red-600 text-sm">Failed to load gene details.</div>'
+      })
   }
 
-  window.enhanceGeneDetailsGeneSetCards = async function(rootEl) {
+  window.loadGeneDetailsMemberships = async function(rootEl) {
     var root = rootEl || document.getElementById('annotation-popup-gene-modal-body')
     if (!root) return
-    var cards = Array.from(root.querySelectorAll('[data-gene-set-item-card="true"]'))
-    if (cards.length === 0) return
-
-    var vc = window.visualizationController || null
-    var projectId = (document.getElementById('annotation-popup-overlay') || {}).dataset?.currentProjectId || ''
-    var loomFile = ''
-    if (vc && typeof vc.getCurrentLoomFileForRequest === 'function') {
-      loomFile = String(vc.getCurrentLoomFileForRequest() || '')
+    var slot = root.querySelector('[data-gene-details-memberships-root="true"]')
+    if (!slot) return
+    var geneId = String(slot.dataset.geneId || '').trim()
+    var membershipsUrl = String(slot.dataset.membershipsUrl || '').trim()
+    if (!geneId || !membershipsUrl) return
+    var csrfMeta = document.querySelector('meta[name="csrf-token"]')
+    var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : ''
+    var url = membershipsUrl + (membershipsUrl.indexOf('?') >= 0 ? '&' : '?') +
+      'gene_id=' + encodeURIComponent(geneId) + '&_ts=' + Date.now()
+    var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+    console.info('[gene-details.timing] memberships fetch start', { geneId: geneId })
+    var response = await fetch(url, {
+      headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html', 'Cache-Control': 'no-cache' },
+      credentials: 'same-origin'
+    })
+    var html = await response.text()
+    var t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+    console.info('[gene-details.timing] memberships fetch done', {
+      status: response.status,
+      ms: Math.round(t1 - t0),
+      html_bytes: html ? html.length : 0
+    })
+    if (!response.ok) {
+      slot.innerHTML = '<div class="pt-2 border-t border-gray-200"><div class="mt-2 text-sm text-gray-500">Failed to load gene set collections.</div></div>'
+      return
     }
-    if (!loomFile && vc && vc.currentLoomFile) loomFile = String(vc.currentLoomFile)
+    slot.outerHTML = html
+  }
 
-    var collectionIds = Array.from(new Set(cards.map(function(card) {
-      return String(card.dataset.geneSetCollectionId || '').trim()
-    }).filter(function(v) { return v.length > 0 })))
+  window.bindGeneDetailsMembershipExpanders = function(rootEl) {
+    var root = rootEl || document.getElementById('annotation-popup-gene-modal-body')
+    if (!root) return
+    Array.from(root.querySelectorAll('[data-gene-membership-collection="true"]')).forEach(function(detailsEl) {
+      if (detailsEl.dataset.boundMembershipExpand === 'true') return
+      detailsEl.dataset.boundMembershipExpand = 'true'
+      detailsEl.addEventListener('toggle', function() {
+        if (!detailsEl.open) return
+        if (detailsEl.dataset.membershipItemsLoaded === 'true') return
+        detailsEl.dataset.membershipItemsLoaded = 'true'
+        window.loadGeneDetailsMembershipItems(detailsEl)
+      })
+    })
+  }
 
-    var coverageByItemId = {}
-    if (projectId && loomFile) {
-      await Promise.all(collectionIds.map(async function(collectionId) {
-        try {
-          var params = new URLSearchParams({
-            collection_id: collectionId,
-            query: '',
-            loom_file: loomFile
-          })
-          var response = await fetch('/projects/' + encodeURIComponent(projectId) + '/gene_set_collection_items?' + params.toString(), {
-            method: 'GET',
-            credentials: 'same-origin',
-            headers: { 'Accept': 'application/json' }
-          })
-          var payload = await response.json()
-          if (!response.ok || payload.status !== 'ok') return
-          Array.isArray(payload.items) && payload.items.forEach(function(item) {
-            var itemId = String(item.id || '').trim()
-            if (!itemId) return
-            coverageByItemId[itemId] = {
-              inDataset: Number(item.in_dataset_count || 0),
-              total: Number(item.gene_count || 0)
-            }
-          })
-        } catch (_err) {
-        }
-      }))
-
-      // Fallback: if an item is not present in the collection list payload (pagination/filtering),
-      // fetch exact counts from the per-item endpoint used by the bottom-right panel.
-      await Promise.all(cards.map(async function(card) {
-        var itemId = String(card.dataset.geneSetItemId || '').trim()
-        if (!itemId || coverageByItemId[itemId]) return
-        try {
-          var itemParams = new URLSearchParams({
-            item_id: itemId,
-            loom_file: loomFile
-          })
-          var itemResponse = await fetch('/projects/' + encodeURIComponent(projectId) + '/gene_set_item_genes?' + itemParams.toString(), {
-            method: 'GET',
-            credentials: 'same-origin',
-            headers: { 'Accept': 'application/json' }
-          })
-          var itemPayload = await itemResponse.json()
-          if (!itemResponse.ok || itemPayload.status !== 'ok') return
-          var foundCount = Array.isArray(itemPayload.genes) ? itemPayload.genes.length : 0
-          var missingCount = Array.isArray(itemPayload.missing_genes) ? itemPayload.missing_genes.length : 0
-          coverageByItemId[itemId] = {
-            inDataset: foundCount,
-            total: foundCount + missingCount
-          }
-        } catch (_err) {
-        }
-      }))
+  window.loadGeneDetailsMembershipItems = async function(detailsEl) {
+    if (!detailsEl) return
+    var itemsHost = detailsEl.querySelector('[data-gene-membership-items="true"]')
+    if (!itemsHost) return
+    var geneId = String(detailsEl.dataset.geneId || '').trim()
+    var collectionId = String(detailsEl.dataset.collectionId || '').trim()
+    var itemsUrl = String(detailsEl.dataset.itemsUrl || '').trim()
+    if (!geneId || !collectionId || !itemsUrl) {
+      itemsHost.innerHTML = '<div class="text-sm text-gray-500">Unable to load gene sets.</div>'
+      return
     }
-
-    cards.forEach(function(card) {
-      var itemId = String(card.dataset.geneSetItemId || '').trim()
-      var labelEl = card.querySelector('[data-gene-set-count-label="true"]')
-      if (labelEl) {
-        var counts = coverageByItemId[itemId]
-        if (counts) {
-          labelEl.textContent = counts.inDataset + ' / ' + counts.total + ' genes in dataset'
-        } else {
-          labelEl.textContent = 'Coverage unavailable'
-        }
+    itemsHost.innerHTML = '<div class="text-sm text-gray-500">Loading matching gene sets...</div>'
+    var csrfMeta = document.querySelector('meta[name="csrf-token"]')
+    var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : ''
+    var url = itemsUrl + (itemsUrl.indexOf('?') >= 0 ? '&' : '?') +
+      'gene_id=' + encodeURIComponent(geneId) +
+      '&collection_id=' + encodeURIComponent(collectionId) +
+      '&_ts=' + Date.now()
+    var t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+    try {
+      var response = await fetch(url, {
+        headers: { 'X-CSRF-Token': csrfToken, 'Accept': 'text/html', 'Cache-Control': 'no-cache' },
+        credentials: 'same-origin'
+      })
+      var html = await response.text()
+      var t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
+      console.info('[gene-details.timing] membership items fetch done', {
+        collectionId: collectionId,
+        status: response.status,
+        ms: Math.round(t1 - t0),
+        html_bytes: html ? html.length : 0
+      })
+      if (!response.ok) {
+        itemsHost.innerHTML = '<div class="text-sm text-gray-500">Failed to load gene sets.</div>'
+        detailsEl.dataset.membershipItemsLoaded = 'false'
+        return
       }
+      itemsHost.innerHTML = html
+      if (window.bindGeneDetailsGeneSetCardClicks) {
+        window.bindGeneDetailsGeneSetCardClicks(itemsHost)
+      }
+    } catch (_err) {
+      itemsHost.innerHTML = '<div class="text-sm text-gray-500">Failed to load gene sets.</div>'
+      detailsEl.dataset.membershipItemsLoaded = 'false'
+    }
+  }
+
+  window.bindGeneDetailsGeneSetCardClicks = function(rootEl) {
+    var root = rootEl || document.getElementById('annotation-popup-gene-modal-body')
+    if (!root) return
+    Array.from(root.querySelectorAll('[data-gene-set-item-card="true"]')).forEach(function(card) {
       if (card.dataset.boundGeneSetCardClick === 'true') return
       card.dataset.boundGeneSetCardClick = 'true'
       card.addEventListener('click', async function(event) {
@@ -375,6 +433,16 @@
         }
       })
     })
+  }
+
+  // Kept for callers that still invoke the old name; no longer storms gene_set_item_genes.
+  window.enhanceGeneDetailsGeneSetCards = async function(rootEl) {
+    if (window.bindGeneDetailsMembershipExpanders) {
+      window.bindGeneDetailsMembershipExpanders(rootEl)
+    }
+    if (window.bindGeneDetailsGeneSetCardClicks) {
+      window.bindGeneDetailsGeneSetCardClicks(rootEl)
+    }
   }
 
   window.closeAnnotationPopupGeneModal = function() {

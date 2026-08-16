@@ -81,6 +81,15 @@ class RemoteGene < Asap2RemoteRecord
     end
   end
 
+  def self.find_by_ensembl_id_flexible(ensembl_id, version:)
+    e = ensembl_id.to_s.strip.sub(/\.\d+\z/, '')
+    return nil if e.blank?
+
+    with_remote(version) do
+      where('LOWER(ensembl_id) = ?', e.downcase).order(:id).first
+    end
+  end
+
   def self.find_by_gene_symbol(symbol, version:)
     s = symbol.to_s.strip
     return nil if s.blank?

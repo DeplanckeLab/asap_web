@@ -3,7 +3,7 @@
 # Builds visualization gene autocomplete payloads from loom row attrs, enriched with
 # gene DB alt_names / obsolete_alt_names for ranked client-side search.
 class GeneAutocompleteBuilder
-  SCHEMA_VERSION = 2
+  SCHEMA_VERSION = 3
   BATCH_SIZE = 5_000
 
   class << self
@@ -11,19 +11,24 @@ class GeneAutocompleteBuilder
       payload.is_a?(Hash) &&
         payload['schema_version'].to_i >= SCHEMA_VERSION &&
         payload['search'].is_a?(Array) &&
-        payload['aliases'].is_a?(Hash)
+        payload['aliases'].is_a?(Hash) &&
+        payload['feature_names'].is_a?(Hash)
     end
 
-    def build(gene_values:, accession_values:, stable_values:, organism_id:, db_version:)
+    def build(gene_values:, accession_values:, stable_values:, feature_name_values: nil, ensembl_release: nil, organism_id:, db_version:)
       size = [
         Array(gene_values).length,
         Array(accession_values).length,
         Array(stable_values).length
       ].min
 
+      feature_names_list = Array(feature_name_values)
+      has_feature_names = feature_names_list.length >= size
+
       autocomplete_list = []
       h_indexes = {}
       accessions = []
+      feature_names = {}
 
       size.times do |i|
         gene = gene_values[i].to_s.strip
@@ -34,6 +39,11 @@ class GeneAutocompleteBuilder
         h_indexes[stable] = i
         autocomplete_list << "#{gene} #{accession} {#{stable}}"
         accessions << accession
+
+        if has_feature_names
+          fname = feature_names_list[i].to_s.strip
+          feature_names[stable] = fname if fname.present?
+        end
       end
 
       {
@@ -44,7 +54,9 @@ class GeneAutocompleteBuilder
           accessions: accessions,
           organism_id: organism_id,
           db_version: db_version
-        )
+        ),
+        'feature_names' => feature_names,
+        'ensembl_release' => ensembl_release.to_i.positive? ? ensembl_release.to_i : nil
       }
     end
 

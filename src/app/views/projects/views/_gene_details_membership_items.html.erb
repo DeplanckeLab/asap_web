@@ -1,0 +1,19 @@
+<div class="space-y-2">
+  <% Array(@gene_set_membership_items).each do |gene_set| %>
+    <% item_label = gene_set[:label].presence || gene_set[:identifier].presence || 'Unnamed gene set' %>
+    <button type="button"
+            data-gene-set-item-card="true"
+            data-gene-set-collection-id="<%= @gene_set_membership_collection_id %>"
+            data-gene-set-collection-label="<%= @gene_set_membership_collection_label %>"
+            data-gene-set-item-id="<%= gene_set[:id] %>"
+            class="w-full text-left rounded border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors px-3 py-2">
+      <div class="text-sm font-medium text-gray-900 truncate"><%= item_label %></div>
+      <% if gene_set[:identifier].present? && gene_set[:identifier] != item_label %>
+        <div class="text-xs text-gray-500 mt-1 truncate"><%= gene_set[:identifier] %></div>
+      <% end %>
+    </button>
+  <% end %>
+  <% if Array(@gene_set_membership_items).empty? %>
+    <div class="text-sm text-gray-500">No matching gene sets in this collection.</div>
+  <% end %>
+</div>

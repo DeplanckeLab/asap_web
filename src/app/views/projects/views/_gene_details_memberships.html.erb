@@ -1,0 +1,38 @@
+<div class="pt-2 border-t border-gray-200" data-gene-details-memberships-loaded="true">
+  <div class="flex items-center justify-between">
+    <span class="text-sm text-gray-500">Gene set collections</span>
+    <span class="text-xs text-gray-500"><%= Array(@gene_set_collection_memberships).length %> collections</span>
+  </div>
+
+  <% if Array(@gene_set_collection_memberships).any? %>
+    <div class="mt-2 space-y-2">
+      <% @gene_set_collection_memberships.each do |collection| %>
+        <details class="rounded border border-gray-200 bg-gray-50"
+                 data-gene-membership-collection="true"
+                 data-gene-id="<%= @gene&.id %>"
+                 data-collection-id="<%= collection[:id] %>"
+                 data-collection-label="<%= collection[:label] %>"
+                 data-items-url="<%= search_gene_membership_items_project_path(@project) %>">
+          <summary class="cursor-pointer list-none px-3 py-2 hover:bg-gray-100">
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-sm font-medium text-gray-900 truncate"><%= collection[:label] %></div>
+                <% if collection[:database_name].present? %>
+                  <div class="text-xs text-gray-500 truncate"><%= collection[:database_name] %></div>
+                <% end %>
+              </div>
+              <div class="text-xs font-medium text-gray-600 whitespace-nowrap">
+                <%= collection[:match_count].to_i %> gene sets
+              </div>
+            </div>
+          </summary>
+          <div class="border-t border-gray-200 bg-white px-3 py-2" data-gene-membership-items="true">
+            <div class="text-sm text-gray-500">Expand to load matching gene sets...</div>
+          </div>
+        </details>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="mt-2 text-sm text-gray-500">This gene is not present in any available gene set collection.</div>
+  <% end %>
+</div>

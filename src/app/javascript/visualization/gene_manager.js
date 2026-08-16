@@ -7,6 +7,8 @@ export class GeneManager {
     this.controller = controller
     this.autocompleteData = null
     this.aliasesByEnsembl = {}
+    this.featureNamesByStable = {}
+    this.ensemblRelease = null
     this.currentMatches = []
     this.selectedGene = null
     this.projectIdentifier = null
@@ -888,14 +890,17 @@ export class GeneManager {
           const stableRaw = entry?.stable_id ?? entry?.stableId
           const stableId = String(stableRaw || '').trim()
           if (!stableId) return null
-          const symbol = String(entry?.symbol || '').trim()
-          const ensemblRaw = entry?.ensembl_id ?? entry?.ensemblId ?? ''
-          const ensemblId = String(ensemblRaw).trim()
+          const resolved = this.resolveGeneIdentity({
+            stableId,
+            symbol: entry?.symbol || entry?.name || '',
+            ensemblId: entry?.ensembl_id ?? entry?.ensemblId ?? ''
+          })
           return {
             stableId,
-            symbol: symbol || `Gene ${stableId}`,
-            ensemblId,
-            query: symbol || ensemblId || String(stableId)
+            symbol: resolved.symbol || `Gene ${stableId}`,
+            ensemblId: resolved.ensemblId || '',
+            featureName: this.featureNameForStable(stableId),
+            query: resolved.symbol || resolved.ensemblId || String(stableId)
           }
         })
         .filter((gene) => !!gene)
@@ -974,6 +979,10 @@ export class GeneManager {
 
       const extractedEntries = this.extractAutocompleteEntries(data)
       this.aliasesByEnsembl = this.extractAliasesByEnsembl(data)
+      this.featureNamesByStable = this.extractFeatureNamesByStable(data)
+      this.ensemblRelease = data?.ensembl_release != null && data.ensembl_release !== ''
+        ? Number(data.ensembl_release)
+        : null
       if (extractedEntries.length > 0) {
         this.autocompleteData = extractedEntries
         const geneCount = this.autocompleteData.length
@@ -995,6 +1004,8 @@ export class GeneManager {
       console.error('GeneManager: Error stack:', error.stack)
       this.autocompleteData = []
       this.aliasesByEnsembl = {}
+      this.featureNamesByStable = {}
+      this.ensemblRelease = null
       this.totalGeneCount = 0
       this.updateGeneCountBadge()
       this.autocompleteLoaded = true
@@ -1007,6 +1018,24 @@ export class GeneManager {
     if (Array.isArray(data.search)) return data.search
     if (Array.isArray(data)) return data
     return []
+  }
+
+  extractFeatureNamesByStable(data) {
+    const raw = data && data.feature_names
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+    const out = {}
+    Object.keys(raw).forEach((stableId) => {
+      const key = String(stableId || '').trim()
+      const value = String(raw[stableId] || '').trim()
+      if (key && value) out[key] = value
+    })
+    return out
+  }
+
+  featureNameForStable(stableId) {
+    const key = String(stableId || '').trim()
+    if (!key) return ''
+    return this.featureNamesByStable[key] || ''
   }
 
   extractAliasesByEnsembl(data) {
@@ -1039,18 +1068,64 @@ export class GeneManager {
     const trimmed = entry.trim()
     if (!trimmed) return null
 
-    // Expected format: "SYMBOL ENSEMBL_ID {STABLE_ID}"
-    const braceMatch = trimmed.match(/^(.+?)\s+(\S+)\s+\{([^}]+)\}\s*$/)
-    if (braceMatch) {
-      const [, geneSymbolRaw, ensemblIdRaw, stableIdRaw] = braceMatch
-      const symbol = geneSymbolRaw.trim()
-      const ensemblId = ensemblIdRaw.trim()
-      const stableId = stableIdRaw.trim()
-      if (symbol && ensemblId && stableId) {
-        return { symbol, ensemblId, stableId, raw: entry }
+    // Expected format: "SYMBOL ACCESSION {STABLE_ID}"
+    // Older corrupted caches sometimes appended alt-name blobs after Accession:
+    // "Ednra ENSMUSG... [AEA001,ET-AR,...] {15976}"
+    const braceMatch = trimmed.match(/^(.+)\s+(\S+)\s+\{([^}]+)\}\s*$/)
+    if (!braceMatch) return null
+
+    let symbol = braceMatch[1].trim()
+    let ensemblId = braceMatch[2].trim()
+    const stableId = braceMatch[3].trim()
+    if (!symbol || !ensemblId || !stableId) return null
+
+    const ensemblTokenRe = /^(?:ENS[A-Z]{0,4}G|MGP_[A-Za-z0-9]+_G)\d+(?:\.\d+)?$/i
+    if (!ensemblTokenRe.test(ensemblId)) {
+      const beforeBrace = trimmed.replace(/\s*\{[^}]+\}\s*$/, '').trim()
+      const parts = beforeBrace.split(/\s+/).filter(Boolean)
+      const ensIdx = parts.findIndex((part) => ensemblTokenRe.test(part))
+      if (ensIdx >= 0) {
+        ensemblId = parts[ensIdx].replace(/\.\d+$/, '')
+        symbol = parts.slice(0, ensIdx).join(' ').trim() || ensemblId
+      }
+    } else {
+      ensemblId = ensemblId.replace(/\.\d+$/, '')
+    }
+
+    return { symbol, ensemblId, stableId, raw: entry }
+  }
+
+  isEnsemblLikeId(value) {
+    return /^(?:ENS[A-Z]{0,4}G|MGP_[A-Za-z0-9]+_G)\d+(?:\.\d+)?$/i.test(String(value || '').trim())
+  }
+
+  resolveGeneIdentity(gene = {}) {
+    const stableId = String(gene.stableId || gene.stable_id || '').trim()
+    let symbol = String(gene.symbol || gene.name || '').trim()
+    let ensemblId = String(gene.ensemblId || gene.ensembl_id || '').trim()
+
+    if (stableId && this.autocompleteData?.length) {
+      for (const entry of this.autocompleteData) {
+        const parsed = this.parseAutocompleteEntry(entry)
+        if (parsed && String(parsed.stableId) === String(stableId)) {
+          symbol = parsed.symbol || symbol
+          ensemblId = parsed.ensemblId || ensemblId
+          break
+        }
       }
     }
-    return null
+
+    if (!this.isEnsemblLikeId(ensemblId)) {
+      const fromSymbol = String(symbol).match(/\b((?:ENS[A-Z]{0,4}G|MGP_[A-Za-z0-9]+_G)\d+)(?:\.\d+)?\b/i)
+      if (fromSymbol) {
+        ensemblId = fromSymbol[1]
+        symbol = String(symbol).replace(fromSymbol[0], '').replace(/\s+/g, ' ').trim() || symbol
+      }
+    } else {
+      ensemblId = ensemblId.replace(/\.\d+$/, '')
+    }
+
+    return { symbol, ensemblId, stableId }
   }
 
   // Rank: latest name (0-2) < ensembl id (3-4) < alt (5-6) < obsolete (7-8).
@@ -1215,13 +1290,13 @@ export class GeneManager {
       return
     }
 
-    const { symbol: geneSymbol, ensemblId, stableId } = parsed
-    
+    const resolved = this.resolveGeneIdentity(parsed)
     const gene = {
-      symbol: geneSymbol,
-      ensemblId: ensemblId,
-      stableId,
-      query: geneSymbol
+      symbol: resolved.symbol || parsed.symbol,
+      ensemblId: resolved.ensemblId || parsed.ensemblId,
+      stableId: resolved.stableId || parsed.stableId,
+      featureName: this.featureNameForStable(resolved.stableId || parsed.stableId),
+      query: resolved.symbol || parsed.symbol
     }
 
     // Add to tags if not already present
@@ -2044,6 +2119,7 @@ export class GeneManager {
       symbol: best.symbol,
       ensemblId: best.ensemblId,
       stableId: best.stableId,
+      featureName: this.featureNameForStable(best.stableId),
       originalQuery: query,
       matchSource: best.matchSource,
       matchedAlias: best.matchedAlias
@@ -2219,12 +2295,13 @@ export class GeneManager {
                 data-gene-id="${gene.stableId}"
                 data-gene-symbol="${gene.symbol}"
                 data-ensembl-id="${gene.ensemblId || ''}"
+                data-feature-name="${gene.featureName || this.featureNameForStable(gene.stableId) || ''}"
                 data-remote-gene-id=""
                 style="padding: 4px; color: #9ca3af; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-right: 4px;"
                 onmouseover="this.style.color='#6b7280'; this.style.backgroundColor='#f3f4f6';"
                 onmouseout="this.style.color='#9ca3af'; this.style.backgroundColor='';"
                 title="More gene information"
-                onclick="event.stopPropagation(); (function(btn){ var overlay = document.getElementById('annotation-popup-overlay'); var searchUrl = overlay ? overlay.dataset.searchGeneUrl : ''; if (window.openAnnotationPopupGeneModal && searchUrl) { window.openAnnotationPopupGeneModal(btn.dataset.ensemblId || '', searchUrl, btn.dataset.geneSymbol || '', btn.dataset.remoteGeneId || ''); } })(this);">
+                onclick="event.stopPropagation(); (function(btn){ var overlay = document.getElementById('annotation-popup-overlay'); var searchUrl = overlay ? overlay.dataset.searchGeneUrl : ''; if (!window.openAnnotationPopupGeneModal || !searchUrl) return; var mgr = (window.visualizationController && window.visualizationController.geneManager) || window.geneManager; var resolved = mgr && typeof mgr.resolveGeneIdentity === 'function' ? mgr.resolveGeneIdentity({ stableId: btn.dataset.geneId || '', symbol: btn.dataset.geneSymbol || '', ensemblId: btn.dataset.ensemblId || '' }) : { symbol: btn.dataset.geneSymbol || '', ensemblId: btn.dataset.ensemblId || '', stableId: btn.dataset.geneId || '' }; var featureName = btn.dataset.featureName || (mgr && typeof mgr.featureNameForStable === 'function' ? mgr.featureNameForStable(resolved.stableId || btn.dataset.geneId || '') : ''); var loomFile = (mgr && typeof mgr.resolveCurrentLoomFile === 'function' ? mgr.resolveCurrentLoomFile() : '') || ''; var ensemblRelease = mgr && mgr.ensemblRelease != null ? mgr.ensemblRelease : ''; window.openAnnotationPopupGeneModal(resolved.ensemblId || '', searchUrl, resolved.symbol || '', btn.dataset.remoteGeneId || '', { featureName: featureName, stableId: resolved.stableId || btn.dataset.geneId || '', loomFile: loomFile, ensemblRelease: ensemblRelease }); })(this);">
           <i class="fas fa-info-circle" style="font-size: 14px;"></i>
         </button>
 

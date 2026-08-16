@@ -68,7 +68,8 @@ module Scfair
       extensions = SchemaExtensionValidator.new(
         field_values: field_values,
         format: format,
-        project_compliance: @project_compliance
+        project_compliance: @project_compliance,
+        fragment_assets_dir: fragment_assets_dir_for_validation
       ).call
       metadata_general = MetadataGeneralValidator.new(field_values: field_values, format: format).call
       consensus_official = ConsensusOfficialMetadataValidator.new(
@@ -175,6 +176,13 @@ module Scfair
     end
 
     private
+
+    def fragment_assets_dir_for_validation
+      return unless @project_compliance
+      return if @file_path.blank?
+
+      File.dirname(@file_path.to_s)
+    end
 
     def detect_format(path)
       ext = File.extname(path).downcase

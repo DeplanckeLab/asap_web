@@ -1,0 +1,81 @@
+<%# locals: project:, upload_type_name:, title:, accept_label:, accept_attr:, url_placeholder:, present:, size:, stored_name: %>
+<% radio_name = "dna_accessibility_source_mode_#{upload_type_name}" %>
+<div class="border border-gray-200 rounded-lg p-4"
+     data-controller="dna-accessibility-upload"
+     data-dna-accessibility-upload-project-id-value="<%= project.id %>"
+     data-dna-accessibility-upload-upload-type-name-value="<%= upload_type_name %>"
+     data-dna-accessibility-upload-accept-label-value="<%= accept_label %>"
+     data-dna-accessibility-upload-stored-name-value="<%= stored_name %>"
+     data-dna-accessibility-upload-present-value="<%= present ? 'true' : 'false' %>">
+  <h3 class="text-sm font-semibold text-gray-900 mb-2"><%= title %></h3>
+  <p class="text-xs text-gray-500 mb-3">Accepted format: <code><%= accept_label %></code></p>
+
+  <div class="mb-3 <%= present ? '' : 'hidden' %>" data-dna-accessibility-upload-target="existingWrap">
+    <p class="text-sm text-green-800 bg-green-50 border border-green-200 rounded-md px-3 py-2"
+       data-dna-accessibility-upload-target="existingText">
+      Saved file present<%= size.present? ? " (#{number_to_human_size(size)})" : '' %>:
+      <code>parsing/<%= stored_name %></code>
+    </p>
+  </div>
+
+  <div class="mb-3">
+    <label class="mr-4 text-sm">
+      <input type="radio" name="<%= radio_name %>" value="upload" checked
+             data-dna-accessibility-upload-target="sourceUpload"
+             data-action="change->dna-accessibility-upload#sourceChanged">
+      Upload from browser
+    </label>
+    <label class="text-sm">
+      <input type="radio" name="<%= radio_name %>" value="url"
+             data-dna-accessibility-upload-target="sourceUrl"
+             data-action="change->dna-accessibility-upload#sourceChanged">
+      Download from URL
+    </label>
+  </div>
+
+  <div class="border-2 border-dashed border-gray-300 rounded-lg p-5 text-center hover:border-blue-400 transition-colors"
+       data-dna-accessibility-upload-target="dropzone">
+    <p class="text-gray-700 font-medium text-sm">Choose a <code><%= accept_label %></code> file</p>
+    <p class="text-gray-500 text-xs mt-1">or drag and drop here</p>
+    <input type="file"
+           accept="<%= accept_attr %>"
+           class="hidden"
+           data-dna-accessibility-upload-target="fileInput"
+           data-action="change->dna-accessibility-upload#fileSelected">
+    <button type="button"
+            class="mt-3 px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700"
+            data-action="click->dna-accessibility-upload#openPicker">
+      Select File
+    </button>
+  </div>
+
+  <div class="hidden mt-3 mb-2" data-dna-accessibility-upload-target="urlWrap">
+    <input type="url"
+           placeholder="<%= url_placeholder %>"
+           class="w-full border rounded p-2 text-sm"
+           data-dna-accessibility-upload-target="urlInput"
+           data-action="input->dna-accessibility-upload#urlChanged">
+  </div>
+
+  <div class="mt-2 hidden text-sm text-gray-700" data-dna-accessibility-upload-target="fileInfo"></div>
+
+  <div class="mt-3 flex items-center justify-between gap-4">
+    <div class="text-sm text-gray-700 flex-1 min-h-[1.25rem]" data-dna-accessibility-upload-target="statusText">
+      Waiting for file selection
+    </div>
+    <button type="button"
+            class="shrink-0 px-4 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            data-dna-accessibility-upload-target="submitButton"
+            data-action="click->dna-accessibility-upload#submit"
+            disabled>
+      Save file
+    </button>
+  </div>
+
+  <div class="mt-3 hidden" data-dna-accessibility-upload-target="progressWrap">
+    <div class="h-2 bg-gray-200 rounded">
+      <div class="h-2 bg-blue-600 rounded transition-all" style="width: 0%" data-dna-accessibility-upload-target="progressBar"></div>
+    </div>
+    <div class="text-xs text-gray-600 mt-1" data-dna-accessibility-upload-target="progressDetail"></div>
+  </div>
+</div>

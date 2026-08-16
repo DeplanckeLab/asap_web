@@ -1,0 +1,50 @@
+<%# locals: project:, fragments_present:, fragments_size:, fragments_name:, tbi_present:, tbi_size:, tbi_name: %>
+<% both_present = fragments_present && tbi_present %>
+<div class="bg-white rounded-lg border border-amber-200 p-5 mb-6"
+     data-controller="dna-accessibility-card"
+     data-action="dna-accessibility-upload:saved->dna-accessibility-card#assetSaved"
+     data-dna-accessibility-card-fragments-present-value="<%= fragments_present ? 'true' : 'false' %>"
+     data-dna-accessibility-card-tbi-present-value="<%= tbi_present ? 'true' : 'false' %>">
+  <div class="flex items-start justify-between mb-3">
+    <div>
+      <h2 class="text-lg font-semibold text-gray-900">DNA accessibility (ATAC fragments)</h2>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full whitespace-nowrap <%= both_present ? '' : 'hidden' %>"
+            data-dna-accessibility-card-target="fixedBadge">Fixed</span>
+    </div>
+  </div>
+
+  <p class="text-sm text-amber-800 bg-amber-50 border border-amber-100 rounded-md px-3 py-2 mb-3">
+    ATAC / multiome assay detected; fragment assets should be provided separately.
+  </p>
+  <p class="text-sm text-gray-500 mb-5">
+    Provide both the bgzip-compressed fragments file (<code>.tsv.bgz</code>) and its tabix index (<code>.tsv.bgz.tbi</code>).
+    They are stored under the project parsing directory as
+    <code><%= fragments_name %></code> and <code><%= tbi_name %></code>.
+  </p>
+
+  <div class="space-y-6">
+    <%= render 'compliance/dna_accessibility_asset_upload',
+        project: project,
+        upload_type_name: 'dna_accessibility',
+        title: 'Fragments file',
+        accept_label: '.tsv.bgz',
+        accept_attr: '.bgz,application/gzip',
+        url_placeholder: 'https://example.org/path/fragments.tsv.bgz',
+        present: fragments_present,
+        size: fragments_size,
+        stored_name: fragments_name %>
+
+    <%= render 'compliance/dna_accessibility_asset_upload',
+        project: project,
+        upload_type_name: 'dna_accessibility_tbi',
+        title: 'Tabix index',
+        accept_label: '.tsv.bgz.tbi',
+        accept_attr: '.tbi',
+        url_placeholder: 'https://example.org/path/fragments.tsv.bgz.tbi',
+        present: tbi_present,
+        size: tbi_size,
+        stored_name: tbi_name %>
+  </div>
+</div>

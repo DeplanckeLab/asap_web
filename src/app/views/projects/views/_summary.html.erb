@@ -39,6 +39,18 @@ font-size: inherit;
 
 <%
   can_edit_project_title = editable?(@project) && !@project.public?
+  can_manage_summary_collection =
+    @summary_collection.present? &&
+    editable?(@project) &&
+    (
+      admin? ||
+      (
+        owner?(@project) &&
+        !@summary_collection.catalog_backed? &&
+        @summary_collection.owned_by?(current_user)
+      )
+    )
+  can_edit_collection_title = can_manage_summary_collection
   summary_run_counts = project_run_counts(@project)
   summary_total_runs = summary_run_counts.values.sum
   summary_loom_file_count = @summary_loom_file_count || 0
@@ -643,7 +655,30 @@ summary_search_gene_url = search_gene_project_path(@project)
           <% end %>
         </div>
         <div class="space-y-2">
-          <p class="text-gray-900 font-medium leading-snug"><%= @summary_collection.display_title %></p>
+          <div id="project-collection-title-editor"
+               data-collection-title="<%= @summary_collection.display_title %>"
+               data-collection-id="<%= @summary_collection.id %>"
+               data-update-url="<%= project_path(@project, format: :json) %>"
+               class="flex items-center gap-2 min-w-0">
+            <p id="project-collection-title-text" class="text-gray-900 font-medium leading-snug min-w-0"><%= @summary_collection.display_title %></p>
+            <% if can_edit_collection_title %>
+              <button id="project-collection-title-edit-button"
+                      type="button"
+                      class="pointer-events-auto shrink-0 text-gray-400 hover:text-blue-600"
+                      title="Edit collection name"
+                      aria-label="Edit collection name">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4"><path d="M16.862 3.487a2.1 2.1 0 113 2.97L8.4 17.92l-4.2 1.2 1.2-4.2L16.862 3.487z" /></svg>
+              </button>
+              <div id="project-collection-title-edit-controls" class="pointer-events-auto hidden flex items-center gap-2 w-full min-w-0">
+                <input id="project-collection-title-input"
+                       type="text"
+                       value="<%= @summary_collection.display_title %>"
+                       class="w-full px-2 py-1 border rounded">
+                <button id="project-collection-title-save-button" type="button" class="badge-text shrink-0 px-2 py-1 rounded bg-blue-600 text-white">Save</button>
+                <button id="project-collection-title-cancel-button" type="button" class="badge-text shrink-0 px-2 py-1 rounded bg-gray-200 text-gray-700">Cancel</button>
+              </div>
+            <% end %>
+          </div>
           <% if summary_other_collection_links.any? %>
             <div class="flex flex-wrap items-center gap-1.5">
               <% summary_other_collection_links.each do |link| %>
@@ -653,17 +688,19 @@ summary_search_gene_url = search_gene_project_path(@project)
               <% end %>
             </div>
           <% end %>
-          <% if @summary_collection.description.present? %>
-            <p class="text-gray-600 leading-snug"><%= truncate(@summary_collection.description, length: 160) %></p>
+          <% if @summary_collection.description.present? || can_manage_summary_collection %>
+            <p id="summary-collection-card-description"
+               class="text-gray-600 leading-snug <%= @summary_collection.description.present? ? '' : 'hidden' %>"
+               data-full-description="<%= @summary_collection.description.to_s %>"><%= truncate(@summary_collection.description.to_s, length: 160) if @summary_collection.description.present? %></p>
           <% end %>
           <% if summary_collection_project_count.positive? %>
-            <p class="badge-text text-blue-700 font-medium">
+            <p id="summary-collection-card-count" class="badge-text text-blue-700 font-medium">
               <%= summary_collection_project_count %>
               <%= summary_collection_project_count == 1 ? 'project' : 'projects' %>
               in this collection
             </p>
           <% else %>
-            <p class="italic text-gray-400">No readable projects in this collection</p>
+            <p id="summary-collection-card-count" class="italic text-gray-400">No readable projects in this collection</p>
           <% end %>
         </div>
       </div>
@@ -720,14 +757,41 @@ summary_search_gene_url = search_gene_project_path(@project)
         </button>
       </div>
       <div class="p-4 overflow-auto flex-1 min-h-0 space-y-4">
-        <% if @summary_collection.description.present? %>
-          <div>
-            <p class="badge-text font-semibold text-gray-700 mb-1">Description</p>
-            <p class="text-gray-700 leading-snug whitespace-pre-wrap"><%= @summary_collection.description %></p>
+        <% if @summary_collection.description.present? || can_manage_summary_collection %>
+          <div id="project-collection-description-editor"
+               data-collection-description="<%= @summary_collection.description.to_s %>"
+               data-update-url="<%= project_path(@project, format: :json) %>"
+               data-collection-id="<%= @summary_collection.id %>">
+            <div class="flex items-center gap-2 mb-1">
+              <p class="badge-text font-semibold text-gray-700">Description</p>
+              <% if can_manage_summary_collection %>
+                <button id="project-collection-description-edit-button"
+                        type="button"
+                        class="text-gray-400 hover:text-blue-600"
+                        title="Edit collection description"
+                        aria-label="Edit collection description">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-4 h-4"><path d="M16.862 3.487a2.1 2.1 0 113 2.97L8.4 17.92l-4.2 1.2 1.2-4.2L16.862 3.487z" /></svg>
+                </button>
+              <% end %>
+            </div>
+            <p id="project-collection-description-text"
+               class="text-gray-700 leading-snug whitespace-pre-wrap <%= @summary_collection.description.present? ? '' : 'italic text-gray-400' %>"><%= @summary_collection.description.present? ? @summary_collection.description : 'No description.' %></p>
+            <% if can_manage_summary_collection %>
+              <div id="project-collection-description-edit-controls" class="hidden space-y-2">
+                <textarea id="project-collection-description-input"
+                          rows="4"
+                          class="w-full px-2 py-1 border rounded text-gray-700 leading-snug"
+                          placeholder="Optional description"><%= @summary_collection.description %></textarea>
+                <div class="flex items-center gap-2">
+                  <button id="project-collection-description-save-button" type="button" class="badge-text px-2 py-1 rounded bg-blue-600 text-white">Save</button>
+                  <button id="project-collection-description-cancel-button" type="button" class="badge-text px-2 py-1 rounded bg-gray-200 text-gray-700">Cancel</button>
+                </div>
+              </div>
+            <% end %>
           </div>
         <% end %>
         <div>
-          <p class="badge-text font-semibold text-gray-700 mb-2">
+          <p id="summary-collection-modal-count" class="badge-text font-semibold text-gray-700 mb-2">
             <% if summary_collection_project_count.positive? %>
               <%= summary_collection_project_count %>
               <%= summary_collection_project_count == 1 ? 'project' : 'projects' %>
@@ -735,11 +799,29 @@ summary_search_gene_url = search_gene_project_path(@project)
               Projects
             <% end %>
           </p>
+          <% if can_manage_summary_collection %>
+            <div id="summary-collection-add-project"
+                 class="relative mb-3"
+                 data-autocomplete-url="<%= collection_owned_project_autocomplete_project_path(@project) %>"
+                 data-add-url="<%= collection_add_project_project_path(@project) %>"
+                 data-current-project-id="<%= @project.id %>">
+              <label for="summary-collection-add-project-input" class="sr-only">Add a project you own</label>
+              <input id="summary-collection-add-project-input"
+                     type="text"
+                     autocomplete="off"
+                     class="w-full px-2 py-1.5 border border-gray-300 rounded text-sm"
+                     placeholder="Add a project you own…">
+              <ul id="summary-collection-add-project-results"
+                  class="hidden absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-auto rounded border border-gray-200 bg-white shadow-lg"></ul>
+              <p id="summary-collection-add-project-feedback" class="hidden mt-1 text-xs text-red-600"></p>
+            </div>
+          <% end %>
           <% if summary_collection_project_count.positive? %>
-            <div class="rounded-lg border border-gray-100 divide-y divide-gray-100">
+            <div id="summary-collection-projects-list" class="rounded-lg border border-gray-100 divide-y divide-gray-100">
               <% summary_collection_projects.each do |collection_project| %>
                 <% is_current_collection_project = collection_project.id == @project.id %>
-                <div class="px-3 py-2 <%= is_current_collection_project ? 'bg-blue-50/60' : 'hover:bg-gray-50' %>">
+                <div class="px-3 py-2 <%= is_current_collection_project ? 'bg-blue-50/60' : 'hover:bg-gray-50' %>"
+                     data-collection-project-id="<%= collection_project.id %>">
                   <div class="flex items-start gap-1.5 min-w-0">
                     <%= link_to collection_project.display_name, project_path(collection_project, view: 'summary'),
                                 class: "font-medium truncate #{is_current_collection_project ? 'text-gray-900' : 'text-blue-700 hover:text-blue-900 hover:underline'}" %>
@@ -759,7 +841,8 @@ summary_search_gene_url = search_gene_project_path(@project)
               <% end %>
             </div>
           <% else %>
-            <p class="italic text-gray-400">No readable projects in this collection</p>
+            <div id="summary-collection-projects-list" class="hidden rounded-lg border border-gray-100 divide-y divide-gray-100"></div>
+            <p id="summary-collection-projects-empty" class="italic text-gray-400">No readable projects in this collection</p>
           <% end %>
         </div>
       </div>
@@ -1559,6 +1642,499 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
   </script>
 <% end %>
 
+<% if can_edit_collection_title %>
+  <script>
+    (function initializeProjectCollectionTitleEditor() {
+      const editor = document.getElementById('project-collection-title-editor')
+      if (!editor || editor.dataset.initialized === 'true') return
+      editor.dataset.initialized = 'true'
+
+      const titleText = document.getElementById('project-collection-title-text')
+      const editButton = document.getElementById('project-collection-title-edit-button')
+      const editControls = document.getElementById('project-collection-title-edit-controls')
+      const input = document.getElementById('project-collection-title-input')
+      const saveButton = document.getElementById('project-collection-title-save-button')
+      const cancelButton = document.getElementById('project-collection-title-cancel-button')
+      const modalTitle = document.getElementById('summary-collection-modal-title')
+      const collectionTrigger = document.querySelector('[data-summary-collection-trigger]')
+      if (!titleText || !editButton || !editControls || !input || !saveButton || !cancelButton) return
+
+      let currentTitle = editor.dataset.collectionTitle || titleText.textContent.trim()
+      const updateUrl = editor.dataset.updateUrl
+      const collectionId = editor.dataset.collectionId
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+
+      const showEditMode = (event) => {
+        if (event) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+        titleText.classList.add('hidden')
+        editButton.classList.add('hidden')
+        editControls.classList.remove('hidden')
+        input.value = currentTitle
+        input.focus()
+        input.select()
+      }
+
+      const showReadMode = (event) => {
+        if (event) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+        editControls.classList.add('hidden')
+        titleText.classList.remove('hidden')
+        editButton.classList.remove('hidden')
+        input.value = currentTitle
+      }
+
+      const applyTitleEverywhere = (nextTitle) => {
+        currentTitle = nextTitle
+        editor.dataset.collectionTitle = nextTitle
+        titleText.textContent = nextTitle
+        if (modalTitle) modalTitle.textContent = nextTitle
+        if (collectionTrigger) {
+          collectionTrigger.setAttribute('aria-label', 'Open project collection details: ' + nextTitle)
+        }
+      }
+
+      const saveTitle = async (event) => {
+        if (event) {
+          event.preventDefault()
+          event.stopPropagation()
+        }
+
+        const nextTitle = input.value.trim()
+        if (!nextTitle) {
+          alert('Collection title cannot be empty.')
+          return
+        }
+        if (nextTitle === currentTitle) {
+          showReadMode()
+          return
+        }
+
+        saveButton.disabled = true
+        try {
+          const response = await fetch(updateUrl, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({
+              project_collection_assignment: {
+                mode: 'existing',
+                project_collection_id: collectionId,
+                title: nextTitle
+              }
+            })
+          })
+
+          if (!response.ok) {
+            let message = 'Failed to update collection title.'
+            try {
+              const body = await response.json()
+              if (body && body.error) message = body.error
+            } catch (_error) {}
+            throw new Error(message)
+          }
+
+          applyTitleEverywhere(nextTitle)
+          showReadMode()
+        } catch (error) {
+          alert(error.message || 'Failed to update collection title.')
+        } finally {
+          saveButton.disabled = false
+        }
+      }
+
+      editButton.addEventListener('click', showEditMode)
+      cancelButton.addEventListener('click', showReadMode)
+      saveButton.addEventListener('click', saveTitle)
+      editControls.addEventListener('click', (event) => event.stopPropagation())
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          event.stopPropagation()
+          saveTitle()
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          showReadMode()
+        }
+      })
+    })()
+  </script>
+<% end %>
+
+<% if can_manage_summary_collection %>
+  <script>
+    (function initializeProjectCollectionDescriptionEditor() {
+      const editor = document.getElementById('project-collection-description-editor')
+      if (!editor || editor.dataset.initialized === 'true') return
+      editor.dataset.initialized = 'true'
+
+      const descriptionText = document.getElementById('project-collection-description-text')
+      const editButton = document.getElementById('project-collection-description-edit-button')
+      const editControls = document.getElementById('project-collection-description-edit-controls')
+      const input = document.getElementById('project-collection-description-input')
+      const saveButton = document.getElementById('project-collection-description-save-button')
+      const cancelButton = document.getElementById('project-collection-description-cancel-button')
+      const cardDescription = document.getElementById('summary-collection-card-description')
+      if (!descriptionText || !editButton || !editControls || !input || !saveButton || !cancelButton) return
+
+      let currentDescription = editor.dataset.collectionDescription || ''
+      const updateUrl = editor.dataset.updateUrl
+      const collectionId = editor.dataset.collectionId
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+
+      const truncateText = (value, length) => {
+        const text = String(value || '')
+        if (text.length <= length) return text
+        return text.slice(0, Math.max(0, length - 3)).trimEnd() + '...'
+      }
+
+      const renderDescription = (value) => {
+        currentDescription = value || ''
+        editor.dataset.collectionDescription = currentDescription
+        if (currentDescription) {
+          descriptionText.textContent = currentDescription
+          descriptionText.classList.remove('italic', 'text-gray-400')
+          descriptionText.classList.add('text-gray-700')
+        } else {
+          descriptionText.textContent = 'No description.'
+          descriptionText.classList.add('italic', 'text-gray-400')
+        }
+        if (cardDescription) {
+          cardDescription.dataset.fullDescription = currentDescription
+          if (currentDescription) {
+            cardDescription.textContent = truncateText(currentDescription, 160)
+            cardDescription.classList.remove('hidden')
+          } else {
+            cardDescription.textContent = ''
+            cardDescription.classList.add('hidden')
+          }
+        }
+      }
+
+      const showEditMode = () => {
+        descriptionText.classList.add('hidden')
+        editButton.classList.add('hidden')
+        editControls.classList.remove('hidden')
+        input.value = currentDescription
+        input.focus()
+      }
+
+      const showReadMode = () => {
+        editControls.classList.add('hidden')
+        descriptionText.classList.remove('hidden')
+        editButton.classList.remove('hidden')
+        input.value = currentDescription
+      }
+
+      const saveDescription = async () => {
+        const nextDescription = input.value.replace(/\s+$/g, '')
+        if (nextDescription === currentDescription) {
+          showReadMode()
+          return
+        }
+
+        saveButton.disabled = true
+        try {
+          const response = await fetch(updateUrl, {
+            method: 'PATCH',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({
+              project_collection_assignment: {
+                mode: 'existing',
+                project_collection_id: collectionId,
+                description: nextDescription
+              }
+            })
+          })
+
+          if (!response.ok) {
+            let message = 'Failed to update collection description.'
+            try {
+              const body = await response.json()
+              if (body && body.error) message = body.error
+            } catch (_error) {}
+            throw new Error(message)
+          }
+
+          renderDescription(nextDescription)
+          showReadMode()
+        } catch (error) {
+          alert(error.message || 'Failed to update collection description.')
+        } finally {
+          saveButton.disabled = false
+        }
+      }
+
+      editButton.addEventListener('click', showEditMode)
+      cancelButton.addEventListener('click', showReadMode)
+      saveButton.addEventListener('click', saveDescription)
+      input.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          showReadMode()
+        }
+      })
+    })()
+  </script>
+
+  <script>
+    (function initializeSummaryCollectionAddProject() {
+      const root = document.getElementById('summary-collection-add-project')
+      if (!root || root.dataset.initialized === 'true') return
+      root.dataset.initialized = 'true'
+
+      const input = document.getElementById('summary-collection-add-project-input')
+      const results = document.getElementById('summary-collection-add-project-results')
+      const feedback = document.getElementById('summary-collection-add-project-feedback')
+      const list = document.getElementById('summary-collection-projects-list')
+      const emptyState = document.getElementById('summary-collection-projects-empty')
+      const modalCount = document.getElementById('summary-collection-modal-count')
+      const cardCount = document.getElementById('summary-collection-card-count')
+      if (!input || !results || !feedback || !list) return
+
+      const autocompleteUrl = root.dataset.autocompleteUrl
+      const addUrl = root.dataset.addUrl
+      const currentProjectId = String(root.dataset.currentProjectId || '')
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+      let debounceTimer = null
+      let activeController = null
+      let selectedIndex = -1
+
+      const escapeHtml = (value) => String(value == null ? '' : value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+
+      const hideResults = () => {
+        results.classList.add('hidden')
+        results.innerHTML = ''
+        selectedIndex = -1
+      }
+
+      const showFeedback = (message) => {
+        if (!message) {
+          feedback.textContent = ''
+          feedback.classList.add('hidden')
+          return
+        }
+        feedback.textContent = message
+        feedback.classList.remove('hidden')
+      }
+
+      const updateCounts = (count) => {
+        const n = Number(count || 0)
+        if (modalCount) {
+          modalCount.textContent = n > 0
+            ? (n + (n === 1 ? ' project' : ' projects'))
+            : 'Projects'
+        }
+        if (cardCount) {
+          if (n > 0) {
+            cardCount.className = 'badge-text text-blue-700 font-medium'
+            cardCount.textContent = n + (n === 1 ? ' project' : ' projects') + ' in this collection'
+          } else {
+            cardCount.className = 'italic text-gray-400'
+            cardCount.textContent = 'No readable projects in this collection'
+          }
+        }
+        if (emptyState) {
+          if (n > 0) emptyState.classList.add('hidden')
+          else emptyState.classList.remove('hidden')
+        }
+        if (n > 0) list.classList.remove('hidden')
+        else if (emptyState) list.classList.add('hidden')
+      }
+
+      const buildProjectRow = (project) => {
+        const isCurrent = !!project.current || String(project.id) === currentProjectId
+        const row = document.createElement('div')
+        row.className = 'px-3 py-2 ' + (isCurrent ? 'bg-blue-50/60' : 'hover:bg-gray-50')
+        row.dataset.collectionProjectId = String(project.id)
+
+        const nameWrap = document.createElement('div')
+        nameWrap.className = 'flex items-start gap-1.5 min-w-0'
+        const link = document.createElement('a')
+        link.href = project.url
+        link.textContent = project.name
+        link.className = 'font-medium truncate ' + (isCurrent ? 'text-gray-900' : 'text-blue-700 hover:text-blue-900 hover:underline')
+        nameWrap.appendChild(link)
+        row.appendChild(nameWrap)
+
+        const badges = document.createElement('div')
+        badges.className = 'mt-1 flex flex-wrap items-center gap-1.5'
+        if (project.key) {
+          const keyBadge = document.createElement('span')
+          keyBadge.className = 'badge-text px-1.5 py-0 rounded bg-blue-100 text-blue-800 whitespace-nowrap'
+          keyBadge.textContent = project.key
+          badges.appendChild(keyBadge)
+        }
+        if (project.public_id) {
+          const publicBadge = document.createElement('span')
+          publicBadge.className = 'badge-text px-1.5 py-0 rounded bg-green-100 text-green-800 whitespace-nowrap'
+          publicBadge.textContent = 'ASAP' + project.public_id
+          badges.appendChild(publicBadge)
+        }
+        if (isCurrent) {
+          const currentBadge = document.createElement('span')
+          currentBadge.className = 'badge-text px-1.5 py-0 rounded bg-gray-100 text-gray-700 whitespace-nowrap'
+          currentBadge.textContent = 'Current'
+          badges.appendChild(currentBadge)
+        }
+        row.appendChild(badges)
+        return row
+      }
+
+      const prependProject = (project, projectCount) => {
+        const existing = list.querySelector('[data-collection-project-id="' + String(project.id) + '"]')
+        if (existing) existing.remove()
+        list.prepend(buildProjectRow(project))
+        updateCounts(projectCount)
+      }
+
+      const highlightResults = () => {
+        Array.from(results.children).forEach((item, index) => {
+          item.classList.toggle('bg-blue-50', index === selectedIndex)
+        })
+      }
+
+      const renderResults = (projects) => {
+        results.innerHTML = ''
+        selectedIndex = -1
+        if (!projects.length) {
+          const empty = document.createElement('li')
+          empty.className = 'px-3 py-2 text-sm text-gray-500'
+          empty.textContent = 'No matching projects'
+          results.appendChild(empty)
+          results.classList.remove('hidden')
+          return
+        }
+
+        projects.forEach((project) => {
+          const item = document.createElement('li')
+          item.className = 'px-3 py-2 text-sm cursor-pointer hover:bg-gray-50'
+          item.dataset.projectId = String(project.id)
+          item.innerHTML =
+            '<div class="font-medium text-gray-900 truncate">' + escapeHtml(project.name) + '</div>' +
+            '<div class="text-xs text-gray-500 truncate">' +
+              escapeHtml([project.key, project.public_id ? ('ASAP' + project.public_id) : ''].filter(Boolean).join(' · ')) +
+            '</div>'
+          item.addEventListener('mousedown', (event) => {
+            event.preventDefault()
+            addProject(project.id)
+          })
+          results.appendChild(item)
+        })
+        results.classList.remove('hidden')
+      }
+
+      const searchProjects = async (query) => {
+        if (activeController) activeController.abort()
+        activeController = new AbortController()
+        showFeedback('')
+        try {
+          const url = autocompleteUrl + (autocompleteUrl.includes('?') ? '&' : '?') + 'q=' + encodeURIComponent(query)
+          const response = await fetch(url, {
+            headers: { 'Accept': 'application/json' },
+            signal: activeController.signal
+          })
+          if (!response.ok) {
+            let message = 'Failed to search projects.'
+            try {
+              const body = await response.json()
+              if (body && body.error) message = body.error
+            } catch (_error) {}
+            throw new Error(message)
+          }
+          const body = await response.json()
+          renderResults(Array.isArray(body.projects) ? body.projects : [])
+        } catch (error) {
+          if (error && error.name === 'AbortError') return
+          hideResults()
+          showFeedback(error.message || 'Failed to search projects.')
+        }
+      }
+
+      const addProject = async (projectId) => {
+        hideResults()
+        input.value = ''
+        showFeedback('')
+        try {
+          const response = await fetch(addUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify({ project_id: projectId })
+          })
+          const body = await response.json().catch(() => ({}))
+          if (!response.ok) {
+            throw new Error((body && body.error) || 'Failed to add project.')
+          }
+          if (body.project) prependProject(body.project, body.project_count)
+        } catch (error) {
+          showFeedback(error.message || 'Failed to add project.')
+        }
+      }
+
+      input.addEventListener('input', () => {
+        const query = input.value.trim()
+        window.clearTimeout(debounceTimer)
+        if (!query) {
+          hideResults()
+          showFeedback('')
+          return
+        }
+        debounceTimer = window.setTimeout(() => searchProjects(query), 200)
+      })
+
+      input.addEventListener('keydown', (event) => {
+        const items = Array.from(results.querySelectorAll('[data-project-id]'))
+        if (event.key === 'ArrowDown') {
+          if (!items.length) return
+          event.preventDefault()
+          selectedIndex = (selectedIndex + 1) % items.length
+          highlightResults()
+        } else if (event.key === 'ArrowUp') {
+          if (!items.length) return
+          event.preventDefault()
+          selectedIndex = selectedIndex <= 0 ? items.length - 1 : selectedIndex - 1
+          highlightResults()
+        } else if (event.key === 'Enter') {
+          if (selectedIndex >= 0 && items[selectedIndex]) {
+            event.preventDefault()
+            addProject(items[selectedIndex].dataset.projectId)
+          }
+        } else if (event.key === 'Escape') {
+          event.preventDefault()
+          event.stopPropagation()
+          hideResults()
+        }
+      })
+
+      input.addEventListener('blur', () => {
+        window.setTimeout(hideResults, 150)
+      })
+    })()
+  </script>
+<% end %>
+
 <% if summary_tier3_has_collection %>
   <script>
     (function initializeSummaryCollectionModal() {
@@ -1588,7 +2164,12 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
         if (event.target === overlay) closeModal()
       })
       document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && !overlay.classList.contains('hidden')) closeModal()
+        if (event.key !== 'Escape' || overlay.classList.contains('hidden')) return
+        const descriptionControls = document.getElementById('project-collection-description-edit-controls')
+        if (descriptionControls && !descriptionControls.classList.contains('hidden')) return
+        const addResults = document.getElementById('summary-collection-add-project-results')
+        if (addResults && !addResults.classList.contains('hidden')) return
+        closeModal()
       })
     })()
   </script>

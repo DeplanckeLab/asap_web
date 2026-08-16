@@ -383,6 +383,36 @@ class ComplianceController < ApplicationController
       field_values[path] = vals if vals.present?
     end
     @current_trigger_values['field_values'] = field_values
+
+    atac_field_values = (@validation_result[:field_values] || @validation_result['field_values'] || {}).deep_dup
+    assay_path = format == 'h5ad' ? 'obs/assay_ontology_term_id' : '/col_attrs/assay_ontology_term_id'
+    assay_vals = raw_values[assay_path] || raw_values['/col_attrs/assay_ontology_term_id']
+    if assay_vals.blank? && @loom_path.present?
+      assay_vals = fix_ui_values_from_validation_or_loom(
+        @validation_result,
+        @loom_path,
+        ['/col_attrs/assay_ontology_term_id']
+      )['/col_attrs/assay_ontology_term_id']
+    end
+    if assay_vals.present?
+      atac_field_values[assay_path] = assay_vals
+      atac_field_values['/col_attrs/assay_ontology_term_id'] = assay_vals
+    end
+
+    @needs_dna_accessibility_upload = compliance_atac_assay_present?(
+      @validation_result,
+      field_values: atac_field_values,
+      format: format
+    )
+    parsing_dir = @project.data_dir.join('parsing')
+    @dna_accessibility_fragments_name = DnaAccessibilityFinalizeService::ASSETS['dna_accessibility'][:target_name]
+    @dna_accessibility_tbi_name = DnaAccessibilityFinalizeService::ASSETS['dna_accessibility_tbi'][:target_name]
+    @dna_accessibility_fragments_path = parsing_dir.join(@dna_accessibility_fragments_name)
+    @dna_accessibility_tbi_path = parsing_dir.join(@dna_accessibility_tbi_name)
+    @dna_accessibility_fragments_present = File.exist?(@dna_accessibility_fragments_path)
+    @dna_accessibility_tbi_present = File.exist?(@dna_accessibility_tbi_path)
+    @dna_accessibility_fragments_size = @dna_accessibility_fragments_present ? File.size(@dna_accessibility_fragments_path) : nil
+    @dna_accessibility_tbi_size = @dna_accessibility_tbi_present ? File.size(@dna_accessibility_tbi_path) : nil
   end
 
   # POST /compliance/projects/:id/apply_fix

@@ -46,6 +46,11 @@ class FuDownloadFromUrlJob < ApplicationJob
 
     content_sha256 ||= InputFileSha256.hexdigest_file(upload_file_path)
 
+    if dna_accessibility_upload?(fu)
+      finalize_dna_accessibility!(fu, content_sha256: content_sha256, downloaded_size: downloaded_size)
+      return
+    end
+
     if version_id.blank?
       raise ArgumentError,
             'version_id is required for URL download preparsing (select a release on the upload form)'
@@ -79,9 +84,13 @@ class FuDownloadFromUrlJob < ApplicationJob
     Rails.logger.error("[FuDownloadFromUrlJob] Download failed for Fu##{fu_id}: #{e.class} - #{e.message}")
     fu&.update(status: 'download_failed')
   rescue StandardError => e
-    Rails.logger.error("[FuDownloadFromUrlJob] Preparsing failed for Fu##{fu_id}: #{e.class} - #{e.message}")
+    Rails.logger.error("[FuDownloadFromUrlJob] Job failed for Fu##{fu_id}: #{e.class} - #{e.message}")
     Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
-    fu&.update(status: 'preparsing_failed')
+    if fu && dna_accessibility_upload?(fu)
+      fu.update(status: 'download_failed')
+    else
+      fu&.update(status: 'preparsing_failed')
+    end
     broadcast(fu.id, status: 'failed', error: e.message) if fu
   end
 
@@ -93,6 +102,49 @@ class FuDownloadFromUrlJob < ApplicationJob
   end
 
   private
+
+  def dna_accessibility_upload?(fu)
+    DnaAccessibilityFinalizeService.dna_accessibility_upload_type?(UploadType.name_for(fu.upload_type))
+  end
+
+  def finalize_dna_accessibility!(fu, content_sha256:, downloaded_size:)
+    project = fu.project
+    raise DnaAccessibilityFinalizeService::Error, 'Project is required for DNA accessibility upload' unless project
+
+    source = fu.file_path
+    raise DnaAccessibilityFinalizeService::Error, 'Downloaded file not found' unless source && File.exist?(source)
+
+    upload_type_name = UploadType.name_for(fu.upload_type)
+    name = fu.name.to_s
+    ext = DnaAccessibilityFinalizeService.extension_for(name)
+    config = DnaAccessibilityFinalizeService.asset_config_for(upload_type_name)
+    unless config && config[:allowed_extensions].include?(ext)
+      name = DnaAccessibilityFinalizeService.default_filename_for(upload_type_name)
+      raise DnaAccessibilityFinalizeService::Error, 'Unknown DNA accessibility upload type' if name.blank?
+    end
+
+    fu.update!(
+      name: name,
+      upload_file_size: downloaded_size,
+      content_sha256: content_sha256,
+      status: 'uploaded'
+    )
+    InputFileSha256.clear_state!(fu.id)
+
+    result = DnaAccessibilityFinalizeService.new(
+      fu: fu,
+      project: project,
+      upload_type_name: upload_type_name
+    ).call
+    broadcast(
+      fu.id,
+      status: 'completed',
+      stage: 'dna_accessibility',
+      saved_path: result[:path],
+      saved_filename: result[:filename],
+      saved_size: result[:size]
+    )
+  end
 
   def stream_download_with_sha256!(url, dest_path)
     digest = Digest::SHA256.new
@@ -136,6 +188,6 @@ class FuDownloadFromUrlJob < ApplicationJob
   end
 
   def broadcast(fu_id, payload)
-    ActionCable.server.broadcast("fu_#{fu_id}", payload.merge(fu_id: fu_id, stage: 'preparsing'))
+    ActionCable.server.broadcast("fu_#{fu_id}", { stage: 'preparsing', fu_id: fu_id }.merge(payload))
   end
 end

@@ -11,6 +11,8 @@ module ComplianceHelpers
     if respond_to?(:helper_method)
       helper_method :compliance_report_uses_check_groups?
       helper_method :compliance_check_report_payload
+      helper_method :compliance_needs_fix?
+      helper_method :compliance_atac_assay_present?
     end
   end
 
@@ -19,6 +21,35 @@ module ComplianceHelpers
 
     stored = validation_result[:check_groups] || validation_result['check_groups']
     stored.is_a?(Array) && stored.any?
+  end
+
+  # Fix Compliance when invalid or when any warnings remain (not only Edit metadata).
+  def compliance_needs_fix?(validation_result)
+    return false if validation_result.blank?
+
+    valid = validation_result[:valid] == true || validation_result['valid'] == true
+    return true unless valid
+
+    warnings = validation_result[:warnings] || validation_result['warnings'] || []
+    count = validation_result[:warnings_count] || validation_result['warnings_count'] || warnings.size
+    count.to_i.positive? || Array(warnings).any?
+  end
+
+  # True when assay (or atac attrs) matches ATAC / multiome — same rule as extension.atac.
+  def compliance_atac_assay_present?(validation_result, field_values: nil, format: nil)
+    values = field_values.presence ||
+             validation_result&.dig(:field_values) ||
+             validation_result&.dig('field_values')
+    return false if values.blank?
+
+    resolved_format = format.presence ||
+                      validation_result&.dig(:format) ||
+                      validation_result&.dig('format') ||
+                      'loom'
+    Scfair::SchemaExtensionValidator.atac_enabled?(
+      field_values: values,
+      format: resolved_format.to_s
+    )
   end
 
   def compliance_check_report_payload(validation_result, check_groups)

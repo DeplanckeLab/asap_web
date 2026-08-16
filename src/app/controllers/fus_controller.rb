@@ -9,6 +9,7 @@ class FusController < ApplicationController
     fu_id = params[:fu_id]
     upload_type = resolved_upload_type
     compliance_upload = compliance_upload?(upload_type)
+    dna_accessibility_upload = dna_accessibility_upload?(upload_type)
     
     # Clean filename
     filename.gsub!(/[()\[\]#?$]/, '')
@@ -16,9 +17,15 @@ class FusController < ApplicationController
     if compliance_upload
       ComplianceFileCheckQueueService.validate_upload!(filename: filename, file_size: file_size)
     end
+    if dna_accessibility_upload
+      DnaAccessibilityFinalizeService.validate_filename!(
+        filename,
+        upload_type_name: UploadType.name_for(upload_type)
+      )
+    end
     
     # Extract file extension and create input filename.
-    # Preserve compound archive extensions like .tar.gz.
+    # Preserve compound archive extensions like .tar.gz / .tsv.gz.
     input_filename = build_input_filename(filename)
     
     # Find or create Fu record for tracking resumable upload
@@ -27,12 +34,16 @@ class FusController < ApplicationController
            find_fu_for_current_actor(fu_id)
          else
            resetting_project = resetting_parsing_project_for_current_actor
+           dna_project = dna_accessibility_upload ? resolve_dna_accessibility_project! : nil
+           attached_project = dna_project || resetting_project
            # Create new Fu record on first chunk
            Fu.new(
             user_id: current_user&.id,
-            project_id: resetting_project&.id,
-            project_key: if current_user
-                           resetting_project&.key
+            project_id: attached_project&.id,
+            project_key: if attached_project
+                           attached_project.key
+                         elsif current_user
+                           nil
                          else
                            session[:sandbox]
                          end,
@@ -170,7 +181,7 @@ class FusController < ApplicationController
       version_id = safe_integer_param(:version_id)
       
       # Store upload info in session for project creation
-      unless compliance_upload?(fu.upload_type)
+      unless compliance_upload?(fu.upload_type) || dna_accessibility_upload?(fu.upload_type)
         session[:file_upload] = {
           fu_id: fu.id,
           original_filename: filename,
@@ -202,6 +213,24 @@ class FusController < ApplicationController
           return
         end
 
+        if dna_accessibility_upload?(fu.upload_type)
+          project = fu.project || resolve_dna_accessibility_project!
+          finalize_result = DnaAccessibilityFinalizeService.new(fu: fu, project: project).call
+          progress = 100.0
+          render json: {
+            fu_id: fu.id,
+            chunk_index: chunk_index,
+            uploaded_size: current_size,
+            complete: true,
+            progress: progress,
+            status: 'completed',
+            saved_path: finalize_result[:path],
+            saved_filename: finalize_result[:filename],
+            saved_size: finalize_result[:size]
+          }
+          return
+        end
+
         if version_id.blank?
           render json: { error: 'Select an ASAP release before finishing the upload' }, status: :unprocessable_entity
           return
@@ -226,7 +255,7 @@ class FusController < ApplicationController
         error: e.message,
         error_code: ComplianceFileCheckQueueService::UNSUPPORTED_FORMAT_ERROR_CODE
       }, status: :unprocessable_entity
-    rescue ArgumentError => e
+    rescue ArgumentError, DnaAccessibilityFinalizeService::Error => e
       render json: { error: e.message }, status: :unprocessable_entity
     rescue => e
       Rails.logger.error "Upload error: #{e.message}"
@@ -270,6 +299,9 @@ class FusController < ApplicationController
       is_complete = if compliance_upload?(fu.upload_type)
                       %w[validating validated validation_failed].include?(fu.status) ||
                         (fu.status != 'downloading' && fu.complete?)
+                    elsif dna_accessibility_upload?(fu.upload_type)
+                      %w[uploaded completed].include?(fu.status) ||
+                        (fu.status != 'downloading' && fu.complete?)
                     else
                       %w[uploaded preparsing preparsed completed].include?(fu.status) ||
                         (fu.status != 'downloading' && fu.complete?)
@@ -307,6 +339,18 @@ class FusController < ApplicationController
     begin
       require 'open-uri'
       require 'uri'
+
+      upload_type_name = (request_body['upload_type_name'] || params[:upload_type_name]).to_s.strip
+      upload_type_id = if upload_type_name.present?
+                         id = UploadType.id_for(upload_type_name)
+                         raise ArgumentError, "Unknown upload type: #{upload_type_name}" unless id
+
+                         id
+                       else
+                         UploadType.id_for('project_input')
+                       end
+      dna_accessibility_upload = dna_accessibility_upload?(upload_type_id)
+      dna_project = dna_accessibility_upload ? resolve_dna_accessibility_project!(request_body) : nil
       
       # Auto-add protocol if missing
       unless url.match?(/^https?:\/\//i)
@@ -324,9 +368,19 @@ class FusController < ApplicationController
       # Extract filename from URL or use default
       filename = uri_obj.path.split('/').last.presence || 'downloaded_file'
       filename.gsub!(/[()\[\]#?$]/, '') # Clean filename
+
+      if dna_accessibility_upload
+        upload_type_name_for_ext = UploadType.name_for(upload_type_id)
+        ext = DnaAccessibilityFinalizeService.extension_for(filename)
+        config = DnaAccessibilityFinalizeService.asset_config_for(upload_type_name_for_ext)
+        unless config && config[:allowed_extensions].include?(ext)
+          filename = DnaAccessibilityFinalizeService.default_filename_for(upload_type_name_for_ext) ||
+                     'dna_accessibility.tsv.bgz'
+        end
+      end
       
       # Extract file extension and create input filename.
-      # Preserve compound archive extensions like .tar.gz.
+      # Preserve compound archive extensions like .tar.gz / .tsv.bgz / .tsv.bgz.tbi.
       file_ext = extract_upload_extension(filename)
       file_ext = '.txt' if file_ext.blank?
       input_filename = "input_file#{file_ext}"
@@ -335,34 +389,62 @@ class FusController < ApplicationController
       # Only unattached uploads: a Fu already linked to a project must not be reused for a new project.
       # Include standalone compliance-check statuses so a file already fetched for
       # /compliance/file-check can be moved into a new project without a second download.
-      reusable_fu = fu_scope_for_current_actor.where(url: normalized_url, project_id: nil)
-                      .where(status: %w[downloading uploaded preparsing preparsed completed validated validation_failed])
-                      .order(updated_at: :desc)
-                      .detect do |candidate|
-        if candidate.status == 'downloading'
-          # Reuse only fresh in-progress downloads; stale records should not block new attempts.
-          candidate.updated_at && candidate.updated_at > 30.minutes.ago
-        else
-          path = candidate.file_path
-          path && File.exist?(path) && File.size(path) > 0
+      # DNA accessibility uploads are project-scoped and never reuse project_input Fus.
+      unless dna_accessibility_upload
+        reusable_fu = fu_scope_for_current_actor.where(url: normalized_url, project_id: nil)
+                        .where(status: %w[downloading uploaded preparsing preparsed completed validated validation_failed])
+                        .order(updated_at: :desc)
+                        .detect do |candidate|
+          if candidate.status == 'downloading'
+            # Reuse only fresh in-progress downloads; stale records should not block new attempts.
+            candidate.updated_at && candidate.updated_at > 30.minutes.ago
+          else
+            path = candidate.file_path
+            path && File.exist?(path) && File.size(path) > 0
+          end
         end
-      end
 
-      if reusable_fu
-        reusable_fu.adopt_as_project_input!
-        reusable_fu.reload
-        upload_path = reusable_fu.file_path
-        size = (upload_path && File.exist?(upload_path)) ? File.size(upload_path) : 0
-        organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)
-        version_id = request_body['version_id'] || safe_integer_param(:version_id)
-
-        if preparsing_result_stale?(reusable_fu, requested_version_id: version_id)
-          Rails.logger.info(
-            "[FusController#download_from_url] Re-preparsing reused Fu##{reusable_fu.id} " \
-            "(stale output or version #{version_id} != #{reusable_fu.preparsing_version_id})"
-          )
-          enqueue_preparsing_job(reusable_fu, organism_id: organism_id, version_id: version_id)
+        if reusable_fu
+          reusable_fu.adopt_as_project_input!
           reusable_fu.reload
+          upload_path = reusable_fu.file_path
+          size = (upload_path && File.exist?(upload_path)) ? File.size(upload_path) : 0
+          organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)
+          version_id = request_body['version_id'] || safe_integer_param(:version_id)
+
+          if preparsing_result_stale?(reusable_fu, requested_version_id: version_id)
+            Rails.logger.info(
+              "[FusController#download_from_url] Re-preparsing reused Fu##{reusable_fu.id} " \
+              "(stale output or version #{version_id} != #{reusable_fu.preparsing_version_id})"
+            )
+            enqueue_preparsing_job(reusable_fu, organism_id: organism_id, version_id: version_id)
+            reusable_fu.reload
+
+            session[:file_upload] = {
+              fu_id: reusable_fu.id,
+              original_filename: reusable_fu.name.presence || filename,
+              input_filename: reusable_fu.upload_file_name,
+              path: upload_path&.to_s,
+              size: size,
+              total_size: reusable_fu.upload_file_size || size,
+              complete: false,
+              organism_id: organism_id,
+              version_id: version_id
+            }
+
+            render json: {
+              success: true,
+              fu_id: reusable_fu.id,
+              filename: reusable_fu.name.presence || filename,
+              size: size,
+              status: reusable_fu.status,
+              reused: false
+            }
+            return
+          end
+
+          status = reusable_fu.status == 'completed' ? 'uploaded' : reusable_fu.status
+          is_complete = %w[uploaded preparsing preparsed completed].include?(reusable_fu.status)
 
           session[:file_upload] = {
             fu_id: reusable_fu.id,
@@ -371,7 +453,7 @@ class FusController < ApplicationController
             path: upload_path&.to_s,
             size: size,
             total_size: reusable_fu.upload_file_size || size,
-            complete: false,
+            complete: is_complete,
             organism_id: organism_id,
             version_id: version_id
           }
@@ -381,67 +463,47 @@ class FusController < ApplicationController
             fu_id: reusable_fu.id,
             filename: reusable_fu.name.presence || filename,
             size: size,
-            status: reusable_fu.status,
-            reused: false
+            status: status,
+            reused: true
           }
           return
         end
-
-        status = reusable_fu.status == 'completed' ? 'uploaded' : reusable_fu.status
-        is_complete = %w[uploaded preparsing preparsed completed].include?(reusable_fu.status)
-
-        session[:file_upload] = {
-          fu_id: reusable_fu.id,
-          original_filename: reusable_fu.name.presence || filename,
-          input_filename: reusable_fu.upload_file_name,
-          path: upload_path&.to_s,
-          size: size,
-          total_size: reusable_fu.upload_file_size || size,
-          complete: is_complete,
-          organism_id: organism_id,
-          version_id: version_id
-        }
-
-        render json: {
-          success: true,
-          fu_id: reusable_fu.id,
-          filename: reusable_fu.name.presence || filename,
-          size: size,
-          status: status,
-          reused: true
-        }
-        return
       end
 
       fu = Fu.create!(
         user_id: current_user&.id,
-        project_key: current_user ? nil : session[:sandbox],
+        project_id: dna_project&.id,
+        project_key: dna_project&.key || (current_user ? nil : session[:sandbox]),
         upload_file_name: input_filename,
         upload_file_size: 0,
         status: 'downloading',
         name: filename,
-        url: normalized_url
+        url: normalized_url,
+        upload_type: upload_type_id
       )
 
       # Get organism_id and version_id from request body (already parsed) or params
       organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)
       version_id = request_body['version_id'] || safe_integer_param(:version_id)
 
-      upload_dir = Pathname.new(Fu.global_upload_root).join(fu.id.to_s)
+      upload_dir = fu.upload_dir
+      FileUtils.mkdir_p(upload_dir)
       upload_file_path = upload_dir.join(input_filename)
 
-      # Store upload info in session for project creation (completion checked through Fu status)
-      session[:file_upload] = {
-        fu_id: fu.id,
-        original_filename: filename,
-        input_filename: input_filename,
-        path: upload_file_path.to_s,
-        size: 0,
-        total_size: 0,
-        complete: false,
-        organism_id: organism_id,
-        version_id: version_id
-      }
+      unless dna_accessibility_upload
+        # Store upload info in session for project creation (completion checked through Fu status)
+        session[:file_upload] = {
+          fu_id: fu.id,
+          original_filename: filename,
+          input_filename: input_filename,
+          path: upload_file_path.to_s,
+          size: 0,
+          total_size: 0,
+          complete: false,
+          organism_id: organism_id,
+          version_id: version_id
+        }
+      end
 
       FuDownloadFromUrlJob.perform_later(
         fu.id,
@@ -459,6 +521,8 @@ class FusController < ApplicationController
     rescue URI::InvalidURIError => e
       Rails.logger.error "Invalid URL: #{url} - #{e.message}"
       render json: { error: "Invalid URL: #{e.message}" }, status: :bad_request
+    rescue ArgumentError, DnaAccessibilityFinalizeService::Error => e
+      render json: { error: e.message }, status: :unprocessable_entity
     rescue OpenURI::HTTPError => e
       Rails.logger.error "HTTP error downloading from URL: #{url} - #{e.message}"
       render json: { error: "Failed to download file: HTTP error - #{e.message}" }, status: :bad_request
@@ -806,6 +870,22 @@ class FusController < ApplicationController
     UploadType.name_for(upload_type_id) == 'compliance_file_check'
   end
 
+  def dna_accessibility_upload?(upload_type_id)
+    DnaAccessibilityFinalizeService.dna_accessibility_upload_type?(UploadType.name_for(upload_type_id))
+  end
+
+  def resolve_dna_accessibility_project!(request_body = nil)
+    raw_id = params[:project_id].presence
+    raw_id ||= request_body['project_id'] if request_body.is_a?(Hash)
+    raise ArgumentError, 'project_id is required for DNA accessibility upload' if raw_id.blank?
+
+    project = Project.find_by(id: raw_id) || Project.find_by(key: raw_id.to_s)
+    raise ArgumentError, 'Project not found' unless project
+    raise ArgumentError, 'Not authorized for this project' unless editable?(project)
+
+    project
+  end
+
   def upload_type_id_from_name_param
     name = params[:upload_type_name].to_s.strip
     return if name.blank?
@@ -819,6 +899,9 @@ class FusController < ApplicationController
   def extract_upload_extension(filename)
     normalized = filename.to_s.downcase
     multi_part_extension = %w[
+      .tsv.bgz.tbi
+      .tsv.bgz
+      .tsv.gz
       .tar.gz
       .tar.bz2
       .tar.xz

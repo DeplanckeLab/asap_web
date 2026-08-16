@@ -2,10 +2,11 @@
 
 module Scfair
   class SchemaExtensionValidator
-    def initialize(field_values:, format:, project_compliance: false)
+    def initialize(field_values:, format:, project_compliance: false, fragment_assets_dir: nil)
       @field_values = field_values || {}
       @format = format
       @project_compliance = project_compliance
+      @fragment_assets_dir = fragment_assets_dir
       @resolver = OntologyLineageResolver.new
     end
 
@@ -30,9 +31,17 @@ module Scfair
       end
 
       if atac_enabled?
-        message = 'ATAC extension detected; fragment assets should be provided separately'
-        warnings << { field: 'extension.atac', message: message }
-        valid_checks << { field: 'extension.atac', status: 'warning', message: message }
+        if fragment_assets_present?
+          valid_checks << {
+            field: 'extension.atac',
+            status: 'passed',
+            message: 'ATAC fragment assets provided (dna_accessibility.tsv.bgz and dna_accessibility.tsv.bgz.tbi)'
+          }
+        else
+          message = 'ATAC extension detected; fragment assets should be provided separately'
+          warnings << { field: 'extension.atac', message: message }
+          valid_checks << { field: 'extension.atac', status: 'warning', message: message }
+        end
       else
         valid_checks << { field: 'extension.atac', status: 'skipped', message: 'No ATAC extension detected' }
       end
@@ -49,6 +58,12 @@ module Scfair
     end
 
     private
+
+    def fragment_assets_present?
+      return false unless @project_compliance
+
+      DnaAccessibilityFinalizeService.assets_present?(@fragment_assets_dir)
+    end
 
     def key(path)
       return path if @format == 'h5ad'
@@ -118,6 +133,11 @@ module Scfair
 
     def perturb_enabled?
       PerturbAssayHelper.perturb_enabled?(@field_values, @format)
+    end
+
+    # 10x multiome, scATAC-seq (EFO:0010891) and descendants, or present atac attrs.
+    def self.atac_enabled?(field_values:, format: 'loom')
+      new(field_values: field_values || {}, format: format).send(:atac_enabled?)
     end
 
     def atac_enabled?

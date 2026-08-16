@@ -193,6 +193,12 @@ console.log('Compliance fix controller registered')
 import IsolatedComplianceController from "controllers/isolated_compliance_controller"
 application.register("isolated-compliance", IsolatedComplianceController)
 
+import DnaAccessibilityUploadController from "controllers/dna_accessibility_upload_controller"
+application.register("dna-accessibility-upload", DnaAccessibilityUploadController)
+
+import DnaAccessibilityCardController from "controllers/dna_accessibility_card_controller"
+application.register("dna-accessibility-card", DnaAccessibilityCardController)
+
 import ComplianceCheckReportController from "controllers/compliance_check_report_controller"
 application.register("compliance-check-report", ComplianceCheckReportController)
 console.log('Isolated compliance controller registered')

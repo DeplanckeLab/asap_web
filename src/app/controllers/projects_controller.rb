@@ -17,10 +17,10 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access annotations].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
   before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
-  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection]
+  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection collection_owned_project_autocomplete collection_add_project]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection save_batch_compose_metadata]
   before_action :authorize_project_owner_access, only: %i[export_consensus_annotation preview_consensus_annotation]
   GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
@@ -1708,6 +1708,81 @@ class ProjectsController < ApplicationController
       message: 'No change.',
       notice: 'No change.'
     )
+  end
+
+  # GET /projects/:id/collection_owned_project_autocomplete
+  def collection_owned_project_autocomplete
+    collection = @project.project_collection
+    unless collection && can_manage_project_collection?(collection)
+      return render json: { error: 'Not authorized to manage this collection.' }, status: :forbidden
+    end
+    unless current_user
+      return render json: { error: 'Authentication required.' }, status: :unauthorized
+    end
+
+    query = params[:q].to_s.strip
+    scope = Project.not_deleted.where(user_id: current_user.id)
+    scope = scope.where.not(id: collection.projects.select(:id))
+    if query.present?
+      like = "%#{ActiveRecord::Base.sanitize_sql_like(query)}%"
+      scope = scope.where(
+        "COALESCE(name, '') ILIKE :q OR COALESCE(key, '') ILIKE :q OR CAST(id AS TEXT) ILIKE :q OR CAST(public_id AS TEXT) ILIKE :q",
+        q: like
+      )
+    end
+
+    projects = scope
+      .order(Arel.sql("LOWER(COALESCE(name, '')) ASC"), :id)
+      .limit(20)
+      .to_a
+
+    render json: {
+      projects: projects.map { |project| summary_collection_project_payload(project) }
+    }
+  end
+
+  # POST /projects/:id/collection_add_project
+  def collection_add_project
+    collection = @project.project_collection
+    unless collection && can_manage_project_collection?(collection)
+      return render json: { error: 'Not authorized to manage this collection.' }, status: :forbidden
+    end
+    unless current_user
+      return render json: { error: 'Authentication required.' }, status: :unauthorized
+    end
+
+    target_id = params[:project_id].to_i
+    if target_id <= 0
+      return render json: { error: 'Select a project to add.' }, status: :unprocessable_entity
+    end
+
+    target = Project.not_deleted.find_by(id: target_id)
+    unless target
+      return render json: { error: 'Project not found.' }, status: :not_found
+    end
+    unless target.user_id == current_user.id
+      return render json: { error: 'You can only add projects you own.' }, status: :forbidden
+    end
+    if target.project_collection_id == collection.id
+      return render json: {
+        error: 'Project is already in this collection.',
+        project: summary_collection_project_payload(target, current: target.id == @project.id)
+      }, status: :unprocessable_entity
+    end
+
+    begin
+      authorize_project_collection_assignment!(collection)
+      target.update!(project_collection_id: collection.id)
+    rescue ArgumentError => e
+      return render json: { error: e.message }, status: :unprocessable_entity
+    end
+
+    member_count = collection.projects.not_deleted.count
+    render json: {
+      success: true,
+      project: summary_collection_project_payload(target, current: target.id == @project.id),
+      project_count: member_count
+    }
   end
 
   def publication_status_payload(success:, message: nil, error: nil)
@@ -12148,14 +12223,19 @@ class ProjectsController < ApplicationController
         collection = ProjectCollection.find(collection_id)
         authorize_project_collection_assignment!(collection, editing_metadata: true)
 
-        title = assignment[:title].to_s.strip
-        raise ArgumentError, 'Collection title is required' if title.blank?
+        updates = {}
+        if assignment.key?(:title)
+          title = assignment[:title].to_s.strip
+          raise ArgumentError, 'Collection title is required' if title.blank?
 
-        if admin? || collection.owned_by?(current_user)
-          collection.update!(
-            title: title,
-            description: assignment[:description].to_s.presence
-          )
+          updates[:title] = title
+        end
+        if assignment.key?(:description)
+          updates[:description] = assignment[:description].to_s.presence
+        end
+
+        if updates.any? && (admin? || collection.owned_by?(current_user))
+          collection.update!(updates)
         end
         @project.project_collection_id = collection.id
       when 'new'
@@ -12188,6 +12268,24 @@ class ProjectsController < ApplicationController
       unless collection.owned_by?(current_user)
         raise ArgumentError, 'You can only assign this project to a collection you created'
       end
+    end
+
+    def can_manage_project_collection?(collection)
+      return false unless collection && editable?(@project)
+      return true if admin?
+
+      owner?(@project) && !collection.catalog_backed? && collection.owned_by?(current_user)
+    end
+
+    def summary_collection_project_payload(project, current: false)
+      {
+        id: project.id,
+        name: project.display_name,
+        key: project.key,
+        public_id: project.public? ? project.public_id : nil,
+        url: project_path(project, view: 'summary'),
+        current: current
+      }
     end
 
     def load_compliance_context

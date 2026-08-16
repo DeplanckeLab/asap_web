@@ -19,10 +19,10 @@ module CompliancePipeline
   end
 
   # Project compliance report uses the same validator as file-check.
-  # Refreshes /attrs/anndata_mapping from current Annots before validating so the
-  # report matches the same mapping written before loom/h5ad download.
+  # Refreshes /attrs/analysis_pipeline and /attrs/anndata_mapping from DB/Annots
+  # before validating so the report matches attrs written before loom/h5ad download.
   def validate_project_loom(loom_path, project = nil, logger: Rails.logger, schema_id: nil, &progress_cb)
-    ensure_anndata_mapping_before_project_validation!(loom_path, project, logger)
+    ensure_loom_attrs_before_project_validation!(loom_path, project, logger)
     validate_loom_file_check(
       loom_path,
       logger: logger,
@@ -33,18 +33,28 @@ module CompliancePipeline
     )
   end
 
+  # Kept for callers/tests that still use the old name.
   def ensure_anndata_mapping_before_project_validation!(loom_path, project, logger)
+    ensure_loom_attrs_before_project_validation!(loom_path, project, logger)
+  end
+
+  def ensure_loom_attrs_before_project_validation!(loom_path, project, logger)
     return if project.nil? || loom_path.blank?
 
     loom_rel = loom_rel_under_project(project, loom_path)
     if loom_rel.blank?
       logger&.info(
-        "[CompliancePipeline] skip anndata_mapping refresh: loom not under project dir " \
+        "[CompliancePipeline] skip analysis_pipeline/anndata_mapping refresh: loom not under project dir " \
         "project=#{project.try(:key)} path=#{loom_path}"
       )
       return
     end
 
+    result = AnalysisJsonPersistService.call(project: project, loom_filepath: loom_rel)
+    logger&.info(
+      "[CompliancePipeline] analysis_pipeline refreshed project=#{project.try(:key)} " \
+      "loom=#{loom_rel} annot_id=#{result[:annot_id]} steps=#{result[:nber_steps]}"
+    )
     Basic.refresh_anndata_mapping_for_loom(logger, project, loom_rel)
   end
 

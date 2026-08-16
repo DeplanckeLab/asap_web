@@ -38,14 +38,25 @@
     </p>
   </div>
 
-  <% if @fixable_groups.empty? %>
+  <% if @needs_dna_accessibility_upload %>
+    <%= render 'compliance/dna_accessibility_upload',
+        project: @project,
+        fragments_present: @dna_accessibility_fragments_present,
+        fragments_size: @dna_accessibility_fragments_size,
+        fragments_name: @dna_accessibility_fragments_name,
+        tbi_present: @dna_accessibility_tbi_present,
+        tbi_size: @dna_accessibility_tbi_size,
+        tbi_name: @dna_accessibility_tbi_name %>
+  <% end %>
+
+  <% if @fixable_groups.empty? && !@needs_dna_accessibility_upload %>
     <div class="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
       <p class="text-green-800 font-medium">No fixable compliance errors found.</p>
       <p class="text-green-700 text-sm mt-2">The validation errors may require manual data preparation outside of this tool.</p>
       <%= link_to 'Back to Report', project_path(@project, view: 'compliance'),
           class: 'inline-flex items-center mt-4 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700 transition-colors' %>
     </div>
-  <% else %>
+  <% elsif @fixable_groups.any? %>
     <%= form_tag apply_compliance_fix_project_path(@project), method: :post, class: 'space-y-4',
         data: { action: 'submit->compliance-fix#submitForm' } do %>
 
@@ -150,5 +161,10 @@
         </div>
       </div>
     <% end %>
+  <% elsif @needs_dna_accessibility_upload %>
+    <div class="flex items-center justify-end mt-4">
+      <%= link_to 'Back to Report', project_path(@project, view: 'compliance'),
+          class: 'inline-flex items-center px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-300 transition-colors' %>
+    </div>
   <% end %>
 </div>

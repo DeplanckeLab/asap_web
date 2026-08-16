@@ -70,7 +70,7 @@ class CompliancePipelineTest < TestBaseWithoutFixtures
     assert_equal 1, result.errors.size
   end
 
-  test 'ensure_anndata_mapping_before_project_validation refreshes loom under project' do
+  test 'ensure_loom_attrs_before_project_validation refreshes analysis_pipeline and anndata_mapping' do
     user_data = Dir.mktmpdir('compliance_pipeline_user_data')
     project_dir = File.join(user_data, '9', 'ABCD')
     FileUtils.mkdir_p(File.join(project_dir, 'parsing'))
@@ -79,34 +79,48 @@ class CompliancePipelineTest < TestBaseWithoutFixtures
     File.write(loom_path, 'loom')
 
     project = Struct.new(:user_id, :key).new(9, 'ABCD')
+    persisted = []
     refreshed = []
 
     with_env('USER_DATA_DIR' => user_data) do
-      with_replaced_singleton(Basic, :refresh_anndata_mapping_for_loom, lambda { |_logger, proj, rel|
-        refreshed << [proj.key, rel]
-        { ok: true, loom_filepath: rel }
+      with_replaced_singleton(AnalysisJsonPersistService, :call, lambda { |project:, loom_filepath:|
+        persisted << [project.key, loom_filepath]
+        { ok: true, annot_id: 1, nber_steps: 0, loom_filepath: loom_filepath }
       }) do
-        CompliancePipeline.ensure_anndata_mapping_before_project_validation!(loom_path, project, nil)
+        with_replaced_singleton(Basic, :refresh_anndata_mapping_for_loom, lambda { |_logger, proj, rel|
+          refreshed << [proj.key, rel]
+          { ok: true, loom_filepath: rel }
+        }) do
+          CompliancePipeline.ensure_loom_attrs_before_project_validation!(loom_path, project, nil)
+        end
       end
     end
 
+    assert_equal [['ABCD', loom_rel]], persisted
     assert_equal [['ABCD', loom_rel]], refreshed
   ensure
     FileUtils.remove_entry(user_data) if user_data && File.directory?(user_data)
   end
 
-  test 'ensure_anndata_mapping_before_project_validation skips loom outside project' do
+  test 'ensure_loom_attrs_before_project_validation skips loom outside project' do
     project = Struct.new(:user_id, :key).new(9, 'ABCD')
+    persisted = []
     refreshed = []
 
-    with_replaced_singleton(Basic, :refresh_anndata_mapping_for_loom, lambda { |*|
-      refreshed << true
+    with_replaced_singleton(AnalysisJsonPersistService, :call, lambda { |*|
+      persisted << true
       { ok: true }
     }) do
-      CompliancePipeline.ensure_anndata_mapping_before_project_validation!('/tmp/other.loom', project, nil)
-      CompliancePipeline.ensure_anndata_mapping_before_project_validation!('/tmp/x.loom', nil, nil)
+      with_replaced_singleton(Basic, :refresh_anndata_mapping_for_loom, lambda { |*|
+        refreshed << true
+        { ok: true }
+      }) do
+        CompliancePipeline.ensure_loom_attrs_before_project_validation!('/tmp/other.loom', project, nil)
+        CompliancePipeline.ensure_loom_attrs_before_project_validation!('/tmp/x.loom', nil, nil)
+      end
     end
 
+    assert_empty persisted
     assert_empty refreshed
   end
 

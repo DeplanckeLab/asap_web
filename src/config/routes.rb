@@ -99,6 +99,8 @@ Rails.application.routes.draw do
       post :rename_selection
       post :rename_gene_set_collection
       post :delete_gene_set_collection
+      get :collection_owned_project_autocomplete
+      post :collection_add_project
       get :selection_states
       get :sample_identifiers
       get :project_data_files

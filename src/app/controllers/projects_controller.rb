@@ -1407,20 +1407,11 @@ class ProjectsController < ApplicationController
               raise ActiveRecord::RecordInvalid, @project
             end
           end
-          redirect_view = params.key?(:project_collection_assignment) ? 'settings' : nil
-          format.html do
-            if redirect_view
-              redirect_to project_path(@project, view: redirect_view), notice: "Project was successfully updated."
-            else
-              redirect_to @project, notice: "Project was successfully updated."
-            end
-          end
+          format.html { redirect_to @project, notice: "Project was successfully updated." }
           format.json { render :show, status: :ok, location: @project }
         rescue ArgumentError, ActiveRecord::RecordInvalid, ActiveRecord::RecordNotFound => e
           message = e.is_a?(ActiveRecord::RecordInvalid) ? @project.errors.full_messages.to_sentence : e.message
-          format.html do
-            redirect_to project_path(@project, view: 'settings'), alert: message
-          end
+          format.html { redirect_to @project, alert: message }
           format.json { render json: { error: message }, status: :unprocessable_entity }
         end
       end
@@ -12188,20 +12179,6 @@ class ProjectsController < ApplicationController
     def load_settings_context
       @shares = @project.shares.includes(:user).to_a
       @project_types = ProjectType.order(:name) if @project.project_type_id.nil? && @project.version_id.to_i < 8
-      @current_project_collection = @project.project_collection
-      @project_collections =
-        if admin?
-          ProjectCollection.ordered_by_title.to_a
-        else
-          scope = ProjectCollection.manual.created_by(current_user).ordered_by_title
-          list = scope.to_a
-          if @current_project_collection && list.none? { |c| c.id == @current_project_collection.id }
-            # Show current membership for context; assignment rules still apply on save.
-            list = [@current_project_collection] + list
-          end
-          list
-        end
-      @can_edit_any_project_collection = admin?
     end
 
     # Assign / clear / create umbrella collection for this project (one collection max).

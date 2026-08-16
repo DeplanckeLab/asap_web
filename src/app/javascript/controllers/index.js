@@ -182,8 +182,6 @@ console.log('Public toggle controller registered')
 import ProjectTypeSettingsController from "controllers/project_type_settings_controller"
 application.register("project-type-settings", ProjectTypeSettingsController)
 
-import ProjectCollectionSettingsController from "controllers/project_collection_settings_controller"
-application.register("project-collection-settings", ProjectCollectionSettingsController)
 console.log('Project type settings controller registered')
 
 import ComplianceFixController from "controllers/compliance_fix_controller"

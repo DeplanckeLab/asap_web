@@ -5510,8 +5510,13 @@ class ProjectsController < ApplicationController
   end
 
   # GET /projects/1/get_autocomplete_genes?loom_file=...
-  # Builds the same payload shape as legacy ASAP:
-  # { "search": ["Gene ENSID {stable}", ...], "h_indexes": { "stable" => idx, ... } }
+  # Payload:
+  # {
+  #   "schema_version": 2,
+  #   "search": ["Gene ENSID {stable}", ...],
+  #   "h_indexes": { "stable" => idx, ... },
+  #   "aliases": { "ENSID" => { "alt" => [...], "obsolete" => [...] }, ... }
+  # }
   def get_autocomplete_genes
     user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
     project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
@@ -5523,15 +5528,19 @@ class ProjectsController < ApplicationController
     end
 
     if loom_file.blank?
-      render json: { search: [], h_indexes: {} }
+      render json: { schema_version: GeneAutocompleteBuilder::SCHEMA_VERSION, search: [], h_indexes: {}, aliases: {} }
       return
     end
 
     autocomplete_file = project_dir + File.dirname(loom_file) + 'autocomplete_genes.json'
     if File.exist?(autocomplete_file)
       begin
-        render json: JSON.parse(File.read(autocomplete_file))
-        return
+        cached = JSON.parse(File.read(autocomplete_file))
+        if GeneAutocompleteBuilder.usable_cached_payload?(cached)
+          render json: cached
+          return
+        end
+        Rails.logger.info("get_autocomplete_genes: rebuilding stale cache #{autocomplete_file}")
       rescue JSON::ParserError => e
         Rails.logger.warn("get_autocomplete_genes: existing file is invalid JSON (#{autocomplete_file}): #{e.message}")
       end
@@ -5539,7 +5548,7 @@ class ProjectsController < ApplicationController
 
     loom_path = project_dir + loom_file
     unless File.exist?(loom_path)
-      render json: { search: [], h_indexes: {} }
+      render json: { schema_version: GeneAutocompleteBuilder::SCHEMA_VERSION, search: [], h_indexes: {}, aliases: {} }
       return
     end
 
@@ -5553,30 +5562,31 @@ class ProjectsController < ApplicationController
       stable_values = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
     rescue => e
       Rails.logger.error("get_autocomplete_genes: failed to extract row attrs from #{loom_path}: #{e.message}")
-      render json: { search: [], h_indexes: {} }
+      render json: { schema_version: GeneAutocompleteBuilder::SCHEMA_VERSION, search: [], h_indexes: {}, aliases: {} }
       return
     end
 
     size = [gene_values&.length || 0, accession_values&.length || 0, stable_values&.length || 0].min
     if size <= 0
-      render json: { search: [], h_indexes: {} }
+      render json: { schema_version: GeneAutocompleteBuilder::SCHEMA_VERSION, search: [], h_indexes: {}, aliases: {} }
       return
     end
 
-    autocomplete_list = []
-    h_indexes = {}
-
-    size.times do |i|
-      gene = gene_values[i].to_s.strip
-      accession = accession_values[i].to_s.strip
-      stable = stable_values[i].to_s.strip
-      next if gene.blank? || accession.blank? || stable.blank?
-
-      h_indexes[stable] = i
-      autocomplete_list << "#{gene} #{accession} {#{stable}}"
+    h_env = @project.version ? Basic.safe_parse_json(@project.version.env_json, {}) : {}
+    db_version = begin
+      asap_data_db_name_for_env(h_env, context: 'get_autocomplete_genes')
+    rescue ArgumentError => e
+      Rails.logger.warn("get_autocomplete_genes: #{e.message}")
+      nil
     end
 
-    payload = { search: autocomplete_list.sort, h_indexes: h_indexes }
+    payload = GeneAutocompleteBuilder.build(
+      gene_values: gene_values,
+      accession_values: accession_values,
+      stable_values: stable_values,
+      organism_id: @project.organism_id,
+      db_version: db_version
+    )
 
     begin
       FileUtils.mkdir_p(autocomplete_file.dirname)
@@ -5587,6 +5597,7 @@ class ProjectsController < ApplicationController
 
     render json: payload
   end
+
 
   # GET /projects/1/get_loom_files_json
   # Lists LOOM matrices (dim 3) with download URLs and optional H5AD sibling paths, matching legacy ASAP summary behavior.

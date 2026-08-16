@@ -6,6 +6,7 @@ export class GeneManager {
   constructor(controller) {
     this.controller = controller
     this.autocompleteData = null
+    this.aliasesByEnsembl = {}
     this.currentMatches = []
     this.selectedGene = null
     this.projectIdentifier = null
@@ -972,6 +973,7 @@ export class GeneManager {
       }
 
       const extractedEntries = this.extractAutocompleteEntries(data)
+      this.aliasesByEnsembl = this.extractAliasesByEnsembl(data)
       if (extractedEntries.length > 0) {
         this.autocompleteData = extractedEntries
         const geneCount = this.autocompleteData.length
@@ -992,6 +994,7 @@ export class GeneManager {
       console.error('GeneManager: Error loading autocomplete data:', error)
       console.error('GeneManager: Error stack:', error.stack)
       this.autocompleteData = []
+      this.aliasesByEnsembl = {}
       this.totalGeneCount = 0
       this.updateGeneCountBadge()
       this.autocompleteLoaded = true
@@ -1004,6 +1007,31 @@ export class GeneManager {
     if (Array.isArray(data.search)) return data.search
     if (Array.isArray(data)) return data
     return []
+  }
+
+  extractAliasesByEnsembl(data) {
+    const raw = data && (data.aliases || data.aliases_by_ensembl)
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+
+    const out = {}
+    Object.keys(raw).forEach((ensemblId) => {
+      const entry = raw[ensemblId] || {}
+      const key = String(ensemblId || '').trim()
+      if (!key) return
+      out[key] = {
+        alt: Array.isArray(entry.alt) ? entry.alt.map((v) => String(v || '').trim()).filter(Boolean) : [],
+        obsolete: Array.isArray(entry.obsolete) ? entry.obsolete.map((v) => String(v || '').trim()).filter(Boolean) : []
+      }
+      const lower = key.toLowerCase()
+      if (!out[lower]) out[lower] = out[key]
+    })
+    return out
+  }
+
+  aliasesForEnsembl(ensemblId) {
+    const key = String(ensemblId || '').trim()
+    if (!key) return { alt: [], obsolete: [] }
+    return this.aliasesByEnsembl[key] || this.aliasesByEnsembl[key.toLowerCase()] || { alt: [], obsolete: [] }
   }
 
   parseAutocompleteEntry(entry) {
@@ -1025,10 +1053,52 @@ export class GeneManager {
     return null
   }
 
+  // Rank: latest name (0-2) < ensembl id (3-4) < alt (5-6) < obsolete (7-8).
+  // Within a source, exact < prefix < substring.
+  scoreGeneMatch(parsed, searchTerm, searchLower) {
+    if (!parsed) return null
+
+    const symbol = String(parsed.symbol || '')
+    const ensemblId = String(parsed.ensemblId || '')
+    const symbolLower = symbol.toLowerCase()
+    const ensemblLower = ensemblId.toLowerCase()
+
+    const scoreText = (text, textLower, base) => {
+      if (!text) return null
+      if (text === searchTerm) return { rank: base, matchedAlias: text }
+      if (textLower === searchLower) return { rank: base + 0.25, matchedAlias: text }
+      if (textLower.startsWith(searchLower)) return { rank: base + 0.5, matchedAlias: text }
+      if (textLower.includes(searchLower)) return { rank: base + 0.75, matchedAlias: text }
+      return null
+    }
+
+    let best = scoreText(symbol, symbolLower, 0)
+    const ensemblHit = scoreText(ensemblId, ensemblLower, 3)
+    if (ensemblHit && (!best || ensemblHit.rank < best.rank)) {
+      best = { ...ensemblHit, matchedAlias: null }
+    }
+
+    const aliases = this.aliasesForEnsembl(ensemblId)
+    for (const alt of aliases.alt) {
+      const hit = scoreText(alt, alt.toLowerCase(), 5)
+      if (hit && (!best || hit.rank < best.rank)) best = { ...hit, matchSource: 'alt' }
+    }
+    for (const obsolete of aliases.obsolete) {
+      const hit = scoreText(obsolete, obsolete.toLowerCase(), 7)
+      if (hit && (!best || hit.rank < best.rank)) best = { ...hit, matchSource: 'obsolete' }
+    }
+
+    if (!best) return null
+    return {
+      ...parsed,
+      rank: best.rank,
+      matchSource: best.matchSource || 'name',
+      matchedAlias: best.matchedAlias && best.matchedAlias !== symbol ? best.matchedAlias : null
+    }
+  }
+
   handleInput(query) {
-    // console.log('GeneManager: handleInput called with query:', query)
     if (!query || query.trim().length === 0) {
-      // console.log('GeneManager: Empty query, hiding dropdown')
       this.hideDropdown()
       return
     }
@@ -1038,66 +1108,34 @@ export class GeneManager {
       return
     }
 
-    // console.log('GeneManager: Searching in', this.autocompleteData.length, 'entries')
     const searchTerm = query.trim()
     const searchLower = searchTerm.toLowerCase()
-    /*this.currentMatches = this.autocompleteData
-      .map(entry => this.parseAutocompleteEntry(entry))
-      .filter(parsed => {
-        if (!parsed) return false
-        const { symbol: geneSymbol, ensemblId } = parsed        
-        return geneSymbol.includes(searchTerm) || geneSymbol.toLowerCase().includes(searchLower) ||
-          ensemblId.toLowerCase().includes(searchLower)
-      })
-      .slice(0, 25) // Limit to 10 results
-*/
-console.log("bla")
-const parsedData = this.autocompleteData
-  .map(entry => this.parseAutocompleteEntry(entry))
-  .filter(p => !!p);
+    const scored = []
+    for (const entry of this.autocompleteData) {
+      const parsed = this.parseAutocompleteEntry(entry)
+      const match = this.scoreGeneMatch(parsed, searchTerm, searchLower)
+      if (match) scored.push(match)
+    }
 
-  let currentMatches1 = parsedData.filter(p => 
-    p.symbol == searchTerm
-  );
+    scored.sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank
+      return String(a.symbol).localeCompare(String(b.symbol))
+    })
 
-  let currentMatches2 = parsedData.filter(p => 
-    p.symbol.toLowerCase() == searchLower
-  );
+    const seen = new Set()
+    this.currentMatches = []
+    for (const item of scored) {
+      const key = String(item.ensemblId || '').toLowerCase()
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      this.currentMatches.push(item)
+      if (this.currentMatches.length >= 25) break
+    }
 
-
-// 1. Get the priority matches (Exact case)
-
-  let currentMatches3 = parsedData.filter(p => 
-  p.symbol.toLowerCase().includes(searchTerm)
-);
-
-
-// 2. Get secondary matches (Case-insensitive or ID) 
-// but exclude ones already in primaryMatches
-
-  let currentMatches4 = parsedData.filter(p => 
-  (p.symbol.toLowerCase().includes(searchLower) || p.ensemblId.toLowerCase().includes(searchLower))
-);
-
-// 3. Combine and slice
-let allMatches = [...currentMatches1, ...currentMatches2, ...currentMatches3, ...currentMatches4].slice(0, 25);
-
-const seen = new Set();
-this.currentMatches = allMatches.filter(item => {
-  if (seen.has(item.ensemblId)) {
-    return false;
-  }
-  seen.add(item.ensemblId);
-  return true;
-}).slice(0, 25);
-
-    // console.log('GeneManager: Found', this.currentMatches.length, 'matches for query:', searchTerm)
     if (this.currentMatches.length > 0) {
-      // console.log('GeneManager: First match:', this.currentMatches[0])
       this.renderDropdown()
       this.showDropdown()
     } else {
-      // console.log('GeneManager: No matches found, hiding dropdown')
       this.hideDropdown()
     }
   }
@@ -1113,12 +1151,16 @@ this.currentMatches = allMatches.filter(item => {
     dropdown.innerHTML = ''
 
     this.currentMatches.forEach((parsed, index) => {
-      const { symbol: geneSymbol, ensemblId, stableId } = parsed
+      const { symbol: geneSymbol, ensemblId, stableId, matchedAlias, matchSource } = parsed
+      const aliasLine = matchedAlias
+        ? `<div style="font-size: 11px; color: #9ca3af; margin-top: 2px;">matched via ${matchSource || 'alias'}: ${matchedAlias}</div>`
+        : ''
       const item = document.createElement('div')
       item.style.cssText = 'padding: 10px 12px; cursor: pointer; border-bottom: 1px solid #f3f4f6; transition: background-color 0.15s;'
       item.innerHTML = `
         <div style="font-weight: 500; color: #111827; font-size: 14px;">${geneSymbol}</div>
         <div style="font-size: 12px; color: #6b7280; margin-top: 2px;">${ensemblId} | Stable ID: ${stableId}</div>
+        ${aliasLine}
       `
       
       item.addEventListener('mouseenter', () => {
@@ -1986,30 +2028,26 @@ this.currentMatches = allMatches.filter(item => {
     }
 
     const searchTerm = query.trim()
+    if (!searchTerm) return null
     const searchLower = searchTerm.toLowerCase()
-    
-    // Try to find exact or partial match
+
+    let best = null
     for (const entry of this.autocompleteData) {
       const parsed = this.parseAutocompleteEntry(entry)
-      if (!parsed) continue
-
-      const { symbol: geneSymbol, ensemblId, stableId } = parsed
-      
-      // Match by gene symbol or Ensembl ID (exact/prefix/substring)
-      if (geneSymbol === searchTerm ||
-          ensemblId.toLowerCase() === searchLower //||
-         // geneSymbol.toLowerCase() === searchLower
-          ) {
-        return {
-          symbol: geneSymbol,
-          ensemblId: ensemblId,
-          stableId,
-          originalQuery: query
-        }
-      }
+      const match = this.scoreGeneMatch(parsed, searchTerm, searchLower)
+      if (!match) continue
+      if (!best || match.rank < best.rank) best = match
     }
-    
-    return null
+
+    if (!best) return null
+    return {
+      symbol: best.symbol,
+      ensemblId: best.ensemblId,
+      stableId: best.stableId,
+      originalQuery: query,
+      matchSource: best.matchSource,
+      matchedAlias: best.matchedAlias
+    }
   }
 
   async processBulkGenes() {

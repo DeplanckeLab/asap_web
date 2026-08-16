@@ -5082,29 +5082,63 @@ function parseGeneAutocompleteEntry(entry) {
   if (!match) return null
   return {
     label: String(match[1]).trim(),
+    symbol: String(match[1]).trim(),
     ensemblId: String(match[2]).trim(),
     stableId: String(match[3]).trim()
   }
 }
 
+function getGeneManager() {
+  return (window.visualizationController && window.visualizationController.geneManager) || window.geneManager
+}
+
 function getGeneAutocompleteEntries() {
-  var geneMgr = (window.visualizationController && window.visualizationController.geneManager) || window.geneManager
+  var geneMgr = getGeneManager()
   var data = geneMgr && Array.isArray(geneMgr.autocompleteData) ? geneMgr.autocompleteData : []
   return data
 }
 
 function searchGeneAutocomplete(query) {
-  var q = String(query || '').trim().toLowerCase()
-  if (!q) return []
+  var searchTerm = String(query || '').trim()
+  if (!searchTerm) return []
+  var searchLower = searchTerm.toLowerCase()
+  var geneMgr = getGeneManager()
   var entries = getGeneAutocompleteEntries()
-  var out = []
+  var scored = []
+
   for (var i = 0; i < entries.length; i++) {
     var parsed = parseGeneAutocompleteEntry(entries[i])
     if (!parsed) continue
-    if (parsed.label.toLowerCase().includes(q) || parsed.ensemblId.toLowerCase().includes(q) || parsed.stableId.includes(q)) {
-      out.push(parsed)
-      if (out.length >= 10) break
+
+    var match = null
+    if (geneMgr && typeof geneMgr.scoreGeneMatch === 'function') {
+      match = geneMgr.scoreGeneMatch(parsed, searchTerm, searchLower)
+    } else {
+      var labelLower = parsed.label.toLowerCase()
+      var ensLower = parsed.ensemblId.toLowerCase()
+      if (labelLower.includes(searchLower) || ensLower.includes(searchLower) || parsed.stableId.includes(searchTerm)) {
+        match = Object.assign({}, parsed, { rank: 0 })
+      }
     }
+    if (!match) continue
+    scored.push(Object.assign({}, match, {
+      label: match.symbol || parsed.label
+    }))
+  }
+
+  scored.sort(function(a, b) {
+    if (a.rank !== b.rank) return a.rank - b.rank
+    return String(a.label).localeCompare(String(b.label))
+  })
+
+  var out = []
+  var seen = {}
+  for (var j = 0; j < scored.length; j++) {
+    var key = String(scored[j].ensemblId || '').toLowerCase()
+    if (!key || seen[key]) continue
+    seen[key] = true
+    out.push(scored[j])
+    if (out.length >= 10) break
   }
   return out
 }
@@ -5122,9 +5156,15 @@ function renderNewGeneSuggestions(kind, matches) {
     var safeLabel = escapeHtml(gene.label)
     var safeEns = escapeHtml(gene.ensemblId)
     var safeStable = escapeHtml(gene.stableId)
+    var aliasNote = ''
+    if (gene.matchedAlias) {
+      aliasNote = '<div style="font-size:11px;color:#9ca3af;">matched via ' +
+        escapeHtml(gene.matchSource || 'alias') + ': ' + escapeHtml(gene.matchedAlias) + '</div>'
+    }
     html += '<div data-kind="' + kind + '" data-label="' + safeLabel + '" data-ensembl="' + safeEns + '" data-stable="' + safeStable + '" style="padding:8px 10px;cursor:pointer;border-bottom:1px solid #f3f4f6;">'
     html += '<div style="font-size:12px;color:#111827;font-weight:500;">' + safeLabel + '</div>'
     html += '<div style="font-size:11px;color:#6b7280;">' + safeEns + ' | Stable ID: ' + safeStable + '</div>'
+    html += aliasNote
     html += '</div>'
   })
   list.innerHTML = html

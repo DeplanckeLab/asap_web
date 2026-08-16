@@ -9715,6 +9715,12 @@ class ProjectsController < ApplicationController
     end
 
     def queue_unarchive_if_project_files_missing
+      @project_being_archived = false
+      @project_being_unarchived = false
+      @project_archive_transitioning = false
+      @project_unarchive_state = nil
+      @project_files_missing = false
+
       if @project.reconcile_archive_status_with_filesystem!
         @project.reload
       end
@@ -9722,13 +9728,19 @@ class ProjectsController < ApplicationController
       project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
       project_archive_file = Pathname.new("#{project_dir}.tgz")
       @project_files_missing = @project.filesystem_project_data_missing?
-      @project_archive_transitioning = [2, 4].include?(@project.archive_status_id)
-      @project_unarchive_state = nil
+      @project_being_archived = @project.being_archived?
+      @project_being_unarchived = @project.being_unarchived?
+      # Unarchive overlay only — never treat "archiving" (status 2) as unarchive-in-progress.
+      @project_archive_transitioning = @project_being_unarchived
       @integration_in_progress = @project.integration_in_progress?
 
       if @integration_in_progress
         return
       end
+
+      # Archiving projects keep local files until the archive job finishes; do not
+      # queue unarchive and do not map this state onto the unarchive overlay.
+      return if @project_being_archived
 
       return unless @project_files_missing
       return if request_user_agent_indicates_bot?
@@ -9762,14 +9774,12 @@ class ProjectsController < ApplicationController
       @project_unarchive_state = 'queue_failed'
       flash.now[:alert] = "Project files are archived and unarchive queueing failed."
     ensure
-      if @project_archive_transitioning && @project_unarchive_state.blank?
-        if @project.archive_status_id == 4 && (
-          !@project_files_missing ||
-          (File.exist?(project_archive_file) && File.size(project_archive_file).to_i.positive?)
-        )
-          @project_unarchive_state = 'unpacking'
+      if @project_being_unarchived && @project_unarchive_state.blank?
+        @project_unarchive_state = if !@project_files_missing ||
+            (File.exist?(project_archive_file) && File.size(project_archive_file).to_i.positive?)
+          'unpacking'
         else
-          @project_unarchive_state = 'in_progress'
+          'in_progress'
         end
       end
     end

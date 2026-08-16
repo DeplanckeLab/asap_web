@@ -82,9 +82,14 @@ class ProjectTest < TestBaseWithoutFixtures
 
     project.archive_status_id = 4
     assert_equal :unarchiving, project.archive_availability_state
+    assert project.being_unarchived?
+    assert_not project.being_archived?
 
     project.archive_status_id = 2
     assert_equal :archiving, project.archive_availability_state
+    assert project.being_archived?
+    assert_not project.being_unarchived?
+    assert_equal "archiving", project.unarchive_client_state
   end
 
   test "key must be unique" do

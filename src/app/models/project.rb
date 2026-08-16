@@ -526,15 +526,18 @@ class Project < ApplicationRecord
     archive_status_id == 3
   end
 
+  def being_archived?
+    archive_status_id == 2
+  end
+
   def being_unarchived?
     archive_status_id == 4
   end
 
-  # Client-facing unarchive state derived from the database and filesystem truth.
+  # Client-facing archive/unarchive state derived from the database and filesystem truth.
   # Used by the ProjectChannel initial snapshot and the unarchive_status polling
-  # endpoint so the unarchive pending overlay can recover when the one-shot
-  # ActionCable completion broadcast is missed (e.g. the job finished before the
-  # browser subscribed).
+  # endpoint so pending overlays can recover when a one-shot ActionCable broadcast
+  # is missed (e.g. the job finished before the browser subscribed).
   def unarchive_client_state
     case archive_status_id
     when 2

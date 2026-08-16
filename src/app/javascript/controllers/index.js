@@ -213,6 +213,10 @@ import UnarchiveStatusController from "controllers/unarchive_status_controller"
 application.register("unarchive-status", UnarchiveStatusController)
 console.log('Unarchive status controller registered')
 
+import ArchivingStatusController from "controllers/archiving_status_controller"
+application.register("archiving-status", ArchivingStatusController)
+console.log('Archiving status controller registered')
+
 import IntegrationStatusController from "controllers/integration_status_controller"
 application.register("integration-status", IntegrationStatusController)
 

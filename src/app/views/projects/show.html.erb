@@ -6,16 +6,21 @@ else
 end %>
 <% content_for :meta_description, meta_desc %>
 
-<!-- Content Area: unarchive-in-progress applies to every tab (same condition as visualization used to use alone) -->
+<!-- Content Area: archive/unarchive pending overlays apply to file-backed tabs -->
 <%# Metadata-only views (summary, settings, admin access) read only database-backed
-    information, so they can render without the project files being unarchived. The
-    unarchive overlay is suppressed for them unless the user explicitly clicked the
-    Unarchive button (force_unarchive=1), in which case we fall through to the regular
-    overlay so the unarchive progress is shown. %>
+    information, so they can render without local project files. Overlays are
+    suppressed for them unless the user explicitly clicked Unarchive
+    (force_unarchive=1). Archiving (status 2) must never reuse the unarchive overlay. %>
 <% unarchive_state = @project_unarchive_state.to_s %>
 <% suppress_unarchive_overlay = metadata_only_view_request? && %w[summary settings access annotations].include?(@view_type.to_s) %>
-<% show_unarchive_pending = !suppress_unarchive_overlay && (@project_archive_transitioning || (@project_files_missing && %w[queued in_progress archived_missing queue_failed].include?(unarchive_state))) %>
-<% if show_unarchive_pending %>
+<% suppress_archiving_overlay = !force_unarchive_requested? && %w[summary settings access annotations].include?(@view_type.to_s) %>
+<% show_archiving_pending = !suppress_archiving_overlay && @project_being_archived %>
+<% show_unarchive_pending = !suppress_unarchive_overlay && (@project_being_unarchived || (@project_files_missing && %w[queued in_progress archived_missing queue_failed].include?(unarchive_state))) %>
+<% if show_archiving_pending %>
+  <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
+    <%= render 'projects/views/archiving_pending_overlay' %>
+  </div>
+<% elsif show_unarchive_pending %>
   <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
     <%= render 'projects/views/unarchive_pending_overlay' %>
   </div>

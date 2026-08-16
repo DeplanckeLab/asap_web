@@ -152,6 +152,15 @@ export default class extends Controller {
       return
     }
 
+    // Archiving must never look like an unarchive-in-progress UI. Reload so the
+    // page can render the dedicated archiving overlay (or the next real state).
+    if (effectiveState === "archiving") {
+      this.statusTextTarget.textContent = "Project is being archived. Reloading..."
+      this.progressBarTarget.style.width = "45%"
+      this.scheduleReload()
+      return
+    }
+
     this.statusTextTarget.textContent = "Preparing archive retrieval..."
     this.progressBarTarget.style.width = "20%"
   }

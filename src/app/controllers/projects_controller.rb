@@ -12052,7 +12052,7 @@ class ProjectsController < ApplicationController
       fp_s.start_with?(root_s + File::SEPARATOR) || fp_s == root_s
     end
 
-    # Rebuild /attrs/analysis_pipeline on the loom sibling before serving loom or converting to h5ad.
+    # Rebuild /attrs/analysis_pipeline and /attrs/anndata_mapping on the loom sibling before serving loom or converting to h5ad.
     def ensure_analysis_json_before_download!(project_root, filepath)
       abs = Pathname.new(filepath.to_s).expand_path
       root = Pathname.new(project_root.to_s).expand_path
@@ -12067,6 +12067,11 @@ class ProjectsController < ApplicationController
       Rails.logger.info(
         "get_file: updated analysis_pipeline on #{loom_rel} " \
         "(annot_id=#{result[:annot_id]}, steps=#{result[:nber_steps]})"
+      )
+      mapping = Basic.refresh_anndata_mapping_for_loom(Rails.logger, @project, loom_rel)
+      Rails.logger.info(
+        "get_file: updated anndata_mapping on #{loom_rel} " \
+        "(annot_id=#{mapping[:annot_id]}, x_path=#{mapping[:x_path]})"
       )
     end
 

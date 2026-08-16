@@ -214,6 +214,7 @@ class BasicH5adExportStatusTest < ActiveSupport::TestCase
     File.write(@project_dir + 'cell_filtering/output.loom', 'loom-bytes')
 
     called = []
+    mapping_called = []
     AnalysisJsonPersistService.stub(
       :call,
       lambda { |project:, loom_filepath:|
@@ -222,10 +223,20 @@ class BasicH5adExportStatusTest < ActiveSupport::TestCase
         { ok: true, loom_filepath: loom_filepath, annot_id: 1, nber_steps: 0 }
       }
     ) do
-      results = Basic.refresh_analysis_pipeline_for_project(Rails.logger, @project)
-      assert_equal 2, results.size
-      assert results.all? { |r| r[:ok] }
-      assert_equal ['cell_filtering/output.loom', 'parsing/output.loom'], called.sort
+      AnndataMappingPersistService.stub(
+        :call,
+        lambda { |project:, loom_filepath:, input_group: nil|
+          assert_equal @project.id, project.id
+          mapping_called << loom_filepath
+          { ok: true, loom_filepath: loom_filepath, annot_id: 2, x_path: '/matrix', nber_obsm: 0 }
+        }
+      ) do
+        results = Basic.refresh_analysis_pipeline_for_project(Rails.logger, @project)
+        assert_equal 2, results.size
+        assert results.all? { |r| r[:ok] }
+        assert_equal ['cell_filtering/output.loom', 'parsing/output.loom'], called.sort
+        assert_equal ['cell_filtering/output.loom', 'parsing/output.loom'], mapping_called.sort
+      end
     end
   end
 

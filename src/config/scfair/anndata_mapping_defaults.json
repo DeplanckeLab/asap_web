@@ -1,0 +1,120 @@
+{
+  "_comment": "Repo-owned defaults and schema for Loom /attrs/anndata_mapping. Keys named _comment are documentation only and are not written into Loom files. AnndataMappingBuilder/PersistService fill a per-loom instance at parse (matrix roles from input_group/Annots) and complete it after analysis_pipeline refresh (obsm/varm/categoricals). loom_to_h5ad.v8.py / loom_to_h5ad_chunked.v8.py (asap_run) require this attr and use it as the sole matrix/embedding map for H5AD export. Spec: docs/loom-creation-spec-for-h5ad-roundtrip.md",
+
+  "title": "AnnData mapping defaults for ASAP Loom",
+  "description": "Fixed ASAP Loom orientation and path prefixes for deterministic Loom -> H5AD conversion. File-specific keys (x_path, raw_x_path, layers, obsm, varm, obsp, varp, categoricals) must be filled at loom write time from the datasets actually present.",
+  "spec_reference": "docs/loom-creation-spec-for-h5ad-roundtrip.md",
+  "loom_attr_path": "/attrs/anndata_mapping",
+  "version": "1.0.0",
+
+  "defaults": {
+    "version": "1.0.0",
+    "orientation": "genes_x_cells",
+    "obs_path": "/col_attrs",
+    "var_path": "/row_attrs",
+    "obs_index_key": "CellID",
+    "var_index_key": "Accession"
+  },
+
+  "required_keys": [
+    "version",
+    "orientation",
+    "x_path",
+    "obs_path",
+    "var_path",
+    "obs_index_key",
+    "var_index_key"
+  ],
+
+  "required_when_data_exists": [
+    "raw_x_path",
+    "raw_var_path",
+    "layers",
+    "obsm",
+    "varm",
+    "obsp",
+    "varp"
+  ],
+
+  "recommended_keys": [
+    "categoricals",
+    "dtypes",
+    "uns_json_keys",
+    "notes",
+    "raw_var_fields"
+  ],
+
+  "file_specific_empty_stubs": {
+    "_comment": "Writers should replace these with real maps for datasets present in the loom. Omit raw_x_path when no raw matrix exists. Do not map the same dataset path under both raw_x_path and layers.",
+    "x_path": null,
+    "raw_x_path": null,
+    "raw_var_path": null,
+    "layers": {},
+    "obsm": {},
+    "varm": {},
+    "obsp": {},
+    "varp": {},
+    "uns_json_keys": [],
+    "categoricals": {},
+    "dtypes": {}
+  },
+
+  "asap_storage_conventions": {
+    "_comment": "What ASAP actually writes today (genes x cells). Declare these concrete paths in anndata_mapping; do not invent /embeddings or /pairwise groups unless a writer starts creating them.",
+    "layers": "/layers/{name}",
+    "obsm": "/col_attrs/{key}",
+    "varm": "/row_attrs/{key}",
+    "obsm_examples": [
+      "/col_attrs/_umap_{run}_{method}_{n}D",
+      "/col_attrs/_tsne_{run}_{method}_{n}D",
+      "/col_attrs/_pca_{run}_{method}_{n}D",
+      "/col_attrs/X_umap",
+      "/col_attrs/spatial"
+    ],
+    "obsp": null,
+    "varp": null,
+    "notes": "Cell (obs) embeddings and multi-dim cell arrays live under /col_attrs. Gene (var) multi-dim arrays would live under /row_attrs. Pairwise graphs (obsp/varp) are not a standard ASAP loom layout today."
+  },
+
+  "examples": {
+    "case_a_raw_primary": {
+      "_comment": "raw selected as primary: /matrix stores raw, normalized X in a layer",
+      "version": "1.0.0",
+      "orientation": "genes_x_cells",
+      "x_path": "/layers/X",
+      "obs_path": "/col_attrs",
+      "var_path": "/row_attrs",
+      "obs_index_key": "CellID",
+      "var_index_key": "Accession",
+      "raw_x_path": "/matrix",
+      "layers": {
+        "X": "/layers/X"
+      },
+      "obsm": {
+        "X_umap": "/col_attrs/X_umap"
+      },
+      "varm": {},
+      "obsp": {},
+      "varp": {},
+      "uns_json_keys": ["analysis_pipeline", "spatial"]
+    },
+    "case_b_normalized_primary": {
+      "_comment": "normalized X selected as primary: /matrix stores X, no raw matrix",
+      "version": "1.0.0",
+      "orientation": "genes_x_cells",
+      "x_path": "/matrix",
+      "obs_path": "/col_attrs",
+      "var_path": "/row_attrs",
+      "obs_index_key": "CellID",
+      "var_index_key": "Accession",
+      "layers": {},
+      "obsm": {
+        "X_umap": "/col_attrs/X_umap"
+      },
+      "varm": {},
+      "obsp": {},
+      "varp": {},
+      "uns_json_keys": ["analysis_pipeline", "spatial"]
+    }
+  }
+}

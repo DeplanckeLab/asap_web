@@ -106,6 +106,7 @@ class LocalAsapGetFileCopyService
       return unless File.exist?(loom_abs)
 
       AnalysisJsonPersistService.call(project: project, loom_filepath: loom_rel)
+      Basic.refresh_anndata_mapping_for_loom(Rails.logger, project, loom_rel)
     end
 
     def host_allowed?(host)

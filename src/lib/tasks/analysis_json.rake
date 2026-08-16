@@ -16,6 +16,9 @@ namespace :analysis_json do
     result = AnalysisJsonPersistService.call(project: project, loom_filepath: loom_filepath)
     puts "Updated #{result[:attr_path]} on #{result[:loom_filepath]} " \
          "(annot_id=#{result[:annot_id]}, steps=#{result[:nber_steps]}, bytes=#{result[:bytes]})"
+    mapping = AnndataMappingPersistService.call(project: project, loom_filepath: loom_filepath)
+    puts "Updated #{mapping[:attr_path]} on #{mapping[:loom_filepath]} " \
+         "(annot_id=#{mapping[:annot_id]}, x_path=#{mapping[:x_path]}, obsm=#{mapping[:nber_obsm]})"
   end
 
   desc 'Create or update /attrs/analysis_pipeline on every distinct loom filepath of a project. ' \
@@ -45,6 +48,8 @@ namespace :analysis_json do
 
       result = AnalysisJsonPersistService.call(project: project, loom_filepath: loom_filepath)
       puts "Updated #{result[:loom_filepath]} annot_id=#{result[:annot_id]} steps=#{result[:nber_steps]}"
+      mapping = AnndataMappingPersistService.call(project: project, loom_filepath: loom_filepath)
+      puts "  anndata_mapping annot_id=#{mapping[:annot_id]} x_path=#{mapping[:x_path]} obsm=#{mapping[:nber_obsm]}"
     end
   end
 end

@@ -3224,6 +3224,7 @@ module Basic
 
     # Write /attrs/analysis_pipeline on every matrix loom from DB-backed run history.
     # Called before making a project public so the loom carries up-to-date pipeline metadata.
+    # After each successful analysis_pipeline write, completes /attrs/anndata_mapping from Annots.
     # Returns an array of { loom_rel:, ok:, error:, ... } per loom.
     def refresh_analysis_pipeline_for_project(logger, project)
       loom_rels = project_matrix_loom_rels(project)
@@ -3242,7 +3243,8 @@ module Basic
             "[refresh_analysis_pipeline_for_project] project=#{project.key} loom=#{loom_rel} " \
             "annot_id=#{result[:annot_id]} steps=#{result[:nber_steps]}"
           )
-          { loom_rel: loom_rel, ok: true, error: nil }.merge(result)
+          mapping = refresh_anndata_mapping_for_loom(logger, project, loom_rel)
+          { loom_rel: loom_rel, ok: true, error: nil, anndata_mapping: mapping }.merge(result)
         rescue StandardError => e
           logger&.error(
             "[refresh_analysis_pipeline_for_project] project=#{project.key} loom=#{loom_rel} " \
@@ -3250,6 +3252,41 @@ module Basic
           )
           { loom_rel: loom_rel, ok: false, error: e.message }
         end
+      end
+    end
+
+    # Rebuild /attrs/anndata_mapping for one loom from defaults + Annot DataClass/dim (+ optional parse input_group).
+    def refresh_anndata_mapping_for_loom(logger, project, loom_rel, input_group: nil)
+      result = AnndataMappingPersistService.call(
+        project: project,
+        loom_filepath: loom_rel,
+        input_group: input_group
+      )
+      logger&.info(
+        "[refresh_anndata_mapping_for_loom] project=#{project.key} loom=#{loom_rel} " \
+        "annot_id=#{result[:annot_id]} x_path=#{result[:x_path]} raw_x_path=#{result[:raw_x_path]} " \
+        "obsm=#{result[:nber_obsm]}"
+      )
+      result
+    rescue StandardError => e
+      logger&.error(
+        "[refresh_anndata_mapping_for_loom] project=#{project.key} loom=#{loom_rel} " \
+        "#{e.class}: #{e.message}"
+      )
+      { ok: false, loom_filepath: loom_rel, error: e.message }
+    end
+
+    # Rebuild /attrs/anndata_mapping on every matrix loom.
+    def refresh_anndata_mapping_for_project(logger, project, input_group: nil)
+      loom_rels = project_matrix_loom_rels(project)
+      if loom_rels.empty?
+        logger&.info("[refresh_anndata_mapping_for_project] project=#{project.key} no matrix looms")
+        return []
+      end
+
+      loom_rels.map do |loom_rel|
+        refresh_anndata_mapping_for_loom(logger, project, loom_rel, input_group: input_group)
+          .merge(loom_rel: loom_rel)
       end
     end
 
@@ -3328,9 +3365,17 @@ module Basic
         return { run: existing, h5ad_status: current_status, error: nil }
       end
 
-      # Refresh analysis_pipeline on the loom before conversion.
+      # Refresh analysis_pipeline and anndata_mapping on the loom before conversion.
       begin
         AnalysisJsonPersistService.call(project: project, loom_filepath: loom_rel)
+        mapping = refresh_anndata_mapping_for_loom(logger, project, loom_rel)
+        if mapping[:ok] == false
+          return {
+            run: nil,
+            h5ad_status: current_status,
+            error: "Failed to refresh anndata_mapping: #{mapping[:error]}"
+          }
+        end
       rescue StandardError => e
         logger.error("[find_or_start_h5ad_export] AnalysisJsonPersistService failed: #{e.class}: #{e.message}")
         return { run: nil, h5ad_status: current_status, error: "Failed to refresh analysis_pipeline: #{e.message}" }
@@ -6847,6 +6892,7 @@ puts "TEST RUN"
         end
       end
       ## edit type of output_files in function of properties described in output.json
+      loom_rels_touched = []
       ActiveRecord::Base.transaction do
         h_output_files.each_key do |k|
           h_output_files[k].each_key do |k2|           
@@ -6879,6 +6925,7 @@ puts "TEST RUN"
                   new_annot = load_annot(run, h_data, relative_filepath, h_data_types, h_data_classes, logger, finish_run_cache)
                   if new_annot
                     logger.info("[Basic.finish_run] Matrix annotation created: id=#{new_annot.id}, name=#{new_annot.name}, nber_rows=#{new_annot.nber_rows}, nber_cols=#{new_annot.nber_cols}")
+                    loom_rels_touched << relative_filepath.to_s if relative_filepath.to_s.match?(/\.loom\z/i)
                   else
                     logger.warn("[Basic.finish_run] load_annot returned nil for matrix annotation")
                   end
@@ -6909,6 +6956,9 @@ puts "TEST RUN"
                     metadata['data_class_names'] = h_output_files[k][k2]["types"]
                     new_annot = load_annot(run, metadata, relative_filepath, h_data_types, h_data_classes, logger, finish_run_cache)
                     h_output_files[k][k2] = update_h_output_files(h_output_files[k][k2], new_annot) if new_annot
+                    if new_annot && relative_filepath.to_s.match?(/\.loom\z/i)
+                      loom_rels_touched << relative_filepath.to_s
+                    end
                   end
                 end
               end
@@ -6919,7 +6969,18 @@ puts "TEST RUN"
           end
         end
       end
-      
+
+      # Seed / complete /attrs/anndata_mapping after annots are loaded (uses parse input_group when present).
+      loom_rels_touched.uniq.each do |loom_rel|
+        next unless File.exist?(project_dir + loom_rel)
+
+        refresh_anndata_mapping_for_loom(
+          logger,
+          project,
+          loom_rel,
+          input_group: h_results['input_group'].presence
+        )
+      end
 
 #      ### update dataset_size, nber_cols, nber_row from added annots
 #      h_annots={}

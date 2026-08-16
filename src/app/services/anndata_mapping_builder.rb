@@ -59,6 +59,8 @@ class AnndataMappingBuilder
       'var_path' => defaults['var_path'],
       'obs_index_key' => obs_index_key,
       'var_index_key' => var_index_key,
+      'h5ad_obs_index_key' => defaults['h5ad_obs_index_key'] || '_index',
+      'h5ad_var_index_key' => defaults['h5ad_var_index_key'] || '_index',
       'layers' => matrix_map[:layers],
       'obsm' => obsm,
       'varm' => varm,

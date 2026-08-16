@@ -45,8 +45,10 @@ This manifest is the single source of truth used by the conversion tool.
 - `x_path` (string): path to the normalized (or primary analysis) matrix for `adata.X`
 - `obs_path` (string): path prefix for obs columns, normally `"/col_attrs"`
 - `var_path` (string): path prefix for var columns, normally `"/row_attrs"`
-- `obs_index_key` (string): e.g. `"CellID"`
-- `var_index_key` (string): e.g. `"Accession"`
+- `obs_index_key` (string): Loom obs index attribute under `obs_path`, e.g. `"CellID"`
+- `var_index_key` (string): Loom var index attribute under `var_path`, e.g. `"Accession"`
+- `h5ad_obs_index_key` (string): AnnData/H5AD obs index dataset name after export (ASAP uses `"_index"`, matching CellXGene)
+- `h5ad_var_index_key` (string): AnnData/H5AD var index dataset name after export (ASAP uses `"_index"`)
 
 ### Required when data exists
 
@@ -156,6 +158,8 @@ Case A: raw selected as primary during Loom creation (`/matrix` stores raw matri
   "var_path": "/row_attrs",
   "obs_index_key": "CellID",
   "var_index_key": "Accession",
+  "h5ad_obs_index_key": "_index",
+  "h5ad_var_index_key": "_index",
   "raw_x_path": "/matrix",
   "layers": {
     "X": "/layers/X"
@@ -190,6 +194,8 @@ Case B: normalized `X` selected as primary (`/matrix` stores normalized matrix, 
   "var_path": "/row_attrs",
   "obs_index_key": "CellID",
   "var_index_key": "Accession",
+  "h5ad_obs_index_key": "_index",
+  "h5ad_var_index_key": "_index",
   "layers": {},
   "obsm": {
     "X_umap": "/col_attrs/X_umap"

@@ -67,6 +67,18 @@ class ExternalCatalogScfairGateTest < ActiveSupport::TestCase
     )
   end
 
+  def warning_result(message)
+    Result.new(
+      valid?: true,
+      errors: [],
+      warnings: [{ field: 'obs', message: message }],
+      info: [],
+      valid_checks: [],
+      schema_version: '7.1.0',
+      validated_at: Time.current.iso8601
+    )
+  end
+
   def fake_status(ok: true)
     Struct.new(:success?, :exitstatus).new(ok, ok ? 0 : 1)
   end
@@ -108,6 +120,23 @@ class ExternalCatalogScfairGateTest < ActiveSupport::TestCase
     end
   end
 
+  test 'loom with warnings raises and does not archive' do
+    loom_warn = warning_result('schema_reference mismatch')
+    with_project_loom do |_dir, _loom, _h5ad|
+      with_replaced_singleton(CompliancePipeline, :validate_project_loom, ->(*) { loom_warn }) do
+        with_replaced_singleton(ScfairValidationJob, :persist_validation_result, ->(*) { true }) do
+          err = assert_raises(ExternalCatalog::ProjectImporter::Error) do
+            @importer.send(:validate_loom_or_raise!, @project)
+            @importer.send(:archive_project!, @project)
+          end
+          assert_match(/scFAIR loom validation failed/, err.message)
+          assert_match(/warnings=1/, err.message)
+          assert_empty @archive_calls
+        end
+      end
+    end
+  end
+
   test 'valid loom and invalid h5ad raises and does not archive' do
     loom_ok = valid_result
     h5ad_bad = invalid_result('missing uns/title')
@@ -129,6 +158,36 @@ class ExternalCatalogScfairGateTest < ActiveSupport::TestCase
                 @importer.send(:archive_project!, @project)
               end
               assert_match(/scFAIR h5ad validation failed/, err.message)
+              assert_empty @archive_calls
+            end
+          end
+        end
+      end
+    end
+  end
+
+  test 'valid loom and h5ad with warnings raises and does not archive' do
+    loom_ok = valid_result
+    h5ad_warn = warning_result('CellID not in column-order')
+    status_ok = fake_status
+    with_project_loom do |_dir, _loom, h5ad_abs|
+      with_replaced_singleton(CompliancePipeline, :validate_project_loom, ->(*) { loom_ok }) do
+        with_replaced_singleton(ScfairValidationJob, :persist_validation_result, ->(*) { true }) do
+          with_replaced_singleton(Open3, :capture3, lambda { |*|
+            File.write(h5ad_abs, 'h5ad-bytes')
+            ['ok', '', status_ok]
+          }) do
+            validator = Object.new
+            validator.define_singleton_method(:validate) { h5ad_warn }
+            with_replaced_singleton(ScfairH5adValidatorService, :new, ->(*) { validator }) do
+              err = assert_raises(ExternalCatalog::ProjectImporter::Error) do
+                @importer.send(:validate_loom_or_raise!, @project)
+                @importer.send(:export_h5ad_chunked_or_raise!, @project)
+                @importer.send(:validate_h5ad_or_raise!, @project)
+                @importer.send(:archive_project!, @project)
+              end
+              assert_match(/scFAIR h5ad validation failed/, err.message)
+              assert_match(/warnings=1/, err.message)
               assert_empty @archive_calls
             end
           end

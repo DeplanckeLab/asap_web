@@ -233,8 +233,8 @@ namespace :external_catalog do
   desc 'Import from external_catalog_candidates (COUNT/N/LIMIT, IMPORT_USER_EMAIL|IMPORT_USER_ID, SOURCE, PROJECT_TYPE, ONLY_NEW=1). ' \
        'Without SOURCE (or SOURCE=all), candidates are taken in order CELLxGENE, Bgee, HCA, GEO. ' \
        'Duplicate file content (SHA-256) links the provider onto the existing ASAP project instead of creating another. ' \
-       'SC projects: refresh analysis_pipeline, hard-fail scFAIR loom validation, sync chunked h5ad export, ' \
-       'hard-fail scFAIR h5ad validation, then publish/archive. ' \
+       'SC projects: refresh analysis_pipeline, hard-fail scFAIR loom validation (errors or warnings), sync chunked h5ad export, ' \
+       'hard-fail scFAIR h5ad validation (errors or warnings), then publish/archive. ' \
        'SKIP_ARCHIVE=1 (default). SKIP_PUBLISH=1 still creates the landing checkpoint but does not make the project public. ' \
        'CHUNK_CELLS overrides chunked h5ad cell batch size (default 2048).'
   task import: :environment do

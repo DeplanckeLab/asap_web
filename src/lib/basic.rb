@@ -3193,6 +3193,11 @@ module Basic
       end
 
       if File.exist?(h5ad_abs) && File.size(h5ad_abs).positive?
+        # Metadata-only partial writes (obs/var/uns without X) must not count as ready.
+        unless H5DataService.metadata_dataset_exists?(h5ad_abs, 'X')
+          return 'failed' if status_id == 3
+          return 'missing'
+        end
         if loom_analysis_newer_than_h5ad?(project, loom_rel, h5ad_abs)
           return 'stale'
         end

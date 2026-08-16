@@ -48,6 +48,8 @@ class AnndataMappingBuilderTest < ActiveSupport::TestCase
     assert_equal '/raw/X', payload['input_group']
     assert_equal 'CellID', payload['obs_index_key']
     assert_equal 'Accession', payload['var_index_key']
+    assert_equal '_index', payload['h5ad_obs_index_key']
+    assert_equal '_index', payload['h5ad_var_index_key']
   end
 
   test 'case B normalized primary from input_group /X with raw layer' do

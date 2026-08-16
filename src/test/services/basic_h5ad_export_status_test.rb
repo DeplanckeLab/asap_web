@@ -34,14 +34,35 @@ class BasicH5adExportStatusTest < ActiveSupport::TestCase
     assert_equal 'parsing/output.loom', Basic.normalize_project_loom_rel('/parsing/output.loom')
   end
 
+  def with_h5ad_matrix_x(exists: true, &block)
+    H5DataService.stub(:metadata_dataset_exists?, exists, &block)
+  end
+
   test 'h5ad_export_status missing when no file and no run' do
     assert_equal 'missing', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+  end
+
+  test 'h5ad_export_status missing when h5ad exists without matrix X' do
+    File.write(@h5ad_abs, 'h5ad-bytes')
+    with_h5ad_matrix_x(exists: false) do
+      assert_equal 'missing', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+    end
+  end
+
+  test 'h5ad_export_status failed when export succeeded but h5ad has no matrix X' do
+    File.write(@h5ad_abs, 'h5ad-bytes')
+    done_run = Struct.new(:status_id).new(3)
+    with_h5ad_matrix_x(exists: false) do
+      assert_equal 'failed', Basic.h5ad_export_status(@project, @loom_rel, run: done_run)
+    end
   end
 
   test 'h5ad_export_status ready when h5ad exists and is not older than loom' do
     File.write(@h5ad_abs, 'h5ad-bytes')
     FileUtils.touch(@h5ad_abs, mtime: Time.now + 2)
-    assert_equal 'ready', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+    with_h5ad_matrix_x do
+      assert_equal 'ready', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+    end
   end
 
   test 'h5ad_export_status ready when loom mtime is newer but no newer analyses' do
@@ -49,7 +70,9 @@ class BasicH5adExportStatusTest < ActiveSupport::TestCase
     FileUtils.touch(@h5ad_abs, mtime: Time.now)
     sleep 0.05
     FileUtils.touch(@loom_abs, mtime: Time.now + 5)
-    assert_equal 'ready', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+    with_h5ad_matrix_x do
+      assert_equal 'ready', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+    end
   end
 
   test 'h5ad_export_status stale when successful analysis is newer than h5ad' do
@@ -85,7 +108,9 @@ class BasicH5adExportStatusTest < ActiveSupport::TestCase
       )
     )
 
-    assert_equal 'stale', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+    with_h5ad_matrix_x do
+      assert_equal 'stale', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+    end
   end
 
   test 'h5ad_export_status ready when analysis is older than h5ad' do
@@ -119,19 +144,23 @@ class BasicH5adExportStatusTest < ActiveSupport::TestCase
 
     File.write(@h5ad_abs, 'h5ad-bytes')
     FileUtils.touch(@h5ad_abs, mtime: Time.now)
-    assert_equal 'ready', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+    with_h5ad_matrix_x do
+      assert_equal 'ready', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+    end
   end
 
   test 'find_or_start_h5ad_export skips refresh when h5ad is ready and mapping unchanged' do
     File.write(@h5ad_abs, 'h5ad-bytes')
     FileUtils.touch(@h5ad_abs, mtime: Time.now + 2)
 
-    Basic.stub(:anndata_mapping_needs_update?, false) do
-      AnalysisJsonPersistService.stub(:call, ->(**) { flunk 'should not refresh analysis_pipeline' }) do
-        AnndataMappingPersistService.stub(:call, ->(**) { flunk 'should not refresh anndata_mapping' }) do
-          result = Basic.find_or_start_h5ad_export(Rails.logger, @project, @loom_rel, @user.id)
-          assert_equal 'ready', result[:h5ad_status]
-          assert_nil result[:error]
+    with_h5ad_matrix_x do
+      Basic.stub(:anndata_mapping_needs_update?, false) do
+        AnalysisJsonPersistService.stub(:call, ->(**) { flunk 'should not refresh analysis_pipeline' }) do
+          AnndataMappingPersistService.stub(:call, ->(**) { flunk 'should not refresh anndata_mapping' }) do
+            result = Basic.find_or_start_h5ad_export(Rails.logger, @project, @loom_rel, @user.id)
+            assert_equal 'ready', result[:h5ad_status]
+            assert_nil result[:error]
+          end
         end
       end
     end
@@ -175,33 +204,35 @@ class BasicH5adExportStatusTest < ActiveSupport::TestCase
       )
     )
 
-    assert_equal 'stale', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+    with_h5ad_matrix_x do
+      assert_equal 'stale', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
 
-    mapping_calls = []
-    pipeline_calls = []
-    Basic.stub(:anndata_mapping_needs_update?, false) do
-      AnalysisJsonPersistService.stub(
-        :call,
-        lambda { |**kwargs|
-          pipeline_calls << kwargs[:loom_filepath]
-          { ok: true, loom_filepath: kwargs[:loom_filepath], annot_id: 1, nber_steps: 0 }
-        }
-      ) do
-        AnndataMappingPersistService.stub(
+      mapping_calls = []
+      pipeline_calls = []
+      Basic.stub(:anndata_mapping_needs_update?, false) do
+        AnalysisJsonPersistService.stub(
           :call,
-          lambda { |**|
-            mapping_calls << true
-            { ok: true, changed: true }
+          lambda { |**kwargs|
+            pipeline_calls << kwargs[:loom_filepath]
+            { ok: true, loom_filepath: kwargs[:loom_filepath], annot_id: 1, nber_steps: 0 }
           }
         ) do
-          Basic.stub(:asap_data_db_name_from_env!, 'asap_data_v8') do
-            Basic.stub(:set_run, ->(*) { true }) do
-              Basic.stub(:exec_run, ->(*) {}) do
-                result = Basic.find_or_start_h5ad_export(Rails.logger, @project, @loom_rel, @user.id)
-                assert_empty mapping_calls, 'anndata_mapping must not be rewritten when unchanged'
-                assert_equal [@loom_rel], pipeline_calls
-                assert result[:run], "expected export run, got error=#{result[:error]}"
-                register_for_test_cleanup(result[:run])
+          AnndataMappingPersistService.stub(
+            :call,
+            lambda { |**|
+              mapping_calls << true
+              { ok: true, changed: true }
+            }
+          ) do
+            Basic.stub(:asap_data_db_name_from_env!, 'asap_data_v8') do
+              Basic.stub(:set_run, ->(*) { true }) do
+                Basic.stub(:exec_run, ->(*) {}) do
+                  result = Basic.find_or_start_h5ad_export(Rails.logger, @project, @loom_rel, @user.id)
+                  assert_empty mapping_calls, 'anndata_mapping must not be rewritten when unchanged'
+                  assert_equal [@loom_rel], pipeline_calls
+                  assert result[:run], "expected export run, got error=#{result[:error]}"
+                  register_for_test_cleanup(result[:run])
+                end
               end
             end
           end

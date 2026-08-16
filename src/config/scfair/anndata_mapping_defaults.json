@@ -13,7 +13,9 @@
     "obs_path": "/col_attrs",
     "var_path": "/row_attrs",
     "obs_index_key": "CellID",
-    "var_index_key": "Accession"
+    "var_index_key": "Accession",
+    "h5ad_obs_index_key": "_index",
+    "h5ad_var_index_key": "_index"
   },
 
   "required_keys": [
@@ -23,7 +25,9 @@
     "obs_path",
     "var_path",
     "obs_index_key",
-    "var_index_key"
+    "var_index_key",
+    "h5ad_obs_index_key",
+    "h5ad_var_index_key"
   ],
 
   "required_when_data_exists": [
@@ -86,6 +90,8 @@
       "var_path": "/row_attrs",
       "obs_index_key": "CellID",
       "var_index_key": "Accession",
+      "h5ad_obs_index_key": "_index",
+      "h5ad_var_index_key": "_index",
       "raw_x_path": "/matrix",
       "layers": {
         "X": "/layers/X"
@@ -107,6 +113,8 @@
       "var_path": "/row_attrs",
       "obs_index_key": "CellID",
       "var_index_key": "Accession",
+      "h5ad_obs_index_key": "_index",
+      "h5ad_var_index_key": "_index",
       "layers": {},
       "obsm": {
         "X_umap": "/col_attrs/X_umap"

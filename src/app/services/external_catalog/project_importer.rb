@@ -10,8 +10,9 @@ require 'digest'
 module ExternalCatalog
   # Sequential import of one catalog entry into ASAP:
   # download → preparse → (content-sha256+preparsing link or create project) → Provider label →
-  # parse → (sc) analysis_pipeline → loom scFAIR validate (hard fail) → chunked h5ad export →
-  # h5ad scFAIR validate (hard fail) → publish → archive (unless SKIP_ARCHIVE).
+  # parse → (sc) analysis_pipeline → loom scFAIR validate (hard fail on errors or warnings) →
+  # chunked h5ad export → h5ad scFAIR validate (hard fail on errors or warnings) →
+  # publish → archive (unless SKIP_ARCHIVE).
   # Bulk: parse → ensure_h5ad_exports → publish → archive.
   class ProjectImporter
     RAW_SEL = '/raw/X'
@@ -835,18 +836,9 @@ module ExternalCatalog
       @logger.info("[ExternalCatalog] scFAIR loom validation project=#{project.key} path=#{loom_path}")
       result = CompliancePipeline.validate_project_loom(loom_path, project, logger: @logger)
       ScfairValidationJob.persist_validation_result(project, result, loom_path)
+      raise_if_scfair_issues!(result, kind: 'loom', project: project)
 
-      unless result.valid?
-        sample = Array(result.errors).first(5).map { |e| format_validation_issue(e) }.join('; ')
-        raise Error,
-              "scFAIR loom validation failed for project=#{project.key} " \
-              "errors=#{Array(result.errors).size}: #{sample}"
-      end
-
-      @logger.info(
-        "[ExternalCatalog] scFAIR loom valid project=#{project.key} " \
-        "warnings=#{Array(result.warnings).size}"
-      )
+      @logger.info("[ExternalCatalog] scFAIR loom clean project=#{project.key}")
       result
     end
 
@@ -923,18 +915,25 @@ module ExternalCatalog
 
       @logger.info("[ExternalCatalog] scFAIR h5ad validation project=#{project.key} path=#{h5ad_abs}")
       result = ScfairH5adValidatorService.new(h5ad_abs.to_s, logger: @logger).validate
-      unless result.valid?
-        sample = Array(result.errors).first(5).map { |e| format_validation_issue(e) }.join('; ')
-        raise Error,
-              "scFAIR h5ad validation failed for project=#{project.key} " \
-              "errors=#{Array(result.errors).size}: #{sample}"
-      end
+      raise_if_scfair_issues!(result, kind: 'h5ad', project: project)
 
-      @logger.info(
-        "[ExternalCatalog] scFAIR h5ad valid project=#{project.key} " \
-        "warnings=#{Array(result.warnings).size}"
-      )
+      @logger.info("[ExternalCatalog] scFAIR h5ad clean project=#{project.key}")
       result
+    end
+
+    # Import requires a fully clean scFAIR report: no errors and no warnings.
+    def raise_if_scfair_issues!(result, kind:, project:)
+      errors = Array(result.errors)
+      warnings = Array(result.warnings)
+      return if result.valid? && errors.empty? && warnings.empty?
+
+      err_sample = errors.first(5).map { |e| format_validation_issue(e) }.join('; ')
+      warn_sample = warnings.first(5).map { |w| format_validation_issue(w) }.join('; ')
+      parts = []
+      parts << "errors=#{errors.size}" + (err_sample.present? ? ": #{err_sample}" : '')
+      parts << "warnings=#{warnings.size}" + (warn_sample.present? ? ": #{warn_sample}" : '')
+      raise Error,
+            "scFAIR #{kind} validation failed for project=#{project.key} #{parts.join(' ')}"
     end
 
     def format_validation_issue(issue)

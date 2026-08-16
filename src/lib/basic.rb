@@ -746,12 +746,11 @@ module Basic
 
     # Read-only Ensembl dumps + ENSEMBL_DATA_DIR for asap_run SLURM/docker jobs.
     # Required so parse can resolve release-scoped feature_name from gene.txt/xref.txt.
+    # Do not Dir.exist? here: this runs inside the website container, while `docker run -v`
+    # binds from the Docker host. Missing host dumps fail at docker run time instead.
     def ensembl_data_docker_volume_mount_arg
       dir = ensembl_data_dir
       raise "ENSEMBL_DATA_DIR is blank" if dir.blank?
-      unless Dir.exist?(dir)
-        raise "ENSEMBL_DATA_DIR missing on host: #{dir}. Mount the Ensembl dump tree for parse feature_name."
-      end
 
       "-v #{dir}:#{dir}:ro -e ENSEMBL_DATA_DIR=#{dir}"
     end

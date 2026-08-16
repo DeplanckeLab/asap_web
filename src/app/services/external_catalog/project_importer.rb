@@ -10,11 +10,16 @@ require 'digest'
 module ExternalCatalog
   # Sequential import of one catalog entry into ASAP:
   # download → preparse → (content-sha256+preparsing link or create project) → Provider label →
-  # parse → scFAIR validation (sc) → refresh analysis_pipeline → publish → h5ad export → archive.
+  # parse → (sc) analysis_pipeline → loom scFAIR validate (hard fail) → chunked h5ad export →
+  # h5ad scFAIR validate (hard fail) → publish → archive (unless SKIP_ARCHIVE).
+  # Bulk: parse → ensure_h5ad_exports → publish → archive.
   class ProjectImporter
     RAW_SEL = '/raw/X'
     DEFAULT_PARSE_TIMEOUT_SEC = 6 * 60 * 60
     POLL_INTERVAL_SEC = 15
+    DEFAULT_H5AD_CHUNK_CELLS = 2048
+    LOOM_REL = 'parsing/output.loom'
+    CHUNKED_H5AD_SCRIPT = '/srv/loom_to_h5ad_chunked.v8.py'
     PREPARSING_FINGERPRINT_KEYS = %w[file_type sel_name delimiter gene_name_col has_header].freeze
     LANDING_CHECKPOINT_TITLE_SUFFIX = ' colored by cell type with labels'
     LEGACY_LANDING_CHECKPOINT_TITLES = [
@@ -139,9 +144,15 @@ module ExternalCatalog
       attach_provider_label!(project, provider, entry)
       wait_for_parse!(project)
       attach_reference_metadata!(project, entry)
-      run_scfair_validation!(project) if project_type_for(entry).tag.to_s == 'sc'
+      if project_type_for(entry).tag.to_s == 'sc'
+        Basic.refresh_analysis_pipeline_for_project(@logger, project)
+        validate_loom_or_raise!(project)
+        export_h5ad_chunked_or_raise!(project)
+        validate_h5ad_or_raise!(project)
+      else
+        Basic.ensure_h5ad_exports_for_project(@logger, project, project.user_id)
+      end
       finalize_project_visibility!(project)
-      Basic.ensure_h5ad_exports_for_project(@logger, project, project.user_id)
       archive_project!(project) unless @skip_archive
 
       @logger.info(
@@ -814,8 +825,127 @@ module ExternalCatalog
     end
 
     def run_scfair_validation!(project)
-      @logger.info("[ExternalCatalog] scFAIR validation project=#{project.key}")
-      ScfairValidationJob.perform_now(project.id)
+      validate_loom_or_raise!(project)
+    end
+
+    def validate_loom_or_raise!(project)
+      loom_path = project_loom_path(project)
+      raise Error, "No loom file found for scFAIR validation project=#{project.key}" if loom_path.blank? || !File.exist?(loom_path)
+
+      @logger.info("[ExternalCatalog] scFAIR loom validation project=#{project.key} path=#{loom_path}")
+      result = CompliancePipeline.validate_project_loom(loom_path, project, logger: @logger)
+      ScfairValidationJob.persist_validation_result(project, result, loom_path)
+
+      unless result.valid?
+        sample = Array(result.errors).first(5).map { |e| format_validation_issue(e) }.join('; ')
+        raise Error,
+              "scFAIR loom validation failed for project=#{project.key} " \
+              "errors=#{Array(result.errors).size}: #{sample}"
+      end
+
+      @logger.info(
+        "[ExternalCatalog] scFAIR loom valid project=#{project.key} " \
+        "warnings=#{Array(result.warnings).size}"
+      )
+      result
+    end
+
+    def export_h5ad_chunked_or_raise!(project)
+      loom_rel = LOOM_REL
+      loom_abs = project_loom_path(project)
+      raise Error, "No loom file for h5ad export project=#{project.key}" if loom_abs.blank? || !File.exist?(loom_abs)
+
+      # Prefer canonical parsing/output.loom when present; otherwise use discovered path.
+      project_dir = Basic.project_user_dir(project)
+      canonical = project_dir + loom_rel
+      if File.exist?(canonical)
+        loom_abs = canonical.to_s
+      else
+        loom_rel = Pathname.new(loom_abs).relative_path_from(project_dir).to_s
+      end
+      h5ad_rel = Basic.h5ad_rel_path_for_loom(loom_rel)
+      h5ad_abs = project_dir + h5ad_rel
+      FileUtils.mkdir_p(h5ad_abs.dirname)
+      File.delete(h5ad_abs) if h5ad_abs.exist?
+
+      run_dir = project_dir.join('export_h5ad', "chunked_#{Time.now.utc.strftime('%Y%m%d%H%M%S')}")
+      FileUtils.mkdir_p(run_dir)
+
+      chunk_cells = Integer(ENV.fetch('CHUNK_CELLS', DEFAULT_H5AD_CHUNK_CELLS.to_s))
+      container = ENV.fetch('ASAP_RUN_CONTAINER')
+      cmd = [
+        'docker', 'exec', container,
+        'python', CHUNKED_H5AD_SCRIPT,
+        '-i', loom_abs.to_s,
+        '-o', h5ad_abs.to_s,
+        '-d', run_dir.to_s,
+        '--chunk-cells', chunk_cells.to_s
+      ]
+
+      @logger.info(
+        "[ExternalCatalog] chunked h5ad export project=#{project.key} " \
+        "chunk_cells=#{chunk_cells} out=#{h5ad_abs}"
+      )
+      stdout, stderr, status = Open3.capture3(*cmd)
+      unless status.success?
+        detail = [stderr, stdout].map(&:to_s).map(&:strip).reject(&:blank?).first
+        raise Error,
+              "chunked h5ad export failed for project=#{project.key}: " \
+              "#{detail.presence || "exit=#{status.exitstatus}"}"
+      end
+      unless h5ad_abs.exist? && h5ad_abs.size.positive?
+        raise Error, "chunked h5ad missing after export project=#{project.key} path=#{h5ad_abs}"
+      end
+
+      @logger.info(
+        "[ExternalCatalog] chunked h5ad ready project=#{project.key} " \
+        "bytes=#{h5ad_abs.size} run_dir=#{run_dir}"
+      )
+      h5ad_abs.to_s
+    end
+
+    def validate_h5ad_or_raise!(project)
+      loom_path = project_loom_path(project)
+      raise Error, "No loom file for h5ad validation project=#{project.key}" if loom_path.blank?
+
+      project_dir = Basic.project_user_dir(project)
+      loom_pn = Pathname.new(loom_path)
+      loom_rel =
+        if loom_pn.to_s.start_with?(project_dir.to_s)
+          loom_pn.relative_path_from(project_dir).to_s
+        else
+          LOOM_REL
+        end
+      h5ad_abs = project_dir + Basic.h5ad_rel_path_for_loom(loom_rel)
+      unless h5ad_abs.exist? && h5ad_abs.size.positive?
+        raise Error, "H5AD not found for validation project=#{project.key} path=#{h5ad_abs}"
+      end
+
+      @logger.info("[ExternalCatalog] scFAIR h5ad validation project=#{project.key} path=#{h5ad_abs}")
+      result = ScfairH5adValidatorService.new(h5ad_abs.to_s, logger: @logger).validate
+      unless result.valid?
+        sample = Array(result.errors).first(5).map { |e| format_validation_issue(e) }.join('; ')
+        raise Error,
+              "scFAIR h5ad validation failed for project=#{project.key} " \
+              "errors=#{Array(result.errors).size}: #{sample}"
+      end
+
+      @logger.info(
+        "[ExternalCatalog] scFAIR h5ad valid project=#{project.key} " \
+        "warnings=#{Array(result.warnings).size}"
+      )
+      result
+    end
+
+    def format_validation_issue(issue)
+      case issue
+      when Hash
+        field = issue[:field] || issue['field']
+        message = issue[:message] || issue['message'] || issue.inspect
+        field.present? ? "#{field}: #{message}" : message.to_s
+      else
+        issue.to_s
+      end
     end
 
     def visualization_available?(project)

@@ -151,6 +151,12 @@ class ScfairValidationJob < ApplicationJob
     nil
   end
 
+  # Persist a CompliancePipeline / validator Result for the project compliance UI.
+  # Used by the async job and by ExternalCatalog::ProjectImporter (sync hard-fail path).
+  def self.persist_validation_result(project, result, error_or_path)
+    new.send(:save_validation_result, project, result, error_or_path)
+  end
+
   def save_validation_result(project, result, error_or_path)
     cs = project.compliance_schemas.first
     schema_meta = cs ? cs.to_config_hash.transform_keys(&:to_sym) : {}

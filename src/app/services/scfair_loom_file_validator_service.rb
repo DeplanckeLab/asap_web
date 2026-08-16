@@ -253,7 +253,7 @@ class ScfairLoomFileValidatorService
     if manifest_present
       valid_checks << { field: '/attrs/anndata_mapping', message: 'Found anndata_mapping manifest' }
     else
-      warnings << { field: '/attrs/anndata_mapping', message: 'Missing anndata_mapping manifest (recommended for deterministic Loom->H5AD conversion)' }
+      warnings << { field: '/attrs/anndata_mapping', message: 'Missing anndata_mapping manifest (ASAP writes /attrs/anndata_mapping from Annots before validation, download, and H5AD export)' }
     end
 
     Result.new(

@@ -1674,7 +1674,7 @@ checks:
     summary: The anndata_mapping manifest documents Loom to AnnData path mapping.
     rollup:
     - Checks for anndata_mapping manifest in /attrs
-    - Recommended for deterministic Loom to H5AD conversion
+    - ASAP writes it from Annots before validation, download, and H5AD export
   h5ad.structure:
     label: AnnData structural integrity
     formats:

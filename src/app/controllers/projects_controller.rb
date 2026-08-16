@@ -1590,8 +1590,8 @@ class ProjectsController < ApplicationController
   end
 
   # POST /projects/:id/toggle_public
-  # Toggle the public status of a project
-  # Requires compliance validation (as configured in Version env_json) to make public
+  # Start publication (being_published), cancel in-progress publication, or unpublish.
+  # public/public_at flip only after H5AD exports + scFAIR H5AD validation succeed.
   def toggle_public
     if @project.sandbox?
       message = "Sandbox projects cannot be made public. Clone the project into a regular account project first."
@@ -1602,7 +1602,6 @@ class ProjectsController < ApplicationController
       return
     end
 
-    # Check permissions - only owner or admin can change public status
     unless @project.user_id == current_user&.id || admin?
       respond_to do |format|
         format.html { redirect_to project_path(@project), alert: "You don't have permission to change this project's public status." }
@@ -1611,10 +1610,28 @@ class ProjectsController < ApplicationController
       return
     end
 
-    # Determine the desired new state
     new_public_state = params[:public] == 'true' || params[:public] == true
-    
-    # If trying to make public, check compliance requirements
+    user_id = current_user&.id || @project.user_id
+
+    if new_public_state && @project.public?
+      respond_publication_json_or_html(
+        success: true,
+        message: 'Project is already public.',
+        notice: 'Project is already public.'
+      )
+      return
+    end
+
+    if new_public_state && @project.publishing?
+      respond_publication_json_or_html(
+        success: false,
+        error: 'Publication is already in progress.',
+        status: :unprocessable_entity,
+        alert: 'Publication is already in progress.'
+      )
+      return
+    end
+
     if new_public_state && !@project.public?
       can_publish, reason = @project.can_be_public?
       unless can_publish
@@ -1624,52 +1641,103 @@ class ProjectsController < ApplicationController
         end
         return
       end
+
+      begin
+        result = ProjectPublicationService.start!(@project, user_id: user_id, logger: Rails.logger)
+        if result[:status] == 'finalized'
+          respond_publication_json_or_html(
+            success: true,
+            message: 'Project is now public.',
+            notice: 'Project is now public.'
+          )
+        else
+          respond_publication_json_or_html(
+            success: true,
+            message: 'Publication started. Exporting and validating H5AD files…',
+            notice: 'Publication started. Exporting and validating H5AD files…'
+          )
+        end
+      rescue ProjectPublicationService::Error => e
+        respond_to do |format|
+          format.html { redirect_to project_path(@project, view: 'settings'), alert: e.message }
+          format.json do
+            render json: publication_status_payload(success: false, error: e.message),
+                   status: :unprocessable_entity
+          end
+        end
+      end
+      return
     end
 
-    # Update the public status
-    made_public = false
-    if new_public_state && !@project.public?
-      # Refresh /attrs/analysis_pipeline on matrix looms before the project becomes public.
-      Basic.refresh_analysis_pipeline_for_project(Rails.logger, @project)
+    if !new_public_state && @project.publishing?
+      ProjectPublicationService.cancel!(@project, logger: Rails.logger)
+      respond_publication_json_or_html(
+        success: true,
+        message: 'Publication cancelled.',
+        notice: 'Publication cancelled.'
+      )
+      return
+    end
 
-      # Making public - set public_id if not already set
-      if @project.public_id.nil?
-        max_public_id = Project.maximum(:public_id) || 0
-        @project.public_id = max_public_id + 1
-      end
-      @project.public = true
-      @project.public_at = Time.current
-      if @project.input_content_sha256.blank?
-        sha = InputFileSha256.ensure_for_project!(@project)
-        @project.input_content_sha256 = sha if sha.present?
-      end
-      made_public = true
-    elsif !new_public_state && @project.public?
-      # Making private
+    if !new_public_state && @project.public?
       @project.public = false
       # Keep public_id and public_at for record keeping
+      if @project.save
+        respond_publication_json_or_html(
+          success: true,
+          message: 'Project is now private.',
+          notice: 'Project is now private.'
+        )
+      else
+        respond_to do |format|
+          format.html { redirect_to project_path(@project, view: 'summary'), alert: 'Failed to update project status.' }
+          format.json do
+            render json: publication_status_payload(
+              success: false,
+              error: @project.errors.full_messages.join(', ')
+            ), status: :unprocessable_entity
+          end
+        end
+      end
+      return
     end
 
-    if @project.save
-      if @project.public?
-        ExternalCatalogCandidate.sync_catalog_links_for_public_project!(@project)
+    respond_publication_json_or_html(
+      success: true,
+      message: 'No change.',
+      notice: 'No change.'
+    )
+  end
+
+  def publication_status_payload(success:, message: nil, error: nil)
+    @project.reload
+    {
+      success: success,
+      public: @project.public?,
+      being_published: @project.publishing?,
+      publication_error: @project.publication_error,
+      public_id: @project.public_id,
+      message: message,
+      error: error
+    }.compact
+  end
+  private :publication_status_payload
+
+  def respond_publication_json_or_html(success:, message: nil, notice: nil, alert: nil, error: nil, status: :ok)
+    respond_to do |format|
+      format.html do
+        opts = {}
+        opts[:notice] = notice if notice.present?
+        opts[:alert] = alert.presence || error
+        redirect_to project_path(@project, view: 'settings'), **opts.compact
       end
-      if made_public
-        user_id = current_user&.id || @project.user_id
-        Basic.ensure_h5ad_exports_for_project(Rails.logger, @project, user_id)
-      end
-      status_text = @project.public? ? 'public' : 'private'
-      respond_to do |format|
-        format.html { redirect_to project_path(@project, view: 'summary'), notice: "Project is now #{status_text}." }
-        format.json { render json: { success: true, public: @project.public?, public_id: @project.public_id, message: "Project is now #{status_text}." } }
-      end
-    else
-      respond_to do |format|
-        format.html { redirect_to project_path(@project, view: 'summary'), alert: "Failed to update project status." }
-        format.json { render json: { success: false, error: @project.errors.full_messages.join(', ') }, status: :unprocessable_entity }
+      format.json do
+        render json: publication_status_payload(success: success, message: message, error: error),
+               status: status
       end
     end
   end
+  private :respond_publication_json_or_html
 
   # GET /projects/1/instructions
   def instructions

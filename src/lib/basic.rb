@@ -3172,10 +3172,13 @@ module Basic
 
     # Classify H5AD export readiness for a loom relative path given optional latest Run.
     # Returns one of: missing, ready, stale, pending, running, failed
+    #
+    # "stale" means a successful analysis for this loom finished after the H5AD file
+    # was last written — not merely that the loom file mtime changed (attrs refreshes
+    # for anndata_mapping / analysis_pipeline bump mtime without new analyses).
     def h5ad_export_status(project, loom_rel, run: nil)
       loom_rel = normalize_project_loom_rel(loom_rel)
       project_dir = project_user_dir(project)
-      loom_abs = project_dir + loom_rel
       h5ad_abs = project_dir + h5ad_rel_path_for_loom(loom_rel)
 
       status_id = run&.status_id.to_i
@@ -3190,7 +3193,7 @@ module Basic
       end
 
       if File.exist?(h5ad_abs) && File.size(h5ad_abs).positive?
-        if File.exist?(loom_abs) && File.ctime(h5ad_abs) < File.mtime(loom_abs)
+        if loom_analysis_newer_than_h5ad?(project, loom_rel, h5ad_abs)
           return 'stale'
         end
         return 'ready'
@@ -3199,6 +3202,48 @@ module Basic
       return 'failed' if status_id == 3 && (!File.exist?(h5ad_abs) || File.size(h5ad_abs) <= 0)
 
       'missing'
+    end
+
+    # True when a successful non-export analysis linked to this loom finished after the H5AD mtime.
+    def loom_analysis_newer_than_h5ad?(project, loom_rel, h5ad_abs)
+      activity_at = latest_loom_analysis_activity_at(project, loom_rel)
+      return false if activity_at.nil?
+
+      activity_at > File.mtime(h5ad_abs)
+    end
+
+    # Latest finish time of successful analyses that contributed annots (and lineage) to this loom.
+    # Excludes export_h5ad runs. Returns nil when there is no such activity.
+    def latest_loom_analysis_activity_at(project, loom_rel)
+      loom_rel = normalize_project_loom_rel(loom_rel)
+      _image, export_step, _std_method = export_h5ad_step_and_std_method
+
+      seed_ids = Annot.where(project_id: project.id, filepath: loom_rel)
+                      .pluck(:run_id, :store_run_id, :ori_run_id)
+                      .flatten
+                      .compact
+                      .map(&:to_i)
+                      .reject(&:zero?)
+                      .uniq
+      return nil if seed_ids.empty?
+
+      lineage_ids = Run.where(id: seed_ids).flat_map do |run|
+        ancestors = run.lineage_run_ids.to_s.split(',').map(&:strip).reject(&:blank?).map(&:to_i)
+        ancestors + [run.id]
+      end.uniq
+
+      scope = Run.where(project_id: project.id, id: lineage_ids, status_id: 3)
+      scope = scope.where.not(step_id: export_step.id) if export_step
+
+      scope.filter_map { |run| run_analysis_activity_at(run) }.max
+    end
+
+    def run_analysis_activity_at(run)
+      if run.start_time.present? && run.process_duration.present?
+        run.start_time + run.process_duration.to_f
+      else
+        run.created_at || run.submitted_at
+      end
     end
 
     def latest_h5ad_export_run(project, loom_rel)
@@ -3256,16 +3301,18 @@ module Basic
     end
 
     # Rebuild /attrs/anndata_mapping for one loom from defaults + Annot DataClass/dim (+ optional parse input_group).
-    def refresh_anndata_mapping_for_loom(logger, project, loom_rel, input_group: nil)
+    # When only_if_changed is true, skips the loom write if the document is already up to date.
+    def refresh_anndata_mapping_for_loom(logger, project, loom_rel, input_group: nil, only_if_changed: false)
       result = AnndataMappingPersistService.call(
         project: project,
         loom_filepath: loom_rel,
-        input_group: input_group
+        input_group: input_group,
+        only_if_changed: only_if_changed
       )
       logger&.info(
         "[refresh_anndata_mapping_for_loom] project=#{project.key} loom=#{loom_rel} " \
-        "annot_id=#{result[:annot_id]} x_path=#{result[:x_path]} raw_x_path=#{result[:raw_x_path]} " \
-        "obsm=#{result[:nber_obsm]}"
+        "changed=#{result[:changed]} annot_id=#{result[:annot_id]} x_path=#{result[:x_path]} " \
+        "raw_x_path=#{result[:raw_x_path]} obsm=#{result[:nber_obsm]}"
       )
       result
     rescue StandardError => e
@@ -3273,7 +3320,21 @@ module Basic
         "[refresh_anndata_mapping_for_loom] project=#{project.key} loom=#{loom_rel} " \
         "#{e.class}: #{e.message}"
       )
-      { ok: false, loom_filepath: loom_rel, error: e.message }
+      { ok: false, changed: false, loom_filepath: loom_rel, error: e.message }
+    end
+
+    def anndata_mapping_needs_update?(project, loom_rel, input_group: nil)
+      AnndataMappingPersistService.needs_update?(
+        project: project,
+        loom_filepath: loom_rel,
+        input_group: input_group
+      )
+    rescue StandardError => e
+      Rails.logger&.error(
+        "[anndata_mapping_needs_update?] project=#{project.key} loom=#{loom_rel} " \
+        "#{e.class}: #{e.message}"
+      )
+      true
     end
 
     # Rebuild /attrs/anndata_mapping on every matrix loom.
@@ -3292,6 +3353,13 @@ module Basic
 
     # Start (or reuse) export_h5ad runs for every matrix loom in the project.
     # Used when a project is made public so H5AD siblings are ready for download.
+    #
+    # Per loom:
+    # - Rebuild H5AD when missing/stale/failed (new analyses since the H5AD), even if
+    #   anndata_mapping is unchanged.
+    # - Rewrite anndata_mapping only when its document would change; if it must change,
+    #   H5AD is rebuilt too.
+    # - Skip both when H5AD is ready and mapping is unchanged.
     # Returns an array of { loom_rel:, run:, h5ad_status:, error: } per loom.
     def ensure_h5ad_exports_for_project(logger, project, user_id)
       loom_rels = project_matrix_loom_rels(project)
@@ -3346,18 +3414,17 @@ module Basic
         }
       end
 
-      version = project.version
-      h_env = h_env_with_asap_run_docker(safe_parse_json(version.env_json, {}), runtime_docker_image)
-
-      ProjectStep.find_or_create_by!(project_id: project.id, step_id: step.id) do |ps|
-        ps.status_id = 1
-      end
-
       existing = latest_h5ad_export_run(project, loom_rel)
       current_status = h5ad_export_status(project, loom_rel, run: existing)
+      mapping_needed = anndata_mapping_needs_update?(project, loom_rel)
 
-      if existing && %w[pending running ready].include?(current_status)
-        if %w[pending running].include?(current_status) && existing.slurm_job_id.blank? && [1, 6].include?(existing.status_id.to_i)
+      # Ready H5AD and mapping unchanged: skip both.
+      if current_status == 'ready' && !mapping_needed
+        return { run: existing, h5ad_status: current_status, error: nil }
+      end
+
+      if existing && %w[pending running].include?(current_status)
+        if existing.slurm_job_id.blank? && [1, 6].include?(existing.status_id.to_i)
           exec_run(logger, existing)
           existing.reload
           current_status = h5ad_export_status(project, loom_rel, run: existing)
@@ -3365,16 +3432,37 @@ module Basic
         return { run: existing, h5ad_status: current_status, error: nil }
       end
 
-      # Refresh analysis_pipeline and anndata_mapping on the loom before conversion.
+      # Export needed: H5AD missing/stale/failed, and/or anndata_mapping document must change.
+      version = project.version
+      unless version
+        return {
+          run: nil,
+          h5ad_status: current_status,
+          error: 'Project version is required to start export_h5ad'
+        }
+      end
+      h_env = h_env_with_asap_run_docker(safe_parse_json(version.env_json, {}), runtime_docker_image)
+
+      ProjectStep.find_or_create_by!(project_id: project.id, step_id: step.id) do |ps|
+        ps.status_id = 1
+      end
+
       begin
         AnalysisJsonPersistService.call(project: project, loom_filepath: loom_rel)
-        mapping = refresh_anndata_mapping_for_loom(logger, project, loom_rel)
-        if mapping[:ok] == false
-          return {
-            run: nil,
-            h5ad_status: current_status,
-            error: "Failed to refresh anndata_mapping: #{mapping[:error]}"
-          }
+        if mapping_needed
+          mapping = refresh_anndata_mapping_for_loom(logger, project, loom_rel)
+          if mapping[:ok] == false
+            return {
+              run: nil,
+              h5ad_status: current_status,
+              error: "Failed to refresh anndata_mapping: #{mapping[:error]}"
+            }
+          end
+        else
+          logger&.info(
+            "[find_or_start_h5ad_export] skip anndata_mapping refresh (unchanged) " \
+            "project=#{project.key} loom=#{loom_rel}"
+          )
         end
       rescue StandardError => e
         logger.error("[find_or_start_h5ad_export] AnalysisJsonPersistService failed: #{e.class}: #{e.message}")

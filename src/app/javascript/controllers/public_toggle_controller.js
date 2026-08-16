@@ -1,12 +1,13 @@
 import { Controller } from "@hotwired/stimulus"
 
-// Handles toggling the public status of a project
-// Requires compliance validation (as configured in Version env_json) to make public
+// Handles starting publication, cancelling in-progress publication, or unpublishing.
+// public flips only after H5AD export + scFAIR H5AD validation succeed.
 export default class extends Controller {
   static targets = ["checkbox", "message", "messageText"]
   static values = {
     url: String,
-    current: Boolean
+    current: Boolean,
+    beingPublished: Boolean
   }
 
   connect() {
@@ -20,17 +21,26 @@ export default class extends Controller {
     }
 
     const newState = this.checkboxTarget.checked
-    
-    // If trying to make public, confirm with user
-    if (newState && !this.currentValue) {
+    const cancellingPublish = this.beingPublishedValue && !newState
+
+    if (newState && !this.currentValue && !this.beingPublishedValue) {
       const confirmed = confirm(
-        'Are you sure you want to make this project public?\n\n' +
-        'This will allow anyone to view and clone your project. ' +
+        'Are you sure you want to publish this project?\n\n' +
+        'The project stays private until H5AD export and scFAIR validation finish. ' +
+        'Anyone will then be able to view and clone it. ' +
         'Please ensure you have the rights to share this data publicly.'
       )
-      
+
       if (!confirmed) {
         this.checkboxTarget.checked = false
+        return
+      }
+    }
+
+    if (cancellingPublish) {
+      const confirmed = confirm('Cancel publication in progress?')
+      if (!confirmed) {
+        this.checkboxTarget.checked = true
         return
       }
     }
@@ -54,29 +64,28 @@ export default class extends Controller {
       const data = await response.json()
 
       if (response.ok && data.success) {
-        this.currentValue = data.public
-        this.showMessage(data.message, 'success')
-        
-        // Reload page after short delay to show updated state
+        this.currentValue = !!data.public
+        this.beingPublishedValue = !!data.being_published
+        this.checkboxTarget.checked = this.currentValue || this.beingPublishedValue
+        this.showMessage(data.message || 'Updated.', data.being_published ? 'info' : 'success')
+
         setTimeout(() => {
           window.location.reload()
         }, 1500)
       } else {
-        // Revert checkbox to previous state
-        this.checkboxTarget.checked = this.currentValue
-        
-        // Show error message
+        this.checkboxTarget.checked = this.currentValue || this.beingPublishedValue
+
         let errorMessage = data.error || 'Failed to update project status.'
-        
+
         if (data.requires_validation) {
           errorMessage += ' Please run metadata schema validation first.'
         }
-        
+
         this.showMessage(errorMessage, 'error')
       }
     } catch (error) {
       console.error('Toggle public error:', error)
-      this.checkboxTarget.checked = this.currentValue
+      this.checkboxTarget.checked = this.currentValue || this.beingPublishedValue
       this.showMessage('Failed to update project status. Please try again.', 'error')
     } finally {
       this.isProcessing = false
@@ -89,7 +98,6 @@ export default class extends Controller {
     this.messageTarget.classList.remove('hidden')
     this.messageTextTarget.textContent = text
 
-    // Remove existing type classes
     this.messageTextTarget.classList.remove(
       'bg-green-100', 'text-green-800',
       'bg-red-100', 'text-red-800',
@@ -97,7 +105,6 @@ export default class extends Controller {
       'bg-amber-100', 'text-amber-800'
     )
 
-    // Add appropriate type classes
     switch (type) {
       case 'success':
         this.messageTextTarget.classList.add('bg-green-100', 'text-green-800')

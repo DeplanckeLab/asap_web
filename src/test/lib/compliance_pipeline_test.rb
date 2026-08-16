@@ -70,6 +70,60 @@ class CompliancePipelineTest < TestBaseWithoutFixtures
     assert_equal 1, result.errors.size
   end
 
+  test 'ensure_anndata_mapping_before_project_validation refreshes loom under project' do
+    user_data = Dir.mktmpdir('compliance_pipeline_user_data')
+    project_dir = File.join(user_data, '9', 'ABCD')
+    FileUtils.mkdir_p(File.join(project_dir, 'parsing'))
+    loom_rel = 'parsing/output.loom'
+    loom_path = File.join(project_dir, loom_rel)
+    File.write(loom_path, 'loom')
+
+    project = Struct.new(:user_id, :key).new(9, 'ABCD')
+    refreshed = []
+
+    with_env('USER_DATA_DIR' => user_data) do
+      with_replaced_singleton(Basic, :refresh_anndata_mapping_for_loom, lambda { |_logger, proj, rel|
+        refreshed << [proj.key, rel]
+        { ok: true, loom_filepath: rel }
+      }) do
+        CompliancePipeline.ensure_anndata_mapping_before_project_validation!(loom_path, project, nil)
+      end
+    end
+
+    assert_equal [['ABCD', loom_rel]], refreshed
+  ensure
+    FileUtils.remove_entry(user_data) if user_data && File.directory?(user_data)
+  end
+
+  test 'ensure_anndata_mapping_before_project_validation skips loom outside project' do
+    project = Struct.new(:user_id, :key).new(9, 'ABCD')
+    refreshed = []
+
+    with_replaced_singleton(Basic, :refresh_anndata_mapping_for_loom, lambda { |*|
+      refreshed << true
+      { ok: true }
+    }) do
+      CompliancePipeline.ensure_anndata_mapping_before_project_validation!('/tmp/other.loom', project, nil)
+      CompliancePipeline.ensure_anndata_mapping_before_project_validation!('/tmp/x.loom', nil, nil)
+    end
+
+    assert_empty refreshed
+  end
+
+  test 'loom_rel_under_project returns relative path inside project dir' do
+    user_data = Dir.mktmpdir('compliance_pipeline_rel')
+    project = Struct.new(:user_id, :key).new(3, 'KEY1')
+    loom_path = File.join(user_data, '3', 'KEY1', 'parsing', 'output.loom')
+
+    with_env('USER_DATA_DIR' => user_data) do
+      assert_equal 'parsing/output.loom', CompliancePipeline.loom_rel_under_project(project, loom_path)
+      assert_nil CompliancePipeline.loom_rel_under_project(project, '/tmp/other.loom')
+      assert_nil CompliancePipeline.loom_rel_under_project(nil, loom_path)
+    end
+  ensure
+    FileUtils.remove_entry(user_data) if user_data && File.directory?(user_data)
+  end
+
   test 'asap_data_db_name_for_project reads version env_json' do
     version = Struct.new(:env_data).new(
       { 'asap_data_db_name' => 'asap_data_v8', 'asap_data_db_version' => 8 }
@@ -81,6 +135,14 @@ class CompliancePipelineTest < TestBaseWithoutFixtures
   end
 
   private
+
+  def with_replaced_singleton(mod, method_name, impl)
+    original = mod.method(method_name)
+    mod.define_singleton_method(method_name, &impl)
+    yield
+  ensure
+    mod.define_singleton_method(method_name, original)
+  end
 
   def with_env(overrides)
     previous = {}

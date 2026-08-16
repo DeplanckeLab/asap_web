@@ -44,11 +44,170 @@ class BasicH5adExportStatusTest < ActiveSupport::TestCase
     assert_equal 'ready', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
   end
 
-  test 'h5ad_export_status stale when loom newer than h5ad' do
+  test 'h5ad_export_status ready when loom mtime is newer but no newer analyses' do
     File.write(@h5ad_abs, 'h5ad-bytes')
+    FileUtils.touch(@h5ad_abs, mtime: Time.now)
     sleep 0.05
     FileUtils.touch(@loom_abs, mtime: Time.now + 5)
+    assert_equal 'ready', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+  end
+
+  test 'h5ad_export_status stale when successful analysis is newer than h5ad' do
+    File.write(@h5ad_abs, 'h5ad-bytes')
+    old_time = Time.now - 120
+    FileUtils.touch(@h5ad_abs, mtime: old_time)
+
+    step = Step.find_by(name: 'parsing')
+    skip 'parsing step missing' unless step
+
+    run = register_for_test_cleanup(
+      Run.create!(
+        project_id: @project.id,
+        step_id: step.id,
+        status_id: 3,
+        user_id: @user.id,
+        created_at: Time.now,
+        submitted_at: Time.now,
+        attrs_json: '{}',
+        command_json: '{}'
+      )
+    )
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: @project.id,
+        user_id: @user.id,
+        run_id: run.id,
+        name: '/matrix',
+        dim: 3,
+        filepath: @loom_rel,
+        nber_rows: 10,
+        nber_cols: 5
+      )
+    )
+
     assert_equal 'stale', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+  end
+
+  test 'h5ad_export_status ready when analysis is older than h5ad' do
+    step = Step.find_by(name: 'parsing')
+    skip 'parsing step missing' unless step
+
+    run = register_for_test_cleanup(
+      Run.create!(
+        project_id: @project.id,
+        step_id: step.id,
+        status_id: 3,
+        user_id: @user.id,
+        created_at: Time.now - 300,
+        submitted_at: Time.now - 300,
+        attrs_json: '{}',
+        command_json: '{}'
+      )
+    )
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: @project.id,
+        user_id: @user.id,
+        run_id: run.id,
+        name: '/matrix',
+        dim: 3,
+        filepath: @loom_rel,
+        nber_rows: 10,
+        nber_cols: 5
+      )
+    )
+
+    File.write(@h5ad_abs, 'h5ad-bytes')
+    FileUtils.touch(@h5ad_abs, mtime: Time.now)
+    assert_equal 'ready', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+  end
+
+  test 'find_or_start_h5ad_export skips refresh when h5ad is ready and mapping unchanged' do
+    File.write(@h5ad_abs, 'h5ad-bytes')
+    FileUtils.touch(@h5ad_abs, mtime: Time.now + 2)
+
+    Basic.stub(:anndata_mapping_needs_update?, false) do
+      AnalysisJsonPersistService.stub(:call, ->(**) { flunk 'should not refresh analysis_pipeline' }) do
+        AnndataMappingPersistService.stub(:call, ->(**) { flunk 'should not refresh anndata_mapping' }) do
+          result = Basic.find_or_start_h5ad_export(Rails.logger, @project, @loom_rel, @user.id)
+          assert_equal 'ready', result[:h5ad_status]
+          assert_nil result[:error]
+        end
+      end
+    end
+  end
+
+  test 'find_or_start_h5ad_export rebuilds h5ad when stale even if mapping unchanged' do
+    File.write(@h5ad_abs, 'h5ad-bytes')
+    FileUtils.touch(@h5ad_abs, mtime: Time.now - 120)
+
+    step = Step.find_by(name: 'parsing')
+    skip 'parsing step missing' unless step
+    version = Version.order(:id).first
+    skip 'no Version row' unless version
+    @project.update!(version_id: version.id)
+
+    image, export_step, std_method = Basic.export_h5ad_step_and_std_method
+    skip 'export_h5ad not configured' unless image && export_step && std_method
+
+    run = register_for_test_cleanup(
+      Run.create!(
+        project_id: @project.id,
+        step_id: step.id,
+        status_id: 3,
+        user_id: @user.id,
+        created_at: Time.now,
+        submitted_at: Time.now,
+        attrs_json: '{}',
+        command_json: '{}'
+      )
+    )
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: @project.id,
+        user_id: @user.id,
+        run_id: run.id,
+        name: '/matrix',
+        dim: 3,
+        filepath: @loom_rel,
+        nber_rows: 10,
+        nber_cols: 5
+      )
+    )
+
+    assert_equal 'stale', Basic.h5ad_export_status(@project, @loom_rel, run: nil)
+
+    mapping_calls = []
+    pipeline_calls = []
+    Basic.stub(:anndata_mapping_needs_update?, false) do
+      AnalysisJsonPersistService.stub(
+        :call,
+        lambda { |**kwargs|
+          pipeline_calls << kwargs[:loom_filepath]
+          { ok: true, loom_filepath: kwargs[:loom_filepath], annot_id: 1, nber_steps: 0 }
+        }
+      ) do
+        AnndataMappingPersistService.stub(
+          :call,
+          lambda { |**|
+            mapping_calls << true
+            { ok: true, changed: true }
+          }
+        ) do
+          Basic.stub(:asap_data_db_name_from_env!, 'asap_data_v8') do
+            Basic.stub(:set_run, ->(*) { true }) do
+              Basic.stub(:exec_run, ->(*) {}) do
+                result = Basic.find_or_start_h5ad_export(Rails.logger, @project, @loom_rel, @user.id)
+                assert_empty mapping_calls, 'anndata_mapping must not be rewritten when unchanged'
+                assert_equal [@loom_rel], pipeline_calls
+                assert result[:run], "expected export run, got error=#{result[:error]}"
+                register_for_test_cleanup(result[:run])
+              end
+            end
+          end
+        end
+      end
+    end
   end
 
   test 'h5ad_export_status pending and running from run status' do
@@ -64,6 +223,16 @@ class BasicH5adExportStatusTest < ActiveSupport::TestCase
     source = File.read(Rails.root.join('app/controllers/projects_controller.rb'))
     refute_match(/CREATE H5AD file/, source)
     refute_match(/sceasy::convertFormat/, source)
+  end
+
+  test 'toggle_public starts publication via ProjectPublicationService' do
+    source = File.read(Rails.root.join('app/controllers/projects_controller.rb'))
+    toggle = source[/def toggle_public\n(.*?)private :publication_status_payload/m, 1]
+    assert toggle, 'expected to find toggle_public method body'
+    refute_match(/refresh_analysis_pipeline_for_project/, toggle)
+    assert_match(/ProjectPublicationService\.start!/, toggle)
+    assert_match(/ProjectPublicationService\.cancel!/, toggle)
+    refute_match(/@project\.public = true/, toggle)
   end
 
   test 'get_latest_asap_docker picks highest major tag' do
@@ -225,10 +394,10 @@ class BasicH5adExportStatusTest < ActiveSupport::TestCase
     ) do
       AnndataMappingPersistService.stub(
         :call,
-        lambda { |project:, loom_filepath:, input_group: nil|
+        lambda { |project:, loom_filepath:, input_group: nil, only_if_changed: false|
           assert_equal @project.id, project.id
           mapping_called << loom_filepath
-          { ok: true, loom_filepath: loom_filepath, annot_id: 2, x_path: '/matrix', nber_obsm: 0 }
+          { ok: true, changed: true, loom_filepath: loom_filepath, annot_id: 2, x_path: '/matrix', nber_obsm: 0 }
         }
       ) do
         results = Basic.refresh_analysis_pipeline_for_project(Rails.logger, @project)

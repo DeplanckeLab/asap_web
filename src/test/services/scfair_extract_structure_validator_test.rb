@@ -78,6 +78,8 @@ class ScfairExtractStructureValidatorTest < ActiveSupport::TestCase
     warning = result[:warnings].find { |w| w[:field] == '/attrs/anndata_mapping' }
     assert warning
     assert_match(/Missing anndata_mapping manifest/, warning[:message])
+    assert_match(/before validation, download, and H5AD export/, warning[:message])
+    refute_match(/recommended for deterministic Loom->H5AD conversion/, warning[:message])
   end
 
   private

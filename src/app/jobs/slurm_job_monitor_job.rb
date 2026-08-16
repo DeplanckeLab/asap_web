@@ -550,9 +550,11 @@ class SlurmJobMonitorJob < ApplicationJob
         Rails.logger.warn("[SlurmJobMonitorJob] Run##{run.id} is complete (status_id=3) but has NO annotations. This should not happen - finish_run should have created them. Calling finish_run again to create annotations.")
       elsif Basic.sync_run_annots_from_output_json!(Rails.logger, run)
         Rails.logger.info("[SlurmJobMonitorJob] Run##{run.id} synced annot dimensions from output.json")
+        maybe_continue_project_publication!(run)
         return
       else
         Rails.logger.info("[SlurmJobMonitorJob] Run##{run.id} already marked as complete with #{annot_count} annotations. finish_run should have been called already, skipping.")
+        maybe_continue_project_publication!(run)
         return
       end
     end
@@ -634,6 +636,7 @@ class SlurmJobMonitorJob < ApplicationJob
       # Check if annotations were created
       annot_count_after = Annot.where(run_id: run.id).count
       Rails.logger.info("[SlurmJobMonitorJob] After finish_run, Run##{run.id} has #{annot_count_after} annotations")
+      maybe_continue_project_publication!(run)
     else
       Rails.logger.warn("[SlurmJobMonitorJob] No valid results found for Run##{run.id}, marking as failed")
       finish_run_with_error(run, "No output.json found or invalid output")
@@ -693,6 +696,15 @@ class SlurmJobMonitorJob < ApplicationJob
 
     project.update(status_id: 4) if project
     run.reload.broadcast_status_change
+    maybe_continue_project_publication!(run)
+  end
+
+  def maybe_continue_project_publication!(run)
+    project = run.project
+    return unless project&.publishing?
+    return unless run.step&.name.to_s == 'export_h5ad'
+
+    FinalizeProjectPublicationJob.perform_later(project.id)
   end
 
   def parse_memory(memory_string)

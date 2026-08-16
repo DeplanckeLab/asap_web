@@ -752,8 +752,39 @@ class Project < ApplicationRecord
     public?
   end
 
+  def publishing?
+    being_published == true
+  end
+
   def publication_lock_active?
     public? && public_at.present?
+  end
+
+  def start_publishing!
+    update!(being_published: true, publication_error: nil)
+  end
+
+  def finalize_publication!
+    if public_id.nil?
+      self.public_id = (Project.maximum(:public_id) || 0) + 1
+    end
+    self.public = true
+    self.public_at = Time.current
+    self.being_published = false
+    self.publication_error = nil
+    save!
+  end
+
+  def abort_publishing!(reason:)
+    update!(
+      being_published: false,
+      public: false,
+      publication_error: reason.to_s.presence
+    )
+  end
+
+  def cancel_publishing!
+    update!(being_published: false, publication_error: nil)
   end
 
   def locked_from_publication?(record_or_time)

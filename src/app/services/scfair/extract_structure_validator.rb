@@ -158,7 +158,7 @@ module Scfair
       elsif @project_compliance
         warnings << {
           field: '/attrs/anndata_mapping',
-          message: 'Missing anndata_mapping manifest (recommended for deterministic Loom->H5AD conversion)'
+          message: 'Missing anndata_mapping manifest (ASAP writes /attrs/anndata_mapping from Annots before validation, download, and H5AD export)'
         }
       end
     end

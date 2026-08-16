@@ -19,7 +19,10 @@ module CompliancePipeline
   end
 
   # Project compliance report uses the same validator as file-check.
+  # Refreshes /attrs/anndata_mapping from current Annots before validating so the
+  # report matches the same mapping written before loom/h5ad download.
   def validate_project_loom(loom_path, project = nil, logger: Rails.logger, schema_id: nil, &progress_cb)
+    ensure_anndata_mapping_before_project_validation!(loom_path, project, logger)
     validate_loom_file_check(
       loom_path,
       logger: logger,
@@ -28,6 +31,36 @@ module CompliancePipeline
       remote_db: asap_data_db_name_for_project(project),
       &progress_cb
     )
+  end
+
+  def ensure_anndata_mapping_before_project_validation!(loom_path, project, logger)
+    return if project.nil? || loom_path.blank?
+
+    loom_rel = loom_rel_under_project(project, loom_path)
+    if loom_rel.blank?
+      logger&.info(
+        "[CompliancePipeline] skip anndata_mapping refresh: loom not under project dir " \
+        "project=#{project.try(:key)} path=#{loom_path}"
+      )
+      return
+    end
+
+    Basic.refresh_anndata_mapping_for_loom(logger, project, loom_rel)
+  end
+
+  def loom_rel_under_project(project, loom_path)
+    return nil unless project.respond_to?(:user_id) && project.respond_to?(:key)
+    return nil if project.user_id.blank? || project.key.blank?
+
+    project_dir = Basic.project_user_dir(project).expand_path
+    abs = Pathname.new(loom_path.to_s).expand_path
+    root_s = project_dir.to_s
+    abs_s = abs.to_s
+    return nil unless abs_s.start_with?(root_s + File::SEPARATOR) || abs_s == root_s
+
+    abs.relative_path_from(project_dir).to_s
+  rescue ArgumentError
+    nil
   end
 
   def validate_loom_file(loom_path, project: nil, logger: Rails.logger, schema_id: nil, &progress_cb)

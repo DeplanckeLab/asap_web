@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_14_183000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_16_133000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1170,6 +1170,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_14_183000) do
   create_table "projects", id: :serial, force: :cascade do |t|
     t.integer "archive_status_id", default: 1
     t.boolean "being_deleted", default: false
+    t.boolean "being_published", default: false, null: false
     t.integer "cloned_project_id"
     t.datetime "created_at", precision: nil
     t.text "de_filter_json"
@@ -1222,6 +1223,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_14_183000) do
     t.boolean "public", default: false
     t.datetime "public_at", precision: nil
     t.integer "public_id"
+    t.text "publication_error"
     t.text "read_access"
     t.text "replaced_by_comment"
     t.text "replaced_by_project_key"

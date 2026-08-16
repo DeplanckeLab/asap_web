@@ -161,7 +161,8 @@
     <!-- Privacy Settings -->
     <div class="bg-gray-50 rounded-lg p-6" data-controller="public-toggle" 
          data-public-toggle-url-value="<%= toggle_public_project_path(@project) %>"
-         data-public-toggle-current-value="<%= @project.is_public? %>">
+         data-public-toggle-current-value="<%= @project.is_public? %>"
+         data-public-toggle-being-published-value="<%= @project.publishing? %>">
       <h3 class="text-lg font-semibold text-gray-900 mb-4">Privacy Settings</h3>
       
       <div class="space-y-4">
@@ -178,7 +179,11 @@
           <div>
             <h4 class="text-sm font-medium text-gray-900">Public Access</h4>
             <p class="text-sm text-gray-600">Allow other users to view and clone this project</p>
-            <% unless @project.compliance_valid? %>
+            <% if @project.publishing? %>
+              <p class="text-xs text-blue-600 mt-1">
+                Publishing in progress: exporting and validating H5AD files. Toggle off to cancel.
+              </p>
+            <% elsif !@project.compliance_valid? %>
               <%
                 schema_label = @project.compliance_schemas.first&.name || 'compliance'
               %>
@@ -194,7 +199,7 @@
           <label class="relative inline-flex items-center <%= @project.sandbox? ? 'cursor-not-allowed opacity-60' : 'cursor-pointer' %>">
             <input type="checkbox" 
                    id="public_toggle" 
-                   <%= 'checked' if @project.is_public? %> 
+                   <%= 'checked' if @project.is_public? || @project.publishing? %> 
                    <%= 'disabled' if @project.sandbox? %>
                    data-action="change->public-toggle#toggle"
                    data-public-toggle-target="checkbox"
@@ -207,6 +212,16 @@
         <div data-public-toggle-target="message" class="hidden">
           <p class="text-sm px-3 py-2 rounded" data-public-toggle-target="messageText"></p>
         </div>
+
+        <% if @project.publishing? %>
+          <div class="text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+            Publishing… H5AD export and scFAIR validation are running. The project stays private until they succeed.
+          </div>
+        <% elsif @project.publication_error.present? %>
+          <div class="text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+            Last publication attempt failed: <%= @project.publication_error %>
+          </div>
+        <% end %>
 
         <% if @project.is_public? %>
           <div class="text-sm text-gray-600">

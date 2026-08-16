@@ -52,6 +52,7 @@ namespace :external_catalog do
       skip_archive: external_catalog_bool('SKIP_ARCHIVE', default: true),
       skip_publish: external_catalog_bool('SKIP_PUBLISH'),
       strict: external_catalog_bool('STRICT'),
+      allow_scfair_warnings: external_catalog_bool('ALLOW_SCFAIR_WARNINGS'),
       parse_timeout_sec: ENV['PARSE_TIMEOUT_SEC'],
       archiver: external_catalog_archiver
     )
@@ -233,8 +234,8 @@ namespace :external_catalog do
   desc 'Import from external_catalog_candidates (COUNT/N/LIMIT, IMPORT_USER_EMAIL|IMPORT_USER_ID, SOURCE, PROJECT_TYPE, ONLY_NEW=1). ' \
        'Without SOURCE (or SOURCE=all), candidates are taken in order CELLxGENE, Bgee, HCA, GEO. ' \
        'Duplicate file content (SHA-256) links the provider onto the existing ASAP project instead of creating another. ' \
-       'SC projects: refresh analysis_pipeline, hard-fail scFAIR loom validation (errors or warnings), sync chunked h5ad export, ' \
-       'hard-fail scFAIR h5ad validation (errors or warnings), then publish/archive. ' \
+       'SC projects: refresh analysis_pipeline, hard-fail scFAIR loom/h5ad validation on errors ' \
+       '(and on warnings unless ALLOW_SCFAIR_WARNINGS=1), sync chunked h5ad export, then publish/archive. ' \
        'SKIP_ARCHIVE=1 (default). SKIP_PUBLISH=1 still creates the landing checkpoint but does not make the project public. ' \
        'CHUNK_CELLS overrides chunked h5ad cell batch size (default 2048).'
   task import: :environment do
@@ -248,7 +249,9 @@ namespace :external_catalog do
     puts "external_catalog:import from candidates SOURCE=#{source} COUNT=#{count.inspect} " \
          "USER=#{user.email} ONLY_NEW=#{only_new} DRY_RUN=#{ENV['DRY_RUN']} " \
          "SKIP_ARCHIVE=#{ENV.fetch('SKIP_ARCHIVE', '1')} " \
-         "SKIP_PUBLISH=#{ENV.fetch('SKIP_PUBLISH', '0')} PROJECT_TYPE=#{project_type.inspect}"
+         "SKIP_PUBLISH=#{ENV.fetch('SKIP_PUBLISH', '0')} " \
+         "ALLOW_SCFAIR_WARNINGS=#{ENV.fetch('ALLOW_SCFAIR_WARNINGS', '0')} " \
+         "PROJECT_TYPE=#{project_type.inspect}"
     if source == 'all'
       puts "Source priority: #{ExternalCatalogCandidate::IMPORT_SOURCE_ORDER.join(' -> ')}"
     end

@@ -10,9 +10,9 @@ require 'digest'
 module ExternalCatalog
   # Sequential import of one catalog entry into ASAP:
   # download → preparse → (content-sha256+preparsing link or create project) → Provider label →
-  # parse → (sc) analysis_pipeline → loom scFAIR validate (hard fail on errors or warnings) →
-  # chunked h5ad export → h5ad scFAIR validate (hard fail on errors or warnings) →
-  # publish → archive (unless SKIP_ARCHIVE).
+  # parse → (sc) analysis_pipeline → loom scFAIR validate → chunked h5ad export →
+  # h5ad scFAIR validate → publish → archive (unless SKIP_ARCHIVE).
+  # scFAIR gates always fail on errors; warnings fail unless allow_scfair_warnings.
   # Bulk: parse → ensure_h5ad_exports → publish → archive.
   class ProjectImporter
     RAW_SEL = '/raw/X'
@@ -54,6 +54,7 @@ module ExternalCatalog
       skip_archive: false,
       skip_publish: false,
       strict: false,
+      allow_scfair_warnings: false,
       parse_timeout_sec: nil,
       archiver: nil
     )
@@ -64,6 +65,7 @@ module ExternalCatalog
       @skip_archive = skip_archive
       @skip_publish = skip_publish
       @strict = strict
+      @allow_scfair_warnings = allow_scfair_warnings
       @parse_timeout_sec = (parse_timeout_sec || ENV.fetch('PARSE_TIMEOUT_SEC', DEFAULT_PARSE_TIMEOUT_SEC)).to_i
       @archiver = archiver
       @formats_by_name = FileFormat.all.index_by(&:name)
@@ -921,19 +923,35 @@ module ExternalCatalog
       result
     end
 
-    # Import requires a fully clean scFAIR report: no errors and no warnings.
+    # Errors always fail the import. Warnings fail unless allow_scfair_warnings.
     def raise_if_scfair_issues!(result, kind:, project:)
       errors = Array(result.errors)
       warnings = Array(result.warnings)
-      return if result.valid? && errors.empty? && warnings.empty?
+      has_errors = !result.valid? || errors.any?
 
-      err_sample = errors.first(5).map { |e| format_validation_issue(e) }.join('; ')
+      if has_errors
+        err_sample = errors.first(5).map { |e| format_validation_issue(e) }.join('; ')
+        warn_sample = warnings.first(5).map { |w| format_validation_issue(w) }.join('; ')
+        parts = [
+          "errors=#{errors.size}" + (err_sample.present? ? ": #{err_sample}" : ''),
+          "warnings=#{warnings.size}" + (warn_sample.present? ? ": #{warn_sample}" : '')
+        ]
+        raise Error,
+              "scFAIR #{kind} validation failed for project=#{project.key} #{parts.join(' ')}"
+      end
+
+      return if warnings.empty?
+
       warn_sample = warnings.first(5).map { |w| format_validation_issue(w) }.join('; ')
-      parts = []
-      parts << "errors=#{errors.size}" + (err_sample.present? ? ": #{err_sample}" : '')
-      parts << "warnings=#{warnings.size}" + (warn_sample.present? ? ": #{warn_sample}" : '')
-      raise Error,
-            "scFAIR #{kind} validation failed for project=#{project.key} #{parts.join(' ')}"
+      detail = "warnings=#{warnings.size}" + (warn_sample.present? ? ": #{warn_sample}" : '')
+      unless @allow_scfair_warnings
+        raise Error,
+              "scFAIR #{kind} validation failed for project=#{project.key} #{detail}"
+      end
+
+      @logger.warn(
+        "[ExternalCatalog] scFAIR #{kind} warnings allowed project=#{project.key} #{detail}"
+      )
     end
 
     def format_validation_issue(issue)

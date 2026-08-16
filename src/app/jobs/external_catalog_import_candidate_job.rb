@@ -51,6 +51,9 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       dry_run: false,
       skip_archive: skip_archive,
       strict: true,
+      allow_scfair_warnings: ActiveModel::Type::Boolean.new.cast(
+        ENV.fetch('ALLOW_SCFAIR_WARNINGS', '0')
+      ),
       archiver: nil
     )
 

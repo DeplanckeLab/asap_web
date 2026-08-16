@@ -137,6 +137,25 @@ class ExternalCatalogScfairGateTest < ActiveSupport::TestCase
     end
   end
 
+  test 'loom with warnings passes when allow_scfair_warnings is true' do
+    loom_warn = warning_result('schema_reference mismatch')
+    importer = ExternalCatalog::ProjectImporter.new(
+      user: @user,
+      version: @version,
+      skip_archive: true,
+      skip_publish: true,
+      dry_run: false,
+      allow_scfair_warnings: true
+    )
+    with_project_loom do |_dir, _loom, _h5ad|
+      with_replaced_singleton(CompliancePipeline, :validate_project_loom, ->(*) { loom_warn }) do
+        with_replaced_singleton(ScfairValidationJob, :persist_validation_result, ->(*) { true }) do
+          importer.send(:validate_loom_or_raise!, @project)
+        end
+      end
+    end
+  end
+
   test 'valid loom and invalid h5ad raises and does not archive' do
     loom_ok = valid_result
     h5ad_bad = invalid_result('missing uns/title')
@@ -193,6 +212,44 @@ class ExternalCatalogScfairGateTest < ActiveSupport::TestCase
           end
         end
       end
+    end
+  end
+
+  test 'h5ad with warnings passes when allow_scfair_warnings is true' do
+    loom_ok = valid_result
+    h5ad_warn = warning_result('CellID not in column-order')
+    status_ok = fake_status
+    importer = ExternalCatalog::ProjectImporter.new(
+      user: @user,
+      version: @version,
+      skip_archive: false,
+      skip_publish: true,
+      dry_run: false,
+      allow_scfair_warnings: true,
+      archiver: lambda { |project|
+        @archive_calls << project.key
+        :ok
+      }
+    )
+    with_project_loom do |_dir, _loom, h5ad_abs|
+      with_replaced_singleton(CompliancePipeline, :validate_project_loom, ->(*) { loom_ok }) do
+        with_replaced_singleton(ScfairValidationJob, :persist_validation_result, ->(*) { true }) do
+          with_replaced_singleton(Open3, :capture3, lambda { |*|
+            File.write(h5ad_abs, 'h5ad-bytes')
+            ['ok', '', status_ok]
+          }) do
+            validator = Object.new
+            validator.define_singleton_method(:validate) { h5ad_warn }
+            with_replaced_singleton(ScfairH5adValidatorService, :new, ->(*) { validator }) do
+              importer.send(:validate_loom_or_raise!, @project)
+              importer.send(:export_h5ad_chunked_or_raise!, @project)
+              importer.send(:validate_h5ad_or_raise!, @project)
+              importer.send(:archive_project!, @project)
+            end
+          end
+        end
+      end
+      assert_equal [@project.key], @archive_calls
     end
   end
 

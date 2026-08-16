@@ -739,6 +739,28 @@ module Basic
       "-v #{user_data_root}:#{user_data_root}"
     end
 
+    # Host path for Ensembl dump mirror used by parse.v8.py feature_name resolution.
+    def ensembl_data_dir
+      ENV.fetch('ENSEMBL_DATA_DIR', '/mnt/asap_data/ensembl').to_s.strip
+    end
+
+    # Read-only Ensembl dumps + ENSEMBL_DATA_DIR for asap_run SLURM/docker jobs.
+    # Required so parse can resolve release-scoped feature_name from gene.txt/xref.txt.
+    def ensembl_data_docker_volume_mount_arg
+      dir = ensembl_data_dir
+      raise "ENSEMBL_DATA_DIR is blank" if dir.blank?
+      unless Dir.exist?(dir)
+        raise "ENSEMBL_DATA_DIR missing on host: #{dir}. Mount the Ensembl dump tree for parse feature_name."
+      end
+
+      "-v #{dir}:#{dir}:ro -e ENSEMBL_DATA_DIR=#{dir}"
+    end
+
+    # Mounts/env injected for every asap_run docker run (project data + Ensembl dumps).
+    def asap_run_docker_volume_mount_args
+      "#{user_data_docker_volume_mount_arg} #{ensembl_data_docker_volume_mount_arg}"
+    end
+
     # Host path to .env_asap_run (sibling of USER_DATA_DIR users/ and fus/ dirs).
     def asap_run_env_file_path
       Pathname.new(ENV.fetch('USER_DATA_DIR')).parent.join('.env_asap_run').to_s
@@ -773,7 +795,7 @@ module Basic
       if run_network.blank?
         raise 'ASAP_RUN_DOCKER_NETWORK is missing. Set it in the env file loaded by docker-compose for website/sidekiq (for example: ASAP_RUN_DOCKER_NETWORK=asap2_test_default), then restart those services.'
       end
-      "docker run --network=#{run_network} -e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm #{user_data_docker_volume_mount_arg} #{ENV.fetch('ASAP_DOCKER_NAME', 'fabdavid/asap_run')}:#{image_tag} -c"
+      "docker run --network=#{run_network} -e HOST_USER_ID=$(id -u) -e HOST_USER_GID=$(id -g) --entrypoint '/bin/sh' --rm #{asap_run_docker_volume_mount_args} #{ENV.fetch('ASAP_DOCKER_NAME', 'fabdavid/asap_run')}:#{image_tag} -c"
     end
 
     # Yield an IO positioned at the start of the Matrix Market body (plain or gzip-compressed).
@@ -6103,7 +6125,8 @@ module Basic
     def substitute_docker_call_placeholders!(docker_call, h_cmd, core_cmd)
       host_option = h_cmd['host_name'] != 'localhost' ? "-H #{h_cmd['host_name']}" : ''
       run_network = ENV['ASAP_RUN_DOCKER_NETWORK'].to_s.strip
-      required_mount = user_data_docker_volume_mount_arg
+      required_mount = asap_run_docker_volume_mount_args
+      user_data_mount = user_data_docker_volume_mount_arg
       env_file_option = docker_call.include?('#env_file_option') ? asap_run_env_file_docker_option : ''
 
       docker_call = docker_call.dup
@@ -6126,8 +6149,11 @@ module Basic
         end
       end
 
-      if !docker_call.include?(required_mount)
+      # Legacy templates may already include only the user-data -v; ensure Ensembl is present too.
+      if !docker_call.include?(user_data_mount)
         docker_call.sub!(/^docker run\s+/, "docker run #{required_mount} ")
+      elsif !docker_call.include?(ensembl_data_dir)
+        docker_call.sub!(/^docker run\s+/, "docker run #{ensembl_data_docker_volume_mount_arg} ")
       end
 
       if core_cmd.include?('host.docker.internal') && !docker_call.include?('host.docker.internal:host-gateway')

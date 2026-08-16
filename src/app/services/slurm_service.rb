@@ -15,18 +15,22 @@ class SlurmService
     
     cores = (run.nber_cores || options[:cores] || 1).to_i
     cores = 1 if cores < 1
-    # Only predicted RAM becomes #SBATCH --mem. If there is no prediction model yet
-    # (pred_max_ram nil), omit --mem — no memory constraint on the job.
-    # Note: with SelectTypeParameters=CR_Core_Memory, SLURM treats missing --mem as
-    # "reserve whole node"; set DefMemPerCPU in slurm.conf so the default is a
-    # modest per-CPU share instead, while explicit --mem from predictions still applies.
-    memory_mb = if run.pred_max_ram.present?
-      (run.pred_max_ram.to_f / 1024.0).ceil
+    # Only a positive predicted RAM becomes #SBATCH --mem.
+    # pred_max_ram nil/0/blank means no usable prediction: omit --mem.
+    # Never emit --mem=0 — SLURM treats that as "all memory on the node".
+    # With SelectTypeParameters=CR_Core_Memory, missing --mem would also reserve
+    # the whole node unless DefMemPerCPU is set (see slurm.conf); that default
+    # then applies a modest per-CPU share while explicit --mem from predictions
+    # still applies.
+    predicted_ram_kb = run.pred_max_ram.to_i
+    memory_mb = if predicted_ram_kb.positive?
+      (predicted_ram_kb.to_f / 1024.0).ceil
     elsif options.key?(:memory_mb) && !options[:memory_mb].nil?
       # Explicit override only (tests / callers). Do not use run.max_ram here:
       # that is measured usage from a finished run, not a prediction.
-      options[:memory_mb].presence&.to_i
+      options[:memory_mb].to_i
     end
+    memory_mb = nil unless memory_mb&.positive?
 
     # Every job gets a walltime. Predictions are often too low for large jobs
     # (e.g. Seurat SCT); Slurm kills at --time, so enforce a 24h floor/default.
@@ -598,7 +602,7 @@ class SlurmService
       #SBATCH --error=#{options[:error_file]}
       #SBATCH --ntasks=1
       #SBATCH --cpus-per-task=#{options[:cores]}
-      #{options[:memory_mb] ? "#SBATCH --mem=#{options[:memory_mb]}M" : ""}
+      #{options[:memory_mb].to_i.positive? ? "#SBATCH --mem=#{options[:memory_mb]}M" : ""}
       #{options[:time_limit] ? "#SBATCH --time=#{format_time_limit(options[:time_limit])}" : ""}
       #{options[:time_limit] ? "#SBATCH --signal=B:USR1@60" : ""}
       #SBATCH --chdir=#{workdir}

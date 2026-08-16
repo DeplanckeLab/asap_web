@@ -2,11 +2,18 @@
 
 require 'open3'
 
-# Read-only disk usage report for admin: USER_DATA_DIR + UPLOAD_DATA_DIR.
+# Read-only disk usage report for admin: USER_DATA_DIR + UPLOAD_DATA_DIR + S3 archives.
 class StorageUsageReport
-  CACHE_KEY = 'storage_usage_report:v1'
+  CACHE_KEY = 'storage_usage_report:v2'
   CACHE_TTL = 5.minutes
   DEFAULT_TOP_N = 50
+
+  # Same bucket used by Basic.unarchive / archive.rake for project archives.
+  ARCHIVE_S3_BUCKET = {
+    key: '20000-af8a16d143d9920a26869b30700c3da4',
+    endpoint: 'https://s3.epfl.ch',
+    region: 'us-west-2'
+  }.freeze
 
   CATEGORY_LABELS = {
     unarchived_project: 'Unarchived projects',
@@ -24,6 +31,13 @@ class StorageUsageReport
     other_under_fus: 'Other files under fus'
   }.freeze
 
+  S3_CATEGORY_LABELS = {
+    total: 'Total projects on S3',
+    unarchived: 'Backed up on S3, unarchived',
+    deleted: 'Backed up on S3, deleted (no project row)',
+    archived: 'Archived on S3'
+  }.freeze
+
   Entry = Struct.new(
     :bytes, :category, :path, :user_id, :project_key, :project_id,
     :archive_status_id, :fu_id, :label,
@@ -33,6 +47,58 @@ class StorageUsageReport
   class << self
     def call(refresh: false, top_n: DEFAULT_TOP_N)
       new(top_n: top_n).call(refresh: refresh)
+    end
+
+    # Classify S3 object inventory against project rows.
+    # objects: array of { key:, bytes: }
+    # archive_status_by_key: hash of project.key => archive_status_id
+    def classify_s3_objects(objects, archive_status_by_key)
+      empty = -> { { count: 0, bytes: 0 } }
+      stats = {
+        total: empty.call,
+        unarchived: empty.call,
+        deleted: empty.call,
+        archived: empty.call
+      }
+
+      Array(objects).each do |obj|
+        key = obj[:key].to_s
+        next if key.blank? || key.end_with?('/')
+
+        bytes = obj[:bytes].to_i
+        next if bytes.negative?
+
+        add_s3_stat!(stats[:total], bytes)
+
+        status_id = archive_status_by_key[key]
+        category =
+          if status_id.nil?
+            :deleted
+          elsif status_id == 3
+            :archived
+          else
+            :unarchived
+          end
+        add_s3_stat!(stats[category], bytes)
+      end
+
+      {
+        bucket: ARCHIVE_S3_BUCKET[:key],
+        categories: %i[total unarchived deleted archived].map do |category|
+          row = stats[category]
+          {
+            category: category.to_s,
+            label: S3_CATEGORY_LABELS[category],
+            count: row[:count],
+            bytes: row[:bytes]
+          }
+        end
+      }
+    end
+
+    def add_s3_stat!(row, bytes)
+      row[:count] += 1
+      row[:bytes] += bytes
     end
   end
 
@@ -72,8 +138,62 @@ class StorageUsageReport
       largest_fus_dirs: largest_children(fus_root, max_depth: 1),
       top_entries: all_entries.sort_by { |e| -e.bytes }.first(@top_n).map { |e| entry_to_h(e) },
       users_total_bytes: users_entries.sum(&:bytes),
-      fus_total_bytes: fus_entries.sum(&:bytes)
+      fus_total_bytes: fus_entries.sum(&:bytes),
+      s3: build_s3_section
     }
+  end
+
+  def build_s3_section
+    objects = list_s3_archive_objects
+    keys = objects.map { |o| o[:key] }
+    archive_status_by_key = load_archive_status_by_key(keys)
+    self.class.classify_s3_objects(objects, archive_status_by_key)
+  rescue StandardError => e
+    Rails.logger.error("storage_usage_report s3 inventory failed error=#{e.class}: #{e.message}")
+    {
+      bucket: ARCHIVE_S3_BUCKET[:key],
+      error: "#{e.class}: #{e.message}",
+      categories: []
+    }
+  end
+
+  def list_s3_archive_objects
+    s3b = ARCHIVE_S3_BUCKET
+    h_s3_settings = Basic.get_s3_settings
+    client = Basic.connect_s3(s3b, h_s3_settings)
+
+    objects = []
+    continuation_token = nil
+    loop do
+      params = { bucket: s3b[:key] }
+      params[:continuation_token] = continuation_token if continuation_token.present?
+
+      response = client.list_objects_v2(params)
+      Array(response.contents).each do |obj|
+        key = obj.key.to_s
+        next if key.blank? || key.end_with?('/')
+
+        objects << { key: key, bytes: obj.size.to_i }
+      end
+
+      break unless response.is_truncated
+
+      continuation_token = response.next_continuation_token
+      break if continuation_token.blank?
+    end
+    objects
+  end
+
+  def load_archive_status_by_key(keys)
+    return {} if keys.empty?
+
+    archive_status_by_key = {}
+    keys.uniq.each_slice(1000) do |slice|
+      Project.where(key: slice).pluck(:key, :archive_status_id).each do |key, archive_status_id|
+        archive_status_by_key[key] = archive_status_id
+      end
+    end
+    archive_status_by_key
   end
 
   def users_dir

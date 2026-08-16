@@ -7,7 +7,7 @@
     <div>
       <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">Storage usage</h1>
       <p class="mt-2 text-gray-600 dark:text-gray-300">
-        Read-only overview of disk space under project users data and global FU uploads.
+        Read-only overview of disk space under project users data, global FU uploads, and S3 project archives.
       </p>
       <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
         Computed at <%= @report[:computed_at] %>
@@ -61,6 +61,47 @@
       · under fus:
       <span class="font-medium text-gray-900 dark:text-white"><%= number_to_human_size(@report[:fus_total_bytes]) %></span>
     </p>
+  </section>
+
+  <section class="space-y-3">
+    <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Projects on S3</h2>
+    <p class="text-sm text-gray-600 dark:text-gray-300">
+      Inventory of archive objects in bucket
+      <code class="text-xs"><%= @report.dig(:s3, :bucket) %></code>.
+      Unarchived, deleted, and archived partition the total by matching each S3 object key to a project row (and its archive status).
+      Sizes come from S3 object size (not local disk).
+    </p>
+    <% if @report.dig(:s3, :error).present? %>
+      <p class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+        S3 inventory failed: <%= @report[:s3][:error] %>
+      </p>
+    <% else %>
+      <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+          <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-950 dark:text-gray-400">
+            <tr>
+              <th scope="col" class="px-3 py-2 text-left">Category</th>
+              <th scope="col" class="px-3 py-2 text-right">Projects</th>
+              <th scope="col" class="px-3 py-2 text-right">Size</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-gray-800 dark:text-gray-200">
+            <% Array(@report.dig(:s3, :categories)).each do |row| %>
+              <tr>
+                <td class="px-3 py-2"><%= row[:label] %></td>
+                <td class="whitespace-nowrap px-3 py-2 text-right"><%= row[:count] %></td>
+                <td class="whitespace-nowrap px-3 py-2 text-right"><%= number_to_human_size(row[:bytes]) %></td>
+              </tr>
+            <% end %>
+            <% if Array(@report.dig(:s3, :categories)).blank? %>
+              <tr>
+                <td colspan="3" class="px-3 py-4 text-center text-gray-500 dark:text-gray-400">No S3 objects found.</td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
   </section>
 
   <section class="space-y-3">

@@ -221,14 +221,58 @@ class AnndataMappingBuilder
       next if key.blank?
       next unless discrete_annot?(annot)
 
-      cats = Basic.safe_parse_json(annot.list_cat_json, [])
-      cats = Array(annot.categories) if cats.blank?
-      cats = cats.keys if cats.is_a?(Hash)
+      cats = category_labels_in_list_cat_order(annot)
       next if cats.blank?
 
-      out[key] = { 'categories' => cats.map(&:to_s), 'ordered' => false }
+      out[key] = { 'categories' => cats, 'ordered' => false }
     end
     out
+  end
+
+  # Prefer Annot#list_cat_json order exactly (same order used by UI / DE group indexing).
+  # Fall back to categories_json only when list_cat_json is absent.
+  def category_labels_in_list_cat_order(annot)
+    if annot.list_cat_json.present?
+      parsed = Basic.safe_parse_json(annot.list_cat_json, nil)
+      case parsed
+      when Array
+        return parsed.map { |c| c.nil? ? '' : c.to_s }
+      when Hash
+        # Rare object-shaped list_cat_json: keep Basic's stable key ordering, use keys as labels
+        # when values are counts; otherwise use ordered values as labels.
+        keys = parsed.keys
+        ordered_keys =
+          if keys.all? { |k| k.to_s.match?(/\A-?\d+\z/) }
+            keys.sort_by { |k| k.to_i }
+          elsif keys.all? { |k| k.to_s.match?(/\A-?\d*\.?\d+\z/) }
+            keys.sort_by { |k| k.to_f }
+          else
+            keys
+          end
+        sample = parsed[ordered_keys.first]
+        if sample.is_a?(Numeric)
+          return ordered_keys.map(&:to_s)
+        end
+
+        return ordered_keys.map { |k| parsed[k].to_s }
+      end
+    end
+
+    return [] if annot.categories_json.blank?
+
+    cats = Basic.safe_parse_json(annot.categories_json, {})
+    return [] unless cats.is_a?(Hash) && cats.any?
+
+    keys = cats.keys
+    ordered_keys =
+      if keys.all? { |k| k.to_s.match?(/\A-?\d+\z/) }
+        keys.sort_by { |k| k.to_i }
+      elsif keys.all? { |k| k.to_s.match?(/\A-?\d*\.?\d+\z/) }
+        keys.sort_by { |k| k.to_f }
+      else
+        keys
+      end
+    ordered_keys.map(&:to_s)
   end
 
   def discrete_annot?(annot)

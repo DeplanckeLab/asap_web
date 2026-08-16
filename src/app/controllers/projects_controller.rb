@@ -1988,7 +1988,8 @@ class ProjectsController < ApplicationController
       
       if authorized
 
-        # Refresh scFAIR analysis_pipeline on the loom sibling before loom download.
+        # Before serving a loom (summary LOOM/H5AD modal, data-view download, etc.):
+        # refresh /attrs/analysis_pipeline and /attrs/anndata_mapping from current Annots.
         # H5AD is produced asynchronously by export_h5ad / loom_to_h5ad (SLURM); get_file only serves.
         if filepath.to_s.match?(/\.loom\z/i)
           ensure_analysis_json_before_download!(project_root, filepath)

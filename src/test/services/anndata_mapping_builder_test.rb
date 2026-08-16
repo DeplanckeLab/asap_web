@@ -112,7 +112,8 @@ class AnndataMappingBuilderTest < ActiveSupport::TestCase
         project_id: @project.id, user_id: @user.id, filepath: @loom,
         name: '/col_attrs/cell_type', dim: 1, nber_rows: 1, nber_cols: 50,
         data_type_id: @discrete.id,
-        list_cat_json: %w[T B].to_json
+        list_cat_json: %w[T B myeloid].to_json,
+        categories_json: { 'myeloid' => 3, 'B' => 2, 'T' => 1 }.to_json
       )
     )
 
@@ -120,7 +121,7 @@ class AnndataMappingBuilderTest < ActiveSupport::TestCase
     assert_equal '/col_attrs/_umap_1_scanpy_2D', payload['obsm']['_umap_1_scanpy_2D']
     assert_equal '/col_attrs/X_umap', payload['obsm']['X_umap']
     refute payload['obsm'].key?('cell_type')
-    assert_equal %w[T B], payload['categoricals']['cell_type']['categories']
+    assert_equal %w[T B myeloid], payload['categoricals']['cell_type']['categories']
     assert_includes payload['uns_json_keys'], 'analysis_pipeline'
   end
 

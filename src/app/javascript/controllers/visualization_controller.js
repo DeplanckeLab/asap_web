@@ -23,23 +23,26 @@ import { formatNumberWithDelimiter } from "lib/number_format"
 import { dataUrlToJpegThumbnail, isCheckpointThumbnailDataUrl, canvasToJpegThumbnailDataUrl } from "lib/checkpoint_thumbnail"
 import consumer from "channels/consumer"
 
+const VISUALIZATION_ONTOP_UI_IDS = [
+  'checkpoint-history-overlay',
+  'checkpoint-comments-overlay',
+  'checkpoint-loading-overlay',
+  'module-score-loading-overlay',
+  'visualization-leave-guard-overlay',
+  'annotation-popup-overlay',
+  'annotation-popup-gene-modal-overlay',
+  'settings-window',
+  '2d-plot-modal',
+  'range-slider-modal',
+  'gradient-editor-modal',
+  'discrete-palette-confirm-overlay',
+  'compose-selection-overlay',
+  'compose-selection-details-overlay',
+  'de-selection-overlay',
+  'global-filter-panel'
+]
 const VISUALIZATION_ONTOP_UI_ROOT_SELECTOR = [
-  '#checkpoint-history-overlay',
-  '#checkpoint-comments-overlay',
-  '#checkpoint-loading-overlay',
-  '#module-score-loading-overlay',
-  '#visualization-leave-guard-overlay',
-  '#annotation-popup-overlay',
-  '#annotation-popup-gene-modal-overlay',
-  '#settings-window',
-  '#2d-plot-modal',
-  '#range-slider-modal',
-  '#gradient-editor-modal',
-  '#discrete-palette-confirm-overlay',
-  '#compose-selection-overlay',
-  '#compose-selection-details-overlay',
-  '#de-selection-overlay',
-  '#global-filter-panel',
+  ...VISUALIZATION_ONTOP_UI_IDS.map((id) => `[id="${id}"]`),
   '.guided-tour-overlay'
 ].join(',')
 
@@ -111,6 +114,144 @@ export default class extends Controller {
       return
     }
     console.log(`[CheckpointTrace ${timestamp}] ${message}`, data)
+  }
+
+  idleDiagEnabled() {
+    return typeof window !== 'undefined' && window.VIZ_IDLE_DIAG === true
+  }
+
+  idleDiag(label, details = null) {
+    if (!this.idleDiagEnabled()) return
+    const payload = {
+      tMs: Number(performance.now().toFixed(1)),
+      idleS: this._idleDiagConnectAt
+        ? Number(((performance.now() - this._idleDiagConnectAt) / 1000).toFixed(1))
+        : null,
+      ...(details && typeof details === 'object' ? details : {})
+    }
+    console.log(`[IDLE] ${label}`, payload)
+  }
+
+  startIdleDiagnostics() {
+    this._idleDiagConnectAt = performance.now()
+    this._idleDiagLastHeartbeatAt = performance.now()
+    this._idleDiagLastMatchTickAt = null
+    this._idleDiagLongTasks = []
+    if (this._autoPreloadInProgress === undefined) this._autoPreloadInProgress = false
+    if (this._autoPreloadDone === undefined) this._autoPreloadDone = false
+
+    try {
+      if (localStorage.getItem('vizIdleDiag') === '1') {
+        window.VIZ_IDLE_DIAG = true
+      }
+    } catch (_error) {
+      // localStorage may be unavailable
+    }
+
+    this.installIdleLongTaskObserver()
+
+    if (this.idleDiagHeartbeatTimer) {
+      window.clearInterval(this.idleDiagHeartbeatTimer)
+    }
+    this.idleDiagHeartbeatTimer = window.setInterval(() => {
+      this.logIdleHeartbeat()
+    }, 5000)
+
+    if (this.idleDiagEnabled()) {
+      console.info('[IDLE] diagnostics on. Filter console for [IDLE]. Disable with window.VIZ_IDLE_DIAG = false')
+    }
+    window.dumpVizIdle = () => this.logIdleHeartbeat()
+  }
+
+  stopIdleDiagnostics() {
+    if (this.idleDiagHeartbeatTimer) {
+      window.clearInterval(this.idleDiagHeartbeatTimer)
+      this.idleDiagHeartbeatTimer = null
+    }
+    if (this._idleLongTaskObserver) {
+      try {
+        this._idleLongTaskObserver.disconnect()
+      } catch (_error) {
+        // Observer may already be disconnected
+      }
+      this._idleLongTaskObserver = null
+    }
+    if (window.dumpVizIdle) {
+      delete window.dumpVizIdle
+    }
+  }
+
+  installIdleLongTaskObserver() {
+    if (this._idleLongTaskObserver) return
+    if (typeof PerformanceObserver === 'undefined') return
+    try {
+      this._idleLongTaskObserver = new PerformanceObserver((list) => {
+        const entries = list.getEntries()
+        for (let i = 0; i < entries.length; i++) {
+          const entry = entries[i]
+          const duration = Number(entry.duration || 0)
+          if (!this._idleDiagLongTasks) this._idleDiagLongTasks = []
+          this._idleDiagLongTasks.push({ at: performance.now(), duration })
+          if (this.idleDiagEnabled() && duration >= 50) {
+            this.idleDiag('long-task', {
+              durationMs: Number(duration.toFixed(1)),
+              name: entry.name || null,
+              startTime: Number(entry.startTime || 0).toFixed
+                ? Number(Number(entry.startTime).toFixed(1))
+                : Number(entry.startTime || 0)
+            })
+          }
+        }
+      })
+      this._idleLongTaskObserver.observe({ type: 'longtask', buffered: true })
+    } catch (_error) {
+      this._idleLongTaskObserver = null
+    }
+  }
+
+  logIdleHeartbeat() {
+    if (!this.idleDiagEnabled()) return
+    const now = performance.now()
+    const expectedGap = 5000
+    const actualGap = now - (this._idleDiagLastHeartbeatAt || now)
+    this._idleDiagLastHeartbeatAt = now
+
+    const longTasks = this._idleDiagLongTasks || []
+    this._idleDiagLongTasks = []
+    let longTaskMax = 0
+    let longTaskSum = 0
+    for (let i = 0; i < longTasks.length; i++) {
+      const duration = Number(longTasks[i].duration || 0)
+      if (duration > longTaskMax) longTaskMax = duration
+      longTaskSum += duration
+    }
+
+    let heapMB = null
+    try {
+      if (performance.memory && performance.memory.usedJSHeapSize) {
+        heapMB = Number((performance.memory.usedJSHeapSize / 1048576).toFixed(1))
+      }
+    } catch (_error) {
+      heapMB = null
+    }
+
+    this.idleDiag('heartbeat', {
+      heartbeatGapMs: Number(actualGap.toFixed(1)),
+      blockedMs: Number(Math.max(0, actualGap - expectedGap).toFixed(1)),
+      checkpointDirty: this._checkpointMatchDirty === true,
+      isApplyingCheckpointState: !!this.isApplyingCheckpointState,
+      currentCheckpointLoadInProgress: !!this.currentCheckpointLoadInProgress,
+      autoPreloadInProgress: this._autoPreloadInProgress === true,
+      autoPreloadDone: this._autoPreloadDone === true,
+      loadedMetadataCount: Object.keys(this.loadedMetadataVectors || {}).length,
+      selectedCategoryMetaCount: Object.keys(this.selectedCategories || {}).length,
+      selectedCellsCount: this.selectedCells ? this.selectedCells.size : 0,
+      visibleCells: Array.isArray(this.currentVisibleCells) ? this.currentVisibleCells.length : null,
+      longTaskCount: longTasks.length,
+      longTaskMaxMs: Number(longTaskMax.toFixed(1)),
+      longTaskSumMs: Number(longTaskSum.toFixed(1)),
+      heapMB
+    })
   }
 
   isVisualizationPerfLoggingEnabled() {
@@ -391,6 +532,8 @@ export default class extends Controller {
     this.truncateLongLabels = true
     this.labelPlacementMode = 'avoid-collisions'
     this.freezeMovedLabels = true
+    // Visium tissue background image visibility (toolbar toggle; default visible)
+    this.showSpatialTissueImage = true
     
     // Histogram display (gene expression range sliders)
     this.histogramScale = 'normal'
@@ -734,8 +877,22 @@ export default class extends Controller {
     }, 3000) // Wait 3 seconds after connection
     
     this._checkpointMatchDirty = true
+    this.startIdleDiagnostics()
     this.checkpointMatchTimer = window.setInterval(() => {
+      const diag = this.idleDiagEnabled()
+      const now = performance.now()
+      const gapMs = this._idleDiagLastMatchTickAt ? now - this._idleDiagLastMatchTickAt : null
+      this._idleDiagLastMatchTickAt = now
+      const dirtyBefore = this._checkpointMatchDirty === true
       this.refreshCurrentCheckpointMatch()
+      if (diag) {
+        this.idleDiag('checkpoint-match-tick', {
+          dirtyBefore,
+          dirtyAfter: this._checkpointMatchDirty === true,
+          tickGapMs: gapMs != null ? Number(gapMs.toFixed(1)) : null,
+          durationMs: Number((performance.now() - now).toFixed(2))
+        })
+      }
     }, 1500)
 
     this.loadInitialCheckpointOnEntry().finally(() => {
@@ -918,6 +1075,7 @@ export default class extends Controller {
 
     this.removeCheckpointCommentTargetOutsideClose()
 
+    this.stopIdleDiagnostics()
     if (this.checkpointMatchTimer) {
       window.clearInterval(this.checkpointMatchTimer)
       this.checkpointMatchTimer = null
@@ -2731,6 +2889,11 @@ export default class extends Controller {
         return
       }
       this._autoPreloadStarted = true
+      this._autoPreloadInProgress = true
+      this._autoPreloadDone = false
+      this.idleDiag('preload-start', {
+        restoredCurrentCheckpointOnEntry: this.restoredCurrentCheckpointOnEntry === true
+      })
       try {
         await this.checkAllMetadataStatusBeforePreload()
         const navigationEntry = performance.getEntriesByType('navigation')[0]
@@ -2777,6 +2940,10 @@ export default class extends Controller {
         }
         // Any expands queued while background preload ran.
         await this.flushPendingExpandedMetadataAfterPreload()
+        this._autoPreloadDone = true
+        this.idleDiag('preload-done', {
+          loadedMetadataCount: Object.keys(this.loadedMetadataVectors || {}).length
+        })
       } catch (_error) {
         // Keep background preload best-effort only.
         try {
@@ -2784,6 +2951,12 @@ export default class extends Controller {
         } catch (_flushError) {
           // Expand flush is best-effort after preload failure.
         }
+        this._autoPreloadDone = true
+        this.idleDiag('preload-error', {
+          error: String(_error?.message || _error)
+        })
+      } finally {
+        this._autoPreloadInProgress = false
       }
     }, 200)
   }
@@ -2801,6 +2974,8 @@ export default class extends Controller {
   }
 
   persistCurrentVisualizationStateBeforeTeardown(reason) {
+    const diag = this.idleDiagEnabled()
+    const t0 = diag ? performance.now() : 0
     if (!this.hasMetadataSelectTarget) return
     if (this.currentCheckpointLoadInProgress === true) return
     if (this.currentCheckpointReadyForOverwrite !== true) return
@@ -2812,8 +2987,15 @@ export default class extends Controller {
       console.info('[CheckpointPersist] skipping save; no metadata headers in DOM', { reason })
       return
     }
+    this.idleDiag('persist-teardown', { reason })
     this.persistCurrentVisualizationStateToSession()
     this.persistCurrentCheckpointOnServer(reason)
+    if (diag) {
+      this.idleDiag('persist-teardown-done', {
+        reason,
+        durationMs: Number((performance.now() - t0).toFixed(2))
+      })
+    }
   }
 
   persistCurrentVisualizationStateToSession() {
@@ -2919,6 +3101,10 @@ export default class extends Controller {
       clientSavedAt: state.clientSavedAt,
       expandedMetadataCount: expandedFoldKeys.length,
       expandedMetadataIds: expandedFoldKeys
+    })
+    this.idleDiag('persist-server', {
+      reason,
+      expandedMetadataCount: expandedFoldKeys.length
     })
 
     fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/current`, {
@@ -4245,13 +4431,13 @@ export default class extends Controller {
     const nX = (x) => this.interactionHandler.normalizeX(x, this.currentBounds)
     const nY = (y) => this.interactionHandler.normalizeY(y, this.currentBounds)
 
-    // Image spans display coords x:[minX,maxX], y:[minY,maxY] with the top of the
-    // tissue (texture row 0) at maxY and the bottom at minY.
+    // Visium / CellxGene pixel space: origin top-left, Y increases downward.
+    // Texture row 0 (top of the PNG) sits at minY; row end at maxY.
     return {
-      tl: [nX(extent.minX), nY(extent.maxY)],
-      tr: [nX(extent.maxX), nY(extent.maxY)],
-      br: [nX(extent.maxX), nY(extent.minY)],
-      bl: [nX(extent.minX), nY(extent.minY)]
+      tl: [nX(extent.minX), nY(extent.minY)],
+      tr: [nX(extent.maxX), nY(extent.minY)],
+      br: [nX(extent.maxX), nY(extent.maxY)],
+      bl: [nX(extent.minX), nY(extent.maxY)]
     }
   }
 
@@ -4307,6 +4493,9 @@ export default class extends Controller {
       }
 
       // Track spatial state used by the renderer transform and spot sizing.
+      // Keep the decoded image on the controller so resize can re-attach it after
+      // the WebGL renderer is destroyed and recreated.
+      this.spatialTissueImage = tissueImage
       this.spatialImageExtent = (tissueImage && data.image_extent) ? data.image_extent : null
       this.spatialSpotDiameter = Number(data.spot_diameter_fullres) || 0
 
@@ -4328,13 +4517,8 @@ export default class extends Controller {
       })
 
       // Attach the tissue background now that the renderer/canvas exist.
-      if (tissueImage && this.spatialImageExtent && this.reglRenderer) {
-        this.reglRenderer.setBackgroundImage(
-          tissueImage,
-          () => this.computeSpatialImageScreenCorners(),
-          1.0
-        )
-      }
+      this.attachSpatialBackgroundImage()
+      this.syncSpatialTissueImageToolbar()
 
       // Size spots to the spot diameter and draw the final frame.
       this.applySpatialSpotSize()
@@ -4373,6 +4557,56 @@ export default class extends Controller {
       img.onerror = () => reject(new Error(`Failed to load image: ${src}`))
       img.src = src
     })
+  }
+
+  // Attach the cached tissue image to the current ReGL renderer (initial load and resize).
+  attachSpatialBackgroundImage() {
+    if (!this.spatialTissueImage || !this.spatialImageExtent || !this.reglRenderer) return false
+    if (typeof this.reglRenderer.setBackgroundImage !== 'function') return false
+
+    const opacity = this.showSpatialTissueImage !== false ? 1.0 : 0.0
+    this.reglRenderer.setBackgroundImage(
+      this.spatialTissueImage,
+      () => this.computeSpatialImageScreenCorners(),
+      opacity
+    )
+    this.syncSpatialTissueImageToolbar()
+    return true
+  }
+
+  hasSpatialTissueImage() {
+    return !!(this.isSpatialView && this.spatialTissueImage && this.spatialImageExtent)
+  }
+
+  applySpatialTissueImageVisibility() {
+    if (!this.reglRenderer || typeof this.reglRenderer.setBackgroundImageOpacity !== 'function') return
+    if (!this.reglRenderer.hasBackgroundImage || !this.reglRenderer.hasBackgroundImage()) return
+
+    this.reglRenderer.setBackgroundImageOpacity(this.showSpatialTissueImage !== false ? 1.0 : 0.0)
+    this.reglRenderer.render()
+  }
+
+  syncSpatialTissueImageToolbar() {
+    const button = document.getElementById('toggle-tissue-image-toolbar-btn')
+    if (!button) return
+
+    const hasImage = this.hasSpatialTissueImage()
+    button.style.display = hasImage ? '' : 'none'
+    if (!hasImage) return
+
+    const isActive = this.showSpatialTissueImage !== false
+    button.style.backgroundColor = isActive ? '#3b82f6' : '#f3f4f6'
+    button.style.color = isActive ? 'white' : '#374151'
+    button.setAttribute('aria-pressed', isActive ? 'true' : 'false')
+    button.title = isActive ? 'Hide tissue image' : 'Show tissue image'
+  }
+
+  toggleSpatialTissueImageFromToolbar() {
+    if (!this.hasSpatialTissueImage()) return
+
+    this.showSpatialTissueImage = !(this.showSpatialTissueImage !== false)
+    this.applySpatialTissueImageVisibility()
+    this.syncSpatialTissueImageToolbar()
   }
 
   async loadMetadataCoordinates(metadataId) {
@@ -4670,6 +4904,8 @@ export default class extends Controller {
     if (!options.spatial && this.reglRenderer.clearBackgroundImage) {
       this.reglRenderer.clearBackgroundImage()
       this.spatialImageExtent = null
+      this.spatialTissueImage = null
+      this.syncSpatialTissueImageToolbar()
     }
 
     const boundsStart = performance.now()
@@ -6190,6 +6426,14 @@ export default class extends Controller {
                 path: 'already-in-memory'
               })
             }
+            if (this.idleDiagEnabled() && ((i + batchIndex) % 25 === 0 || i + batchIndex === orderedMetadata.length - 1)) {
+              this.idleDiag('preload-progress', {
+                index: i + batchIndex + 1,
+                total: orderedMetadata.length,
+                path: 'already-in-memory',
+                elapsedMs: Number((performance.now() - phase2Start).toFixed(1))
+              })
+            }
             // Yield so checkpoint UI stays interactive during long disk warm-ups.
             await new Promise((resolve) => setTimeout(resolve, 0))
             continue
@@ -7501,7 +7745,8 @@ export default class extends Controller {
       return
     }
 
-    const valuesForStorage = ArrayBuffer.isView(values) ? Array.from(values) : values
+    // Keep the original values buffer (typed array or array). Do not Array.from() 1M+ cells.
+    const valuesForStorage = values
 
     const loadedVec = this.loadedMetadataVectors && this.loadedMetadataVectors[metadataId]
     const compressionInfo =
@@ -8186,6 +8431,16 @@ export default class extends Controller {
   }
 
   buildCheckpointState() {
+    const diag = this.idleDiagEnabled()
+    const t0 = diag ? performance.now() : 0
+    let tMark = t0
+    const marks = {}
+    const mark = (name) => {
+      if (!diag) return
+      marks[name] = Number((performance.now() - tMark).toFixed(2))
+      tMark = performance.now()
+    }
+
     const selectedEmbedding = this.getCurrentSelectedEmbeddingState()
     // Persist only real filter constraints. Full "all categories selected" / full-range
     // entries are UI initialization state and must not be restored as filters on reload.
@@ -8196,6 +8451,7 @@ export default class extends Controller {
       }
       selectedCategories[metadataId] = Array.from(values || []).map(String).sort()
     })
+    mark('selectedCategories')
 
     const selectedRanges = {}
     Object.entries(this.selectedRanges || {}).forEach(([metadataId, range]) => {
@@ -8207,6 +8463,7 @@ export default class extends Controller {
         max: Number(range.max)
       }
     })
+    mark('selectedRanges')
 
     const metadataFoldState = {}
     this.getMetadataFoldHeaders().forEach((header) => {
@@ -8239,6 +8496,7 @@ export default class extends Controller {
       if (!key.startsWith('category_color_')) return
       categoryColorOverrides[key] = localStorage.getItem(key)
     })
+    mark('localStorageColors')
 
     const geneTags = Array.isArray(this.geneManager?.geneTags)
       ? this.geneManager.geneTags.map((gene) => ({
@@ -8249,6 +8507,7 @@ export default class extends Controller {
       : []
 
     const selectedCells = Array.from(this.selectedCells || []).sort((a, b) => a - b)
+    mark('selectedCellsSort')
     const manualLabelLocks = {}
     if (this.manualLabelLocks && typeof this.manualLabelLocks.forEach === 'function') {
       this.manualLabelLocks.forEach((lock, category) => {
@@ -8334,6 +8593,7 @@ export default class extends Controller {
         showGrid: !!document.getElementById('show-grid-checkbox')?.checked,
         showAxes: !!document.getElementById('show-axes-checkbox')?.checked,
         showCategories: !!document.getElementById('show-categories-checkbox')?.checked,
+        showSpatialTissueImage: this.showSpatialTissueImage !== false,
         showLabelBoxes: this.showLabelBoxes !== false,
         labelFontSizeMode: this.labelFontSizeMode,
         labelFontSize: this.labelFontSize,
@@ -8361,6 +8621,17 @@ export default class extends Controller {
     }
 
     state.signature = this.computeCheckpointStateSignature(state)
+    mark('signature')
+    if (diag) {
+      this.idleDiag('buildCheckpointState', {
+        totalMs: Number((performance.now() - t0).toFixed(2)),
+        selectedCellsCount: selectedCells.length,
+        selectedCategoryMetaCount: Object.keys(selectedCategories).length,
+        selectedRangeCount: Object.keys(selectedRanges).length,
+        foldHeaderCount: Object.keys(metadataFoldState).length,
+        ...marks
+      })
+    }
     return state
   }
 
@@ -8828,12 +9099,21 @@ export default class extends Controller {
   }
 
   markCheckpointMatchDirty() {
+    if (this.idleDiagEnabled() && this._checkpointMatchDirty !== true) {
+      this.idleDiag('checkpoint-dirty')
+    }
     this._checkpointMatchDirty = true
   }
 
   refreshCurrentCheckpointMatch({ force = false } = {}) {
-    if (this.isApplyingCheckpointState) return
-    if (this.isRefreshingCheckpointMatch) return
+    if (this.isApplyingCheckpointState) {
+      this.idleDiag('checkpoint-match-skip', { reason: 'applying-state', force, dirty: this._checkpointMatchDirty === true })
+      return
+    }
+    if (this.isRefreshingCheckpointMatch) {
+      this.idleDiag('checkpoint-match-skip', { reason: 'already-refreshing', force, dirty: this._checkpointMatchDirty === true })
+      return
+    }
     // Idle pages must not rebuild/stringify full viz state every 1.5s.
     if (!force && this._checkpointMatchDirty !== true) return
 
@@ -8848,6 +9128,8 @@ export default class extends Controller {
       return
     }
 
+    const diag = this.idleDiagEnabled()
+    const t0 = diag ? performance.now() : 0
     this.isRefreshingCheckpointMatch = true
     try {
       const previousMatchedCheckpointId = this.currentMatchedCheckpointId
@@ -8874,6 +9156,17 @@ export default class extends Controller {
         this.logCheckpointMismatch(previousMatchedCheckpointId, currentState, currentSignature, history)
       }
       this._checkpointMatchDirty = false
+      if (diag) {
+        this.idleDiag('checkpoint-match-refresh', {
+          force,
+          durationMs: Number((performance.now() - t0).toFixed(2)),
+          matched: !!match,
+          historySize: history.length,
+          selectedCellsCount: Array.isArray(currentState?.selection?.selectedCells)
+            ? currentState.selection.selectedCells.length
+            : 0
+        })
+      }
     } finally {
       this.isRefreshingCheckpointMatch = false
     }
@@ -9178,6 +9471,12 @@ export default class extends Controller {
           categoriesCheckbox.checked = !!state.display.showCategories
           this.toggleCategories()
         }
+      }
+
+      if (Object.prototype.hasOwnProperty.call(state.display, 'showSpatialTissueImage')) {
+        this.showSpatialTissueImage = state.display.showSpatialTissueImage !== false
+        this.applySpatialTissueImageVisibility()
+        this.syncSpatialTissueImageToolbar()
       }
     }
 
@@ -13601,6 +13900,13 @@ export default class extends Controller {
     const preservedMetadataVector = this.currentMetadataVector
     const preservedMetadataId = this.currentMetadataId
     const preservedMetadataIdString = preservedMetadataId ? String(preservedMetadataId) : ''
+    // Spatial tissue texture lives on the ReGL renderer; keep controller-side state
+    // so we can re-init with spatial options and re-upload the image after destroy.
+    const preservedIsSpatialView = !!this.isSpatialView
+    const preservedSpatialImageExtent = this.spatialImageExtent
+      ? { ...this.spatialImageExtent }
+      : null
+    const preservedSpatialTissueImage = this.spatialTissueImage || null
     
     // Preserve filtering state (selectedCategories and selectedRanges)
     const preservedSelectedCategories = this.selectedCategories && Object.keys(this.selectedCategories).length > 0 ? {} : null
@@ -13635,6 +13941,10 @@ export default class extends Controller {
     
     // Clear cached canvas rect
     this.cachedCanvasRect = null
+
+    // Restore spatial image state before re-init (destroy only cleared the GPU texture).
+    this.spatialTissueImage = preservedSpatialTissueImage
+    this.spatialImageExtent = preservedSpatialImageExtent
     
     // Check if filtering is active - if so, add white overlay to hide canvas during resize
     const hasActiveFiltering = (preservedSelectedCategories && Object.keys(preservedSelectedCategories).length > 0) ||
@@ -13658,9 +13968,17 @@ export default class extends Controller {
       }
     }
     
-    // Reinitialize the scatter plot from scratch - this will create new canvas/renderer with correct size
+    // Reinitialize the scatter plot from scratch - this will create new canvas/renderer with correct size.
+    // Spatial views must pass spatial options, otherwise renderScatterPlot clears the tissue image.
+    const resizeInitOptions = preservedIsSpatialView
+      ? {
+          spatial: true,
+          equalAspect: true,
+          spatialExtent: preservedSpatialImageExtent || undefined
+        }
+      : {}
     // console.log('🔄 [RESIZE] Reinitializing scatter plot from scratch with', this.currentCoordinates.length, 'coordinates...')
-    await this.rendererManager.initializeScatterPlot(this.currentCoordinates)
+    await this.rendererManager.initializeScatterPlot(this.currentCoordinates, resizeInitOptions)
     
     // Add white overlay AFTER initialization to cover canvas during resize (container might be cleared during init)
     let resizeOverlay = null
@@ -13719,6 +14037,12 @@ export default class extends Controller {
         
         // Update positions in renderer with preserved bounds
         this.reglRenderer.setPositions(screenCoordinates)
+
+        // Re-upload tissue texture after renderer recreation (GPU texture was destroyed).
+        if (preservedIsSpatialView) {
+          this.attachSpatialBackgroundImage()
+          this.applySpatialSpotSize()
+        }
         
         // Don't render yet if filtering is active - wait for filtering to be applied
         if (!preservedSelectedCategories && !preservedSelectedRanges) {
@@ -13742,6 +14066,11 @@ export default class extends Controller {
         
         // console.log('🔄 [RESIZE] Bounds restored and positions re-normalized')
       }
+    } else if (preservedIsSpatialView) {
+      // No preserved pan/zoom bounds: still re-attach tissue for the fresh spatial init.
+      this.attachSpatialBackgroundImage()
+      this.applySpatialSpotSize()
+      if (this.reglRenderer) this.reglRenderer.render()
     }
     
     // Now apply filtering (will update visibility and render)
@@ -16099,7 +16428,7 @@ export default class extends Controller {
     return Math.sqrt(dx * dx + dy * dy)
   }
 
-  updateSelectionCount() {
+  updateSelectionCount({ skipDistribution = false } = {}) {
     const countElement = document.getElementById('selected-cells-count')
     const labelElement = document.getElementById('selected-cells-label')
     const viewWarningElement = document.getElementById('selected-cells-view-warning')
@@ -16122,7 +16451,9 @@ export default class extends Controller {
       }
     }
     this.syncSelectionColorDot()
-    this.drawSelectionDistribution()
+    if (!skipDistribution) {
+      this.drawSelectionDistribution()
+    }
   }
 
   showViewLimitedTooltip(event) {
@@ -21501,6 +21832,8 @@ export default class extends Controller {
       return
     }
 
+    const diag = this.idleDiagEnabled()
+    const t0 = diag ? performance.now() : 0
     const generation = (this.selectionStatesRefreshGeneration || 0) + 1
     this.selectionStatesRefreshGeneration = generation
 
@@ -21530,6 +21863,12 @@ export default class extends Controller {
         }
       }
       this.renderSavedSelections()
+      if (diag) {
+        this.idleDiag('refreshSelectionStates', {
+          durationMs: Number((performance.now() - t0).toFixed(2)),
+          itemCount: this.savedSelections ? this.savedSelections.length : 0
+        })
+      }
       const completionSignature = this.savedSelections
         .filter((item) => item.status === 'completed' && item.metadataId)
         .map((item) => `${item.metadataId}:${item.createdAt || ''}`)
@@ -24435,7 +24774,8 @@ export default class extends Controller {
   async toggleCategorySelection(event) {
     event.preventDefault()
     event.stopPropagation()
-    
+
+    const t0 = performance.now()
     const metadataId = event.currentTarget.dataset.metadataId
     const category = event.currentTarget.dataset.category
     const checkbox = event.currentTarget
@@ -24518,12 +24858,13 @@ export default class extends Controller {
     // Update cell filtering
     // console.log(`🔄 About to call updateCellFiltering`)
     this.dataManager.updateCellFiltering()
-    // console.log(`🔄 updateCellFiltering completed`)
-    
-    // Note: Category label re-rendering is handled by updateCellFiltering() in ReGL mode
-    // (it redraws the entire overlay including labels with new centroids)
-    
-    // console.log(`🔄 toggleCategorySelection function completed`)
+    this.idleDiag('toggleCategorySelection', {
+      metadataId,
+      category,
+      becameSelected: !isSelected,
+      durationMs: Number((performance.now() - t0).toFixed(2)),
+      selectedCount: this.selectedCategories?.[metadataId]?.size || 0
+    })
   }
 
   async selectAllCategoriesForMetadata(metadataId) {
@@ -27077,18 +27418,27 @@ export default class extends Controller {
     const displayedValues = displayedMetadataVector.values
     const coloringValues = coloringMetadataVector.values
     const n = displayedValues.length
-    for (let i = 0; i < n; i++) {
-      if (filteredSet && !filteredSet.has(i)) continue
-
+    const visitCell = (i) => {
       const coloringCategory = String(coloringLabels[coloringValues[i]])
       coloringCategoryCounts[coloringCategory] = (coloringCategoryCounts[coloringCategory] || 0) + 1
 
       const displayedCategory = String(displayedLabels[displayedValues[i]])
-      if (!displayedCategorySet.has(displayedCategory)) continue
+      if (!displayedCategorySet.has(displayedCategory)) return
 
       const distributionCounts = perDisplayedCategoryCounts[displayedCategory]
       distributionCounts[coloringCategory] = (distributionCounts[coloringCategory] || 0) + 1
       displayedCategoryTotals[displayedCategory] += 1
+    }
+    const visibleCells = this.currentVisibleCells
+    if (filteredSet && Array.isArray(visibleCells) && visibleCells.length < n) {
+      for (let v = 0; v < visibleCells.length; v++) visitCell(visibleCells[v])
+    } else if (filteredSet) {
+      for (let i = 0; i < n; i++) {
+        if (!filteredSet.has(i)) continue
+        visitCell(i)
+      }
+    } else {
+      for (let i = 0; i < n; i++) visitCell(i)
     }
     const aggregateMs = perfEnabled ? (performance.now() - tMark) : 0
     if (perfEnabled) tMark = performance.now()
@@ -27287,32 +27637,21 @@ export default class extends Controller {
     const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
     if (!metadataItem || !displayedMetadataVector?.values) return
 
-    const values = displayedMetadataVector.values
-    const labels = this.dataManager.getCategoryLabels(displayedMetadataVector)
-    if (!labels) {
-      throw new Error(`Discrete metadata is missing compression_info.categories`)
-    }
-    const totalCells = values.length
-    const totalSelectedCells = filteredSet ? filteredSet.size : totalCells
-    const countsByCategory = new Map()
-    const selectedCountsByCategory = new Map()
-
     const tCount = perfEnabled ? performance.now() : 0
-    for (let i = 0; i < values.length; i++) {
-      const category = String(labels[values[i]])
-      countsByCategory.set(category, (countsByCategory.get(category) || 0) + 1)
-      if (!filteredSet || filteredSet.has(i)) {
-        selectedCountsByCategory.set(category, (selectedCountsByCategory.get(category) || 0) + 1)
-      }
-    }
+    const counts = this.dataManager.getDiscreteCategoryCounts(metadataId, displayedMetadataVector)
     const countMs = perfEnabled ? (performance.now() - tCount) : 0
+    if (!counts) return
+
+    const totalCells = displayedMetadataVector.values.length
+    const totalSelectedCells = filteredSet
+      ? filteredSet.size
+      : (Array.isArray(this.currentVisibleCells) ? this.currentVisibleCells.length : totalCells)
 
     const tooltip = this.ensureCategoryCountTooltip()
     const countElements = metadataItem.querySelectorAll('.metadata-category-row .metadata-category-count')
     const tBind = perfEnabled ? performance.now() : 0
 
     countElements.forEach((countElement) => {
-      // Ensure browser-native tooltip never appears for count cells.
       countElement.removeAttribute('title')
       const row = countElement.closest('.metadata-category-row')
       if (!row) return
@@ -27322,13 +27661,14 @@ export default class extends Controller {
       const category = categoryCheckbox?.dataset?.category || categoryNameElement?.textContent?.trim()
       if (!category) return
 
-      const totalInCategory = countsByCategory.get(String(category)) || 0
-      const selectedInCategory = selectedCountsByCategory.get(String(category)) || 0
+      const code = this.dataManager.labelToCode(displayedMetadataVector, category)
+      const totalInCategory = code >= 0 ? counts.totalCounts[code] : 0
+      const selectedInCategory = code >= 0 ? counts.visibleCounts[code] : 0
       const percentOfTotalCells = totalCells > 0 ? (selectedInCategory / totalCells) * 100 : 0
       const percentOfTotalCellsWithoutFiltering = totalCells > 0 ? (totalInCategory / totalCells) * 100 : 0
       const percentOfTotalSelected = totalSelectedCells > 0 ? (selectedInCategory / totalSelectedCells) * 100 : 0
       const percentFilteredAmongCategory = totalInCategory > 0 ? (selectedInCategory / totalInCategory) * 100 : 0
-      const isCategoryAffectedByFiltering = !!(filteredSet && selectedInCategory < totalInCategory)
+      const isCategoryAffectedByFiltering = !!(counts.hasFilter && selectedInCategory < totalInCategory)
 
       const hideTooltip = () => {
         tooltip.style.display = 'none'
@@ -27457,15 +27797,24 @@ export default class extends Controller {
       throw new Error(`Discrete metadata ${metadataId} is missing compression_info.categories`)
     }
     const n = displayedValues.length
-    for (let i = 0; i < n; i++) {
-      if (filteredSet && !filteredSet.has(i)) continue
-
+    const visitCell = (i) => {
       const displayedCategory = String(displayedLabels[displayedValues[i]])
-      if (!displayedCategorySet.has(displayedCategory)) continue
+      if (!displayedCategorySet.has(displayedCategory)) return
 
       const v = coloringValues[i]
-      if (v === null || v === undefined || isNaN(v)) continue
+      if (v === null || v === undefined || isNaN(v)) return
       valuesByCategory[displayedCategory].push(v)
+    }
+    const visibleCells = this.currentVisibleCells
+    if (filteredSet && Array.isArray(visibleCells) && visibleCells.length < n) {
+      for (let v = 0; v < visibleCells.length; v++) visitCell(visibleCells[v])
+    } else if (filteredSet) {
+      for (let i = 0; i < n; i++) {
+        if (!filteredSet.has(i)) continue
+        visitCell(i)
+      }
+    } else {
+      for (let i = 0; i < n; i++) visitCell(i)
     }
     const groupMs = perfEnabled ? (performance.now() - tMark) : 0
     if (perfEnabled) tMark = performance.now()

@@ -7008,9 +7008,10 @@ class ProjectsController < ApplicationController
   # the tissue image extent and Visium scalefactors so the visualization can draw
   # the tissue map behind the spots (CellxGene-style spatial view).
   #
-  # The spot coordinates are the fullres pixel positions stored in the loom at
-  # /col_attrs/spatial. The Y axis is negated so that image row 0 (top of the
-  # tissue) appears at the top of the plot, whose Y axis points upward.
+  # Spot coordinates are the fullres pixel positions stored in the loom at
+  # /col_attrs/spatial (origin top-left, Y increases downward — same as the
+  # tissue image and CellxGene spatial embeddings). Do not negate Y here: that
+  # produced a vertically flipped view relative to CellxGene.
   def spatial_data
     metadata = Annot.find_by(id: params[:metadata_id], project_id: @project.id)
     if metadata.nil?
@@ -7031,9 +7032,8 @@ class ProjectsController < ApplicationController
       return
     end
 
-    # Negate Y for an upright tissue display (plot Y axis points up, image rows go down).
     display_coordinates = coordinates.map do |pair|
-      [pair[0].to_f, -pair[1].to_f]
+      [pair[0].to_f, pair[1].to_f]
     end
 
     info = SpatialDataService.metadata_info(loom_path.to_s)
@@ -7057,9 +7057,8 @@ class ProjectsController < ApplicationController
       result[:library] = info['library']
       result[:tissue_hires_scalef] = scalef.to_f
       result[:spot_diameter_fullres] = info['spot_diameter_fullres']&.to_f
-      # Image extent in the same (display) coordinate space as the spots.
-      # Top of the image is at display Y = 0, bottom at display Y = -extent_y.
-      result[:image_extent] = { minX: 0.0, maxX: extent_x, minY: -extent_y, maxY: 0.0 }
+      # Image extent in the same pixel coordinate space as the spots (Y down).
+      result[:image_extent] = { minX: 0.0, maxX: extent_x, minY: 0.0, maxY: extent_y }
       result[:image_url] = spatial_image_project_path(@project, loom_file: loom_file, library: info['library'])
     end
 

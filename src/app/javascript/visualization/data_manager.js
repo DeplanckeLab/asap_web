@@ -1125,7 +1125,8 @@ export class DataManager {
   // Actual filtering update logic (separated for batching)
   performCellFilteringUpdate(shouldUpdateColors = false) {
     const perfEnabled = this.controller.perfLoggingEnabled?.() === true
-    const t0 = perfEnabled ? performance.now() : 0
+    const idleDiag = this.controller.idleDiagEnabled?.() === true
+    const t0 = (perfEnabled || idleDiag) ? performance.now() : 0
     if (perfEnabled) {
       this.controller.logPerf('pipeline_performCellFiltering_enter', 0, {
         shouldUpdateColors: !!shouldUpdateColors
@@ -1155,7 +1156,7 @@ export class DataManager {
     this.controller.uiManager.updatePointCountDisplay(filteredIndices)
     
     // Refresh selection summary after every filtering action.
-    this.controller.updateSelectionCount()
+    this.controller.updateSelectionCount({ skipDistribution: true })
     
     // Update global filter summary (count and switch state)
     this.controller.uiManager.updateGlobalFilterSummary()
@@ -1171,6 +1172,13 @@ export class DataManager {
         hasFilterNow,
         hadFilterBefore,
         filterModeChanged,
+        filteredCount: filteredIndices ? filteredIndices.length : null
+      })
+    }
+    if (idleDiag) {
+      this.controller.idleDiag('filter-sync', {
+        durationMs: Number((performance.now() - t0).toFixed(2)),
+        hasFilterNow,
         filteredCount: filteredIndices ? filteredIndices.length : null
       })
     }
@@ -1605,6 +1613,13 @@ export class DataManager {
           filterModeChanged
         })
       }
+      if (idleDiag) {
+        this.controller.idleDiag('filter-raf', {
+          durationMs: Number((performance.now() - rafStart).toFixed(2)),
+          gapSinceScheduleMs: Number((rafStart - rafScheduleTime).toFixed(2)),
+          hasFilterNow
+        })
+      }
     })
   }
 
@@ -1731,13 +1746,32 @@ export class DataManager {
     this._filterSidebarRefreshTimer = setTimeout(() => {
       this._filterSidebarRefreshTimer = null
       const perfEnabled = this.controller.perfLoggingEnabled?.() === true
-      const t0 = perfEnabled ? performance.now() : 0
+      const idleDiag = this.controller.idleDiagEnabled?.() === true
+      const t0 = (perfEnabled || idleDiag) ? performance.now() : 0
+      let tMark = t0
+      const mark = (name, extra = null) => {
+        if (!perfEnabled && !idleDiag) return
+        const durationMs = Number((performance.now() - tMark).toFixed(2))
+        tMark = performance.now()
+        if (perfEnabled) {
+          this.controller.logPerf(`pipeline_filterSidebar_${name}`, durationMs, extra || {})
+        }
+      }
       this.controller.uiManager.updateSidebarCategoryCounts()
+      mark('categoryCounts')
       this.controller.uiManager.updateAllRangeSliderCounts()
+      mark('rangeSliderCounts')
       this.updateAllCategoryDistributions()
+      mark('categoryDistributions')
       this.redrawAllDensityPlots()
+      mark('densityPlots')
       if (perfEnabled) {
         this.controller.logPerf('pipeline_filterSidebarRefresh', performance.now() - t0, {})
+      }
+      if (idleDiag) {
+        this.controller.idleDiag('filter-sidebar-refresh', {
+          durationMs: Number((performance.now() - t0).toFixed(2))
+        })
       }
     }, 32)
   }
@@ -2174,6 +2208,61 @@ export class DataManager {
   hasUsableMetadataVectorValues(metadataId) {
     const vector = this.getMetadataVectorById(metadataId)
     return !!(vector && vector.values)
+  }
+
+  getDiscreteCategoryCounts(metadataId, metadataVector = null) {
+    const vector = metadataVector || this.getMetadataVectorById(metadataId)
+    if (!vector?.values) return null
+    const labels = this.getCategoryLabels(vector)
+    if (!labels || labels.length === 0) return null
+
+    const values = vector.values
+    const n = values.length
+    const categoryCount = labels.length
+    const filterGeneration = this.controller.filterGeneration || 0
+    const visibleCells = this.controller.currentVisibleCells
+    const visibleMask = this.controller.currentVisibleMask
+    const hasFilter = Array.isArray(visibleCells) && visibleCells.length < n
+
+    if (
+      !(vector._categoryTotalCounts instanceof Uint32Array) ||
+      vector._categoryTotalCounts.length !== categoryCount ||
+      vector._categoryTotalCountsN !== n
+    ) {
+      const totalCounts = new Uint32Array(categoryCount)
+      for (let i = 0; i < n; i++) {
+        const code = values[i]
+        if (code >= 0 && code < categoryCount) totalCounts[code]++
+      }
+      vector._categoryTotalCounts = totalCounts
+      vector._categoryTotalCountsN = n
+    }
+
+    if (
+      !(vector._categoryVisibleCounts instanceof Uint32Array) ||
+      vector._categoryVisibleCounts.length !== categoryCount ||
+      vector._categoryVisibleCountsGeneration !== filterGeneration
+    ) {
+      const visibleCounts = new Uint32Array(categoryCount)
+      if (!hasFilter) {
+        visibleCounts.set(vector._categoryTotalCounts)
+      } else {
+        for (let i = 0; i < visibleCells.length; i++) {
+          const cellIndex = visibleCells[i]
+          const code = values[cellIndex]
+          if (code >= 0 && code < categoryCount) visibleCounts[code]++
+        }
+      }
+      vector._categoryVisibleCounts = visibleCounts
+      vector._categoryVisibleCountsGeneration = filterGeneration
+    }
+
+    return {
+      labels,
+      totalCounts: vector._categoryTotalCounts,
+      visibleCounts: vector._categoryVisibleCounts,
+      hasFilter: hasFilter || !!visibleMask
+    }
   }
 
   isDiscreteSelectionConstraining(metadataId, selections = null) {
@@ -2871,11 +2960,14 @@ export class DataManager {
     }
   }
   
-  // Redraw all density plots (histograms in range sliders) to reflect filtered cells
+  // Redraw density plots for expanded range sliders only
   redrawAllDensityPlots() {
-    // Find all range slider controllers and redraw their density plots
     const rangeSliderElements = document.querySelectorAll('[data-controller~="range-slider"]')
     rangeSliderElements.forEach(element => {
+      if (this.controller.uiManager?.isRangeSliderSectionExpanded &&
+          !this.controller.uiManager.isRangeSliderSectionExpanded(element)) {
+        return
+      }
       const controller = this.controller.application?.getControllerForElementAndIdentifier(element, 'range-slider')
       if (controller && typeof controller.drawDensityPlot === 'function') {
         controller.drawDensityPlot()

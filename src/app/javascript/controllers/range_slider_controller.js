@@ -594,48 +594,42 @@ export default class extends Controller {
       return
     }
     
-    // Count cells within the selected range (considering ALL filters)
-    let selectedByRangeCount = 0
-    let selectedByAllFiltersCount = 0
-    
-    // Prefer visibility mask (O(1) lookup) — avoid building a Set of 1M+ indices.
-    let visibleMask = this.visualizationController?.currentVisibleMask || null
-    if (!visibleMask && this.visualizationController?.currentVisibleCells && this.visualizationController.dataManager?.ensureVisibleMask) {
-      visibleMask = this.visualizationController.dataManager.ensureVisibleMask(
-        this.visualizationController.currentVisibleCells
-      )
+    const values = sliderData.values
+    const min = this.currentMinValue
+    const max = this.currentMaxValue
+    const rangeKey = `${min}:${max}:${values.length}`
+
+    // Range-only count does not depend on other filters — cache across category checkbox clicks.
+    if (this._cachedRangeCountKey !== rangeKey) {
+      let selectedByRangeCount = 0
+      for (let i = 0; i < values.length; i++) {
+        const value = values[i]
+        if (value >= min && value <= max) selectedByRangeCount++
+      }
+      this._cachedRangeCount = selectedByRangeCount
+      this._cachedRangeCountKey = rangeKey
     }
-    
-    if (visibleMask) {
-      for (let i = 0; i < sliderData.values.length; i++) {
-        const value = sliderData.values[i]
-        if (value >= this.currentMinValue && value <= this.currentMaxValue) {
-          selectedByRangeCount++
-          if (visibleMask[i]) selectedByAllFiltersCount++
-        }
+    const selectedByRangeCount = this._cachedRangeCount
+
+    let selectedByAllFiltersCount = 0
+    const visibleCells = this.visualizationController?.currentVisibleCells
+    const visibleMask = this.visualizationController?.currentVisibleMask
+
+    if (Array.isArray(visibleCells) && visibleCells.length < values.length) {
+      for (let i = 0; i < visibleCells.length; i++) {
+        const value = values[visibleCells[i]]
+        if (value >= min && value <= max) selectedByAllFiltersCount++
+      }
+    } else if (visibleMask) {
+      for (let i = 0; i < values.length; i++) {
+        const value = values[i]
+        if (value >= min && value <= max && visibleMask[i]) selectedByAllFiltersCount++
       }
     } else {
-      for (let i = 0; i < sliderData.values.length; i++) {
-        const value = sliderData.values[i]
-        if (value >= this.currentMinValue && value <= this.currentMaxValue) {
-          selectedByRangeCount++
-        }
-      }
       selectedByAllFiltersCount = selectedByRangeCount
     }
-    
-    // console.log('🎚️ Updating selected count:', {
-      // selectedByRangeCount,
-      // selectedByAllFiltersCount,
-      // currentMin: this.currentMinValue,
-      // currentMax: this.currentMaxValue,
-      // totalValues: sliderData.values.length,
-      // hasOtherFilters: selectedByRangeCount !== selectedByAllFiltersCount
-    // })
-    
-    // Show count with visual indicator if other filters are active
+
     if (selectedByRangeCount > selectedByAllFiltersCount) {
-      // Other filters are reducing the count - show both counts in red
       this.selectedCountTarget.textContent = selectedByAllFiltersCount.toLocaleString()
       this.selectedCountTarget.style.color = '#dc2626'
       this.selectedCountTarget.style.fontWeight = '600'
@@ -646,7 +640,6 @@ export default class extends Controller {
         hasOtherFilters: true
       }
     } else {
-      // No other filters active
       this.selectedCountTarget.textContent = selectedByAllFiltersCount.toLocaleString()
       this.selectedCountTarget.style.color = '#6b7280'
       this.selectedCountTarget.style.fontWeight = '500'
@@ -1130,26 +1123,37 @@ export default class extends Controller {
         this.visualizationController.currentVisibleCells
       )
     }
-    
-    // Check if there's a range filter on this metadata
+
     const rangeFilter = this.visualizationController?.selectedRanges && this.visualizationController.selectedRanges[this.metadataIdValue]
     const hasRangeFilter = rangeFilter && rangeFilter.min !== undefined && rangeFilter.max !== undefined
-    
-    // Filter values to only include those from filtered cells AND within the selected range (if a range filter exists)
+    const values = sliderData.values
+    const visibleCells = this.visualizationController?.currentVisibleCells
+    const useVisibleCells = Array.isArray(visibleCells) && visibleCells.length < values.length
+
+    // Only collect values that are currently visible (and in range). Never copy all 1.3M cells.
     const filteredValues = []
-    for (let index = 0; index < sliderData.values.length; index++) {
-      const value = sliderData.values[index]
-      if (visibleMask && !visibleMask[index]) continue
+    const pushIfInRange = (value) => {
       if (hasRangeFilter) {
-        if (value >= rangeFilter.min && value <= rangeFilter.max) {
-          filteredValues.push(value)
-        }
+        if (value >= rangeFilter.min && value <= rangeFilter.max) filteredValues.push(value)
       } else {
         filteredValues.push(value)
       }
     }
-    
-    // Create histogram using only filtered values
+    if (useVisibleCells) {
+      for (let i = 0; i < visibleCells.length; i++) {
+        pushIfInRange(values[visibleCells[i]])
+      }
+    } else if (visibleMask) {
+      for (let index = 0; index < values.length; index++) {
+        if (!visibleMask[index]) continue
+        pushIfInRange(values[index])
+      }
+    } else {
+      for (let index = 0; index < values.length; index++) {
+        pushIfInRange(values[index])
+      }
+    }
+
     const numBins = 50
     const histogramOptions = this.getHistogramOptions()
     const { bins, maxCount, binRanges, sourceCount } = this.visualizationController.buildHistogramBins(

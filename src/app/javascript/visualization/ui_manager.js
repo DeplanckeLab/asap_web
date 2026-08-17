@@ -390,13 +390,8 @@ export class UIManager {
       // Show filter state icon (hidden when all cells have the same value; no subrange to filter)
       const filterStateIcon = document.querySelector(`.metadata-filter-state-icon[data-metadata-id="${metadataId}"]`)
       if (filterStateIcon) {
-        const valuesRaw = metadataVector?.values
-        const values =
-          valuesRaw && ArrayBuffer.isView(valuesRaw)
-            ? Array.from(valuesRaw)
-            : valuesRaw
         const degenerateState = this.controller.computeNumericDegenerateState(
-          Array.isArray(values) ? values : [],
+          metadataVector?.values,
           metadataVector?.compression_info
         )
         if (degenerateState.degenerate) {
@@ -1279,27 +1274,40 @@ export class UIManager {
     }
   }
 
+  isMetadataCategoriesSectionExpanded(section) {
+    if (!section) return false
+    const header = section.querySelector('[data-action*="toggleMetadata"]')
+    if (!header) return false
+    const categoriesDiv = header.nextElementSibling
+    if (!categoriesDiv) return false
+    if (categoriesDiv.classList.contains('metadata-range-section')) return false
+    return categoriesDiv.style.display !== 'none'
+  }
+
+  isRangeSliderSectionExpanded(element) {
+    if (!element) return false
+    const section = element.closest('.metadata-range-section, .gene-range-section')
+    if (section) {
+      if (section.style.display === 'none') return false
+      return section.offsetParent !== null
+    }
+    return element.offsetParent !== null
+  }
+
   // Update all range slider counts
   updateAllRangeSliderCounts() {
-    // Find all range slider controllers and trigger their count updates
-    // Only update sliders that have been initialized (have data in inlineRangeSliderData)
     const rangeSliderElements = document.querySelectorAll('[data-controller~="range-slider"]')
     rangeSliderElements.forEach(element => {
-      // Get the metadata ID from the element
+      if (!this.isRangeSliderSectionExpanded(element)) return
+
       const metadataId = element.getAttribute('data-range-slider-metadata-id-value')
       if (!metadataId) return
-      
-      // Check if slider data is available before trying to update
-      const hasSliderData = this.controller.inlineRangeSliderData && 
+
+      const hasSliderData = this.controller.inlineRangeSliderData &&
                            this.controller.inlineRangeSliderData[metadataId] &&
                            this.controller.inlineRangeSliderData[metadataId].values
-      
-      if (!hasSliderData) {
-        // Skip sliders that haven't been initialized yet
-        return
-      }
-      
-      // Get the Stimulus controller instance
+      if (!hasSliderData) return
+
       const controller = this.controller.application?.getControllerForElementAndIdentifier(element, 'range-slider')
       if (controller && typeof controller.updateSelectedCellsCount === 'function') {
         controller.updateSelectedCellsCount()
@@ -1307,45 +1315,9 @@ export class UIManager {
     })
   }
 
-  // Update sidebar category counts with visual indicators for ALL categorical metadata
+  // Update sidebar category counts with visual indicators for expanded categorical metadata
   updateSidebarCategoryCounts() {
-    // PERFORMANCE: Only update counts for expanded metadata. One pass per metadata
-    // (not per category) so >1M-cell datasets stay responsive.
-    
     const perfStart = performance.now()
-    
-    const allCategoryCheckboxes = document.querySelectorAll('.category-checkbox')
-    const visibleCheckboxes = Array.from(allCategoryCheckboxes).filter(cb => {
-      const container = cb.closest('[data-metadata-item]')
-      if (!container) return false
-      
-      const header = container.querySelector('[data-action*="toggleMetadata"]')
-      if (!header) return false
-      
-      const categoriesDiv = header.nextElementSibling
-      if (!categoriesDiv) return false
-      
-      return categoriesDiv.style.display !== 'none'
-    })
-    
-    const visibleMask = this.controller.currentVisibleMask || (
-      this.controller.dataManager?.ensureVisibleMask
-        ? this.controller.dataManager.ensureVisibleMask(this.controller.currentVisibleCells)
-        : null
-    )
-
-    const checkboxesByMetadata = new Map()
-    visibleCheckboxes.forEach((checkbox) => {
-      const metadataId = checkbox.dataset.metadataId
-      if (!checkboxesByMetadata.has(metadataId)) {
-        checkboxesByMetadata.set(metadataId, [])
-      }
-      checkboxesByMetadata.get(metadataId).push(checkbox)
-    })
-
-    const debugSummary = new Map()
-    const missingMetadata = new Set()
-    const logPrefix = '[FILTER COUNTS]'
     const checkpointTraceEnabled = window.CHECKPOINT_TRACE === true
     let perfLogEnabled = false
     try {
@@ -1353,129 +1325,57 @@ export class UIManager {
     } catch (error) {
       perfLogEnabled = false
     }
-    if (checkpointTraceEnabled) {
-      console.log(`${logPrefix} updateSidebarCategoryCounts called`, {
-        totalCheckboxes: allCategoryCheckboxes.length,
-        visibleCheckboxes: visibleCheckboxes.length,
-        currentVisibleCells: this.controller.currentVisibleCells ? this.controller.currentVisibleCells.length : null
-      })
-    }
 
-    checkboxesByMetadata.forEach((checkboxes, metadataId) => {
-      const metadataVector = this.controller.loadedMetadataVectors[metadataId]
-      if (!metadataVector || !metadataVector.values) {
-        missingMetadata.add(metadataId)
-        return
-      }
+    const expandedSections = document.querySelectorAll('[data-metadata-item]')
+    let metadataProcessed = 0
+    expandedSections.forEach((section) => {
+      if (!this.isMetadataCategoriesSectionExpanded(section)) return
+      const metadataId = section.dataset.metadataItem
+      if (!metadataId) return
 
-      const values = metadataVector.values
-      const labels = this.controller.dataManager.getCategoryLabels(metadataVector)
-      const categoryCount = Array.isArray(labels) ? labels.length : 0
-      const totalCounts = categoryCount > 0 ? new Uint32Array(categoryCount) : null
-      const visibleCounts = categoryCount > 0 ? new Uint32Array(categoryCount) : null
+      const counts = this.controller.dataManager.getDiscreteCategoryCounts(metadataId)
+      if (!counts) return
+      metadataProcessed += 1
 
-      if (totalCounts && visibleCounts) {
-        for (let i = 0; i < values.length; i++) {
-          const code = values[i]
-          if (code < 0 || code >= categoryCount) continue
-          totalCounts[code]++
-          if (!visibleMask || visibleMask[i]) {
-            visibleCounts[code]++
-          }
-        }
-      }
-
+      const checkboxes = section.querySelectorAll('.category-checkbox')
       checkboxes.forEach((checkbox) => {
         const category = checkbox.dataset.category
         const parentContainer = checkbox.closest('.metadata-category-row')
         const countElement = parentContainer ? parentContainer.querySelector('.metadata-category-count') : null
-        if (!countElement) {
-          if (checkpointTraceEnabled) {
-            console.warn(`${logPrefix} Missing count element for category`, {
-              metadataId,
-              category,
-              parentFound: !!parentContainer
-            })
-          }
-          return
-        }
+        if (!countElement) return
 
+        const metadataVector = this.controller.dataManager.getMetadataVectorById(metadataId)
         const code = this.controller.dataManager.labelToCode(metadataVector, category)
-        const totalCount = (code >= 0 && totalCounts) ? totalCounts[code] : 0
-        const visibleCount = (code >= 0 && visibleCounts) ? visibleCounts[code] : 0
+        const totalCount = (code >= 0 && counts.totalCounts) ? counts.totalCounts[code] : 0
+        const visibleCount = (code >= 0 && counts.visibleCounts) ? counts.visibleCounts[code] : 0
 
         countElement.textContent = formatNumberWithDelimiter(visibleCount)
-
-        const debugEntry = debugSummary.get(metadataId) || {
-          metadataId,
-          categoriesProcessed: 0,
-          categoriesReduced: 0,
-          reducedSamples: [],
-          unchangedSamples: [],
-          totalCountSum: 0,
-          visibleCountSum: 0,
-          zeroVisibleCategories: 0,
-          zeroTotalCategories: 0
-        }
-        debugEntry.categoriesProcessed += 1
-        debugEntry.totalCountSum += totalCount
-        debugEntry.visibleCountSum += visibleCount
-        if (visibleCount === 0 && totalCount > 0) {
-          debugEntry.zeroVisibleCategories += 1
-        }
-        if (totalCount === 0) {
-          debugEntry.zeroTotalCategories += 1
-        }
 
         if (totalCount > visibleCount) {
           countElement.style.color = '#dc2626'
           countElement.style.fontWeight = '600'
           const percentage = ((visibleCount / totalCount) * 100).toFixed(1)
           countElement.title = `${formatNumberWithDelimiter(visibleCount)} of ${formatNumberWithDelimiter(totalCount)} cells (${percentage}% visible after filtering)`
-          debugEntry.categoriesReduced += 1
-          if (debugEntry.reducedSamples.length < 3) {
-            debugEntry.reducedSamples.push({ category, totalCount, visibleCount })
-          }
         } else {
           countElement.style.color = '#6b7280'
           countElement.style.fontWeight = '500'
           countElement.title = `${formatNumberWithDelimiter(totalCount)} cells (100% visible)`
-          if (debugEntry.unchangedSamples.length < 3 && totalCount > 0) {
-            debugEntry.unchangedSamples.push({ category, totalCount, visibleCount })
-          }
         }
-
-        debugSummary.set(metadataId, debugEntry)
       })
     })
 
-    if (checkpointTraceEnabled && (debugSummary.size > 0 || missingMetadata.size > 0)) {
-      const metadataSummaries = []
-      debugSummary.forEach((value) => {
-        metadataSummaries.push({
-          metadataId: value.metadataId,
-          categoriesProcessed: value.categoriesProcessed,
-          categoriesReduced: value.categoriesReduced,
-          totalCountSum: value.totalCountSum,
-          visibleCountSum: value.visibleCountSum,
-          zeroVisibleCategories: value.zeroVisibleCategories,
-          zeroTotalCategories: value.zeroTotalCategories,
-          reducedSamples: value.reducedSamples,
-          unchangedSamples: value.unchangedSamples
-        })
-      })
-
-      console.log(`${logPrefix} updateSidebarCategoryCounts summary`, {
-        metadataSummaries,
-        missingMetadata: missingMetadata.size > 0 ? Array.from(missingMetadata) : [],
-        currentVisibleCells: this.controller.currentVisibleCells ? this.controller.currentVisibleCells.length : null
+    const perfTime = performance.now() - perfStart
+    if (perfLogEnabled) {
+      this.controller.logPerf('pipeline_updateSidebarCategoryCounts', perfTime, {
+        metadataProcessed,
+        sectionCount: expandedSections.length
       })
     }
-    
-    const perfTime = performance.now() - perfStart
-    
-    if (perfTime > 100 && perfLogEnabled) {
-      console.warn(`updateSidebarCategoryCounts took ${perfTime.toFixed(2)}ms - consider further optimization`)
+    if (checkpointTraceEnabled) {
+      console.log('[FILTER COUNTS] updateSidebarCategoryCounts', {
+        metadataProcessed,
+        durationMs: Number(perfTime.toFixed(2))
+      })
     }
   }
 
@@ -2213,7 +2113,6 @@ export class UIManager {
     const isActive = !!checkbox.checked
     button.style.backgroundColor = isActive ? '#3b82f6' : '#f3f4f6'
     button.style.color = isActive ? 'white' : '#374151'
-    button.style.borderColor = '#d1d5db'
     button.setAttribute('aria-pressed', isActive ? 'true' : 'false')
   }
 

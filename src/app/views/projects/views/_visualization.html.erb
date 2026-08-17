@@ -2145,13 +2145,24 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
             </button>
           </div>
 
-          <button id="toggle-labels-toolbar-btn"
-                  type="button"
-                  style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; transition: background-color 0.2s;"
-                  title="Display labels"
-                  data-action="click->visualization#toggleDisplayLabelsFromToolbar">
-            <i class="fas fa-tags" style="font-size: 14px;"></i>
-          </button>
+          <div style="display: flex; border: 1px solid #d1d5db; border-radius: 4px; overflow: hidden;">
+            <button id="toggle-labels-toolbar-btn"
+                    type="button"
+                    style="padding: 6px 12px; font-size: 14px; background-color: #f3f4f6; color: #374151; border: none; cursor: pointer; transition: background-color 0.2s;"
+                    title="Display labels"
+                    aria-pressed="false"
+                    data-action="click->visualization#toggleDisplayLabelsFromToolbar">
+              <i class="fas fa-tags" style="font-size: 14px;"></i>
+            </button>
+            <button id="toggle-tissue-image-toolbar-btn"
+                    type="button"
+                    style="display: none; padding: 6px 12px; font-size: 14px; background-color: #3b82f6; color: white; border: none; border-left: 1px solid #d1d5db; cursor: pointer; transition: background-color 0.2s;"
+                    title="Hide tissue image"
+                    aria-pressed="true"
+                    data-action="click->visualization#toggleSpatialTissueImageFromToolbar">
+              <i class="fas fa-image" style="font-size: 14px;"></i>
+            </button>
+          </div>
         </div>
         
         <!-- Checkpoint Action Group -->

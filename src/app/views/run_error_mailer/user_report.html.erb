@@ -9,6 +9,7 @@
   <% end %>
 </p>
 <p><strong>From:</strong> <%= @sender_email %></p>
+<p><strong>X-Real-IP:</strong> <%= @x_real_ip %></p>
 <p><strong>Project:</strong> <%= @project.key %> (ID <%= @project.id %>)</p>
 <p><strong>Run:</strong> #<%= @run.id %></p>
 <p><strong>Step:</strong> <%= @step&.label.presence || @step&.name %></p>

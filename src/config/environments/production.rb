@@ -80,7 +80,7 @@ Rails.application.configure do
   # config.action_mailer.raise_delivery_errors = false
 
   # Set host to be used by links generated in mailer templates.
-  config.action_mailer.default_url_options = { host: "example.com" }
+  config.action_mailer.default_url_options = { protocol: 'https', host: ENV.fetch('HOST') }
   
   # Ensure URLs are generated with HTTPS protocol
   config.action_controller.default_url_options = { protocol: 'https' }

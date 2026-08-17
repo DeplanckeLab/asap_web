@@ -854,7 +854,8 @@ class RunsController < ApplicationController
         run: @run,
         sender_email: sender_email,
         message: message.presence,
-        reporter: current_user
+        reporter: current_user,
+        x_real_ip: request.headers['X-Real-IP']
       ).deliver_now
 
       redirect_back fallback_location: project_path(@project), notice: 'Thank you for reporting this issue. We will get back to you shortly.'

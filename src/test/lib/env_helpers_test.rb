@@ -39,6 +39,11 @@ class EnvHelpersTest < ActiveSupport::TestCase
     assert_raises(KeyError) { EnvHelpers.instance_name }
   end
 
+  test 'public_base_url uses https and HOST' do
+    ENV['HOST'] = 'asap-test.epfl.ch'
+    assert_equal 'https://asap-test.epfl.ch', EnvHelpers.public_base_url
+  end
+
   private
 
   def set_or_delete_env(key, value)

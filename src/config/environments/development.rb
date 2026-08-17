@@ -30,8 +30,8 @@ Rails.application.configure do
   # This makes Rails trust X-Forwarded-Proto header and generate HTTPS URLs.
   config.assume_ssl = true
 
-  # Configure action mailer for Devise
-  config.action_mailer.default_url_options = { host: 'localhost', port: 3000 }
+  # Configure action mailer for Devise (public hostname, not the Puma bind address)
+  config.action_mailer.default_url_options = { protocol: 'https', host: ENV.fetch('HOST') }
   
   # Ensure URLs are generated with HTTPS protocol when behind a proxy
   config.action_controller.default_url_options = { protocol: 'https' }
@@ -66,7 +66,7 @@ Rails.application.configure do
 
   config.action_mailer.perform_caching = false
 
-  config.action_mailer.default_url_options = { host: "localhost", port: 3000 }
+  config.action_mailer.default_url_options = { protocol: 'https', host: ENV.fetch('HOST') }
 
   if ENV['SMTP_ADDRESS'].present?
     config.action_mailer.delivery_method = :smtp

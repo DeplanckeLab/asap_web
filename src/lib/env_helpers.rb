@@ -18,5 +18,12 @@ module EnvHelpers
   def instance_kind
     instance_host == PRODUCTION_HOST ? 'production' : 'dev/test'
   end
+
+  # Public origin for this instance. HOST is the external hostname
+  # (asap-test.epfl.ch / asap.epfl.ch). SERVER_URL is not used here because
+  # it can point at another instance (e.g. production on the test .env).
+  def public_base_url
+    "https://#{instance_host}"
+  end
 end
 

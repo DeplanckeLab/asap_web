@@ -1,6 +1,4 @@
 class RunErrorMailer < ApplicationMailer
-  include Rails.application.routes.url_helpers
-
   def admin_notification(run:)
     assign_run_context(run)
     assign_instance_context
@@ -11,12 +9,13 @@ class RunErrorMailer < ApplicationMailer
     )
   end
 
-  def user_report(run:, sender_email:, message: nil, reporter: nil)
+  def user_report(run:, sender_email:, message: nil, reporter: nil, x_real_ip: nil)
     assign_run_context(run)
     assign_instance_context
     @sender_email = sender_email
     @message = message
     @reporter = reporter
+    @x_real_ip = x_real_ip
 
     mail(
       to: admin_report_recipients,

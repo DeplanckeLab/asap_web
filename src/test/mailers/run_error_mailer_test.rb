@@ -21,11 +21,13 @@ class RunErrorMailerTest < ActionMailer::TestCase
     @project = create_test_project!(user_id: @user.id)
     @step = Step.find_by(name: 'parsing')
     skip 'parsing step missing' unless @step
+    waiting = Status.find_by(name: 'waiting')
+    skip 'waiting status missing' unless waiting
     @run = register_for_test_cleanup(
       Run.create!(
         project_id: @project.id,
         step_id: @step.id,
-        status_id: 4,
+        status_id: waiting.id,
         user_id: @user.id,
         error: 'boom'
       )
@@ -52,6 +54,19 @@ class RunErrorMailerTest < ActionMailer::TestCase
     assert_includes body, "Logged-in user ##{@user.id} Error Reporter"
     assert_includes body, @user.email
     refute_includes body, 'Guest user'
+    assert_includes body, "https://asap-test.epfl.ch/projects/#{@project.key}"
+    refute_includes body, 'localhost'
+  end
+
+  test 'user_report includes X-Real-IP' do
+    email = RunErrorMailer.user_report(
+      run: @run,
+      sender_email: @user.email,
+      reporter: @user,
+      x_real_ip: '203.0.113.10'
+    )
+
+    assert_includes email.body.to_s, 'X-Real-IP:</strong> 203.0.113.10'
   end
 
   test 'user_report marks guest reporter' do
@@ -73,7 +88,10 @@ class RunErrorMailerTest < ActionMailer::TestCase
     email = RunErrorMailer.admin_notification(run: @run)
 
     assert_includes email.subject, '[production]'
-    assert_includes email.body.to_s, 'Instance:</strong> production (asap.epfl.ch, asap)'
+    body = email.body.to_s
+    assert_includes body, 'Instance:</strong> production (asap.epfl.ch, asap)'
+    assert_includes body, "https://asap.epfl.ch/projects/#{@project.key}"
+    refute_includes body, 'localhost'
   end
 
   private

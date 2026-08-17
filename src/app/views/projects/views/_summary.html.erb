@@ -292,12 +292,14 @@ summary_search_gene_url = search_gene_project_path(@project)
         <span>Data unavailable</span>
       </span>
     <% else %>
+      <% unless search_engine_crawler? %>
       <%= link_to project_path(@project, view: 'summary', force_unarchive: 1),
           class: "inline-flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium bg-amber-600 text-white hover:bg-amber-700 transition-colors",
           title: "Restore project files from the archive. The page will reload and show the unarchive progress.",
           data: { turbo: false, guided_tour: "summary-archive-unarchive-button" } do %>
         <i class="fas fa-box-open"></i>
         <span>Unarchive project</span>
+      <% end %>
       <% end %>
     <% end %>
   </div>

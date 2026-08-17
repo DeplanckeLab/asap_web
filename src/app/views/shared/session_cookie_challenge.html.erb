@@ -1,0 +1,167 @@
+<div class="max-w-xl mx-auto mt-16 mb-16 px-4">
+  <h1 class="text-2xl font-bold text-gray-900">Session verification</h1>
+  <p class="mt-3 text-gray-800">
+    This project is archived. Move the tile onto the dashed square to restore it.
+  </p>
+  <p class="mt-2 text-sm text-gray-700">
+    Drag the tile, or click the tile and then click the dashed square.
+    After this check, you will not be asked again during this session, including for other projects.
+  </p>
+
+  <div class="mt-6 inline-block bg-white border border-gray-300 p-3">
+    <div id="asap-challenge-board"
+         class="relative"
+         style="width: <%= @session_cookie_challenge[:board_cols] * @session_cookie_challenge[:cell_size] %>px; height: <%= @session_cookie_challenge[:board_rows] * @session_cookie_challenge[:cell_size] %>px;">
+      <% @session_cookie_challenge[:board_rows].times do |row| %>
+        <% @session_cookie_challenge[:board_cols].times do |col| %>
+          <% is_slot = row == @session_cookie_challenge[:target_row] && col == @session_cookie_challenge[:target_col] %>
+          <div class="absolute flex items-center justify-center <%= is_slot ? 'border-2 border-dashed border-gray-900 bg-white text-gray-900 text-xs font-semibold' : 'border border-gray-200 bg-gray-100' %>"
+               data-challenge-cell="1"
+               data-col="<%= col %>"
+               data-row="<%= row %>"
+               style="left: <%= col * @session_cookie_challenge[:cell_size] %>px; top: <%= row * @session_cookie_challenge[:cell_size] %>px; width: <%= @session_cookie_challenge[:cell_size] - 4 %>px; height: <%= @session_cookie_challenge[:cell_size] - 4 %>px;">
+            <%= is_slot ? 'Drop here' : '' %>
+          </div>
+        <% end %>
+      <% end %>
+      <div id="asap-challenge-piece"
+           class="absolute flex items-center justify-center bg-blue-700 text-white text-sm font-bold rounded-md shadow cursor-grab"
+           style="left: <%= @session_cookie_challenge[:piece_col] * @session_cookie_challenge[:cell_size] + 6 %>px; top: <%= @session_cookie_challenge[:piece_row] * @session_cookie_challenge[:cell_size] + 6 %>px; width: <%= @session_cookie_challenge[:cell_size] - 16 %>px; height: <%= @session_cookie_challenge[:cell_size] - 16 %>px; touch-action: none; user-select: none; z-index: 2;">
+        Tile
+      </div>
+    </div>
+  </div>
+
+  <div id="asap-challenge-status" class="mt-4 font-semibold text-gray-900" role="status"></div>
+</div>
+
+<%= javascript_tag nonce: true do %>
+  (function() {
+    const challenge = {
+      cellSize: <%= @session_cookie_challenge[:cell_size] %>,
+      targetCol: <%= @session_cookie_challenge[:target_col] %>,
+      targetRow: <%= @session_cookie_challenge[:target_row] %>,
+      pieceCol: <%= @session_cookie_challenge[:piece_col] %>,
+      pieceRow: <%= @session_cookie_challenge[:piece_row] %>,
+      nonce: "<%= @session_cookie_challenge[:nonce] %>"
+    };
+
+    const board = document.getElementById('asap-challenge-board');
+    const piece = document.getElementById('asap-challenge-piece');
+    const statusEl = document.getElementById('asap-challenge-status');
+    if (!board || !piece) {
+      if (statusEl) { statusEl.textContent = 'Challenge could not load. Please refresh this page.'; }
+      return;
+    }
+
+    const startLeft = challenge.pieceCol * challenge.cellSize + 6;
+    const startTop = challenge.pieceRow * challenge.cellSize + 6;
+    let dragging = false;
+    let selected = false;
+    let moved = false;
+    let startX = 0;
+    let startY = 0;
+    let dragOffsetX = 0;
+    let dragOffsetY = 0;
+    let solved = false;
+
+    function csrfToken() {
+      const meta = document.querySelector("meta[name='csrf-token']");
+      return meta ? meta.content : '';
+    }
+
+    function setPiecePosition(left, top) {
+      piece.style.left = left + 'px';
+      piece.style.top = top + 'px';
+    }
+
+    function resetPiece() {
+      setPiecePosition(startLeft, startTop);
+      selected = false;
+      piece.style.outline = '';
+    }
+
+    function cellFromPoint(clientX, clientY) {
+      const rect = board.getBoundingClientRect();
+      const x = clientX - rect.left;
+      const y = clientY - rect.top;
+      return {
+        col: Math.floor(x / challenge.cellSize),
+        row: Math.floor(y / challenge.cellSize)
+      };
+    }
+
+    async function submitSolve(col, row) {
+      if (solved) { return; }
+      statusEl.textContent = 'Checking placement...';
+      try {
+        const response = await fetch('/security/session_cookie_challenge/solve', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrfToken()
+          },
+          credentials: 'same-origin',
+          body: JSON.stringify({ nonce: challenge.nonce, drop_col: col, drop_row: row })
+        });
+        const data = await response.json();
+        statusEl.textContent = data.message;
+        if (data.ok) {
+          solved = true;
+          setTimeout(function() { window.location.reload(); }, 600);
+        } else {
+          resetPiece();
+        }
+      } catch (_error) {
+        statusEl.textContent = 'Unable to verify placement. Please retry.';
+        resetPiece();
+      }
+    }
+
+    piece.addEventListener('pointerdown', function(event) {
+      if (solved) { return; }
+      dragging = true;
+      moved = false;
+      selected = true;
+      piece.style.outline = '3px solid #111827';
+      piece.setPointerCapture(event.pointerId);
+      startX = event.clientX;
+      startY = event.clientY;
+      const rect = piece.getBoundingClientRect();
+      dragOffsetX = event.clientX - rect.left;
+      dragOffsetY = event.clientY - rect.top;
+      event.preventDefault();
+    });
+
+    piece.addEventListener('pointermove', function(event) {
+      if (!dragging) { return; }
+      if (Math.hypot(event.clientX - startX, event.clientY - startY) < 8) { return; }
+      moved = true;
+      const boardRect = board.getBoundingClientRect();
+      const left = event.clientX - boardRect.left - dragOffsetX;
+      const top = event.clientY - boardRect.top - dragOffsetY;
+      setPiecePosition(left, top);
+    });
+
+    piece.addEventListener('pointerup', function(event) {
+      if (!dragging) { return; }
+      dragging = false;
+      piece.releasePointerCapture(event.pointerId);
+      if (!moved) { return; }
+      const cell = cellFromPoint(event.clientX, event.clientY);
+      if (cell.col === challenge.targetCol && cell.row === challenge.targetRow) {
+        submitSolve(cell.col, cell.row);
+      } else {
+        resetPiece();
+      }
+    });
+
+    board.addEventListener('click', function(event) {
+      if (solved || dragging || event.target === piece) { return; }
+      if (!selected) { return; }
+      const cell = event.target.closest('[data-challenge-cell="1"]');
+      if (!cell) { return; }
+      submitSolve(parseInt(cell.getAttribute('data-col'), 10), parseInt(cell.getAttribute('data-row'), 10));
+    });
+  })();
+<% end %>

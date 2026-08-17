@@ -34,14 +34,11 @@ module ExternalCatalog
     EMBEDDING_METHOD_LABELS = {
       umap: 'UMAP',
       tsne: 't-SNE',
-      pca: 'PCA'
+      pca: 'PCA',
+      spatial: 'Spatial'
     }.freeze
-    # Prefer UMAP, then t-SNE, then PCA when guessing from annot names.
-    EMBEDDING_METHOD_RANK = {
-      umap: 0,
-      tsne: 1,
-      pca: 2
-    }.freeze
+    # Prefer UMAP, then t-SNE, then PCA. If none exist, use spatial, else the first 2D embedding.
+    PREFERRED_EMBEDDING_METHODS = %i[umap tsne pca].freeze
 
     class Error < StandardError; end
     class SkipEntry < StandardError; end
@@ -1058,17 +1055,52 @@ module ExternalCatalog
       end
     end
 
-    def prefer_embedding_annot(project)
+    def visualization_embedding_annots(project)
       Annot.light
            .where(project_id: project.id, dim: 1, nber_rows: 2)
            .where.not(filepath: nil)
            .to_a
-           .min_by do |annot|
-        parsing_rank = annot.filepath.to_s.match?(%r{(^|/)parsing(/|$)}) ? 0 : 1
-        method_rank = embedding_method_rank(annot.name)
-        cell_count = -(annot.nber_cols.to_i)
-        [method_rank, parsing_rank, cell_count, annot.id]
+    end
+
+    def prefer_embedding_annot(project)
+      annots = visualization_embedding_annots(project)
+      return nil if annots.empty?
+
+      preferred = pick_ranked_embedding(annots, PREFERRED_EMBEDDING_METHODS)
+      return preferred if preferred
+
+      spatial = pick_ranked_embedding(annots, [:spatial])
+      if spatial
+        @logger.info(
+          "[ExternalCatalog] no UMAP/t-SNE/PCA embedding project=#{project.key}; " \
+          "using spatial annot=#{spatial.id}(#{spatial.name})"
+        )
+        return spatial
       end
+
+      fallback = annots.min_by { |annot| embedding_fallback_sort_key(annot) }
+      @logger.info(
+        "[ExternalCatalog] no UMAP/t-SNE/PCA/spatial embedding project=#{project.key}; " \
+        "using first embedding annot=#{fallback.id}(#{fallback.name})"
+      )
+      fallback
+    end
+
+    def pick_ranked_embedding(annots, methods)
+      ranked = annots.select { |annot| methods.include?(detect_embedding_method(annot.name)) }
+      return nil if ranked.empty?
+
+      method_order = methods.each_with_index.to_h
+      ranked.min_by do |annot|
+        method_rank = method_order.fetch(detect_embedding_method(annot.name), methods.size)
+        [method_rank, *embedding_fallback_sort_key(annot)]
+      end
+    end
+
+    def embedding_fallback_sort_key(annot)
+      parsing_rank = annot.filepath.to_s.match?(%r{(^|/)parsing(/|$)}) ? 0 : 1
+      cell_count = -(annot.nber_cols.to_i)
+      [parsing_rank, cell_count, annot.id]
     end
 
     def detect_embedding_method(name)
@@ -1076,13 +1108,15 @@ module ExternalCatalog
       return :umap if text.match?(/(?:\b|_)umap(?:\b|_)/i)
       return :tsne if text.match?(/(?:\b|_)(?:tsne|t_sne|t-sne)(?:\b|_)/i)
       return :pca if text.match?(/(?:\b|_)pca(?:\b|_)/i)
+      return :spatial if spatial_embedding_name?(text)
 
       nil
     end
 
-    def embedding_method_rank(name)
-      method = detect_embedding_method(name)
-      EMBEDDING_METHOD_RANK.fetch(method, 3)
+    def spatial_embedding_name?(name)
+      text = name.to_s
+      base = text.split('/').last.to_s
+      base.match?(/\Aspatial\z/i)
     end
 
     def embedding_method_label(name)

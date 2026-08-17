@@ -22501,6 +22501,17 @@ export default class extends Controller {
 
   // Update the selected cells count display
 
+  inspectorDisplayValue(vector, cellId) {
+    const value = this.dataManager.getDisplayValue(vector, cellId)
+    if (value === undefined) {
+      return undefined
+    }
+    if (vector.data_type === 'NUMERIC') {
+      return Number(value).toFixed(3)
+    }
+    return value
+  }
+
   // Tooltip methods
   showTooltip(cellId, point) {
     // Get cell information
@@ -22509,15 +22520,15 @@ export default class extends Controller {
     // Get category information if available
     let categoryInfo = ''
     if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[cellId] !== undefined) {
-      const { data_type, values } = this.currentMetadataVector
-      const value = values[cellId]
+      const { data_type } = this.currentMetadataVector
+      const displayValue = this.inspectorDisplayValue(this.currentMetadataVector, cellId)
       
       if (data_type === 'DISCRETE' || data_type === 'STRING') {
-        // For discrete metadata, show the category name
-        categoryInfo = `<br><strong>Category:</strong> ${value}`
+        // For discrete metadata, show the category name (values are codes)
+        categoryInfo = `<br><strong>Category:</strong> ${displayValue}`
       } else if (data_type === 'NUMERIC') {
         // For continuous metadata, show the numeric value
-        categoryInfo = `<br><strong>Value:</strong> ${value.toFixed(3)}`
+        categoryInfo = `<br><strong>Value:</strong> ${displayValue}`
       }
     }
     
@@ -22996,7 +23007,7 @@ export default class extends Controller {
             
             const cellIdVector = this.dataManager.getMetadataVectorById(metadataId)
             if (cellIdVector && cellIdVector.values && cellIdVector.values[cellId] !== undefined) {
-              cellIdValue = cellIdVector.values[cellId]
+              cellIdValue = this.dataManager.getDisplayValue(cellIdVector, cellId)
               cellIdMetadataId = metadataId
               break
             }
@@ -23052,7 +23063,7 @@ export default class extends Controller {
                   console.error(`🔧 [Tooltip] Failed to load CellID metadata:`, err)
                 })
               } else if (cellIdVector && cellIdVector.values && cellIdVector.values[cellId] !== undefined) {
-                cellIdValue = cellIdVector.values[cellId]
+                cellIdValue = this.dataManager.getDisplayValue(cellIdVector, cellId)
                 cellIdMetadataId = metadataId
                 break
               }
@@ -23079,14 +23090,7 @@ export default class extends Controller {
     // Add category/value row - use current metadata if cellId provided, otherwise use passed categoryInfo
     let finalCategoryInfo = categoryInfo
     if (cellId !== null && this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[cellId] !== undefined) {
-      const { data_type, values } = this.currentMetadataVector
-      const value = values[cellId]
-      
-      if (data_type === 'DISCRETE' || data_type === 'STRING') {
-        finalCategoryInfo = value
-      } else if (data_type === 'NUMERIC') {
-        finalCategoryInfo = value.toFixed(3)
-      }
+      finalCategoryInfo = this.inspectorDisplayValue(this.currentMetadataVector, cellId)
     }
     
     if (finalCategoryInfo !== null && finalCategoryInfo !== undefined && finalCategoryInfo !== '') {
@@ -23169,14 +23173,7 @@ export default class extends Controller {
     // Get current category info
     let categoryInfo = null
     if (this.currentMetadataVector && this.currentMetadataVector.values && this.currentMetadataVector.values[this.fixedTooltipCellId] !== undefined) {
-      const { data_type, values } = this.currentMetadataVector
-      const value = values[this.fixedTooltipCellId]
-      
-      if (data_type === 'DISCRETE' || data_type === 'STRING') {
-        categoryInfo = value
-      } else if (data_type === 'NUMERIC') {
-        categoryInfo = value.toFixed(3)
-      }
+      categoryInfo = this.inspectorDisplayValue(this.currentMetadataVector, this.fixedTooltipCellId)
     }
     
     // Use existing position from DOM

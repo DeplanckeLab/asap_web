@@ -4,20 +4,39 @@ require 'redis'
 require 'json'
 require 'securerandom'
 
-# Tracks clients that hit the app without the Rails session cookie and blocks repeat abuse.
-# Uses Redis so enforcement is shared across Puma workers.
+# Human check used only when a request would restore an archived project from S3.
+# Ordinary pages are not challenged. Google/Bing never see this gate.
 class SessionCookieGate
-  BLOCK_KEY_PREFIX = 'asap:session_cookie_gate:v1:block'
-  STRIKE_KEY_PREFIX = 'asap:session_cookie_gate:v1:strikes'
+  BLOCK_KEY_PREFIX = 'asap:session_cookie_gate:v2:block'
+  STRIKE_KEY_PREFIX = 'asap:session_cookie_gate:v2:strikes'
+  CHALLENGE_KEY_PREFIX = 'asap:session_cookie_gate:v2:challenge'
 
-  BAN_MESSAGE = 'This IP is banned due to repeated requests without a valid session cookie.'
   STRIKE_WINDOW_SECONDS = 1.hour.to_i
   CHALLENGE_TTL_SECONDS = 10.minutes.to_i
-  CHALLENGE_KEY_PREFIX = 'asap:session_cookie_gate:v1:challenge'
+  BOARD_COLS = 5
+  BOARD_ROWS = 4
+  CELL_SIZE = 80
 
   class << self
     def redis
       @redis ||= Redis.new(url: ENV.fetch('REDIS_URL'))
+    end
+
+    def enabled?
+      flag = ENV['SESSION_COOKIE_UNARCHIVE_CHALLENGE']
+      return ActiveModel::Type::Boolean.new.cast(flag) unless flag.nil? || flag == ''
+
+      Rails.env.production?
+    end
+
+    def challenge_required?(archived:, project_show:, metadata_only:, force_unarchive:, search_engine: false, enabled: nil)
+      return false unless enabled.nil? ? self.enabled? : enabled
+      return false if search_engine
+      return false unless archived
+      return false unless project_show
+      return true if force_unarchive
+
+      !metadata_only
     end
 
     def blocked?(ip)
@@ -40,19 +59,19 @@ class SessionCookieGate
     def challenge_for(ip)
       nonce = SecureRandom.hex(16)
       challenge_key = "#{CHALLENGE_KEY_PREFIX}:#{ip}:#{nonce}"
-
-      # Simple graphical challenge: user must click the center of the target square.
-      size = 420
-      cell_size = 42
-      columns = (size / cell_size)
-      target_col = rand(columns)
-      target_row = rand(columns)
+      cell_count = BOARD_COLS * BOARD_ROWS
+      target_index = rand(cell_count)
+      piece_index = rand(cell_count - 1)
+      piece_index += 1 if piece_index >= target_index
 
       payload = {
-        size: size,
-        cell_size: cell_size,
-        target_col: target_col,
-        target_row: target_row
+        board_cols: BOARD_COLS,
+        board_rows: BOARD_ROWS,
+        cell_size: CELL_SIZE,
+        target_col: target_index % BOARD_COLS,
+        target_row: target_index / BOARD_COLS,
+        piece_col: piece_index % BOARD_COLS,
+        piece_row: piece_index / BOARD_COLS
       }
 
       redis.setex(challenge_key, CHALLENGE_TTL_SECONDS, payload.to_json)
@@ -63,35 +82,27 @@ class SessionCookieGate
       )
     end
 
-    def solve_challenge!(ip, nonce:, click_x:, click_y:)
+    def solve_challenge!(ip, nonce:, drop_col:, drop_row:)
+      return false unless drop_col.present? && drop_row.present?
+
       challenge_key = "#{CHALLENGE_KEY_PREFIX}:#{ip}:#{nonce}"
       raw = redis.get(challenge_key)
       return false if raw.blank?
 
       payload = JSON.parse(raw)
+
+      placed =
+        drop_col.to_i == payload.fetch('target_col').to_i &&
+        drop_row.to_i == payload.fetch('target_row').to_i
+      return false unless placed
+
       redis.del(challenge_key)
-
-      cell_size = payload.fetch('cell_size').to_i
-      target_col = payload.fetch('target_col').to_i
-      target_row = payload.fetch('target_row').to_i
-      target_x_min = target_col * cell_size
-      target_x_max = target_x_min + cell_size
-      target_y_min = target_row * cell_size
-      target_y_max = target_y_min + cell_size
-
-      x = click_x.to_i
-      y = click_y.to_i
-
-      inside_target = (x >= target_x_min && x <= target_x_max && y >= target_y_min && y <= target_y_max)
-      return false unless inside_target
-
       unban!(ip)
       true
     rescue JSON::ParserError, KeyError
       false
     end
 
-    # Increments consecutive cookieless strikes for ip and resets the rolling window TTL.
     def increment_strike(ip)
       key = "#{STRIKE_KEY_PREFIX}:#{ip}"
       redis.multi do |multi|

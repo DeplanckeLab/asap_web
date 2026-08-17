@@ -1994,7 +1994,7 @@ export class UIManager {
       
       if (data_type === 'DISCRETE' || data_type === 'STRING') {
         // For discrete metadata, show the category name (values are codes)
-        const label = this.controller.dataManager.getCategoryLabel(
+        const label = this.controller.dataManager.getDisplayValue(
           this.controller.currentMetadataVector,
           cellId
         )

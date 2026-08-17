@@ -529,6 +529,17 @@ export class DataManager {
     return labels[code]
   }
 
+  // User-facing value for a cell: category label for discrete/string, raw value otherwise.
+  getDisplayValue(vector, cellIndex) {
+    if (!vector?.values || vector.values[cellIndex] === undefined) {
+      return undefined
+    }
+    if (this.isDiscreteMetadata(vector)) {
+      return this.getCategoryLabel(vector, cellIndex)
+    }
+    return vector.values[cellIndex]
+  }
+
   labelToCode(vector, label) {
     const labels = this.getCategoryLabels(vector)
     if (!labels) {

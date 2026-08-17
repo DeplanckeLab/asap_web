@@ -124,6 +124,14 @@ class ProjectsController < ApplicationController
 
   # GET /projects/1 or /projects/1.json
   def show
+    if crawler_archived_summary_only?
+      requested_view = params[:view].to_s
+      unless requested_view.blank? || METADATA_ONLY_PROJECT_VIEWS.include?(requested_view)
+        redirect_to project_path(@project, view: 'summary')
+        return
+      end
+    end
+
     queue_unarchive_if_project_files_missing
     track_project_view!
     set_sandbox_self_destruct_at!
@@ -135,7 +143,8 @@ class ProjectsController < ApplicationController
 
     # Bare project URLs should open the curated landing visualization checkpoint when set
     # (legacy landing_page_json behavior). Explicit ?view=... keeps normal navigation.
-    if params[:view].blank? && params[:checkpoint_id].blank?
+    # Search-engine crawlers must keep archived projects on the summary page and never restore files.
+    if params[:view].blank? && params[:checkpoint_id].blank? && !crawler_archived_summary_only?
       landing_checkpoint = @project.checkpoints.visualization.find_by(is_landing_page: true)
       if landing_checkpoint
         redirect_to project_path(@project, view: 'visualization', checkpoint_id: landing_checkpoint.id)
@@ -10193,7 +10202,7 @@ class ProjectsController < ApplicationController
       return if @project_being_archived
 
       return unless @project_files_missing
-      return if request_user_agent_indicates_bot?
+      return if skip_project_unarchive_for_crawler?
       return if metadata_only_view_request?
 
       if @project.archived_on_s3? && !@project.archive_restore_expected?
@@ -10302,7 +10311,7 @@ class ProjectsController < ApplicationController
     # button on the summary page can still kick off the unarchive flow.
     def metadata_only_view_request?
       return false if force_unarchive_requested?
-      METADATA_ONLY_PROJECT_VIEWS.include?(params[:view].to_s)
+      metadata_only_view_param?
     end
 
     def force_unarchive_requested?
@@ -15567,10 +15576,16 @@ class ProjectsController < ApplicationController
       return unless request.get?
       return unless request.format.html?
       return unless @project&.public?
+      return if search_engine_crawler?
       return unless request_user_agent_indicates_bot?
-      return if params[:view].to_s == 'summary'
+      return if bot_allowed_public_project_view?
 
       head :forbidden
+    end
+
+    def bot_allowed_public_project_view?
+      view = params[:view].to_s
+      view.blank? || METADATA_ONLY_PROJECT_VIEWS.include?(view)
     end
 
     def set_project

@@ -5304,6 +5304,27 @@ module Basic
       true
     end
 
+    # /layers/X is the published analysis matrix (already normalized). Map it to the
+    # Normalization step so PCA and later steps accept it as input instead of raw /matrix counts.
+    def normalization_step_id_for_project(project)
+      docker_image = get_asap_docker(project.version)
+      return nil unless docker_image
+
+      Step.find_by(
+        name: 'normalization',
+        docker_image_id: docker_image.id,
+        version_id: project.version_id
+      )&.id
+    end
+
+    def sim_step_id_for_parsed_dataset(run, dataset_name, existing_sim_step_id: nil)
+      return existing_sim_step_id if existing_sim_step_id.present?
+      return nil unless dataset_name.to_s == AnndataMappingBuilder::X_LAYER_PATH
+      return nil unless run.step&.name == 'parsing'
+
+      normalization_step_id_for_project(run.project)
+    end
+
     def load_annot run, meta, relative_filepath, h_data_types, h_data_classes, logger, cache = nil
       cache ||= {}
       project_by_id = cache[:project_by_id] ||= {}
@@ -5505,6 +5526,16 @@ module Basic
                     cache[:data_transformation_id] if cache
                   end
           h_annot[:data_transformation_id] = dt_id unless dt_id.nil?
+        end
+
+        sim_step_id = sim_step_id_for_parsed_dataset(run, meta['name'], existing_sim_step_id: annot&.sim_step_id)
+        if sim_step_id.present?
+          h_annot[:sim_step_id] = sim_step_id
+        elsif meta['name'].to_s == AnndataMappingBuilder::X_LAYER_PATH && run.step&.name == 'parsing'
+          logger&.warn(
+            "[Basic.load_annot] could not map #{AnndataMappingBuilder::X_LAYER_PATH} to normalization " \
+            "project=#{run.project.key}"
+          )
         end
         
 #        annot = Annot.where(:name => meta['name'], :filepath => relative_filepath, :store_run_id => (fo) ? fo.run_id : nil, :project_id => run.project_id).first

@@ -249,4 +249,22 @@ class ProjectTest < TestBaseWithoutFixtures
     assert project.apply_project_type_from_assay_metadata!(replace_sc_default: true)
     assert_equal spat.id, project.reload.project_type_id
   end
+
+  test "inferred project type uses loom visium annot even when h5ad obs keys are also present" do
+    project = create_test_project!(name: "Mixed format infer", key: "mix#{SecureRandom.hex(3)}", project_type_id: nil)
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: project.id,
+        name: "/col_attrs/assay_ontology_term_id",
+        list_cat_json: ["EFO:0022857"].to_json,
+        nber_cols: 10,
+        dim: 1
+      )
+    )
+    project.define_singleton_method(:cxg_validation_result) do
+      { 'field_values' => { 'obs/assay_ontology_term_id' => ['EFO:0009899'] } }
+    end
+
+    assert_equal 'spat', project.inferred_project_type_tag_from_assay
+  end
 end

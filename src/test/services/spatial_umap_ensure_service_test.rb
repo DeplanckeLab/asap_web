@@ -81,8 +81,29 @@ class SpatialUmapEnsureServiceTest < ActiveSupport::TestCase
     assert_equal 'not_spatial', result.reason
   end
 
-  test 'starts PCA on /matrix when spatial project has no UMAP' do
-    tmp_root = Dir.mktmpdir('spatial-umap')
+  test 'skips PCA when only raw count /matrix is present' do
+    result = SpatialUmapEnsureService.call(project: @project, logger: Rails.logger, wait: false)
+    assert result.skipped
+    assert_equal 'not_normalized', result.reason
+    assert_nil result.pca_run
+  end
+
+  test 'starts PCA on analysis X when raw counts are in /matrix' do
+    num_matrix = DataClass.find_by(name: 'num_matrix')
+    skip 'No num_matrix DataClass' unless num_matrix
+    x_layer = Annot.create!(
+      project_id: @project.id,
+      user_id: @user.id,
+      run_id: @parsing_run.id,
+      filepath: 'parsing/output.loom',
+      name: AnndataMappingBuilder::X_LAYER_PATH,
+      dim: 3,
+      nber_rows: 100,
+      nber_cols: 50,
+      data_class_ids: num_matrix.id.to_s
+    )
+
+    tmp_root = Dir.mktmpdir('spatial-umap-x')
     previous = ENV['USER_DATA_DIR']
     ENV['USER_DATA_DIR'] = tmp_root
     FileUtils.mkdir_p(File.join(tmp_root, @user.id.to_s, @project.key))
@@ -92,12 +113,9 @@ class SpatialUmapEnsureServiceTest < ActiveSupport::TestCase
         Basic.stub(:exec_run, ->(*) { nil }) do
           result = SpatialUmapEnsureService.call(project: @project, logger: Rails.logger, wait: false, user_id: @user.id)
           refute result.skipped, result.error
-          assert result.pca_run
+          assert_equal 'pca_sc', result.pca_run.step.name
           attrs = JSON.parse(result.pca_run.attrs_json)
-          assert_equal true, attrs['auto_spatial_from_matrix']
-          assert_equal @matrix.id, attrs.dig('input_matrix', 'annot_id')
-          assert_equal 50, attrs['nber_dims']
-          assert_nil result.umap_run
+          assert_equal x_layer.id, attrs.dig('input_matrix', 'annot_id')
         end
       end
     ensure

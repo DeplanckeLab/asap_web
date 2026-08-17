@@ -27,6 +27,31 @@ module Scfair
       tag_from_labels(values)
     end
 
+    # CELLxGENE (and similar) catalog payloads store assays as
+    # [{ ontology_term_id:, label: }, ...].
+    def tag_for_catalog_assays(assays)
+      assays = Array(assays)
+      terms = []
+      labels = []
+      assays.each do |assay|
+        next unless assay.is_a?(Hash)
+
+        term = assay[:ontology_term_id].presence || assay['ontology_term_id'].presence
+        label = assay[:label].presence || assay['label'].presence
+        terms << term.to_s if term.present?
+        labels << label.to_s if label.present?
+      end
+      return nil if terms.empty? && labels.empty?
+
+      tag_for(
+        field_values: {
+          'obs/assay_ontology_term_id' => terms,
+          'obs/assay' => labels
+        },
+        format: 'h5ad'
+      )
+    end
+
     def tag_for_format(field_values, format, resolver)
       return 'spat' if SpatialAssayHelper.spatial_enabled?(field_values, format, resolver: resolver)
 

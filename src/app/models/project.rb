@@ -951,13 +951,7 @@ class Project < ApplicationRecord
   # stored on the project (Annots and/or CXG field_values).
   # Returns the ProjectType tag, or nil when assay metadata does not match.
   def inferred_project_type_tag_from_assay
-    field_values = assay_field_values_for_type_inference
-    format = if field_values.key?('obs/assay_ontology_term_id') || field_values.key?('obs/assay')
-               'h5ad'
-             else
-               'loom'
-             end
-    Scfair::AssayProjectTypeHelper.tag_for(field_values: field_values, format: format)
+    Scfair::AssayProjectTypeHelper.tag_for(field_values: assay_field_values_for_type_inference)
   end
 
   # Assign project_type from assay metadata.

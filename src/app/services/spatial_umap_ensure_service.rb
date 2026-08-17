@@ -1,11 +1,12 @@
 # frozen_string_literal: true
 
 # For spatial datasets that were parsed without an imported UMAP embedding,
-# run Scanpy PCA on /matrix then Scanpy UMAP on that PCA.
+# run Scanpy PCA on the normalized analysis matrix (anndata_mapping x_path, typically
+# /layers/X) then Scanpy UMAP. Raw count /matrix is not a valid PCA input.
 class SpatialUmapEnsureService
   PCA_STEP_NAME = 'pca_sc'
   UMAP_STEP_NAME = 'umap'
-  PCA_STD_METHOD_NAME = 'scanpy'
+  PCA_STD_METHOD_NAMES = %w[scanpy pca].freeze
   UMAP_STD_METHOD_NAME = 'scanpy'
   AUTO_ATTR = 'auto_spatial_from_matrix'
   NBER_DIMS = 50
@@ -13,6 +14,7 @@ class SpatialUmapEnsureService
   POLL_INTERVAL_SEC = 15
   UMAP_NAME = /(?:\b|_)umap(?:\b|_)/i
   PCA_NAME = /(?:\b|_)pca(?:\b|_)/i
+  LOOM_REL = 'parsing/output.loom'
 
   Result = Struct.new(:skipped, :reason, :pca_run, :umap_run, :error, keyword_init: true)
 
@@ -46,9 +48,10 @@ class SpatialUmapEnsureService
       return Result.new(skipped: true, reason: 'umap_present')
     end
 
-    matrix = matrix_annot
+    matrix = analysis_matrix_annot
     if matrix.nil?
-      return Result.new(skipped: true, reason: 'no_matrix', error: 'No /matrix annot found')
+      reason = @skip_reason || 'no_matrix'
+      return Result.new(skipped: true, reason: reason, error: @error)
     end
 
     pca_run = ensure_pca_run!(matrix)
@@ -105,7 +108,7 @@ class SpatialUmapEnsureService
 
     start_run!(
       step_name: UMAP_STEP_NAME,
-      std_method_name: UMAP_STD_METHOD_NAME,
+      std_method_names: [UMAP_STD_METHOD_NAME],
       input_annot: pca_annot,
       extra_attrs: {
         'nber_pcs' => NBER_DIMS,
@@ -134,11 +137,27 @@ class SpatialUmapEnsureService
     Annot.where(project_id: @project.id, dim: 1, nber_rows: 2).where.not(filepath: nil)
   end
 
-  def matrix_annot
-    Annot.where(project_id: @project.id, name: '/matrix', dim: 3)
-         .where.not(filepath: nil)
-         .order(id: :desc)
-         .first
+  def analysis_matrix_annot
+    mapping = AnndataMappingBuilder.call(project: @project, loom_filepath: LOOM_REL)
+    x_path = mapping['x_path'].to_s
+    if x_path.blank?
+      @error = 'anndata_mapping is missing x_path'
+      return nil
+    end
+
+    annot = Annot.where(project_id: @project.id, name: x_path, dim: 3)
+                 .where.not(filepath: nil)
+                 .order(id: :desc)
+                 .first
+    if annot.nil?
+      @error = "No matrix annot for anndata_mapping x_path=#{x_path}"
+      return nil
+    end
+    unless annot.normalized_matrix?
+      @skip_reason = 'not_normalized'
+      return nil
+    end
+    annot
   end
 
   def ensure_pca_run!(matrix)
@@ -150,7 +169,7 @@ class SpatialUmapEnsureService
 
     start_run!(
       step_name: PCA_STEP_NAME,
-      std_method_name: PCA_STD_METHOD_NAME,
+      std_method_names: PCA_STD_METHOD_NAMES,
       input_annot: matrix,
       extra_attrs: {
         'nber_dims' => NBER_DIMS,
@@ -197,11 +216,11 @@ class SpatialUmapEnsureService
          .find { |annot| annot.name.to_s.match?(PCA_NAME) }
   end
 
-  def start_run!(step_name:, std_method_name:, input_annot:, extra_attrs:)
+  def start_run!(step_name:, std_method_names:, input_annot:, extra_attrs:)
     step = step_for(step_name)
-    std_method = std_method_for(step, std_method_name)
+    std_method = std_method_for(step, std_method_names)
     if step.nil? || std_method.nil?
-      @error = "#{step_name}/#{std_method_name} is not configured for this project version"
+      @error = "#{step_name}/#{Array(std_method_names).join('|')} is not configured for this project version"
       @logger.error("[SpatialUmapEnsureService] #{@error} project=#{@project.key}")
       return nil
     end
@@ -288,7 +307,7 @@ class SpatialUmapEnsureService
     Basic.exec_run(@logger, run)
     run.reload
     @logger.info(
-      "[SpatialUmapEnsureService] started #{step_name}/#{std_method_name} Run##{run.id} " \
+      "[SpatialUmapEnsureService] started #{step_name}/#{std_method.name} Run##{run.id} " \
       "project=#{@project.key} input=#{input_annot.name}"
     )
     run
@@ -333,10 +352,14 @@ class SpatialUmapEnsureService
     Step.find_by(name: name, docker_image_id: docker_image.id, version_id: @project.version_id)
   end
 
-  def std_method_for(step, name)
+  def std_method_for(step, names)
     return nil unless step
 
-    StdMethod.find_by(name: name, step_id: step.id, obsolete: false) ||
-      StdMethod.find_by(name: name, step_id: step.id)
+    Array(names).each do |name|
+      found = StdMethod.find_by(name: name, step_id: step.id, obsolete: false) ||
+              StdMethod.find_by(name: name, step_id: step.id)
+      return found if found
+    end
+    nil
   end
 end

@@ -37,8 +37,8 @@ module ExternalCatalog
       pca: 'PCA',
       spatial: 'Spatial'
     }.freeze
-    # Prefer UMAP, then t-SNE, then PCA. If none exist, use spatial, else the first 2D embedding.
-    PREFERRED_EMBEDDING_METHODS = %i[umap tsne pca].freeze
+    # Spatial first when present, then UMAP, t-SNE, PCA, else the first 2D embedding.
+    PREFERRED_EMBEDDING_METHODS = %i[spatial umap tsne pca].freeze
 
     class Error < StandardError; end
     class SkipEntry < StandardError; end
@@ -296,9 +296,21 @@ module ExternalCatalog
       pp.projects.where(being_deleted: [false, nil]).exists?
     end
 
-    def project_type_for(entry)
+    def project_type_for(entry, fu: nil)
       tag = entry.project_type_tag.to_s
-      tag == 'bulk' ? @bulk_type : @sc_type
+      tag = 'spat' if fu && preparsing_spatial?(fu)
+      ptype = ProjectType.find_by(tag: tag)
+      raise Error, "No ProjectType for tag=#{tag.inspect}" unless ptype
+
+      ptype
+    end
+
+    def preparsing_spatial?(fu)
+      output_path = fu.upload_dir.join('output.json')
+      return false unless File.exist?(output_path)
+
+      output = Basic.safe_parse_json(File.read(output_path), {})
+      output['is_spatial'].to_i == 1 || output['spatial_library_id'].present?
     end
 
     def resolve_organism!(entry)
@@ -617,7 +629,7 @@ module ExternalCatalog
     end
 
     def create_project!(entry, fu, organism, parsing_attrs, preparsing_fp)
-      ptype = project_type_for(entry)
+      ptype = project_type_for(entry, fu: fu)
       project = Project.new(
         user_id: @user.id,
         key: Project.generate_unique_key,
@@ -803,18 +815,16 @@ module ExternalCatalog
 
       loop do
         project.reload
-        loom = project_loom_path(project)
-        if loom && File.exist?(loom) && File.size(loom) > 0
-          run = latest_parsing_run(project)
-          if run.nil? || run.status_id == success_id
-            @logger.info("[ExternalCatalog] parse complete project=#{project.key} loom=#{loom}")
-            return
-          end
-        end
-
         run = latest_parsing_run(project)
         if run && [failed_id, stopped_id].include?(run.status_id)
           raise Error, "Parsing failed for project=#{project.key} run=#{run.id} status_id=#{run.status_id}"
+        end
+
+        loom = project_loom_path(project)
+        loom_ready = loom && File.exist?(loom) && File.size(loom) > 0
+        if run && run.status_id == success_id && loom_ready
+          @logger.info("[ExternalCatalog] parse complete project=#{project.key} loom=#{loom}")
+          return
         end
 
         if Time.now > deadline
@@ -1096,18 +1106,9 @@ module ExternalCatalog
       preferred = pick_ranked_embedding(annots, PREFERRED_EMBEDDING_METHODS)
       return preferred if preferred
 
-      spatial = pick_ranked_embedding(annots, [:spatial])
-      if spatial
-        @logger.info(
-          "[ExternalCatalog] no UMAP/t-SNE/PCA embedding project=#{project.key}; " \
-          "using spatial annot=#{spatial.id}(#{spatial.name})"
-        )
-        return spatial
-      end
-
       fallback = annots.min_by { |annot| embedding_fallback_sort_key(annot) }
       @logger.info(
-        "[ExternalCatalog] no UMAP/t-SNE/PCA/spatial embedding project=#{project.key}; " \
+        "[ExternalCatalog] no ranked embedding project=#{project.key}; " \
         "using first embedding annot=#{fallback.id}(#{fallback.name})"
       )
       fallback

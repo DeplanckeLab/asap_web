@@ -66,4 +66,16 @@ class ScfairAssayProjectTypeHelperTest < TestBaseWithoutFixtures
 
     assert_nil Scfair::AssayProjectTypeHelper.tag_for(field_values: field_values, format: 'h5ad')
   end
+
+  test 'catalog visium assay maps to spat' do
+    assays = [{ 'ontology_term_id' => 'EFO:0022857', 'label' => 'Visium Spatial Gene Expression V1' }]
+
+    assert_equal 'spat', Scfair::AssayProjectTypeHelper.tag_for_catalog_assays(assays)
+  end
+
+  test 'catalog scRNA-seq assay does not map to spat' do
+    assays = [{ ontology_term_id: 'EFO:0009899', label: "10x 3' v3" }]
+
+    assert_nil Scfair::AssayProjectTypeHelper.tag_for_catalog_assays(assays)
+  end
 end

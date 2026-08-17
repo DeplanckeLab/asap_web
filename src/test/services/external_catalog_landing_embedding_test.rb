@@ -65,15 +65,29 @@ class ExternalCatalogLandingEmbeddingTest < ActiveSupport::TestCase
     )
   end
 
-  test 'prefers UMAP over spatial and other embeddings' do
-    spatial = create_embedding!(name: '/col_attrs/spatial', nber_cols: 80)
-    other = create_embedding!(name: '/col_attrs/X_draw_graph_fa', nber_cols: 90)
+  test 'prefers spatial over UMAP and other embeddings' do
     umap = create_embedding!(name: '/col_attrs/X_umap', nber_cols: 40)
+    other = create_embedding!(name: '/col_attrs/X_draw_graph_fa', nber_cols: 90)
+    spatial = create_embedding!(name: '/col_attrs/spatial', nber_cols: 80)
 
     chosen = @importer.send(:prefer_embedding_annot, @project)
-    assert_equal umap.id, chosen.id
-    assert_not_equal spatial.id, chosen.id
+    assert_equal spatial.id, chosen.id
+    assert_not_equal umap.id, chosen.id
     assert_not_equal other.id, chosen.id
+  end
+
+  test 'landing checkpoint uses spatial embedding when UMAP is also present' do
+    spatial = create_embedding!(name: '/col_attrs/spatial')
+    create_embedding!(name: '/col_attrs/X_umap')
+    create_cell_type!
+
+    @importer.send(:create_landing_visualization_checkpoint!, @project)
+
+    checkpoint = @project.checkpoints.visualization.find_by(is_landing_page: true)
+    assert checkpoint, 'Expected a landing visualization checkpoint'
+    assert_equal 'Spatial colored by cell type with labels', checkpoint.title
+    assert_equal spatial.id.to_s, checkpoint.state.dig('visualizationEmbedding', 'id')
+    assert_equal '/col_attrs/spatial', checkpoint.state.dig('visualizationEmbedding', 'name')
   end
 
   test 'uses spatial when no UMAP t-SNE or PCA embedding exists' do

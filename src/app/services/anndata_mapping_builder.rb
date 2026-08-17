@@ -13,6 +13,7 @@ class AnndataMappingBuilder
   RAW_INPUT_GROUPS = ['/raw/X', '/raw.X'].freeze
   RAW_LAYER_NAMES = %w[raw_X raw.X raw].freeze
   X_LAYER_NAMES = %w[X].freeze
+  X_LAYER_PATH = '/layers/X'
 
   RESERVED_OBS_INDEX_KEYS = %w[CellID cell_id cell_ids barcode barcodes Barcode obs_names index _index].freeze
   RESERVED_VAR_INDEX_KEYS = %w[Accession Name Gene Original_Gene gene gene_name var_names index _index].freeze

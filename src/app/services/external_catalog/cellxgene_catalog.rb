@@ -92,7 +92,7 @@ module ExternalCatalog
           tax_id: tax_id,
           organism_label: organism_label,
           filesize: (asset[:filesize] || asset['filesize']).to_i,
-          project_type_tag: 'sc',
+          project_type_tag: project_type_tag_for_dataset(dataset),
           format_kind: :h5ad,
           filename: File.basename(URI.parse(url.to_s).path.to_s),
           dois: refs[:dois],
@@ -168,6 +168,11 @@ module ExternalCatalog
         identifiers: identifiers.compact,
         source_page_url: source_page_url
       }
+    end
+
+    def project_type_tag_for_dataset(dataset)
+      assays = dataset[:assay] || dataset['assay']
+      Scfair::AssayProjectTypeHelper.tag_for_catalog_assays(assays).presence || 'sc'
     end
 
     def extract_organism(dataset)

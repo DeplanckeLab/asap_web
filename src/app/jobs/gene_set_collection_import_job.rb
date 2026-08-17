@@ -89,6 +89,8 @@ class GeneSetCollectionImportJob < ApplicationJob
       duration_ms: ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started_at) * 1000).round
     )
 
+    collection_record.update!(staged_upload_path: nil)
+
     ActionCable.server.broadcast("project_#{project.id}", {
       event: 'gene_set_collection_import',
       status: 'completed',

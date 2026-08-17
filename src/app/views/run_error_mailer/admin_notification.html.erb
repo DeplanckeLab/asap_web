@@ -1,5 +1,6 @@
 <h2>ASAP run failed</h2>
 
+<p><strong>Instance:</strong> <%= @instance_kind %> (<%= @instance_host %>, <%= @instance_name %>)</p>
 <p><strong>Project:</strong> <%= @project.key %> (ID <%= @project.id %>)</p>
 <p><strong>Run:</strong> #<%= @run.id %></p>
 <p><strong>Step:</strong> <%= @step&.label.presence || @step&.name %></p>

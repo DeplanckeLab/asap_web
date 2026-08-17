@@ -57,8 +57,7 @@ class ComplianceController < ApplicationController
   end
 
   # POST /compliance/projects/:id/validate
-  # Trigger validation for a project's loom file
-  # Runs synchronously if sidekiq is not available
+  # Queue validation for a project's loom file
   def validate_project
     unless @project
       render json: { error: 'Project not found' }, status: :not_found
@@ -105,50 +104,12 @@ class ComplianceController < ApplicationController
       }
     )
 
-    # Run validation synchronously; progress ticks are pushed over ActionCable.
-    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    result = run_project_compliance_validation(loom_path, @project, logger: Rails.logger) do |evt|
-      broadcast_project_compliance_progress(@project.id, evt)
-    end
-    Rails.logger.info("[Compliance TIMING] Synchronous validation: #{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0).round(2)}s")
-
-    validation_data = project_validation_payload(@project, result, loom_path, schema_config)
-    save_validation_result(@project, validation_data)
-
-    ActionCable.server.broadcast(
-      "compliance_#{@project.id}",
-      {
-        project_id: @project.id,
-        status: 'completed',
-        valid: result.valid?,
-        message: result.valid? ? 'Validation passed' : "Validation found #{result.errors.count} error(s)",
-        progress: 100,
-        errors_count: result.errors.count,
-        warnings_count: result.warnings.count,
-        valid_checks_count: result.valid_checks.count,
-        redirect_url: project_path(@project, view: 'compliance'),
-        timestamp: Time.current.iso8601
-      }
-    )
+    @project.update!(being_validated: true)
+    ScfairValidationJob.perform_later(@project.id)
 
     respond_to do |format|
-      format.html do
-        if result.valid?
-          redirect_to project_path(@project, view: 'compliance'), notice: 'Validation passed!'
-        else
-          redirect_to project_path(@project, view: 'compliance'), alert: "Validation found #{result.errors.count} #{result.errors.count == 1 ? 'error' : 'errors'}"
-        end
-      end
-      format.json do
-        render json: {
-          status: 'completed',
-          valid: result.valid?,
-          errors_count: result.errors.count,
-          warnings_count: result.warnings.count,
-          valid_checks_count: result.valid_checks.count,
-          project_id: @project.id
-        }
-      end
+      format.html { redirect_to project_path(@project, view: 'compliance'), notice: 'Validation started.' }
+      format.json { render json: { status: 'started', project_id: @project.id } }
     end
   end
 
@@ -175,6 +136,7 @@ class ComplianceController < ApplicationController
     
     render json: {
       project_id: @project.id,
+      being_validated: @project.being_validated,
       has_result: result.present?,
       valid: result&.dig(:valid),
       validated_at: result&.dig(:validated_at),
@@ -613,6 +575,7 @@ class ComplianceController < ApplicationController
     })
 
     # Trigger async validation and respond immediately
+    @project.update!(being_validated: true)
     ScfairValidationJob.perform_later(@project.id)
 
     respond_to do |format|
@@ -1227,6 +1190,7 @@ class ComplianceController < ApplicationController
       return
     end
 
+    project.update!(being_validated: true)
     ScfairValidationJob.perform_later(project.id)
     render json: { status: 'queued', project_id: project.id }
   end

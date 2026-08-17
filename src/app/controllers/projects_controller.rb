@@ -17,9 +17,9 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access annotations].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
-  before_action :authorize_project_read_access, only: %i[show metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
+  before_action :authorize_project_read_access, only: %i[show clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection collection_owned_project_autocomplete collection_add_project]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection save_batch_compose_metadata]
   before_action :authorize_project_owner_access, only: %i[export_consensus_annotation preview_consensus_annotation]
@@ -1574,12 +1574,13 @@ class ProjectsController < ApplicationController
     end
 
     clone_service = ProjectCloneService.new(@project, user: current_user, session: session, admin: admin?)
-    new_project = clone_service.call
+    new_project = clone_service.start!
 
     if new_project
+      ProjectCloneJob.perform_later(new_project.id)
       respond_to do |format|
-        format.html { redirect_to project_path(new_project), notice: "Project successfully cloned." }
-        format.json { render json: { project_key: new_project.key, redirect_url: project_path(new_project) }, status: :created }
+        format.html { redirect_to project_path(new_project) }
+        format.json { render json: { project_key: new_project.key, redirect_url: project_path(new_project), status: 'cloning' }, status: :accepted }
       end
     else
       error_message = clone_service.errors.first || "Failed to clone project"
@@ -1588,6 +1589,15 @@ class ProjectsController < ApplicationController
         format.json { render json: { error: error_message }, status: :unprocessable_entity }
       end
     end
+  end
+
+  def clone_status
+    render json: {
+      project_id: @project.id,
+      being_cloned: @project.being_cloned,
+      clone_status: @project.being_cloned ? 'copying' : 'completed',
+      redirect_url: project_path(@project)
+    }
   end
 
   # POST /projects/:id/toggle_public
@@ -4468,7 +4478,10 @@ class ProjectsController < ApplicationController
       name: collection_name,
       file_key: "gene_set_collection_#{SecureRandom.hex(12)}",
       source_kind: source_kind,
-      gene_set_collection_type_id: gene_set_collection_type_id_for!(GENE_SET_COLLECTION_TYPE_IMPORTED)
+      gene_set_collection_type_id: gene_set_collection_type_id_for!(GENE_SET_COLLECTION_TYPE_IMPORTED),
+      staged_upload_path: staged_upload_path,
+      import_loom_file: loom_file,
+      import_id: import_id
     )
     GeneSetCollectionImportJob.perform_later(
       @project.id,
@@ -5460,7 +5473,6 @@ class ProjectsController < ApplicationController
 
   # GET /projects/:id/gene_set_item_module_score
   def gene_set_item_module_score
-    started_module_score_execution = false
     item_id_raw = params[:item_id].to_s.strip
     if item_id_raw.blank?
       render json: { status: 'error', message: 'Missing gene set item identifier' }, status: :unprocessable_entity
@@ -5476,162 +5488,35 @@ class ProjectsController < ApplicationController
     dataset_path = params[:dataset].to_s.strip
     dataset_path = '/matrix' if dataset_path.blank?
 
-    h_env = Basic.safe_parse_json(@project.version.env_json, {})
-    db_version = asap_data_db_name_for_env(h_env, context: "gene_set_item_module_score")
-    current_user_id = current_user&.id
-    user_data_dir = ENV["USER_DATA_DIR"] || Rails.root.join('storage', 'user_data').to_s
-    project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
-    loom_path = project_dir + loom_file
-    unless File.exist?(loom_path)
-      render json: { status: 'error', message: 'Loom file not found' }, status: :not_found
-      return
-    end
-
     request_id = params[:request_id].to_s.strip
     if request_id.blank?
       render json: { status: 'error', message: 'Missing module score request identifier' }, status: :unprocessable_entity
       return
     end
 
-    # Local / legacy manual gene set items: mean expression across genes in the dataset.
-    if parse_local_gene_set_collection_id_from_item_id(item_id_raw) || item_id_raw.start_with?("#{MANUAL_GENE_SET_COLLECTION_ID}:")
-      begin
-        scores = compute_local_gene_set_expression_scores(
-          item_id_raw: item_id_raw,
-          loom_path: loom_path,
-          dataset_path: dataset_path
-        )
-        render json: { status: 'ok', scores: scores, dataset: dataset_path }
-      rescue StandardError => e
-        Rails.logger.error("gene_set_item_module_score local failed: #{e.class} - #{e.message}")
-        render json: { status: 'error', message: e.message }, status: :unprocessable_entity
-      end
+    existing = ModuleScoreRequest.find_by(request_id: request_id, project_id: @project.id)
+    if existing
+      render_module_score_request(existing)
       return
     end
 
-    item_id = item_id_raw.to_i
-    if item_id <= 0
-      render json: { status: 'error', message: 'Missing gene set item identifier' }, status: :unprocessable_entity
+    loom_path = @project.data_dir + loom_file
+    unless File.exist?(loom_path)
+      render json: { status: 'error', message: 'Loom file not found' }, status: :not_found
       return
     end
 
-    db_conn = nil
-    RemoteGene.with_remote(db_version) do
-      conn = RemoteGene.connection
-      db_config = RemoteGene.connection_db_config
-      cfg = db_config&.configuration_hash || {}
-      db_host = cfg[:host] || cfg['host'] || ENV.fetch('ASAP2_REMOTE_HOST', 'host.docker.internal')
-      db_port = cfg[:port] || cfg['port'] || ENV.fetch('ASAP2_REMOTE_PORT', 5433)
-      db_name = cfg[:database] || cfg['database'] || db_version
-      db_conn = "#{db_host}:#{db_port}/#{db_name}"
-
-      visibility_sql = [
-        "(gs.project_id IS NULL AND gs.ref_id IS NOT NULL)",
-        "gs.project_id = #{@project.id}"
-      ]
-      if current_user_id.present?
-        visibility_sql << "(gs.project_id IS NULL AND gs.user_id = #{current_user_id.to_i} AND gs.ref_id IS NULL)"
-      end
-
-      item_row = conn.select_one(<<~SQL)
-        SELECT gsi.id
-        FROM gene_set_items gsi
-        JOIN gene_sets gs ON gs.id = gsi.gene_set_id
-        WHERE gsi.id = #{item_id}
-          AND gs.organism_id = #{@project.organism_id.to_i}
-          AND COALESCE(gs.obsolete, FALSE) = FALSE
-          AND (#{visibility_sql.join(' OR ')})
-      SQL
-      unless item_row
-        render json: { status: 'error', message: 'Gene set item not found' }, status: :not_found
-        return
-      end
-    end
-
-    cmd = [
-      'java',
-      '-jar',
-      "#{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar",
-      '-T', 'ModuleScore',
-      '-loom', loom_path.to_s,
-      '-geneset', item_id.to_s,
-      '-dataset', dataset_path,
-      '-h', db_conn,
-      '-m', 'seurat'
-    ]
-
-    stdout = ''
-    stderr = ''
-    status = nil
-    canceled = false
-    run_key = module_score_run_cache_key(request_id)
-    cancel_key = module_score_cancel_cache_key(request_id)
-    Rails.cache.write(cancel_key, false, expires_in: 30.minutes)
-    started_module_score_execution = true
-
-    Open3.popen3(*cmd) do |stdin, stdout_io, stderr_io, wait_thr|
-      stdin.close
-      Rails.cache.write(
-        run_key,
-        {
-          pid: wait_thr.pid,
-          project_id: @project.id,
-          user_id: current_user&.id
-        },
-        expires_in: 30.minutes
-      )
-
-      stdout_reader = Thread.new { stdout_io.read.to_s }
-      stderr_reader = Thread.new { stderr_io.read.to_s }
-
-      while wait_thr.alive?
-        if Rails.cache.read(cancel_key) == true
-          canceled = true
-          terminate_module_score_process(wait_thr.pid)
-          break
-        end
-        sleep 0.1
-      end
-
-      status = wait_thr.value
-      stdout = stdout_reader.value
-      stderr = stderr_reader.value
-    end
-  ensure
-    return unless started_module_score_execution
-    Rails.cache.delete(run_key) if defined?(run_key) && run_key.present?
-    Rails.cache.delete(cancel_key) if defined?(cancel_key) && cancel_key.present?
-
-    if canceled
-      render json: { status: 'canceled', request_id: request_id }
-      return
-    end
-
-    if status.nil?
-      render json: { status: 'error', message: 'ModuleScore execution did not complete' }, status: :unprocessable_entity
-      return
-    end
-
-    unless status.success?
-      stderr_msg = stderr.to_s.strip
-      stderr_msg = stderr_msg[0..500] if stderr_msg.length > 500
-      Rails.logger.error("gene_set_item_module_score failed (status=#{status.exitstatus}): #{stderr}")
-      render json: {
-        status: 'error',
-        message: stderr_msg.present? ? "ModuleScore execution failed: #{stderr_msg}" : "ModuleScore execution failed (exit status #{status.exitstatus})"
-      }, status: :unprocessable_entity
-      return
-    end
-
-    parsed = Basic.safe_parse_json(stdout, {})
-    scores = parsed['scores']
-    unless scores.is_a?(Array)
-      Rails.logger.error("gene_set_item_module_score invalid output: #{stdout.to_s[0..500]}")
-      render json: { status: 'error', message: 'ModuleScore output is invalid' }, status: :unprocessable_entity
-      return
-    end
-
-    render json: { status: 'ok', scores: scores, dataset: dataset_path }
+    request = ModuleScoreRequest.create!(
+      request_id: request_id,
+      project_id: @project.id,
+      user_id: current_user&.id,
+      item_id: item_id_raw,
+      loom_file: loom_file,
+      dataset: dataset_path,
+      status: 'pending'
+    )
+    GeneSetItemModuleScoreJob.perform_later(request.id)
+    render json: { status: 'pending', request_id: request.request_id }
   end
 
   # POST /projects/:id/cancel_gene_set_item_module_score
@@ -5642,25 +5527,16 @@ class ProjectsController < ApplicationController
       return
     end
 
-    run_key = module_score_run_cache_key(request_id)
-    cancel_key = module_score_cancel_cache_key(request_id)
-    run_data = Rails.cache.read(run_key)
-
-    if run_data.is_a?(Hash)
-      if run_data[:project_id].to_i != @project.id
-        render json: { status: 'error', message: 'Invalid module score request scope' }, status: :forbidden
-        return
-      end
+    request = ModuleScoreRequest.find_by(request_id: request_id, project_id: @project.id)
+    if request
       current_user_id = current_user&.id
-      if current_user_id.present? && run_data[:user_id].present? && run_data[:user_id].to_i != current_user_id.to_i
+      if current_user_id.present? && request.user_id.present? && request.user_id.to_i != current_user_id.to_i
         render json: { status: 'error', message: 'Invalid module score request owner' }, status: :forbidden
         return
       end
-    end
 
-    Rails.cache.write(cancel_key, true, expires_in: 10.minutes)
-    if run_data.is_a?(Hash) && run_data[:pid].present?
-      terminate_module_score_process(run_data[:pid].to_i)
+      request.update!(status: 'canceled') unless request.terminal?
+      terminate_module_score_process(request.pid.to_i) if request.pid.present?
     end
 
     render json: { status: 'ok', request_id: request_id }
@@ -9702,6 +9578,22 @@ class ProjectsController < ApplicationController
       nil
     end
 
+    def render_module_score_request(request)
+      case request.status
+      when 'pending', 'running'
+        render json: { status: request.status, request_id: request.request_id }
+      when 'canceled'
+        render json: { status: 'canceled', request_id: request.request_id }
+      when 'failed'
+        render json: { status: 'error', message: request.error_message.presence || 'ModuleScore execution failed' }, status: :unprocessable_entity
+      when 'completed'
+        scores = request.read_scores
+        render json: { status: 'ok', scores: scores, dataset: request.dataset }
+      else
+        raise ArgumentError, "Unknown module score status #{request.status}"
+      end
+    end
+
     def module_score_run_cache_key(request_id)
       "module_score_run:#{request_id}"
     end
@@ -10183,6 +10075,8 @@ class ProjectsController < ApplicationController
       if @project.reconcile_archive_status_with_filesystem!
         @project.reload
       end
+
+      return if @project.being_cloned
 
       project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
       project_archive_file = Pathname.new("#{project_dir}.tgz")
@@ -10926,7 +10820,7 @@ class ProjectsController < ApplicationController
     end
 
     def gene_set_collection_imports_dir
-      Rails.root.join('tmp', 'gene_set_collection_imports')
+      GeneSetCollection.imports_dir
     end
 
     def stage_gene_set_collection_upload!(source_path, import_id:)
@@ -11584,50 +11478,11 @@ class ProjectsController < ApplicationController
     end
 
     def compute_local_gene_set_expression_scores(item_id_raw:, loom_path:, dataset_path:)
-      item = find_local_or_manual_gene_set_item(item_id_raw)
-      raise "Gene set item not found" unless item
-
-      dataset_lookup = cached_dataset_stable_lookup(loom_path)
-      stable_ids = Array(item[:genes]).filter_map do |gene|
-        resolve_manual_gene_stable_id(
-          gene,
-          dataset_stable_by_accession: dataset_lookup[:by_accession],
-          dataset_stable_by_symbol: dataset_lookup[:by_symbol],
-          dataset_stable_ids: dataset_lookup[:stable_ids]
-        )
-      end.uniq
-      raise "No genes from this gene set are present in the dataset" if stable_ids.empty?
-
-      stable_id_vector = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/_StableID')
-      raise "Failed to read gene stable IDs from loom" unless stable_id_vector.is_a?(Array) && stable_id_vector.any?
-
-      wanted = {}
-      stable_ids.each { |sid| wanted[sid.to_s] = true }
-      row_indexes = []
-      stable_id_vector.each_with_index do |value, idx|
-        key = value.to_s.strip
-        row_indexes << idx if wanted[key]
-      end
-      raise "No matching gene rows found in the loom for this gene set" if row_indexes.empty?
-
-      sums = nil
-      gene_count = 0
-      row_indexes.each_slice(50) do |slice|
-        extracted = H5DataService.extract_row_by_indexes(loom_path.to_s, dataset_path, slice)
-        rows = extracted['rows'] || extracted['values'] || []
-        rows.each do |row|
-          next unless row.is_a?(Array)
-          gene_count += 1
-          if sums.nil?
-            sums = row.map { |v| v.to_f }
-          else
-            row.each_with_index { |v, i| sums[i] = sums[i].to_f + v.to_f }
-          end
-        end
-      end
-      raise "Failed to extract expression values for gene set" if sums.nil? || gene_count <= 0
-
-      sums.map { |total| total.to_f / gene_count }
+      LocalGeneSetExpressionScores.new(@project).call(
+        item_id_raw: item_id_raw,
+        loom_path: loom_path,
+        dataset_path: dataset_path
+      )
     end
 
     def delete_related_manual_module_score_runs(removed_item)

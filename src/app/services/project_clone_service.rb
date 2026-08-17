@@ -15,25 +15,51 @@ class ProjectCloneService
     @h_annots = {}
   end
 
-  # Clone the project and return the new project or nil on failure
-  def call
+  # Persist the destination project so a compose restart can resume the copy.
+  def start!
     return nil unless can_clone?
 
-    ActiveRecord::Base.transaction do
-      create_new_project
-      create_project_directory
-      copy_runs
-      copy_fos
-      copy_annots
-      copy_annot_cell_sets
-      update_run_references
-      copy_project_steps
-      copy_associations
-      rename_run_folders
-      update_source_clone_count
+    create_new_project
+    @new_project.update_column(:being_cloned, true)
+    update_source_clone_count
+    @new_project
+  rescue StandardError => e
+    @errors << e.message
+    Rails.logger.error "Project clone start failed: #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    cleanup_failed_clone
+    nil
+  end
 
-      new_project
-    end
+  def complete_existing!(dest_project)
+    @new_project = dest_project
+    complete!
+  end
+
+  def complete!
+    raise ArgumentError, 'Destination project is missing' unless @new_project
+    raise ArgumentError, "Project##{@new_project.id} is not being cloned" unless @new_project.being_cloned
+
+    reset_partial_clone!
+    create_project_directory
+    copy_runs
+    copy_fos
+    copy_annots
+    copy_annot_cell_sets
+    update_run_references
+    copy_project_steps
+    copy_associations
+    rename_run_folders
+    @new_project.update_column(:being_cloned, false)
+    @new_project
+  end
+
+  # Clone the project and return the new project or nil on failure
+  def call
+    return nil unless start!
+
+    complete!
+    new_project
   rescue StandardError => e
     @errors << e.message
     Rails.logger.error "Project clone failed: #{e.message}"
@@ -82,6 +108,7 @@ class ProjectCloneService
       archive_status_id: 1,
       disk_size_archive: nil,
       disk_size_archived: nil,
+      being_cloned: true,
       viewed_at: now,
       created_at: now,
       updated_at: now,
@@ -398,19 +425,47 @@ class ProjectCloneService
     source_project.update_column(:nber_cloned, current_count + 1) unless @admin
   end
 
+  def reset_partial_clone!
+    return unless @new_project&.persisted?
+
+    new_user_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + (@new_project.user_id&.to_s || '0')
+    @new_project_dir = new_user_dir + @new_project.key
+    FileUtils.rm_rf(@new_project_dir) if File.exist?(@new_project_dir)
+
+    Fo.where(project_id: @new_project.id).find_each(&:destroy)
+    AnnotCellSet.where(project_id: @new_project.id).find_each(&:destroy)
+    @new_project.annots.find_each(&:destroy)
+    @new_project.runs.find_each(&:destroy)
+    @new_project.project_steps.find_each(&:destroy)
+    @new_project.exp_entries.clear
+    @new_project.provider_projects.clear
+    @h_runs = {}
+    @h_annots = {}
+  end
+
   def cleanup_failed_clone
     return unless @new_project&.persisted?
-    
+
     begin
-      # Delete the project directory if it exists
+      decrement_source_clone_count
       if @new_project_dir && File.exist?(@new_project_dir)
         FileUtils.rm_rf(@new_project_dir)
       end
-      
-      # Delete the project record (will cascade delete associated records)
+
       @new_project.destroy
+      @new_project = nil
     rescue StandardError => e
       Rails.logger.error "Failed to cleanup after failed clone: #{e.message}"
     end
+  end
+
+  def decrement_source_clone_count
+    return if @admin
+    return unless source_project
+
+    current_count = source_project.nber_cloned.to_i
+    return if current_count <= 0
+
+    source_project.update_column(:nber_cloned, current_count - 1)
   end
 end

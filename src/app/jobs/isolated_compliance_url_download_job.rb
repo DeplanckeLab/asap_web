@@ -7,18 +7,22 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
 
   PROGRESS_MIN_INTERVAL = 0.5
 
-  def perform(task_id, url, schema_id, user_id: nil, project_key: nil)
-    tmp_path = download_remote_file!(task_id, url)
+  def perform(fu_id)
+    fu = Fu.find_by(id: fu_id)
+    unless fu
+      Rails.logger.error("[IsolatedComplianceUrlDownloadJob] Fu##{fu_id} not found")
+      return
+    end
+
+    task_id = fu.compliance_task_id
+    raise ArgumentError, "Fu##{fu.id} has no compliance_task_id" if task_id.blank?
+    raise ArgumentError, "Fu##{fu.id} has no url" if fu.url.blank?
+    raise ArgumentError, "Fu##{fu.id} has no compliance_schema_id" if fu.compliance_schema_id.blank?
+
+    tmp_path = download_remote_file!(task_id, fu.url)
     detected_format = ComplianceFileCheckQueueService.validate_downloaded_file!(tmp_path)
     final_path = rename_downloaded_file!(tmp_path, task_id, detected_format)
-
-    fu = create_fu_for_downloaded_file!(
-      final_path,
-      url,
-      detected_format: detected_format,
-      user_id: user_id,
-      project_key: project_key
-    )
+    finalize_downloaded_fu!(fu, final_path, detected_format)
 
     queued_payload = {
       status: 'queued',
@@ -32,44 +36,39 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
     IsolatedComplianceValidationJob.perform_later(
       task_id,
       fu.file_path.to_s,
-      schema_id,
+      fu.compliance_schema_id,
       fu.name,
       fu_id: fu.id
     )
   rescue ComplianceFileCheckQueueService::UnsupportedFormatError => e
-    fail_task(task_id, e.message, error_code: ComplianceFileCheckQueueService::UNSUPPORTED_FORMAT_ERROR_CODE)
+    fail_task(fu, e.message, error_code: ComplianceFileCheckQueueService::UNSUPPORTED_FORMAT_ERROR_CODE)
   rescue StandardError => e
-    fail_task(task_id, e.message)
+    fail_task(fu, e.message)
     Rails.logger.error("[IsolatedComplianceUrlDownloadJob] #{e.class}: #{e.message}")
     Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
   end
 
-  private
-
-  def create_fu_for_downloaded_file!(current_path, source_url, detected_format:, user_id: nil, project_key: nil)
-    parsed_url = URI.parse(source_url.to_s.strip)
-    original_filename = File.basename(parsed_url.path).presence || File.basename(current_path)
-    original_filename = File.basename(current_path) if original_filename.blank?
+  def finalize_downloaded_fu!(fu, current_path, detected_format)
+    parsed_url = URI.parse(fu.url.to_s.strip)
+    original_filename = fu.name.presence || File.basename(parsed_url.path).presence || File.basename(current_path)
     extension = detected_format == 'loom' ? '.loom' : '.h5ad'
     input_filename = "input_file#{extension}"
 
-    upload_type_id = UploadType.id_for('compliance_file_check')
-    fu = Fu.create!(
+    fu.update!(
       upload_file_name: input_filename,
       upload_file_size: File.size(current_path),
       name: original_filename,
-      status: 'validating',
-      upload_type: upload_type_id,
-      user_id: user_id,
-      project_key: project_key,
-      url: parsed_url.to_s
+      status: 'validating'
     )
 
     fu_dir = fu.upload_dir.to_s
     FileUtils.mkdir_p(fu_dir)
-    FileUtils.mv(current_path, File.join(fu_dir, fu.upload_file_name))
+    dest = File.join(fu_dir, fu.upload_file_name)
+    FileUtils.mv(current_path, dest)
     fu
   end
+
+  private
 
   def temp_dir
     shared_root = ENV['UPLOAD_DATA_DIR'].presence || ENV['USER_DATA_DIR'].presence || '/data/asap2/fus'
@@ -149,7 +148,9 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
     ActionCable.server.broadcast("isolated_compliance_#{task_id}", payload)
   end
 
-  def fail_task(task_id, message, error_code: nil)
+  def fail_task(fu, message, error_code: nil)
+    task_id = fu&.compliance_task_id
+    fu&.update(status: 'download_failed')
     return if task_id.blank?
 
     payload = {

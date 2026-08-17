@@ -470,6 +470,10 @@ class FusController < ApplicationController
         end
       end
 
+      # Get organism_id and version_id from request body (already parsed) or params
+      organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)
+      version_id = request_body['version_id'] || safe_integer_param(:version_id)
+
       fu = Fu.create!(
         user_id: current_user&.id,
         project_id: dna_project&.id,
@@ -479,12 +483,9 @@ class FusController < ApplicationController
         status: 'downloading',
         name: filename,
         url: normalized_url,
-        upload_type: upload_type_id
+        upload_type: upload_type_id,
+        preparsing_version_id: version_id
       )
-
-      # Get organism_id and version_id from request body (already parsed) or params
-      organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)
-      version_id = request_body['version_id'] || safe_integer_param(:version_id)
 
       upload_dir = fu.upload_dir
       FileUtils.mkdir_p(upload_dir)

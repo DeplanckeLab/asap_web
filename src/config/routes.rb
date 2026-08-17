@@ -52,6 +52,7 @@ Rails.application.routes.draw do
       get :run_counts
       get :run_list
       get :unarchive_status
+      get :clone_status
       get :graph
       get :pipeline_runs
       get :search_gene

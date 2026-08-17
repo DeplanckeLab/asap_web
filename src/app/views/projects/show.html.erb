@@ -14,9 +14,14 @@ end %>
 <% unarchive_state = @project_unarchive_state.to_s %>
 <% suppress_unarchive_overlay = metadata_only_view_request? && %w[summary settings access annotations].include?(@view_type.to_s) %>
 <% suppress_archiving_overlay = !force_unarchive_requested? && %w[summary settings access annotations].include?(@view_type.to_s) %>
+<% show_clone_pending = @project.being_cloned %>
 <% show_archiving_pending = !suppress_archiving_overlay && @project_being_archived %>
 <% show_unarchive_pending = !suppress_unarchive_overlay && (@project_being_unarchived || (@project_files_missing && %w[queued in_progress archived_missing queue_failed].include?(unarchive_state))) %>
-<% if show_archiving_pending %>
+<% if show_clone_pending %>
+  <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
+    <%= render 'projects/views/clone_pending_overlay' %>
+  </div>
+<% elsif show_archiving_pending %>
   <div class="flex-1 min-h-0 overflow-hidden flex flex-col">
     <%= render 'projects/views/archiving_pending_overlay' %>
   </div>

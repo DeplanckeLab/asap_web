@@ -32,26 +32,39 @@ class ComplianceFileChecksController < ApplicationController
     raise ArgumentError, 'Only HTTP/HTTPS URLs are supported' unless uri.is_a?(URI::HTTP)
 
     task_id = SecureRandom.uuid
+    original_filename = File.basename(uri.path).presence || 'remote_file'
+    upload_type_id = UploadType.id_for('compliance_file_check')
+    raise ArgumentError, 'compliance_file_check upload type is missing' if upload_type_id.blank?
+
+    fu = Fu.create!(
+      upload_file_name: 'pending.download',
+      upload_file_size: 0,
+      name: original_filename,
+      status: 'downloading',
+      upload_type: upload_type_id,
+      user_id: current_user&.id,
+      project_key: current_user ? nil : session[:sandbox],
+      url: uri.to_s,
+      compliance_schema_id: schema_id,
+      compliance_task_id: task_id
+    )
+
     initial = {
       status: 'downloading',
       task_id: task_id,
       progress: 0,
       transfer_progress: 0,
-      message: 'Downloading file...'
+      message: 'Downloading file...',
+      fu_id: fu.id
     }
     IsolatedComplianceStatusStore.write(task_id, initial)
-    IsolatedComplianceUrlDownloadJob.perform_later(
-      task_id,
-      url,
-      schema_id,
-      user_id: current_user&.id,
-      project_key: current_user ? nil : session[:sandbox]
-    )
+    IsolatedComplianceUrlDownloadJob.perform_later(fu.id)
 
     render json: {
       task_id: task_id,
       status: 'downloading',
-      schema_id: schema_id
+      schema_id: schema_id,
+      fu_id: fu.id
     }
   rescue URI::InvalidURIError
     render json: { error: 'Invalid URL' }, status: :unprocessable_entity

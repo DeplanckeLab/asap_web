@@ -11101,18 +11101,29 @@ export default class extends Controller {
           dataset: normalizedDataset,
           request_id: requestId
         })
-        const response = await fetch(`/projects/${encodeURIComponent(this.getProjectIdentifier())}/gene_set_item_module_score?${params.toString()}`, {
-          method: 'GET',
-          credentials: 'same-origin',
-          headers: { 'Accept': 'application/json' },
-          signal: this.moduleScoreAbortController.signal
-        })
-        const payload = await response.json()
-        if (payload?.status === 'canceled') {
-          return
+        let payload = null
+        while (!this.moduleScoreCancellationRequested) {
+          const response = await fetch(`/projects/${encodeURIComponent(this.getProjectIdentifier())}/gene_set_item_module_score?${params.toString()}`, {
+            method: 'GET',
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json' },
+            signal: this.moduleScoreAbortController.signal
+          })
+          payload = await response.json()
+          if (payload?.status === 'canceled') {
+            return
+          }
+          if (payload?.status === 'pending' || payload?.status === 'running') {
+            await new Promise((resolve) => window.setTimeout(resolve, 1000))
+            continue
+          }
+          if (!response.ok || payload.status !== 'ok') {
+            throw new Error(payload.message || 'Failed to compute ModuleScore')
+          }
+          break
         }
-        if (!response.ok || payload.status !== 'ok') {
-          throw new Error(payload.message || 'Failed to compute ModuleScore')
+        if (this.moduleScoreCancellationRequested || !payload || payload.status !== 'ok') {
+          return
         }
 
         scoreValues = Array.isArray(payload.scores) ? payload.scores.map((value) => Number(value || 0)) : []

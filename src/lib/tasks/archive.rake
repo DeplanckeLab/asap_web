@@ -56,11 +56,11 @@ def include_project_fus_for_archive(project, project_dir)
 end
 
 def archive_s3_bucket_config
-  {
-    key: '20000-af8a16d143d9920a26869b30700c3da4',
-    endpoint: 'https://s3.epfl.ch',
-    region: 'us-west-2'
-  }
+  ProjectS3Archive.bucket_config
+end
+
+def archive_project_to_s3!(project, s3b:, dry_run: false)
+  ProjectS3Archive.archive!(project, s3b: s3b, dry_run: dry_run)
 end
 
 def project_archive_due?(project, cutoff_time)
@@ -260,75 +260,6 @@ ensure
   FileUtils.rm_r(tmp_dir) if tmp_dir.present? && File.exist?(tmp_dir)
 end
 
-def archive_project_to_s3!(project, s3b:, dry_run: false)
-  demo_id = guided_tour_demo_project_id_for_archive
-  if demo_id.present? && project.id == demo_id
-    Rails.logger.info("[archive] skip guided-tour demo project id=#{project.id} key=#{project.key} public_id=#{project.public_id.inspect}")
-    return :exempt
-  end
-
-  base_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + project.user_id.to_s
-  project_dir = base_dir + project.key
-  return :missing_local_dir unless File.directory?(project_dir)
-  return :empty_local_dir unless directory_non_empty?(project_dir)
-
-  if dry_run
-    Rails.logger.info("[archive][dry-run] would archive project=#{project.id} key=#{project.key}")
-    return :dry_run
-  end
-
-  if Rails.env.development?
-    Rails.logger.info("[archive] development: skip S3 upload and local archive for project=#{project.id} key=#{project.key}")
-    return :development_skipped
-  end
-
-  archive_file = Pathname.new("#{project_dir}.tgz")
-  File.delete(archive_file) if File.exist?(archive_file)
-
-  project.update_archive_metadata!(archive_status_id: 2)
-  include_project_fus_for_archive(project, project_dir)
-
-  cmd = "tar -cf - -C #{Shellwords.escape(base_dir.to_s)} #{Shellwords.escape(project.key)} | pigz -9 -p 32 > #{Shellwords.escape(archive_file.to_s)}"
-  `#{cmd}`
-  raise "Archive command failed for #{project.key}" unless $?.success?
-  raise "Archive file missing for #{project.key}" unless File.exist?(archive_file) && File.size(archive_file).to_i > 0
-
-  local_md5 = file_md5_hex(archive_file)
-
-  s3_obj = Basic.write_file_on_s3(s3b, archive_file.to_s, { key: project.key, md5: local_md5 })
-  raise "S3 upload failed for #{project.key}" unless s3_obj
-
-  gzip_test_cmd = "gzip -t #{Shellwords.escape(archive_file.to_s)}"
-  `#{gzip_test_cmd} 2>&1`
-  gzip_ok = $?.success?
-
-  list_cmd = "gunzip -c #{Shellwords.escape(archive_file.to_s)} | tar -t >/dev/null"
-  `#{list_cmd} 2>&1`
-  list_ok = $?.success?
-
-  archive_valid = gzip_ok && list_ok
-  raise "Archive integrity check failed for #{project.key}" unless archive_valid
-
-  h_s3_settings = Basic.get_s3_settings
-  s3_client = Basic.connect_s3(s3b, h_s3_settings)
-  local_size = File.size(archive_file).to_i
-  remote_head = s3_client.head_object(bucket: s3b[:key], key: project.key)
-  remote_size = remote_head.content_length.to_i
-  raise "S3 and local archive size mismatch for #{project.key}" unless local_size == remote_size
-
-  remote_md5 = s3_object_md5_hex(s3_client, bucket: s3b[:key], key: project.key)
-  raise "S3 and local archive MD5 mismatch for #{project.key}" unless local_md5 == remote_md5
-
-  File.delete(archive_file) if File.exist?(archive_file)
-  FileUtils.rm_r(project_dir) if File.exist?(project_dir)
-  project.update_archive_metadata!(archive_status_id: 3, disk_size_archived: remote_size)
-  :archived
-rescue StandardError => e
-  Rails.logger.error("[archive] project=#{project.id} key=#{project.key} error=#{e.class} #{e.message}")
-  project.update_archive_metadata!(archive_status_id: 1) if project.archive_status_id == 2
-  :failed
-end
-
 def delete_project_archive_from_s3!(project, s3b:)
   h_s3_settings = Basic.get_s3_settings
   s3 = Basic.connect_s3(s3b, h_s3_settings)
@@ -447,7 +378,6 @@ end
 
 desc 'Archive projects to S3 (optionally one key)'
 task :archive, [:project_key] => :environment do |_t, args|
-  s3b = archive_s3_bucket_config
   idle_days = ENV.fetch('PROJECT_ARCHIVE_IDLE_DAYS', '1').to_i
   cutoff_time = Time.current - idle_days.days
 
@@ -461,7 +391,11 @@ task :archive, [:project_key] => :environment do |_t, args|
     should_archive = args[:project_key].present? || project_archive_due?(project, cutoff_time)
     next unless should_archive
 
-    archive_project_to_s3!(project, s3b: s3b, dry_run: false)
+    if args[:project_key].present?
+      ArchiveProjectJob.perform_now(project.id)
+    else
+      ArchiveProjectJob.perform_later(project.id)
+    end
   end
 end
 
@@ -576,11 +510,16 @@ namespace :projects do
       counts = Hash.new(0)
 
       candidates.find_each do |project|
-        result = archive_project_to_s3!(project, s3b: s3b, dry_run: dry_run)
-        counts[result] += 1
+        if dry_run
+          result = archive_project_to_s3!(project, s3b: s3b, dry_run: true)
+          counts[result] += 1
+        else
+          ArchiveProjectJob.perform_later(project.id)
+          counts[:enqueued] += 1
+        end
       end
 
-      puts "[archive_inactive] done archived=#{counts[:archived]} failed=#{counts[:failed]} missing_local_dir=#{counts[:missing_local_dir]} empty_local_dir=#{counts[:empty_local_dir]} dry_run=#{counts[:dry_run]} exempt=#{counts[:exempt]} development_skipped=#{counts[:development_skipped]}"
+      puts "[archive_inactive] done enqueued=#{counts[:enqueued]} archived=#{counts[:archived]} failed=#{counts[:failed]} missing_local_dir=#{counts[:missing_local_dir]} empty_local_dir=#{counts[:empty_local_dir]} dry_run=#{counts[:dry_run]} exempt=#{counts[:exempt]} development_skipped=#{counts[:development_skipped]}"
       f.flock(File::LOCK_UN)
     end
   end

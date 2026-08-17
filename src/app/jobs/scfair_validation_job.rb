@@ -19,6 +19,8 @@ class ScfairValidationJob < ApplicationJob
       return
     end
 
+    project.update_column(:being_validated, true) unless project.being_validated
+
     broadcast(project_id, status: 'validating', message: 'Starting scFAIR schema validation...')
 
     # Find the loom file to validate
@@ -96,6 +98,10 @@ class ScfairValidationJob < ApplicationJob
     
     if project
       save_validation_result(project, nil, e.message)
+    end
+  ensure
+    if defined?(project) && project&.persisted? && project.being_validated
+      project.update_column(:being_validated, false)
     end
   end
 

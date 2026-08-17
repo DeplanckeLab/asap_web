@@ -103,7 +103,11 @@ class ComplianceFileCheckQueueService
       message: 'Validation queued'
     }
     IsolatedComplianceStatusStore.write(task_id, initial)
-    @fu.update!(status: 'validating')
+    @fu.update!(
+      status: 'validating',
+      compliance_schema_id: @schema_id,
+      compliance_task_id: task_id
+    )
     IsolatedComplianceValidationJob.perform_later(
       task_id,
       path,

@@ -853,7 +853,8 @@ class RunsController < ApplicationController
       RunErrorMailer.user_report(
         run: @run,
         sender_email: sender_email,
-        message: message.presence
+        message: message.presence,
+        reporter: current_user
       ).deliver_now
 
       redirect_back fallback_location: project_path(@project), notice: 'Thank you for reporting this issue. We will get back to you shortly.'

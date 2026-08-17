@@ -205,6 +205,9 @@ import CloneOverlayController from "controllers/clone_overlay_controller"
 application.register("clone-overlay", CloneOverlayController)
 console.log('Clone overlay controller registered')
 
+import CloneStatusController from "controllers/clone_status_controller"
+application.register("clone-status", CloneStatusController)
+
 import DeFilterController from "controllers/de_filter_controller"
 application.register("de-filter", DeFilterController)
 console.log('DE filter controller registered')

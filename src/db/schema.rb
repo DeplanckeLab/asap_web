@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_17_084000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_17_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -739,6 +739,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_17_084000) do
   end
 
   create_table "fus", id: :integer, default: -> { "nextval('courses_id_seq'::regclass)" }, force: :cascade do |t|
+    t.string "compliance_schema_id"
+    t.string "compliance_task_id"
     t.string "content_sha256", limit: 64
     t.datetime "created_at", precision: nil
     t.text "name"
@@ -755,6 +757,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_17_084000) do
     t.text "url"
     t.integer "user_id"
     t.boolean "visible"
+    t.index ["compliance_task_id"], name: "index_fus_on_compliance_task_id"
     t.index ["content_sha256"], name: "index_fus_on_content_sha256"
     t.index ["preparsing_version_id"], name: "index_fus_on_preparsing_version_id"
   end
@@ -803,13 +806,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_17_084000) do
     t.datetime "created_at", null: false
     t.string "file_key", null: false
     t.bigint "gene_set_collection_type_id", null: false
+    t.string "import_id"
+    t.string "import_loom_file"
     t.string "name", null: false
     t.integer "project_id", null: false
     t.string "source_kind", null: false
+    t.string "staged_upload_path"
     t.datetime "updated_at", null: false
     t.integer "user_id"
     t.index ["file_key"], name: "index_gene_set_collections_on_file_key", unique: true
     t.index ["gene_set_collection_type_id"], name: "index_gene_set_collections_on_gene_set_collection_type_id"
+    t.index ["import_id"], name: "index_gene_set_collections_on_import_id"
     t.index ["project_id", "gene_set_collection_type_id"], name: "index_gene_set_collections_on_project_and_type"
     t.index ["project_id", "source_kind"], name: "index_gene_set_collections_on_project_id_and_source_kind"
     t.index ["project_id"], name: "index_gene_set_collections_on_project_id"
@@ -924,6 +931,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_17_084000) do
     t.datetime "created_at", precision: nil
     t.text "name"
     t.datetime "updated_at", precision: nil
+  end
+
+  create_table "module_score_requests", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "dataset", null: false
+    t.text "error_message"
+    t.string "item_id", null: false
+    t.string "loom_file", null: false
+    t.integer "pid"
+    t.integer "project_id", null: false
+    t.string "request_id", null: false
+    t.string "result_path"
+    t.string "status", null: false
+    t.datetime "updated_at", null: false
+    t.integer "user_id"
+    t.index ["project_id"], name: "index_module_score_requests_on_project_id"
+    t.index ["request_id"], name: "index_module_score_requests_on_request_id", unique: true
+    t.index ["status"], name: "index_module_score_requests_on_status"
   end
 
   create_table "ncbi_taxonomy_nodes", primary_key: "tax_id", id: :serial, force: :cascade do |t|
@@ -1169,8 +1194,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_17_084000) do
 
   create_table "projects", id: :serial, force: :cascade do |t|
     t.integer "archive_status_id", default: 1
+    t.boolean "being_cloned", default: false, null: false
     t.boolean "being_deleted", default: false
     t.boolean "being_published", default: false, null: false
+    t.boolean "being_validated", default: false, null: false
     t.integer "cloned_project_id"
     t.datetime "created_at", precision: nil
     t.text "de_filter_json"
@@ -1380,6 +1407,127 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_17_084000) do
     t.integer "user_id"
     t.boolean "view_perm", default: true
     t.index ["project_id"], name: "index_shares_on_project_id"
+  end
+
+  create_table "solid_queue_blocked_executions", force: :cascade do |t|
+    t.string "concurrency_key", null: false
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.bigint "job_id", null: false
+    t.integer "priority", default: 0, null: false
+    t.string "queue_name", null: false
+    t.index ["concurrency_key", "priority", "job_id"], name: "index_solid_queue_blocked_executions_for_release"
+    t.index ["expires_at", "concurrency_key"], name: "index_solid_queue_blocked_executions_for_maintenance"
+    t.index ["job_id"], name: "index_solid_queue_blocked_executions_on_job_id", unique: true
+  end
+
+  create_table "solid_queue_claimed_executions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "job_id", null: false
+    t.bigint "process_id"
+    t.index ["job_id"], name: "index_solid_queue_claimed_executions_on_job_id", unique: true
+    t.index ["process_id", "job_id"], name: "index_solid_queue_claimed_executions_on_process_id_and_job_id"
+  end
+
+  create_table "solid_queue_failed_executions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.text "error"
+    t.bigint "job_id", null: false
+    t.index ["job_id"], name: "index_solid_queue_failed_executions_on_job_id", unique: true
+  end
+
+  create_table "solid_queue_jobs", force: :cascade do |t|
+    t.string "active_job_id"
+    t.text "arguments"
+    t.string "class_name", null: false
+    t.string "concurrency_key"
+    t.datetime "created_at", null: false
+    t.datetime "finished_at"
+    t.integer "priority", default: 0, null: false
+    t.string "queue_name", null: false
+    t.datetime "scheduled_at"
+    t.datetime "updated_at", null: false
+    t.index ["active_job_id"], name: "index_solid_queue_jobs_on_active_job_id"
+    t.index ["class_name"], name: "index_solid_queue_jobs_on_class_name"
+    t.index ["finished_at"], name: "index_solid_queue_jobs_on_finished_at"
+    t.index ["queue_name", "finished_at"], name: "index_solid_queue_jobs_for_filtering"
+    t.index ["scheduled_at", "finished_at"], name: "index_solid_queue_jobs_for_alerting"
+  end
+
+  create_table "solid_queue_pauses", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "queue_name", null: false
+    t.index ["queue_name"], name: "index_solid_queue_pauses_on_queue_name", unique: true
+  end
+
+  create_table "solid_queue_processes", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "hostname"
+    t.string "kind", null: false
+    t.datetime "last_heartbeat_at", null: false
+    t.text "metadata"
+    t.string "name", null: false
+    t.integer "pid", null: false
+    t.bigint "supervisor_id"
+    t.index ["last_heartbeat_at"], name: "index_solid_queue_processes_on_last_heartbeat_at"
+    t.index ["name", "supervisor_id"], name: "index_solid_queue_processes_on_name_and_supervisor_id", unique: true
+    t.index ["supervisor_id"], name: "index_solid_queue_processes_on_supervisor_id"
+  end
+
+  create_table "solid_queue_ready_executions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "job_id", null: false
+    t.integer "priority", default: 0, null: false
+    t.string "queue_name", null: false
+    t.index ["job_id"], name: "index_solid_queue_ready_executions_on_job_id", unique: true
+    t.index ["priority", "job_id"], name: "index_solid_queue_poll_all"
+    t.index ["queue_name", "priority", "job_id"], name: "index_solid_queue_poll_by_queue"
+  end
+
+  create_table "solid_queue_recurring_executions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "job_id", null: false
+    t.datetime "run_at", null: false
+    t.string "task_key", null: false
+    t.index ["job_id"], name: "index_solid_queue_recurring_executions_on_job_id", unique: true
+    t.index ["task_key", "run_at"], name: "index_solid_queue_recurring_executions_on_task_key_and_run_at", unique: true
+  end
+
+  create_table "solid_queue_recurring_tasks", force: :cascade do |t|
+    t.text "arguments"
+    t.string "class_name"
+    t.string "command", limit: 2048
+    t.datetime "created_at", null: false
+    t.text "description"
+    t.string "key", null: false
+    t.integer "priority", default: 0
+    t.string "queue_name"
+    t.string "schedule", null: false
+    t.boolean "static", default: true, null: false
+    t.datetime "updated_at", null: false
+    t.index ["key"], name: "index_solid_queue_recurring_tasks_on_key", unique: true
+    t.index ["static"], name: "index_solid_queue_recurring_tasks_on_static"
+  end
+
+  create_table "solid_queue_scheduled_executions", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.bigint "job_id", null: false
+    t.integer "priority", default: 0, null: false
+    t.string "queue_name", null: false
+    t.datetime "scheduled_at", null: false
+    t.index ["job_id"], name: "index_solid_queue_scheduled_executions_on_job_id", unique: true
+    t.index ["scheduled_at", "priority", "job_id"], name: "index_solid_queue_dispatch_all"
+  end
+
+  create_table "solid_queue_semaphores", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.datetime "expires_at", null: false
+    t.string "key", null: false
+    t.datetime "updated_at", null: false
+    t.integer "value", default: 1, null: false
+    t.index ["expires_at"], name: "index_solid_queue_semaphores_on_expires_at"
+    t.index ["key", "value"], name: "index_solid_queue_semaphores_on_key_and_value"
+    t.index ["key"], name: "index_solid_queue_semaphores_on_key", unique: true
   end
 
   create_table "speeds", id: :serial, force: :cascade do |t|
@@ -1820,6 +1968,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_17_084000) do
   add_foreign_key "selections", "users", name: "selections_user_id_fkey"
   add_foreign_key "shares", "projects", name: "shares_project_id_fkey"
   add_foreign_key "shares", "users", name: "shares_user_id_fkey"
+  add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "solid_queue_claimed_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "solid_queue_failed_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "solid_queue_ready_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "solid_queue_recurring_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
+  add_foreign_key "solid_queue_scheduled_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade
   add_foreign_key "std_methods", "docker_images", name: "std_methods_docker_image_id_fkey"
   add_foreign_key "std_methods", "speeds", name: "std_methods_speed_id_fkey"
   add_foreign_key "std_methods", "steps", name: "std_methods_step_id_fkey"

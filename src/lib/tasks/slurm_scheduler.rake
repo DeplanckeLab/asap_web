@@ -73,6 +73,8 @@ namespace :slurm do
     # in the UI as the monitor switches between the stale and the new job id.
     waiting_runs = Run.where(status_id: 1)
                       .where("slurm_job_id IS NULL OR slurm_job_id = 0")
+                      .joins(:step)
+                      .where.not(steps: { name: 'cell_selection' })
                       .order(:created_at)
                       .limit(10)
 

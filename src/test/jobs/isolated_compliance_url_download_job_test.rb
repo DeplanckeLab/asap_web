@@ -19,21 +19,28 @@ class IsolatedComplianceUrlDownloadJobTest < TestBaseWithoutFixtures
     FileUtils.rm_rf(@tmp_root) if @tmp_root.present?
   end
 
-  test 'create_fu_for_downloaded_file stores a guest-scoped canonical input file' do
+  test 'finalize_downloaded_fu stores a guest-scoped canonical input file' do
     source_path = File.join(@tmp_root, 'downloaded.h5ad')
     File.write(source_path, 'h5ad-bytes')
+    fu = register_for_test_cleanup(
+      Fu.create!(
+        upload_file_name: 'pending.download',
+        upload_file_size: 0,
+        name: 'demo.h5ad',
+        status: 'downloading',
+        upload_type: @upload_type_id,
+        user_id: nil,
+        project_key: 'abc123',
+        url: 'https://example.com/path/demo.h5ad',
+        compliance_schema_id: 'scfair_7_1_0',
+        compliance_task_id: SecureRandom.uuid
+      )
+    )
     job = IsolatedComplianceUrlDownloadJob.new
 
-    fu = job.send(
-      :create_fu_for_downloaded_file!,
-      source_path,
-      'https://example.com/path/demo.h5ad',
-      detected_format: 'h5ad',
-      user_id: nil,
-      project_key: 'abc123'
-    )
-    register_for_test_cleanup(fu)
+    job.finalize_downloaded_fu!(fu, source_path, 'h5ad')
 
+    fu.reload
     assert_equal 'input_file.h5ad', fu.upload_file_name
     assert_equal 'demo.h5ad', fu.name
     assert_equal 'abc123', fu.project_key

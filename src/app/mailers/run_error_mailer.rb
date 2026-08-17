@@ -2,33 +2,47 @@ class RunErrorMailer < ApplicationMailer
   include Rails.application.routes.url_helpers
 
   def admin_notification(run:)
-    @run = run
-    @project = run.project
-    @step = run.step
-    @error_message = run_error_text(run)
+    assign_run_context(run)
+    assign_instance_context
 
     mail(
       to: admin_report_recipients,
-      subject: "[ASAP Run Error] #{@project.key} - #{@step&.name || 'unknown step'} (Run ##{run.id})"
+      subject: error_mail_subject('ASAP Run Error', run)
     )
   end
 
-  def user_report(run:, sender_email:, message: nil)
-    @run = run
-    @project = run.project
-    @step = run.step
+  def user_report(run:, sender_email:, message: nil, reporter: nil)
+    assign_run_context(run)
+    assign_instance_context
     @sender_email = sender_email
     @message = message
-    @error_message = run_error_text(run)
+    @reporter = reporter
 
     mail(
       to: admin_report_recipients,
       reply_to: sender_email,
-      subject: "[ASAP Bug Report] #{@project.key} - #{@step&.name || 'unknown step'} (Run ##{run.id})"
+      subject: error_mail_subject('ASAP Bug Report', run)
     )
   end
 
   private
+
+  def assign_run_context(run)
+    @run = run
+    @project = run.project
+    @step = run.step
+    @error_message = run_error_text(run)
+  end
+
+  def assign_instance_context
+    @instance_kind = EnvHelpers.instance_kind
+    @instance_name = EnvHelpers.instance_name
+    @instance_host = EnvHelpers.instance_host
+  end
+
+  def error_mail_subject(prefix, run)
+    "[#{prefix}] [#{@instance_kind}] #{@project.key} - #{@step&.name || 'unknown step'} (Run ##{run.id})"
+  end
 
   def admin_report_recipients
     recipients = EnvHelpers.email_list('ADMIN_REPORT_EMAILS')

@@ -1,0 +1,31 @@
+<% source_project = @project.cloned_project %>
+<div data-guided-tour="project-clone-pending" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; background-color: #f9fafb; padding: 40px;">
+  <div style="max-width: 640px; width: 100%; text-align: center;"
+       data-controller="clone-status"
+       data-clone-status-project-id-value="<%= @project.id %>"
+       data-clone-status-source-url-value="<%= source_project ? project_path(source_project) : projects_path %>">
+    <h2 style="font-size: 24px; font-weight: 600; color: #374151; margin-bottom: 16px;">Project Is Being Cloned</h2>
+    <p style="font-size: 16px; color: #6b7280; margin-bottom: 24px; line-height: 1.6;">
+      Files and analysis history are being copied into this project. The view will reload when cloning finishes.
+    </p>
+
+    <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 14px;">
+      <div style="width: 22px; height: 22px; border: 3px solid #d1d5db; border-top-color: #3b82f6; border-radius: 50%; animation: clone-spin 1s linear infinite;"></div>
+    </div>
+
+    <style>
+      @keyframes clone-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+    </style>
+
+    <p data-clone-status-target="statusText"
+       style="font-size: 14px; color: #4b5563; margin-bottom: 12px; line-height: 1.6;">
+      Copying project files...
+    </p>
+
+    <p data-clone-status-target="errorText"
+       style="display: none; font-size: 13px; color: #b45309; margin-bottom: 16px; line-height: 1.6;"></p>
+  </div>
+</div>

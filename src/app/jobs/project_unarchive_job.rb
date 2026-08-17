@@ -1,5 +1,7 @@
 class ProjectUnarchiveJob < ApplicationJob
-  queue_as :default
+  queue_as :archive
+
+  limits_concurrency to: 1, key: ->(project_id) { "unarchive-project-#{project_id}" }, duration: 12.hours
 
   def perform(project_id)
     project = Project.find_by(id: project_id)

@@ -61,6 +61,7 @@ class Project < ApplicationRecord
            through: :external_catalog_candidate_projects,
            source: :external_catalog_candidate
   has_many :fus
+  has_many :module_score_requests, dependent: :destroy
 
   # Project-local Fu storage (fus/<fu_id>/ under this project's directory).
   def fu_storage_dir

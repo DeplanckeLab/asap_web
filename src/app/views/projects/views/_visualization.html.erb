@@ -84,6 +84,11 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
     display: none;
   }
 
+  /* Hidden on desktop; mobile media query shows it only with .is-visible */
+  #viz-mobile-panel-loading {
+    display: none;
+  }
+
   .viz-mobile-panel-close-btn {
     display: none;
   }

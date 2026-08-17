@@ -293,12 +293,12 @@ export default class extends Controller {
       more.style.backgroundColor = `${color}22`
       more.style.color = color
       more.textContent = `+${remaining} more`
+      more.dataset.action = "click->search-terms-modal#open:prevent:stop:capture"
       more.dataset.searchTermsModalTrigger = "true"
       more.dataset.cardLabel = "Technology"
       more.dataset.cardColor = color
       more.dataset.cardTerms = JSON.stringify(displayEntries)
       more.setAttribute("aria-label", `Show all ${displayEntries.length} technologies`)
-      more.addEventListener("click", (event) => event.stopPropagation())
       wrap.appendChild(more)
     }
     el.replaceChildren(wrap)

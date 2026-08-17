@@ -6,31 +6,22 @@ export default class extends Controller {
   static targets = ["overlay", "titleText", "titleSwatch", "count", "countLabel", "list"]
 
   connect() {
-    this.onClick = this.onClick.bind(this)
     this.onKeydown = this.onKeydown.bind(this)
-    // Capture phase so "+X more" can stopPropagation (to avoid row navigation)
-    // without blocking the modal open handler.
-    this.element.addEventListener("click", this.onClick, true)
     document.addEventListener("keydown", this.onKeydown)
   }
 
   disconnect() {
-    this.element.removeEventListener("click", this.onClick, true)
     document.removeEventListener("keydown", this.onKeydown)
   }
 
-  onClick(event) {
-    if (this.hasOverlayTarget && this.overlayTarget.contains(event.target)) {
-      if (event.target === this.overlayTarget) this.close()
-      return
-    }
-
+  open(event) {
     const trigger = event.target.closest("[data-search-terms-modal-trigger]")
-    if (trigger && this.element.contains(trigger)) {
-      event.preventDefault()
-      event.stopPropagation()
-      this.openFromTrigger(trigger)
-    }
+    if (!trigger || !this.element.contains(trigger)) return
+    this.openFromTrigger(trigger)
+  }
+
+  backdropClose(event) {
+    if (event.target === this.overlayTarget) this.close()
   }
 
   onKeydown(event) {
@@ -93,7 +84,7 @@ export default class extends Controller {
         ? `<span class="shrink-0 badge-text font-mono opacity-90">${this.escapeHtml(term.identifier)}</span>`
         : ""
       const inner = `<span class="min-w-0 break-words">${displayLabel}</span>${identifierHtml}`
-      const rowClass = "badge-text px-3 py-1.5 rounded flex items-baseline justify-between gap-3"
+      const rowClass = "badge-text px-3 py-1.5 rounded flex items-baseline justify-between gap-3 pointer-events-auto"
       const rowStyle = `background-color: ${color}22; color: ${color};`
       if (ontologyUrl) {
         return `<li><a href="${this.escapeHtml(ontologyUrl)}" target="_blank" rel="noopener noreferrer" class="${rowClass} hover:opacity-80 cursor-pointer" style="${rowStyle}">${inner}</a></li>`

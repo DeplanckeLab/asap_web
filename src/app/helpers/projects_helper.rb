@@ -475,12 +475,12 @@ module ProjectsHelper
           class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium hover:opacity-80 cursor-pointer',
           style: "background-color: #{hex}22; color: #{hex};",
           data: {
+            action: 'click->search-terms-modal#open:prevent:stop:capture',
             search_terms_modal_trigger: true,
             card_label: modal_label.presence || 'Terms',
             card_color: hex,
             card_terms: entries.to_json
           },
-          onclick: 'event.stopPropagation()',
           aria: { label: "Show all #{entries.size} #{modal_label.present? ? modal_label.downcase.pluralize : 'terms'}" }
         )
       end

@@ -148,7 +148,8 @@ class ProjectTest < TestBaseWithoutFixtures
     end
 
     expected_url = AsapData::OntologyIdentifierUrl.url_for("EFO:0030004")
-    assert_equal expected_url, efo[:url] if expected_url.present?
+    assert_equal expected_url, efo[:url]
+    assert_match(%r{\Ahttps?://}, efo[:url].to_s)
   end
 
   test "compliance_term_entries_for uses projects.technology when ontology terms are missing" do

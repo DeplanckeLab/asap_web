@@ -8,28 +8,28 @@
 #     MovieGenre.find_or_create_by!(name: genre_name)
 #   end
 
-puts "Seeding project type labels..."
+puts "Seeding project types..."
 
-project_type_labels = {
-  "Single-cell transcriptomics" => { row_label: "genes", col_label: "cells" },
-  "Bulk transcriptomics" => { row_label: "genes", col_label: "samples" }
-}
+project_types_seed = [
+  { tag: "sc", name: "Single-cell (or nucleus) transcriptomics", row_label: "genes", col_label: "cells" },
+  { tag: "bulk", name: "Bulk transcriptomics", row_label: "genes", col_label: "samples" },
+  { tag: "spat", name: "Spatial transcriptomics", row_label: "genes", col_label: "cells" },
+  { tag: "atac", name: "ATAC-seq", row_label: "genes", col_label: "cells" },
+  { tag: "multi", name: "Multiomics", row_label: "genes", col_label: "cells" }
+]
 
-project_type_labels.each do |name, labels|
-  project_type = ProjectType.find_by(name: name)
+project_types_seed.each do |attrs|
+  project_type = ProjectType.find_or_initialize_by(tag: attrs[:tag])
+  project_type.assign_attributes(attrs)
 
-  unless project_type
-    puts "ProjectType not found: #{name}"
-    next
-  end
-
-  project_type.assign_attributes(labels)
-
-  if project_type.changed?
+  if project_type.new_record?
     project_type.save!
-    puts "Updated #{name}: row_label=#{project_type.row_label}, col_label=#{project_type.col_label}"
+    puts "Created #{attrs[:tag]}: #{attrs[:name]} (row_label=#{attrs[:row_label]}, col_label=#{attrs[:col_label]})"
+  elsif project_type.changed?
+    project_type.save!
+    puts "Updated #{attrs[:tag]}: #{attrs[:name]} (row_label=#{project_type.row_label}, col_label=#{project_type.col_label})"
   else
-    puts "No change for #{name}"
+    puts "No change for #{attrs[:tag]}"
   end
 end
 

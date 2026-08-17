@@ -7196,6 +7196,16 @@ puts "TEST RUN"
         # did, keeping the left panel and header in sync.
         run.broadcast_status_change
       end
+      if run && run.status_id.to_i == 3 && step&.name == 'pca_sc'
+        begin
+          SpatialUmapEnsureService.after_pca_success(logger, project, run)
+        rescue StandardError => e
+          logger.error(
+            "[Basic.finish_run] Spatial UMAP after PCA failed project=#{project.key} " \
+            "pca_run=#{run.id} #{e.class}: #{e.message}"
+          )
+        end
+      end
       return h_results
     end
     

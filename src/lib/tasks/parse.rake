@@ -954,6 +954,27 @@ task :parse, [:project_key] => [:environment] do |t, args|
       
       annot_count = Annot.where(run_id: run.id).count
       logger.info("[ParseRake] finish_run completed for run #{run.id}, status_id=#{run.status_id}, annotations created: #{annot_count}")
+
+      project.reload
+      if project.apply_project_type_from_assay_metadata!
+        logger.info("[ParseRake] Assigned project_type=#{project.project_type.tag} from assay metadata project=#{project.key}")
+      end
+      umap_result = SpatialUmapEnsureService.call(
+        project: project,
+        logger: logger,
+        wait: false,
+        user_id: project.user_id
+      )
+      if umap_result.error
+        logger.warn("[ParseRake] Spatial UMAP ensure: #{umap_result.error} project=#{project.key}")
+      elsif umap_result.skipped
+        logger.info("[ParseRake] Spatial UMAP skipped (#{umap_result.reason}) project=#{project.key}")
+      else
+        logger.info(
+          "[ParseRake] Spatial UMAP ensure pca_run=#{umap_result.pca_run&.id} " \
+          "umap_run=#{umap_result.umap_run&.id} project=#{project.key}"
+        )
+      end
       
       # Visualization (embedding menu) shows cells x genes via project.gene_count / cell_count, which
       # read projects.nber_rows / nber_cols. Those columns were only set from the create-project form;

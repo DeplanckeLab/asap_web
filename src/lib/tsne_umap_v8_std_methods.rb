@@ -222,7 +222,7 @@ module TsneUmapV8StdMethods
         obsolete: false,
         attrs_json: JSON.pretty_generate(defn[:attrs]),
         attr_layout_json: attr_layout_json_for(defn),
-        obj_attrs_json: { handles_log: false, project_types: %w[sc] }.to_json,
+        obj_attrs_json: { handles_log: false, project_types: ProjectType::SC_LIKE_TAGS }.to_json,
         command_json: JSON.pretty_generate(command_json_for(defn)),
         output_json: "{}"
       }

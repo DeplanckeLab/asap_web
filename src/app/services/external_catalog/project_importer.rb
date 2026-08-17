@@ -144,7 +144,34 @@ module ExternalCatalog
       attach_provider_label!(project, provider, entry)
       wait_for_parse!(project)
       attach_reference_metadata!(project, entry)
-      if project_type_for(entry).tag.to_s == 'sc'
+      project.reload
+      if project.apply_project_type_from_assay_metadata!(replace_sc_default: true)
+        @logger.info(
+          "[ExternalCatalog] project_type=#{project.project_type.tag} from assay " \
+          "source=#{entry.source}/#{entry.external_id} project=#{project.key}"
+        )
+      end
+      umap_result = SpatialUmapEnsureService.call(
+        project: project,
+        logger: @logger,
+        wait: true,
+        user_id: @user.id,
+        timeout_sec: @parse_timeout_sec
+      )
+      if umap_result.error
+        raise Error, "Spatial UMAP failed for project=#{project.key}: #{umap_result.error}"
+      elsif umap_result.skipped
+        @logger.info(
+          "[ExternalCatalog] Spatial UMAP skipped (#{umap_result.reason}) " \
+          "source=#{entry.source}/#{entry.external_id} project=#{project.key}"
+        )
+      else
+        @logger.info(
+          "[ExternalCatalog] Spatial UMAP ready pca_run=#{umap_result.pca_run&.id} " \
+          "umap_run=#{umap_result.umap_run&.id} project=#{project.key}"
+        )
+      end
+      if project.project_type&.sc_like?
         Basic.refresh_analysis_pipeline_for_project(@logger, project)
         validate_loom_or_raise!(project)
         export_h5ad_chunked_or_raise!(project)

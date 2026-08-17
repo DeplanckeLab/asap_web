@@ -86,24 +86,30 @@ class HomeController < ApplicationController
   end
 
   def robots
-    base = ENV.fetch('SERVER_URL').chomp('/')
+    if EnvHelpers.instance_kind == 'production'
+      base = ENV.fetch('SERVER_URL').chomp('/')
+      render plain: <<~ROBOTS, content_type: 'text/plain'
+        User-agent: *
+        Allow: /sitemap.xml
+        Disallow: /
+
+        User-agent: GPTBot
+        User-agent: PerplexityBot
+        User-agent: ClaudeBot
+        User-agent: Googlebot
+        User-agent: Google-InspectionTool
+        User-agent: Bingbot
+        User-agent: Applebot
+        Allow: /
+
+        Sitemap: #{base}/sitemap.xml
+      ROBOTS
+      return
+    end
+
     render plain: <<~ROBOTS, content_type: 'text/plain'
       User-agent: *
       Disallow: /
-
-      User-agent: GPTBot
-
-      User-agent: PerplexityBot
-
-      User-agent: ClaudeBot
-
-      User-agent: Googlebot
-
-      User-agent: Bingbot
-
-      User-agent: Applebot
-
-      Sitemap: #{base}/sitemap.xml
     ROBOTS
   end
 

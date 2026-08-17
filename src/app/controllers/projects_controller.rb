@@ -157,6 +157,7 @@ class ProjectsController < ApplicationController
         @view_type = resolve_project_view_type(params[:view])
         # Summary/settings/access/annotations are metadata-only; creating ProjectStep
         # rows is only needed when the analysis pipeline UI is loaded.
+        @project.apply_project_type_from_assay_metadata!
         @project.ensure_project_steps unless METADATA_ONLY_PROJECT_VIEWS.include?(@view_type)
         return unless authorize_requested_view_access!(@view_type)
         load_view_context_for(@view_type)
@@ -169,6 +170,9 @@ class ProjectsController < ApplicationController
       end
       return
     end
+
+    # Infer spat/atac/multi from assay metadata when the type was left blank.
+    @project.apply_project_type_from_assay_metadata!
 
     # Ensure project steps exist (safeguard for existing projects)
     @project.ensure_project_steps
@@ -14110,12 +14114,18 @@ class ProjectsController < ApplicationController
                    project_type_label = case project_type_tag
                                         when 'sc' then 'single-cell'
                                         when 'bulk' then 'bulk'
+                                        when 'spat' then 'spatial transcriptomics'
+                                        when 'atac' then 'ATAC-seq'
+                                        when 'multi' then 'multiomics'
                                         else project_type_tag || 'unknown'
                                         end
                    required_types_labels = all_required_project_types.map do |t|
                      case t
                      when 'sc' then 'single-cell'
                      when 'bulk' then 'bulk'
+                     when 'spat' then 'spatial transcriptomics'
+                     when 'atac' then 'ATAC-seq'
+                     when 'multi' then 'multiomics'
                      else t
                      end
                    end

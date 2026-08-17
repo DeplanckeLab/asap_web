@@ -8,5 +8,7 @@ module Scfair
     VISIUM_ASSAY_ROOT = 'EFO:0010961'
     VISIUM_ASSAY_TERMS = Rules.visium_assay_terms
     SLIDE_SEQ_ASSAY = Rules.slide_seq_assay
+    ATAC_ASSAY_ROOT = 'EFO:0010891'
+    MULTIOME_ASSAY = 'EFO:0030059'
   end
 end

@@ -266,7 +266,7 @@ export class DownloadManager {
 
   isTranscriptomicsProject() {
     const tag = String(this.controller.projectTypeTagValue || '').toLowerCase()
-    return tag === 'sc' || tag === 'bulk'
+    return tag === 'sc' || tag === 'bulk' || tag === 'spat' || tag === 'atac' || tag === 'multi'
   }
 
   async getCellBarcodes(metadataId, expectedLength) {

@@ -947,6 +947,63 @@ class Project < ApplicationRecord
       project_type_id == 1  # ID 1 is Single-cell transcriptomics
   end
 
+  # Infer spat / atac / multi from assay ontology terms (or labels) already
+  # stored on the project (Annots and/or CXG field_values).
+  # Returns the ProjectType tag, or nil when assay metadata does not match.
+  def inferred_project_type_tag_from_assay
+    field_values = assay_field_values_for_type_inference
+    format = if field_values.key?('obs/assay_ontology_term_id') || field_values.key?('obs/assay')
+               'h5ad'
+             else
+               'loom'
+             end
+    Scfair::AssayProjectTypeHelper.tag_for(field_values: field_values, format: format)
+  end
+
+  # Assign project_type from assay metadata.
+  # By default only fills a blank type. Catalog import may also replace a
+  # generic `sc` default once assay Annots exist.
+  def apply_project_type_from_assay_metadata!(only_if_blank: true, replace_sc_default: false)
+    current_tag = project_type&.tag.to_s
+    if project_type_id.present?
+      allowed_replace = replace_sc_default && current_tag == 'sc'
+      return false unless allowed_replace || !only_if_blank
+    end
+
+    tag = inferred_project_type_tag_from_assay
+    return false if tag.blank?
+
+    ptype = ProjectType.find_by(tag: tag)
+    if ptype.nil?
+      Rails.logger.warn("[Project] No ProjectType for inferred assay tag=#{tag} project=#{key}")
+      return false
+    end
+    return false if project_type_id == ptype.id
+
+    update!(project_type_id: ptype.id)
+    self.project_type = ptype
+    Rails.logger.info("[Project] Set project_type=#{tag} from assay metadata project=#{key}")
+    true
+  end
+
+  def assay_field_values_for_type_inference
+    values = {}
+    stored = cxg_validation_result
+    stored_values = stored && (stored['field_values'] || stored[:field_values])
+    values.merge!(stored_values.transform_keys(&:to_s)) if stored_values.is_a?(Hash)
+
+    {
+      '/col_attrs/assay_ontology_term_id' => annot_category_values_for('/col_attrs/assay_ontology_term_id', normalize: false),
+      'obs/assay_ontology_term_id' => annot_category_values_for('obs/assay_ontology_term_id', normalize: false),
+      '/col_attrs/assay' => annot_category_values_for('/col_attrs/assay', normalize: false),
+      'obs/assay' => annot_category_values_for('obs/assay', normalize: false)
+    }.each do |path, cats|
+      values[path] = cats if cats.any?
+    end
+
+    values
+  end
+
   # Check if the project passes all compliance schemas that gate publishing
   # Returns true if validation has been run and passed, or if no compliance is required
   def compliance_valid?

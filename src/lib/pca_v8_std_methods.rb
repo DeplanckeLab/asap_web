@@ -207,7 +207,7 @@ module PcaV8StdMethods
         obsolete: false,
         attrs_json: JSON.pretty_generate(defn[:attrs_json]),
         attr_layout_json: attr_layout_json_for(defn[:param_attrs]),
-        obj_attrs_json: { handles_log: false, project_types: %w[sc] }.to_json,
+        obj_attrs_json: { handles_log: false, project_types: ProjectType::SC_LIKE_TAGS }.to_json,
         command_json: JSON.pretty_generate(defn[:command_json]),
         output_json: "{}"
       }

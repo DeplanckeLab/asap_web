@@ -163,4 +163,90 @@ class ProjectTest < TestBaseWithoutFixtures
     assert_equal ["10x 3' v3", "Smart-seq2", "Drop-seq"], entries.map { |entry| entry[:label] }
     assert entries.all? { |entry| entry[:identifier].blank? && entry[:url].blank? }
   end
+
+  test "apply_project_type_from_assay_metadata assigns spat from visium annot when type is blank" do
+    spat = ProjectType.find_by!(tag: "spat")
+    project = create_test_project!(name: "Visium infer", key: "vis#{SecureRandom.hex(3)}", project_type_id: nil)
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: project.id,
+        name: "/col_attrs/assay_ontology_term_id",
+        list_cat_json: ["EFO:0022857"].to_json,
+        nber_cols: 10,
+        dim: 1
+      )
+    )
+
+    assert project.apply_project_type_from_assay_metadata!
+    assert_equal spat.id, project.reload.project_type_id
+  end
+
+  test "apply_project_type_from_assay_metadata assigns atac from scATAC annot when type is blank" do
+    atac = ProjectType.find_by!(tag: "atac")
+    project = create_test_project!(name: "ATAC infer", key: "ata#{SecureRandom.hex(3)}", project_type_id: nil)
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: project.id,
+        name: "/col_attrs/assay_ontology_term_id",
+        list_cat_json: ["EFO:0010891"].to_json,
+        nber_cols: 10,
+        dim: 1
+      )
+    )
+
+    assert project.apply_project_type_from_assay_metadata!
+    assert_equal atac.id, project.reload.project_type_id
+  end
+
+  test "apply_project_type_from_assay_metadata assigns multi from multiome annot when type is blank" do
+    multi = ProjectType.find_by!(tag: "multi")
+    project = create_test_project!(name: "Multiome infer", key: "mul#{SecureRandom.hex(3)}", project_type_id: nil)
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: project.id,
+        name: "/col_attrs/assay_ontology_term_id",
+        list_cat_json: ["EFO:0030059"].to_json,
+        nber_cols: 10,
+        dim: 1
+      )
+    )
+
+    assert project.apply_project_type_from_assay_metadata!
+    assert_equal multi.id, project.reload.project_type_id
+  end
+
+  test "apply_project_type_from_assay_metadata does not override a set type" do
+    sc = ProjectType.find_by!(tag: "sc")
+    project = create_test_project!(name: "Keep sc", key: "ksc#{SecureRandom.hex(3)}", project_type_id: sc.id)
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: project.id,
+        name: "/col_attrs/assay_ontology_term_id",
+        list_cat_json: ["EFO:0022857"].to_json,
+        nber_cols: 10,
+        dim: 1
+      )
+    )
+
+    refute project.apply_project_type_from_assay_metadata!
+    assert_equal sc.id, project.reload.project_type_id
+  end
+
+  test "apply_project_type_from_assay_metadata replaces sc default when requested" do
+    sc = ProjectType.find_by!(tag: "sc")
+    spat = ProjectType.find_by!(tag: "spat")
+    project = create_test_project!(name: "Replace sc", key: "rsc#{SecureRandom.hex(3)}", project_type_id: sc.id)
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: project.id,
+        name: "/col_attrs/assay_ontology_term_id",
+        list_cat_json: ["EFO:0022857"].to_json,
+        nber_cols: 10,
+        dim: 1
+      )
+    )
+
+    assert project.apply_project_type_from_assay_metadata!(replace_sc_default: true)
+    assert_equal spat.id, project.reload.project_type_id
+  end
 end

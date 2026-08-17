@@ -286,7 +286,7 @@ module ClusteringV8StdMethods
         obsolete: false,
         attrs_json: JSON.pretty_generate(attrs_json),
         attr_layout_json: layout_json,
-        obj_attrs_json: { project_types: %w[sc] }.to_json,
+        obj_attrs_json: { project_types: ProjectType::SC_LIKE_TAGS }.to_json,
         command_json: JSON.pretty_generate(cmd),
         output_json: output_json
       }

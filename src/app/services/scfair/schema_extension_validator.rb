@@ -143,12 +143,13 @@ module Scfair
     def atac_enabled?
       assay_key = @format == 'h5ad' ? 'obs/assay_ontology_term_id' : '/col_attrs/assay_ontology_term_id'
       vals = Array(@field_values[assay_key]).flat_map { |v| v.to_s.split(' || ') }.map(&:strip)
-      return true if vals.include?('EFO:0030059') # 10x multiome
+      return true if vals.include?(SchemaConstants::MULTIOME_ASSAY)
 
       vals.any? do |v|
         next false if v.blank?
 
-        @resolver.descendant_of?(v, 'EFO:0010891') # scATAC-seq root and descendants
+        v == SchemaConstants::ATAC_ASSAY_ROOT ||
+          @resolver.descendant_of?(v, SchemaConstants::ATAC_ASSAY_ROOT)
       end || present?(key('uns/atac')) || present?(key('attrs/atac'))
     end
 

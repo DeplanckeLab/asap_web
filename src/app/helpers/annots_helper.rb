@@ -1,6 +1,43 @@
 # frozen_string_literal: true
 
 module AnnotsHelper
+  DOWNLOAD_LINK_CLASS = 'inline-flex items-center px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 hover:text-gray-900 transition-colors'
+
+  def annot_download_links(annot, wrapper_class: 'flex items-center gap-1')
+    content_tag(
+      :div,
+      class: wrapper_class,
+      data: {
+        controller: 'annot-download',
+        annot_download_heavy_value: annot.expression_matrix?
+      }
+    ) do
+      safe_join(
+        [
+          annot_download_link(annot, 'tsv.gz', 'TSV', 'Download as TSV.gz'),
+          annot_download_link(annot, 'json', 'JSON', 'Download as JSON')
+        ]
+      )
+    end
+  end
+
+  def annot_download_link(annot, format_type, label, title)
+    link_to download_annot_path(annot, format_type: format_type),
+            class: DOWNLOAD_LINK_CLASS,
+            title: title,
+            data: {
+              turbo: false,
+              action: 'click->annot-download#start'
+            } do
+      safe_join(
+        [
+          content_tag(:i, nil, class: 'fas fa-download mr-1'),
+          label
+        ]
+      )
+    end
+  end
+
   # Recursively render a JSON value as nested foldable <details> blocks.
   def render_json_foldable(value, key: nil, depth: 0, open: false)
     if value.is_a?(Hash)

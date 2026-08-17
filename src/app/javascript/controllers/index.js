@@ -275,6 +275,9 @@ import AnnotationsPageController from "controllers/annotations_page_controller"
 application.register("annotations-page", AnnotationsPageController)
 console.log('Annotations page controller registered')
 
+import AnnotDownloadController from "controllers/annot_download_controller"
+application.register("annot-download", AnnotDownloadController)
+
 import HeatmapController from "controllers/heatmap_controller"
 application.register("heatmap", HeatmapController)
 console.log('Heatmap controller registered')

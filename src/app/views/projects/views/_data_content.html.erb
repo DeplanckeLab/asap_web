@@ -106,18 +106,7 @@
                     </div>
                   <% end %>
                 <% end %>
-                <div class="flex items-center gap-1 flex-shrink-0">
-                  <%= link_to download_annot_path(annot, format_type: 'tsv.gz'),
-                      class: 'inline-flex items-center px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 hover:text-gray-900 transition-colors',
-                      title: 'Download as TSV.gz' do %>
-                    <i class="fas fa-download mr-1"></i>TSV
-                  <% end %>
-                  <%= link_to download_annot_path(annot, format_type: 'json'),
-                      class: 'inline-flex items-center px-2 py-1 text-xs font-medium text-gray-600 bg-white border border-gray-300 rounded hover:bg-gray-50 hover:text-gray-900 transition-colors',
-                      title: 'Download as JSON' do %>
-                    <i class="fas fa-download mr-1"></i>JSON
-                  <% end %>
-                </div>
+                <%= annot_download_links(annot, wrapper_class: 'flex items-center gap-1 flex-shrink-0') %>
               </div>
               <% unless annot.name.to_s.start_with?('/attrs/') %>
               <% if @sim_step_options && annot.imported? %>

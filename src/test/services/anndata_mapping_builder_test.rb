@@ -125,6 +125,34 @@ class AnndataMappingBuilderTest < ActiveSupport::TestCase
     refute payload['obsm'].key?('cell_type')
     assert_equal %w[T B myeloid], payload['categoricals']['cell_type']['categories']
     assert_includes payload['uns_json_keys'], 'analysis_pipeline'
+    assert_equal({}, payload['uns_groups'])
+    refute_includes payload['uns_json_keys'], 'spatial'
+  end
+
+  test 'maps spatial coords to obsm and spatial metadata group to uns_groups' do
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/matrix', dim: 3, nber_rows: 100, nber_cols: 50
+      ),
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/col_attrs/spatial', dim: 1, nber_rows: 2, nber_cols: 50
+      ),
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/attrs/spatial/is_single', dim: 4, nber_rows: 1, nber_cols: 1
+      ),
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/attrs/spatial/libA/images/hires', dim: 4, nber_rows: 64, nber_cols: 64
+      )
+    )
+
+    payload = AnndataMappingBuilder.call(project: @project, loom_filepath: @loom)
+    assert_equal '/col_attrs/spatial', payload['obsm']['spatial']
+    assert_equal '/attrs/spatial', payload['uns_groups']['spatial']
+    refute_includes payload['uns_json_keys'], 'spatial'
   end
 
   test 'preserves existing x_path when completing without input_group' do
@@ -159,5 +187,6 @@ class AnndataMappingBuilderTest < ActiveSupport::TestCase
     assert_equal '/layers/raw_X', payload['raw_x_path']
     assert_equal '/X', payload['input_group']
     assert_equal '/col_attrs/spatial', payload['obsm']['spatial']
+    assert_equal({}, payload['uns_groups'])
   end
 end

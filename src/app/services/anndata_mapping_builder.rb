@@ -17,7 +17,11 @@ class AnndataMappingBuilder
   RESERVED_OBS_INDEX_KEYS = %w[CellID cell_id cell_ids barcode barcodes Barcode obs_names index _index].freeze
   RESERVED_VAR_INDEX_KEYS = %w[Accession Name Gene Original_Gene gene gene_name var_names index _index].freeze
 
-  KNOWN_UNS_JSON_KEYS = %w[analysis_pipeline spatial].freeze
+  KNOWN_UNS_JSON_KEYS = %w[analysis_pipeline].freeze
+  # scFAIR uns HDF5 groups (not JSON). Exporters copy these loom groups into h5ad uns.
+  UNS_GROUP_PATHS = {
+    'spatial' => '/attrs/spatial'
+  }.freeze
 
   class << self
     def call(project:, loom_filepath:, input_group: nil, existing: nil)
@@ -51,6 +55,7 @@ class AnndataMappingBuilder
     obsm, varm = build_embedding_maps(annots)
     categoricals = build_categoricals(annots)
     uns_json_keys = build_uns_json_keys(annots)
+    uns_groups = build_uns_groups(annots)
     obs_index_key, var_index_key = resolve_index_keys(annots, defaults)
 
     payload = defaults.merge(
@@ -67,6 +72,7 @@ class AnndataMappingBuilder
       'obsp' => {},
       'varp' => {},
       'uns_json_keys' => uns_json_keys,
+      'uns_groups' => uns_groups,
       'categoricals' => categoricals
     )
 
@@ -294,10 +300,29 @@ class AnndataMappingBuilder
 
       key = name.sub(%r{\A/attrs/}, '')
       next if key.blank? || key == ATTR_NAME
+      next if uns_group_key_for_attr_path(name)
 
       keys << key if KNOWN_UNS_JSON_KEYS.include?(key) || key.include?('pipeline')
     end
     keys.uniq
+  end
+
+  def build_uns_groups(annots)
+    groups = {}
+    annots.each do |annot|
+      uns_key = uns_group_key_for_attr_path(annot.name.to_s)
+      next unless uns_key
+
+      groups[uns_key] = UNS_GROUP_PATHS[uns_key]
+    end
+    groups
+  end
+
+  def uns_group_key_for_attr_path(name)
+    UNS_GROUP_PATHS.each do |uns_key, loom_path|
+      return uns_key if name == loom_path || name.start_with?("#{loom_path}/")
+    end
+    nil
   end
 
   def resolve_index_keys(annots, defaults)

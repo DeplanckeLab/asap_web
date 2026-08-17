@@ -44,6 +44,7 @@
     "categoricals",
     "dtypes",
     "uns_json_keys",
+    "uns_groups",
     "notes",
     "raw_var_fields"
   ],
@@ -59,6 +60,7 @@
     "obsp": {},
     "varp": {},
     "uns_json_keys": [],
+    "uns_groups": {},
     "categoricals": {},
     "dtypes": {}
   },
@@ -68,6 +70,8 @@
     "layers": "/layers/{name}",
     "obsm": "/col_attrs/{key}",
     "varm": "/row_attrs/{key}",
+    "uns_json": "/attrs/{key} (JSON string copied into uns as text, e.g. analysis_pipeline)",
+    "uns_groups": "/attrs/{key} (HDF5 group copied into uns/{key}; spatial is scFAIR uns/spatial)",
     "obsm_examples": [
       "/col_attrs/_umap_{run}_{method}_{n}D",
       "/col_attrs/_tsne_{run}_{method}_{n}D",
@@ -82,7 +86,7 @@
 
   "examples": {
     "case_a_raw_primary": {
-      "_comment": "raw selected as primary: /matrix stores raw, normalized X in a layer",
+      "_comment": "raw selected as primary: /matrix stores raw, normalized X in a layer. Visium: obsm.spatial is coordinates; uns_groups.spatial is the scFAIR uns/spatial HDF5 group (images, scalefactors, is_single), not JSON.",
       "version": "1.0.0",
       "orientation": "genes_x_cells",
       "x_path": "/layers/X",
@@ -97,12 +101,16 @@
         "X": "/layers/X"
       },
       "obsm": {
-        "X_umap": "/col_attrs/X_umap"
+        "X_umap": "/col_attrs/X_umap",
+        "spatial": "/col_attrs/spatial"
       },
       "varm": {},
       "obsp": {},
       "varp": {},
-      "uns_json_keys": ["analysis_pipeline", "spatial"]
+      "uns_json_keys": ["analysis_pipeline"],
+      "uns_groups": {
+        "spatial": "/attrs/spatial"
+      }
     },
     "case_b_normalized_primary": {
       "_comment": "normalized X selected as primary: /matrix stores X, no raw matrix",
@@ -122,7 +130,8 @@
       "varm": {},
       "obsp": {},
       "varp": {},
-      "uns_json_keys": ["analysis_pipeline", "spatial"]
+      "uns_json_keys": ["analysis_pipeline"],
+      "uns_groups": {}
     }
   }
 }

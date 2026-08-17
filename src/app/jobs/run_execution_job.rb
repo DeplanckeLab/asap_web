@@ -1,5 +1,5 @@
 class RunExecutionJob < ApplicationJob
-  queue_as :default
+  queue_as :pipeline
 
   def perform(run_id)
     Rails.logger.info("[RunExecutionJob] Starting execution for Run##{run_id}")

@@ -1,5 +1,5 @@
 class ProjectParsingJob < ApplicationJob
-  queue_as :default
+  queue_as :pipeline
 
   def perform(project_id, h_data = {})
     Rails.logger.info("[ProjectParsingJob] Starting parsing job for Project##{project_id}")

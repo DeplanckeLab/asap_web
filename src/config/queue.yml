@@ -7,6 +7,13 @@ default: &default
       threads: 1
       processes: 1
       polling_interval: 0.5
+    # Parsing / SLURM submit / SLURM monitor. Kept off "*" so a job that
+    # polls for parse (catalog import) cannot occupy every default thread
+    # and deadlock the ProjectParsingJob it is waiting on.
+    - queues: pipeline
+      threads: 3
+      processes: 1
+      polling_interval: 0.1
     - queues: "*"
       threads: 3
       processes: <%= ENV.fetch("JOB_CONCURRENCY", 1) %>

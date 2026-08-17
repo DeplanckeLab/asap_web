@@ -1,5 +1,5 @@
 class SlurmJobMonitorJob < ApplicationJob
-  queue_as :default
+  queue_as :pipeline
 
   MAX_MONITOR_ATTEMPTS = 480
   MONITOR_INTERVAL = 30.seconds

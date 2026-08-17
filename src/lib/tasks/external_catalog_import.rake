@@ -244,6 +244,7 @@ namespace :external_catalog do
     only_new = external_catalog_bool('ONLY_NEW', default: true)
     max_filesize = ENV['MAX_FILESIZE_BYTES'].presence&.to_i
     project_type = ENV['PROJECT_TYPE'].presence
+    dry_run = external_catalog_bool('DRY_RUN')
     user = external_catalog_resolve_user!
 
     puts "external_catalog:import from candidates SOURCE=#{source} COUNT=#{count.inspect} " \
@@ -258,6 +259,13 @@ namespace :external_catalog do
 
     if ExternalCatalogCandidate.count.zero?
       raise 'No external_catalog_candidates rows. Run external_catalog:sync_candidates first.'
+    end
+
+    unless dry_run
+      released = ExternalCatalogCandidate.release_stale_importing!
+      if released.positive?
+        puts "Released #{released} stale importing candidate(s) with no running import job"
+      end
     end
 
     candidates = external_catalog_select_candidates(
@@ -289,6 +297,7 @@ namespace :external_catalog do
     puts 'external_catalog:test — one candidate each from CELLxGENE, Bgee, HCA, GEO'
     user = external_catalog_resolve_user!
     importer = external_catalog_build_importer(user: user)
+    ExternalCatalogCandidate.release_stale_importing! unless external_catalog_bool('DRY_RUN')
 
     candidates = []
     candidates << external_catalog_pick_test_candidate('cellxgene', label: 'CELLxGENE')

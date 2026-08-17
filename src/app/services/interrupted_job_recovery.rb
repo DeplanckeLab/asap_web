@@ -26,7 +26,6 @@ class InterruptedJobRecovery
     recover_unarchives
     recover_publications
     recover_fus
-    recover_catalog_imports
     recover_selection_imports
     recover_gene_set_imports
     recover_clones
@@ -133,18 +132,6 @@ class InterruptedJobRecovery
         uniqueness: fu.id,
         fu_id: fu.id
       )
-    end
-  end
-
-  def recover_catalog_imports
-    ExternalCatalogCandidate.where(import_status: 'importing').find_each do |candidate|
-      user_id = candidate.import_user_id
-      if user_id.blank?
-        Rails.logger.error("[InterruptedJobRecovery] candidate=#{candidate.id} importing with no import_user_id; not re-queued")
-        next
-      end
-
-      enqueue(ExternalCatalogImportCandidateJob, candidate.id, user_id)
     end
   end
 

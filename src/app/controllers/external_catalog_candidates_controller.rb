@@ -84,7 +84,7 @@ class ExternalCatalogCandidatesController < ApplicationController
   def create_blocked_message
     if @candidate.obsolete?
       'This candidate is obsolete and no longer listed.'
-    elsif @candidate.importing?
+    elsif @candidate.importing? && @candidate.import_job_in_flight?
       'Import already in progress for this candidate.'
     elsif @candidate.already_in_asap?
       'An ASAP project already exists for this dataset.'

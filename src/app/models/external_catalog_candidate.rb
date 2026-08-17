@@ -343,8 +343,42 @@ class ExternalCatalogCandidate < ApplicationRecord
     import_status.to_s == 'failed'
   end
 
+  def import_job_in_flight?
+    self.class.import_job_in_flight?(id)
+  end
+
+  def release_if_stale_importing!
+    return false unless importing?
+    return false if import_job_in_flight?
+
+    update!(import_status: 'idle')
+    true
+  end
+
+  # Catalog import is driven by the rake or by an explicit UI enqueue.
+  # A killed rake leaves import_status=importing with no Solid Queue job.
+  def self.import_job_in_flight?(candidate_id)
+    return false unless defined?(SolidQueue::Job)
+    return false unless SolidQueue::Job.table_exists?
+    return false if candidate_id.nil?
+
+    SolidQueue::Job.where(class_name: 'ExternalCatalogImportCandidateJob', finished_at: nil).any? do |job|
+      args = job.arguments
+      first = args.is_a?(Hash) ? (args['arguments'] || args[:arguments] || []).first : nil
+      first.to_i == candidate_id.to_i
+    end
+  end
+
+  def self.release_stale_importing!
+    released = 0
+    where(import_status: 'importing').find_each do |candidate|
+      released += 1 if candidate.release_if_stale_importing!
+    end
+    released
+  end
+
   def can_create_project?
-    !obsolete? && !already_in_asap? && !importing?
+    !obsolete? && !already_in_asap? && !(importing? && import_job_in_flight?)
   end
 
   def test_entry?

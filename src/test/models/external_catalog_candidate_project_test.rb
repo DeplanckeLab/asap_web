@@ -32,6 +32,37 @@ class ExternalCatalogCandidateProjectTest < ActiveSupport::TestCase
                  candidate.external_catalog_candidate_projects.find_by(project_id: clone_like.id).link_kind
   end
 
+  test 'release_if_stale_importing clears importing when no import job is running' do
+    candidate = register_for_test_cleanup(
+      ExternalCatalogCandidate.create!(
+        source: 'geo',
+        external_id: "GSE#{SecureRandom.hex(4)}",
+        provider_tag: 'geo',
+        title: 'Stale importing',
+        url: 'https://example.com/stale.h5ad',
+        import_status: 'importing'
+      )
+    )
+
+    assert candidate.release_if_stale_importing!
+    assert_equal 'idle', candidate.reload.import_status
+  end
+
+  test 'can_create_project allows retry when importing has no running job' do
+    candidate = register_for_test_cleanup(
+      ExternalCatalogCandidate.create!(
+        source: 'geo',
+        external_id: "GSE#{SecureRandom.hex(4)}",
+        provider_tag: 'geo',
+        title: 'Retry importing',
+        url: 'https://example.com/retry.h5ad',
+        import_status: 'importing'
+      )
+    )
+
+    assert candidate.can_create_project?
+  end
+
   test 'link_matched_project upgrades existing row to import kind' do
     candidate = register_for_test_cleanup(
       ExternalCatalogCandidate.create!(

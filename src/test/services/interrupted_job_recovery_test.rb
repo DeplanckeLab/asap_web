@@ -94,7 +94,7 @@ class InterruptedJobRecoveryTest < ActiveSupport::TestCase
     assert preparsing.reload.status == 'preparsing'
   end
 
-  test 're-enqueues catalog import from importing status' do
+  test 'does not re-enqueue catalog import from importing status' do
     user = register_for_test_cleanup(
       User.create!(email: "recovcat_#{SecureRandom.hex(4)}@example.com", password: 'password123')
     )
@@ -110,8 +110,19 @@ class InterruptedJobRecoveryTest < ActiveSupport::TestCase
       )
     )
 
-    assert_enqueued_with(job: ExternalCatalogImportCandidateJob, args: [candidate.id, user.id]) do
-      InterruptedJobRecovery.call
+    InterruptedJobRecovery.call
+
+    assert_equal 'importing', candidate.reload.import_status
+    if defined?(SolidQueue::Job) && SolidQueue::Job.table_exists?
+      leaked = SolidQueue::Job.where(
+        class_name: 'ExternalCatalogImportCandidateJob',
+        finished_at: nil
+      ).any? do |job|
+        args = job.arguments
+        first = args.is_a?(Hash) ? (args['arguments'] || args[:arguments] || []).first : nil
+        first.to_i == candidate.id
+      end
+      refute leaked
     end
   end
 

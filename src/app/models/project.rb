@@ -391,8 +391,59 @@ class Project < ApplicationRecord
     ott = OntologyTermType.find_by(name: ott_name)
     return [] unless ott
 
-    path = ott.label_path.presence || ott.term_path
-    return [] unless path
+    annot_category_values_for(ott.label_path.presence || ott.term_path)
+  end
+
+  # Ontology term entries for UI popups (same shape as summary scFAIR metadata cards):
+  # { label:, identifier:, url: }. Identifiers come from term_path; display names
+  # prefer CellOntologyTerm, then the paired label_path value.
+  def compliance_term_entries_for(ott_name, ontology_by_tag: nil)
+    ott = OntologyTermType.find_by(name: ott_name)
+    return technology_column_term_entries if ott.nil? && ott_name.to_s == 'technology'
+    return [] unless ott
+
+    label_path = ott.label_path.presence
+    term_path = ott.term_path.presence
+    labels = annot_category_values_for(label_path || term_path)
+    identifiers =
+      if term_path.present? && term_path != label_path
+        annot_category_values_for(term_path, normalize: false)
+      else
+        []
+      end
+
+    ontology_by_tag ||= AsapData::OntologyIdentifierUrl.ontology_by_tag_index
+    has_ontology_terms = identifiers.any? { |identifier| AsapData::OntologyIdentifierUrl.prefix_for(identifier).present? }
+    if has_ontology_terms
+      names_by_identifier = ontology_term_names_by_identifier(identifiers)
+      paired_labels = labels.size == identifiers.size ? labels : []
+      identifiers.filter_map.with_index do |identifier, index|
+        ontology_term_entry(
+          label: names_by_identifier[identifier].presence || paired_labels[index] || identifier,
+          identifier: identifier,
+          ontology_by_tag: ontology_by_tag
+        )
+      end
+    elsif ott_name.to_s == 'technology'
+      technology_column_term_entries
+    else
+      labels.filter_map do |label|
+        ontology_term_entry(label: label, identifier: nil, ontology_by_tag: ontology_by_tag)
+      end
+    end
+  end
+
+  def technology_column_term_entries
+    technology.to_s.split(',').map { |part| part.strip }.reject(&:blank?).uniq.map do |label|
+      { label: label, identifier: nil, url: nil }
+    end
+  end
+
+  # Distinct category values from the latest annot at +path+.
+  # +normalize+ applies search-index cleanup (underscores to spaces); skip it
+  # for ontology identifiers so CURIEs stay intact.
+  def annot_category_values_for(path, normalize: true)
+    return [] if path.blank?
 
     annot = if annots.loaded?
       annots.select { |a| a.name == path && a.latest_version }
@@ -405,13 +456,41 @@ class Project < ApplicationRecord
     return [] unless annot&.list_cat_json.present?
 
     parsed = JSON.parse(annot.list_cat_json)
-    Array(parsed)
+    values = Array(parsed)
       .flat_map { |v| v.to_s.split(' || ') }
-      .map { |v| normalize_term(v.strip) }
+      .map { |v| v.strip }
       .reject(&:blank?)
-      .uniq
+    values = values.map { |v| normalize_term(v) }.reject(&:blank?) if normalize
+    values.uniq
   rescue JSON::ParserError
     []
+  end
+
+  def ontology_term_names_by_identifier(identifiers)
+    ids = Array(identifiers).map(&:to_s).reject(&:blank?).uniq
+    return {} if ids.empty?
+
+    CellOntologyTerm.with_active_cell_ontology
+      .where(identifier: ids, original: true)
+      .pluck(:identifier, :name)
+      .to_h
+  end
+
+  def ontology_term_entry(label:, identifier:, ontology_by_tag:)
+    label_s = label.to_s.strip
+    identifier_s = identifier.to_s.strip.presence
+    display = label_s.presence || identifier_s
+    return nil if display.blank?
+
+    ontology_identifier =
+      if identifier_s.present? && AsapData::OntologyIdentifierUrl.prefix_for(identifier_s).present?
+        identifier_s
+      end
+    {
+      label: display,
+      identifier: ontology_identifier,
+      url: ontology_identifier.present? ? AsapData::OntologyIdentifierUrl.url_for(ontology_identifier, ontology_by_tag: ontology_by_tag) : nil
+    }
   end
 
   # Normalize a term value for consistent indexing.

@@ -88,6 +88,10 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
     display: none;
   }
 
+  #viz-mobile-selections-header {
+    display: none;
+  }
+
   .viz-panel-header-icon-btn {
     display: inline-flex;
     align-items: center;
@@ -297,17 +301,15 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       display: flex;
       flex-shrink: 0;
       width: 100%;
-      gap: 4px;
-      padding: 8px 10px;
+      gap: 3px;
+      padding: 4px 6px;
       background: white;
       border-bottom: 1px solid #e5e7eb;
       box-sizing: border-box;
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
+      overflow-x: hidden;
       position: relative;
       /* Keep below project header (z-80) so the global hamburger menu stays on top */
       z-index: 40;
-      transition: padding 0.28s ease;
     }
 
     [data-controller="visualization"][data-mobile-panel] #viz-mobile-panel-selector {
@@ -317,23 +319,85 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
     }
 
     #viz-mobile-panel-selector button {
-      flex: 1 0 auto;
+      flex: 1 1 0;
       min-width: 0;
-      padding: 8px 10px;
-      font-size: 12px;
+      max-width: 100%;
+      padding: 3px 2px;
+      font-size: clamp(9px, 2.1vw, 11px);
       font-weight: 600;
       color: #374151;
       background: #f3f4f6;
       border: 1px solid #d1d5db;
-      border-radius: 6px;
+      border-radius: 4px;
       cursor: pointer;
-      white-space: nowrap;
+      white-space: normal;
+      text-align: center;
+      line-height: 1.1;
+      overflow-wrap: anywhere;
+      hyphens: auto;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      transition: background-color 0.08s ease, color 0.08s ease, border-color 0.08s ease;
+    }
+
+    #viz-mobile-panel-selector button:active {
+      background: #e5e7eb;
     }
 
     #viz-mobile-panel-selector button[aria-pressed="true"] {
       color: #1d4ed8;
       background: #dbeafe;
       border-color: #93c5fd;
+    }
+
+    #viz-mobile-panel-selector button[aria-pressed="true"]:active {
+      background: #bfdbfe;
+    }
+
+    #viz-mobile-panel-loading {
+      display: none;
+      position: fixed;
+      top: var(--viz-mobile-panel-top, 120px);
+      left: 0;
+      right: 0;
+      height: var(--viz-mobile-panel-region-height, 40vh);
+      z-index: 70;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.78);
+      color: #4b5563;
+      font-size: 12px;
+      font-weight: 500;
+      pointer-events: none;
+    }
+
+    #viz-mobile-panel-loading.is-visible {
+      display: flex;
+    }
+
+    #viz-mobile-panel-loading .fa-spinner {
+      font-size: 16px;
+      color: #2563eb;
+    }
+
+    #viz-mobile-panel-selector button.is-loading {
+      position: relative;
+    }
+
+    #viz-mobile-panel-selector button.is-loading .viz-mobile-panel-btn-label {
+      opacity: 0.35;
+    }
+
+    #viz-mobile-panel-selector button.is-loading .viz-mobile-panel-btn-spinner {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: #2563eb;
+      pointer-events: none;
     }
 
     /* Match magnifier / fold / close header icon buttons */
@@ -352,24 +416,71 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
     }
 
     #viz-plot-area-wrap {
-      flex: 1 1 auto !important;
-      min-height: 0 !important;
-      padding: 4px !important;
+      position: relative !important;
+      left: auto !important;
+      right: auto !important;
+      bottom: auto !important;
+      /* Keep the square plot at the bottom of the mobile column without
+         position:fixed (fixed + overflow:hidden ancestors breaks touch/lasso). */
+      margin-top: auto !important;
+      flex: 0 0 auto !important;
+      width: 100% !important;
+      height: calc(var(--viz-mobile-plot-size, 200px) + var(--viz-mobile-plot-footer-height, 22px)) !important;
+      max-height: calc(var(--viz-mobile-plot-size, 200px) + var(--viz-mobile-plot-footer-height, 22px)) !important;
+      margin-left: 0 !important;
+      margin-right: 0 !important;
+      margin-bottom: 0 !important;
+      padding: 0 4px 2px !important;
       display: flex !important;
       flex-direction: column !important;
       align-items: center !important;
-      justify-content: center !important;
+      justify-content: flex-end !important;
       overflow: hidden !important;
+      box-sizing: border-box !important;
+      background: #f9fafb;
+      z-index: 1;
     }
 
     [data-controller="visualization"] #viz-plot-area-wrap .plot-container {
       flex: 0 0 auto !important;
-      width: min(100%, calc(100dvh - var(--viz-mobile-chrome-height, 240px))) !important;
+      width: var(--viz-mobile-plot-size, 200px) !important;
+      height: var(--viz-mobile-plot-size, 200px) !important;
       max-width: 100% !important;
       aspect-ratio: 1 / 1;
-      height: auto !important;
       min-height: 0 !important;
       margin: 0 auto;
+      /* Ensure the WebGL canvas receives lasso/pan touches */
+      touch-action: none;
+      pointer-events: auto;
+    }
+
+    /* Tiny band under the plot for the cell count only */
+    #viz-plot-area-wrap > div:last-child {
+      flex: 0 0 auto !important;
+      width: 100% !important;
+      height: var(--viz-mobile-plot-footer-height, 22px) !important;
+      min-height: var(--viz-mobile-plot-footer-height, 22px) !important;
+      margin: 0 !important;
+      padding: 0 4px !important;
+      display: flex !important;
+      justify-content: center !important;
+      align-items: center !important;
+      font-size: 11px !important;
+      line-height: 1 !important;
+      color: #6b7280 !important;
+      box-sizing: border-box !important;
+      pointer-events: none;
+    }
+
+    #viz-plot-area-wrap > div:last-child > div:first-child {
+      display: none !important;
+    }
+
+    [data-controller="visualization"] #viz-plot-area-wrap #plot-info {
+      display: flex !important;
+      justify-content: center !important;
+      align-items: center !important;
+      width: 100% !important;
     }
 
     [data-controller="visualization"] #control-instructions {
@@ -380,15 +491,19 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       display: none !important;
     }
 
-    /* Split view: panel on top, square plot below */
+    /* Panel overlays above the bottom-anchored plot; plot size/position stay put. */
     [data-controller="visualization"][data-mobile-panel] #viz-plot-area-wrap {
+      position: relative !important;
+      left: auto !important;
+      right: auto !important;
+      bottom: auto !important;
+      margin-top: auto !important;
       flex: 0 0 auto !important;
       width: 100% !important;
-      height: calc(var(--viz-mobile-plot-size, 200px) + 28px) !important;
-      max-height: calc(var(--viz-mobile-plot-size, 200px) + 28px) !important;
-      margin-top: var(--viz-mobile-panel-region-height, 40vh);
-      padding: 4px !important;
-      justify-content: flex-start !important;
+      height: calc(var(--viz-mobile-plot-size, 200px) + var(--viz-mobile-plot-footer-height, 22px)) !important;
+      max-height: calc(var(--viz-mobile-plot-size, 200px) + var(--viz-mobile-plot-footer-height, 22px)) !important;
+      padding: 0 4px 2px !important;
+      justify-content: flex-end !important;
     }
 
     [data-controller="visualization"][data-mobile-panel] #viz-plot-area-wrap .plot-container {
@@ -396,6 +511,8 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       height: var(--viz-mobile-plot-size, 200px) !important;
       max-width: 100% !important;
       aspect-ratio: 1 / 1;
+      touch-action: none;
+      pointer-events: auto;
     }
 
     /* Active panel host fills the top split region */
@@ -452,6 +569,39 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
     [data-controller="visualization"][data-mobile-panel] #gene-expression-panel,
     [data-controller="visualization"][data-mobile-panel] #selections-panel {
       border-left: none !important;
+    }
+
+    /* Mobile title + close for Cell sets / Gene sets (desktop tabs are hidden). */
+    [data-controller="visualization"][data-mobile-panel="cells"] #viz-mobile-selections-header,
+    [data-controller="visualization"][data-mobile-panel="gene-sets"] #viz-mobile-selections-header {
+      display: flex !important;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-shrink: 0;
+      padding: 10px 12px;
+      border-bottom: 1px solid #e5e7eb;
+      background: #f9fafb;
+      box-sizing: border-box;
+    }
+
+    #viz-mobile-selections-header h3 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #111827;
+      line-height: 1.2;
+    }
+
+    [data-controller="visualization"][data-mobile-panel="cells"] #viz-mobile-selections-title-gene-sets,
+    [data-controller="visualization"][data-mobile-panel="gene-sets"] #viz-mobile-selections-title-cells {
+      display: none !important;
+    }
+
+    /* Close lives in the mobile header; hide the ones buried in filter toolbars. */
+    [data-controller="visualization"][data-mobile-panel="cells"] #cells-tab-content .viz-mobile-panel-close-btn,
+    [data-controller="visualization"][data-mobile-panel="gene-sets"] #gene-sets-tab-content .viz-mobile-panel-close-btn {
+      display: none !important;
     }
 
     [data-controller="visualization"][data-mobile-panel="genes"] #right-panel,
@@ -2144,35 +2294,39 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
 
     <div id="viz-mobile-panel-selector" role="toolbar" aria-label="Visualization panels">
       <button type="button"
-              data-action="click->visualization#openMobilePanel"
+              data-action="pointerdown->visualization#openMobilePanel"
               data-mobile-panel="categorical"
               aria-pressed="false">
-        Categorical
+        <span class="viz-mobile-panel-btn-label">Categorical</span>
       </button>
       <button type="button"
-              data-action="click->visualization#openMobilePanel"
+              data-action="pointerdown->visualization#openMobilePanel"
               data-mobile-panel="continuous"
               aria-pressed="false">
-        Continuous
+        <span class="viz-mobile-panel-btn-label">Continuous</span>
       </button>
       <button type="button"
-              data-action="click->visualization#openMobilePanel"
+              data-action="pointerdown->visualization#openMobilePanel"
               data-mobile-panel="genes"
               aria-pressed="false">
-        <%= row_label(@project).to_s.pluralize.capitalize %>
+        <span class="viz-mobile-panel-btn-label"><%= row_label(@project).to_s.pluralize.capitalize %></span>
       </button>
       <button type="button"
-              data-action="click->visualization#openMobilePanel"
+              data-action="pointerdown->visualization#openMobilePanel"
               data-mobile-panel="cells"
               aria-pressed="false">
-        Cell sets
+        <span class="viz-mobile-panel-btn-label">Cell sets</span>
       </button>
       <button type="button"
-              data-action="click->visualization#openMobilePanel"
+              data-action="pointerdown->visualization#openMobilePanel"
               data-mobile-panel="gene-sets"
               aria-pressed="false">
-        Gene sets
+        <span class="viz-mobile-panel-btn-label">Gene sets</span>
       </button>
+    </div>
+    <div id="viz-mobile-panel-loading" aria-live="polite" aria-busy="false">
+      <i class="fas fa-spinner fa-spin" aria-hidden="true"></i>
+      <span>Loading</span>
     </div>
 
     <div id="viz-plot-area-wrap" style="flex: 1; padding: 4px; display: flex; flex-direction: column;">
@@ -2433,6 +2587,21 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
 
     <!-- Bottom Section: Selections Panel -->
     <div id="selections-panel" style="flex: 1; background-color: #f9fafb; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
+      <div id="viz-mobile-selections-header">
+        <h3>
+          <span id="viz-mobile-selections-title-cells">Cell sets</span>
+          <span id="viz-mobile-selections-title-gene-sets">Gene sets</span>
+        </h3>
+        <button type="button"
+                class="viz-panel-header-icon-btn viz-mobile-panel-close-btn"
+                data-action="click->visualization#closeMobilePanel"
+                onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.borderColor='#9ca3af'; this.style.color='#374151';"
+                onmouseout="this.style.backgroundColor='#f9fafb'; this.style.borderColor='#d1d5db'; this.style.color='#6b7280';"
+                title="Close panel"
+                aria-label="Close panel">
+          <i class="fas fa-times" style="font-size: 12px;" aria-hidden="true"></i>
+        </button>
+      </div>
       <!-- Selection Tabs -->
       <div id="viz-selection-tabs" style="border-bottom: 1px solid #e5e7eb;">
         <nav style="display: flex; align-items: center; gap: 8px; padding: 0 16px;">

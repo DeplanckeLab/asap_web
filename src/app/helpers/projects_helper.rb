@@ -449,18 +449,19 @@ module ProjectsHelper
   # Colored badges matching scFAIR summary metadata chips (color + 22 alpha background).
   # When limit is set and there are more terms, shows the first N plus a "+X more" button
   # that opens the search-terms-modal (same pattern as summary scFAIR metadata cards).
+  # +labels+ may be strings or hashes with :label, :identifier, :url (ontology terms).
   def ontology_term_type_badges(labels, color, unknown_label: 'Unknown', limit: nil, modal_label: nil)
-    terms = Array(labels).map { |label| label.to_s.strip }.reject(&:blank?)
-    terms = [unknown_label] if terms.empty?
+    entries = Array(labels).filter_map { |item| normalize_badge_term_entry(item) }
+    entries = [{ label: unknown_label, identifier: nil, url: nil }] if entries.empty?
     hex = color.to_s.presence || '#64748B'
-    visible = limit.present? ? terms.first(limit) : terms
-    remaining = limit.present? ? [terms.size - visible.size, 0].max : 0
+    visible = limit.present? ? entries.first(limit) : entries
+    remaining = limit.present? ? [entries.size - visible.size, 0].max : 0
 
     content_tag(:span, class: 'flex flex-wrap gap-1') do
-      parts = visible.map do |label|
+      parts = visible.map do |entry|
         content_tag(
           :span,
-          label,
+          entry[:label],
           class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium',
           style: "background-color: #{hex}22; color: #{hex};"
         )
@@ -477,10 +478,10 @@ module ProjectsHelper
             search_terms_modal_trigger: true,
             card_label: modal_label.presence || 'Terms',
             card_color: hex,
-            card_terms: terms.to_json
+            card_terms: entries.to_json
           },
           onclick: 'event.stopPropagation()',
-          aria: { label: "Show all #{terms.size} #{modal_label.present? ? modal_label.downcase.pluralize : 'terms'}" }
+          aria: { label: "Show all #{entries.size} #{modal_label.present? ? modal_label.downcase.pluralize : 'terms'}" }
         )
       end
 
@@ -494,9 +495,9 @@ module ProjectsHelper
   end
 
   def search_project_technology_badges(project)
-    labels = project ? project.compliance_term_names_for('technology') : []
+    entries = project ? project.compliance_term_entries_for('technology', ontology_by_tag: ontology_by_tag_index_cache) : []
     ontology_term_type_badges(
-      labels,
+      entries,
       ontology_term_type_color('technology'),
       limit: 2,
       modal_label: 'Technology'
@@ -507,5 +508,29 @@ module ProjectsHelper
 
   def ontology_term_type_color_cache
     @ontology_term_type_color_cache ||= {}
+  end
+
+  def ontology_by_tag_index_cache
+    @ontology_by_tag_index_cache ||= AsapData::OntologyIdentifierUrl.ontology_by_tag_index
+  end
+
+  def normalize_badge_term_entry(item)
+    if item.is_a?(Hash)
+      label = (item[:label] || item['label']).to_s.strip
+      identifier = (item[:identifier] || item['identifier']).to_s.strip
+      url = (item[:url] || item['url']).to_s.strip
+      return nil if label.blank? && identifier.blank?
+
+      {
+        label: label.presence || identifier,
+        identifier: identifier.presence,
+        url: url.presence
+      }
+    else
+      text = item.to_s.strip
+      return nil if text.blank?
+
+      { label: text, identifier: nil, url: nil }
+    end
   end
 end

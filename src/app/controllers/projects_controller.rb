@@ -5803,6 +5803,7 @@ class ProjectsController < ApplicationController
 
   # GET /projects/1/get_loom_files_json
   # Lists LOOM matrices (dim 3) with download URLs and optional H5AD sibling paths, matching legacy ASAP summary behavior.
+  # ATAC projects also include DNA accessibility tabix and index download entries.
   def get_loom_files_json
     unless ENV['USER_DATA_DIR'].present?
       Rails.logger.error 'get_loom_files_json: USER_DATA_DIR environment variable is not set'
@@ -5905,7 +5906,12 @@ class ProjectsController < ApplicationController
     if params[:download].present?
       send_data list_files.to_json, filename: "loom_files_#{@project.key}.json", type: 'application/json'
     else
-      render json: list_files
+      atac = compliance_atac_assay_present?(@project.cxg_validation_result)
+      render json: {
+        files: list_files,
+        atac: atac,
+        dna_accessibility: atac ? dna_accessibility_download_entries(server_url) : []
+      }
     end
   end
 
@@ -9523,6 +9529,19 @@ class ProjectsController < ApplicationController
   end
 
   private
+    def search_snapshot_ontology_by_tag
+      @search_snapshot_ontology_by_tag ||= AsapData::OntologyIdentifierUrl.ontology_by_tag_index
+    end
+
+    def search_snapshot_term_payload(entries, color)
+      terms = Array(entries)
+      {
+        labels: terms.map { |entry| entry[:label] },
+        terms: terms,
+        color: color
+      }
+    end
+
     def search_snapshot_project_payload(project)
       project_type = project.project_type
       run_counts = helpers.project_run_counts(project)
@@ -9540,10 +9559,13 @@ class ProjectsController < ApplicationController
           labels: project.organism&.name.present? ? [project.organism.name] : [],
           color: helpers.ontology_term_type_color('organism')
         },
-        technology: {
-          labels: project.compliance_term_names_for('technology'),
-          color: helpers.ontology_term_type_color('technology')
-        },
+        technology: search_snapshot_term_payload(
+          project.compliance_term_entries_for(
+            'technology',
+            ontology_by_tag: search_snapshot_ontology_by_tag
+          ),
+          helpers.ontology_term_type_color('technology')
+        ),
         cell_count: helpers.number_with_delimiter(project.cell_count),
         col_label: helpers.col_label(project),
         gene_count: helpers.number_with_delimiter(project.gene_count),
@@ -12434,6 +12456,19 @@ class ProjectsController < ApplicationController
         links.sort_by! { |link| link[:source] == primary_source ? 0 : 1 }
       end
       links
+    end
+
+    def dna_accessibility_download_entries(server_url)
+      parsing_dir = @project.data_dir.join('parsing')
+      DnaAccessibilityFinalizeService.download_assets(parsing_dir).map do |asset|
+        {
+          name: asset[:rel_path],
+          label: asset[:label],
+          file_size: asset[:present] ? helpers.display_mem(asset[:size]) : nil,
+          present: asset[:present],
+          url: "#{server_url}#{get_file_project_path(@project.key, filename: asset[:rel_path])}"
+        }
+      end
     end
 
     def summary_project_data_root(project)

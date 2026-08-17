@@ -13107,6 +13107,7 @@ export default class extends Controller {
     canvas.style.top = '0'
     canvas.style.left = '0'
     canvas.style.zIndex = '1' // Bottom layer
+    canvas.style.touchAction = 'none'
     plotContainer.appendChild(canvas)
     
     // Store canvas reference
@@ -13144,6 +13145,10 @@ export default class extends Controller {
   async handleWindowResize() {
     this.updateMetadataClaColumns()
     this.refreshMetadataCategoriesJumpListeners()
+    // Allow mobile plot size to remeasure for orientation / real viewport changes.
+    this._mobilePlotSizeLock = null
+    this._mobileStableHeaderHeight = null
+    this._mobileStableToolbarHeight = null
     this.updateMobileVizChromeHeight()
 
     // Debounce resize events to avoid excessive redraws during drag
@@ -13154,6 +13159,9 @@ export default class extends Controller {
     // Use a longer debounce to prevent flickering during drag
     this.resizeTimeout = setTimeout(() => {
       this.updateMetadataClaColumns()
+      this._mobilePlotSizeLock = null
+      this._mobileStableHeaderHeight = null
+      this._mobileStableToolbarHeight = null
       this.updateMobileVizChromeHeight()
       // console.log('🔄 [RESIZE] Window resized, redrawing plot...')
       
@@ -13231,6 +13239,16 @@ export default class extends Controller {
     this.closeMobilePanel({ redraw: false })
     document.body.classList.remove('viz-mobile-panel-open')
     this.element?.classList?.remove('viz-mobile-layout')
+    this._mobilePlotSizeLock = null
+    this._mobileStableHeaderHeight = null
+    this._mobileStableToolbarHeight = null
+    this._pendingMobilePanel = null
+    this.hideMobilePanelLoading()
+    this.element?.style?.removeProperty?.('--viz-mobile-chrome-height')
+    this.element?.style?.removeProperty?.('--viz-mobile-panel-top')
+    this.element?.style?.removeProperty?.('--viz-mobile-panel-region-height')
+    this.element?.style?.removeProperty?.('--viz-mobile-plot-size')
+    this.element?.style?.removeProperty?.('--viz-mobile-plot-footer-height')
   }
 
   syncMobileVizLayout({ redraw = true } = {}) {
@@ -13259,54 +13277,87 @@ export default class extends Controller {
   updateMobileVizChromeHeight() {
     if (!this.element || !this.isMobileVizLayout()) {
       document.body.classList.remove('viz-mobile-panel-open')
+      this._mobilePlotSizeLock = null
+      this._mobileStableHeaderHeight = null
+      this._mobileStableToolbarHeight = null
+      this._pendingMobilePanel = null
+      this._mobilePlotSizeNeedsCanvasSync = false
+      this.hideMobilePanelLoading()
+      this.element?.style?.removeProperty?.('--viz-mobile-chrome-height')
+      this.element?.style?.removeProperty?.('--viz-mobile-panel-top')
+      this.element?.style?.removeProperty?.('--viz-mobile-panel-region-height')
+      this.element?.style?.removeProperty?.('--viz-mobile-plot-size')
+      this.element?.style?.removeProperty?.('--viz-mobile-plot-footer-height')
       return
     }
 
     const header = document.getElementById('project-page-header')
     const toolbarShell = this.element.querySelector('.viz-toolbar-shell')
     const selector = document.getElementById('viz-mobile-panel-selector')
-    const plotFooter = document.querySelector('#viz-plot-area-wrap > div:last-child')
     const panelOpen = !!this.element.dataset.mobilePanel
+
+    // Cache closed-layout chrome before hiding header/toolbar for an open panel.
+    if (!panelOpen) {
+      this._mobileStableHeaderHeight = header?.getBoundingClientRect?.().height || 64
+      this._mobileStableToolbarHeight = toolbarShell?.getBoundingClientRect?.().height || 0
+    }
 
     document.body.classList.toggle('viz-mobile-panel-open', panelOpen)
 
-    const headerHeight = panelOpen ? 0 : (header?.getBoundingClientRect?.().height || 64)
-    const toolbarHeight = panelOpen ? 0 : (toolbarShell?.getBoundingClientRect?.().height || 0)
+    // Lock plot size against the "chrome visible" layout so opening a panel
+    // (which hides header/toolbar) does not grow/shrink the canvas.
+    const headerHeight = this._mobileStableHeaderHeight || 64
+    const toolbarHeight = this._mobileStableToolbarHeight || 0
     const selectorHeight = selector?.getBoundingClientRect?.().height || 0
-    const footerHeight = plotFooter?.getBoundingClientRect?.().height || 24
-    const chromeHeight = Math.ceil(headerHeight + toolbarHeight + selectorHeight + footerHeight + 24)
+    const footerHeight = 22
+    const stableChromeHeight = Math.ceil(headerHeight + toolbarHeight + selectorHeight + footerHeight + 24)
 
-    this.element.style.setProperty('--viz-mobile-chrome-height', `${chromeHeight}px`)
+    this.element.style.setProperty('--viz-mobile-chrome-height', `${stableChromeHeight}px`)
+    this.element.style.setProperty('--viz-mobile-plot-footer-height', `${footerHeight}px`)
+
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0
+
+    if (!this._mobilePlotSizeLock) {
+      const available = Math.min(
+        Math.max(140, viewportWidth - 8),
+        Math.max(140, viewportHeight - stableChromeHeight)
+      )
+      this._mobilePlotSizeLock = Math.round(available)
+      this._mobilePlotSizeNeedsCanvasSync = true
+    }
+
+    this.element.style.setProperty('--viz-mobile-plot-size', `${this._mobilePlotSizeLock}px`)
 
     if (!panelOpen) {
       this.element.style.removeProperty('--viz-mobile-panel-top')
       this.element.style.removeProperty('--viz-mobile-panel-region-height')
-      this.element.style.removeProperty('--viz-mobile-plot-size')
-      return
+    } else {
+      // Header/toolbar are folded away; selector sits at the top of the screen.
+      const selectorBottom = selector?.getBoundingClientRect?.().bottom
+      const panelTop = Math.ceil(
+        Number.isFinite(selectorBottom) && selectorBottom > 0
+          ? selectorBottom
+          : selectorHeight
+      )
+      const availableBelowChrome = Math.max(180, viewportHeight - panelTop)
+      const plotReserve = (this._mobilePlotSizeLock || 200) + footerHeight + 4
+      const panelRegionHeight = Math.max(160, availableBelowChrome - plotReserve)
+
+      this.element.style.setProperty('--viz-mobile-panel-top', `${panelTop}px`)
+      this.element.style.setProperty('--viz-mobile-panel-region-height', `${panelRegionHeight}px`)
     }
 
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
-    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0
-    // Header/toolbar are folded away; selector sits at the top of the screen.
-    const selectorBottom = selector?.getBoundingClientRect?.().bottom
-    const panelTop = Math.ceil(
-      Number.isFinite(selectorBottom) && selectorBottom > 0
-        ? selectorBottom
-        : selectorHeight
-    )
-    const availableBelowChrome = Math.max(180, viewportHeight - panelTop)
-
-    // Keep a usable square plot visible while editing; panel takes the rest above it.
-    const minPlotSize = 140
-    const maxPlotByWidth = Math.max(minPlotSize, viewportWidth - 8)
-    const maxPlotByHeight = Math.max(minPlotSize, Math.floor(availableBelowChrome * 0.45))
-    const plotSize = Math.max(minPlotSize, Math.min(maxPlotByWidth, maxPlotByHeight, 320))
-    const plotAreaHeight = plotSize + 28
-    const panelRegionHeight = Math.max(180, availableBelowChrome - plotAreaHeight)
-
-    this.element.style.setProperty('--viz-mobile-panel-top', `${panelTop}px`)
-    this.element.style.setProperty('--viz-mobile-panel-region-height', `${panelRegionHeight}px`)
-    this.element.style.setProperty('--viz-mobile-plot-size', `${plotSize}px`)
+    // Canvas buffer must match the locked CSS box or lasso/pan coordinates drift.
+    if (this._mobilePlotSizeNeedsCanvasSync) {
+      this._mobilePlotSizeNeedsCanvasSync = false
+      if (this.canvas && this.reglRenderer && !this.isPanning && !this.isDrawingLasso && !this.isZooming) {
+        requestAnimationFrame(() => {
+          if (!this.isMobileVizLayout()) return
+          this.redrawPlot()
+        })
+      }
+    }
   }
 
   scheduleMobileSplitLayoutRefresh({ redraw = false } = {}) {
@@ -13315,18 +13366,17 @@ export default class extends Controller {
       this._mobileSplitLayoutTimer = null
     }
 
-    // Header/toolbar hide instantly; remeasure on the next frame.
+    // Header/toolbar hide instantly; remeasure panel chrome on the next frame.
+    // Plot size is locked on mobile, so skip redraw unless a caller opts in
+    // (e.g. real viewport resize).
     this._mobileSplitLayoutTimer = window.setTimeout(() => {
       this._mobileSplitLayoutTimer = null
       if (!this.element || !this.isMobileVizLayout()) return
 
-      const plotSizeBefore = this.element.style.getPropertyValue('--viz-mobile-plot-size')
       this.updateMobileVizChromeHeight()
-      const plotSizeAfter = this.element.style.getPropertyValue('--viz-mobile-plot-size')
-      const plotSizeChanged = plotSizeBefore !== plotSizeAfter
 
       if (
-        (redraw || plotSizeChanged) &&
+        redraw &&
         this.canvas &&
         this.reglRenderer &&
         !this.isPanning &&
@@ -13342,7 +13392,12 @@ export default class extends Controller {
   }
 
   openMobilePanel(eventOrKey) {
-    if (eventOrKey?.preventDefault) {
+    if (eventOrKey?.type === 'pointerdown') {
+      if (eventOrKey.pointerType === 'mouse' && eventOrKey.button !== 0) return
+      // Respond on press; skip the delayed click that would fire again.
+      eventOrKey.preventDefault()
+      eventOrKey.stopPropagation?.()
+    } else if (eventOrKey?.preventDefault) {
       eventOrKey.preventDefault()
       eventOrKey.stopPropagation?.()
     }
@@ -13361,32 +13416,60 @@ export default class extends Controller {
       return
     }
 
-    const previousPanel = this.element.dataset.mobilePanel || ''
-    const wasClosed = !previousPanel
+    const previousPanel = this.element.dataset.mobilePanel || this._pendingMobilePanel || ''
+    const isUserGesture = typeof eventOrKey !== 'string' && !!eventOrKey?.type
 
-    this.element.dataset.mobilePanel = normalizedKey
-
-    if (normalizedKey === 'cells' || normalizedKey === 'gene-sets') {
-      this.setSelectionTab(normalizedKey === 'gene-sets' ? 'gene-sets' : 'cells')
+    // Tap active button again to close — feels immediate.
+    if (isUserGesture && previousPanel === normalizedKey) {
+      this.closeMobilePanel({ redraw: false })
+      return
     }
 
-    this.updateMobilePanelSelectorState()
-    this.updateMobileVizChromeHeight()
+    const wasClosed = !previousPanel
+    this._mobilePanelSwitchToken = (this._mobilePanelSwitchToken || 0) + 1
+    const switchToken = this._mobilePanelSwitchToken
+    this._pendingMobilePanel = normalizedKey
 
-    requestAnimationFrame(() => {
-      this.updateMobileVizChromeHeight()
-      if (typeof this.refreshHistogramsAndBarplots === 'function') {
-        this.refreshHistogramsAndBarplots()
-      }
-      if (normalizedKey === 'cells') {
-        this.drawSelectionDistribution?.()
+    // Instant feedback: pressed button + spinner, before heavy DOM swap.
+    this.updateMobilePanelSelectorState(normalizedKey, { loadingKey: normalizedKey })
+    this.ensureMobilePanelRegionVars()
+    this.showMobilePanelLoading()
+
+    const revealPanel = () => {
+      if (switchToken !== this._mobilePanelSwitchToken) return
+
+      this.element.dataset.mobilePanel = normalizedKey
+      this._pendingMobilePanel = null
+      this.updateMobilePanelSelectorState(normalizedKey, { loadingKey: normalizedKey })
+
+      if (normalizedKey === 'cells' || normalizedKey === 'gene-sets') {
+        this.setSelectionTab(normalizedKey === 'gene-sets' ? 'gene-sets' : 'cells')
       }
 
-      // After header/toolbar fold, remeasure and redraw once if the plot box grew/shrank.
       if (wasClosed) {
-        this.scheduleMobileSplitLayoutRefresh({ redraw: true })
+        this.updateMobileVizChromeHeight()
       }
-    })
+
+      const finishLoading = () => {
+        if (switchToken !== this._mobilePanelSwitchToken) return
+        if (typeof this.refreshHistogramsAndBarplots === 'function') {
+          this.refreshHistogramsAndBarplots()
+        }
+        // Keep spinner up briefly so content/layout can settle.
+        window.setTimeout(() => {
+          if (switchToken !== this._mobilePanelSwitchToken) return
+          this.hideMobilePanelLoading()
+          this.updateMobilePanelSelectorState(normalizedKey)
+        }, 50)
+      }
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(finishLoading)
+      })
+    }
+
+    // Yield so the pressed-state + spinner can paint before the heavy panel DOM work.
+    window.setTimeout(revealPanel, 0)
   }
 
   closeMobilePanel(eventOrOptions) {
@@ -13395,16 +13478,19 @@ export default class extends Controller {
       eventOrOptions.stopPropagation?.()
     }
 
-    const redraw = eventOrOptions?.redraw !== false
+    const redraw = eventOrOptions?.redraw === true
+    this._mobilePanelSwitchToken = (this._mobilePanelSwitchToken || 0) + 1
+    this._pendingMobilePanel = null
+    this.hideMobilePanelLoading()
+
     if (!this.element?.dataset?.mobilePanel) {
-      this.updateMobilePanelSelectorState()
+      this.updateMobilePanelSelectorState('')
       return
     }
 
     delete this.element.dataset.mobilePanel
     document.body.classList.remove('viz-mobile-panel-open')
-
-    this.updateMobilePanelSelectorState()
+    this.updateMobilePanelSelectorState('')
     this.updateMobileVizChromeHeight()
 
     if (redraw) {
@@ -13412,12 +13498,62 @@ export default class extends Controller {
     }
   }
 
-  updateMobilePanelSelectorState() {
-    const activePanel = this.element?.dataset?.mobilePanel || ''
+  ensureMobilePanelRegionVars() {
+    if (!this.element) return
+    const hasTop = this.element.style.getPropertyValue('--viz-mobile-panel-top')
+    const hasHeight = this.element.style.getPropertyValue('--viz-mobile-panel-region-height')
+    if (hasTop && hasHeight) return
+
+    const selector = document.getElementById('viz-mobile-panel-selector')
+    const selectorBottom = selector?.getBoundingClientRect?.().bottom
+    const panelTop = Math.ceil(
+      Number.isFinite(selectorBottom) && selectorBottom > 0
+        ? selectorBottom
+        : (selector?.getBoundingClientRect?.().height || 40)
+    )
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+    const plotReserve = (this._mobilePlotSizeLock || 200) + 22 + 4
+    const panelRegionHeight = Math.max(160, viewportHeight - panelTop - plotReserve)
+
+    this.element.style.setProperty('--viz-mobile-panel-top', `${panelTop}px`)
+    this.element.style.setProperty('--viz-mobile-panel-region-height', `${panelRegionHeight}px`)
+  }
+
+  showMobilePanelLoading() {
+    const el = document.getElementById('viz-mobile-panel-loading')
+    if (!el) return
+    el.classList.add('is-visible')
+    el.setAttribute('aria-busy', 'true')
+  }
+
+  hideMobilePanelLoading() {
+    const el = document.getElementById('viz-mobile-panel-loading')
+    if (!el) return
+    el.classList.remove('is-visible')
+    el.setAttribute('aria-busy', 'false')
+  }
+
+  updateMobilePanelSelectorState(activePanel = null, { loadingKey = null } = {}) {
+    const resolvedActive = activePanel != null
+      ? String(activePanel)
+      : (this._pendingMobilePanel || this.element?.dataset?.mobilePanel || '')
     const buttons = document.querySelectorAll('#viz-mobile-panel-selector [data-mobile-panel]')
     buttons.forEach((button) => {
-      const isActive = button.dataset.mobilePanel === activePanel
+      const key = button.dataset.mobilePanel || ''
+      const isActive = key === resolvedActive
+      const isLoading = loadingKey != null && key === loadingKey
       button.setAttribute('aria-pressed', isActive ? 'true' : 'false')
+      button.classList.toggle('is-loading', isLoading)
+
+      const existingSpinner = button.querySelector('.viz-mobile-panel-btn-spinner')
+      if (isLoading && !existingSpinner) {
+        const spinner = document.createElement('span')
+        spinner.className = 'viz-mobile-panel-btn-spinner'
+        spinner.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>'
+        button.appendChild(spinner)
+      } else if (!isLoading && existingSpinner) {
+        existingSpinner.remove()
+      }
     })
   }
   
@@ -13885,6 +14021,7 @@ export default class extends Controller {
     // Add pointermove to CANVAS only (not document) to avoid blocking main thread when hovering over UI
     canvas.addEventListener('pointermove', this.boundMouseMove)
     this.canvasMoveListenerAdded = true
+    canvas.style.touchAction = 'none'
     
     // console.log('✅ Event listeners registered - pointermove on CANVAS only (not document)')
     
@@ -13967,8 +14104,17 @@ export default class extends Controller {
     }
 
     if (this.interactionMode === 'lasso') {
+      // Keep the gesture on the canvas (mobile browsers otherwise scroll/steal the touch).
+      if (event.cancelable) event.preventDefault()
+      if (typeof event.target?.setPointerCapture === 'function' && event.pointerId != null) {
+        try { event.target.setPointerCapture(event.pointerId) } catch (_) { /* ignore */ }
+      }
       this.onLassoMouseDown(event)
     } else if (this.interactionMode === 'pan') {
+      if (event.cancelable) event.preventDefault()
+      if (typeof event.target?.setPointerCapture === 'function' && event.pointerId != null) {
+        try { event.target.setPointerCapture(event.pointerId) } catch (_) { /* ignore */ }
+      }
       this.onPanMouseDown(event)
     } else if (this.interactionMode === 'pick') {
       this.onPickMouseDown(event)

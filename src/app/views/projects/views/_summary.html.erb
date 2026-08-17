@@ -65,6 +65,9 @@ font-size: inherit;
   summary_compliance_schema_count = @project.compliance_schemas.size
   summary_compliance_result = @project.cxg_validation_result
   summary_compliance_valid = summary_compliance_result.present? ? summary_compliance_result['valid'] : nil
+  summary_atac_dataset = compliance_atac_assay_present?(summary_compliance_result)
+  summary_downloads_label = summary_atac_dataset ? 'LOOM/H5AD/DNA accessibility' : 'LOOM/H5AD'
+  summary_downloads_aria_label = summary_atac_dataset ? 'LOOM, H5AD, and DNA accessibility downloads' : 'LOOM and H5AD downloads'
   summary_compliance_schema_config = @project.compliance_schemas.first&.to_config_hash
   summary_compliance_schema_name = summary_compliance_schema_config&.dig('name') || @project.compliance_schemas.first&.name || 'Schema'
   summary_compliance_schema_version = summary_compliance_result&.dig('schema_version') || summary_compliance_schema_config&.dig('version')
@@ -462,11 +465,11 @@ summary_search_gene_url = search_gene_project_path(@project)
                     aria-disabled="true"
                     title="<%= summary_archive_disabled_tooltip %>"
                     data-guided-tour="summary-repro-downloads-trigger"
-                    aria-label="LOOM and H5AD downloads (disabled, project archived)">
-              <i class="fas fa-download text-gray-400" aria-hidden="true"></i><span>LOOM/H5AD</span>
+                    aria-label="<%= summary_downloads_aria_label %> (disabled, project archived)">
+              <i class="fas fa-download text-gray-400" aria-hidden="true"></i><span><%= summary_downloads_label %></span>
             </button>
           <% else %>
-            <button type="button" id="summary-loom-downloads-open-button" class="badge-text flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-gray-100 text-gray-700 font-medium hover:bg-gray-200" data-summary-loom-json-url="<%= get_loom_files_json_project_path(@project.key) %>" data-summary-loom-export-url="<%= export_h5ad_project_path(@project.key) %>" data-summary-status-icons="<%= status_icons_json %>" data-guided-tour="summary-repro-downloads-trigger" aria-label="LOOM and H5AD downloads"><i class="fas fa-download text-gray-500" aria-hidden="true"></i><span>LOOM/H5AD</span></button>
+            <button type="button" id="summary-loom-downloads-open-button" class="badge-text flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 py-1 rounded bg-gray-100 text-gray-700 font-medium hover:bg-gray-200" data-summary-loom-json-url="<%= get_loom_files_json_project_path(@project.key) %>" data-summary-loom-export-url="<%= export_h5ad_project_path(@project.key) %>" data-summary-status-icons="<%= status_icons_json %>" data-guided-tour="summary-repro-downloads-trigger" aria-label="<%= summary_downloads_aria_label %>"><i class="fas fa-download text-gray-500" aria-hidden="true"></i><span><%= summary_downloads_label %></span></button>
           <% end %>
         </div>
         <% if summary_archive_data_unavailable %>
@@ -936,7 +939,7 @@ summary_search_gene_url = search_gene_project_path(@project)
     <div id="summary-loom-downloads-overlay" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-labelledby="summary-loom-downloads-title">
       <div id="summary-loom-downloads-panel" class="bg-white rounded-lg border border-gray-200 shadow-xl max-w-4xl w-full max-h-[85vh] flex flex-col overflow-hidden">
         <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 shrink-0">
-          <h3 id="summary-loom-downloads-title" class="text-sm font-semibold text-gray-900 inline-flex items-center gap-1.5"><i class="fas fa-download text-gray-500" aria-hidden="true"></i><span>LOOM/H5AD</span></h3>
+          <h3 id="summary-loom-downloads-title" class="text-sm font-semibold text-gray-900 inline-flex items-center gap-1.5"><i class="fas fa-download text-gray-500" aria-hidden="true"></i><span><%= summary_downloads_label %></span></h3>
           <button type="button" id="summary-loom-downloads-close-button" class="badge-text px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-100">Close</button>
         </div>
         <div id="summary-loom-downloads-body" class="p-4 overflow-auto flex-1 min-h-0 text-sm text-gray-700"></div>
@@ -2370,12 +2373,9 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
       return s === 'pending' || s === 'running'
     })
 
-    const renderRows = (items) => {
-      latestItems = Array.isArray(items) ? items : []
+    const loomTableHtml = (items) => {
       if (!Array.isArray(items) || items.length === 0) {
-        body.innerHTML = '<p class="text-gray-500 italic">No Loom files listed.</p>'
-        stopPolling()
-        return
+        return '<p class="text-gray-500 italic">No Loom files listed.</p>'
       }
       const rows = items.map((item) => {
         const loomLabel = escapeHtml(item.run_name || item.name || 'Loom file')
@@ -2387,12 +2387,41 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
           <td class="py-2 text-gray-600">${attrs}</td>
         </tr>`
       }).join('')
-      body.innerHTML = `<div class="overflow-x-auto"><table class="min-w-full text-left"><thead><tr class="border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
+      return `<div class="overflow-x-auto"><table class="min-w-full text-left"><thead><tr class="border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
         <th class="pb-2 pr-3">Loom file</th>
         <th class="pb-2 pr-3">H5AD file</th>
         <th class="pb-2">Run attributes</th>
       </tr></thead><tbody>${rows}</tbody></table></div>`
+    }
 
+    const dnaAccessibilityHtml = (items) => {
+      if (!Array.isArray(items) || items.length === 0) return ''
+      const rows = items.map((item) => {
+        const label = escapeHtml(item.label)
+        const filename = `<span class="block text-xs text-gray-500 mt-0.5">${escapeHtml(item.name)}</span>`
+        const size = item.file_size ? `<span class="block text-xs text-gray-500">${escapeHtml(item.file_size)}</span>` : ''
+        const download = item.present
+          ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="text-blue-700 hover:text-blue-900 hover:underline font-medium">Download</a>`
+          : '<span class="text-gray-500">Not available</span>'
+        return `<tr class="border-b border-gray-100 align-top">
+          <td class="py-2 pr-3">${label}${filename}${size}</td>
+          <td class="py-2">${download}</td>
+        </tr>`
+      }).join('')
+      return `<div class="mt-6">
+        <h4 class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">DNA accessibility</h4>
+        <div class="overflow-x-auto"><table class="min-w-full text-left"><thead><tr class="border-b border-gray-200 text-xs font-medium text-gray-500 uppercase tracking-wide">
+          <th class="pb-2 pr-3">File</th>
+          <th class="pb-2">Download</th>
+        </tr></thead><tbody>${rows}</tbody></table></div>
+      </div>`
+    }
+
+    const renderRows = (payload) => {
+      const items = payload.files
+      const dnaItems = payload.atac ? payload.dna_accessibility : []
+      latestItems = items
+      body.innerHTML = loomTableHtml(items) + dnaAccessibilityHtml(dnaItems)
       if (needsPolling(items)) startPolling()
       else stopPolling()
     }
@@ -2407,6 +2436,8 @@ cardLink?.addEventListener('click', () => window.location = cardLink.dataset.url
         throw new Error(message)
       }
       if (data && data.error) throw new Error(data.error)
+      if (!data || !Array.isArray(data.files)) throw new Error('Invalid file list payload.')
+      if (data.atac && !Array.isArray(data.dna_accessibility)) throw new Error('Invalid DNA accessibility payload.')
       return data
     }
 

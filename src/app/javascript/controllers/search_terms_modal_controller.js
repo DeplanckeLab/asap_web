@@ -8,26 +8,28 @@ export default class extends Controller {
   connect() {
     this.onClick = this.onClick.bind(this)
     this.onKeydown = this.onKeydown.bind(this)
-    this.element.addEventListener("click", this.onClick)
+    // Capture phase so "+X more" can stopPropagation (to avoid row navigation)
+    // without blocking the modal open handler.
+    this.element.addEventListener("click", this.onClick, true)
     document.addEventListener("keydown", this.onKeydown)
   }
 
   disconnect() {
-    this.element.removeEventListener("click", this.onClick)
+    this.element.removeEventListener("click", this.onClick, true)
     document.removeEventListener("keydown", this.onKeydown)
   }
 
   onClick(event) {
+    if (this.hasOverlayTarget && this.overlayTarget.contains(event.target)) {
+      if (event.target === this.overlayTarget) this.close()
+      return
+    }
+
     const trigger = event.target.closest("[data-search-terms-modal-trigger]")
     if (trigger && this.element.contains(trigger)) {
       event.preventDefault()
       event.stopPropagation()
       this.openFromTrigger(trigger)
-      return
-    }
-
-    if (event.target === this.overlayTarget) {
-      this.close()
     }
   }
 
@@ -94,7 +96,7 @@ export default class extends Controller {
       const rowClass = "badge-text px-3 py-1.5 rounded flex items-baseline justify-between gap-3"
       const rowStyle = `background-color: ${color}22; color: ${color};`
       if (ontologyUrl) {
-        return `<li><a href="${this.escapeHtml(ontologyUrl)}" target="_blank" rel="noopener noreferrer" class="${rowClass} hover:opacity-80" style="${rowStyle}">${inner}</a></li>`
+        return `<li><a href="${this.escapeHtml(ontologyUrl)}" target="_blank" rel="noopener noreferrer" class="${rowClass} hover:opacity-80 cursor-pointer" style="${rowStyle}">${inner}</a></li>`
       }
       return `<li class="${rowClass}" style="${rowStyle}">${inner}</li>`
     }).join("")

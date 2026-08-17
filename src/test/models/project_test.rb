@@ -110,4 +110,56 @@ class ProjectTest < TestBaseWithoutFixtures
     assert_not Project.exists?(key: key)
     assert_equal 6, key.length
   end
+
+  test "compliance_term_entries_for returns ontology identifiers for technology" do
+    ott = OntologyTermType.find_by(name: "technology")
+    skip "technology OntologyTermType with term and label paths is required" unless ott&.term_path.present? && ott.label_path.present?
+
+    project = create_test_project!(name: "Tech ontology terms", key: "tot#{SecureRandom.hex(3)}")
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: project.id,
+        name: ott.label_path,
+        latest_version: true,
+        version_nber: 1,
+        list_cat_json: ["raw_assay_label", "unknown"].to_json
+      ),
+      Annot.create!(
+        project_id: project.id,
+        name: ott.term_path,
+        latest_version: true,
+        version_nber: 1,
+        list_cat_json: ["EFO:0030004", "unknown"].to_json
+      )
+    )
+
+    entries = project.compliance_term_entries_for("technology")
+    efo = entries.find { |entry| entry[:identifier] == "EFO:0030004" }
+    unknown = entries.find { |entry| entry[:label].to_s.downcase == "unknown" && entry[:identifier].blank? }
+
+    assert efo, "Expected an ontology term entry for EFO:0030004, got #{entries.inspect}"
+    assert unknown, "Expected a non-ontology unknown entry, got #{entries.inspect}"
+
+    cot = CellOntologyTerm.with_active_cell_ontology.find_by(identifier: "EFO:0030004", original: true)
+    if cot&.name.present?
+      assert_equal cot.name, efo[:label]
+    else
+      assert_equal "raw assay label", efo[:label]
+    end
+
+    expected_url = AsapData::OntologyIdentifierUrl.url_for("EFO:0030004")
+    assert_equal expected_url, efo[:url] if expected_url.present?
+  end
+
+  test "compliance_term_entries_for uses projects.technology when ontology terms are missing" do
+    project = create_test_project!(
+      name: "Tech column fallback",
+      key: "tcf#{SecureRandom.hex(3)}",
+      technology: "10x 3' v3, Smart-seq2, Drop-seq"
+    )
+
+    entries = project.compliance_term_entries_for("technology")
+    assert_equal ["10x 3' v3", "Smart-seq2", "Drop-seq"], entries.map { |entry| entry[:label] }
+    assert entries.all? { |entry| entry[:identifier].blank? && entry[:url].blank? }
+  end
 end

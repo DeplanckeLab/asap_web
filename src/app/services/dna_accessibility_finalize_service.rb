@@ -8,16 +8,19 @@ class DnaAccessibilityFinalizeService
     'dna_accessibility' => {
       target_name: 'dna_accessibility.tsv.bgz',
       allowed_extensions: %w[.tsv.bgz],
-      label: 'DNA accessibility fragments (.tsv.bgz)'
+      label: 'DNA accessibility fragments (.tsv.bgz)',
+      download_label: 'DNA accessibility (tabix)'
     },
     'dna_accessibility_tbi' => {
       target_name: 'dna_accessibility.tsv.bgz.tbi',
       allowed_extensions: %w[.tsv.bgz.tbi],
-      label: 'DNA accessibility tabix index (.tsv.bgz.tbi)'
+      label: 'DNA accessibility tabix index (.tsv.bgz.tbi)',
+      download_label: 'DNA accessibility index'
     }
   }.freeze
 
   UPLOAD_TYPE_NAMES = ASSETS.keys.freeze
+  REL_DIR = 'parsing'
 
   class Error < StandardError; end
 
@@ -35,12 +38,25 @@ class DnaAccessibilityFinalizeService
 
   # True when every required DNA accessibility asset exists and is non-empty.
   def self.assets_present?(parsing_dir)
-    root = parsing_dir.present? ? Pathname.new(parsing_dir.to_s) : nil
-    return false unless root&.directory?
+    download_assets(parsing_dir).all? { |asset| asset[:present] }
+  end
 
-    target_names.all? do |name|
-      path = root.join(name)
-      path.exist? && path.file? && path.size.positive?
+  # Tabix fragments and index as stored under the project parsing directory.
+  def self.download_assets(parsing_dir)
+    root = parsing_dir.present? ? Pathname.new(parsing_dir.to_s) : nil
+
+    ASSETS.map do |upload_type_name, config|
+      filename = config[:target_name]
+      path = root&.join(filename)
+      present = path&.exist? && path.file? && path.size.positive?
+      {
+        upload_type_name: upload_type_name,
+        filename: filename,
+        rel_path: "#{REL_DIR}/#{filename}",
+        label: config[:download_label],
+        present: present == true,
+        size: present ? path.size : 0
+      }
     end
   end
 

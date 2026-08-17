@@ -254,32 +254,36 @@ export default class extends Controller {
     const el = this.field(row, fieldName)
     if (!el) return
 
-    let labels = []
+    let terms = []
     let color = "#64748B"
     if (payload && typeof payload === "object" && !Array.isArray(payload)) {
-      labels = Array.isArray(payload.labels) ? payload.labels : []
       if (payload.color) color = String(payload.color)
+      if (Array.isArray(payload.terms) && payload.terms.length > 0) {
+        terms = payload.terms
+      } else if (Array.isArray(payload.labels)) {
+        terms = payload.labels
+      }
     } else if (typeof payload === "string" && payload.length > 0 && payload !== "Unknown") {
-      labels = payload.split(",").map((part) => part.trim()).filter(Boolean)
+      terms = payload.split(",").map((part) => part.trim()).filter(Boolean)
     }
 
-    const terms = labels.map((label) => String(label).trim()).filter(Boolean)
-    const displayTerms = terms.length > 0 ? terms : ["Unknown"]
+    const entries = this.normalizeTermEntries(terms)
+    const displayEntries = entries.length > 0 ? entries : [{ label: "Unknown", identifier: "", url: "" }]
     const limit = fieldName === "technology" ? 2 : null
-    const visible = limit != null ? displayTerms.slice(0, limit) : displayTerms
-    const remaining = limit != null ? Math.max(displayTerms.length - visible.length, 0) : 0
-    const nextKey = `${color}|${displayTerms.join("\u0001")}|${limit || ""}`
+    const visible = limit != null ? displayEntries.slice(0, limit) : displayEntries
+    const remaining = limit != null ? Math.max(displayEntries.length - visible.length, 0) : 0
+    const nextKey = `${color}|${displayEntries.map((entry) => `${entry.label}\u0002${entry.identifier}\u0002${entry.url}`).join("\u0001")}|${limit || ""}`
     if (el.dataset.badgeKey === nextKey) return
     el.dataset.badgeKey = nextKey
 
     const wrap = document.createElement("span")
     wrap.className = "flex flex-wrap gap-1"
-    visible.forEach((label) => {
+    visible.forEach((entry) => {
       const badge = document.createElement("span")
       badge.className = "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium"
       badge.style.backgroundColor = `${color}22`
       badge.style.color = color
-      badge.textContent = label
+      badge.textContent = entry.label
       wrap.appendChild(badge)
     })
     if (remaining > 0) {
@@ -292,12 +296,29 @@ export default class extends Controller {
       more.dataset.searchTermsModalTrigger = "true"
       more.dataset.cardLabel = "Technology"
       more.dataset.cardColor = color
-      more.dataset.cardTerms = JSON.stringify(displayTerms)
-      more.setAttribute("aria-label", `Show all ${displayTerms.length} technologies`)
+      more.dataset.cardTerms = JSON.stringify(displayEntries)
+      more.setAttribute("aria-label", `Show all ${displayEntries.length} technologies`)
       more.addEventListener("click", (event) => event.stopPropagation())
       wrap.appendChild(more)
     }
     el.replaceChildren(wrap)
+  }
+
+  normalizeTermEntries(terms) {
+    return (Array.isArray(terms) ? terms : []).map((term) => {
+      if (term && typeof term === "object") {
+        const label = String(term.label == null ? "" : term.label).trim()
+        const identifier = String(term.identifier == null ? "" : term.identifier).trim()
+        const url = String(term.url == null ? "" : term.url).trim()
+        return {
+          label: label || identifier,
+          identifier,
+          url
+        }
+      }
+      const text = String(term == null ? "" : term).trim()
+      return { label: text, identifier: "", url: "" }
+    }).filter((entry) => entry.label || entry.identifier)
   }
 
   syncCheckbox(row, project) {

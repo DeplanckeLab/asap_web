@@ -32,12 +32,15 @@
     <div class="flex items-center justify-between h-16 overflow-visible">
       <!-- Left side: Logo and Project Info -->
       <div class="flex items-center space-x-6 overflow-visible">
-        <!-- ASAP Logo -->
+        <!-- ASAP Logo: mark+SIB on mobile, full wordmark on desktop -->
         <div class="flex-shrink-0">
           <%= link_to projects_browse_url,
                 class: "inline-block rounded focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-400" do %>
-            <%= image_tag "ASAP_sansTagline_White.svg", 
-                class: 'h-8 w-32 object-contain', 
+            <%= image_tag "ASAP_logoOnly_White.svg",
+                class: 'h-8 w-auto object-contain lg:hidden',
+                alt: 'ASAP Logo' %>
+            <%= image_tag "ASAP_sansTagline_White.svg",
+                class: 'hidden lg:block h-8 w-32 object-contain',
                 alt: 'ASAP Logo' %>
           <% end %>
         </div>

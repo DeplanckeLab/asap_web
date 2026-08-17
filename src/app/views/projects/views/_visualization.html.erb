@@ -189,6 +189,24 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       max-width: none !important;
       min-width: 0 !important;
       overflow: hidden;
+      font-size: 10px !important;
+      line-height: 1.2 !important;
+    }
+
+    [data-controller="visualization"] #current-coloring-indicator > div {
+      align-items: flex-start !important;
+    }
+
+    [data-controller="visualization"] #current-coloring-label {
+      flex-direction: column !important;
+      align-items: flex-start !important;
+      gap: 0 !important;
+    }
+
+    [data-controller="visualization"] #current-coloring-prefix {
+      font-size: 8px !important;
+      line-height: 1.2 !important;
+      color: #9ca3af !important;
     }
 
     [data-controller="visualization"] #global-filter-summary {
@@ -261,9 +279,18 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
     }
 
     [data-controller="visualization"] #current-coloring-link {
+      display: block !important;
+      max-width: 100% !important;
       overflow: hidden !important;
       text-overflow: ellipsis !important;
       white-space: nowrap !important;
+      font-size: 10px !important;
+      line-height: 1.25 !important;
+    }
+
+    [data-controller="visualization"] #current-coloring-revert-btn,
+    [data-controller="visualization"] #current-coloring-history-btn {
+      margin-top: 2px;
     }
 
     #viz-mobile-panel-selector {

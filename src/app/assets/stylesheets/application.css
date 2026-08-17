@@ -5,6 +5,13 @@
 
 /*  Layout components */
 
+/* Project/run/annot shell: size to the dynamic viewport so mobile browser
+   chrome does not clip the bottom of overflow-hidden pages (100vh bug). */
+.asap-project-shell {
+  height: 100vh;
+  height: 100dvh;
+}
+
 /* Fixed footer at the bottom of the page */
 #main_footer {
   position: fixed;

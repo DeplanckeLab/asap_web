@@ -27,7 +27,7 @@ end %>
 <% else %>
 <% case @view_type %>
 <% when 'summary' %>
-  <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+  <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
     <%= render 'projects/views/summary' %>
   </div>
 <% when 'visualization' %>
@@ -43,27 +43,27 @@ end %>
     <%= render 'projects/views/analysis' %>
   </div>
 <% when 'data' %>
-  <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+  <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
     <%= render 'projects/views/data' %>
   </div>
 <% when 'settings' %>
-  <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+  <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
     <%= render 'projects/views/settings' %>
   </div>
 <% when 'compliance' %>
-  <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+  <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
     <%= render 'projects/views/compliance' %>
   </div>
 <% when 'access' %>
-  <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+  <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
     <%= render 'projects/views/access' %>
   </div>
 <% when 'annotations' %>
-  <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+  <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
     <%= render 'projects/views/annotations' %>
   </div>
 <% else %>
-  <div class="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
+  <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 lg:px-8 py-6">
     <%= render 'projects/views/summary' %>
   </div>
 <% end %>

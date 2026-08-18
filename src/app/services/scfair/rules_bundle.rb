@@ -112,9 +112,26 @@ module Scfair
         end
         paths << "obs.label_pairs.#{field}"
         paths << "uns.label_pairs.#{field}" if path.start_with?('/attrs/')
+        paths << "cross-field.#{field_path('h5ad', :obs, field)}"
+        paths << "cross-field.#{field_path('loom', :obs, field)}"
+        cross_field_rule_fields_for_obs_field(field).each { |rule_field| paths << rule_field }
       end
 
       paths.uniq
+    end
+
+    def cross_field_rule_fields_for_obs_field(obs_field)
+      name = obs_field.to_s
+      return [] if name.blank?
+
+      cross_field_validation[:rules].values.filter_map do |rule|
+        token = rule[:token].to_s
+        violation_field = rule.dig(:violation, :field).to_s
+        mapping_field = rule.dig(:mapping, :field).to_s
+        next unless [token, violation_field, mapping_field].include?(name)
+
+        rule[:field]
+      end
     end
 
     def schema_id
@@ -1427,7 +1444,7 @@ module Scfair
       obs_path = field_path(format, :obs, field_name)
       message = kwargs.empty? ? template : format(template, **kwargs)
       severity = violation[:severity].to_s == 'warning' ? :warning : :error
-      { field: obs_path, severity: severity, message: message }
+      { field: obs_path, severity: severity, message: message, rule_key: rule_key.to_s }
     end
 
     def organism_specific_validation_config

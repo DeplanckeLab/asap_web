@@ -46,6 +46,7 @@ module ScfairSchemaRules
     dev_stage_term_id: nil,
     donor_id_val: nil,
     tissue_term_id: nil,
+    cell_type_term_id: nil,
     format: 'loom'
   )
     violations = []
@@ -104,11 +105,19 @@ module ScfairSchemaRules
         )
       end
 
-      if tissue_term_id.present? && !tissue_term_id.start_with?('CVCL_')
+      if tissue_term_id.present? && !Scfair::Rules.cellosaurus_ontology_term?(tissue_term_id)
         violations << Scfair::Rules.cross_field_violation_message(
           'CF-2f',
           format: format,
           value: tissue_term_id
+        )
+      end
+
+      if cell_type_term_id.present? && !%w[na unknown].include?(cell_type_term_id)
+        violations << Scfair::Rules.cross_field_violation_message(
+          'CF-7',
+          format: format,
+          value: cell_type_term_id
         )
       end
     end

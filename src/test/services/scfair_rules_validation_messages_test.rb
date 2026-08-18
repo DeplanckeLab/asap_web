@@ -62,6 +62,7 @@ class ScfairRulesValidationMessagesTest < TestBaseWithoutFixtures
     )
 
     assert_equal 'obs/suspension_type', violation[:field]
+    assert_equal 'CF-1', violation[:rule_key]
     assert_includes violation[:message], 'EFO:0009899'
     assert_includes violation[:message], 'cell, nucleus'
   end

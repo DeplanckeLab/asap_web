@@ -34,27 +34,29 @@ module Scfair
         sex_term_id: sex,
         dev_stage_term_id: dev_stage,
         donor_id_val: donor,
-        tissue_term_id: tissue
+        tissue_term_id: tissue,
+        cell_type_term_id: first(@field_values["#{prefix}cell_type_ontology_term_id"])
       )
 
       errors = []
       warnings = []
       rule_checks = []
       Array(violations).each do |v|
-        item = { field: "cross-field.#{v[:field]}", message: v[:message] }
+        rule = Rules.cross_field_rule_by_key(v[:rule_key])
+        field = rule ? rule[:field] : "cross-field.#{v[:field]}"
+        item = { field: field, message: v[:message] }
         v[:severity] == :error ? errors << item : warnings << item
       end
 
-      violated_fields = (errors + warnings).map { |x| x[:field].to_s }.join(' ')
+      violated_keys = Array(violations).map { |v| v[:rule_key].to_s }
       cf1 = Rules.cross_field_rule_by_key('CF-1')
       add_rule_check(
         rule_checks,
         cf1[:id],
-        violated_fields,
-        cf1[:token],
+        violated_keys.include?('CF-1'),
         Rules.cross_field_rule_message_for_key('CF-1', :pass)
       )
-      add_cell_line_checks(rule_checks, tissue_type: tissue_type, violated_fields: violated_fields)
+      add_cell_line_checks(rule_checks, tissue_type: tissue_type, violated_keys: violated_keys)
 
       donor_bad = tissue_type != 'cell line' && donor == 'na'
       rule_checks << {
@@ -64,7 +66,7 @@ module Scfair
       }
 
       cf4 = Rules.cross_field_rule_by_key('CF-4')
-      organoid_bad = violated_fields.include?(cf4[:token].to_s)
+      organoid_bad = violated_keys.include?('CF-4')
       rule_checks << {
         field: Rules.cross_field_rule_field('CF-4'),
         status: tissue_type == 'organoid' ? (organoid_bad ? 'failed' : 'passed') : 'skipped',
@@ -92,8 +94,7 @@ module Scfair
         message: is_single_present ? Rules.cross_field_rule_message_for_key('CF-6', cf6_bad ? :fail : :pass) : Rules.cross_field_not_applicable_message
       }
 
-      cell_type = first(@field_values["#{prefix}cell_type_ontology_term_id"])
-      cf7_bad = tissue_type == 'cell line' && !%w[na unknown].include?(cell_type) && cell_type.present?
+      cf7_bad = violated_keys.include?('CF-7')
       rule_checks << {
         field: Rules.cross_field_rule_field('CF-7'),
         status: tissue_type == 'cell line' ? (cf7_bad ? 'failed' : 'passed') : 'skipped',
@@ -112,7 +113,7 @@ module Scfair
       Array(v).first.to_s
     end
 
-    def add_cell_line_checks(rule_checks, tissue_type:, violated_fields:)
+    def add_cell_line_checks(rule_checks, tissue_type:, violated_keys:)
       cell_line = tissue_type == 'cell line'
 
       Rules.cross_field_cell_line_checks.each do |rule|
@@ -127,7 +128,7 @@ module Scfair
           next
         end
 
-        failed = violated_fields.include?(rule[:token].to_s)
+        failed = violated_keys.include?(rule[:key].to_s)
         rule_checks << {
           field: field,
           status: failed ? 'failed' : 'passed',
@@ -136,8 +137,7 @@ module Scfair
       end
     end
 
-    def add_rule_check(out, id, violated_blob, token, message)
-      failed = violated_blob.include?(token)
+    def add_rule_check(out, id, failed, message)
       out << {
         field: "cross-field.#{id}",
         status: failed ? 'failed' : 'passed',

@@ -1176,6 +1176,11 @@ cross_field:
         messages:
           pass: 'Cell line cell_type constraint OK'
           fail: 'cell_type_ontology_term_id should be na/unknown for cell lines'
+        token: cell_type_ontology_term_id
+        violation:
+          field: cell_type_ontology_term_id
+          severity: error
+          template: 'tissue_type is "cell line" -- cell_type_ontology_term_id SHOULD be "na" or "unknown", got "%{value}".'
       CF-8:
         slug: visium-in-tissue
         title: 'CF-8: Visium in_tissue spots'

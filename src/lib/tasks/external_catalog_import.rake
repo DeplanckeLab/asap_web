@@ -361,6 +361,10 @@ namespace :external_catalog do
     end
     puts "Total active candidates in DB: #{ExternalCatalogCandidate.current.count}"
     puts "Total obsolete candidates in DB: #{ExternalCatalogCandidate.obsolete_only.count}"
+    Array(totals[:failed]).each do |failure|
+      puts "FAILED #{failure[:source]}: #{failure[:error]}"
+    end
+    abort('external_catalog:sync_candidates: one or more sources failed') if Array(totals[:failed]).any?
   end
 
   desc 'Refresh collection title/description from upstream APIs (SOURCE=cellxgene|hca|all). Also updates matching ASAP project_collections.'

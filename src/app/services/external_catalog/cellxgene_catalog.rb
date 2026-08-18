@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'httparty'
+require 'net/http'
 require 'uri'
 
 module ExternalCatalog
@@ -8,6 +9,21 @@ module ExternalCatalog
   # (same source as scfair CellxgeneParser).
   class CellxgeneCatalog
     BASE_URL = 'https://api.cellxgene.cziscience.com/curation/v1/collections/'.freeze
+    HTTP_OPEN_TIMEOUT_SEC = 20
+    HTTP_READ_TIMEOUT_SEC = 180
+    HTTP_ATTEMPTS = 4
+    RETRYABLE_ERRORS = [
+      Net::OpenTimeout,
+      Net::ReadTimeout,
+      Errno::ECONNRESET,
+      Errno::ECONNREFUSED,
+      Errno::ETIMEDOUT,
+      SocketError
+    ].freeze
+    RETRYABLE_STATUS = [429, 500, 502, 503, 504].freeze
+    HTTP_HEADERS = { 'User-Agent' => 'ASAP-external-catalog (https://asap.epfl.ch)' }.freeze
+
+    class FetchError < StandardError; end
 
     def initialize(logger: Rails.logger)
       @logger = logger
@@ -19,13 +35,20 @@ module ExternalCatalog
       return enum_for(:each, limit: limit) unless block_given?
 
       yielded = 0
+      failed_collection_ids = []
       fetch_collections.each do |collection_summary|
         break if limit.present? && yielded >= limit.to_i
 
         collection_id = collection_summary[:collection_id] || collection_summary['collection_id']
         next if collection_id.blank?
 
-        detail = fetch_collection(collection_id)
+        begin
+          detail = fetch_collection(collection_id)
+        rescue FetchError => e
+          @logger.error("[ExternalCatalog::CellxgeneCatalog] collection=#{collection_id} #{e.message}")
+          failed_collection_ids << collection_id
+          next
+        end
         datasets = detail[:datasets] || detail['datasets'] || []
         collection_refs = collection_reference_fields(detail, collection_id)
         collection_title = (detail[:name] || detail['name'] || detail[:title] || detail['title']).to_s.presence
@@ -47,6 +70,11 @@ module ExternalCatalog
           end
         end
       end
+      if failed_collection_ids.any?
+        sample = failed_collection_ids.first(10).join(', ')
+        raise FetchError,
+              "CELLxGENE #{failed_collection_ids.size} collection(s) failed after retries: #{sample}"
+      end
       yielded
     end
 
@@ -57,17 +85,55 @@ module ExternalCatalog
     private
 
     def fetch_collections
-      response = HTTParty.get(BASE_URL, timeout: 120)
-      raise "CELLxGENE collections request failed: HTTP #{response.code}" unless response.success?
-
-      JSON.parse(response.body, symbolize_names: true)
+      http_get_json(BASE_URL, label: 'collections list')
     end
 
     def fetch_collection(collection_id)
-      response = HTTParty.get("#{BASE_URL}#{collection_id}", timeout: 120)
-      raise "CELLxGENE collection #{collection_id} request failed: HTTP #{response.code}" unless response.success?
+      http_get_json("#{BASE_URL}#{collection_id}", label: "collection #{collection_id}")
+    end
 
-      JSON.parse(response.body, symbolize_names: true)
+    def http_get_json(url, label:)
+      last_error = nil
+      HTTP_ATTEMPTS.times do |attempt|
+        begin
+          response = perform_get(url)
+          if response.success?
+            return JSON.parse(response.body, symbolize_names: true)
+          end
+
+          last_error = "HTTP #{response.code}"
+          unless RETRYABLE_STATUS.include?(response.code.to_i)
+            raise FetchError, "CELLxGENE #{label} failed: #{last_error}"
+          end
+        rescue *RETRYABLE_ERRORS => e
+          last_error = "#{e.class}: #{e.message}"
+        end
+
+        next_attempt = attempt + 2
+        next unless next_attempt <= HTTP_ATTEMPTS
+
+        sleep_sec = 2**attempt
+        @logger.warn(
+          "[ExternalCatalog::CellxgeneCatalog] retry #{next_attempt}/#{HTTP_ATTEMPTS} " \
+          "for #{label} after #{last_error} sleep=#{sleep_sec}s"
+        )
+        backoff_sleep(sleep_sec)
+      end
+
+      raise FetchError, "CELLxGENE #{label} failed after #{HTTP_ATTEMPTS} attempts: #{last_error}"
+    end
+
+    def perform_get(url)
+      HTTParty.get(
+        url,
+        open_timeout: HTTP_OPEN_TIMEOUT_SEC,
+        timeout: HTTP_READ_TIMEOUT_SEC,
+        headers: HTTP_HEADERS
+      )
+    end
+
+    def backoff_sleep(seconds)
+      sleep(seconds)
     end
 
     def entries_for_dataset(dataset, collection_refs = {}, collection_id: nil, collection_title: nil, collection_description: nil)

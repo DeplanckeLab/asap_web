@@ -23,7 +23,8 @@ module ExternalCatalog
         upserted: 0,
         marked_obsolete: 0,
         deleted_test: 0,
-        by_source: Hash.new(0)
+        by_source: Hash.new(0),
+        failed: []
       }
       sources.each do |src|
         result = sync_source(src, limit: limit, geo_mode: geo_mode)
@@ -31,6 +32,9 @@ module ExternalCatalog
         totals[:marked_obsolete] += result[:marked_obsolete]
         totals[:deleted_test] += result[:deleted_test]
         totals[:by_source][src] = result[:upserted]
+        next if result[:error].blank?
+
+        totals[:failed] << { source: src, error: "#{result[:error].class}: #{result[:error].message}" }
       end
       totals
     end
@@ -40,16 +44,34 @@ module ExternalCatalog
     def sync_source(source, limit:, geo_mode:)
       upserted = 0
       seen_external_ids = []
-      each_entry(source, limit: limit, geo_mode: geo_mode) do |entry|
-        ExternalCatalogCandidate.upsert_from_entry!(entry)
-        seen_external_ids << entry.external_id.to_s
-        upserted += 1
+      enumeration_error = nil
+      begin
+        each_entry(source, limit: limit, geo_mode: geo_mode) do |entry|
+          ExternalCatalogCandidate.upsert_from_entry!(entry)
+          seen_external_ids << entry.external_id.to_s
+          upserted += 1
+        end
+      rescue StandardError => e
+        enumeration_error = e
+        @logger.error(
+          "[ExternalCatalog::CandidateSync] source=#{source} incomplete enumeration; skip prune: " \
+          "#{e.class}: #{e.message}"
+        )
+      end
+
+      if enumeration_error.nil? && seen_external_ids.empty?
+        enumeration_error = StandardError.new(
+          "source=#{source} yielded 0 entries; skip prune"
+        )
+        @logger.error(
+          "[ExternalCatalog::CandidateSync] #{enumeration_error.message}"
+        )
       end
 
       marked_obsolete = 0
       deleted_test = 0
-      # Partial syncs must not mark the rest of the source as obsolete.
-      if limit.blank?
+      # Partial or failed walks must not mark unseen rows as obsolete.
+      if limit.blank? && enumeration_error.nil?
         prune = prune_missing_for_source!(source, seen_external_ids)
         marked_obsolete = prune[:marked_obsolete]
         deleted_test = prune[:deleted_test]
@@ -59,7 +81,12 @@ module ExternalCatalog
         "[ExternalCatalog::CandidateSync] source=#{source} upserted=#{upserted} " \
         "marked_obsolete=#{marked_obsolete} deleted_test=#{deleted_test}"
       )
-      { upserted: upserted, marked_obsolete: marked_obsolete, deleted_test: deleted_test }
+      {
+        upserted: upserted,
+        marked_obsolete: marked_obsolete,
+        deleted_test: deleted_test,
+        error: enumeration_error
+      }
     end
 
     def prune_missing_for_source!(source, seen_external_ids)

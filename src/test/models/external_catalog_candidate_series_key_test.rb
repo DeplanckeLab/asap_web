@@ -84,6 +84,129 @@ class ExternalCatalogCandidateSeriesKeyTest < ActiveSupport::TestCase
     record&.destroy
   end
 
+  test 'ordered_for_catalog groups by collection then title even when DOI series_keys differ' do
+    suffix = SecureRandom.hex(3)
+    figure_collection = "7dd599c5-d25d-40c0-b1a6-#{suffix}"
+    mouse_collection = "c69bd2e0-32fe-431d-b855-#{suffix}"
+    figure1 = ExternalCatalogCandidate.create!(
+      source: 'cellxgene',
+      external_id: "fig1-#{suffix}",
+      provider_tag: 'CELLxGENE',
+      title: 'Figure 1',
+      dois_json: ['10.1002/ctm2.1356'].to_json,
+      collection_id: figure_collection,
+      import_status: 'idle',
+      tax_id: 9606
+    )
+    figure2 = ExternalCatalogCandidate.create!(
+      source: 'cellxgene',
+      external_id: "fig2-#{suffix}",
+      provider_tag: 'CELLxGENE',
+      title: 'Figure 2',
+      dois_json: ['10.1002/ctm2.1356'].to_json,
+      collection_id: figure_collection,
+      import_status: 'idle',
+      tax_id: 9606
+    )
+    mouse1 = ExternalCatalogCandidate.create!(
+      source: 'cellxgene',
+      external_id: "mouse1-#{suffix}",
+      provider_tag: 'CELLxGENE',
+      title: 'Mouse 1',
+      collection_id: mouse_collection,
+      import_status: 'idle',
+      tax_id: 10090
+    )
+    mouse2 = ExternalCatalogCandidate.create!(
+      source: 'cellxgene',
+      external_id: "mouse2-#{suffix}",
+      provider_tag: 'CELLxGENE',
+      title: 'Mouse 2',
+      collection_id: mouse_collection,
+      import_status: 'idle',
+      tax_id: 10090
+    )
+    figure3 = ExternalCatalogCandidate.create!(
+      source: 'cellxgene',
+      external_id: "fig3-#{suffix}",
+      provider_tag: 'CELLxGENE',
+      title: 'Figure 3',
+      dois_json: ['10.1002/ctm2.1356'].to_json,
+      collection_id: figure_collection,
+      import_status: 'idle',
+      tax_id: 9606
+    )
+
+    ordered = ExternalCatalogCandidate.where(
+      id: [figure1.id, figure2.id, figure3.id, mouse1.id, mouse2.id]
+    ).ordered_for_catalog.to_a
+
+    assert_equal ['Figure 1', 'Figure 2', 'Figure 3', 'Mouse 1', 'Mouse 2'],
+                 ordered.map(&:title)
+  ensure
+    ExternalCatalogCandidate.where(
+      id: [figure1&.id, figure2&.id, figure3&.id, mouse1&.id, mouse2&.id].compact
+    ).delete_all
+  end
+
+  test 'take_for_import finishes the last collection when COUNT would split it' do
+    suffix = SecureRandom.hex(3)
+    mouse_collection = "aaaa1111-32fe-431d-b855-#{suffix}"
+    figure_collection = "bbbb2222-d25d-40c0-b1a6-#{suffix}"
+    rows = []
+    ['Mouse 1', 'Mouse 2'].each_with_index do |title, i|
+      rows << ExternalCatalogCandidate.create!(
+        source: 'cellxgene',
+        external_id: "mouse#{i}-#{suffix}",
+        provider_tag: 'CELLxGENE',
+        title: title,
+        collection_id: mouse_collection,
+        import_status: 'idle',
+        tax_id: 10090
+      )
+    end
+    ['Figure 1', 'Figure 2', 'Figure 3'].each_with_index do |title, i|
+      rows << ExternalCatalogCandidate.create!(
+        source: 'cellxgene',
+        external_id: "fig#{i}-#{suffix}",
+        provider_tag: 'CELLxGENE',
+        title: title,
+        dois_json: ['10.1002/ctm2.1356'].to_json,
+        collection_id: figure_collection,
+        import_status: 'idle',
+        tax_id: 9606
+      )
+    end
+
+    taken = ExternalCatalogCandidate.where(id: rows.map(&:id)).take_for_import(3)
+
+    assert_equal ['Mouse 1', 'Mouse 2', 'Figure 1', 'Figure 2', 'Figure 3'],
+                 taken.map(&:title)
+  ensure
+    ExternalCatalogCandidate.where(id: rows&.map(&:id)).delete_all
+  end
+
+  test 'take_for_import does not overflow when the batch is a single collection' do
+    suffix = SecureRandom.hex(3)
+    collection_id = "cccc3333-d25d-40c0-b1a6-#{suffix}"
+    rows = (1..4).map do |i|
+      ExternalCatalogCandidate.create!(
+        source: 'cellxgene',
+        external_id: "only#{i}-#{suffix}",
+        provider_tag: 'CELLxGENE',
+        title: "Only #{i}",
+        collection_id: collection_id,
+        import_status: 'idle',
+        tax_id: 9606
+      )
+    end
+
+    taken = ExternalCatalogCandidate.where(id: rows.map(&:id)).take_for_import(2)
+    assert_equal ['Only 1', 'Only 2'], taken.map(&:title)
+  ensure
+    ExternalCatalogCandidate.where(id: rows&.map(&:id)).delete_all
+  end
+
   test 'ordered_for_catalog groups by series_key then title' do
     suffix = SecureRandom.hex(3)
     a = ExternalCatalogCandidate.create!(

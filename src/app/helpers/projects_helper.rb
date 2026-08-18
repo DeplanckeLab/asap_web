@@ -405,11 +405,11 @@ module ProjectsHelper
   end
 
   # scFAIR check after key / public id / optional origin badges on the search list.
-  # Green when single-cell and latest validation passed; light grey when single-cell
-  # but not compliant / not yet validated; nothing for non-single-cell projects.
+  # Green when sc-like (sc/spat/atac/multi) and latest validation passed; light grey
+  # when not compliant / not yet validated; nothing for other project types.
   # latest_passed_by_project_id must be the batch map from the index action.
   def project_scfair_compliance_list_icon(project, latest_passed_by_project_id)
-    return unless project&.single_cell?
+    return unless project&.sc_like?
 
     passed = latest_passed_by_project_id[project.id]
 

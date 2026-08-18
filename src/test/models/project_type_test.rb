@@ -29,4 +29,11 @@ class ProjectTypeTest < ActiveSupport::TestCase
     again = ProjectType.ensure_for_tag!('sc')
     assert_equal existing.id, again.id
   end
+
+  test 'sc_like? is true for sc spat atac multi and false for bulk' do
+    %w[sc spat atac multi].each do |tag|
+      assert ProjectType.ensure_for_tag!(tag).sc_like?, "expected #{tag} to be sc-like"
+    end
+    refute ProjectType.ensure_for_tag!('bulk').sc_like?
+  end
 end

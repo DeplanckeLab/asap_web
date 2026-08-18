@@ -947,6 +947,12 @@ class Project < ApplicationRecord
       project_type_id == 1  # ID 1 is Single-cell transcriptomics
   end
 
+  def sc_like?
+    return false unless project_type
+
+    project_type.sc_like?
+  end
+
   # Infer spat / atac / multi from assay ontology terms (or labels) already
   # stored on the project (Annots and/or CXG field_values).
   # Returns the ProjectType tag, or nil when assay metadata does not match.

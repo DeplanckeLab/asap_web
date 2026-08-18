@@ -72,7 +72,7 @@
     <div>
       <%= form.label :project_type_tags, "Project Type Tags (comma-separated)", class: "block text-sm font-medium text-gray-700" %>
       <div class="mt-1">
-        <%= form.text_field :project_type_tags, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900", placeholder: "e.g., sc or sc,bulk" %>
+        <%= form.text_field :project_type_tags, class: "w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900", placeholder: "e.g., sc,spat,atac,multi" %>
       </div>
       <p class="mt-1 text-xs text-gray-500">Matches against ProjectType.tag (<%= ProjectType.pluck(:tag).compact.join(', ') %>)</p>
     </div>

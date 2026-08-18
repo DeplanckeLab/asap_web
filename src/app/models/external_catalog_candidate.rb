@@ -40,13 +40,17 @@ class ExternalCatalogCandidate < ApplicationRecord
       pattern, pattern, pattern, pattern, pattern
     )
   }
-  # Logical browse/import order: preferred source, DOI/GEO/collection series, organism, title.
+  # Logical browse/import order: preferred source, CELLxGENE/HCA collection (or DOI/GEO
+  # series when there is no collection), title, then organism.
+  # Collection members stay together even when some rows have a DOI series_key and
+  # others only have collection:<uuid> — sorting by series_key alone splits them.
   scope :ordered_for_catalog, lambda {
     order(
       Arel.sql(import_source_order_sql),
+      Arel.sql("COALESCE(collection_id, series_key, '') ASC"),
       Arel.sql("COALESCE(series_key, '') ASC"),
-      Arel.sql('tax_id ASC NULLS LAST'),
       Arel.sql("LOWER(COALESCE(title, '')) ASC"),
+      Arel.sql('tax_id ASC NULLS LAST'),
       id: :asc
     )
   }
@@ -56,6 +60,38 @@ class ExternalCatalogCandidate < ApplicationRecord
       "WHEN #{connection.quote(source)} THEN #{index}"
     end
     "CASE source #{cases.join(' ')} ELSE #{IMPORT_SOURCE_ORDER.size} END ASC"
+  end
+
+  # Group key used to keep related datasets together (collection, else DOI/GEO series).
+  def catalog_group_key
+    collection_id.to_s.strip.presence || series_key.to_s.strip.presence || "id:#{id}"
+  end
+
+  # Take up to +count+ candidates in catalog order. If that slice starts a second
+  # collection, also take the rest of the last collection so COUNT cannot leave
+  # Figure 3 behind after importing Figure 1 and Figure 2.
+  # A batch that is entirely one collection is truncated at COUNT.
+  def self.take_for_import(count)
+    ordered = all.ordered_for_catalog
+    return ordered.to_a if count.blank?
+
+    n = Integer(count)
+    rows = ordered.limit(n).to_a
+    return rows if rows.empty? || rows.size < n
+
+    return rows if rows.map(&:catalog_group_key).uniq.size <= 1
+
+    last = rows.last
+    extra = ordered.where.not(id: rows.map(&:id))
+    extra =
+      if last.collection_id.present?
+        extra.where(collection_id: last.collection_id)
+      elsif last.series_key.present?
+        extra.where(series_key: last.series_key)
+      else
+        return rows
+      end
+    rows + extra.to_a
   end
 
   # Candidate ids that already have a live ASAP project via ProviderProject.

@@ -33,6 +33,11 @@ project_types_seed.each do |attrs|
   end
 end
 
+if defined?(ComplianceSchema) && ComplianceSchema.table_exists?
+  updated = ComplianceSchema.ensure_sc_like_project_types!
+  puts "scFAIR schema project types updated on #{updated} row(s)"
+end
+
 puts "Seeding guided tours..."
 
 def seed_guided_tour!(name, duration_time:, steps:)

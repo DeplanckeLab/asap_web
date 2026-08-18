@@ -79,10 +79,9 @@ namespace :external_catalog do
       scope = scope.where('filesize = 0 OR filesize <= ?', max_filesize)
     end
 
-    # Same order as the catalog UI: source, DOI/GEO/collection series, organism, title.
-    scope = scope.ordered_for_catalog
-    scope = scope.limit(count) if count.present?
-    scope.to_a
+    # Same order as the catalog UI. COUNT finishes the last collection if the
+    # slice would otherwise split it (e.g. Figure 1, Figure 2, then Mouse…).
+    scope.take_for_import(count)
   end
 
   def external_catalog_print_results(results)
@@ -233,6 +232,7 @@ namespace :external_catalog do
 
   desc 'Import from external_catalog_candidates (COUNT/N/LIMIT, IMPORT_USER_EMAIL|IMPORT_USER_ID, SOURCE, PROJECT_TYPE, ONLY_NEW=1). ' \
        'Without SOURCE (or SOURCE=all), candidates are taken in order CELLxGENE, Bgee, HCA, GEO. ' \
+       'COUNT may include extra rows to finish the last collection so a batch cannot split it. ' \
        'Duplicate file content (SHA-256) links the provider onto the existing ASAP project instead of creating another. ' \
        'SC projects: refresh analysis_pipeline, hard-fail scFAIR loom/h5ad validation on errors ' \
        '(and on warnings unless ALLOW_SCFAIR_WARNINGS=1), sync chunked h5ad export, then publish/archive. ' \

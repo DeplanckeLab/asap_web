@@ -5,7 +5,8 @@ class ProjectType < ApplicationRecord
 
   # Tags that share the single-cell (sc) analysis method allow-lists for
   # core pipeline steps (parsing, metadata, DE, clustering, heatmap,
-  # module score, gene enrichment, umap, tsne, pca_sc).
+  # module score, gene enrichment, umap, tsne, pca_sc) and the scFAIR
+  # compliance schema.
   SC_LIKE_TAGS = %w[sc spat atac multi].freeze
 
   CANONICAL = {

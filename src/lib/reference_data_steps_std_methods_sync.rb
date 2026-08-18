@@ -4,13 +4,13 @@ require "json"
 require "set"
 
 # Applies Step, StdMethod, Version, DockerImage, DockerBuild, NewsItem,
-# CellOntology, OntologyTermType, and UploadType rows from a JSON snapshot produced by
+# CellOntology, OntologyTermType, UploadType, and ProjectType rows from a JSON snapshot produced by
 # ReferenceDataCompare / bin/rake reference_data:export, or built in-memory by
 # the rake tasks.
 #
 # Preferred entry point: +reference_data:steps_std_methods:sync_from_dev+, which
 # sets +max_version_id+ and matches Step, StdMethod, Version, NewsItem,
-# CellOntology, OntologyTermType, and UploadType by primary key id (required when the same
+# CellOntology, OntologyTermType, UploadType, and ProjectType by primary key id (required when the same
 # step name exists across pipeline versions).
 #
 # OBSOLETE: calling without +max_version_id+ (rake +reference_data:steps_std_methods:sync+)
@@ -32,6 +32,7 @@ require "set"
 # OntologyTermType is applied after CellOntology so +cell_ontology_ids+ stay valid
 # (create / update only; no OntologyTermType deletes — clas / mappings FKs).
 # UploadType rows are applied by id when present (create / update only; no deletes — Fu.upload_type refs).
+# ProjectType rows are applied by id when present (create / update only; no deletes — Project.project_type_id FKs).
 class ReferenceDataStepsStdMethodsSync
   SyncError = Class.new(StandardError)
 
@@ -74,6 +75,7 @@ class ReferenceDataStepsStdMethodsSync
     cell_ontologies_in = fetch_optional_records_if_present!("CellOntology")
     ontology_term_types_in = fetch_optional_records_if_present!("OntologyTermType")
     upload_types_in = fetch_optional_records_if_present!("UploadType")
+    project_types_in = fetch_optional_records_if_present!("ProjectType")
 
     docker_by_src_id = index_optional_model!("DockerImage")
     version_by_src_id = index_optional_model!("Version")
@@ -111,6 +113,9 @@ class ReferenceDataStepsStdMethodsSync
       upload_types_created: 0,
       upload_types_updated: 0,
       upload_types_unchanged: 0,
+      project_types_created: 0,
+      project_types_updated: 0,
+      project_types_unchanged: 0,
       steps_created: 0,
       steps_updated: 0,
       steps_unchanged: 0,
@@ -132,6 +137,7 @@ class ReferenceDataStepsStdMethodsSync
       apply_cell_ontologies!(cell_ontologies_in, summary)
       apply_ontology_term_types!(ontology_term_types_in, summary)
       apply_upload_types!(upload_types_in, summary)
+      apply_project_types!(project_types_in, summary)
       apply_steps!(steps_in, docker_remap, version_remap, summary)
       apply_std_methods!(
         steps_in,
@@ -155,7 +161,8 @@ class ReferenceDataStepsStdMethodsSync
       news_items_in,
       cell_ontologies_in,
       ontology_term_types_in,
-      upload_types_in
+      upload_types_in,
+      project_types_in
     )
     summary
   end
@@ -474,6 +481,12 @@ class ReferenceDataStepsStdMethodsSync
   def prepare_upload_type_row(row)
     attrs = row.except("id")
     target_columns = UploadType.column_names.to_set
+    attrs.select { |column, _value| target_columns.include?(column) }
+  end
+
+  def prepare_project_type_row(row)
+    attrs = row.except("id")
+    target_columns = ProjectType.column_names.to_set
     attrs.select { |column, _value| target_columns.include?(column) }
   end
 
@@ -826,6 +839,51 @@ class ReferenceDataStepsStdMethodsSync
     return if @dry_run || upload_types_in.empty?
 
     reset_pk_sequence!("upload_types")
+  end
+
+  def apply_project_types!(project_types_in, summary)
+    return if project_types_in.nil?
+
+    unless ActiveRecord::Base.connection.table_exists?(:project_types)
+      raise SyncError,
+            "project_types table is missing on the target database. " \
+            "Run migrations before syncing ProjectType rows."
+    end
+
+    project_types_in.sort_by { |row| row["id"].to_i }.each do |src|
+      src_id = src["id"]
+      raise SyncError, "ProjectType row without id: #{src.inspect}" if src_id.nil?
+
+      prepared = prepare_project_type_row(src)
+      tag = prepared["tag"].to_s
+      label = "id=#{src_id} tag=#{tag.inspect}"
+      record = ProjectType.find_by(id: src_id)
+
+      if record.nil?
+        puts "[#{mode_label}] create ProjectType #{label}"
+        summary[:project_types_created] += 1
+        next if @dry_run
+
+        ProjectType.create!(prepared.merge("id" => src_id))
+        next
+      end
+
+      if record_attributes_match?(record, prepared)
+        summary[:project_types_unchanged] += 1
+        next
+      end
+
+      puts "[#{mode_label}] update ProjectType #{label} (target id=#{record.id})"
+      log_verbose_diff!(record, prepared)
+      summary[:project_types_updated] += 1
+      next if @dry_run
+
+      record.update!(prepared)
+    end
+
+    return if @dry_run || project_types_in.empty?
+
+    reset_pk_sequence!("project_types")
   end
 
   def reset_pk_sequence!(table_name)
@@ -1196,7 +1254,8 @@ class ReferenceDataStepsStdMethodsSync
     news_items_in = [],
     cell_ontologies_in = nil,
     ontology_term_types_in = nil,
-    upload_types_in = nil
+    upload_types_in = nil,
+    project_types_in = nil
   )
     puts ""
     puts "Summary (#{mode_label})"
@@ -1233,6 +1292,11 @@ class ReferenceDataStepsStdMethodsSync
       puts "  upload_types: created=#{summary[:upload_types_created]} updated=#{summary[:upload_types_updated]} " \
            "unchanged=#{summary[:upload_types_unchanged]}"
       puts "  snapshot upload_types: #{upload_types_in.size}"
+    end
+    if project_types_in
+      puts "  project_types: created=#{summary[:project_types_created]} updated=#{summary[:project_types_updated]} " \
+           "unchanged=#{summary[:project_types_unchanged]}"
+      puts "  snapshot project_types: #{project_types_in.size}"
     end
     puts "  steps: created=#{summary[:steps_created]} updated=#{summary[:steps_updated]} unchanged=#{summary[:steps_unchanged]}"
     puts "  std_methods: created=#{summary[:std_methods_created]} updated=#{summary[:std_methods_updated]} unchanged=#{summary[:std_methods_unchanged]}"

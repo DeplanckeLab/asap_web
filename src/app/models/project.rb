@@ -967,7 +967,7 @@ class Project < ApplicationRecord
     tag = inferred_project_type_tag_from_assay
     return false if tag.blank?
 
-    ptype = ProjectType.find_by(tag: tag)
+    ptype = ProjectType.ensure_for_tag!(tag)
     if ptype.nil?
       Rails.logger.warn("[Project] No ProjectType for inferred assay tag=#{tag} project=#{key}")
       return false

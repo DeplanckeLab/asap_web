@@ -181,6 +181,26 @@ class ProjectTest < TestBaseWithoutFixtures
     assert_equal spat.id, project.reload.project_type_id
   end
 
+  test "apply_project_type_from_assay_metadata creates spat type when the row is missing" do
+    ProjectType.find_by(tag: "spat")&.destroy!
+    project = create_test_project!(name: "Visium create spat", key: "vcs#{SecureRandom.hex(3)}", project_type_id: nil)
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: project.id,
+        name: "/col_attrs/assay_ontology_term_id",
+        list_cat_json: ["EFO:0022857"].to_json,
+        nber_cols: 10,
+        dim: 1
+      )
+    )
+
+    assert project.apply_project_type_from_assay_metadata!
+    spat = ProjectType.find_by!(tag: "spat")
+    assert_equal spat.id, project.reload.project_type_id
+  ensure
+    ProjectType.ensure_for_tag!("spat")
+  end
+
   test "apply_project_type_from_assay_metadata assigns atac from scATAC annot when type is blank" do
     atac = ProjectType.find_by!(tag: "atac")
     project = create_test_project!(name: "ATAC infer", key: "ata#{SecureRandom.hex(3)}", project_type_id: nil)

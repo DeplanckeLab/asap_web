@@ -38,6 +38,18 @@ class ExternalCatalogProjectTypeTest < ActiveSupport::TestCase
     )
   end
 
+  test 'project_type_for creates spat when missing from database' do
+    ProjectType.find_by(tag: 'spat')&.destroy!
+
+    begin
+      ptype = @importer.send(:project_type_for, entry_for('spat'))
+      assert_equal 'spat', ptype.tag
+      assert_equal 'Spatial transcriptomics', ptype.name
+    ensure
+      ProjectType.ensure_for_tag!('spat')
+    end
+  end
+
   test 'project_type_for maps spat and bulk tags' do
     assert_equal @spat.id, @importer.send(:project_type_for, entry_for('spat')).id
     assert_equal @bulk.id, @importer.send(:project_type_for, entry_for('bulk')).id

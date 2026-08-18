@@ -299,7 +299,7 @@ module ExternalCatalog
     def project_type_for(entry, fu: nil)
       tag = entry.project_type_tag.to_s
       tag = 'spat' if fu && preparsing_spatial?(fu)
-      ptype = ProjectType.find_by(tag: tag)
+      ptype = ProjectType.ensure_for_tag!(tag)
       raise Error, "No ProjectType for tag=#{tag.inspect}" unless ptype
 
       ptype

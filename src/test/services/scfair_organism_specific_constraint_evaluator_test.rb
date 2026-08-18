@@ -100,6 +100,20 @@ class ScfairOrganismSpecificConstraintEvaluatorTest < TestBaseWithoutFixtures
     assert result[:errors].any? { |entry| entry[:field] == "#{CHECK}.ethnicity" }
   end
 
+  test 'accepts Cellosaurus CVCL terms for cell line tissue' do
+    result = Scfair::OrganismSpecificConstraintEvaluator.new(
+      field_values: {
+        'obs/tissue_type' => ['cell line'],
+        'obs/tissue_ontology_term_id' => ['CVCL_0031']
+      },
+      format: 'h5ad'
+    ).call
+
+    tissue = result[:valid_checks].find { |check| check[:field] == "#{CHECK}.tissue" }
+    assert_equal 'passed', tissue[:status]
+    assert result[:errors].none? { |entry| entry[:field] == "#{CHECK}.tissue" }
+  end
+
   test 'validates celegans sex terms' do
     result = Scfair::OrganismSpecificConstraintEvaluator.new(
       field_values: {

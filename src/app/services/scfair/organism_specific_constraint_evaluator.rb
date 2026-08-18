@@ -85,7 +85,7 @@ module Scfair
       return skipped_check('tissue', :field_missing) if tissue_values.empty?
 
       if tissue_type == @cfg[:cell_line_tissue_type]
-        invalid = tissue_values.reject { |value| value.start_with?("#{@cfg[:cellosaurus_prefix]}_") }
+        invalid = tissue_values.reject { |value| value.start_with?(@cfg[:cellosaurus_prefix]) }
         return build_custom_result(
           rule: 'tissue',
           label: 'tissue_ontology_term_id',

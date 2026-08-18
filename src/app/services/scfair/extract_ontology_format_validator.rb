@@ -34,6 +34,8 @@ module Scfair
               next
             end
 
+            next if Rules.cellosaurus_ontology_term?(term)
+
             prefix = term.split(':').first
             next if prefixes.include?(prefix)
 

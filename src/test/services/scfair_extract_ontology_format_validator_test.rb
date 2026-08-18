@@ -40,4 +40,17 @@ class ScfairExtractOntologyFormatValidatorTest < TestBaseWithoutFixtures
     assert_empty result[:warnings]
     assert result[:valid_checks].any? { |entry| entry[:status] == 'passed' }
   end
+
+  test 'passes Cellosaurus tissue ontology term for loom' do
+    result = Scfair::ExtractOntologyFormatValidator.new(
+      field_values: {
+        '/col_attrs/tissue_ontology_term_id' => ['CVCL_0031']
+      },
+      format: 'loom'
+    ).call
+
+    assert_empty result[:errors]
+    assert_empty result[:warnings]
+    assert result[:valid_checks].any? { |entry| entry[:status] == 'passed' }
+  end
 end

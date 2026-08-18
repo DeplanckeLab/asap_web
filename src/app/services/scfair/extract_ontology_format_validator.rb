@@ -34,10 +34,8 @@ module Scfair
               next
             end
 
-            next if Rules.cellosaurus_ontology_term?(term)
-
-            prefix = term.split(':').first
-            next if prefixes.include?(prefix)
+            prefix = Rules.ontology_term_prefix(term)
+            next if Rules.ontology_term_matches_prefixes?(term, prefixes)
 
             errors << CheckResult.ontology_format(
               field: path,

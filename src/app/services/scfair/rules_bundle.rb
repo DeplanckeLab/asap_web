@@ -410,8 +410,26 @@ module Scfair
       }.freeze
     end
 
+    def cellosaurus_ontology_tag
+      ontology_term_format_config[:cellosaurus_prefix].to_s.sub(/_+\z/, '')
+    end
+
     def ontology_allows_cellosaurus_format?(field_name)
-      ontology_prefixes(field_name).include?('CVCL')
+      ontology_prefixes(field_name).include?(cellosaurus_ontology_tag)
+    end
+
+    # Cellosaurus IDs are CVCL_*, not PREFIX:ID. The ontology tag in prefix lists is CVCL.
+    def ontology_term_prefix(term)
+      term = term.to_s.strip
+      return cellosaurus_ontology_tag if cellosaurus_ontology_term?(term)
+      return nil unless term.include?(':')
+
+      term.split(':', 2).first
+    end
+
+    def ontology_term_matches_prefixes?(term, prefixes)
+      prefix = ontology_term_prefix(term)
+      prefix.present? && Array(prefixes).map(&:to_s).include?(prefix)
     end
 
     def ontology_format_example(field_name)

@@ -206,7 +206,7 @@ module Scfair
     end
 
     def cellosaurus_term?(field_name, identifier)
-      identifier.to_s.start_with?('CVCL_') && Rules.ontology_prefixes(field_name).include?('CVCL')
+      Rules.cellosaurus_ontology_term?(identifier) && Rules.ontology_allows_cellosaurus_format?(field_name)
     end
 
     def check_label_id_pair(field_name, id_values, allowed_specials = [])

@@ -470,19 +470,17 @@ class ScfairLoomValidatorService
       return
     end
 
-    return if Scfair::Rules.cellosaurus_ontology_term?(term)
+    prefix = Scfair::Rules.ontology_term_prefix(term)
+    return if Scfair::Rules.ontology_term_matches_prefixes?(term, valid_prefixes)
 
-    prefix = term.split(':').first
-    unless valid_prefixes.include?(prefix)
-      @errors << Scfair::CheckResult.build(
-        check_id: Scfair::Rules::ONTOLOGY_FORMAT_CHECK_ID,
-        field: field,
-        status: 'failed',
-        code: 'unexpected_prefix',
-        format: 'loom',
-        message: "Unexpected ontology prefix '#{prefix}' for #{field}"
-      )
-    end
+    @errors << Scfair::CheckResult.build(
+      check_id: Scfair::Rules::ONTOLOGY_FORMAT_CHECK_ID,
+      field: field,
+      status: 'failed',
+      code: 'unexpected_prefix',
+      format: 'loom',
+      message: "Unexpected ontology prefix '#{prefix}' for #{field}"
+    )
   end
 
   def validate_organism_specific_requirements

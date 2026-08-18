@@ -10,6 +10,10 @@ class ScfairOntologyTermFormatTest < TestBaseWithoutFixtures
     assert Scfair::Rules.obo_ontology_term_format?('EFO:0009899')
     refute Scfair::Rules.obo_ontology_term_format?('EFO-0009899')
     assert Scfair::Rules.cellosaurus_ontology_term?('CVCL_1P02')
+    assert_equal 'CVCL', Scfair::Rules.cellosaurus_ontology_tag
+    assert_equal 'CVCL', Scfair::Rules.ontology_term_prefix('CVCL_0031')
+    assert Scfair::Rules.ontology_term_matches_prefixes?('CVCL_0031', %w[UBERON CVCL WBbt])
+    refute Scfair::Rules.ontology_term_matches_prefixes?('CVCL_0031', %w[UBERON])
   end
 
   test 'assay requires obo format only' do

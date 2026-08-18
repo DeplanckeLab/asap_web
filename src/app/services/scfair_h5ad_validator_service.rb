@@ -551,7 +551,7 @@ class ScfairH5adValidatorService
           if term in specials:
             continue
           if term.startswith(CELLOSAURUS_PREFIX):
-            if "CVCL" not in prefixes:
+            if CELLOSAURUS_PREFIX.rstrip("_") not in prefixes:
               errors.append({
                 "field": field_path,
                 "check_id": ONTOLOGY_FORMAT_CHECK_ID,
@@ -578,7 +578,7 @@ class ScfairH5adValidatorService
             })
             issues += 1
             continue
-          prefix = term.split(":")[0]
+          prefix = term.split(":", 1)[0]
           if prefix not in prefixes:
             errors.append({
               "field": field_path,

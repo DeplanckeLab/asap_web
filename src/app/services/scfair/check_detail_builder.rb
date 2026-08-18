@@ -565,7 +565,7 @@ module Scfair
         "Allowed ontology prefixes: #{prefixes.join(', ')}"
       ]
 
-      if prefixes.include?('CVCL')
+      if prefixes.include?(Rules.cellosaurus_ontology_tag)
         checks << 'Accepts Cellosaurus CVCL_* identifiers (underscore format) in addition to PREFIX:ID terms'
       end
 
@@ -634,7 +634,7 @@ module Scfair
         "Allowed ontology prefixes: #{prefixes.join(', ')}"
       ]
 
-      if prefixes.include?('CVCL')
+      if prefixes.include?(Rules.cellosaurus_ontology_tag)
         checks << 'Accepts Cellosaurus CVCL_* identifiers (underscore format) in addition to PREFIX:ID terms'
       end
 
@@ -1407,7 +1407,7 @@ module Scfair
       return nil if cell_values.empty?
 
       invalid = cell_values.reject do |value|
-        %w[unknown na].include?(value) || allowed_prefixes.any? { |prefix| value.start_with?("#{prefix}:") }
+        %w[unknown na].include?(value) || Rules.ontology_term_matches_prefixes?(value, allowed_prefixes)
       end
 
       organism_prefix_status_row(
@@ -1422,11 +1422,11 @@ module Scfair
       return nil if tissue_values.empty?
 
       invalid = if tissue_type == 'cell line'
-                  tissue_values.reject { |value| value.start_with?('CVCL_') }
+                  tissue_values.reject { |value| Rules.cellosaurus_ontology_term?(value) }
                 else
                   special = tissue_type == 'primary cell culture' ? %w[unknown na] : []
                   tissue_values.reject do |value|
-                    special.include?(value) || allowed_prefixes.any? { |prefix| value.start_with?("#{prefix}:") }
+                    special.include?(value) || Rules.ontology_term_matches_prefixes?(value, allowed_prefixes)
                   end
                 end
 

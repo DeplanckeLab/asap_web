@@ -85,7 +85,7 @@ module Scfair
       return skipped_check('tissue', :field_missing) if tissue_values.empty?
 
       if tissue_type == @cfg[:cell_line_tissue_type]
-        invalid = tissue_values.reject { |value| value.start_with?(@cfg[:cellosaurus_prefix]) }
+        invalid = tissue_values.reject { |value| Rules.cellosaurus_ontology_term?(value) }
         return build_custom_result(
           rule: 'tissue',
           label: 'tissue_ontology_term_id',
@@ -158,7 +158,7 @@ module Scfair
 
         invalid = ethnicity_values.reject do |value|
           Rules.organism_ethnicity_special_values.include?(value) ||
-            Rules.organism_ethnicity_prefixes.any? { |prefix| value.start_with?("#{prefix}:") }
+            Rules.ontology_term_matches_prefixes?(value, Rules.organism_ethnicity_prefixes)
         end
         build_prefix_result(
           rule: 'ethnicity',
@@ -269,7 +269,7 @@ module Scfair
 
     def invalid_prefix_values(raw_values, allowed_prefixes:, special_values:)
       split_values(raw_values).reject do |value|
-        special_values.include?(value) || allowed_prefixes.any? { |prefix| value.start_with?("#{prefix}:") }
+        special_values.include?(value) || Rules.ontology_term_matches_prefixes?(value, allowed_prefixes)
       end.uniq.first(5)
     end
 

@@ -76,6 +76,10 @@ class InterruptedJobRecovery
   def recover_fus
     Fu.where(status: 'downloading').find_each do |fu|
       next if fu.url.blank?
+      if download_still_running?(fu)
+        Rails.logger.info("[InterruptedJobRecovery] Fu##{fu.id} download still running; not re-queued")
+        next
+      end
 
       if fu.compliance_schema_id.present? || fu.compliance_task_id.present?
         if fu.compliance_schema_id.blank? || fu.compliance_task_id.blank?
@@ -194,6 +198,11 @@ class InterruptedJobRecovery
     ModuleScoreRequest.where(status: %w[pending running]).find_each do |request|
       enqueue(GeneSetItemModuleScoreJob, request.id)
     end
+  end
+
+  def download_still_running?(fu)
+    pid = UrlDownloadService.live_pid(UrlDownloadService.pid_path_for_fu(fu))
+    pid.present?
   end
 
   def enqueue(job_class, *args, uniqueness: nil, **kwargs)

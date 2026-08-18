@@ -1,7 +1,5 @@
 require 'open-uri'
 require 'uri'
-require 'open3'
-require 'digest'
 
 class FuDownloadFromUrlJob < ApplicationJob
   queue_as :default
@@ -32,19 +30,14 @@ class FuDownloadFromUrlJob < ApplicationJob
       raise e
     end
 
-    content_sha256 = nil
     unless copied_internally
-      remote_total_size = fetch_remote_size(url)
-      fu.update_column(:upload_file_size, remote_total_size) if remote_total_size.to_i > 0
-
-      # Stream download while updating SHA-256 so preparsing does not re-hash.
-      content_sha256 = stream_download_with_sha256!(url, upload_file_path)
+      UrlDownloadService.new(fu: fu, url: url, dest_path: upload_file_path).call
     end
 
     downloaded_size = File.size(upload_file_path)
     raise "Downloaded file is missing or empty" unless File.exist?(upload_file_path) && downloaded_size > 0
 
-    content_sha256 ||= InputFileSha256.hexdigest_file(upload_file_path)
+    content_sha256 = InputFileSha256.hexdigest_file(upload_file_path)
 
     if dna_accessibility_upload?(fu)
       finalize_dna_accessibility!(fu, content_sha256: content_sha256, downloaded_size: downloaded_size)
@@ -80,9 +73,10 @@ class FuDownloadFromUrlJob < ApplicationJob
       raw_output: result[:raw_output],
       prediction_debug: result[:summary][:prediction_debug]
     )
-  rescue URI::InvalidURIError, OpenURI::HTTPError => e
+  rescue URI::InvalidURIError, OpenURI::HTTPError, UrlDownloadService::Error => e
     Rails.logger.error("[FuDownloadFromUrlJob] Download failed for Fu##{fu_id}: #{e.class} - #{e.message}")
     fu&.update(status: 'download_failed')
+    broadcast(fu.id, status: 'failed', error: e.message) if fu
   rescue StandardError => e
     Rails.logger.error("[FuDownloadFromUrlJob] Job failed for Fu##{fu_id}: #{e.class} - #{e.message}")
     Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
@@ -144,47 +138,6 @@ class FuDownloadFromUrlJob < ApplicationJob
       saved_filename: result[:filename],
       saved_size: result[:size]
     )
-  end
-
-  def stream_download_with_sha256!(url, dest_path)
-    digest = Digest::SHA256.new
-    File.open(dest_path, 'wb') do |out|
-      Open3.popen3(
-        'curl',
-        '-L',
-        '--fail',
-        '--silent',
-        '--show-error',
-        '--connect-timeout', '30',
-        '--retry', '2',
-        '--retry-delay', '2',
-        '-o', '-',
-        url.to_s
-      ) do |stdin, stdout, stderr, wait_thr|
-        stdin.close
-        while (chunk = stdout.read(1024 * 1024))
-          out.write(chunk)
-          digest.update(chunk)
-        end
-        err = stderr.read.to_s
-        exit_status = wait_thr.value.exitstatus
-        raise "curl download failed (exit #{exit_status}): #{err}" unless exit_status == 0
-      end
-    end
-    digest.hexdigest
-  end
-
-  def fetch_remote_size(url)
-    head_cmd = ['curl', '-sIL', '--connect-timeout', '20', url.to_s]
-    output, _err, status = Open3.capture3(*head_cmd)
-    return nil unless status.success?
-
-    header_line = output.to_s.lines.reverse.find { |line| line =~ /^content-length:\s*\d+/i }
-    return nil unless header_line
-
-    header_line.split(':', 2).last.to_s.strip.to_i
-  rescue StandardError
-    nil
   end
 
   def broadcast(fu_id, payload)

@@ -1022,6 +1022,8 @@ export class RendererManager {
       
       // Clear plot container
       plotContainer.innerHTML = ''
+      this.controller.lassoCanvas = null
+      this.controller.lassoCanvasCtx = null
       
         // ===== ReGL RENDERER =====
         // console.log('🎯 Initializing ReGL renderer for WebGL performance')

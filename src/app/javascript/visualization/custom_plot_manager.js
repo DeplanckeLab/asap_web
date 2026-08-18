@@ -1067,9 +1067,10 @@ export class CustomPlotManager {
       if (!this.isDrawingLasso) {
         return
       }
-      const rect = this.currentCanvas.getBoundingClientRect()
-      const mouseX = event.clientX - rect.left
-      const mouseY = event.clientY - rect.top
+      const pointer = this.controller.clientPointToCanvasBuffer(event.clientX, event.clientY, this.currentCanvas)
+      if (!pointer) return
+      const mouseX = pointer.x
+      const mouseY = pointer.y
       const lastPoint = this.customLassoPoints[this.customLassoPoints.length - 1]
       if (!lastPoint || this.getDistanceBetweenPoints(lastPoint, { x: mouseX, y: mouseY }) >= 1.5) {
         this.customLassoPoints.push({ x: mouseX, y: mouseY })
@@ -1092,9 +1093,10 @@ export class CustomPlotManager {
     if (this.controller.isTooltipFixed) {
       return
     }
-    const rect = this.currentCanvas.getBoundingClientRect()
-    const mouseX = event.clientX - rect.left
-    const mouseY = event.clientY - rect.top
+    const pointer = this.controller.clientPointToCanvasBuffer(event.clientX, event.clientY, this.currentCanvas)
+    if (!pointer) return
+    const mouseX = pointer.x
+    const mouseY = pointer.y
     const closest = this.findClosestPoint(mouseX, mouseY)
     if (!closest) {
       if (!this.controller.isTooltipFixed && typeof this.controller.hideSimpleTooltip === 'function') {
@@ -1142,9 +1144,10 @@ export class CustomPlotManager {
     if (this.controller.interactionMode !== 'pick') {
       return
     }
-    const rect = this.currentCanvas.getBoundingClientRect()
-    const mouseX = event.clientX - rect.left
-    const mouseY = event.clientY - rect.top
+    const pointer = this.controller.clientPointToCanvasBuffer(event.clientX, event.clientY, this.currentCanvas)
+    if (!pointer) return
+    const mouseX = pointer.x
+    const mouseY = pointer.y
     const closest = this.findClosestPoint(mouseX, mouseY)
     if (!closest) {
       if (this.controller.isTooltipFixed && typeof this.controller.unfixTooltip === 'function') {
@@ -1209,9 +1212,10 @@ export class CustomPlotManager {
     if (this.controller.interactionMode !== 'lasso') return
     if (event.button !== 0) return
     event.preventDefault()
-    const rect = this.currentCanvas.getBoundingClientRect()
-    const mouseX = event.clientX - rect.left
-    const mouseY = event.clientY - rect.top
+    const pointer = this.controller.clientPointToCanvasBuffer(event.clientX, event.clientY, this.currentCanvas)
+    if (!pointer) return
+    const mouseX = pointer.x
+    const mouseY = pointer.y
     this.isDrawingLasso = true
     this.customLassoPoints = [{ x: mouseX, y: mouseY }]
     this.ensureLassoOverlay(this.currentCanvas)
@@ -1229,9 +1233,10 @@ export class CustomPlotManager {
       return
     }
     event.preventDefault()
-    const rect = this.currentCanvas.getBoundingClientRect()
-    const mouseX = event.clientX - rect.left
-    const mouseY = event.clientY - rect.top
+    const pointer = this.controller.clientPointToCanvasBuffer(event.clientX, event.clientY, this.currentCanvas)
+    if (!pointer) return
+    const mouseX = pointer.x
+    const mouseY = pointer.y
     const lastPoint = this.customLassoPoints[this.customLassoPoints.length - 1]
     if (!lastPoint || this.getDistanceBetweenPoints(lastPoint, { x: mouseX, y: mouseY }) >= 1) {
       this.customLassoPoints.push({ x: mouseX, y: mouseY })
@@ -1356,8 +1361,10 @@ export class CustomPlotManager {
 
     overlayCanvas.width = baseCanvas.width
     overlayCanvas.height = baseCanvas.height
-    overlayCanvas.style.width = baseCanvas.style.width || `${baseCanvas.width}px`
-    overlayCanvas.style.height = baseCanvas.style.height || `${baseCanvas.height}px`
+    const displayRect = baseCanvas.getBoundingClientRect()
+    overlayCanvas.style.width = `${displayRect.width}px`
+    overlayCanvas.style.height = `${displayRect.height}px`
+    overlayCanvas.style.display = 'block'
 
     if (type === 'selection') {
       return this.selectionOverlayCtx

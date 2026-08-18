@@ -13935,6 +13935,8 @@ export default class extends Controller {
     this.canvas = null
     this.overlayCanvas = null
     this.overlayCtx = null
+    this.lassoCanvas = null
+    this.lassoCanvasCtx = null
     
     // Reset canvas listeners flag
     this.canvasListenersSetup = false
@@ -14476,9 +14478,10 @@ export default class extends Controller {
     // Handle label dragging in pick/move mode (ReGL)
     if ((this.interactionMode === 'pick' || this.interactionMode === 'pan') && this.draggingLabel && this.rendererType === 'regl') {
       const canvas = this.canvas
-      const rect = canvas.getBoundingClientRect()
-      const mouseX = event.clientX - rect.left
-      const mouseY = event.clientY - rect.top
+      const pointer = this.clientPointToCanvasBuffer(event.clientX, event.clientY, canvas)
+      if (!pointer) return
+      const mouseX = pointer.x
+      const mouseY = pointer.y
       
       // Calculate drag delta
       const deltaX = mouseX - this.labelDragStartX
@@ -14580,9 +14583,10 @@ export default class extends Controller {
     const canvas = this.canvas
     if (!canvas) return false
 
-    const rect = canvas.getBoundingClientRect()
-    const mouseX = event.clientX - rect.left
-    const mouseY = event.clientY - rect.top
+    const pointer = this.clientPointToCanvasBuffer(event.clientX, event.clientY, canvas)
+    if (!pointer) return false
+    const mouseX = pointer.x
+    const mouseY = pointer.y
 
     for (let i = this.canvas2DLabels.length - 1; i >= 0; i--) {
       const label = this.canvas2DLabels[i]
@@ -14640,11 +14644,12 @@ export default class extends Controller {
       return false
     }
     
-    // Get mouse position relative to canvas
+    // Get mouse position in canvas backing-store pixels
     const canvas = this.canvas
-    const rect = canvas.getBoundingClientRect()
-    const mouseX = event.clientX - rect.left
-    const mouseY = event.clientY - rect.top
+    const pointer = this.clientPointToCanvasBuffer(event.clientX, event.clientY, canvas)
+    if (!pointer) return false
+    const mouseX = pointer.x
+    const mouseY = pointer.y
     
     // Basic zoom implementation with faster increments, zooming around mouse cursor
     const delta = event.deltaY > 0 ? 1.05 : 0.95
@@ -14720,6 +14725,50 @@ export default class extends Controller {
     // Return false to ensure no default scroll behavior
     return false
   }
+
+  // Map a client (CSS pixel) point onto the plot canvas backing store.
+  // Points, pan, zoom, and lasso hit-testing all live in canvas.width/height space,
+  // which can differ from getBoundingClientRect() after layout, stretch, or DPR.
+  clientPointToCanvasBuffer(clientX, clientY, canvas = this.canvas, rect = null) {
+    if (!canvas) return null
+    const box = rect || canvas.getBoundingClientRect()
+    if (box.width <= 0 || box.height <= 0) return null
+    return {
+      x: (clientX - box.left) * (canvas.width / box.width),
+      y: (clientY - box.top) * (canvas.height / box.height),
+      rect: box
+    }
+  }
+
+  ensureLassoCanvas() {
+    const plotContainer = document.querySelector('.plot-container')
+    const canvas = this.canvas
+    if (!plotContainer || !canvas) return false
+
+    if (!this.lassoCanvas || this.lassoCanvas.parentElement !== plotContainer) {
+      if (this.lassoCanvas && this.lassoCanvas.parentElement) {
+        this.lassoCanvas.parentElement.removeChild(this.lassoCanvas)
+      }
+      this.lassoCanvas = document.createElement('canvas')
+      this.lassoCanvas.style.position = 'absolute'
+      this.lassoCanvas.style.top = '0'
+      this.lassoCanvas.style.left = '0'
+      this.lassoCanvas.style.width = '100%'
+      this.lassoCanvas.style.height = '100%'
+      this.lassoCanvas.style.display = 'block'
+      this.lassoCanvas.style.pointerEvents = 'none'
+      this.lassoCanvas.style.zIndex = '1000'
+      plotContainer.appendChild(this.lassoCanvas)
+      this.lassoCanvasCtx = this.lassoCanvas.getContext('2d')
+    }
+
+    if (this.lassoCanvas.width !== canvas.width || this.lassoCanvas.height !== canvas.height) {
+      this.lassoCanvas.width = canvas.width
+      this.lassoCanvas.height = canvas.height
+    }
+    return true
+  }
+
   // Lasso mode handlers
   onLassoMouseDown(event) {
     if (this.lassoClearTimeout) {
@@ -14738,48 +14787,26 @@ export default class extends Controller {
     
     // Detect browser and store it
     //this.isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1
-    
-   
-    
-    // Create HTML canvas overlay for lasso drawing
-    const plotContainer = document.querySelector('.plot-container')
-    const canvasCreationStart = performance.now()
-    if (plotContainer && !this.lassoCanvas) {
-      const canvas = this.canvas
-      
-      this.lassoCanvas = document.createElement('canvas')
-      this.lassoCanvas.width = canvas.width
-      this.lassoCanvas.height = canvas.height
-      this.lassoCanvas.style.position = 'absolute'
-      this.lassoCanvas.style.top = '0'
-      this.lassoCanvas.style.left = '0'
-      this.lassoCanvas.style.pointerEvents = 'none'
-      this.lassoCanvas.style.zIndex = '1000' // On top of everything
-      plotContainer.appendChild(this.lassoCanvas)
-      
-      this.lassoCanvasCtx = this.lassoCanvas.getContext('2d')
-    }
-    
-   
-    
+
+    if (!this.ensureLassoCanvas()) return
+
+    const canvas = this.canvas
+    if (!canvas) return
+
+    const pointer = this.clientPointToCanvasBuffer(event.clientX, event.clientY, canvas)
+    if (!pointer) return
+    this.cachedCanvasRect = pointer.rect
+
     this.isDrawingLasso = true
     this.lassoPoints = []
     this.mouseMoveCount = 0
     this.interactionMoveCount = 0
     this.lastMouseMoveTime = performance.now()
     this.lassoStartTime = lassoStartTime
-    
-    // Get mouse position relative to canvas
-    const canvas = this.canvas 
-    if (!canvas) return
-    
-    // Cache rect for performance during mouse moves
-    const rect = canvas.getBoundingClientRect()
-    this.cachedCanvasRect = rect
-    
-    const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
-    
+
+    const x = pointer.x
+    const y = pointer.y
+
     this.lassoPoints.push({ x, y })
     
     // Clear the overlay canvas
@@ -14789,8 +14816,8 @@ export default class extends Controller {
     
     // Firefox workaround: Poll mouse position at high frequency for smooth drawing
     if (this.isFirefox) {
-      this.lastMouseX = x + rect.left
-      this.lastMouseY = y + rect.top
+      this.lastMouseX = event.clientX
+      this.lastMouseY = event.clientY
       
       // Track last mouse position from any move event
       this.firefoxMouseHandler = (e) => {
@@ -14803,8 +14830,10 @@ export default class extends Controller {
       this.firefoxPollInterval = setInterval(() => {
         if (!this.isDrawingLasso) return
         
-        const x = this.lastMouseX - rect.left
-        const y = this.lastMouseY - rect.top
+        const mapped = this.clientPointToCanvasBuffer(this.lastMouseX, this.lastMouseY, canvas, this.cachedCanvasRect)
+        if (!mapped) return
+        const x = mapped.x
+        const y = mapped.y
         
         const lastPoint = this.lassoPoints[this.lassoPoints.length - 1]
         const distance = this.getDistance(lastPoint, { x, y })
@@ -14841,8 +14870,10 @@ export default class extends Controller {
     let pointsAdded = 0
     const pointProcessingStart = performance.now()
     for (const evt of coalescedEvents) {
-      const x = evt.clientX - rect.left
-      const y = evt.clientY - rect.top
+      const mapped = this.clientPointToCanvasBuffer(evt.clientX, evt.clientY, canvas, rect)
+      if (!mapped) continue
+      const x = mapped.x
+      const y = mapped.y
       
     const lastPoint = this.lassoPoints[this.lassoPoints.length - 1]
       const distance = lastPoint ? this.getDistance(lastPoint, { x, y }) : Infinity
@@ -14955,12 +14986,12 @@ export default class extends Controller {
     const canvas = this.canvas
     if (!canvas) return
     
-    // Cache rect for performance during mouse moves
-    const rect = canvas.getBoundingClientRect()
-    this.cachedCanvasRect = rect
+    const pointer = this.clientPointToCanvasBuffer(event.clientX, event.clientY, canvas)
+    if (!pointer) return
+    this.cachedCanvasRect = pointer.rect
     
-    this.panStartX = event.clientX - rect.left
-    this.panStartY = event.clientY - rect.top
+    this.panStartX = pointer.x
+    this.panStartY = pointer.y
     
     // Store current bounds
     this.panStartBounds = { ...this.currentBounds }
@@ -14987,9 +15018,15 @@ export default class extends Controller {
     if (!canvas) return
     
     // Use cached rect if available (set when pan starts)
-    const rect = this.cachedCanvasRect || canvas.getBoundingClientRect()
-    const currentX = event.clientX - rect.left
-    const currentY = event.clientY - rect.top
+    const pointer = this.clientPointToCanvasBuffer(
+      event.clientX,
+      event.clientY,
+      canvas,
+      this.cachedCanvasRect
+    )
+    if (!pointer) return
+    const currentX = pointer.x
+    const currentY = pointer.y
     
     // Calculate pan delta
     const deltaX = currentX - this.panStartX
@@ -23542,9 +23579,10 @@ export default class extends Controller {
     // In ReGL mode, check for label clicks first
     if (this.rendererType === 'regl' && this.canvas2DLabels && this.canvas2DLabels.length > 0) {
       const canvas = this.canvas
-      const rect = canvas.getBoundingClientRect()
-      const mouseX = event.clientX - rect.left
-      const mouseY = event.clientY - rect.top
+      const pointer = this.clientPointToCanvasBuffer(event.clientX, event.clientY, canvas)
+      if (!pointer) return
+      const mouseX = pointer.x
+      const mouseY = pointer.y
       
       // console.log(`🏷️ [Drag] Mouse down at (${mouseX}, ${mouseY}), checking ${this.canvas2DLabels.length} labels`)
       
@@ -23773,9 +23811,10 @@ export default class extends Controller {
       return
     }
 
-    const rect = canvas.getBoundingClientRect()
-    const clickX = event.clientX - rect.left
-    const clickY = event.clientY - rect.top
+    const pointer = this.clientPointToCanvasBuffer(event.clientX, event.clientY, canvas)
+    if (!pointer) return
+    const clickX = pointer.x
+    const clickY = pointer.y
 
     // console.log('🎯 [RegL] Click coordinates:', { clickX, clickY, canvasWidth: canvas.width, canvasHeight: canvas.height })
 
@@ -23902,9 +23941,10 @@ export default class extends Controller {
     const canvas = this.canvas
     if (!canvas || !this.reglRenderer || !this.currentCoordinates) return
 
-    const rect = canvas.getBoundingClientRect()
-    const mouseX = event.clientX - rect.left
-    const mouseY = event.clientY - rect.top
+    const pointer = this.clientPointToCanvasBuffer(event.clientX, event.clientY, canvas)
+    if (!pointer) return
+    const mouseX = pointer.x
+    const mouseY = pointer.y
 
     // Use current bounds (which include pan/zoom state) instead of calculating from coordinates
     const bounds = this.currentBounds || this.dataManager.calculateBounds(this.currentCoordinates)

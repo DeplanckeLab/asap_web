@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'test_helper'
+require 'fileutils'
 
 class InterruptedJobRecoveryTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
@@ -92,6 +93,34 @@ class InterruptedJobRecoveryTest < ActiveSupport::TestCase
 
     assert downloading.reload.status == 'downloading'
     assert preparsing.reload.status == 'preparsing'
+  end
+
+  test 'does not re-enqueue download when curl pid is still running' do
+    user = register_for_test_cleanup(
+      User.create!(email: "recovfu_pid_#{SecureRandom.hex(4)}@example.com", password: 'password123')
+    )
+    version = Version.order(id: :desc).first
+    skip 'no Version row' if version.nil?
+
+    downloading = register_for_test_cleanup(
+      Fu.create!(
+        name: 'remote.h5ad',
+        upload_file_name: 'input_file.h5ad',
+        upload_file_size: 100,
+        status: 'downloading',
+        url: 'https://example.com/still-running.h5ad',
+        user_id: user.id,
+        preparsing_version_id: version.id
+      )
+    )
+    FileUtils.mkdir_p(downloading.global_upload_dir)
+    File.write(downloading.global_upload_dir.join(downloading.upload_file_name), 'partial')
+    File.write(UrlDownloadService.pid_path_for_fu(downloading), Process.pid.to_s)
+
+    InterruptedJobRecovery.call
+
+    download_jobs = enqueued_jobs.select { |job| job[:job] == FuDownloadFromUrlJob }
+    assert download_jobs.none? { |job| Array(job[:args]).first.to_i == downloading.id }
   end
 
   test 'does not re-enqueue catalog import from importing status' do

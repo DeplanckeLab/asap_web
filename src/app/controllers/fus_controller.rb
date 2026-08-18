@@ -412,6 +412,30 @@ class FusController < ApplicationController
           organism_id = request_body['organism_id'] || safe_integer_param(:organism_id)
           version_id = request_body['version_id'] || safe_integer_param(:version_id)
 
+          if reusable_fu.status == 'downloading'
+            session[:file_upload] = {
+              fu_id: reusable_fu.id,
+              original_filename: reusable_fu.name.presence || filename,
+              input_filename: reusable_fu.upload_file_name,
+              path: upload_path&.to_s,
+              size: size,
+              total_size: reusable_fu.upload_file_size || size,
+              complete: false,
+              organism_id: organism_id,
+              version_id: version_id
+            }
+
+            render json: {
+              success: true,
+              fu_id: reusable_fu.id,
+              filename: reusable_fu.name.presence || filename,
+              size: size,
+              status: 'downloading',
+              reused: true
+            }
+            return
+          end
+
           if preparsing_result_stale?(reusable_fu, requested_version_id: version_id)
             Rails.logger.info(
               "[FusController#download_from_url] Re-preparsing reused Fu##{reusable_fu.id} " \
@@ -960,6 +984,9 @@ class FusController < ApplicationController
   def normalize_preparsing_error_message(message)
     text = message.to_s.strip
     return text if text.blank?
+
+    hdf5_message = Hdf5FileCheck.user_message(text)
+    return hdf5_message if hdf5_message.present?
 
     if text.downcase.include?('file format not detected')
       return 'Input file format is not recognized. Please upload a supported format.'

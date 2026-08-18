@@ -842,8 +842,10 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
         unless cmd_exitstatus == 0
           begin
+            raw_error = parse_stdout.present? ? parse_stdout : "Python parser failed with exit status #{cmd_exitstatus}"
+            displayed = Hdf5FileCheck.user_message(raw_error).presence || raw_error
             error_payload = {
-              displayed_error: parse_stdout.present? ? parse_stdout : "Python parser failed with exit status #{cmd_exitstatus}"
+              displayed_error: displayed
             }
             File.open(output_json_v8, 'w') { |fw| fw.write(error_payload.to_json) }
           rescue => write_err

@@ -2771,16 +2771,14 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                     </div>
                   </div>
                   <% if can_analyze_project %>
-                    <% if admin? %>
-                      <button id="de-selection-btn"
-                              type="button"
-                              style="display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 8px;background-color:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;"
-                              title="Differential expression (run new DE or browse existing results)"
-                              aria-label="Differential expression"
-                              data-action="click->visualization#openDeSelectionModal">
-                        DE
-                      </button>
-                    <% end %>
+                    <button id="de-selection-btn"
+                            type="button"
+                            style="display:inline-flex;align-items:center;justify-content:center;min-width:28px;height:28px;padding:0 8px;background-color:#7c3aed;color:white;border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;"
+                            title="Differential expression (run new DE or browse existing results)"
+                            aria-label="Differential expression"
+                            data-action="click->visualization#openDeSelectionModal">
+                      DE
+                    </button>
                     <button id="compose-selection-btn"
                             type="button"
                             style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;"

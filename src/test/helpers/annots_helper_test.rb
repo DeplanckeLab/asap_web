@@ -22,23 +22,24 @@ class AnnotsHelperTest < ActionView::TestCase
     assert_includes html, 'open'
   end
 
-  test 'annot_download_links marks expression matrices as heavy and disables turbo' do
+  test 'annot_download_links omits expression matrix TSV and JSON links' do
     annot = Annot.new(id: 42, dim: 3, name: '/matrix')
     html = annot_download_links(annot).to_s
 
+    assert_equal '', html
+  end
+
+  test 'annot_download_links marks metadata downloads as nofollow' do
+    annot = Annot.new(id: 43, dim: 1, name: '/col_attrs/nCount_RNA')
+    html = annot_download_links(annot).to_s
+
     assert_includes html, 'data-controller="annot-download"'
-    assert_includes html, 'data-annot-download-heavy-value="true"'
+    assert_includes html, 'rel="nofollow"'
     assert_includes html, 'data-turbo="false"'
     assert_includes html, 'annot-download#start'
     assert_includes html, 'TSV'
     assert_includes html, 'JSON'
-  end
-
-  test 'annot_download_links does not mark cell metadata as heavy' do
-    annot = Annot.new(id: 43, dim: 1, name: '/col_attrs/nCount_RNA')
-    html = annot_download_links(annot).to_s
-
-    assert_includes html, 'data-annot-download-heavy-value="false"'
+    refute_includes html, 'data-annot-download-heavy-value'
   end
 
   test 'render_json_foldable renders scalars without details' do

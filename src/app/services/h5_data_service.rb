@@ -196,20 +196,6 @@ class H5DataService
     parsed
   end
 
-  # Full row range via repeated ExtractRow (index list size is bounded per call).
-  def self.extract_matrix_rows_chunked(h5_file, i_annot, total_rows, chunk_size: 1000)
-    total = total_rows.to_i
-    total = 1 if total < 1
-    all_rows = []
-    (0...total).each_slice(chunk_size) do |slice|
-      j = extract_row_by_indexes(h5_file, i_annot, slice)
-      batch = j['rows'] || j['values'] || []
-      all_rows.concat(batch)
-    end
-    nc = all_rows.first.is_a?(Array) ? all_rows.first.size : nil
-    { 'rows' => all_rows, 'nber_rows' => all_rows.size, 'nber_cols' => nc }
-  end
-
   # 1b. Pathway expression data (same as genes but from pathway-specific loom file)
   def self.get_pathway_data(pathway_ids, h5_path, annot_name = '/matrix')
     # Use indexes (IDs) instead of names to avoid comma-separation issues

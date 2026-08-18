@@ -101,6 +101,7 @@ class HomeController < ApplicationController
         User-agent: Bingbot
         User-agent: Applebot
         Allow: /
+        Disallow: /annots/*/download
 
         Sitemap: #{base}/sitemap.xml
       ROBOTS

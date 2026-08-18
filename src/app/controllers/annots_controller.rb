@@ -3,6 +3,7 @@ require 'open3'
 class AnnotsController < ApplicationController
   helper_method :data_type_editable?, :metadata_type_editable?
 
+  before_action :forbid_robot_annot_download, only: :download
   before_action :set_annot, only: [:show, :download, :categories, :edit, :update]
 
   # GET /annots/:id
@@ -407,61 +408,33 @@ class AnnotsController < ApplicationController
     annot_label = @annot.name.split('/').last || @annot.name
     safe_label = annot_label.to_s.gsub(/[^\w.\-]+/, '_')
 
+    if @annot.expression_matrix?
+      render plain: 'Expression matrices cannot be downloaded as TSV or JSON. Download the Loom file from the project Data or Summary view.',
+             status: :forbidden
+      return
+    end
+
     unless File.exist?(loom_path)
       render plain: 'Loom file not found', status: :not_found
       return
     end
 
-    if @annot.dim == 3
-      total_rows = @annot.nber_rows.to_i
-      if total_rows <= 0
-        render plain: 'Cannot download: row count is missing for this matrix.', status: :unprocessable_entity
-        return
-      end
+    begin
+      values = H5DataService.get_metadata_vector(loom_path.to_s, @annot.name)
+    rescue StandardError => e
+      render plain: "Failed to extract data: #{e.message}", status: :internal_server_error
+      return
+    end
 
-      begin
-        data = H5DataService.extract_matrix_rows_chunked(loom_path.to_s, @annot.name, total_rows, chunk_size: 1000)
-      rescue StandardError => e
-        render plain: "Failed to extract data: #{e.message}", status: :internal_server_error
-        return
-      end
-
-      rows = data['rows'] || []
-
-      if format_type == 'json'
-        send_data data.to_json,
-                  filename: "#{safe_label}.json",
-                  type: 'application/json',
-                  disposition: 'attachment'
-      else
-        tsv_lines = []
-        rows.each do |row|
-          if row.is_a?(Array)
-            tsv_lines << row.join("\t")
-          else
-            tsv_lines << row.to_s
-          end
-        end
-        send_tsv_download(tsv_lines.join("\n"), safe_label, want_gzip: want_gzip)
-      end
+    if format_type == 'json'
+      json_output = { name: @annot.name, values: values }.to_json
+      send_data json_output,
+                filename: "#{safe_label}.json",
+                type: 'application/json',
+                disposition: 'attachment'
     else
-      begin
-        values = H5DataService.get_metadata_vector(loom_path.to_s, @annot.name)
-      rescue StandardError => e
-        render plain: "Failed to extract data: #{e.message}", status: :internal_server_error
-        return
-      end
-
-      if format_type == 'json'
-        json_output = { name: @annot.name, values: values }.to_json
-        send_data json_output,
-                  filename: "#{safe_label}.json",
-                  type: 'application/json',
-                  disposition: 'attachment'
-      else
-        tsv_content = build_annot_vector_tsv(loom_path.to_s, values, annot_label)
-        send_tsv_download(tsv_content, safe_label, want_gzip: want_gzip)
-      end
+      tsv_content = build_annot_vector_tsv(loom_path.to_s, values, annot_label)
+      send_tsv_download(tsv_content, safe_label, want_gzip: want_gzip)
     end
   end
 
@@ -750,6 +723,21 @@ class AnnotsController < ApplicationController
     else
       %w[NUMERIC DISCRETE STRING]
     end
+  end
+
+  def forbid_robot_annot_download
+    return unless robot_annot_download_request?
+
+    head :forbidden
+  end
+
+  def robot_annot_download_request?
+    ua = request.user_agent.to_s
+    return false if ua.blank?
+    return true if search_engine_crawler?
+    return true if request_user_agent_indicates_bot?
+
+    ua.match?(/ClaudeBot|Amzn-SearchBot|GPTBot|Bytespider|Amazonbot/i)
   end
 
   def set_annot

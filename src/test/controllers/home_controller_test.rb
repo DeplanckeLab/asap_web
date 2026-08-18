@@ -40,7 +40,9 @@ class HomeControllerTest < ActionDispatch::IntegrationTest
     assert_match(/^Disallow: \/$/, body)
     assert_match(/^User-agent: Googlebot$/, body)
     assert_match(/^User-agent: Google-InspectionTool$/, body)
+    assert_match(/^User-agent: ClaudeBot$/, body)
     assert_match(/^Allow: \/$/, body)
+    assert_match(%r{^Disallow: /annots/\*/download$}, body)
     assert_includes body, "Sitemap: #{ENV.fetch('SERVER_URL').chomp('/')}/sitemap.xml"
   end
 

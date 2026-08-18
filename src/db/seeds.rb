@@ -11,16 +11,18 @@
 puts "Seeding project types..."
 
 project_types_seed = [
-  { tag: "sc", name: "Single-cell (or nucleus) transcriptomics", row_label: "genes", col_label: "cells" },
-  { tag: "bulk", name: "Bulk transcriptomics", row_label: "genes", col_label: "samples" },
-  { tag: "spat", name: "Spatial transcriptomics", row_label: "genes", col_label: "cells" },
-  { tag: "atac", name: "ATAC-seq", row_label: "genes", col_label: "cells" },
-  { tag: "multi", name: "Multiomics", row_label: "genes", col_label: "cells" }
+  { tag: "sc", name: "Single-cell (or nucleus) transcriptomics", row_label: "genes", col_label: "cells", admin_report_only: false },
+  { tag: "bulk", name: "Bulk transcriptomics", row_label: "genes", col_label: "samples", admin_report_only: false },
+  { tag: "spat", name: "Spatial transcriptomics", row_label: "genes", col_label: "cells", admin_report_only: true },
+  { tag: "atac", name: "ATAC-seq", row_label: "genes", col_label: "cells", admin_report_only: true },
+  { tag: "multi", name: "Multiomics", row_label: "genes", col_label: "cells", admin_report_only: true }
 ]
 
 project_types_seed.each do |attrs|
   project_type = ProjectType.find_or_initialize_by(tag: attrs[:tag])
-  project_type.assign_attributes(attrs)
+  assign_attrs = attrs
+  assign_attrs = attrs.except(:admin_report_only) unless project_type.new_record?
+  project_type.assign_attributes(assign_attrs)
 
   if project_type.new_record?
     project_type.save!

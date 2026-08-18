@@ -65,7 +65,7 @@ class ProjectTypesController < ApplicationController
 
     # Only allow a list of trusted parameters through.
     def project_type_params
-      params.fetch(:project_type, {}).permit(:name, :tag, :row_label, :col_label)
+      params.fetch(:project_type, {}).permit(:name, :tag, :row_label, :col_label, :admin_report_only)
     end
 end
 

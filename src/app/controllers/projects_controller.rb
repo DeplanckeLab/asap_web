@@ -9,7 +9,7 @@ require 'set'
 
 class ProjectsController < ApplicationController
   include ComplianceHelpers
-  helper_method :de_filter_cache_key, :metadata_only_view_request?, :force_unarchive_requested?
+  helper_method :de_filter_cache_key, :metadata_only_view_request?, :force_unarchive_requested?, :selectable_project_types
   rescue_from ActiveRecord::RecordNotFound, with: :handle_project_not_found
 
   # Project show views that only depend on database metadata (no need for unarchived
@@ -717,7 +717,7 @@ class ProjectsController < ApplicationController
     @project = Project.new
     # Explicitly set organism_id to nil to override database default
     @project.organism_id = nil
-    @project_types = ProjectType.order(:name)
+    @project_types = selectable_project_types
     @versions = available_versions
     @file_formats = FileFormat.ordered
     @project.version_id = @versions.first&.id if @project.version_id.blank?
@@ -775,7 +775,7 @@ class ProjectsController < ApplicationController
   # GET /projects/1/edit
   def edit
     @organisms = Organism.order(:name)
-    @project_types = ProjectType.order(:name)
+    @project_types = selectable_project_types
     @versions = available_versions
     @file_formats = FileFormat.ordered
   end
@@ -982,6 +982,21 @@ class ProjectsController < ApplicationController
     }
     @project.ge_filter_json = default_ge_filter.to_json
 
+    if unauthorized_restricted_project_type?(@project)
+      @organisms = Organism.order(:name)
+      @project_types = selectable_project_types
+      @versions = available_versions
+      @file_formats = FileFormat.ordered
+      @grouped_organisms = group_organisms(fetch_organisms_for_version(@project.version_id), version_id: @project.version_id)
+      @project.errors.add(:project_type_id, 'is not available')
+      respond_to do |format|
+        format.html { render template: 'projects/new', status: :unprocessable_entity }
+        format.turbo_stream { render template: 'projects/new', status: :unprocessable_entity }
+        format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
+      end
+      return
+    end
+
     Rails.logger.info("[ProjectsController#create] About to enter respond_to block, request format: #{request.format}")
     respond_to do |format|
       Rails.logger.info("[ProjectsController#create] ===== VALIDATION CHECK =====")
@@ -1003,7 +1018,7 @@ class ProjectsController < ApplicationController
         Rails.logger.warn("[ProjectsController#create] ===== VALIDATION FAILED =====")
         Rails.logger.warn("[ProjectsController#create] Input file validation failed - no valid Fu record")
         @organisms = Organism.order(:name)
-        @project_types = ProjectType.order(:name)
+        @project_types = selectable_project_types
         @versions = available_versions
         @file_formats = FileFormat.ordered
         @grouped_organisms = group_organisms(fetch_organisms_for_version(@project.version_id), version_id: @project.version_id)
@@ -1120,7 +1135,7 @@ class ProjectsController < ApplicationController
       else
         Rails.logger.error("[ProjectsController#create] Project save failed: #{@project.errors.full_messages.inspect}")
         @organisms = Organism.order(:name)
-        @project_types = ProjectType.order(:name)
+        @project_types = selectable_project_types
         @versions = available_versions
         @file_formats = FileFormat.ordered
         format.html { render :new, status: :unprocessable_entity }
@@ -1203,6 +1218,20 @@ class ProjectsController < ApplicationController
       
       # Update project attributes
       @project.assign_attributes(project_params)
+      if unauthorized_restricted_project_type?(@project)
+        @project.errors.add(:project_type_id, 'is not available')
+        @project_types = selectable_project_types
+        @versions = available_versions
+        @file_formats = FileFormat.ordered
+        @organisms = fetch_organisms_for_version(@project.version_id)
+        @grouped_organisms = group_organisms(@organisms, version_id: @project.version_id)
+        respond_to do |format|
+          format.html { render :new, status: :unprocessable_entity }
+          format.turbo_stream { render :new, status: :unprocessable_entity }
+          format.json { render json: @project.errors, status: :unprocessable_entity }
+        end
+        return
+      end
       @project.parsing_attrs_json = tmp_attrs.to_json
       # Defer destructive reset cleanup to parse.rake execution context.
       h_parsing_attrs = Basic.safe_parse_json(@project.parsing_attrs_json, {})
@@ -1374,7 +1403,7 @@ class ProjectsController < ApplicationController
           format.html { redirect_to project_path(@project, view: 'analysis', step_id: parsing_step&.id), notice: "Project recreation started. Parsing will restart shortly." }
           format.json { render :show, status: :ok, location: @project }
         else
-          @project_types = ProjectType.order(:name)
+          @project_types = selectable_project_types
           @versions = available_versions
           @file_formats = FileFormat.ordered
           @organisms = fetch_organisms_for_version(@project.version_id)
@@ -1399,8 +1428,10 @@ class ProjectsController < ApplicationController
           "Project type can only be set for ASAP releases before version 8."
         elsif new_project_type_id.blank?
           "Project type is required."
-        elsif !ProjectType.exists?(new_project_type_id)
+        elsif (ptype = ProjectType.find_by(id: new_project_type_id)).nil?
           "Invalid project type."
+        elsif ptype.admin_report_only? && !admin_report?
+          "This project type is not available."
         end
 
         if type_set_error
@@ -9008,7 +9039,7 @@ class ProjectsController < ApplicationController
     session[:resetting_parsing_project_id] = @original_project.id
     
     # Set up form data
-    @project_types = ProjectType.order(:name)
+    @project_types = selectable_project_types
     @versions = available_versions
     @file_formats = FileFormat.ordered
     @organisms = fetch_organisms_for_version(@project.version_id || @versions.first&.id)
@@ -9557,6 +9588,17 @@ class ProjectsController < ApplicationController
       return unless sc_type
 
       project.project_type_id = sc_type.id
+    end
+
+    def selectable_project_types
+      ProjectType.selectable_for(include_restricted: admin_report?)
+    end
+
+    def unauthorized_restricted_project_type?(project)
+      ptype = ProjectType.find_by(id: project.project_type_id)
+      return false if ptype.nil?
+
+      ptype.admin_report_only? && !admin_report?
     end
 
     def single_cell_transcriptomics_project_type
@@ -12067,7 +12109,7 @@ class ProjectsController < ApplicationController
 
     def load_settings_context
       @shares = @project.shares.includes(:user).to_a
-      @project_types = ProjectType.order(:name) if @project.project_type_id.nil? && @project.version_id.to_i < 8
+      @project_types = selectable_project_types if @project.project_type_id.nil? && @project.version_id.to_i < 8
     end
 
     # Assign / clear / create umbrella collection for this project (one collection max).

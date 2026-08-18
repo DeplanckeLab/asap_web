@@ -44,6 +44,17 @@ class EnvHelpersTest < ActiveSupport::TestCase
     assert_equal 'https://asap-test.epfl.ch', EnvHelpers.public_base_url
   end
 
+  test 'email_in_list? matches stripped case-insensitive addresses' do
+    previous = ENV['ADMIN_REPORT_EMAILS']
+    ENV['ADMIN_REPORT_EMAILS'] = 'one@example.com, Two@Example.com'
+    assert EnvHelpers.email_in_list?('ADMIN_REPORT_EMAILS', ' one@example.com ')
+    assert EnvHelpers.email_in_list?('ADMIN_REPORT_EMAILS', 'two@example.com')
+    refute EnvHelpers.email_in_list?('ADMIN_REPORT_EMAILS', 'other@example.com')
+    refute EnvHelpers.email_in_list?('ADMIN_REPORT_EMAILS', '')
+  ensure
+    set_or_delete_env('ADMIN_REPORT_EMAILS', previous)
+  end
+
   private
 
   def set_or_delete_env(key, value)

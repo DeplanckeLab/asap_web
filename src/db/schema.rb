@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_18_054000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_18_143000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1173,6 +1173,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_18_054000) do
   end
 
   create_table "project_types", id: :serial, force: :cascade do |t|
+    t.boolean "admin_report_only", default: false, null: false
     t.text "col_label"
     t.datetime "created_at", precision: nil
     t.text "name"

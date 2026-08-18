@@ -28,6 +28,10 @@
         <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Col Label</dt>
         <dd class="mt-1 text-sm text-gray-900 dark:text-white"><%= @project_type.col_label.presence || "—" %></dd>
       </div>
+      <div>
+        <dt class="text-sm font-medium text-gray-500 dark:text-gray-400">Admin report only</dt>
+        <dd class="mt-1 text-sm text-gray-900 dark:text-white"><%= @project_type.admin_report_only? ? "yes" : "no" %></dd>
+      </div>
     </dl>
 
     <div class="mt-6 flex items-center gap-3">

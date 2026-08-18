@@ -13,27 +13,32 @@ class ProjectType < ApplicationRecord
     'sc' => {
       name: 'Single-cell (or nucleus) transcriptomics',
       row_label: 'genes',
-      col_label: 'cells'
+      col_label: 'cells',
+      admin_report_only: false
     },
     'bulk' => {
       name: 'Bulk transcriptomics',
       row_label: 'genes',
-      col_label: 'samples'
+      col_label: 'samples',
+      admin_report_only: false
     },
     'spat' => {
       name: 'Spatial transcriptomics',
       row_label: 'genes',
-      col_label: 'cells'
+      col_label: 'cells',
+      admin_report_only: true
     },
     'atac' => {
       name: 'ATAC-seq',
       row_label: 'genes',
-      col_label: 'cells'
+      col_label: 'cells',
+      admin_report_only: true
     },
     'multi' => {
       name: 'Multiomics',
       row_label: 'genes',
-      col_label: 'cells'
+      col_label: 'cells',
+      admin_report_only: true
     }
   }.freeze
 
@@ -44,9 +49,18 @@ class ProjectType < ApplicationRecord
       return find_by(tag: key) unless attrs
 
       record = find_or_initialize_by(tag: key)
-      record.assign_attributes(attrs)
+      assign_attrs = attrs
+      assign_attrs = attrs.except(:admin_report_only) unless record.new_record?
+      record.assign_attributes(assign_attrs)
       record.save! if record.new_record? || record.changed?
       record
+    end
+
+    def selectable_for(include_restricted:)
+      relation = order(:name)
+      return relation if include_restricted
+
+      relation.where(admin_report_only: false)
     end
   end
 

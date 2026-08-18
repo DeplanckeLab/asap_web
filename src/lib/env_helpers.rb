@@ -7,6 +7,13 @@ module EnvHelpers
     ENV.fetch(key, '').split(',').map(&:strip).reject(&:empty?)
   end
 
+  def email_in_list?(key, email)
+    value = email.to_s.strip.downcase
+    return false if value.empty?
+
+    email_list(key).map { |entry| entry.to_s.strip.downcase }.include?(value)
+  end
+
   def instance_host
     ENV.fetch('HOST')
   end

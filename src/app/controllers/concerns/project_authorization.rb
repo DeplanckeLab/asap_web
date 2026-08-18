@@ -76,7 +76,10 @@ module ProjectAuthorization
 
   # Check if user can clone/duplicate a project
   def clonable?(project)
-    exportable?(project)
+    return false unless exportable?(project)
+    return true unless project.project_type&.admin_report_only?
+
+    admin_report?
   end
 
   # Check if user can export a specific item (run, etc.)

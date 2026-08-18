@@ -4,30 +4,25 @@ module AdminAuthorization
   extend ActiveSupport::Concern
 
   def admin?
-    user = Array(current_user).compact.first
-    return false unless user.respond_to?(:email)
-    email = user.email.to_s.strip.downcase
-    return false if email.empty?
-
-    EnvHelpers.email_list('ADMIN_EMAILS')
-      .map { |value| value.to_s.strip.downcase }
-      .include?(email)
+    user_email_in_list?('ADMIN_EMAILS')
   end
 
   def uab?
-    return true if admin?
+    admin? || user_email_in_list?('UAB_EMAILS')
+  end
 
-    user = Array(current_user).compact.first
-    return false unless user.respond_to?(:email)
-    email = user.email.to_s.strip.downcase
-    return false if email.empty?
-
-    EnvHelpers.email_list('UAB_EMAILS')
-      .map { |value| value.to_s.strip.downcase }
-      .include?(email)
+  def admin_report?
+    user_email_in_list?('ADMIN_REPORT_EMAILS')
   end
 
   private
+
+  def user_email_in_list?(key)
+    user = Array(current_user).compact.first
+    return false unless user.respond_to?(:email)
+
+    EnvHelpers.email_in_list?(key, user.email)
+  end
 
   def authorize_admin
     unless admin?

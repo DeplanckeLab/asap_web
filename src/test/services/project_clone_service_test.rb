@@ -94,4 +94,62 @@ class ProjectCloneServiceTest < TestBaseWithoutFixtures
     assert_includes clone_dir.to_s, "/#{clone.key}/fus/#{fu.id}"
     assert_not_equal source_dir.to_s, clone_dir.to_s
   end
+
+  test "start! refuses admin_report_only project types for other users" do
+    spat = ProjectType.find_by(tag: "spat") || ProjectType.ensure_for_tag!("spat")
+    spat.update!(admin_report_only: true)
+    user = register_for_test_cleanup(
+      User.create!(email: "clone_deny_#{SecureRandom.hex(4)}@example.com", password: "password123")
+    )
+    source = create_test_project!(
+      name: "Restricted clone source",
+      key: "rsc#{SecureRandom.hex(3)}",
+      user_id: user.id,
+      project_type_id: spat.id
+    )
+
+    previous = ENV["ADMIN_REPORT_EMAILS"]
+    ENV["ADMIN_REPORT_EMAILS"] = "admin-report@example.com"
+    service = ProjectCloneService.new(source, user: user, session: {})
+    clone = service.start!
+    assert_nil clone
+    assert_includes service.errors, "This project type is not available"
+  ensure
+    if previous.nil?
+      ENV.delete("ADMIN_REPORT_EMAILS")
+    else
+      ENV["ADMIN_REPORT_EMAILS"] = previous
+    end
+    spat&.update!(admin_report_only: true)
+  end
+
+  test "start! allows admin_report_only project types for ADMIN_REPORT_EMAILS users" do
+    spat = ProjectType.find_by(tag: "spat") || ProjectType.ensure_for_tag!("spat")
+    spat.update!(admin_report_only: true)
+    email = "clone_ok_#{SecureRandom.hex(4)}@example.com"
+    user = register_for_test_cleanup(
+      User.create!(email: email, password: "password123")
+    )
+    source = create_test_project!(
+      name: "Restricted clone allowed",
+      key: "rca#{SecureRandom.hex(3)}",
+      user_id: user.id,
+      project_type_id: spat.id
+    )
+
+    previous = ENV["ADMIN_REPORT_EMAILS"]
+    ENV["ADMIN_REPORT_EMAILS"] = email
+    service = ProjectCloneService.new(source, user: user, session: {})
+    clone = service.start!
+    assert clone, "Expected clone start to succeed: #{service.errors.inspect}"
+    register_for_test_cleanup(clone)
+    assert_equal spat.id, clone.project_type_id
+  ensure
+    if previous.nil?
+      ENV.delete("ADMIN_REPORT_EMAILS")
+    else
+      ENV["ADMIN_REPORT_EMAILS"] = previous
+    end
+    spat&.update!(admin_report_only: true)
+  end
 end

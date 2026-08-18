@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'env_helpers'
+
 # Service for cloning projects and all associated data
 # Creates a complete copy of a project including runs, annots, files, etc.
 class ProjectCloneService
@@ -71,7 +73,12 @@ class ProjectCloneService
   private
 
   def can_clone?
-    source_project.present?
+    return false unless source_project.present?
+    return true unless source_project.project_type&.admin_report_only?
+    return true if EnvHelpers.email_in_list?('ADMIN_REPORT_EMAILS', user&.email)
+
+    @errors << 'This project type is not available'
+    false
   end
 
   def create_new_project

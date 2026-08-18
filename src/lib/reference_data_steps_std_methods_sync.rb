@@ -172,7 +172,8 @@ class ReferenceDataStepsStdMethodsSync
       ontology_term_types_in,
       upload_types_in,
       project_types_in,
-      compliance_schemas_in
+      compliance_schemas_in,
+      methods_in
     )
     summary
   end
@@ -532,7 +533,7 @@ class ReferenceDataStepsStdMethodsSync
       record = DockerImage.find_by(id: src_id) if record.nil? && match_by_id?
 
       if record.nil?
-        puts "[#{mode_label}] create DockerImage #{label}"
+        log_change(:create, "DockerImage #{label}")
         summary[:docker_images_created] += 1
         next if @dry_run
 
@@ -549,7 +550,7 @@ class ReferenceDataStepsStdMethodsSync
         next
       end
 
-      puts "[#{mode_label}] update DockerImage #{label} (target id=#{record.id})"
+      log_change(:update, "DockerImage #{label} (target id=#{record.id})")
       log_verbose_diff!(record, prepared)
       summary[:docker_images_updated] += 1
       next if @dry_run
@@ -575,7 +576,7 @@ class ReferenceDataStepsStdMethodsSync
       record = DockerBuild.find_by(digest: digest)
 
       if record.nil?
-        puts "[#{mode_label}] create DockerBuild #{label}"
+        log_change(:create, "DockerBuild #{label}")
         summary[:docker_builds_created] += 1
         summary[:docker_builds_created_tags] << prepared["tag"].to_s
         next if @dry_run
@@ -591,7 +592,7 @@ class ReferenceDataStepsStdMethodsSync
         next
       end
 
-      puts "[#{mode_label}] update DockerBuild #{label} (target id=#{record.id})"
+      log_change(:update, "DockerBuild #{label} (target id=#{record.id})")
       log_verbose_diff!(record, comparable)
       summary[:docker_builds_updated] += 1
       next if @dry_run
@@ -611,7 +612,7 @@ class ReferenceDataStepsStdMethodsSync
       record = Version.find_by(id: src_id)
 
       if record.nil?
-        puts "[#{mode_label}] create Version id=#{src_id}"
+        log_change(:create, "Version id=#{src_id}")
         summary[:versions_created] += 1
         next if @dry_run
 
@@ -624,7 +625,7 @@ class ReferenceDataStepsStdMethodsSync
         next
       end
 
-      puts "[#{mode_label}] update Version id=#{src_id}"
+      log_change(:update, "Version id=#{src_id}")
       log_verbose_diff!(record, prepared)
       summary[:versions_updated] += 1
       next if @dry_run
@@ -654,7 +655,7 @@ class ReferenceDataStepsStdMethodsSync
       record = NewsItem.find_by(id: src_id)
 
       if record.nil?
-        puts "[#{mode_label}] create NewsItem #{label}"
+        log_change(:create, "NewsItem #{label}")
         summary[:news_items_created] += 1
         next if @dry_run
 
@@ -667,7 +668,7 @@ class ReferenceDataStepsStdMethodsSync
         next
       end
 
-      puts "[#{mode_label}] update NewsItem #{label} (target id=#{record.id})"
+      log_change(:update, "NewsItem #{label} (target id=#{record.id})")
       log_verbose_diff!(record, prepared)
       summary[:news_items_updated] += 1
       next if @dry_run
@@ -680,7 +681,7 @@ class ReferenceDataStepsStdMethodsSync
     NewsItem.order(:id).each do |record|
       next if source_ids.include?(record.id)
 
-      puts "[#{mode_label}] delete NewsItem id=#{record.id} title=#{record.title.inspect}"
+      log_change(:delete, "NewsItem id=#{record.id} title=#{record.title.inspect}")
       summary[:news_items_deleted] += 1
       next if @dry_run
 
@@ -714,7 +715,7 @@ class ReferenceDataStepsStdMethodsSync
       record = CellOntology.find_by(id: src_id)
 
       if record.nil?
-        puts "[#{mode_label}] create CellOntology #{label}"
+        log_change(:create, "CellOntology #{label}")
         summary[:cell_ontologies_created] += 1
         next if @dry_run
 
@@ -727,7 +728,7 @@ class ReferenceDataStepsStdMethodsSync
         next
       end
 
-      puts "[#{mode_label}] update CellOntology #{label} (target id=#{record.id})"
+      log_change(:update, "CellOntology #{label} (target id=#{record.id})")
       log_verbose_diff!(record, prepared)
       summary[:cell_ontologies_updated] += 1
       next if @dry_run
@@ -740,8 +741,11 @@ class ReferenceDataStepsStdMethodsSync
         next if source_ids.include?(record.id)
 
         term_count = CellOntologyTerm.where(cell_ontology_id: record.id).count
-        puts "[#{mode_label}] delete CellOntology id=#{record.id} name=#{record.name.inspect} tag=#{record.tag.inspect}" \
-             "#{term_count.positive? ? " (and #{term_count} cell_ontology_terms)" : ''}"
+        log_change(
+          :delete,
+          "CellOntology id=#{record.id} name=#{record.name.inspect} tag=#{record.tag.inspect}" \
+          "#{term_count.positive? ? " (and #{term_count} cell_ontology_terms)" : ''}"
+        )
         summary[:cell_ontologies_deleted] += 1
         next if @dry_run
 
@@ -786,7 +790,7 @@ class ReferenceDataStepsStdMethodsSync
       record = OntologyTermType.find_by(id: src_id)
 
       if record.nil?
-        puts "[#{mode_label}] create OntologyTermType #{label}"
+        log_change(:create, "OntologyTermType #{label}")
         summary[:ontology_term_types_created] += 1
         next if @dry_run
 
@@ -799,7 +803,7 @@ class ReferenceDataStepsStdMethodsSync
         next
       end
 
-      puts "[#{mode_label}] update OntologyTermType #{label} (target id=#{record.id})"
+      log_change(:update, "OntologyTermType #{label} (target id=#{record.id})")
       log_verbose_diff!(record, prepared)
       summary[:ontology_term_types_updated] += 1
       next if @dry_run
@@ -831,7 +835,7 @@ class ReferenceDataStepsStdMethodsSync
       record = UploadType.find_by(id: src_id)
 
       if record.nil?
-        puts "[#{mode_label}] create UploadType #{label}"
+        log_change(:create, "UploadType #{label}")
         summary[:upload_types_created] += 1
         next if @dry_run
 
@@ -844,7 +848,7 @@ class ReferenceDataStepsStdMethodsSync
         next
       end
 
-      puts "[#{mode_label}] update UploadType #{label} (target id=#{record.id})"
+      log_change(:update, "UploadType #{label} (target id=#{record.id})")
       log_verbose_diff!(record, prepared)
       summary[:upload_types_updated] += 1
       next if @dry_run
@@ -876,7 +880,7 @@ class ReferenceDataStepsStdMethodsSync
       record = ProjectType.find_by(id: src_id)
 
       if record.nil?
-        puts "[#{mode_label}] create ProjectType #{label}"
+        log_change(:create, "ProjectType #{label}")
         summary[:project_types_created] += 1
         next if @dry_run
 
@@ -889,7 +893,7 @@ class ReferenceDataStepsStdMethodsSync
         next
       end
 
-      puts "[#{mode_label}] update ProjectType #{label} (target id=#{record.id})"
+      log_change(:update, "ProjectType #{label} (target id=#{record.id})")
       log_verbose_diff!(record, prepared)
       summary[:project_types_updated] += 1
       next if @dry_run
@@ -922,7 +926,7 @@ class ReferenceDataStepsStdMethodsSync
       record = ComplianceSchema.find_by(id: src_id)
 
       if record.nil?
-        puts "[#{mode_label}] create ComplianceSchema #{label}"
+        log_change(:create, "ComplianceSchema #{label}")
         summary[:compliance_schemas_created] += 1
         next if @dry_run
 
@@ -935,7 +939,7 @@ class ReferenceDataStepsStdMethodsSync
         next
       end
 
-      puts "[#{mode_label}] update ComplianceSchema #{label} (target id=#{record.id})"
+      log_change(:update, "ComplianceSchema #{label} (target id=#{record.id})")
       log_verbose_diff!(record, prepared)
       summary[:compliance_schemas_updated] += 1
       next if @dry_run
@@ -993,7 +997,7 @@ class ReferenceDataStepsStdMethodsSync
     record = Step.find_by(id: src_id)
 
     if record.nil?
-      puts "[#{mode_label}] create Step #{step_label}"
+      log_change(:create, "Step #{step_label}")
       summary[:steps_created] += 1
       return if @dry_run
 
@@ -1006,7 +1010,7 @@ class ReferenceDataStepsStdMethodsSync
       return
     end
 
-    puts "[#{mode_label}] update Step #{step_label}"
+    log_change(:update, "Step #{step_label}")
     log_verbose_diff!(record, prepared)
     summary[:steps_updated] += 1
     return if @dry_run
@@ -1025,7 +1029,7 @@ class ReferenceDataStepsStdMethodsSync
     end
 
     if existing.empty?
-      puts "[#{mode_label}] create Step #{step_label}"
+      log_change(:create, "Step #{step_label}")
       summary[:steps_created] += 1
       return if @dry_run
 
@@ -1039,7 +1043,7 @@ class ReferenceDataStepsStdMethodsSync
       return
     end
 
-    puts "[#{mode_label}] update Step id=#{record.id} #{step_label}"
+    log_change(:update, "Step id=#{record.id} #{step_label}")
     log_verbose_diff!(record, prepared)
     summary[:steps_updated] += 1
     return if @dry_run
@@ -1082,12 +1086,12 @@ class ReferenceDataStepsStdMethodsSync
     if pending_new_step && @dry_run
       record = StdMethod.find_by(id: src_id)
       if record.nil?
-        puts "[#{mode_label}] create StdMethod #{method_label} (after new Step in same run)"
+        log_change(:create, "StdMethod #{method_label} (after new Step in same run)")
         summary[:std_methods_created] += 1
       elsif record_attributes_match?(record, prepared)
         summary[:std_methods_unchanged] += 1
       else
-        puts "[#{mode_label}] update StdMethod #{method_label} (after new Step in same run)"
+        log_change(:update, "StdMethod #{method_label} (after new Step in same run)")
         log_verbose_diff!(record, prepared)
         summary[:std_methods_updated] += 1
       end
@@ -1103,7 +1107,7 @@ class ReferenceDataStepsStdMethodsSync
     record = StdMethod.find_by(id: src_id)
 
     if record.nil?
-      puts "[#{mode_label}] create StdMethod #{method_label}"
+      log_change(:create, "StdMethod #{method_label}")
       summary[:std_methods_created] += 1
       return if @dry_run
 
@@ -1116,7 +1120,7 @@ class ReferenceDataStepsStdMethodsSync
       return
     end
 
-    puts "[#{mode_label}] update StdMethod #{method_label}"
+    log_change(:update, "StdMethod #{method_label}")
     log_verbose_diff!(record, prepared)
     summary[:std_methods_updated] += 1
     return if @dry_run
@@ -1146,8 +1150,10 @@ class ReferenceDataStepsStdMethodsSync
       mname = src["name"].to_s
       raise SyncError, "StdMethod row without name (step #{step_name})" if mname.empty?
 
-      puts "[#{mode_label}] create StdMethod #{std_method_log_label(nil, nil, mname, step_info['version_id'], step_name: step_name)} " \
-           "(after new Step in same run)"
+      log_change(
+        :create,
+        "StdMethod #{std_method_log_label(nil, nil, mname, step_info['version_id'], step_name: step_name)} (after new Step in same run)"
+      )
       summary[:std_methods_created] += 1
       return
     end
@@ -1168,7 +1174,7 @@ class ReferenceDataStepsStdMethodsSync
     method_label = std_method_log_label(nil, target_step.id, mname, target_step.version_id, step_name: step_name)
 
     if existing.empty?
-      puts "[#{mode_label}] create StdMethod #{method_label}"
+      log_change(:create, "StdMethod #{method_label}")
       summary[:std_methods_created] += 1
       return if @dry_run
 
@@ -1182,7 +1188,7 @@ class ReferenceDataStepsStdMethodsSync
       return
     end
 
-    puts "[#{mode_label}] update StdMethod id=#{record.id} #{method_label}"
+    log_change(:update, "StdMethod id=#{record.id} #{method_label}")
     log_verbose_diff!(record, prepared)
     summary[:std_methods_updated] += 1
     return if @dry_run
@@ -1294,17 +1300,28 @@ class ReferenceDataStepsStdMethodsSync
   def log_verbose_diff!(record, prepared)
     return unless @verbose
 
+    diffs = []
     prepared.each do |column, new_val|
       old_comp = comparable_column_value(record, column)
       new_comp = comparable_value(column, new_val)
       next if old_comp == new_comp
 
-      puts "    #{column}: was #{old_comp.inspect} -> #{new_comp.inspect}"
+      diffs << [column, old_comp, new_comp]
+    end
+    return if diffs.empty?
+
+    name_width = diffs.map { |column, _, _| column.to_s.length }.max
+    diffs.each do |column, old_comp, new_comp|
+      puts format("           %-*s  %s  ->  %s", name_width + 1, "#{column}:", old_comp.inspect, new_comp.inspect)
     end
   end
 
   def mode_label
     @dry_run ? "dry-run" : "apply"
+  end
+
+  def log_change(action, detail)
+    puts format("[%s] %-6s %s", mode_label, action.to_s.upcase, detail)
   end
 
   def print_summary(
@@ -1318,59 +1335,101 @@ class ReferenceDataStepsStdMethodsSync
     ontology_term_types_in = nil,
     upload_types_in = nil,
     project_types_in = nil,
-    compliance_schemas_in = nil
+    compliance_schemas_in = nil,
+    methods_in = []
   )
-    puts ""
-    puts "Summary (#{mode_label})"
+    rows = []
     if docker_images_in.any?
-      puts "  docker_images: created=#{summary[:docker_images_created]} updated=#{summary[:docker_images_updated]} unchanged=#{summary[:docker_images_unchanged]}"
-      puts "  snapshot docker_images: #{docker_images_in.size}"
+      rows << summary_count_row("docker_images", summary, snapshot: docker_images_in.size)
     end
     if docker_builds_in.any?
-      puts "  docker_builds: created=#{summary[:docker_builds_created]} updated=#{summary[:docker_builds_updated]} unchanged=#{summary[:docker_builds_unchanged]}"
-      created_tags = Array(summary[:docker_builds_created_tags]).reject(&:empty?)
-      puts "  docker_builds created tags: #{created_tags.join(', ')}" if created_tags.any?
-      puts "  snapshot docker_builds: #{docker_builds_in.size}"
+      rows << summary_count_row("docker_builds", summary, snapshot: docker_builds_in.size)
     end
     if versions_in.any?
-      puts "  versions: created=#{summary[:versions_created]} updated=#{summary[:versions_updated]} unchanged=#{summary[:versions_unchanged]}"
-      puts "  snapshot versions: #{versions_in.size}"
+      rows << summary_count_row("versions", summary, snapshot: versions_in.size)
     end
     if news_items_in
-      puts "  news_items: created=#{summary[:news_items_created]} updated=#{summary[:news_items_updated]} " \
-           "unchanged=#{summary[:news_items_unchanged]} deleted=#{summary[:news_items_deleted]}"
-      puts "  snapshot news_items: #{news_items_in.size}"
+      rows << summary_count_row("news_items", summary, snapshot: news_items_in.size, deleted: true)
     end
     if cell_ontologies_in
-      puts "  cell_ontologies: created=#{summary[:cell_ontologies_created]} updated=#{summary[:cell_ontologies_updated]} " \
-           "unchanged=#{summary[:cell_ontologies_unchanged]} deleted=#{summary[:cell_ontologies_deleted]}"
-      puts "  snapshot cell_ontologies: #{cell_ontologies_in.size}"
+      rows << summary_count_row("cell_ontologies", summary, snapshot: cell_ontologies_in.size, deleted: true)
     end
     if ontology_term_types_in
-      puts "  ontology_term_types: created=#{summary[:ontology_term_types_created]} updated=#{summary[:ontology_term_types_updated]} " \
-           "unchanged=#{summary[:ontology_term_types_unchanged]}"
-      puts "  snapshot ontology_term_types: #{ontology_term_types_in.size}"
+      rows << summary_count_row("ontology_term_types", summary, snapshot: ontology_term_types_in.size)
     end
     if upload_types_in
-      puts "  upload_types: created=#{summary[:upload_types_created]} updated=#{summary[:upload_types_updated]} " \
-           "unchanged=#{summary[:upload_types_unchanged]}"
-      puts "  snapshot upload_types: #{upload_types_in.size}"
+      rows << summary_count_row("upload_types", summary, snapshot: upload_types_in.size)
     end
     if project_types_in
-      puts "  project_types: created=#{summary[:project_types_created]} updated=#{summary[:project_types_updated]} " \
-           "unchanged=#{summary[:project_types_unchanged]}"
-      puts "  snapshot project_types: #{project_types_in.size}"
+      rows << summary_count_row("project_types", summary, snapshot: project_types_in.size)
     end
     if compliance_schemas_in
-      puts "  compliance_schemas: created=#{summary[:compliance_schemas_created]} updated=#{summary[:compliance_schemas_updated]} " \
-           "unchanged=#{summary[:compliance_schemas_unchanged]}"
-      puts "  snapshot compliance_schemas: #{compliance_schemas_in.size}"
+      rows << summary_count_row("compliance_schemas", summary, snapshot: compliance_schemas_in.size)
     end
-    puts "  steps: created=#{summary[:steps_created]} updated=#{summary[:steps_updated]} unchanged=#{summary[:steps_unchanged]}"
-    puts "  std_methods: created=#{summary[:std_methods_created]} updated=#{summary[:std_methods_updated]} unchanged=#{summary[:std_methods_unchanged]}"
-    puts "  snapshot steps: #{steps_in.size}"
+    rows << summary_count_row("steps", summary, snapshot: steps_in.size)
+    rows << summary_count_row("std_methods", summary, snapshot: methods_in.size)
+
+    puts ""
+    puts "Summary (#{mode_label})"
+    puts ""
+    header = format(
+      "  %-22s %9s %9s %10s %9s %9s",
+      "table", "created", "updated", "unchanged", "deleted", "snapshot"
+    )
+    rule = "  #{'-' * (header.length - 2)}"
+    puts header
+    puts rule
+    rows.each { |row| puts format_summary_count_row(row) }
+    puts rule
+    puts format_summary_count_row(
+      {
+        name: "total",
+        created: rows.sum { |row| row[:created] },
+        updated: rows.sum { |row| row[:updated] },
+        unchanged: rows.sum { |row| row[:unchanged] },
+        deleted: rows.sum { |row| row[:deleted].to_i },
+        snapshot: rows.map { |row| row[:snapshot] }.compact.sum
+      }
+    )
+
+    created_tags = Array(summary[:docker_builds_created_tags]).reject(&:empty?)
+    if created_tags.any?
+      puts ""
+      puts "  docker_builds created tags: #{created_tags.join(', ')}"
+    end
+
+    changed = rows.select { |row| row[:created].positive? || row[:updated].positive? || row[:deleted].to_i.positive? }
+    puts ""
+    if changed.empty?
+      puts "  no created/updated/deleted rows"
+    else
+      puts "  changed tables: #{changed.map { |row| row[:name] }.join(', ')}"
+    end
     puts "  match key: #{match_by_id? ? 'id' : (match_by_version? ? 'name + version_id' : 'name')}"
     puts "  version filter: id/version_id < #{@max_version_id}" if @max_version_id
     puts "  rolled back (dry-run)" if @dry_run
+  end
+
+  def summary_count_row(name, summary, snapshot:, deleted: false)
+    {
+      name: name,
+      created: summary[:"#{name}_created"].to_i,
+      updated: summary[:"#{name}_updated"].to_i,
+      unchanged: summary[:"#{name}_unchanged"].to_i,
+      deleted: deleted ? summary[:"#{name}_deleted"].to_i : nil,
+      snapshot: snapshot
+    }
+  end
+
+  def format_summary_count_row(row)
+    format(
+      "  %-22s %9s %9s %10s %9s %9s",
+      row[:name],
+      row[:created],
+      row[:updated],
+      row[:unchanged],
+      row[:deleted].nil? ? "-" : row[:deleted],
+      row[:snapshot].nil? ? "-" : row[:snapshot]
+    )
   end
 end

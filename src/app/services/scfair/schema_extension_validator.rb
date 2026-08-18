@@ -42,6 +42,12 @@ module Scfair
           warnings << { field: 'extension.atac', message: message }
           valid_checks << { field: 'extension.atac', status: 'warning', message: message }
         end
+      elsif mixed_atac_with_other_assays?
+        valid_checks << {
+          field: 'extension.atac',
+          status: 'skipped',
+          message: 'ATAC/multiome mixed with other assays; fragment assets not required'
+        }
       else
         valid_checks << { field: 'extension.atac', status: 'skipped', message: 'No ATAC extension detected' }
       end
@@ -135,22 +141,42 @@ module Scfair
       PerturbAssayHelper.perturb_enabled?(@field_values, @format)
     end
 
-    # 10x multiome, scATAC-seq (EFO:0010891) and descendants, or present atac attrs.
+    # True only for multiome-only or ATAC-seq/scATAC-seq-only datasets (or ATAC attrs
+    # when no assay terms are present). Mixed ATAC/multiome + other assays skip the
+    # fragment-file warning.
     def self.atac_enabled?(field_values:, format: 'loom')
       new(field_values: field_values || {}, format: format).send(:atac_enabled?)
     end
 
     def atac_enabled?
-      assay_key = @format == 'h5ad' ? 'obs/assay_ontology_term_id' : '/col_attrs/assay_ontology_term_id'
-      vals = Array(@field_values[assay_key]).flat_map { |v| v.to_s.split(' || ') }.map(&:strip)
-      return true if vals.include?(SchemaConstants::MULTIOME_ASSAY)
+      return false if mixed_atac_with_other_assays?
+      return true if atac_like_assay_terms.any?
 
-      vals.any? do |v|
-        next false if v.blank?
+      assay_ontology_terms.empty? && atac_attrs_present?
+    end
 
-        v == SchemaConstants::ATAC_ASSAY_ROOT ||
-          @resolver.descendant_of?(v, SchemaConstants::ATAC_ASSAY_ROOT)
-      end || present?(key('uns/atac')) || present?(key('attrs/atac'))
+    def mixed_atac_with_other_assays?
+      atac_like_assay_terms.any? && other_assay_terms.any?
+    end
+
+    def assay_ontology_terms
+      SpatialAssayHelper.assay_terms(@field_values, @format)
+    end
+
+    def atac_like_assay_terms
+      assay_ontology_terms.select { |term| atac_like_assay?(term) }
+    end
+
+    def other_assay_terms
+      assay_ontology_terms - atac_like_assay_terms
+    end
+
+    def atac_like_assay?(term)
+      AssayProjectTypeHelper.atac_like_term?(term, resolver: @resolver)
+    end
+
+    def atac_attrs_present?
+      present?(key('uns/atac')) || present?(key('attrs/atac'))
     end
 
     def analysis_json_enabled?

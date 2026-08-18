@@ -1,4 +1,6 @@
 <% content_for :title, "Project Types - ASAP" %>
+<% show_counts = admin? %>
+<% show_actions = can_edit_synced_reference_data? %>
 <div class="max-w-6xl mx-auto py-10 px-4 sm:px-6 lg:px-8">
   <div class="mb-8 space-y-4">
     <div>
@@ -9,7 +11,7 @@
         Manage the different types of projects available in ASAP.
       </p>
     </div>
-    <% if admin? %>
+    <% if show_actions %>
       <div>
         <%= link_to "New Project Type",
                     new_project_type_path,
@@ -18,8 +20,18 @@
     <% end %>
   </div>
 
+  <% if admin? && !synced_reference_data_writable? %>
+    <div class="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-400/50 dark:bg-amber-950/30 dark:text-amber-100">
+      Project types are synced from development and are read-only on production.
+    </div>
+  <% end %>
+
   <% if notice.present? %>
     <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700 dark:bg-green-950/30 dark:text-green-100 mb-4"><%= notice %></div>
+  <% end %>
+
+  <% if alert.present? %>
+    <div class="rounded-md bg-red-100 px-4 py-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-100 mb-4"><%= alert %></div>
   <% end %>
 
   <% if @project_types.empty? %>
@@ -35,7 +47,6 @@
       </div>
 
       <div class="overflow-x-auto">
-        <% show_actions = admin? %>
         <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-800">
           <thead>
             <tr class="bg-gray-50 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:bg-gray-950 dark:text-gray-400">
@@ -45,6 +56,10 @@
               <th scope="col" class="px-6 py-3">Row Label</th>
               <th scope="col" class="px-6 py-3">Col Label</th>
               <th scope="col" class="px-6 py-3">Admin report only</th>
+              <% if show_counts %>
+                <th scope="col" class="px-6 py-3">Public projects</th>
+                <th scope="col" class="px-6 py-3">Private projects</th>
+              <% end %>
               <% if show_actions %>
                 <th scope="col" class="px-6 py-3 text-right">Actions</th>
               <% end %>
@@ -52,7 +67,8 @@
           </thead>
           <tbody class="divide-y divide-gray-100 bg-white text-sm text-gray-900 dark:divide-gray-800 dark:bg-gray-900 dark:text-gray-100">
             <% @project_types.each do |project_type| %>
-              <tr>
+              <% counts = @project_counts[project_type.id] %>
+              <tr data-project-type-id="<%= project_type.id %>">
                 <td class="whitespace-nowrap px-6 py-4 font-mono text-xs text-gray-600 dark:text-gray-400">
                   <%= project_type.id %>
                 </td>
@@ -71,19 +87,26 @@
                 <td class="whitespace-nowrap px-6 py-4 text-gray-600 dark:text-gray-300">
                   <%= project_type.admin_report_only? ? "yes" : "no" %>
                 </td>
+                <% if show_counts %>
+                  <td class="whitespace-nowrap px-6 py-4 text-gray-600 dark:text-gray-300" data-role="public-projects-count">
+                    <%= counts[:public] %>
+                  </td>
+                  <td class="whitespace-nowrap px-6 py-4 text-gray-600 dark:text-gray-300" data-role="private-projects-count">
+                    <%= counts[:private] %>
+                  </td>
+                <% end %>
                 <% if show_actions %>
                   <td class="whitespace-nowrap px-6 py-4 text-right text-sm">
-                    <%= link_to "Show",
-                                project_type_path(project_type),
-                                class: "text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200" %>
-                    <%= link_to "Edit",
+                    <%= link_to "Edit details",
                                 edit_project_type_path(project_type),
-                                class: "ml-3 text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200" %>
-                    <%= button_to "Delete",
-                                  project_type_path(project_type),
-                                  method: :delete,
-                                  form: { data: { turbo_confirm: "Delete #{project_type.name}?" }, class: "inline" },
-                                  class: "ml-3 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 bg-transparent p-0" %>
+                                class: "text-indigo-600 hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200" %>
+                    <% if counts[:public].zero? && counts[:private].zero? %>
+                      <%= button_to "Delete",
+                                    project_type_path(project_type),
+                                    method: :delete,
+                                    form: { data: { turbo_confirm: "Delete #{project_type.name}?" }, class: "inline" },
+                                    class: "ml-3 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300 bg-transparent p-0" %>
+                    <% end %>
                   </td>
                 <% end %>
               </tr>

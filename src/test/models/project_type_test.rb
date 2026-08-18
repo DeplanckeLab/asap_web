@@ -65,4 +65,28 @@ class ProjectTypeTest < ActiveSupport::TestCase
     ProjectType.find_by(tag: 'spat')&.update!(admin_report_only: true)
     ProjectType.find_by(tag: 'sc')&.update!(admin_report_only: false)
   end
+
+  test 'project_visibility_counts_for counts public and private projects' do
+    ptype = register_for_test_cleanup(
+      ProjectType.create!(
+        name: "Count type #{SecureRandom.hex(4)}",
+        tag: "ct#{SecureRandom.hex(3)}"
+      )
+    )
+    other = register_for_test_cleanup(
+      ProjectType.create!(
+        name: "Other type #{SecureRandom.hex(4)}",
+        tag: "ot#{SecureRandom.hex(3)}"
+      )
+    )
+    2.times do
+      create_test_project!(project_type_id: ptype.id, public: true)
+    end
+    create_test_project!(project_type_id: ptype.id, public: false)
+    create_test_project!(project_type_id: other.id, public: true)
+
+    counts = ProjectType.project_visibility_counts_for([ptype, other])
+    assert_equal({ public: 2, private: 1 }, counts[ptype.id])
+    assert_equal({ public: 1, private: 0 }, counts[other.id])
+  end
 end

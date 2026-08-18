@@ -30,17 +30,7 @@ module Scfair
     # CELLxGENE (and similar) catalog payloads store assays as
     # [{ ontology_term_id:, label: }, ...].
     def tag_for_catalog_assays(assays)
-      assays = Array(assays)
-      terms = []
-      labels = []
-      assays.each do |assay|
-        next unless assay.is_a?(Hash)
-
-        term = assay[:ontology_term_id].presence || assay['ontology_term_id'].presence
-        label = assay[:label].presence || assay['label'].presence
-        terms << term.to_s if term.present?
-        labels << label.to_s if label.present?
-      end
+      terms, labels = catalog_assay_terms_and_labels(assays)
       return nil if terms.empty? && labels.empty?
 
       tag_for(
@@ -50,6 +40,24 @@ module Scfair
         },
         format: 'h5ad'
       )
+    end
+
+    # True when every assay ontology term is 10x multiome or scATAC-seq / ATAC
+    # (including descendants). Mixed ATAC/multiome + other assays is false.
+    def catalog_assays_atac_or_multiome_only?(assays, resolver: nil)
+      terms, = catalog_assay_terms_and_labels(assays)
+      return false if terms.empty?
+
+      resolver ||= OntologyLineageResolver.new
+      terms.all? { |term| atac_like_term?(term, resolver: resolver) }
+    end
+
+    def atac_like_term?(term, resolver: nil)
+      t = term.to_s
+      return false if t.blank?
+      return true if t == MULTIOME_ASSAY || t == ATAC_ASSAY_ROOT
+
+      (resolver || OntologyLineageResolver.new).descendant_of?(t, ATAC_ASSAY_ROOT)
     end
 
     def tag_for_format(field_values, format, resolver)
@@ -101,6 +109,20 @@ module Scfair
       return {} unless field_values.is_a?(Hash)
 
       field_values.each_with_object({}) { |(k, v), h| h[k.to_s] = v }
+    end
+
+    def catalog_assay_terms_and_labels(assays)
+      terms = []
+      labels = []
+      Array(assays).each do |assay|
+        next unless assay.is_a?(Hash)
+
+        term = assay[:ontology_term_id].presence || assay['ontology_term_id'].presence
+        label = assay[:label].presence || assay['label'].presence
+        terms << term.to_s if term.present?
+        labels << label.to_s if label.present?
+      end
+      [terms.uniq, labels.uniq]
     end
   end
 end

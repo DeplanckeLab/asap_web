@@ -35,7 +35,8 @@ module ComplianceHelpers
     count.to_i.positive? || Array(warnings).any?
   end
 
-  # True when assay (or atac attrs) matches ATAC / multiome — same rule as extension.atac.
+  # True when assays are multiome-only or ATAC-seq/scATAC-seq-only (or ATAC attrs
+  # with no assay terms) — same rule as extension.atac fragment-file warning.
   def compliance_atac_assay_present?(validation_result, field_values: nil, format: nil)
     values = field_values.presence ||
              validation_result&.dig(:field_values) ||

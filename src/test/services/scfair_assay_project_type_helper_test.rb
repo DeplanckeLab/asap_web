@@ -78,4 +78,23 @@ class ScfairAssayProjectTypeHelperTest < TestBaseWithoutFixtures
 
     assert_nil Scfair::AssayProjectTypeHelper.tag_for_catalog_assays(assays)
   end
+
+  test 'catalog assays are atac or multiome only when every term is ATAC-like' do
+    assert Scfair::AssayProjectTypeHelper.catalog_assays_atac_or_multiome_only?(
+      [{ ontology_term_id: 'EFO:0030059', label: '10x multiome' }]
+    )
+    assert Scfair::AssayProjectTypeHelper.catalog_assays_atac_or_multiome_only?(
+      [{ ontology_term_id: 'EFO:0010891', label: 'scATAC-seq' }]
+    )
+    refute Scfair::AssayProjectTypeHelper.catalog_assays_atac_or_multiome_only?(
+      [
+        { ontology_term_id: 'EFO:0030059', label: '10x multiome' },
+        { ontology_term_id: 'EFO:0009899', label: "10x 3' v3" }
+      ]
+    )
+    refute Scfair::AssayProjectTypeHelper.catalog_assays_atac_or_multiome_only?(
+      [{ ontology_term_id: 'EFO:0009899', label: "10x 3' v3" }]
+    )
+    refute Scfair::AssayProjectTypeHelper.catalog_assays_atac_or_multiome_only?([])
+  end
 end

@@ -139,6 +139,14 @@ module ExternalCatalog
     def entries_for_dataset(dataset, collection_refs = {}, collection_id: nil, collection_title: nil, collection_description: nil)
       dataset_id = dataset[:dataset_id] || dataset['dataset_id']
       title = dataset[:title] || dataset['name'] || dataset_id.to_s
+      if atac_or_multiome_only_dataset?(dataset)
+        @logger.info(
+          "[ExternalCatalog::CellxgeneCatalog] skip atac/multiome-only " \
+          "dataset=#{dataset_id} title=#{title.inspect}"
+        )
+        return []
+      end
+
       tax_id, organism_label = extract_organism(dataset)
       assets = dataset[:assets] || dataset['assets'] || []
       refs = merge_dataset_refs(dataset, collection_refs)
@@ -158,7 +166,7 @@ module ExternalCatalog
           tax_id: tax_id,
           organism_label: organism_label,
           filesize: (asset[:filesize] || asset['filesize']).to_i,
-          project_type_tag: project_type_tag_for_dataset(dataset),
+          project_type_tag: 'sc',
           format_kind: :h5ad,
           filename: File.basename(URI.parse(url.to_s).path.to_s),
           dois: refs[:dois],
@@ -236,9 +244,9 @@ module ExternalCatalog
       }
     end
 
-    def project_type_tag_for_dataset(dataset)
+    def atac_or_multiome_only_dataset?(dataset)
       assays = dataset[:assay] || dataset['assay']
-      Scfair::AssayProjectTypeHelper.tag_for_catalog_assays(assays).presence || 'sc'
+      Scfair::AssayProjectTypeHelper.catalog_assays_atac_or_multiome_only?(assays)
     end
 
     def extract_organism(dataset)

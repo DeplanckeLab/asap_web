@@ -1,13 +1,17 @@
 class ProjectTypesController < ApplicationController
-  before_action :set_project_type, only: %i[ show edit update destroy ]
+  before_action :authorize_admin, except: %i[index show]
+  before_action :ensure_synced_reference_data_writable!, except: %i[index show]
+  before_action :set_project_type, only: %i[show edit update destroy]
 
   # GET /project_types or /project_types.json
   def index
-    @project_types = ProjectType.all
+    @project_types = ProjectType.order(:name)
+    @project_counts = ProjectType.project_visibility_counts_for(@project_types)
   end
 
   # GET /project_types/1 or /project_types/1.json
   def show
+    @project_counts = ProjectType.project_visibility_counts_for([@project_type]).fetch(@project_type.id)
   end
 
   # GET /project_types/new
@@ -49,7 +53,16 @@ class ProjectTypesController < ApplicationController
 
   # DELETE /project_types/1 or /project_types/1.json
   def destroy
-    @project_type.destroy
+    if @project_type.projects.exists?
+      message = "Cannot delete #{@project_type.name}: projects still use this type."
+      respond_to do |format|
+        format.html { redirect_to project_types_url, alert: message }
+        format.json { render json: { error: message }, status: :unprocessable_entity }
+      end
+      return
+    end
+
+    @project_type.destroy!
 
     respond_to do |format|
       format.html { redirect_to project_types_url, notice: "Project type was successfully destroyed." }
@@ -58,14 +71,12 @@ class ProjectTypesController < ApplicationController
   end
 
   private
-    # Use callbacks to share common setup or constraints between actions.
-    def set_project_type
-      @project_type = ProjectType.find(params[:id])
-    end
 
-    # Only allow a list of trusted parameters through.
-    def project_type_params
-      params.fetch(:project_type, {}).permit(:name, :tag, :row_label, :col_label, :admin_report_only)
-    end
+  def set_project_type
+    @project_type = ProjectType.find(params[:id])
+  end
+
+  def project_type_params
+    params.fetch(:project_type, {}).permit(:name, :tag, :row_label, :col_label, :admin_report_only)
+  end
 end
-

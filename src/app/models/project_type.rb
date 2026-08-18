@@ -62,6 +62,18 @@ class ProjectType < ApplicationRecord
 
       relation.where(admin_report_only: false)
     end
+
+    def project_visibility_counts_for(types)
+      ids = types.map(&:id)
+      counts = ids.each_with_object({}) { |id, hash| hash[id] = { public: 0, private: 0 } }
+      return counts if ids.empty?
+
+      Project.where(project_type_id: ids).group(:project_type_id, :public).count.each do |(type_id, is_public), n|
+        key = is_public == true ? :public : :private
+        counts[type_id][key] += n
+      end
+      counts
+    end
   end
 
   def display_name

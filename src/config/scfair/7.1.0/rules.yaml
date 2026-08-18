@@ -1712,8 +1712,9 @@ checks:
     label: ATAC schema extension checks
     summary: ATAC-seq extension metadata.
     rollup:
-    - Detects ATAC or 10x multiome assays via ontology lineage
+    - Detects ATAC-seq/scATAC-seq-only or 10x multiome-only assays via ontology lineage
     - Warns that fragment file assets should be supplied separately
+    - Skips the fragment-file warning when ATAC/multiome is mixed with other assays
   extension.analysis_json:
     label: analysis_json extension checks
     summary: analysis_json extension metadata.

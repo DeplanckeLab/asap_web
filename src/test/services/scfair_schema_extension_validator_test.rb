@@ -8,6 +8,38 @@ class ScfairSchemaExtensionValidatorTest < TestBaseWithoutFixtures
   include SpatialTestHelpers
   include PerturbTestHelpers
 
+  test 'skips ATAC fragment warning when multiome is mixed with other assays' do
+    result = Scfair::SchemaExtensionValidator.new(
+      field_values: { 'obs/assay_ontology_term_id' => ['EFO:0030059', 'EFO:0009899'] },
+      format: 'h5ad'
+    ).call
+
+    refute result[:warnings].any? { |entry| entry[:field] == 'extension.atac' }
+    atac = result[:valid_checks].find { |entry| entry[:field] == 'extension.atac' }
+    assert_equal 'skipped', atac[:status]
+    assert_match(/mixed with other assays/, atac[:message])
+  end
+
+  test 'skips ATAC fragment warning when scATAC-seq is mixed with other assays' do
+    result = Scfair::SchemaExtensionValidator.new(
+      field_values: { 'obs/assay_ontology_term_id' => ['EFO:0010891', 'EFO:0009899'] },
+      format: 'h5ad'
+    ).call
+
+    refute result[:warnings].any? { |entry| entry[:field] == 'extension.atac' }
+    atac = result[:valid_checks].find { |entry| entry[:field] == 'extension.atac' }
+    assert_equal 'skipped', atac[:status]
+  end
+
+  test 'warns about ATAC fragments for scATAC-seq-only assays' do
+    result = Scfair::SchemaExtensionValidator.new(
+      field_values: { 'obs/assay_ontology_term_id' => ['EFO:0010891'] },
+      format: 'h5ad'
+    ).call
+
+    assert result[:warnings].any? { |entry| entry[:field] == 'extension.atac' }
+  end
+
   test 'records extension warnings in warnings list and valid_checks' do
     field_values = {
       'obs/assay_ontology_term_id' => ['EFO:0030059']

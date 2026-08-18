@@ -8,9 +8,8 @@ class ExternalCatalogProjectTypeTest < ActiveSupport::TestCase
     skip 'No Version available' unless @version
 
     @sc = ProjectType.find_by(tag: 'sc')
-    @spat = ProjectType.find_by(tag: 'spat')
     @bulk = ProjectType.find_by(tag: 'bulk')
-    skip 'Missing sc/spat/bulk ProjectType' unless @sc && @spat && @bulk
+    skip 'Missing sc/bulk ProjectType' unless @sc && @bulk
 
     @user = register_for_test_cleanup(
       User.create!(email: "ecpt_#{SecureRandom.hex(4)}@example.com", password: 'password123')
@@ -38,51 +37,64 @@ class ExternalCatalogProjectTypeTest < ActiveSupport::TestCase
     )
   end
 
-  test 'project_type_for creates spat when missing from database' do
-    ProjectType.find_by(tag: 'spat')&.destroy!
-
-    begin
-      ptype = @importer.send(:project_type_for, entry_for('spat'))
-      assert_equal 'spat', ptype.tag
-      assert_equal 'Spatial transcriptomics', ptype.name
-    ensure
-      ProjectType.ensure_for_tag!('spat')
-    end
-  end
-
-  test 'project_type_for maps spat and bulk tags' do
-    assert_equal @spat.id, @importer.send(:project_type_for, entry_for('spat')).id
+  test 'project_type_for keeps GEO bulk and maps every other catalog tag to sc' do
     assert_equal @bulk.id, @importer.send(:project_type_for, entry_for('bulk')).id
     assert_equal @sc.id, @importer.send(:project_type_for, entry_for('sc')).id
+    assert_equal @sc.id, @importer.send(:project_type_for, entry_for('spat')).id
+    assert_equal @sc.id, @importer.send(:project_type_for, entry_for('atac')).id
+    assert_equal @sc.id, @importer.send(:project_type_for, entry_for('multi')).id
   end
 
-  test 'project_type_for uses preparsing is_spatial even when catalog tag is sc' do
-    tmp = Dir.mktmpdir('ecpt-fu')
-    File.write(File.join(tmp, 'output.json'), { is_spatial: 1, spatial_library_id: 'libA' }.to_json)
-    fu = Object.new
-    fu.define_singleton_method(:upload_dir) { Pathname.new(tmp) }
-
-    begin
-      ptype = @importer.send(:project_type_for, entry_for('sc'), fu: fu)
-      assert_equal 'spat', ptype.tag
-    ensure
-      FileUtils.rm_rf(tmp)
-    end
-  end
-
-  test 'CELLxGENE visium dataset is tagged spat' do
+  test 'CELLxGENE catalog entries are always tagged sc' do
     catalog = ExternalCatalog::CellxgeneCatalog.new
-    dataset = {
-      assay: [{ ontology_term_id: 'EFO:0022857', label: 'Visium Spatial Gene Expression V1' }]
+    visium = {
+      dataset_id: 'd-visium',
+      title: 'Visium',
+      assay: [{ ontology_term_id: 'EFO:0022857', label: 'Visium Spatial Gene Expression V1' }],
+      assets: [{ filetype: 'h5ad', url: 'https://example.com/v.h5ad', filesize: 10 }]
     }
-    assert_equal 'spat', catalog.send(:project_type_tag_for_dataset, dataset)
+    scrna = {
+      dataset_id: 'd-sc',
+      title: 'scRNA',
+      assay: [{ 'ontology_term_id' => 'EFO:0009899', 'label' => "10x 3' v3" }],
+      assets: [{ filetype: 'h5ad', url: 'https://example.com/s.h5ad', filesize: 10 }]
+    }
+
+    visium_entry = catalog.send(:entries_for_dataset, visium).first
+    scrna_entry = catalog.send(:entries_for_dataset, scrna).first
+    assert_equal 'sc', visium_entry.project_type_tag
+    assert_equal 'sc', scrna_entry.project_type_tag
   end
 
-  test 'CELLxGENE scRNA-seq dataset stays sc' do
+  test 'CELLxGENE skips multiome-only and ATAC-only datasets' do
     catalog = ExternalCatalog::CellxgeneCatalog.new
-    dataset = {
-      assay: [{ 'ontology_term_id' => 'EFO:0009899', 'label' => "10x 3' v3" }]
+    assets = [{ filetype: 'h5ad', url: 'https://example.com/a.h5ad', filesize: 10 }]
+    multiome_only = {
+      dataset_id: 'd-multi',
+      title: 'Multiome only',
+      assay: [{ ontology_term_id: 'EFO:0030059', label: '10x multiome' }],
+      assets: assets
     }
-    assert_equal 'sc', catalog.send(:project_type_tag_for_dataset, dataset)
+    atac_only = {
+      dataset_id: 'd-atac',
+      title: 'ATAC only',
+      assay: [{ ontology_term_id: 'EFO:0010891', label: 'scATAC-seq' }],
+      assets: assets
+    }
+    mixed = {
+      dataset_id: 'd-mixed',
+      title: 'Multiome plus RNA',
+      assay: [
+        { ontology_term_id: 'EFO:0030059', label: '10x multiome' },
+        { ontology_term_id: 'EFO:0009899', label: "10x 3' v3" }
+      ],
+      assets: assets
+    }
+
+    assert_empty catalog.send(:entries_for_dataset, multiome_only)
+    assert_empty catalog.send(:entries_for_dataset, atac_only)
+    mixed_entry = catalog.send(:entries_for_dataset, mixed).first
+    assert_equal 'd-mixed', mixed_entry.external_id
+    assert_equal 'sc', mixed_entry.project_type_tag
   end
 end

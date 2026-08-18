@@ -239,6 +239,12 @@ module ApplicationHelper
       { label: "Docker Images", path: docker_images_path, icon: "fas fa-cube" },
       { label: "Docker Builds", path: docker_builds_path, icon: "fas fa-cubes" },
       { label: "Organisms", path: organisms_path, icon: "fas fa-dna" },
+      {
+        label: "Project types",
+        description: "List types and public/private project counts",
+        path: project_types_path,
+        icon: "fas fa-layer-group"
+      },
       { label: "Steps", path: steps_path, icon: "fas fa-list-ol" },
       { label: "Methods", path: std_methods_path, icon: "fas fa-cogs" },
       { label: "Run statuses", path: statuses_path, icon: "fas fa-check-circle" }

@@ -145,12 +145,6 @@ module ExternalCatalog
       wait_for_parse!(project)
       attach_reference_metadata!(project, entry)
       project.reload
-      if project.apply_project_type_from_assay_metadata!(replace_sc_default: true)
-        @logger.info(
-          "[ExternalCatalog] project_type=#{project.project_type.tag} from assay " \
-          "source=#{entry.source}/#{entry.external_id} project=#{project.key}"
-        )
-      end
       umap_result = SpatialUmapEnsureService.call(
         project: project,
         logger: @logger,
@@ -296,21 +290,14 @@ module ExternalCatalog
       pp.projects.where(being_deleted: [false, nil]).exists?
     end
 
-    def project_type_for(entry, fu: nil)
-      tag = entry.project_type_tag.to_s
-      tag = 'spat' if fu && preparsing_spatial?(fu)
+    # Catalog import always creates sc projects (GEO bulk stays bulk).
+    # Assay-based spat/atac/multi assignment is left to user-created projects.
+    def project_type_for(entry)
+      tag = entry.project_type_tag.to_s == 'bulk' ? 'bulk' : 'sc'
       ptype = ProjectType.ensure_for_tag!(tag)
       raise Error, "No ProjectType for tag=#{tag.inspect}" unless ptype
 
       ptype
-    end
-
-    def preparsing_spatial?(fu)
-      output_path = fu.upload_dir.join('output.json')
-      return false unless File.exist?(output_path)
-
-      output = Basic.safe_parse_json(File.read(output_path), {})
-      output['is_spatial'].to_i == 1 || output['spatial_library_id'].present?
     end
 
     def resolve_organism!(entry)
@@ -629,7 +616,7 @@ module ExternalCatalog
     end
 
     def create_project!(entry, fu, organism, parsing_attrs, preparsing_fp)
-      ptype = project_type_for(entry, fu: fu)
+      ptype = project_type_for(entry)
       project = Project.new(
         user_id: @user.id,
         key: Project.generate_unique_key,

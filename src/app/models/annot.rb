@@ -103,9 +103,10 @@ class Annot < ApplicationRecord
   end
 
   # True when this is a DISCRETE (categorical) annotation whose category
-  # names are all numeric-coercible, i.e. safe to re-interpret as NUMERIC.
+  # names are all finite numbers or NaN, i.e. safe to re-interpret as NUMERIC.
   # Returns false for any non-DISCRETE annot, for annots with blank or
-  # unparseable categories_json, or when any category name is not a number.
+  # unparseable categories_json, or when any category name is Inf or a
+  # non-numeric label.
   def categorical_numeric_coercible?
     return false unless data_type_id == 3
     return false if categories_json.blank?
@@ -115,7 +116,9 @@ class Annot < ApplicationRecord
       next false if key.nil?
       str = key.to_s.strip
       next false if str.empty?
-      !!(Float(str) rescue nil)
+      next true if str.match?(/\A[-+]?nan\z/i)
+      value = Float(str) rescue nil
+      value.is_a?(Numeric) && value.finite?
     end
   end
   

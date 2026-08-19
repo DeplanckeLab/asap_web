@@ -280,6 +280,118 @@
         </button>
       </div>
     </div>
+
+    <div class="bg-gray-50 rounded-lg p-6"
+         data-controller="transfer-ownership"
+         data-transfer-ownership-url-value="<%= transfer_ownership_project_path(@project) %>">
+      <h3 class="text-lg font-semibold text-gray-900 mb-4">Transfer ownership</h3>
+      <% if @project.sandbox? %>
+        <div class="p-3 bg-amber-50 border border-amber-200 rounded-md">
+          <p class="text-sm text-amber-800">
+            Sandbox projects cannot be transferred. Clone this project into a regular account project first.
+          </p>
+        </div>
+      <% else %>
+      <p class="text-sm text-gray-600 mb-4">
+        Transfer this project to another existing user account. Only records currently owned by
+        <%= @project.user&.email || 'the current owner' %> are reassigned when you select the options below.
+      </p>
+
+      <div class="space-y-4">
+        <div class="max-w-md">
+          <label for="transfer_ownership_email" class="block text-sm font-medium text-gray-900 mb-2">
+            New owner email
+          </label>
+          <input type="email"
+                 id="transfer_ownership_email"
+                 data-transfer-ownership-target="email"
+                 placeholder="user@example.com"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
+        </div>
+
+        <div>
+          <p class="text-sm font-medium text-gray-900 mb-2">Also transfer ownership of</p>
+          <label class="flex items-center gap-2 text-sm text-gray-700 mb-3">
+            <input type="checkbox"
+                   checked
+                   data-action="change->transfer-ownership#toggleAll"
+                   class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+            Select all
+          </label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <% [
+              ['runs', 'Runs'],
+              ['selections', 'Selections'],
+              ['clas', 'Collaborative annotations (CLAs)'],
+              ['cla_votes', 'CLA votes'],
+              ['annots', 'Metadata / annots'],
+              ['checkpoints', 'Checkpoints'],
+              ['gene_set_collections', 'Gene set collections'],
+              ['reqs', 'Analysis requests'],
+              ['fus', 'Uploads'],
+              ['jobs', 'Jobs'],
+              ['fos', 'Output files'],
+              ['module_score_requests', 'Module score requests']
+            ].each do |key, label| %>
+              <label class="flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox"
+                       value="<%= key %>"
+                       data-label="<%= label %>"
+                       data-transfer-ownership-target="option"
+                       checked
+                       class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                <%= label %>
+              </label>
+            <% end %>
+          </div>
+        </div>
+
+        <div data-transfer-ownership-target="message" class="hidden">
+          <p class="text-sm px-3 py-2 rounded whitespace-pre-line" data-transfer-ownership-target="messageText"></p>
+        </div>
+
+        <button type="button"
+                data-transfer-ownership-target="submitButton"
+                data-action="click->transfer-ownership#openConfirm"
+                class="px-4 py-2 bg-amber-600 text-white text-sm rounded-md hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed">
+          Transfer ownership
+        </button>
+      </div>
+
+      <div data-transfer-ownership-target="modal"
+           class="hidden fixed inset-0 z-50 flex items-center justify-center"
+           role="dialog"
+           aria-modal="true"
+           aria-labelledby="transfer-ownership-modal-title"
+           data-action="click->transfer-ownership#closeOnBackdrop keydown@window->transfer-ownership#closeOnEscape">
+        <div class="absolute inset-0 bg-black/40"></div>
+        <div class="relative bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 border border-gray-200"
+             data-action="click->transfer-ownership#stop">
+          <div class="px-5 py-4 border-b border-gray-200">
+            <h2 id="transfer-ownership-modal-title" class="text-base font-semibold text-gray-900 m-0">
+              Confirm ownership transfer
+            </h2>
+          </div>
+          <div class="px-5 py-4">
+            <p data-transfer-ownership-target="summary" class="text-sm text-gray-700 m-0 whitespace-pre-line"></p>
+          </div>
+          <div class="px-5 py-4 border-t border-gray-200 flex justify-end gap-2">
+            <button type="button"
+                    class="inline-flex items-center px-4 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+                    data-action="click->transfer-ownership#close">
+              Cancel
+            </button>
+            <button type="button"
+                    data-transfer-ownership-target="confirmButton"
+                    class="inline-flex items-center px-4 py-2 rounded-md bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+                    data-action="click->transfer-ownership#confirm">
+              Confirm transfer
+            </button>
+          </div>
+        </div>
+      </div>
+      <% end %>
+    </div>
   </div>
 
   <!-- Action Buttons -->
@@ -607,7 +719,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <h3 class="text-sm font-semibold text-gray-900 mb-2">Project owner</h3>
             <p class="text-xs text-gray-600 mb-2">The owner has full control of the project. In addition to Analyze and Export, this includes:</p>
             <ul class="list-disc list-inside space-y-1 text-xs text-gray-700">
-              <li>Edit project settings (privacy, project type, and user rights)</li>
+              <li>Edit project settings (privacy, project type, user rights, and ownership transfer)</li>
               <li>Invite, update, and remove shared users</li>
               <li>Publish or unpublish the project</li>
               <li>Delete the project</li>

@@ -5,6 +5,7 @@ Rails.application.routes.draw do
       collection do
         get :current
         put :current, action: :upsert_current
+        delete :current, action: :destroy_current
       end
     end
     collection do
@@ -87,6 +88,7 @@ Rails.application.routes.draw do
       post :prepare_metadata_from_project_annot
       post :clone
       post :toggle_public
+      post :transfer_ownership
       post :prepare_metadata
       post :do_import_metadata
       post :export_consensus_annotation

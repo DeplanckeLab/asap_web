@@ -17,8 +17,12 @@ class CheckpointsController < ApplicationController
       .where.not(title: CURRENT_CHECKPOINT_TITLES)
       .includes(:user)
       .order(created_at: :desc)
+    current = find_current_checkpoint
+    return if performed?
+
     render json: {
-      checkpoints: checkpoints.map { |checkpoint| checkpoint_payload(checkpoint, include_state: true) }
+      checkpoints: checkpoints.map { |checkpoint| checkpoint_payload(checkpoint, include_state: true) },
+      current_checkpoint: current ? checkpoint_payload(current, include_state: true) : nil
     }
   end
 
@@ -97,6 +101,14 @@ class CheckpointsController < ApplicationController
     end
 
     if checkpoint_state_param_present?
+      if @checkpoint.current_auto?
+        render json: { error: 'Cannot update the current auto checkpoint this way.' }, status: :unprocessable_entity
+        return
+      end
+      unless @checkpoint.comments_empty?
+        render json: { error: 'Cannot update a checkpoint that already has comments.' }, status: :unprocessable_entity
+        return
+      end
       @checkpoint.state = checkpoint_state
     end
 
@@ -183,6 +195,17 @@ class CheckpointsController < ApplicationController
     else
       render json: { error: checkpoint.errors.full_messages.join(', ') }, status: :unprocessable_entity
     end
+  end
+
+  def destroy_current
+    return if performed?
+    return unless ensure_analyzable!
+
+    checkpoint = find_current_checkpoint
+    return if performed?
+
+    checkpoint&.destroy
+    render json: { success: true }
   end
 
   private

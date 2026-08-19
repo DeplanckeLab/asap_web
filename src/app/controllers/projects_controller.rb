@@ -17,10 +17,10 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access annotations].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public transfer_ownership cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
   before_action :authorize_project_read_access, only: %i[show clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
-  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection collection_owned_project_autocomplete collection_add_project]
+  before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection collection_owned_project_autocomplete collection_add_project transfer_ownership]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection save_batch_compose_metadata]
   before_action :authorize_project_owner_access, only: %i[export_consensus_annotation preview_consensus_annotation]
   GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
@@ -1753,6 +1753,33 @@ class ProjectsController < ApplicationController
       message: 'No change.',
       notice: 'No change.'
     )
+  end
+
+  # POST /projects/:id/transfer_ownership
+  def transfer_ownership
+    unless ActiveModel::Type::Boolean.new.cast(params[:confirm])
+      return render json: { success: false, error: 'Ownership transfer was not confirmed.' },
+                    status: :unprocessable_entity
+    end
+
+    result = ProjectOwnershipTransferService.call!(
+      project: @project,
+      new_owner_email: params[:email],
+      transfer: params[:transfer] || {}
+    )
+    new_owner = result[:new_owner]
+    still_readable = readable?(@project.reload)
+    redirect_url = still_readable ? project_path(@project, view: 'settings') : projects_path
+
+    render json: {
+      success: true,
+      message: "Ownership transferred to #{new_owner.email}.",
+      new_owner_email: new_owner.email,
+      transferred: result[:transferred].map(&:to_s),
+      redirect_url: redirect_url
+    }
+  rescue ProjectOwnershipTransferService::Error => e
+    render json: { success: false, error: e.message }, status: :unprocessable_entity
   end
 
   # GET /projects/:id/collection_owned_project_autocomplete
@@ -13741,16 +13768,13 @@ class ProjectsController < ApplicationController
         Run.where(id: annots.map(&:run_id).uniq, status_id: 3).order(created_at: :desc).to_a
       end
     table_rows = Basic.de_table_rows_for_runs(completed)
-    annots_union = (annots + table_rows.filter_map { |r| r[:annot] }).uniq(&:id)
+    # Prefer full Annot rows from de_table_rows (include headers_json). Annot.light omits it.
+    annots_union = (table_rows.filter_map { |r| r[:annot] } + annots).uniq(&:id)
 
     h_annots_by_loom_path = {}
     annots_to_do = annots_union.select do |annot|
       output_txt = Basic.de_annot_output_txt_path(project_dir, annot)
-      next true unless File.exist?(output_txt) && File.size(output_txt).positive?
-
-      first_line = File.open(output_txt, 'r', &:gets)
-      ncol = first_line&.chomp&.split("\t")&.size.to_i
-      ncol != 10 || Basic.de_output_txt_first_line_is_column_header?(first_line)
+      Basic.de_output_txt_needs_rebuild?(output_txt, annot)
     end
     annots_to_do.each do |annot|
       h_annots_by_loom_path[annot.filepath] ||= []
@@ -13765,11 +13789,7 @@ class ProjectsController < ApplicationController
     loom_paths.each do |loom_path|
       to_compute = h_annots_by_loom_path[loom_path].any? do |annot|
         output_file = Basic.de_annot_output_txt_path(project_dir, annot)
-        next true unless File.exist?(output_file) && File.size(output_file).positive?
-
-        first_line = File.open(output_file, 'r', &:gets)
-        ncol = first_line&.chomp&.split("\t")&.size.to_i
-        ncol != 10 || Basic.de_output_txt_first_line_is_column_header?(first_line)
+        Basic.de_output_txt_needs_rebuild?(output_file, annot)
       end
 
       next unless to_compute
@@ -13804,9 +13824,7 @@ class ProjectsController < ApplicationController
       output_file = Basic.de_annot_output_txt_path(project_dir, annot)
 
       if File.exist?(output_file) && File.size(output_file).positive?
-        first_line = File.open(output_file, 'r', &:gets)
-        ncol = first_line&.chomp&.split("\t")&.size.to_i
-        next if ncol == 10 && !Basic.de_output_txt_first_line_is_column_header?(first_line)
+        next unless Basic.de_output_txt_needs_rebuild?(output_file, annot)
       end
 
       h_results = {}
@@ -13852,12 +13870,25 @@ class ProjectsController < ApplicationController
       json_nc = h_results['nber_cols'].to_i
       vals, de_orient_note = Basic.de_attrs_values_to_column_major(vals, json_nr, json_nc, annot)
       n_cols = vals.is_a?(Array) ? vals.size : 0
-      pack = Basic.de_metric_source_indices_for_extract_metadata(annot, n_cols)
+      headers_override = Basic.de_usable_column_names(h_results['column_names'])
+      pack = Basic.de_metric_source_indices_for_extract_metadata(annot, n_cols, headers_override: headers_override)
+      identity_idxs = Basic.de_identity_column_indices_for_extract_metadata(annot, n_cols, headers_override: headers_override)
       metric_idxs = pack[:indices]
       sort_col = pack[:sort_idx]
 
       ensembl_ids = h_ensembl_ids_by_loom_path[loom_path]
       gene_names = h_gene_names_by_loom_path[loom_path]
+      ensembl_to_idx = Basic.de_index_lookup_from_vector(ensembl_ids)
+      gene_to_idx = Basic.de_index_lookup_from_vector(gene_names)
+      loom_n = if ensembl_ids.is_a?(Array) && gene_names.is_a?(Array)
+                 [ensembl_ids.size, gene_names.size].min
+               elsif ensembl_ids.is_a?(Array)
+                 ensembl_ids.size
+               elsif gene_names.is_a?(Array)
+                 gene_names.size
+               else
+                 0
+               end
 
       sample_preview = nil
       FileUtils.mkdir_p(output_file.dirname)
@@ -13865,37 +13896,30 @@ class ProjectsController < ApplicationController
         if vals.is_a?(Array) && vals[sort_col].is_a?(Array) && vals[sort_col].size.positive?
           sort_series = vals[sort_col]
           n_matrix = sort_series.size
-          n_acc = ensembl_ids&.size.to_i
-          n_gene = gene_names&.size.to_i
-          loom_n = if n_acc.positive? && n_gene.positive?
-                     [n_acc, n_gene].min
-                   elsif n_acc.positive?
-                     n_acc
-                   elsif n_gene.positive?
-                     n_gene
-                   else
-                     0
-                   end
-          n_use = loom_n.positive? && n_matrix > loom_n ? loom_n : n_matrix
+          n_use = if identity_idxs[:ensembl] || identity_idxs[:gene]
+                    n_matrix
+                  elsif loom_n.positive? && n_matrix > loom_n
+                    loom_n
+                  else
+                    n_matrix
+                  end
           body = (0...n_use).to_a
             .select { |e| sort_series[e] }
             .sort { |a, b| sort_series[a].to_f <=> sort_series[b].to_f }
-            .map { |i|
-              if ensembl_ids && ensembl_ids[i] && (g = h_genes[ensembl_ids[i]])
-                details = [i, g.ensembl_id, g.name, g.alt_names, g.description]
-              else
-                details = [i, nil, gene_names ? gene_names[i] : nil, nil, nil]
-              end
-              metric_cells = (0..4).map do |slot|
-                ci = metric_idxs[slot]
-                raw = vals[ci].is_a?(Array) ? vals[ci][i] : nil
-                Basic.de_format_output_txt_metric_value(raw, slot)
-              end
-              (details + metric_cells).join("\t")
-            }.join("\n") + "\n"
+            .filter_map { |i|
+              Basic.de_output_txt_line_for_matrix_row(
+                i, vals, metric_idxs, identity_idxs,
+                ensembl_ids, gene_names, h_genes,
+                ensembl_to_idx, gene_to_idx, loom_n
+              )
+            }.join("\n")
+          body = "#{body}\n" if body.present?
           f.write(body)
           sample_preview = body.lines.first&.chomp&.slice(0, 240)
         end
+      end
+      if identity_idxs[:ensembl] || identity_idxs[:gene]
+        File.write(Basic.de_output_txt_layout_path(output_file).to_s, "#{Basic::DE_OUTPUT_TXT_LAYOUT_IDENTITY}\n")
       end
 
       Rails.logger.info(

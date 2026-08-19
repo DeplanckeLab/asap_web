@@ -92,13 +92,32 @@ class Project < ApplicationRecord
           type: 'custom',
           filter: ['lowercase']
         }
+      },
+      tokenizer: {
+        hyphen_preserving: {
+          type: 'pattern',
+          pattern: '[^\\w\\-]+'
+        }
+      },
+      analyzer: {
+        hyphen_text: {
+          type: 'custom',
+          tokenizer: 'hyphen_preserving',
+          filter: ['lowercase']
+        }
       }
     }
   } do
     mappings dynamic: 'false' do
-      indexes :name, type: 'text', analyzer: 'english'
-      indexes :key, type: 'text', analyzer: 'english'
-      indexes :description, type: 'text', analyzer: 'english'
+      indexes :name, type: 'text', analyzer: 'english' do
+        indexes :hyphen, type: 'text', analyzer: 'hyphen_text'
+      end
+      indexes :key, type: 'text', analyzer: 'english' do
+        indexes :hyphen, type: 'text', analyzer: 'hyphen_text'
+      end
+      indexes :description, type: 'text', analyzer: 'english' do
+        indexes :hyphen, type: 'text', analyzer: 'hyphen_text'
+      end
       indexes :technology, type: 'keyword', normalizer: 'lowercase_normalizer'
       indexes :project_type_name, type: 'keyword'
       indexes :tissue, type: 'keyword', normalizer: 'lowercase_normalizer'
@@ -224,23 +243,9 @@ class Project < ApplicationRecord
       search_definition[:from] = (page - 1) * search_definition[:size]
     end
 
-    # Text search
+    # Text search: AND of whitespace-separated terms; hyphens stay in the term.
     if query.present?
-      normalized_query = query.to_s.strip
-      if normalized_query.include?('@')
-        search_definition[:query][:bool][:must] << {
-          term: { 'owner_email.raw' => normalized_query.downcase }
-        }
-      else
-        search_definition[:query][:bool][:must] << {
-          multi_match: {
-            query: normalized_query,
-            fields: ['name^3', 'key^2', 'description', 'technology', 'owner_email^2'],
-            type: 'best_fields',
-            fuzziness: 'AUTO'
-          }
-        }
-      end
+      search_definition[:query][:bool][:must].concat(ProjectSearchQuery.must_clauses(query))
     end
 
     # Filters

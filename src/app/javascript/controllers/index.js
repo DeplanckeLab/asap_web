@@ -184,6 +184,10 @@ application.register("project-type-settings", ProjectTypeSettingsController)
 
 console.log('Project type settings controller registered')
 
+import TransferOwnershipController from "controllers/transfer_ownership_controller"
+application.register("transfer-ownership", TransferOwnershipController)
+console.log('Transfer ownership controller registered')
+
 import ComplianceFixController from "controllers/compliance_fix_controller"
 application.register("compliance-fix", ComplianceFixController)
 console.log('Compliance fix controller registered')

@@ -439,76 +439,31 @@ class RunsController < ApplicationController
     step_dir = project_dir + step.name
     output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
     
-    tmp_dir = project_dir + 'tmp'
-    FileUtils.mkdir_p(tmp_dir)
     ## kill run if necessary
     Basic.kill_run run
     
     ## remove potential annotations
     ### from the loom
-    #run.annots.each do |annot|
     h_outputs = JSON.parse(run.output_json)
     logger.debug(h_outputs.to_json)
     
     annots1 = run.annots 
     annots2 = Annot.where(:ori_run_id => run.id).all
-    #store_run_annots = Annot.where(:store_run_id => run.id).all
-    now = Time.now.to_i
     h_annots= {}
     all_annots = (annots1 | annots2)
     all_annots.each do |annot|
       h_annots[annot.filepath]||=[] 
       h_annots[annot.filepath].push annot
     end
-    h_annots.each_key do |filepath|
-      if File.exist? (project_dir + filepath) and !["gene_filtering", "cell_filtering"].include? step.name
-        tmp_file = project_dir + "tmp" + ("remove_metadata_#{now}.json")
-        tmp_data = {:meta => h_annots[filepath].map{|a| a.name}}
-        File.open(tmp_file, 'w') do |f|
-          f.write tmp_data.to_json
-        end
-        cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T RemoveMetaData -loom #{project_dir + filepath} -metaJSON '#{tmp_file}' 2>&1 > tmp/remove_metadata_output_#{now}.json"
-        File.open(project_dir + "tmp" + "toto.txt", "w") do |f|
-          f.write("CMD: " + cmd)
-          `#{cmd}`
-        end
+    unless ["gene_filtering", "cell_filtering"].include?(step.name)
+      h_annots.each do |filepath, annots|
+        loom_path = project_dir + filepath
+        next unless File.exist?(loom_path)
+        names = annots.map { |annot| annot.name.to_s }.reject(&:blank?).uniq
+        next if names.empty?
+        H5DataService.delete_metadata_datasets!(loom_path.to_s, names)
       end
     end
-    ## delete loom file if it's a filtering 
-    #    if ["gene_filtering", "cell_filtering"].include? step.name
-    #      h_annots.each_key do |filepath|
-    #        File.delete(project_dir + filepath) if 
-    #      end
-    #    end
-    #    (annots1 | annots2).each do |annot|
-    #      if File.exist? (project_dir + annot.filepath)
-    #        cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T RemoveMetaData -o #{tmp_dir} -loom #{project_dir + annot.filepath} -meta '#{annot.name}' 2>&1 > tmp/bla.txt"
-    #        logger.debug("CMD: " + cmd)
-    #        `#{cmd}`
-    #      end
-    #    end
-    
-    #    if h_outputs
-    #      h_outputs.each_key do |k|
-    #        h_outputs[k].each_key do |output_key|
-    #          t = output_key.split(":")
-    #          if t.size == 2 
-    #            if File.exist? (project_dir + t[0])
-    #              cmd = "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar -T RemoveMetaData -o #{tmp_dir} -loom #{project_dir + t[0]} -meta #{t[1]} 2>&1 > tmp/bla.txt"
-    #              logger.debug("CMD: " + cmd)
-    #              `#{cmd}`
-    #            end
-    #            #        elsif t.size == 1
-    #            #          if File.exist? (project_dir + t[0])
-    #            #            logger.debug("DEL_FILE: " + t.to_json + '---' + (project_dir + t[0]).to_s)
-    #            #            File.delete (project_dir + t[0]) 
-    #            #          end
-    #          end
-    #        end
-    #      end
-    #    end
-    
-    #    logger.debug()
     FileUtils.rm_r output_dir if File.exist? output_dir
     
     ### from the database

@@ -54,6 +54,10 @@ class Checkpoint < ApplicationRecord
     CURRENT_TITLES.include?(title)
   end
 
+  def comments_empty?
+    comments.blank?
+  end
+
   def display_title
     current_auto? ? CURRENT_DISPLAY_TITLE : title
   end

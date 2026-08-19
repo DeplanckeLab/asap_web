@@ -21,11 +21,13 @@ import {
 import { resetInputDataWidgetToEmptyPlaceholder } from "lib/reset_input_data_widget_placeholder"
 import { formatNumberWithDelimiter } from "lib/number_format"
 import { dataUrlToJpegThumbnail, isCheckpointThumbnailDataUrl, canvasToJpegThumbnailDataUrl } from "lib/checkpoint_thumbnail"
+import { DEFAULT_NAN_COLOR_INT, nanColorToHex, parseNanColor } from "lib/nan_color"
 import consumer from "channels/consumer"
 
 const VISUALIZATION_ONTOP_UI_IDS = [
   'checkpoint-history-overlay',
   'checkpoint-comments-overlay',
+  'checkpoint-save-overlay',
   'checkpoint-loading-overlay',
   'module-score-loading-overlay',
   'visualization-leave-guard-overlay',
@@ -64,7 +66,8 @@ export default class extends Controller {
     colLabel: String,
     projectTypeTag: String,
     cellIdAnnotIdsByLoom: Object,
-    entryCheckpointTitle: String
+    entryCheckpointTitle: String,
+    currentUserId: Number
   }
   
   // Optional targets - manually check with querySelector
@@ -284,6 +287,7 @@ export default class extends Controller {
     const overlayIds = [
       'checkpoint-history-overlay',
       'checkpoint-comments-overlay',
+      'checkpoint-save-overlay',
       'metadata-loading-spinner',
       'global-filter-panel'
     ]
@@ -449,6 +453,7 @@ export default class extends Controller {
     if (this.globalFilterPanelVisible === undefined) this.globalFilterPanelVisible = false
     if (!this._globalFilterOutsideHandler) this._globalFilterOutsideHandler = null
     if (!Array.isArray(this.checkpointHistory)) this.checkpointHistory = []
+    if (this.currentAutoCheckpoint === undefined) this.currentAutoCheckpoint = null
     if (!Array.isArray(this.coloringHistory)) this.coloringHistory = []
     if (this._coloringHistoryCurrentId === undefined) this._coloringHistoryCurrentId = undefined
     if (this._coloringHistoryCurrentSnapshot === undefined) this._coloringHistoryCurrentSnapshot = null
@@ -514,6 +519,7 @@ export default class extends Controller {
     
     // Initialize color range controls for continuous metadata
     this.customColorRange = null // { min: number, max: number } or null for auto
+    this.nanColor = DEFAULT_NAN_COLOR_INT
     
     // Initialize category display order preference
     // Default: largest-first (painter's algorithm). 'fixed' remains available as the fastest option.
@@ -779,7 +785,7 @@ export default class extends Controller {
     if (!this.loadedMetadataVectors) this.loadedMetadataVectors = {}
     if (!this.loadingMetadataVectors) this.loadingMetadataVectors = new Set() // Track which vectors are currently loading
     
-    // Store gradients per metadata ID (metadataId -> { gradientControlPoints, customGradientControlPoints, gradientScale })
+    // Store gradients per metadata ID (metadataId -> { gradientControlPoints, customGradientControlPoints, gradientScale, nanColor })
     this.metadataGradients = new Map()
     
     // Memory management for metadata vectors
@@ -2249,11 +2255,186 @@ export default class extends Controller {
   }
 
   openSaveCheckpointDialog() {
-    const title = window.prompt('Checkpoint title')
-    if (!title) return
-    const normalizedTitle = title.trim()
-    if (!normalizedTitle) return
-    this.saveCheckpoint(normalizedTitle)
+    const overlay = document.getElementById('checkpoint-save-overlay')
+    if (!overlay) return
+    this.fetchCheckpointHistory().then(() => {
+      this.populateSaveCheckpointDialog()
+      overlay.style.display = 'flex'
+      const titleInput = document.getElementById('checkpoint-save-new-title')
+      if (titleInput && this.resolveSaveCheckpointMode() === 'new') {
+        titleInput.focus()
+      }
+    })
+  }
+
+  closeSaveCheckpointDialog() {
+    const overlay = document.getElementById('checkpoint-save-overlay')
+    if (!overlay) return
+    overlay.style.display = 'none'
+  }
+
+  checkpointSaveDialogBackdropClick(event) {
+    if (event.target === document.getElementById('checkpoint-save-overlay')) {
+      this.closeSaveCheckpointDialog()
+    }
+  }
+
+  updatableNamedCheckpoints() {
+    return (this.checkpointHistory || []).filter((checkpoint) => {
+      if (!checkpoint?.id) return false
+      const title = String(checkpoint.title || '').trim()
+      if (title === '__current_visualization_view__' || title === '__current_heatmap_view__') return false
+      const commentCount = Number(checkpoint.comments_count || (Array.isArray(checkpoint.comments) ? checkpoint.comments.length : 0))
+      return commentCount === 0
+    })
+  }
+
+  currentVisualizationUserId() {
+    if (!this.hasCurrentUserIdValue) return null
+    const id = Number(this.currentUserIdValue)
+    return Number.isFinite(id) && id > 0 ? id : null
+  }
+
+  populateSaveCheckpointDialog() {
+    const eligible = this.updatableNamedCheckpoints()
+    const select = document.getElementById('checkpoint-save-existing-select')
+    const existingRadio = document.getElementById('checkpoint-save-mode-existing')
+    const newRadio = document.getElementById('checkpoint-save-mode-new')
+    const existingWrap = document.getElementById('checkpoint-save-existing-wrap')
+    const emptyHint = document.getElementById('checkpoint-save-existing-empty')
+    if (!select || !existingRadio || !newRadio) return
+
+    const currentUserId = this.currentVisualizationUserId()
+    const preferredId = [this.lastLoadedCheckpointId, this.currentMatchedCheckpointId]
+      .map((id) => (id == null ? '' : String(id)))
+      .find((id) => id && eligible.some((checkpoint) => String(checkpoint.id) === id))
+
+    select.innerHTML = eligible.map((checkpoint) => {
+      const ownerId = checkpoint.user_id == null ? null : Number(checkpoint.user_id)
+      const ownerName = String(checkpoint.user_name || 'Unknown').trim() || 'Unknown'
+      const mine = currentUserId != null && ownerId === currentUserId
+      const ownerLabel = mine ? `${ownerName} (you)` : ownerName
+      return `<option value="${this.escapeHtml(String(checkpoint.id))}">${this.escapeHtml(checkpoint.title || 'Untitled')} — ${this.escapeHtml(ownerLabel)}</option>`
+    }).join('')
+
+    const hasEligible = eligible.length > 0
+    existingRadio.disabled = !hasEligible
+    select.disabled = !hasEligible
+    if (existingWrap) existingWrap.style.opacity = hasEligible ? '1' : '0.55'
+    if (emptyHint) emptyHint.style.display = hasEligible ? 'none' : 'block'
+
+    if (hasEligible && preferredId) {
+      existingRadio.checked = true
+      newRadio.checked = false
+      select.value = preferredId
+    } else {
+      newRadio.checked = true
+      existingRadio.checked = false
+    }
+
+    this.onSaveCheckpointModeChanged()
+  }
+
+  resolveSaveCheckpointMode() {
+    const existingRadio = document.getElementById('checkpoint-save-mode-existing')
+    if (existingRadio && existingRadio.checked && !existingRadio.disabled) return 'existing'
+    return 'new'
+  }
+
+  onSaveCheckpointModeChanged() {
+    const mode = this.resolveSaveCheckpointMode()
+    const newWrap = document.getElementById('checkpoint-save-new-fields')
+    const existingFields = document.getElementById('checkpoint-save-existing-fields')
+    if (newWrap) newWrap.style.display = mode === 'new' ? 'flex' : 'none'
+    if (existingFields) existingFields.style.display = mode === 'existing' ? 'flex' : 'none'
+  }
+
+  async confirmSaveCheckpoint(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const mode = this.resolveSaveCheckpointMode()
+    if (mode === 'existing') {
+      const select = document.getElementById('checkpoint-save-existing-select')
+      const checkpointId = String(select?.value || '').trim()
+      if (!checkpointId) {
+        alert('Select a checkpoint to update.')
+        return
+      }
+      await this.saveCheckpoint(null, { checkpointId })
+      return
+    }
+
+    const titleInput = document.getElementById('checkpoint-save-new-title')
+    const normalizedTitle = String(titleInput?.value || '').trim()
+    if (!normalizedTitle) {
+      alert('Please provide a name for the new checkpoint.')
+      return
+    }
+    await this.saveCheckpoint(normalizedTitle)
+  }
+
+  async saveCheckpoint(title, options = {}) {
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) {
+      alert('Cannot determine project identifier.')
+      return
+    }
+
+    const checkpointId = options.checkpointId ? String(options.checkpointId).trim() : ''
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    const state = this.buildCheckpointState()
+    try {
+      const thumbnails = await this.captureNamedCheckpointThumbnails()
+      if (thumbnails) {
+        state.thumbnails = thumbnails
+      }
+    } catch (error) {
+      console.warn('[Checkpoint] Failed to capture named-checkpoint thumbnails', error)
+    }
+    this.checkpointDebug('saveCheckpoint:state', {
+      title,
+      checkpointId: checkpointId || null,
+      embedding: state.embedding,
+      visualizationEmbedding: state.visualizationEmbedding,
+      loomFile: state.loomFile,
+      hasThumbnails: !!(state.thumbnails && Object.keys(state.thumbnails).length)
+    })
+
+    const url = checkpointId
+      ? `/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(checkpointId)}`
+      : `/projects/${encodeURIComponent(projectIdentifier)}/checkpoints`
+    const body = checkpointId
+      ? { checkpoint: { state } }
+      : { checkpoint: { title, state } }
+
+    const response = await fetch(url, {
+      method: checkpointId ? 'PATCH' : 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify(body)
+    })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      const errorMessage = errorPayload.error || `Failed to save checkpoint (${response.status})`
+      alert(errorMessage)
+      return
+    }
+
+    const payload = await response.json()
+    const checkpoint = payload.checkpoint
+    this.mergeCheckpointIntoHistory(checkpoint)
+    this.currentMatchedCheckpointId = checkpoint.id
+    this.lastLoadedCheckpointId = checkpoint.id
+    this.refreshCurrentCheckpointMatch({ force: true })
+    this.closeSaveCheckpointDialog()
+    const titleInput = document.getElementById('checkpoint-save-new-title')
+    if (titleInput) titleInput.value = ''
   }
 
   async captureNamedCheckpointThumbnails() {
@@ -2279,59 +2460,6 @@ export default class extends Controller {
     }
 
     return Object.keys(thumbnails).length > 0 ? thumbnails : null
-  }
-
-  async saveCheckpoint(title) {
-    const projectIdentifier = this.getProjectIdentifier()
-    if (!projectIdentifier) {
-      alert('Cannot determine project identifier.')
-      return
-    }
-
-    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
-    const state = this.buildCheckpointState()
-    try {
-      const thumbnails = await this.captureNamedCheckpointThumbnails()
-      if (thumbnails) {
-        state.thumbnails = thumbnails
-      }
-    } catch (error) {
-      console.warn('[Checkpoint] Failed to capture named-checkpoint thumbnails', error)
-    }
-    this.checkpointDebug('saveCheckpoint:state', {
-      title,
-      embedding: state.embedding,
-      visualizationEmbedding: state.visualizationEmbedding,
-      loomFile: state.loomFile,
-      hasThumbnails: !!(state.thumbnails && Object.keys(state.thumbnails).length)
-    })
-    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken
-      },
-      credentials: 'same-origin',
-      body: JSON.stringify({
-        checkpoint: {
-          title: title,
-          state: state
-        }
-      })
-    })
-
-    if (!response.ok) {
-      const errorPayload = await response.json().catch(() => ({}))
-      const errorMessage = errorPayload.error || `Failed to save checkpoint (${response.status})`
-      alert(errorMessage)
-      return
-    }
-
-    const payload = await response.json()
-    const checkpoint = payload.checkpoint
-    this.mergeCheckpointIntoHistory(checkpoint)
-    this.currentMatchedCheckpointId = checkpoint.id
-    this.refreshCurrentCheckpointMatch({ force: true })
   }
 
   async openCheckpointHistory(event) {
@@ -2375,6 +2503,7 @@ export default class extends Controller {
 
     const payload = await response.json()
     this.checkpointHistory = Array.isArray(payload.checkpoints) ? payload.checkpoints : []
+    this.currentAutoCheckpoint = payload.current_checkpoint || null
     this.updateCheckpointHistoryButtonState()
     this.refreshCurrentCheckpointMatch({ force: true })
   }
@@ -2383,7 +2512,9 @@ export default class extends Controller {
     const listContainer = document.getElementById('checkpoint-history-list')
     if (!listContainer) return
 
-    if (!Array.isArray(this.checkpointHistory) || this.checkpointHistory.length === 0) {
+    const namedHistory = Array.isArray(this.checkpointHistory) ? this.checkpointHistory : []
+    const currentAuto = this.currentAutoCheckpoint
+    if (namedHistory.length === 0 && !currentAuto) {
       listContainer.innerHTML = `
         <div style="padding: 12px; color: #6b7280; line-height: 1.45;">
           <div style="font-size: 13px; color: #6b7280;">No checkpoints yet.</div>
@@ -2412,77 +2543,11 @@ export default class extends Controller {
       return
     }
 
-    const rowsHtml = this.checkpointHistory.map((checkpoint) => {
-      const createdAt = checkpoint.created_at ? new Date(checkpoint.created_at).toLocaleString() : ''
-      const commentCount = Number(checkpoint.comments_count || 0)
-      const checkpointId = this.escapeHtml(checkpoint.id)
-      const mainThumb = checkpoint.state?.thumbnails?.main
-      const secondaryThumb = checkpoint.state?.thumbnails?.secondary
-      const thumbHtml = [
-        isCheckpointThumbnailDataUrl(mainThumb)
-          ? `<img class="checkpoint-thumb" src="${mainThumb}" alt="" style="width:72px;height:54px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
-          : '',
-        isCheckpointThumbnailDataUrl(secondaryThumb)
-          ? `<img class="checkpoint-thumb" src="${secondaryThumb}" alt="" style="width:72px;height:54px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
-          : ''
-      ].filter(Boolean).join('')
-      return `
-        <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;column-gap:6px;">
-          <div style="display:flex;align-items:center;justify-content:flex-start;gap:4px;min-height:54px;">
-            ${thumbHtml || ''}
-          </div>
-          <div style="min-width:0;">
-            <div title="${this.escapeHtml(checkpoint.title || '')}" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(checkpoint.title || '')}</div>
-            <div style="font-size:11px;color:#6b7280;">${this.escapeHtml(createdAt)} - ${commentCount} comment${commentCount === 1 ? '' : 's'}</div>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:center;">
-            <input type="checkbox"
-                   ${checkpoint.is_landing_page === true ? 'checked' : ''}
-                   onclick="event.stopPropagation()"
-                   onchange="if (window.visualizationController) window.visualizationController.toggleCheckpointLandingPage('${checkpointId}', this.checked, this)"
-                   style="width:14px;height:14px;cursor:pointer;" />
-          </div>
-          <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
-            <button type="button"
-                    data-checkpoint-id="${checkpointId}"
-                    onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${checkpointId}', this, false)"
-                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
-                    title="Copy direct link without comments">
-              Copy link
-            </button>
-            <button type="button"
-                    data-checkpoint-id="${checkpointId}"
-                    onclick="if (window.visualizationController) window.visualizationController.loadCheckpointById('${checkpointId}')"
-                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
-              Open
-            </button>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
-            <button type="button"
-                    data-checkpoint-id="${checkpointId}"
-                    onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${checkpointId}', this, true)"
-                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
-                    title="Copy direct link and open comments">
-              Copy link
-            </button>
-            <button type="button"
-                    data-checkpoint-id="${checkpointId}"
-                    onclick="if (window.visualizationController) window.visualizationController.loadCheckpointWithCommentsById('${checkpointId}')"
-                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
-              Open
-            </button>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:center;">
-            <button type="button"
-                    data-checkpoint-id="${checkpointId}"
-                    onclick="if (window.visualizationController) window.visualizationController.deleteCheckpointById('${checkpointId}')"
-                    style="border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
-              Delete
-            </button>
-          </div>
-        </div>
-      `
-    }).join('')
+    const currentRowHtml = currentAuto ? this.renderCurrentAutoCheckpointRow(currentAuto) : ''
+    const rowsHtml = namedHistory.map((checkpoint) => this.renderNamedCheckpointHistoryRow(checkpoint)).join('')
+    const emptyNamedHtml = namedHistory.length === 0
+      ? `<div style="padding:10px 12px;font-size:12px;color:#6b7280;">No named checkpoints yet.</div>`
+      : ''
 
     listContainer.innerHTML = `
       <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #d1d5db;background:#f9fafb;column-gap:6px;position:sticky;top:0;z-index:1;">
@@ -2502,9 +2567,114 @@ export default class extends Controller {
         </div>
         <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;">Delete</div>
       </div>
+      ${currentRowHtml}
       ${rowsHtml}
+      ${emptyNamedHtml}
     `
     this.updateCheckpointHistoryButtonState()
+  }
+
+  checkpointHistoryThumbnailHtml(checkpoint) {
+    const mainThumb = checkpoint?.state?.thumbnails?.main
+    const secondaryThumb = checkpoint?.state?.thumbnails?.secondary
+    return [
+      isCheckpointThumbnailDataUrl(mainThumb)
+        ? `<img class="checkpoint-thumb" src="${mainThumb}" alt="" style="width:72px;height:54px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
+        : '',
+      isCheckpointThumbnailDataUrl(secondaryThumb)
+        ? `<img class="checkpoint-thumb" src="${secondaryThumb}" alt="" style="width:72px;height:54px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
+        : ''
+    ].filter(Boolean).join('')
+  }
+
+  renderCurrentAutoCheckpointRow(checkpoint) {
+    const updatedAt = checkpoint.updated_at ? new Date(checkpoint.updated_at).toLocaleString() : ''
+    const thumbHtml = this.checkpointHistoryThumbnailHtml(checkpoint)
+    return `
+      <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;column-gap:6px;background:#f8fafc;">
+        <div style="display:flex;align-items:center;justify-content:flex-start;gap:4px;min-height:54px;">
+          ${thumbHtml || ''}
+        </div>
+        <div style="min-width:0;">
+          <div title="Current auto checkpoint" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Current auto checkpoint</div>
+          <div style="font-size:11px;color:#6b7280;">Auto-saved ${this.escapeHtml(updatedAt)}. Reset if the view looks wrong after data changes.</div>
+        </div>
+        <div></div>
+        <div></div>
+        <div></div>
+        <div style="display:flex;align-items:center;justify-content:center;">
+          <button type="button"
+                  onclick="if (window.visualizationController) window.visualizationController.resetCurrentCheckpoint()"
+                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
+                  title="Clear the auto-saved view and reload the default visualization">
+            Reset
+          </button>
+        </div>
+      </div>
+    `
+  }
+
+  renderNamedCheckpointHistoryRow(checkpoint) {
+    const createdAt = checkpoint.created_at ? new Date(checkpoint.created_at).toLocaleString() : ''
+    const commentCount = Number(checkpoint.comments_count || 0)
+    const checkpointId = this.escapeHtml(checkpoint.id)
+    const thumbHtml = this.checkpointHistoryThumbnailHtml(checkpoint)
+    return `
+      <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;column-gap:6px;">
+        <div style="display:flex;align-items:center;justify-content:flex-start;gap:4px;min-height:54px;">
+          ${thumbHtml || ''}
+        </div>
+        <div style="min-width:0;">
+          <div title="${this.escapeHtml(checkpoint.title || '')}" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(checkpoint.title || '')}</div>
+          <div style="font-size:11px;color:#6b7280;">${this.escapeHtml(createdAt)} - ${commentCount} comment${commentCount === 1 ? '' : 's'}</div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;">
+          <input type="checkbox"
+                 ${checkpoint.is_landing_page === true ? 'checked' : ''}
+                 onclick="event.stopPropagation()"
+                 onchange="if (window.visualizationController) window.visualizationController.toggleCheckpointLandingPage('${checkpointId}', this.checked, this)"
+                 style="width:14px;height:14px;cursor:pointer;" />
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+          <button type="button"
+                  data-checkpoint-id="${checkpointId}"
+                  onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${checkpointId}', this, false)"
+                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
+                  title="Copy direct link without comments">
+            Copy link
+          </button>
+          <button type="button"
+                  data-checkpoint-id="${checkpointId}"
+                  onclick="if (window.visualizationController) window.visualizationController.loadCheckpointById('${checkpointId}')"
+                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+            Open
+          </button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+          <button type="button"
+                  data-checkpoint-id="${checkpointId}"
+                  onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${checkpointId}', this, true)"
+                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
+                  title="Copy direct link and open comments">
+            Copy link
+          </button>
+          <button type="button"
+                  data-checkpoint-id="${checkpointId}"
+                  onclick="if (window.visualizationController) window.visualizationController.loadCheckpointWithCommentsById('${checkpointId}')"
+                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+            Open
+          </button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;">
+          <button type="button"
+                  data-checkpoint-id="${checkpointId}"
+                  onclick="if (window.visualizationController) window.visualizationController.deleteCheckpointById('${checkpointId}')"
+                  style="border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+            Delete
+          </button>
+        </div>
+      </div>
+    `
   }
 
   updateCheckpointHistoryButtonState() {
@@ -3338,6 +3508,57 @@ export default class extends Controller {
     }
     this.renderCheckpointHistory()
     this.refreshCurrentCheckpointMatch({ force: true })
+  }
+
+  clearCurrentVisualizationStateFromSession() {
+    const sessionKey = this.currentVisualizationSessionKey()
+    if (!sessionKey) return
+    try {
+      sessionStorage.removeItem(sessionKey)
+    } catch (_error) {
+      // Session storage may be unavailable.
+    }
+    this._lastPersistedState = null
+  }
+
+  async resetCurrentCheckpoint() {
+    if (!window.confirm('Reset the current auto-saved view? The visualization will reload without that saved state.')) {
+      return
+    }
+
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    this.currentCheckpointReadyForOverwrite = false
+    this.currentCheckpointLoadInProgress = true
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/current`, {
+      method: 'DELETE',
+      headers: {
+        'Accept': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      credentials: 'same-origin'
+    })
+
+    if (!response.ok) {
+      this.currentCheckpointLoadInProgress = false
+      this.currentCheckpointReadyForOverwrite = true
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || 'Failed to reset the current checkpoint.')
+      return
+    }
+
+    this.clearCurrentVisualizationStateFromSession()
+    this.clearAllCategoryColorOverrides()
+    this.currentAutoCheckpoint = null
+
+    const url = new URL(window.location.href)
+    url.searchParams.set('view', 'visualization')
+    url.searchParams.delete('checkpoint_id')
+    url.searchParams.delete('open_checkpoint_comments')
+    window.location.assign(url.toString())
   }
 
   async loadCheckpoint(event) {
@@ -7893,7 +8114,7 @@ export default class extends Controller {
   // Color for missing/NaN numeric values. Must be non-zero: regl treats 0 as transparent,
   // and falsy fallbacks (`color || defaultBlue`) would otherwise paint default blue.
   getMissingNumericColor() {
-    return 0x9ca3af
+    return parseNanColor(this.nanColor)
   }
 
   ensurePointColorArrays(cellCount, fillColor = 0x3b82f6) {
@@ -8558,6 +8779,7 @@ export default class extends Controller {
         customColorRange: this.customColorRange,
         currentColorScheme: this.currentColorScheme,
         gradientScale: this.gradientScale === 'log' ? 'log' : 'normal',
+        nanColor: nanColorToHex(this.nanColor),
         metadataGradients: this.serializeMetadataGradientsForCheckpoint(),
         history: this.serializeColoringHistoryForCheckpoint()
       },
@@ -9686,6 +9908,15 @@ export default class extends Controller {
     // so loadGradientForMetadata picks up the checkpoint scale/control points.
     this.restoreMetadataGradientsFromCheckpoint(checkpointColoringState.metadataGradients)
 
+    const coloringMetadataIdForNan = checkpointColoringState.metadataId
+    if (coloringMetadataIdForNan) {
+      const storedForNan = this.metadataGradients.get(String(coloringMetadataIdForNan))
+      if (storedForNan) this.nanColor = parseNanColor(storedForNan.nanColor)
+    }
+    if (Object.prototype.hasOwnProperty.call(checkpointColoringState, 'nanColor')) {
+      this.nanColor = parseNanColor(checkpointColoringState.nanColor)
+    }
+
     if (checkpointColoringState.gradientScale === 'log' || checkpointColoringState.gradientScale === 'normal') {
       this.gradientScale = checkpointColoringState.gradientScale
       const coloringMetadataIdForScale = checkpointColoringState.metadataId
@@ -9698,7 +9929,8 @@ export default class extends Controller {
           customGradientControlPoints: existing.customGradientControlPoints
             ? JSON.parse(JSON.stringify(existing.customGradientControlPoints))
             : null,
-          gradientScale: this.gradientScale
+          gradientScale: this.gradientScale,
+          nanColor: nanColorToHex(existing.nanColor)
         })
       }
     }
@@ -11716,7 +11948,8 @@ export default class extends Controller {
         customGradientControlPoints: gradientState.customGradientControlPoints
           ? JSON.parse(JSON.stringify(gradientState.customGradientControlPoints))
           : null,
-        gradientScale: gradientState.gradientScale === 'log' ? 'log' : 'normal'
+        gradientScale: gradientState.gradientScale === 'log' ? 'log' : 'normal',
+        nanColor: nanColorToHex(gradientState.nanColor)
       }
     })
     return serialized
@@ -11737,7 +11970,8 @@ export default class extends Controller {
         customGradientControlPoints: gradientState.customGradientControlPoints
           ? JSON.parse(JSON.stringify(gradientState.customGradientControlPoints))
           : null,
-        gradientScale: gradientState.gradientScale === 'log' ? 'log' : 'normal'
+        gradientScale: gradientState.gradientScale === 'log' ? 'log' : 'normal',
+        nanColor: nanColorToHex(gradientState.nanColor)
       })
     })
   }
@@ -15902,6 +16136,7 @@ export default class extends Controller {
     this.customGradientControlPoints = null
     this.selectedControlPointIndex = undefined
     this.gradientScale = 'normal'
+    this.nanColor = DEFAULT_NAN_COLOR_INT
     
     // Reinitialize default gradient
     this.colorManager.initializeDefaultGradient()
@@ -15911,6 +16146,7 @@ export default class extends Controller {
     
     this.closeControlPointEditor()
     this.gradientManager.syncGradientScaleSelect()
+    this.gradientManager.syncNanColorInput()
     this.rendererManager.renderModalGradientPreview()
     this.rendererManager.renderModalControlPointMarkers()
     this.rendererManager.renderControlPointsList()

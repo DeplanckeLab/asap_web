@@ -22,6 +22,7 @@
      data-heatmap-run-num-value="<%= heatmap_run_num %>"
      data-heatmap-run-label-value="<%= heatmap_run_label %>"
      data-heatmap-can-analyze-value="<%= can_analyze_heatmap %>"
+     data-heatmap-current-user-id-value="<%= current_user&.id.to_i %>"
      data-heatmap-data-url-value="<%= heatmap_data_project_path(project, run_id: run.id) %>">
   <style>
     .heatmap-toggle-btn .heatmap-switch {
@@ -962,6 +963,53 @@
             Apply
           </button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="heatmap-checkpoint-save-overlay"
+       data-action="click->heatmap#checkpointSaveDialogBackdropClick"
+       style="display:none; position:fixed; inset:0; z-index:12000; background:rgba(0,0,0,0.5); justify-content:center; align-items:center;">
+    <div style="background:#fff; border-radius:10px; width:min(520px,94vw); overflow:hidden; display:flex; flex-direction:column; box-shadow:0 20px 25px -5px rgba(0,0,0,0.2);"
+         data-action="click->heatmap#stopModalPropagation">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; border-bottom:1px solid #e5e7eb;">
+        <div style="font-size:15px; font-weight:600; color:#111827;">Save checkpoint</div>
+        <button type="button" data-action="heatmap#closeSaveCheckpointDialog" class="<%= heatmap_btn %>">Close</button>
+      </div>
+      <div style="padding:14px 16px; display:flex; flex-direction:column; gap:12px;">
+        <label style="display:flex; align-items:flex-start; gap:8px; font-size:13px; color:#111827; cursor:pointer;">
+          <input type="radio" name="heatmap-checkpoint-save-mode" id="heatmap-checkpoint-save-mode-new" value="new" checked
+                 data-action="change->heatmap#onSaveCheckpointModeChanged" style="margin-top:2px;">
+          <span>New checkpoint</span>
+        </label>
+        <div id="heatmap-checkpoint-save-new-fields" style="display:flex; flex-direction:column; gap:6px; padding-left:24px;">
+          <label for="heatmap-checkpoint-save-new-title" style="font-size:12px; color:#4b5563;">Name</label>
+          <input id="heatmap-checkpoint-save-new-title" type="text" maxlength="255"
+                 style="border:1px solid #d1d5db; border-radius:6px; padding:7px 8px; font-size:13px;">
+        </div>
+        <div id="heatmap-checkpoint-save-existing-wrap">
+          <label style="display:flex; align-items:flex-start; gap:8px; font-size:13px; color:#111827; cursor:pointer;">
+            <input type="radio" name="heatmap-checkpoint-save-mode" id="heatmap-checkpoint-save-mode-existing" value="existing"
+                   data-action="change->heatmap#onSaveCheckpointModeChanged" style="margin-top:2px;">
+            <span>Update an existing checkpoint with no comments</span>
+          </label>
+          <div id="heatmap-checkpoint-save-existing-fields" style="display:none; flex-direction:column; gap:6px; padding:8px 0 0 24px;">
+            <label for="heatmap-checkpoint-save-existing-select" style="font-size:12px; color:#4b5563;">Checkpoint</label>
+            <select id="heatmap-checkpoint-save-existing-select"
+                    style="border:1px solid #d1d5db; border-radius:6px; padding:7px 8px; font-size:13px; background:#fff;"></select>
+            <div style="font-size:12px; color:#6b7280;">You can update your own uncommented checkpoints and uncommented checkpoints created by someone else. Checkpoints that already have comments stay unchanged.</div>
+          </div>
+          <div id="heatmap-checkpoint-save-existing-empty" style="display:none; padding:6px 0 0 24px; font-size:12px; color:#6b7280;">
+            No uncommented checkpoints are available to update.
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px; padding:12px 16px; border-top:1px solid #e5e7eb;">
+        <button type="button" data-action="heatmap#closeSaveCheckpointDialog" class="<%= heatmap_btn %>">Cancel</button>
+        <button type="button" data-action="heatmap#confirmSaveCheckpoint"
+                class="inline-flex items-center justify-center px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-xs transition-colors cursor-pointer border border-blue-600 shadow-sm">
+          Save
+        </button>
       </div>
     </div>
   </div>

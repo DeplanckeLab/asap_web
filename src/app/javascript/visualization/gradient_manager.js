@@ -1,3 +1,5 @@
+import { nanColorToHex, parseNanColor } from 'lib/nan_color'
+
 // GradientManager - Handles all gradient-related functionality including modal, control points, and color calculations
 export class GradientManager {
   constructor(controller) {
@@ -63,6 +65,7 @@ export class GradientManager {
       requestAnimationFrame(() => {
         // Initialize gradient editor with current gradient
         this.syncGradientScaleSelect()
+        this.syncNanColorInput()
         this.controller.rendererManager.renderModalGradientPreview()
         this.controller.rendererManager.renderModalControlPointMarkers()
         this.controller.rendererManager.renderControlPointsList()
@@ -183,6 +186,32 @@ export class GradientManager {
       })
     }
     this.syncGradientScaleSelect()
+    this.attachNanColorInputListener()
+  }
+
+  attachNanColorInputListener() {
+    const input = document.getElementById('gradient-nan-color')
+    if (!input || input.dataset.nanColorBound === '1') return
+    input.dataset.nanColorBound = '1'
+    input.addEventListener('input', (event) => {
+      this.handleNanColorChange(event.target.value)
+    })
+  }
+
+  syncNanColorInput() {
+    const input = document.getElementById('gradient-nan-color')
+    if (!input) return
+    input.value = nanColorToHex(this.controller.nanColor)
+  }
+
+  handleNanColorChange(value) {
+    this.controller.nanColor = parseNanColor(value)
+    if (this.controller.currentMetadataId) {
+      this.saveGradientForMetadata(this.controller.currentMetadataId)
+    }
+    if (typeof this.controller.reapplyColorsWithNewGradient === 'function') {
+      this.controller.reapplyColorsWithNewGradient()
+    }
   }
 
   syncGradientScaleSelect() {
@@ -590,6 +619,7 @@ export class GradientManager {
     this.controller.gradientControlPoints = null
     this.controller.customGradientControlPoints = null
     this.controller.gradientScale = 'normal'
+    this.controller.nanColor = parseNanColor(null)
     
     // Check if we have a stored gradient for this metadata
     const storedGradient = this.controller.metadataGradients.get(metadataId)
@@ -604,10 +634,12 @@ export class GradientManager {
         JSON.stringify(storedGradient.customGradientControlPoints)
       )
       this.controller.gradientScale = storedGradient.gradientScale === 'log' ? 'log' : 'normal'
+      this.controller.nanColor = parseNanColor(storedGradient.nanColor)
     } else {
       // Auto gradient always follows the current value range (signed vs positive-only vs negative-only).
       this.controller.colorManager.initializeDefaultGradient()
       this.controller.gradientScale = storedGradient?.gradientScale === 'log' ? 'log' : 'normal'
+      this.controller.nanColor = parseNanColor(storedGradient?.nanColor)
       this.saveGradientForMetadata(metadataId)
     }
 
@@ -637,7 +669,8 @@ export class GradientManager {
         JSON.parse(JSON.stringify(this.controller.gradientControlPoints)) : null,
       customGradientControlPoints: this.controller.customGradientControlPoints ? 
         JSON.parse(JSON.stringify(this.controller.customGradientControlPoints)) : null,
-      gradientScale: this.controller.gradientScale === 'log' ? 'log' : 'normal'
+      gradientScale: this.controller.gradientScale === 'log' ? 'log' : 'normal',
+      nanColor: nanColorToHex(this.controller.nanColor)
     }
     
     this.controller.metadataGradients.set(metadataId, gradientState)

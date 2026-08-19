@@ -7,6 +7,7 @@ module Basic
   ASAP_AUTO_CLA_SOURCE_ID = 3
   # Manual annotations submitted from the visualization annotation popup.
   MANUAL_CLA_SOURCE_ID = 1
+  DE_OUTPUT_TXT_LAYOUT_IDENTITY = 'gene_identity_from_matrix_v1'
 
   # Suggested embedded JSON key for the cross-tool metadata catalog (location depends on file format: LOOM attrs, H5AD, RDS, etc.).
   DATA_FILE_METADATA_CATALOG_ATTR = 'metadata_catalog'
@@ -1721,15 +1722,43 @@ module Basic
       s.to_s.strip.downcase.gsub(/\s+/, ' ')
     end
 
+    def de_usable_column_names(names)
+      return nil unless names.is_a?(Array) && names.size >= 5
+      return nil if names.all? { |x| x.to_s.match?(/\A\d+\z/) }
+
+      names
+    end
+
+    def de_headers_array_from_annot(annot, headers_override: nil)
+      override = de_usable_column_names(headers_override)
+      return override if override
+
+      headers = annot ? safe_parse_json(annot.headers_json_value, []) : []
+      headers.is_a?(Array) ? headers : []
+    end
+
+    # Extra HDF5 columns before header titles (identity fields not listed in headers_json).
+    def de_header_column_prefix(headers, n_value_cols)
+      return 0 unless headers.is_a?(Array) && headers.any?
+
+      extra = n_value_cols.to_i - headers.size
+      extra.positive? ? extra : 0
+    end
+
     def de_metric_indices_from_header_names(headers)
       return nil unless headers.is_a?(Array) && headers.any?
 
       nh = headers.map { |h| de_normalize_de_header_label(h) }
       logfc = nh.index { |x| %w[logfc log2fc].include?(x) || x.match?(/\Alog2?fc\z/) || (x.include?('fold') && x.include?('change')) }
-      pval = nh.index { |x| %w[p-value p value pvalue p_val p.val].include?(x) || x.match?(/\Ap[\._]?value\z/) }
+      pval = nh.index { |x| %w[p-value p value pvalue p_val p.val].include?(x) || x.match?(/\Ap[\._\-]?value\z/) }
       fdr = nh.index { |x| x == 'fdr' || x.match?(/\Aadj\.?\s*p/) || x.start_with?('padj') }
       avg1 = nh.index { |x| x == 'avg group1' || x == 'avg_group1' || (x.include?('avg') && x.include?('group') && x.match?(/1/)) }
       avg2 = nh.index { |x| x == 'avg group2' || x == 'avg_group2' || (x.include?('avg') && x.include?('group') && x.match?(/2/)) }
+      if avg1.nil? || avg2.nil?
+        avg_idxs = nh.each_index.select { |i| nh[i].include?('avg') && i != logfc && i != pval && i != fdr }
+        avg1 ||= avg_idxs[0]
+        avg2 ||= avg_idxs.find { |i| i != avg1 }
+      end
       return nil if logfc.nil? || pval.nil? || fdr.nil? || avg1.nil? || avg2.nil?
 
       { logfc: logfc, p_value: pval, fdr: fdr, avg1: avg1, avg2: avg2 }
@@ -1740,34 +1769,157 @@ module Basic
       m && m[:logfc].zero? && m[:p_value] == 1 && m[:fdr] == 2 && m[:avg1] == 3 && m[:avg2] == 4
     end
 
-    def de_metric_source_indices_for_extract_metadata(annot, n_value_cols)
+    def de_identity_column_indices_from_header_names(headers)
+      return { ensembl: nil, gene: nil } unless headers.is_a?(Array) && headers.any?
+
+      nh = headers.map { |h| de_normalize_de_header_label(h) }
+      ensembl = nh.index do |x|
+        compact = x.tr(' .', '_')
+        x.include?('ensembl') || %w[accession gene_id geneid stable_id].include?(compact)
+      end
+      gene = nh.index do |x|
+        compact = x.tr(' .', '_')
+        %w[gene_name genename gene symbol].include?(compact)
+      end
+      { ensembl: ensembl, gene: gene }
+    end
+
+    def de_metric_source_indices_for_extract_metadata(annot, n_value_cols, headers_override: nil)
       n = n_value_cols.to_i
       return { indices: [0, 1, 2, 3, 4], sort_idx: 0 } if n < 5
 
-      headers = safe_parse_json(annot.headers_json_value, [])
-      headers = [] unless headers.is_a?(Array)
-
-      offset = 0
-      if headers.any? && n == headers.size + 1
-        offset = 1
-      end
+      headers = de_headers_array_from_annot(annot, headers_override: headers_override)
+      prefix = de_header_column_prefix(headers, n)
 
       if headers.size >= 5
         tail = headers.last(5)
         if de_tail_headers_are_legacy_metric_pack?(tail)
           start_h = headers.size - 5
-          idxs = (0...5).map { |k| start_h + k + offset }
+          idxs = (0...5).map { |k| start_h + k + prefix }
           return { indices: idxs, sort_idx: idxs[0] } if idxs.max < n
         end
       end
 
       by_name = de_metric_indices_from_header_names(headers)
       if by_name
-        idxs = %i[logfc p_value fdr avg1 avg2].map { |k| by_name[k] + offset }
+        idxs = %i[logfc p_value fdr avg1 avg2].map { |k| by_name[k] + prefix }
         return { indices: idxs, sort_idx: idxs[0] } if idxs.max < n
       end
 
+      if n > 5
+        start = n - 5
+        idxs = (0...5).map { |k| start + k }
+        return { indices: idxs, sort_idx: idxs[0] }
+      end
+
       { indices: [0, 1, 2, 3, 4], sort_idx: 0 }
+    end
+
+    def de_identity_column_indices_for_extract_metadata(annot, n_value_cols, headers_override: nil)
+      n = n_value_cols.to_i
+      headers = de_headers_array_from_annot(annot, headers_override: headers_override)
+      prefix = de_header_column_prefix(headers, n)
+      raw = de_identity_column_indices_from_header_names(headers)
+      ens = raw[:ensembl] ? raw[:ensembl] + prefix : nil
+      gene = raw[:gene] ? raw[:gene] + prefix : nil
+      ens = nil if ens && ens >= n
+      gene = nil if gene && gene >= n
+      { ensembl: ens, gene: gene }
+    end
+
+    def de_matrix_has_gene_identity_columns?(annot, n_value_cols: nil, headers_override: nil)
+      n = n_value_cols.nil? ? 64 : n_value_cols.to_i
+      idc = de_identity_column_indices_for_extract_metadata(annot, n, headers_override: headers_override)
+      !idc[:ensembl].nil? || !idc[:gene].nil?
+    end
+
+    def de_output_txt_layout_path(output_txt)
+      p = output_txt.is_a?(Pathname) ? output_txt : Pathname.new(output_txt.to_s)
+      p.sub_ext('.layout')
+    end
+
+    def de_output_txt_needs_rebuild?(output_txt, annot)
+      path = output_txt.to_s
+      return true unless File.exist?(path) && File.size(path).positive?
+
+      first_line = File.open(path, 'r', &:gets)
+      ncol = first_line&.chomp&.split("\t")&.size.to_i
+      return true if ncol != 10 || de_output_txt_first_line_is_column_header?(first_line)
+      return false unless de_matrix_has_gene_identity_columns?(annot)
+
+      layout_path = de_output_txt_layout_path(path)
+      return true unless File.exist?(layout_path.to_s)
+
+      File.read(layout_path.to_s).to_s.strip != DE_OUTPUT_TXT_LAYOUT_IDENTITY
+    end
+
+    def de_index_lookup_from_vector(vec)
+      h = {}
+      Array(vec).each_with_index do |v, i|
+        key = v.to_s.strip
+        next if key.empty? || key.casecmp('na').zero?
+        h[key] = i unless h.key?(key)
+      end
+      h
+    end
+
+    def de_loom_gene_index_for_matrix_row(i, identity_idxs, vals, ensembl_to_idx, gene_to_idx, loom_n)
+      has_id = identity_idxs[:ensembl] || identity_idxs[:gene]
+      unless has_id
+        return i if loom_n.to_i <= 0 || i < loom_n.to_i
+
+        return nil
+      end
+
+      if identity_idxs[:ensembl]
+        col = vals[identity_idxs[:ensembl]]
+        if col.is_a?(Array)
+          key = col[i].to_s.strip
+          found = ensembl_to_idx[key] if key != '' && key.casecmp('na') != 0
+          return found unless found.nil?
+        end
+      end
+      if identity_idxs[:gene]
+        col = vals[identity_idxs[:gene]]
+        if col.is_a?(Array)
+          key = col[i].to_s.strip
+          found = gene_to_idx[key] if key != '' && key.casecmp('na') != 0
+          return found unless found.nil?
+        end
+      end
+      nil
+    end
+
+    def de_output_txt_line_for_matrix_row(i, vals, metric_idxs, identity_idxs, ensembl_ids, gene_names, h_genes, ensembl_to_idx, gene_to_idx, loom_n)
+      loom_i = de_loom_gene_index_for_matrix_row(i, identity_idxs, vals, ensembl_to_idx, gene_to_idx, loom_n)
+      return nil if loom_i.nil?
+
+      ens_from_matrix = nil
+      if identity_idxs[:ensembl]
+        col = vals[identity_idxs[:ensembl]]
+        ens_from_matrix = col[i].to_s.strip if col.is_a?(Array)
+        ens_from_matrix = nil if ens_from_matrix.blank? || ens_from_matrix.casecmp('na').zero?
+      end
+      gene_from_matrix = nil
+      if identity_idxs[:gene]
+        col = vals[identity_idxs[:gene]]
+        gene_from_matrix = col[i].to_s.strip if col.is_a?(Array)
+        gene_from_matrix = nil if gene_from_matrix.blank? || gene_from_matrix.casecmp('na').zero?
+      end
+
+      ens = ens_from_matrix.presence || (ensembl_ids && ensembl_ids[loom_i]).to_s.presence
+      if ens && h_genes && (g = h_genes[ens])
+        details = [loom_i, g.ensembl_id, g.name, g.alt_names, g.description]
+      else
+        gname = gene_from_matrix.presence || (gene_names && gene_names[loom_i])
+        details = [loom_i, ens, gname, nil, nil]
+      end
+      metric_cells = (0..4).map do |slot|
+        ci = metric_idxs[slot]
+        raw = vals[ci].is_a?(Array) ? vals[ci][i] : nil
+        de_format_output_txt_metric_value(raw, slot)
+      end
+      (details + metric_cells).join("\t")
     end
 
     def de_format_output_txt_metric_value(val, metric_slot)
@@ -2210,13 +2362,28 @@ module Basic
         annot
       )
       n_cols = vals.size
-      pack = de_metric_source_indices_for_extract_metadata(annot, n_cols)
+      headers_override = de_usable_column_names(h_results['column_names'])
+      pack = de_metric_source_indices_for_extract_metadata(annot, n_cols, headers_override: headers_override)
+      identity_idxs = de_identity_column_indices_for_extract_metadata(annot, n_cols, headers_override: headers_override)
       metric_idxs = pack[:indices]
       logfc_col = metric_idxs[0]
       fdr_col = metric_idxs[2]
       logfc_series = vals[logfc_col]
       fdr_series = vals[fdr_col]
       raise StandardError, "DE matrix missing logFC/FDR columns for gene enrichment (annot_id=#{annot.id})" unless logfc_series.is_a?(Array) && fdr_series.is_a?(Array)
+
+      ensembl_ids = nil
+      gene_names = nil
+      if identity_idxs[:ensembl] || identity_idxs[:gene]
+        ensembl_ids = H5DataService.get_metadata_vector(loom_file.to_s, '/row_attrs/Accession')
+        gene_names = H5DataService.get_metadata_vector(loom_file.to_s, '/row_attrs/Gene')
+        unless ensembl_ids.is_a?(Array) || gene_names.is_a?(Array)
+          raise StandardError, "DE gene identity columns present but loom Accession/Gene vectors were not readable (annot_id=#{annot.id})"
+        end
+      end
+      ensembl_to_idx = de_index_lookup_from_vector(ensembl_ids)
+      gene_to_idx = de_index_lookup_from_vector(gene_names)
+      loom_n = [ensembl_ids&.size.to_i, gene_names&.size.to_i].max
 
       fdr_c = fdr_cutoff.to_f
       log_fc_c = log_fc_cutoff.to_f
@@ -2228,10 +2395,13 @@ module Basic
         logfc = Float(logfc_series[i]) rescue nil
         next unless fdr && logfc && fdr <= fdr_c
 
+        gene_i = de_loom_gene_index_for_matrix_row(i, identity_idxs, vals, ensembl_to_idx, gene_to_idx, loom_n)
+        next if gene_i.nil?
+
         if logfc >= 0 && logfc >= log_fc_c
-          vec_up_ids << i
+          vec_up_ids << gene_i
         elsif logfc <= 0 && logfc <= -log_fc_c
-          vec_down_ids << i
+          vec_down_ids << gene_i
         end
       end
 

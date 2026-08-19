@@ -4,6 +4,7 @@ import { GradientManager } from "visualization/gradient_manager"
 import { ColorManager } from "visualization/color_manager"
 import { GeneSetCollectionsController } from "visualization/gene_set_collections_controller"
 import { canvasToJpegThumbnailDataUrl, isCheckpointThumbnailDataUrl } from "lib/checkpoint_thumbnail"
+import { DEFAULT_NAN_COLOR_INT, nanColorToHex, parseNanColor } from "lib/nan_color"
 import consumer from "channels/consumer"
 
 // Interactive expression heatmap viewer.
@@ -21,7 +22,8 @@ export default class extends Controller {
     runNum: String,
     runLabel: String,
     dataUrl: String,
-    canAnalyze: { type: Boolean, default: false }
+    canAnalyze: { type: Boolean, default: false },
+    currentUserId: { type: Number, default: 0 }
   }
 
   static targets = [
@@ -93,6 +95,7 @@ export default class extends Controller {
     this.editingGradientTarget = { type: "expression" }
     this.expressionCustomColorRange = null
     this.checkpointHistory = []
+    this.currentAutoCheckpoint = null
     this.lastLoadedCheckpointId = null
     this.checkpointCommentsFocusId = null
     this.currentCheckpointLoadInProgress = false
@@ -109,6 +112,7 @@ export default class extends Controller {
     this.gradientMaxValue = undefined
     this.selectedControlPointIndex = undefined
     this.customColorRange = null
+    this.nanColor = DEFAULT_NAN_COLOR_INT
     this.histogramScale = "normal"
     this.histogramIgnoreZeros = true
     this.gradientManager = new GradientManager(this)
@@ -393,7 +397,8 @@ export default class extends Controller {
     return {
       gradientControlPoints: this.defaultHeatmapControlPoints(),
       customGradientControlPoints: null,
-      gradientScale: "normal"
+      gradientScale: "normal",
+      nanColor: nanColorToHex(DEFAULT_NAN_COLOR_INT)
     }
   }
 
@@ -403,6 +408,7 @@ export default class extends Controller {
     const prevCustom = this.customGradientControlPoints
     const prevDefault = this.gradientControlPoints
     const prevScale = this.gradientScale
+    const prevNan = this.nanColor
     this.customGradientControlPoints = stored.customGradientControlPoints
       ? JSON.parse(JSON.stringify(stored.customGradientControlPoints))
       : null
@@ -410,11 +416,14 @@ export default class extends Controller {
       ? JSON.parse(JSON.stringify(stored.gradientControlPoints))
       : this.defaultHeatmapControlPoints()
     this.gradientScale = stored.gradientScale === "log" ? "log" : "normal"
+    this.nanColor = parseNanColor(stored.nanColor)
     const points = this.activeControlPoints()
     this.renderer.setColormapFromControlPoints(points, (t) => this.gradientManager.getColorFromGradient(t))
+    this.renderer.setNanColor(this.nanColor)
     this.customGradientControlPoints = prevCustom
     this.gradientControlPoints = prevDefault
     this.gradientScale = prevScale
+    this.nanColor = prevNan
   }
 
   normalizeExpressionValue(value, vmin, vmax) {
@@ -609,7 +618,8 @@ export default class extends Controller {
         customGradientControlPoints: added.customGradientControlPoints
           ? JSON.parse(JSON.stringify(added.customGradientControlPoints))
           : null,
-        gradientScale: added.gradientScale === "log" ? "log" : "normal"
+        gradientScale: added.gradientScale === "log" ? "log" : "normal",
+        nanColor: nanColorToHex(added.nanColor)
       })
     }
     this.persistCurrentCheckpointOnServer("add-track")
@@ -694,6 +704,8 @@ export default class extends Controller {
     for (let i = 0; i < values.length; i++) {
       const v = values[i]
       if (v === null || v === undefined || v === "") continue
+      if (typeof v === "number" && Number.isNaN(v)) continue
+      if (typeof v === "string" && /^\s*[-+]?nan\s*$/i.test(v)) continue
       const n = Number(v)
       if (!Number.isFinite(n)) return false
       seen++
@@ -785,6 +797,7 @@ export default class extends Controller {
     if (!Object.prototype.hasOwnProperty.call(track, "customGradientControlPoints")) {
       track.customGradientControlPoints = null
     }
+    track.nanColor = parseNanColor(track.nanColor)
   }
 
   applyGradientOptionsToTrack(track, gradient) {
@@ -804,6 +817,9 @@ export default class extends Controller {
     }
     if (gradient.gradientScale) {
       track.gradientScale = gradient.gradientScale === "log" ? "log" : "normal"
+    }
+    if (Object.prototype.hasOwnProperty.call(gradient, "nanColor")) {
+      track.nanColor = parseNanColor(gradient.nanColor)
     }
   }
 
@@ -2193,7 +2209,7 @@ export default class extends Controller {
 
   trackColor(track, value) {
     if (value === null || value === undefined || value === "" || (typeof value === "number" && Number.isNaN(value))) {
-      return "#e5e7eb"
+      return this.colorIntToCss(parseNanColor(track.nanColor))
     }
     if (track.type === "numerical") {
       const t = this.trackNormalizedPosition(track, Number(value))
@@ -2684,15 +2700,17 @@ export default class extends Controller {
   }
 
   // Seed controller + metadataGradients so the modal loads the gradient currently shown.
-  seedGradientEditorState(points, scale, metadataId) {
+  seedGradientEditorState(points, scale, metadataId, nanColor) {
     const copied = this.copyControlPoints(points)
     this.customGradientControlPoints = this.copyControlPoints(copied)
     this.gradientControlPoints = this.copyControlPoints(copied)
     this.gradientScale = scale === "log" ? "log" : "normal"
+    this.nanColor = parseNanColor(nanColor)
     this.metadataGradients.set(metadataId, {
       gradientControlPoints: this.copyControlPoints(copied),
       customGradientControlPoints: this.copyControlPoints(copied),
-      gradientScale: this.gradientScale
+      gradientScale: this.gradientScale,
+      nanColor: nanColorToHex(this.nanColor)
     })
   }
 
@@ -2729,6 +2747,7 @@ export default class extends Controller {
     track.customColorRange = this.customColorRange
       ? { min: Number(this.customColorRange.min), max: Number(this.customColorRange.max) }
       : null
+    track.nanColor = parseNanColor(this.nanColor)
     this.gradientManager.saveGradientForMetadata(this.trackGradientMetadataId(track))
   }
 
@@ -2761,7 +2780,7 @@ export default class extends Controller {
       : null
     this.gradientMinValue = this.customColorRange?.min ?? this.vmin
     this.gradientMaxValue = this.customColorRange?.max ?? this.vmax
-    this.seedGradientEditorState(points, scale, this.currentMetadataId)
+    this.seedGradientEditorState(points, scale, this.currentMetadataId, displayed.nanColor)
     const histLabel = document.getElementById("gradient-editor-hist-label")
     if (histLabel) histLabel.textContent = "Gene expression distribution"
     this.gradientManager.openGradientEditorModal()
@@ -2787,7 +2806,7 @@ export default class extends Controller {
       values: track.values,
       compression_info: { min_val: track.min, max_val: track.max }
     }
-    this.seedGradientEditorState(points, scale, this.currentMetadataId)
+    this.seedGradientEditorState(points, scale, this.currentMetadataId, track.nanColor)
     const histLabel = document.getElementById("gradient-editor-hist-label")
     if (histLabel) histLabel.textContent = `${track.name} distribution`
     this.gradientManager.openGradientEditorModal()
@@ -2813,6 +2832,7 @@ export default class extends Controller {
     this.customGradientControlPoints = null
     this.selectedControlPointIndex = undefined
     this.gradientScale = "normal"
+    this.nanColor = DEFAULT_NAN_COLOR_INT
     if (this.editingGradientTarget?.type === "track") {
       this.gradientControlPoints = this.defaultNumericalTrackControlPoints()
       this.customColorRange = null
@@ -2827,6 +2847,7 @@ export default class extends Controller {
     this.gradientManager.saveGradientForMetadata(this.currentMetadataId)
     this.closeControlPointEditor()
     this.gradientManager.syncGradientScaleSelect()
+    this.gradientManager.syncNanColorInput()
     this.rendererManager.renderModalGradientPreview()
     this.rendererManager.renderModalControlPointMarkers()
     this.rendererManager.renderControlPointsList()
@@ -2864,7 +2885,7 @@ export default class extends Controller {
   }
 
   getMissingNumericColor() {
-    return 0x9ca3af
+    return parseNanColor(this.nanColor)
   }
 
   getEffectiveColorRange() {
@@ -4223,7 +4244,8 @@ export default class extends Controller {
         customColorRange: track.customColorRange
           ? { min: Number(track.customColorRange.min), max: Number(track.customColorRange.max) }
           : null,
-        gradientScale: track.gradientScale === "log" ? "log" : "normal"
+        gradientScale: track.gradientScale === "log" ? "log" : "normal",
+        nanColor: nanColorToHex(track.nanColor)
       }
     }
     return payload
@@ -4258,7 +4280,8 @@ export default class extends Controller {
           : (this.customColorRange ? { ...this.customColorRange } : null),
         gradientScale: (storedExpression?.gradientScale || this.gradientScale || "normal") === "log"
           ? "log"
-          : "normal"
+          : "normal",
+        nanColor: nanColorToHex(storedExpression?.nanColor)
       }
     }
   }
@@ -4386,11 +4409,117 @@ export default class extends Controller {
       alert("Not authorized to save checkpoints.")
       return
     }
-    const title = window.prompt("Checkpoint title")
-    if (!title) return
-    const normalized = title.trim()
-    if (!normalized) return
-    this.saveCheckpoint(normalized)
+    const overlay = document.getElementById("heatmap-checkpoint-save-overlay")
+    if (!overlay) return
+    this.fetchCheckpointHistory().then(() => {
+      this.populateSaveCheckpointDialog()
+      overlay.style.display = "flex"
+      const titleInput = document.getElementById("heatmap-checkpoint-save-new-title")
+      if (titleInput && this.resolveSaveCheckpointMode() === "new") titleInput.focus()
+    })
+  }
+
+  closeSaveCheckpointDialog() {
+    const overlay = document.getElementById("heatmap-checkpoint-save-overlay")
+    if (overlay) overlay.style.display = "none"
+  }
+
+  checkpointSaveDialogBackdropClick(event) {
+    if (event.target === document.getElementById("heatmap-checkpoint-save-overlay")) {
+      this.closeSaveCheckpointDialog()
+    }
+  }
+
+  updatableNamedCheckpoints() {
+    return (this.checkpointHistory || []).filter((checkpoint) => {
+      if (!checkpoint?.id) return false
+      const title = String(checkpoint.title || "").trim()
+      if (title === "__current_visualization_view__" || title === "__current_heatmap_view__") return false
+      const commentCount = Number(checkpoint.comments_count || (Array.isArray(checkpoint.comments) ? checkpoint.comments.length : 0))
+      return commentCount === 0
+    })
+  }
+
+  currentHeatmapUserId() {
+    const id = Number(this.currentUserIdValue)
+    return Number.isFinite(id) && id > 0 ? id : null
+  }
+
+  populateSaveCheckpointDialog() {
+    const eligible = this.updatableNamedCheckpoints()
+    const select = document.getElementById("heatmap-checkpoint-save-existing-select")
+    const existingRadio = document.getElementById("heatmap-checkpoint-save-mode-existing")
+    const newRadio = document.getElementById("heatmap-checkpoint-save-mode-new")
+    const existingWrap = document.getElementById("heatmap-checkpoint-save-existing-wrap")
+    const emptyHint = document.getElementById("heatmap-checkpoint-save-existing-empty")
+    if (!select || !existingRadio || !newRadio) return
+
+    const currentUserId = this.currentHeatmapUserId()
+    const preferredId = String(this.lastLoadedCheckpointId || "")
+    const preferredExists = preferredId && eligible.some((checkpoint) => String(checkpoint.id) === preferredId)
+
+    select.innerHTML = eligible.map((checkpoint) => {
+      const ownerId = checkpoint.user_id == null ? null : Number(checkpoint.user_id)
+      const ownerName = String(checkpoint.user_name || "Unknown").trim() || "Unknown"
+      const mine = currentUserId != null && ownerId === currentUserId
+      const ownerLabel = mine ? `${ownerName} (you)` : ownerName
+      return `<option value="${this.escape(String(checkpoint.id))}">${this.escape(checkpoint.title || "Untitled")} — ${this.escape(ownerLabel)}</option>`
+    }).join("")
+
+    const hasEligible = eligible.length > 0
+    existingRadio.disabled = !hasEligible
+    select.disabled = !hasEligible
+    if (existingWrap) existingWrap.style.opacity = hasEligible ? "1" : "0.55"
+    if (emptyHint) emptyHint.style.display = hasEligible ? "none" : "block"
+
+    if (hasEligible && preferredExists) {
+      existingRadio.checked = true
+      newRadio.checked = false
+      select.value = preferredId
+    } else {
+      newRadio.checked = true
+      existingRadio.checked = false
+    }
+    this.onSaveCheckpointModeChanged()
+  }
+
+  resolveSaveCheckpointMode() {
+    const existingRadio = document.getElementById("heatmap-checkpoint-save-mode-existing")
+    if (existingRadio && existingRadio.checked && !existingRadio.disabled) return "existing"
+    return "new"
+  }
+
+  onSaveCheckpointModeChanged() {
+    const mode = this.resolveSaveCheckpointMode()
+    const newWrap = document.getElementById("heatmap-checkpoint-save-new-fields")
+    const existingFields = document.getElementById("heatmap-checkpoint-save-existing-fields")
+    if (newWrap) newWrap.style.display = mode === "new" ? "flex" : "none"
+    if (existingFields) existingFields.style.display = mode === "existing" ? "flex" : "none"
+  }
+
+  async confirmSaveCheckpoint(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const mode = this.resolveSaveCheckpointMode()
+    if (mode === "existing") {
+      const select = document.getElementById("heatmap-checkpoint-save-existing-select")
+      const checkpointId = String(select?.value || "").trim()
+      if (!checkpointId) {
+        alert("Select a checkpoint to update.")
+        return
+      }
+      await this.saveCheckpoint(null, { checkpointId })
+      return
+    }
+    const titleInput = document.getElementById("heatmap-checkpoint-save-new-title")
+    const normalized = String(titleInput?.value || "").trim()
+    if (!normalized) {
+      alert("Please provide a name for the new checkpoint.")
+      return
+    }
+    await this.saveCheckpoint(normalized)
   }
 
   captureNamedCheckpointThumbnail() {
@@ -4419,7 +4548,8 @@ export default class extends Controller {
     return jpeg ? { heatmap: jpeg } : null
   }
 
-  async saveCheckpoint(title) {
+  async saveCheckpoint(title, options = {}) {
+    const checkpointId = options.checkpointId ? String(options.checkpointId).trim() : ""
     const state = this.buildCheckpointState()
     try {
       const thumbnails = this.captureNamedCheckpointThumbnail()
@@ -4430,8 +4560,18 @@ export default class extends Controller {
       console.warn("[heatmap] Failed to capture named-checkpoint thumbnail", error)
     }
 
-    const response = await fetch(this.checkpointsUrl(), {
-      method: "POST",
+    const url = checkpointId
+      ? `${this.checkpointsUrl(checkpointId)}?${this.checkpointsQuery()}`
+      : `${this.checkpointsUrl()}?${this.checkpointsQuery()}`
+    const checkpointPayload = {
+      kind: "heatmap",
+      run_id: this.runIdValue,
+      state
+    }
+    if (!checkpointId) checkpointPayload.title = title
+
+    const response = await fetch(url, {
+      method: checkpointId ? "PATCH" : "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -4441,12 +4581,7 @@ export default class extends Controller {
       body: JSON.stringify({
         kind: "heatmap",
         run_id: this.runIdValue,
-        checkpoint: {
-          title,
-          kind: "heatmap",
-          run_id: this.runIdValue,
-          state
-        }
+        checkpoint: checkpointPayload
       })
     })
 
@@ -4462,6 +4597,9 @@ export default class extends Controller {
     this.lastLoadedCheckpointId = checkpoint.id
     this.updateCheckpointCommentsButtonState(checkpoint.comments_count || 0)
     this.persistCurrentCheckpointOnServer("save-named-checkpoint")
+    this.closeSaveCheckpointDialog()
+    const titleInput = document.getElementById("heatmap-checkpoint-save-new-title")
+    if (titleInput) titleInput.value = ""
   }
 
   mergeCheckpointIntoHistory(checkpoint) {
@@ -4483,6 +4621,7 @@ export default class extends Controller {
     if (!response.ok) return
     const payload = await response.json()
     this.checkpointHistory = Array.isArray(payload.checkpoints) ? payload.checkpoints : []
+    this.currentAutoCheckpoint = payload.current_checkpoint || null
     this.updateCheckpointCommentsButtonState(
       this.checkpointForId(this.lastLoadedCheckpointId)?.comments_count || 0
     )
@@ -4526,7 +4665,8 @@ export default class extends Controller {
     if (!this.hasCheckpointHistoryListTarget) return
     const list = this.checkpointHistoryListTarget
     const history = this.checkpointHistory || []
-    if (!history.length) {
+    const currentAuto = this.currentAutoCheckpoint
+    if (!history.length && !currentAuto) {
       list.innerHTML = `<div style="padding:12px;color:#6b7280;font-size:13px;line-height:1.45;">
         No checkpoints yet for this heatmap run.
         ${this.canAnalyzeValue ? "Use <strong>Save checkpoint</strong> to store the current view, tracks, and gradient." : ""}
@@ -4534,7 +4674,8 @@ export default class extends Controller {
       return
     }
 
-    list.innerHTML = history.map((checkpoint) => {
+    const currentHtml = currentAuto ? this.renderCurrentAutoCheckpointCard(currentAuto) : ""
+    const namedHtml = history.map((checkpoint) => {
       const id = String(checkpoint.id)
       const createdAt = checkpoint.created_at ? new Date(checkpoint.created_at).toLocaleString() : ""
       const commentCount = Number(checkpoint.comments_count || 0)
@@ -4564,6 +4705,34 @@ export default class extends Controller {
         </div>
       </div>`
     }).join("")
+
+    list.innerHTML = `${currentHtml}${namedHtml}`
+  }
+
+  renderCurrentAutoCheckpointCard(checkpoint) {
+    const updatedAt = checkpoint.updated_at ? new Date(checkpoint.updated_at).toLocaleString() : ""
+    const heatmapThumb = checkpoint.state?.thumbnails?.heatmap
+    const thumbHtml = isCheckpointThumbnailDataUrl(heatmapThumb)
+      ? `<img class="checkpoint-thumb" src="${heatmapThumb}" alt="" style="width:96px;height:64px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
+      : ""
+    const resetBtn = this.canAnalyzeValue
+      ? `<button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-gray-100 text-gray-700 rounded border border-gray-300 text-xs"
+          data-action="heatmap#resetCurrentCheckpoint">Reset</button>`
+      : ""
+    return `<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#f8fafc;">
+      <div style="display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:12px;align-items:center;">
+        <div style="display:flex;align-items:center;justify-content:flex-start;min-height:64px;">
+          ${thumbHtml || ""}
+        </div>
+        <div style="min-width:0;">
+          <div style="font-size:13px;font-weight:600;color:#111827;">Current auto checkpoint</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:2px;">Auto-saved ${this.escape(updatedAt)}. Reset if the view looks wrong after data changes.</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          ${resetBtn}
+        </div>
+      </div>
+    </div>`
   }
 
   async loadCheckpointFromHistory(event) {
@@ -4602,6 +4771,46 @@ export default class extends Controller {
       this.updateCheckpointCommentsButtonState(0)
     }
     this.renderCheckpointHistory()
+  }
+
+  clearCurrentCheckpointFromSession() {
+    const key = this.currentCheckpointSessionKey()
+    if (!key) return
+    try {
+      sessionStorage.removeItem(key)
+    } catch (_e) {
+      // Session storage may be unavailable.
+    }
+    this._lastPersistedState = null
+  }
+
+  async resetCurrentCheckpoint() {
+    if (!this.canAnalyzeValue) return
+    if (!window.confirm("Reset the current auto-saved heatmap view? The page will reload without that saved state.")) {
+      return
+    }
+
+    this.currentCheckpointReadyForOverwrite = false
+    this.currentCheckpointLoadInProgress = true
+    const response = await fetch(`${this.checkpointsUrl("current")}?${this.checkpointsQuery()}`, {
+      method: "DELETE",
+      headers: {
+        Accept: "application/json",
+        "X-CSRF-Token": this.csrfToken()
+      },
+      credentials: "same-origin"
+    })
+    if (!response.ok) {
+      this.currentCheckpointLoadInProgress = false
+      this.currentCheckpointReadyForOverwrite = true
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || `Failed to reset the current checkpoint (${response.status})`)
+      return
+    }
+
+    this.clearCurrentCheckpointFromSession()
+    this.currentAutoCheckpoint = null
+    window.location.reload()
   }
 
   setCheckpointLoading(visible, message = "Loading checkpoint") {
@@ -4730,6 +4939,7 @@ export default class extends Controller {
         ? { min: Number(this.customColorRange.min), max: Number(this.customColorRange.max) }
         : null
       this.gradientScale = state.gradient.gradientScale || "normal"
+      this.nanColor = parseNanColor(state.gradient.nanColor)
       if (this.customColorRange?.min != null) this.gradientMinValue = this.customColorRange.min
       if (this.customColorRange?.max != null) this.gradientMaxValue = this.customColorRange.max
       this.editingGradientTarget = { type: "expression" }
@@ -4763,7 +4973,8 @@ export default class extends Controller {
           customGradientControlPoints: prepared.customGradientControlPoints
             ? JSON.parse(JSON.stringify(prepared.customGradientControlPoints))
             : null,
-          gradientScale: prepared.gradientScale === "log" ? "log" : "normal"
+          gradientScale: prepared.gradientScale === "log" ? "log" : "normal",
+          nanColor: nanColorToHex(prepared.nanColor)
         })
       }
     } catch (e) {

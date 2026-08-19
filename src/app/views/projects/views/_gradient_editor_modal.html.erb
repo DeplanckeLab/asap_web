@@ -38,6 +38,21 @@
       </select>
     </div>
 
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px;">
+      <div>
+        <label for="gradient-nan-color" style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 2px;">
+          NaN / missing color
+        </label>
+        <p style="margin: 0; font-size: 11px; color: #6b7280; line-height: 1.4;">
+          Used for NaN and other values that cannot be mapped onto the gradient.
+        </p>
+      </div>
+      <input id="gradient-nan-color"
+             type="color"
+             value="#d1d5db"
+             style="width: 56px; height: 32px; padding: 2px; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; flex-shrink: 0; background: white;">
+    </div>
+
     <!-- Gradient Preview Bar -->
     <div style="margin-bottom: 20px;">
       <label style="display: block; font-size: 13px; font-weight: 500; color: #374151; margin-bottom: 8px;">

@@ -13,6 +13,7 @@
  */
 
 import createREGL from 'regl'
+import { DEFAULT_NAN_COLOR_INT, nanColorToRgb, parseNanColor } from 'lib/nan_color'
 
 const COLORMAP_SIZE = 256
 
@@ -34,6 +35,7 @@ export class ReglHeatmap {
     this.texSize = [1, 1]
     this.textureViewKey = null
     this.fullTextureFits = false
+    this.nanColorRgb = nanColorToRgb(DEFAULT_NAN_COLOR_INT)
     this.initialize()
   }
 
@@ -70,6 +72,7 @@ export class ReglHeatmap {
         uniform vec2 uRowRange;
         uniform vec2 uTexOrigin;
         uniform vec2 uTexSize;
+        uniform vec3 uNanColor;
 
         void main() {
           float col = mix(uColRange.x, uColRange.y, vPos.x);
@@ -86,7 +89,7 @@ export class ReglHeatmap {
           }
           vec4 texel = texture2D(uMatrix, uv);
           if (texel.g < 0.5) {
-            gl_FragColor = vec4(0.88, 0.88, 0.88, 1.0);
+            gl_FragColor = vec4(uNanColor, 1.0);
             return;
           }
           float t = clamp(texel.r, 0.0, 1.0);
@@ -103,12 +106,17 @@ export class ReglHeatmap {
         uColRange: this.regl.prop('colRange'),
         uRowRange: this.regl.prop('rowRange'),
         uTexOrigin: () => this.texOrigin,
-        uTexSize: () => this.texSize
+        uTexSize: () => this.texSize,
+        uNanColor: () => this.nanColorRgb
       },
       count: 6
     })
 
     this.setColormap(true)
+  }
+
+  setNanColor(colorInt) {
+    this.nanColorRgb = nanColorToRgb(parseNanColor(colorInt))
   }
 
   setColormap(diverging) {

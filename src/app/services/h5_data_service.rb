@@ -850,28 +850,57 @@ class H5DataService
 
   # Delete a metadata dataset if present. No-op when missing.
   def self.delete_metadata_dataset!(h5_file, metadata_path, already_locked: false)
-    field = strip_leading_slash(metadata_path)
+    delete_metadata_datasets!(h5_file, [metadata_path], already_locked: already_locked)
+  end
+
+  # Delete several metadata datasets in one h5py open. Missing paths are skipped.
+  def self.delete_metadata_datasets!(h5_file, metadata_paths, already_locked: false)
+    fields = Array(metadata_paths).map { |path| strip_leading_slash(path) }.reject(&:blank?).uniq
+    return true if fields.empty?
+
+    loom_path = Pathname.new(h5_file.to_s)
+    staging_path = loom_path.dirname.join(".asap_delete_metadata_#{Process.pid}_#{SecureRandom.hex(8)}.json")
+    File.write(staging_path, fields.to_json)
+
     script = <<~PYTHON
-      import h5py
+      import json
       import sys
 
-      with h5py.File(sys.argv[1], 'r+') as f:
-          if sys.argv[2] in f:
-              del f[sys.argv[2]]
+      import h5py
+
+      loom_path = sys.argv[1]
+      paths_file = sys.argv[2]
+      with open(paths_file, 'r', encoding='utf-8') as fh:
+          fields = json.load(fh)
+      if not isinstance(fields, list):
+          print('ERROR: metadata path list must be a JSON array')
+          sys.exit(1)
+
+      with h5py.File(loom_path, 'r+') as f:
+          for field in fields:
+              if not isinstance(field, str) or field == '':
+                  print('ERROR: metadata path must be a non-empty string')
+                  sys.exit(1)
+              if field in f:
+                  del f[field]
 
       print('OK')
     PYTHON
-    run_with_optional_loom_write_lock(h5_file, already_locked: already_locked) do
-      stdout, stderr, status = docker_exec_h5_write_python3!(
-        h5_file.to_s, field,
-        stdin_data: script
-      )
-      unless status.success? && stdout.strip.start_with?('OK')
-        raise "Failed to delete metadata #{metadata_path}: #{stderr.presence || stdout}"
-      end
-    end
 
-    true
+    begin
+      run_with_optional_loom_write_lock(h5_file, already_locked: already_locked) do
+        stdout, stderr, status = docker_exec_h5_write_python3!(
+          loom_path.to_s, staging_path.to_s,
+          stdin_data: script
+        )
+        unless status.success? && stdout.strip.start_with?('OK')
+          raise "Failed to delete metadata #{fields.join(', ')}: #{stderr.presence || stdout}"
+        end
+      end
+      true
+    ensure
+      File.delete(staging_path) if File.exist?(staging_path)
+    end
   end
 
   # Write a global loom attribute as a length-1 string dataset under attrs/<name>.

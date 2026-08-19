@@ -19576,6 +19576,7 @@ export default class extends Controller {
   }
 
   async updateDeSelectionPreview() {
+    this.ensureComposeSelectionStateInitialized()
     const preview = document.getElementById('de-selection-preview')
     const operandASelect = document.getElementById('de-selection-operand-a')
     const operandBSelect = document.getElementById('de-selection-operand-b')
@@ -19623,8 +19624,10 @@ export default class extends Controller {
 
       this.drawComposeSelectionScatterPreview('de-preview-canvas-a', coordinates, operandA.cellSet, '#2563eb')
       this.drawComposeSelectionScatterPreview('de-preview-canvas-b', coordinates, comparedSet, '#d97706')
-    } catch (_error) {
-      preview.innerHTML = `<div style="grid-column: 1 / -1; font-size: 12px; color: #991b1b; padding: 8px;">Could not render DE preview for selected ${colSets}.</div>`
+    } catch (error) {
+      console.error('Could not render DE preview:', error)
+      const detail = error && error.message ? ` ${error.message}` : ''
+      preview.innerHTML = `<div style="grid-column: 1 / -1; font-size: 12px; color: #991b1b; padding: 8px;">Could not render DE preview for selected ${colSets}.${this.escapeHtml(detail)}</div>`
     }
   }
 
@@ -20684,23 +20687,18 @@ export default class extends Controller {
       throw new Error(`Category name is missing for metadata ${metadataId}`)
     }
 
-    let metadataVector = this.ensureComposeMetadataVectorValues(metadataId, this.loadedMetadataVectors?.[metadataId] || null)
-    if (!metadataVector || !Array.isArray(metadataVector.values)) {
-      const diskVector = await this.memoryManager.loadMetadataFromIndexedDB(metadataId)
-      metadataVector = this.ensureComposeMetadataVectorValues(metadataId, diskVector)
-    }
-    if (!metadataVector || !Array.isArray(metadataVector.values)) {
-      await this.loadSingleMetadataVectorSilently(metadataId)
-      metadataVector = this.ensureComposeMetadataVectorValues(metadataId, this.loadedMetadataVectors?.[metadataId] || null)
-    }
-    if (!metadataVector || !Array.isArray(metadataVector.values)) {
+    const metadataVector = await this.loadComposeMetadataVector(metadataId)
+    if (!metadataVector) {
       throw new Error(`Metadata vector is not available for ${meta.metadataName || metadataId}`)
     }
 
-    const target = String(categoryName)
+    const targetCode = this.dataManager.labelToCode(metadataVector, categoryName)
+    if (targetCode < 0) {
+      throw new Error(`Category ${categoryName} is not present in ${meta.metadataName || metadataId}`)
+    }
     const cellSet = new Set()
     for (let index = 0; index < metadataVector.values.length; index++) {
-      if (String(metadataVector.values[index]) === target) {
+      if (this.dataManager.getCategoryCode(metadataVector, index) === targetCode) {
         cellSet.add(index)
       }
     }
@@ -20719,24 +20717,16 @@ export default class extends Controller {
     const metadataId = String(item.metadataId || '')
     if (!metadataId) return new Set()
 
-    let metadataVector = this.ensureComposeMetadataVectorValues(metadataId, this.loadedMetadataVectors?.[metadataId] || null)
-    if (!metadataVector || !Array.isArray(metadataVector.values)) {
-      const diskVector = await this.memoryManager.loadMetadataFromIndexedDB(metadataId)
-      metadataVector = this.ensureComposeMetadataVectorValues(metadataId, diskVector)
-    }
-    if (!metadataVector || !Array.isArray(metadataVector.values)) {
-      await this.loadSingleMetadataVectorSilently(metadataId)
-      metadataVector = this.ensureComposeMetadataVectorValues(metadataId, this.loadedMetadataVectors?.[metadataId] || null)
-    }
-    if (!metadataVector || !Array.isArray(metadataVector.values)) {
+    const metadataVector = await this.loadComposeMetadataVector(metadataId)
+    if (!metadataVector) {
       throw new Error(`Metadata vector is not available for selection ${item.name}`)
     }
 
     const unselectedName = String(item.unselectedName || 'Not selected')
     const cellSet = new Set()
     for (let index = 0; index < metadataVector.values.length; index++) {
-      const rawValue = metadataVector.values[index]
-      if (!this.isSelectionExcludedCategoryValue(rawValue, unselectedName)) {
+      const displayValue = this.dataManager.getDisplayValue(metadataVector, index)
+      if (!this.isSelectionExcludedCategoryValue(displayValue, unselectedName)) {
         cellSet.add(index)
       }
     }
@@ -20745,42 +20735,27 @@ export default class extends Controller {
     return cellSet
   }
 
+  composeMetadataVectorHasValues(vectorData) {
+    return !!(vectorData && vectorData.values && typeof vectorData.values.length === 'number' && vectorData.values.length > 0)
+  }
+
+  async loadComposeMetadataVector(metadataId) {
+    let metadataVector = this.ensureComposeMetadataVectorValues(metadataId, this.loadedMetadataVectors?.[metadataId] || null)
+    if (!this.composeMetadataVectorHasValues(metadataVector)) {
+      const diskVector = await this.memoryManager.loadMetadataFromIndexedDB(metadataId)
+      metadataVector = this.ensureComposeMetadataVectorValues(metadataId, diskVector)
+    }
+    if (!this.composeMetadataVectorHasValues(metadataVector)) {
+      await this.loadSingleMetadataVectorSilently(metadataId)
+      metadataVector = this.ensureComposeMetadataVectorValues(metadataId, this.loadedMetadataVectors?.[metadataId] || null)
+    }
+    return this.composeMetadataVectorHasValues(metadataVector) ? metadataVector : null
+  }
+
   ensureComposeMetadataVectorValues(metadataId, vectorData) {
     if (!vectorData) return null
-    if (Array.isArray(vectorData.values)) {
-      return vectorData
-    }
-
-    if (!vectorData.compressed_data || !vectorData.compression_info) {
-      return null
-    }
-
-    try {
-      const compressionInfo = typeof vectorData.compression_info === 'string'
-        ? JSON.parse(vectorData.compression_info)
-        : vectorData.compression_info
-
-      let values = null
-      if (vectorData.data_type === 'DISCRETE' || vectorData.data_type === 'STRING') {
-        values = this.dataManager.decompressDiscreteMetadataVector(vectorData.compressed_data, compressionInfo)
-      } else if (vectorData.data_type === 'NUMERIC') {
-        values = this.dataManager.decompressContinuousMetadataVector(vectorData.compressed_data, compressionInfo)
-      }
-
-      if (!Array.isArray(values)) {
-        return null
-      }
-
-      const normalizedVector = {
-        ...vectorData,
-        id: String(vectorData.id || metadataId),
-        values
-      }
-      this.loadedMetadataVectors[metadataId] = normalizedVector
-      return normalizedVector
-    } catch (_error) {
-      return null
-    }
+    const normalized = this.dataManager.ensureMetadataVectorValues(metadataId, vectorData)
+    return this.composeMetadataVectorHasValues(normalized) ? normalized : null
   }
 
   isSelectionExcludedCategoryValue(rawValue, unselectedName) {

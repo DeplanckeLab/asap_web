@@ -51,17 +51,19 @@ namespace :fus do
   end
 
   desc 'Audit the fus upload tree: list disk usage per Fu id, flag orphans (directory with no Fu row). ' \
-       'Set DELETE_ORPHANS=1 to remove orphan directories only (numeric names under the fus root). ' \
+       'Dry-run by default (prints would remove for each orphan). Set DELETE_ORPHANS=1 to remove ' \
+       'orphan directories only (numeric names under the fus root). ' \
        'Root: UPLOAD_DATA_DIR, else DATA_DIR/fus, else /data/asap2/fus. Override with FUS_ROOT=...'
   task audit: :environment do
     root = Pathname.new(ENV['FUS_ROOT'].presence || fus_audit_root)
     delete_orphans = ENV['DELETE_ORPHANS'].to_s == '1'
+    dry_run = !delete_orphans
 
     unless File.directory?(root.to_s)
       raise "fus root does not exist or is not a directory: #{root}"
     end
 
-    puts "[fus:audit] root=#{root} delete_orphans=#{delete_orphans}"
+    puts "[fus:audit] root=#{root} dry_run=#{dry_run} delete_orphans=#{delete_orphans}"
     puts '[fus:audit] note: this scans the global upload staging root only (UPLOAD_DATA_DIR / DATA_DIR/fus). ' \
          'It does not look at project directories or count symlinks under USER_DATA_DIR.'
 
@@ -160,22 +162,28 @@ namespace :fus do
       puts "  ... (#{linked_rows.size - 30} more rows not shown)" if linked_rows.size > 30
     end
 
-    if delete_orphans
-      if orphan_rows.empty?
-        puts '[fus:audit] DELETE_ORPHANS=1: nothing to remove'
-      else
-        puts ''
-        puts "[fus:audit] DELETE_ORPHANS=1: removing #{orphan_rows.size} orphan director(y|ies)"
-        orphan_rows.each do |r|
-          FileUtils.rm_rf(r[:path])
-          puts "  removed #{r[:path]}"
-        rescue StandardError => e
-          $stderr.puts "  FAILED #{r[:path]}: #{e.class} #{e.message}"
-        end
-      end
-    elsif orphan_rows.any?
+    if dry_run
       puts ''
-      puts '[fus:audit] To delete orphan directories above, run with DELETE_ORPHANS=1'
+      if orphan_rows.empty?
+        puts '[fus:audit] dry-run: nothing to remove'
+      else
+        puts "[fus:audit] dry-run: would remove #{orphan_rows.size} orphan director(y|ies)"
+        orphan_rows.sort_by { |r| -r[:bytes] }.each do |r|
+          puts "  would remove #{r[:path]} (#{fus_audit_bytes_to_human(r[:bytes])})"
+        end
+        puts '[fus:audit] dry-run only. To delete these paths, re-run with DELETE_ORPHANS=1'
+      end
+    elsif orphan_rows.empty?
+      puts '[fus:audit] DELETE_ORPHANS=1: nothing to remove'
+    else
+      puts ''
+      puts "[fus:audit] DELETE_ORPHANS=1: removing #{orphan_rows.size} orphan director(y|ies)"
+      orphan_rows.each do |r|
+        FileUtils.rm_rf(r[:path])
+        puts "  removed #{r[:path]}"
+      rescue StandardError => e
+        $stderr.puts "  FAILED #{r[:path]}: #{e.class} #{e.message}"
+      end
     end
 
     puts ''

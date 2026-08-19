@@ -1,5 +1,3 @@
-require 'shellwords'
-
 class SelectionMetadataImportJob < ApplicationJob
   queue_as :default
 
@@ -43,21 +41,9 @@ class SelectionMetadataImportJob < ApplicationJob
       raise StandardError, 'Selection cells file not found'
     end
 
-    cmd = [
-      'java', '-jar', "#{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar",
-      '-T', 'CreateCellSelection',
-      '-loom', loom_path.to_s,
-      '-meta', metadata_name,
-      '-f', selected_file_path.to_s
-    ]
-    raw_output = `#{Shellwords.join(cmd)}`
-    if !$?.success?
-      raise StandardError, 'CreateCellSelection command failed'
-    end
-
-    meta = Basic.safe_parse_json(raw_output, {})
-    if meta.blank?
-      raise StandardError, 'CreateCellSelection returned empty output'
+    meta = H5DataService.write_cell_selection!(loom_path.to_s, metadata_name, selected_file_path.to_s)
+    if meta.blank? || meta['name'].blank?
+      raise StandardError, 'Cell selection write returned empty metadata'
     end
 
     meta['data_class_names'] = ['dataset', 'mdata', 'col_mdata', 'discrete_mdata']
@@ -67,7 +53,6 @@ class SelectionMetadataImportJob < ApplicationJob
     DataClass.all.each { |dc| h_data_classes[dc.name] = dc }
 
     new_annot = Basic.load_annot(run, meta, loom_file, h_data_types, h_data_classes, Rails.logger)
-    new_annot ||= Annot.where(run_id: run.id).order(id: :desc).first
     raise StandardError, 'Selection metadata annotation not created' unless new_annot
 
     new_annot.update(

@@ -3726,18 +3726,6 @@ class ProjectsController < ApplicationController
       return
     end
 
-    stable_ids = H5DataService.get_metadata_vector(loom_path.to_s, '/col_attrs/_StableID')
-    if !stable_ids.is_a?(Array) || stable_ids.empty?
-      render json: { status: 'error', message: 'Could not extract cell identifiers from loom' }, status: :unprocessable_entity
-      return
-    end
-
-    selected_cells = list_cols.filter_map { |idx| stable_ids[idx] }
-    if selected_cells.empty?
-      render json: { status: 'error', message: 'Selected cells could not be mapped to identifiers' }, status: :unprocessable_entity
-      return
-    end
-
     asap_docker_image = Basic.get_asap_docker(@project.version)
     step = Step.where(docker_image_id: asap_docker_image.id, name: 'cell_selection').first
     std_method = StdMethod.where(docker_image_id: asap_docker_image.id, name: 'cell_sel').first
@@ -3771,13 +3759,12 @@ class ProjectsController < ApplicationController
     FileUtils.mkdir_p(run_dir)
     selected_cells_file = run_dir + 'selected_cells.json'
     File.open(selected_cells_file, 'w') do |f|
-      f.write({ selected_cells: selected_cells }.to_json)
+      f.write({ selected_indices: list_cols }.to_json)
     end
 
     cmd = {
-      program: "java -jar #{ENV.fetch('LOCAL_ASAP_RUN_DIR')}/ASAP.jar",
+      program: 'h5py write_cell_selection',
       opts: [
-        { opt: '-T', value: 'CreateCellSelection' },
         { opt: '-loom', value: loom_path.to_s },
         { opt: '-meta', value: selection_metadata_name },
         { opt: '-f', value: selected_cells_file.to_s }
@@ -3816,7 +3803,7 @@ class ProjectsController < ApplicationController
       loom_file: loom_file,
       name: selected_name,
       unselected_name: unselected_name,
-      selected_count: selected_cells.size,
+      selected_count: list_cols.size,
       selection_metadata_name: selection_metadata_name,
       selection_number: selection_number_from_metadata_name(selection_metadata_name),
       selection_source: selection_source,

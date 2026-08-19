@@ -1074,6 +1074,107 @@ class H5DataService
     end
   end
 
+  # Write a 0/1 int32 cell-selection column. selected_indices_file is JSON:
+  # {"selected_indices":[...]} with 0-based column indexes. Replaces the dataset
+  # if it already exists (failed Java writes can leave the path without an annot).
+  # Metadata JSON is written to a sidecar file so HDF5/JVM stdout cannot swallow it.
+  def self.write_cell_selection!(h5_file, metadata_path, selected_indices_file, already_locked: false)
+    field = strip_leading_slash(metadata_path)
+    raise ArgumentError, 'Selection metadata path is required' if field.blank?
+
+    loom_path = Pathname.new(h5_file.to_s)
+    selected_path = Pathname.new(selected_indices_file.to_s)
+    raise ArgumentError, 'Selection indices file not found' unless selected_path.file?
+
+    out_path = selected_path.dirname.join(".asap_cell_selection_meta_#{Process.pid}_#{SecureRandom.hex(8)}.json")
+    script = <<~PYTHON
+      import json
+      import sys
+
+      import h5py
+      import numpy as np
+
+      loom_path = sys.argv[1]
+      field = sys.argv[2]
+      selected_path = sys.argv[3]
+      out_path = sys.argv[4]
+
+      def fail(message):
+          with open(out_path, 'w', encoding='utf-8') as fh:
+              json.dump({'displayed_error': message}, fh)
+          print('ERROR')
+          sys.exit(1)
+
+      with open(selected_path, 'r', encoding='utf-8') as fh:
+          payload = json.load(fh)
+      if not isinstance(payload, dict):
+          fail('Selection file must be a JSON object')
+      raw_indices = payload.get('selected_indices')
+      if not isinstance(raw_indices, list) or len(raw_indices) == 0:
+          fail('selected_indices must be a non-empty list')
+
+      with h5py.File(loom_path, 'r+') as f:
+          if 'col_attrs/_StableID' not in f:
+              fail('Loom is missing /col_attrs/_StableID')
+          n_cells = int(f['col_attrs/_StableID'].shape[0])
+          if n_cells <= 0:
+              fail('Loom /col_attrs/_StableID is empty')
+          mask = np.zeros(n_cells, dtype=np.int32)
+          for raw in raw_indices:
+              try:
+                  idx = int(raw)
+              except (TypeError, ValueError):
+                  fail('selected_indices must contain integers')
+              if idx < 0 or idx >= n_cells:
+                  fail('Cell index ' + str(idx) + ' is out of range (n=' + str(n_cells) + ')')
+              mask[idx] = 1
+          n_selected = int(mask.sum())
+          if n_selected == 0:
+              fail('No valid selected cell indices')
+          if field in f:
+              del f[field]
+          f.create_dataset(field, data=mask, dtype='int32')
+
+      meta = {
+          'name': '/' + field,
+          'on': 'CELL',
+          'type': 'DISCRETE',
+          'nber_cols': n_cells,
+          'nber_rows': 1,
+          'categories': {
+              '0': n_cells - n_selected,
+              '1': n_selected
+          }
+      }
+      with open(out_path, 'w', encoding='utf-8') as fh:
+          json.dump(meta, fh)
+      print('OK')
+    PYTHON
+
+    begin
+      run_with_optional_loom_write_lock(loom_path, already_locked: already_locked) do
+        stdout, stderr, status = docker_exec_h5_write_python3!(
+          loom_path.to_s, field, selected_path.to_s, out_path.to_s,
+          stdin_data: script
+        )
+        payload = {}
+        if out_path.file?
+          payload = JSON.parse(File.read(out_path, encoding: 'utf-8'))
+        end
+        unless status.success? && stdout.strip.start_with?('OK')
+          err = payload['displayed_error'] if payload.is_a?(Hash)
+          raise(err.presence || stderr.presence || stdout.presence || 'Cell selection write failed')
+        end
+        unless payload.is_a?(Hash) && payload['name'].present?
+          raise 'Cell selection write returned empty metadata'
+        end
+        payload
+      end
+    ensure
+      File.delete(out_path) if File.exist?(out_path)
+    end
+  end
+
   # Write a 1-D string metadata vector. Replaces the dataset if it already exists.
   # Values are staged to a temp JSON file under the loom directory (shared with the run container).
   def self.write_metadata_string_vector!(h5_file, metadata_path, values, already_locked: false)

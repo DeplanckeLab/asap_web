@@ -55,6 +55,7 @@ class ProjectOwnershipTransferServiceTest < TestBaseWithoutFixtures
     assert_equal 'data', File.read(new_dir + 'input_file')
     assert File.exist?("#{new_dir}.tgz")
     refute File.exist?(project_dir.to_s)
+    refute @project.shares.where(user_id: @owner.id).exists?
   end
 
   test 'reassigns selected related records owned by the previous owner' do
@@ -114,6 +115,24 @@ class ProjectOwnershipTransferServiceTest < TestBaseWithoutFixtures
     assert_equal @other.id, other_selection.reload.user_id
   end
 
+  test 'transfer_all reassigns owned records even when transfer options are omitted' do
+    step = Step.first
+    skip 'No Step available' unless step
+
+    run = register_for_test_cleanup(
+      Run.create!(project_id: @project.id, user_id: @owner.id, step_id: step.id, status_id: 1, num: 1)
+    )
+
+    ProjectOwnershipTransferService.call!(
+      project: @project,
+      new_owner_email: @new_owner.email,
+      transfer_all: true
+    )
+
+    assert_equal @new_owner.id, run.reload.user_id
+    refute @project.shares.where(user_id: @owner.id).exists?
+  end
+
   test 'does not reassign runs when the option is off' do
     step = Step.first
     skip 'No Step available' unless step
@@ -130,9 +149,56 @@ class ProjectOwnershipTransferServiceTest < TestBaseWithoutFixtures
 
     assert_equal @owner.id, run.reload.user_id
     assert_equal @new_owner.id, @project.reload.user_id
+
+    share = @project.shares.find_by(user_id: @owner.id)
+    assert share
+    assert share.view_perm?
+    assert share.analyze_perm?
   end
 
-  test 'skips a CLA vote when the new owner already voted on that CLA' do
+  test 'does not share the previous owner when they no longer own records' do
+    step = Step.first
+    skip 'No Step available' unless step
+
+    run = register_for_test_cleanup(
+      Run.create!(project_id: @project.id, user_id: @owner.id, step_id: step.id, status_id: 1, num: 1)
+    )
+
+    ProjectOwnershipTransferService.call!(
+      project: @project,
+      new_owner_email: @new_owner.email,
+      transfer: { runs: true }
+    )
+
+    assert_equal @new_owner.id, run.reload.user_id
+    refute @project.shares.where(user_id: @owner.id).exists?
+  end
+
+  test 'collaborative_annotations transfers both annotations and votes' do
+    pcs = register_for_test_cleanup(ProjectCellSet.create!(key: "pcs#{SecureRandom.hex(4)}"))
+    cell_set = register_for_test_cleanup(
+      CellSet.create!(project_cell_set_id: pcs.id, key: SecureRandom.hex(8), nber_cells: 1)
+    )
+    annotation = register_for_test_cleanup(
+      Cla.create!(project_id: @project.id, cell_set_id: cell_set.id, user_id: @owner.id, cat: 'c1')
+    )
+    vote = register_for_test_cleanup(
+      ClaVote.create!(cla_id: annotation.id, user_id: @owner.id, agree: true)
+    )
+
+    result = ProjectOwnershipTransferService.call!(
+      project: @project,
+      new_owner_email: @new_owner.email,
+      transfer: { collaborative_annotations: true }
+    )
+
+    assert_equal @new_owner.id, annotation.reload.user_id
+    assert_equal @new_owner.id, vote.reload.user_id
+    assert_includes result[:transferred], :clas
+    assert_includes result[:transferred], :cla_votes
+  end
+
+  test 'skips a collaborative annotation vote when the new owner already voted' do
     pcs = register_for_test_cleanup(ProjectCellSet.create!(key: "pcs#{SecureRandom.hex(4)}"))
     cell_set = register_for_test_cleanup(
       CellSet.create!(project_cell_set_id: pcs.id, key: SecureRandom.hex(8), nber_cells: 1)

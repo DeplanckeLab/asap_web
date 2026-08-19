@@ -20,6 +20,12 @@ class ProjectTransferOwnershipTest < ActionDispatch::IntegrationTest
   end
 
   test 'owner can transfer the project after confirmation' do
+    step = Step.first
+    skip 'No Step available' unless step
+    run = register_for_test_cleanup(
+      Run.create!(project_id: @project.id, user_id: @owner.id, step_id: step.id, status_id: 1, num: 1)
+    )
+
     post transfer_ownership_project_path(@project),
          params: {
            email: @new_owner.email,
@@ -33,6 +39,35 @@ class ProjectTransferOwnershipTest < ActionDispatch::IntegrationTest
     assert body['success']
     assert_equal @new_owner.email, body['new_owner_email']
     assert_equal @new_owner.id, @project.reload.user_id
+    assert_equal @new_owner.id, run.reload.user_id
+  end
+
+  test 'admin can leave owned records with the previous owner' do
+    previous_admin_emails = ENV['ADMIN_EMAILS']
+    ENV['ADMIN_EMAILS'] = @owner.email
+    step = Step.first
+    skip 'No Step available' unless step
+    run = register_for_test_cleanup(
+      Run.create!(project_id: @project.id, user_id: @owner.id, step_id: step.id, status_id: 1, num: 1)
+    )
+
+    post transfer_ownership_project_path(@project),
+         params: {
+           email: @new_owner.email,
+           confirm: true,
+           transfer: { runs: false }
+         },
+         as: :json
+
+    assert_response :success
+    assert_equal @new_owner.id, @project.reload.user_id
+    assert_equal @owner.id, run.reload.user_id
+  ensure
+    if previous_admin_emails.nil?
+      ENV.delete('ADMIN_EMAILS')
+    else
+      ENV['ADMIN_EMAILS'] = previous_admin_emails
+    end
   end
 
   test 'rejects transfer without confirmation' do

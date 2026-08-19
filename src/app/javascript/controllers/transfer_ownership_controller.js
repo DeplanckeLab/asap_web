@@ -11,7 +11,7 @@ export default class extends Controller {
     "submitButton",
     "confirmButton"
   ]
-  static values = { url: String }
+  static values = { url: String, admin: Boolean }
 
   connect() {
     this.isProcessing = false
@@ -27,21 +27,32 @@ export default class extends Controller {
       return
     }
 
-    const selected = this.selectedOptions()
-    const optionLines = selected.length > 0
-      ? selected.map((item) => "- " + item.label).join("\n")
-      : "- Project only (related records keep their current owners)"
+    if (this.adminValue) {
+      const selected = this.selectedOptions()
+      const optionLines = selected.length > 0
+        ? selected.map((item) => "- " + item.label).join("\n")
+        : "- Project only (related records keep their current owners)"
 
-    this.summaryTarget.textContent =
-      "Transfer ownership of this project to " + email + ".\n\n" +
-      "Also transfer records you currently own:\n" +
-      optionLines +
-      "\n\nYou will lose owner rights after this transfer. This cannot be undone."
+      this.summaryTarget.textContent =
+        "Transfer ownership of this project to " + email + ".\n\n" +
+        "Also transfer records currently owned by the current owner:\n" +
+        optionLines +
+        "\n\nYou will lose owner rights after this transfer. " +
+        "If you still own records in the project, it will stay shared with you with Analyze access. " +
+        "If you did not share the project with yourself, you will not be able to access this project anymore. " +
+        "The new owner can remove your rights later. This cannot be undone."
+    } else {
+      this.summaryTarget.textContent =
+        "Transfer ownership of this project to " + email + ".\n\n" +
+        "The project and all attached records you currently own will move to the new owner.\n\n" +
+        "If you did not share the project with yourself, you will not be able to access this project anymore. " +
+        "The new owner can decide to remove your rights later. This cannot be undone."
+    }
 
     this.pendingPayload = {
       email: email,
       confirm: true,
-      transfer: this.transferPayload()
+      transfer: this.adminValue ? this.transferPayload() : {}
     }
     this.modalTarget.classList.remove("hidden")
     document.body.classList.add("overflow-hidden")

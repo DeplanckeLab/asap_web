@@ -283,7 +283,8 @@
 
     <div class="bg-gray-50 rounded-lg p-6"
          data-controller="transfer-ownership"
-         data-transfer-ownership-url-value="<%= transfer_ownership_project_path(@project) %>">
+         data-transfer-ownership-url-value="<%= transfer_ownership_project_path(@project) %>"
+         data-transfer-ownership-admin-value="<%= admin? %>">
       <h3 class="text-lg font-semibold text-gray-900 mb-4">Transfer ownership</h3>
       <% if @project.sandbox? %>
         <div class="p-3 bg-amber-50 border border-amber-200 rounded-md">
@@ -293,8 +294,15 @@
         </div>
       <% else %>
       <p class="text-sm text-gray-600 mb-4">
-        Transfer this project to another existing user account. Only records currently owned by
-        <%= @project.user&.email || 'the current owner' %> are reassigned when you select the options below.
+        Transfer this project to another existing user account.
+        <% if admin? %>
+          You can choose which records currently owned by
+          <%= @project.user&.email || 'the current owner' %> are reassigned.
+          If you keep ownership of any records in the project, it will remain shared with you with Analyze access.
+        <% else %>
+          Ownership of the project and of all attached records you currently own will move to the new owner.
+          If you want to keep access, share the project with yourself in User Rights before transferring.
+        <% end %>
       </p>
 
       <div class="space-y-4">
@@ -309,6 +317,7 @@
                  class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm">
         </div>
 
+        <% if admin? %>
         <div>
           <p class="text-sm font-medium text-gray-900 mb-2">Also transfer ownership of</p>
           <label class="flex items-center gap-2 text-sm text-gray-700 mb-3">
@@ -322,8 +331,7 @@
             <% [
               ['runs', 'Runs'],
               ['selections', 'Selections'],
-              ['clas', 'Collaborative annotations (CLAs)'],
-              ['cla_votes', 'CLA votes'],
+              ['collaborative_annotations', 'Collaborative annotations'],
               ['annots', 'Metadata / annots'],
               ['checkpoints', 'Checkpoints'],
               ['gene_set_collections', 'Gene set collections'],
@@ -345,6 +353,7 @@
             <% end %>
           </div>
         </div>
+        <% end %>
 
         <div data-transfer-ownership-target="message" class="hidden">
           <p class="text-sm px-3 py-2 rounded whitespace-pre-line" data-transfer-ownership-target="messageText"></p>

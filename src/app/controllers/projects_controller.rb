@@ -1765,7 +1765,8 @@ class ProjectsController < ApplicationController
     result = ProjectOwnershipTransferService.call!(
       project: @project,
       new_owner_email: params[:email],
-      transfer: params[:transfer] || {}
+      transfer: admin? ? (params[:transfer] || {}) : {},
+      transfer_all: !admin?
     )
     new_owner = result[:new_owner]
     still_readable = readable?(@project.reload)

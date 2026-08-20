@@ -2387,6 +2387,28 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
           <div style="display: flex; align-items: center; gap: 8px;">
             <h2 style="margin: 0; font-size: 18px; font-weight: 600;"><%= row_label(@project).to_s.pluralize.capitalize %></h2>
             <span id="gene-count-badge" style="display: inline-flex; align-items: center; padding: 4px 8px; background-color: #e5e7eb; color: #374151; border-radius: 12px; font-size: 12px; font-weight: 500;">-</span>
+            <button type="button"
+                    id="gene-list-revert-btn"
+                    style="display: none; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; background: white; color: #6b7280; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer; flex-shrink: 0;"
+                    title="Previous gene list"
+                    aria-label="Previous gene list"
+                    onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.color='#374151'"
+                    onmouseout="this.style.backgroundColor='white'; this.style.color='#6b7280'">
+              <i class="fas fa-rotate-left" style="font-size: 10px;" aria-hidden="true"></i>
+            </button>
+            <div style="position: relative; flex-shrink: 0;">
+              <button type="button"
+                      id="gene-list-history-btn"
+                      style="display: none; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; background: white; color: #6b7280; border: 1px solid #d1d5db; border-radius: 4px; cursor: pointer;"
+                      title="Gene list history"
+                      aria-label="Gene list history"
+                      onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.color='#374151'"
+                      onmouseout="this.style.backgroundColor='white'; this.style.color='#6b7280'">
+                <i class="fas fa-history" style="font-size: 10px;" aria-hidden="true"></i>
+              </button>
+              <div id="gene-list-history-menu"
+                   style="display: none; position: absolute; top: 26px; left: 0; min-width: 200px; max-width: 320px; max-height: 260px; overflow-y: auto; background: white; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 6px 12px rgba(0,0,0,0.1); z-index: 3000;"></div>
+            </div>
           </div>
           <button type="button"
                   class="viz-panel-header-icon-btn"

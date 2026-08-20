@@ -15,6 +15,10 @@ export class GeneManager {
     this.projectIdentifier = null
     this.geneTags = [] // Array of {symbol, ensemblId, stableId, query}
     this.notFoundQueries = [] // Queries that didn't match
+    this.geneListHistory = [] // Up to 10 previous gene-list snapshots (newest first)
+    this._geneListHistoryBatchDepth = 0
+    this._geneListHistoryBefore = null
+    this._skipGeneListHistoryRecord = false
     this.geneExpressionData = {} // Store expression values per gene: {stableId: {values: [...], stats: {...}}}
     this.currentMatrixLayer = '/matrix' // Default to /matrix
     this.currentMatrixAnnotId = null // Annot ID for the current matrix/layer
@@ -467,11 +471,16 @@ export class GeneManager {
           const lastPart = parts.pop() // Keep the last part for autocomplete
           
           // Process completed genes
-          for (const part of parts) {
-            const trimmed = part.trim()
-            if (trimmed) {
-              this.processGeneInput(trimmed)
+          this.beginGeneListHistoryBatch()
+          try {
+            for (const part of parts) {
+              const trimmed = part.trim()
+              if (trimmed) {
+                this.processGeneInput(trimmed)
+              }
             }
+          } finally {
+            this.endGeneListHistoryBatch()
           }
           
           // Update input to only show the current typing part
@@ -489,7 +498,12 @@ export class GeneManager {
         // Enter key: process current input if not empty
         if (e.key === 'Enter' && input.value.trim()) {
           e.preventDefault()
-          this.processGeneInput(input.value.trim())
+          this.beginGeneListHistoryBatch()
+          try {
+            this.processGeneInput(input.value.trim())
+          } finally {
+            this.endGeneListHistoryBatch()
+          }
           input.value = ''
           this.hideDropdown()
         }
@@ -630,6 +644,38 @@ export class GeneManager {
       })
     }
 
+    const revertBtn = document.getElementById('gene-list-revert-btn')
+    if (revertBtn && revertBtn.dataset.bound !== 'true') {
+      revertBtn.dataset.bound = 'true'
+      revertBtn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        this.revertToPreviousGeneList()
+      })
+    }
+
+    const historyBtn = document.getElementById('gene-list-history-btn')
+    if (historyBtn && historyBtn.dataset.bound !== 'true') {
+      historyBtn.dataset.bound = 'true'
+      historyBtn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        this.toggleGeneListHistoryMenu(e)
+      })
+    }
+
+    const historyMenu = document.getElementById('gene-list-history-menu')
+    if (historyMenu && historyMenu.dataset.bound !== 'true') {
+      historyMenu.dataset.bound = 'true'
+      historyMenu.addEventListener('click', (e) => e.stopPropagation())
+    }
+
+    if (!this._boundCloseGeneListHistoryMenu) {
+      this._boundCloseGeneListHistoryMenu = () => this.closeGeneListHistoryMenu()
+      document.addEventListener('click', this._boundCloseGeneListHistoryMenu)
+    }
+
+    this.updateGeneListHistoryControls()
   }
 
   setupGeneSetCollectionImportSubscription() {
@@ -771,6 +817,8 @@ export class GeneManager {
     if (clearAllBtn) {
       clearAllBtn.style.display = this.geneTags.length > 0 ? 'inline-flex' : 'none'
     }
+
+    this.updateGeneListHistoryControls()
   }
 
   clearGeneMetadataStateForStableIds(stableIds = []) {
@@ -935,12 +983,192 @@ export class GeneManager {
         .filter((gene) => !!gene)
       : []
 
-    const nextGeneStableIds = normalizedGenes.map((gene) => String(gene.stableId))
-    this.syncGeneExpressionFilterStateForGenes(nextGeneStableIds)
-    this.geneTags = normalizedGenes
-    this.notFoundQueries = []
-    this.updateGeneCountBadge()
-    await this.processAllGenes()
+    this.beginGeneListHistoryBatch()
+    try {
+      const nextGeneStableIds = normalizedGenes.map((gene) => String(gene.stableId))
+      this.syncGeneExpressionFilterStateForGenes(nextGeneStableIds)
+      this.geneTags = normalizedGenes
+      this.notFoundQueries = []
+      this.updateGeneCountBadge()
+      await this.processAllGenes()
+    } finally {
+      this.endGeneListHistoryBatch()
+    }
+  }
+
+  snapshotGeneList() {
+    return (Array.isArray(this.geneTags) ? this.geneTags : []).map((gene) => ({ ...gene }))
+  }
+
+  geneListHistoryKey(genes) {
+    return (Array.isArray(genes) ? genes : [])
+      .map((gene) => String(gene?.stableId || '').trim())
+      .filter((id) => id.length > 0)
+      .join('|')
+  }
+
+  geneListHistoryLabel(genes) {
+    const list = Array.isArray(genes) ? genes : []
+    if (list.length === 0) return 'Empty gene list'
+    const symbols = list
+      .map((gene) => String(gene?.symbol || gene?.ensemblId || gene?.stableId || '').trim())
+      .filter((value) => value.length > 0)
+    const preview = symbols.slice(0, 3).join(', ')
+    const suffix = symbols.length > 3 ? ', ...' : ''
+    return `${list.length} gene${list.length === 1 ? '' : 's'}: ${preview}${suffix}`
+  }
+
+  beginGeneListHistoryBatch() {
+    if (this._geneListHistoryBatchDepth === 0) {
+      this._geneListHistoryBefore = this.snapshotGeneList()
+    }
+    this._geneListHistoryBatchDepth += 1
+  }
+
+  endGeneListHistoryBatch() {
+    if (this._geneListHistoryBatchDepth <= 0) return
+    this._geneListHistoryBatchDepth -= 1
+    if (this._geneListHistoryBatchDepth > 0) return
+
+    const before = this._geneListHistoryBefore
+    this._geneListHistoryBefore = null
+    if (this._skipGeneListHistoryRecord) {
+      this.updateGeneListHistoryControls()
+      return
+    }
+    if (!before) {
+      this.updateGeneListHistoryControls()
+      return
+    }
+    const beforeKey = this.geneListHistoryKey(before)
+    const afterKey = this.geneListHistoryKey(this.geneTags)
+    if (beforeKey === afterKey) {
+      this.updateGeneListHistoryControls()
+      return
+    }
+    this.pushGeneListHistoryEntry(before)
+    this.updateGeneListHistoryControls()
+  }
+
+  pushGeneListHistoryEntry(snapshot) {
+    if (!Array.isArray(this.geneListHistory)) this.geneListHistory = []
+    const genes = Array.isArray(snapshot) ? snapshot.map((gene) => ({ ...gene })) : []
+    this.geneListHistory.unshift({
+      genes,
+      label: this.geneListHistoryLabel(genes)
+    })
+    if (this.geneListHistory.length > 10) {
+      this.geneListHistory = this.geneListHistory.slice(0, 10)
+    }
+  }
+
+  updateGeneListHistoryControls() {
+    const revertBtn = document.getElementById('gene-list-revert-btn')
+    const historyBtn = document.getElementById('gene-list-history-btn')
+    const historyCount = Array.isArray(this.geneListHistory) ? this.geneListHistory.length : 0
+    const showControls = historyCount > 0
+
+    if (revertBtn) {
+      revertBtn.style.display = showControls ? 'inline-flex' : 'none'
+      revertBtn.disabled = !showControls
+    }
+    if (historyBtn) {
+      historyBtn.style.display = showControls ? 'inline-flex' : 'none'
+      historyBtn.disabled = !showControls
+      historyBtn.title = showControls
+        ? `Gene list history (${historyCount})`
+        : 'Gene list history'
+    }
+    if (!showControls) this.closeGeneListHistoryMenu()
+  }
+
+  closeGeneListHistoryMenu() {
+    const menu = document.getElementById('gene-list-history-menu')
+    if (menu) menu.style.display = 'none'
+  }
+
+  toggleGeneListHistoryMenu(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const menu = document.getElementById('gene-list-history-menu')
+    if (!menu) return
+    const isOpen = menu.style.display === 'block'
+    if (typeof this.controller?.closeAllDropdowns === 'function') {
+      this.controller.closeAllDropdowns()
+    } else {
+      this.closeGeneListHistoryMenu()
+    }
+    if (isOpen) return
+    this.renderGeneListHistoryMenu()
+    menu.style.display = 'block'
+  }
+
+  renderGeneListHistoryMenu() {
+    const menu = document.getElementById('gene-list-history-menu')
+    if (!menu) return
+    menu.innerHTML = ''
+    const entries = Array.isArray(this.geneListHistory) ? this.geneListHistory : []
+    if (entries.length === 0) {
+      const empty = document.createElement('div')
+      empty.style.cssText = 'padding: 10px 12px; font-size: 12px; color: #6b7280;'
+      empty.textContent = 'No previous gene lists'
+      menu.appendChild(empty)
+      return
+    }
+
+    entries.forEach((entry, index) => {
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.dataset.historyIndex = String(index)
+      button.style.cssText = 'display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; cursor: pointer; font-size: 12px; color: #374151; border-bottom: 1px solid #f3f4f6;'
+      const label = entry.label || this.geneListHistoryLabel(entry.genes)
+      button.textContent = label
+      button.title = label
+      button.addEventListener('mouseenter', () => { button.style.backgroundColor = '#f3f4f6' })
+      button.addEventListener('mouseleave', () => { button.style.backgroundColor = '' })
+      button.addEventListener('click', (event) => this.applyGeneListHistoryEntry(event))
+      menu.appendChild(button)
+    })
+  }
+
+  async revertToPreviousGeneList() {
+    this.closeGeneListHistoryMenu()
+    if (!Array.isArray(this.geneListHistory) || this.geneListHistory.length === 0) return
+    const previous = this.geneListHistory.shift()
+    this.updateGeneListHistoryControls()
+    await this.applyGeneListSnapshot(previous?.genes || [])
+  }
+
+  async applyGeneListHistoryEntry(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const button = event?.currentTarget
+    const index = parseInt(button?.dataset?.historyIndex, 10)
+    if (!Number.isInteger(index) || index < 0 || !Array.isArray(this.geneListHistory)) return
+    if (index >= this.geneListHistory.length) return
+    const [entry] = this.geneListHistory.splice(index, 1)
+    this.closeGeneListHistoryMenu()
+    this.updateGeneListHistoryControls()
+    await this.applyGeneListSnapshot(entry?.genes || [])
+  }
+
+  async applyGeneListSnapshot(geneEntries) {
+    const normalizedGenes = (Array.isArray(geneEntries) ? geneEntries : []).map((gene) => ({ ...gene }))
+    this.beginGeneListHistoryBatch()
+    try {
+      const nextGeneStableIds = normalizedGenes.map((gene) => String(gene.stableId || '')).filter((id) => id.length > 0)
+      this.syncGeneExpressionFilterStateForGenes(nextGeneStableIds)
+      this.geneTags = normalizedGenes
+      this.notFoundQueries = []
+      this.updateGeneCountBadge()
+      await this.processAllGenes()
+    } finally {
+      this.endGeneListHistoryBatch()
+    }
   }
 
   scheduleAutocompleteLoadRetry() {
@@ -1331,27 +1559,32 @@ export class GeneManager {
     // Add to tags if not already present
     const existingIndex = this.geneTags.findIndex(g => String(g.stableId) === String(gene.stableId))
     if (existingIndex === -1) {
-      this.geneTags.push(gene)
-      // Update badge when gene is added
-      this.updateGeneCountBadge()
-      // Only add the new gene instead of re-rendering all genes
-      // This preserves the state of existing genes (filter icons, expansion, etc.)
-      const resultsDiv = document.getElementById('gene-expression-results')
-      if (resultsDiv) {
-        this.displayBulkGene(gene, resultsDiv)
-        this._autoColorGeneToken = (this._autoColorGeneToken || 0) + 1
-        const autoColorToken = this._autoColorGeneToken
-        this.loadGeneExpressionData(gene, resultsDiv)
-          .then(() => {
-            // Only the latest added gene should drive auto-coloring (bulk-safe).
-            if (autoColorToken !== this._autoColorGeneToken) return
-            if (typeof this.controller?.applyGeneExpressionColoringForGene === 'function') {
-              return this.controller.applyGeneExpressionColoringForGene(gene)
-            }
-          })
-          .catch((error) => {
-            console.error('GeneManager: Failed to auto-color newly added gene:', error)
-          })
+      this.beginGeneListHistoryBatch()
+      try {
+        this.geneTags.push(gene)
+        // Update badge when gene is added
+        this.updateGeneCountBadge()
+        // Only add the new gene instead of re-rendering all genes
+        // This preserves the state of existing genes (filter icons, expansion, etc.)
+        const resultsDiv = document.getElementById('gene-expression-results')
+        if (resultsDiv) {
+          this.displayBulkGene(gene, resultsDiv)
+          this._autoColorGeneToken = (this._autoColorGeneToken || 0) + 1
+          const autoColorToken = this._autoColorGeneToken
+          this.loadGeneExpressionData(gene, resultsDiv)
+            .then(() => {
+              // Only the latest added gene should drive auto-coloring (bulk-safe).
+              if (autoColorToken !== this._autoColorGeneToken) return
+              if (typeof this.controller?.applyGeneExpressionColoringForGene === 'function') {
+                return this.controller.applyGeneExpressionColoringForGene(gene)
+              }
+            })
+            .catch((error) => {
+              console.error('GeneManager: Failed to auto-color newly added gene:', error)
+            })
+        }
+      } finally {
+        this.endGeneListHistoryBatch()
       }
     } else if (typeof this.controller?.applyGeneExpressionColoringForGene === 'function') {
       // Gene already listed: still switch plot coloring to this gene's expression
@@ -1434,39 +1667,44 @@ export class GeneManager {
   removeGeneByStableId(stableId) {
     const index = this.geneTags.findIndex(g => String(g.stableId) === String(stableId))
     if (index !== -1) {
-      const metadataKeys = this.getGeneMetadataKeys(stableId, this.currentMatrixAnnotId)
-      const metadataIds = [metadataKeys.baseKey, metadataKeys.layerKey]
+      this.beginGeneListHistoryBatch()
+      try {
+        const metadataKeys = this.getGeneMetadataKeys(stableId, this.currentMatrixAnnotId)
+        const metadataIds = [metadataKeys.baseKey, metadataKeys.layerKey]
 
-      metadataIds.forEach(id => {
-        if (!id) return
-        if (this.controller?.loadedMetadataVectors && this.controller.loadedMetadataVectors[id]) {
-          delete this.controller.loadedMetadataVectors[id]
+        metadataIds.forEach(id => {
+          if (!id) return
+          if (this.controller?.loadedMetadataVectors && this.controller.loadedMetadataVectors[id]) {
+            delete this.controller.loadedMetadataVectors[id]
+          }
+          if (this.controller?.inlineRangeSliderData && this.controller.inlineRangeSliderData[id]) {
+            delete this.controller.inlineRangeSliderData[id]
+          }
+          if (this.controller?.selectedRanges && this.controller.selectedRanges[id]) {
+            delete this.controller.selectedRanges[id]
+          }
+        })
+        
+        this.geneTags.splice(index, 1)
+        this.clearGeneMetadataStateForStableIds([stableId])
+        const remainingGeneIds = this.geneTags.map((gene) => String(gene.stableId))
+        this.syncGeneExpressionFilterStateForGenes(remainingGeneIds)
+        // Update badge when gene is removed
+        this.updateGeneCountBadge()
+        // Remove the gene div from the UI
+        const geneDiv = document.getElementById(`gene-result-${stableId}`)
+        if (geneDiv) {
+          geneDiv.remove()
         }
-        if (this.controller?.inlineRangeSliderData && this.controller.inlineRangeSliderData[id]) {
-          delete this.controller.inlineRangeSliderData[id]
+        // If no genes left, clear the results
+        if (this.geneTags.length === 0) {
+          const resultsDiv = document.getElementById('gene-expression-results')
+          if (resultsDiv) {
+            resultsDiv.innerHTML = ''
+          }
         }
-        if (this.controller?.selectedRanges && this.controller.selectedRanges[id]) {
-          delete this.controller.selectedRanges[id]
-        }
-      })
-      
-      this.geneTags.splice(index, 1)
-      this.clearGeneMetadataStateForStableIds([stableId])
-      const remainingGeneIds = this.geneTags.map((gene) => String(gene.stableId))
-      this.syncGeneExpressionFilterStateForGenes(remainingGeneIds)
-      // Update badge when gene is removed
-      this.updateGeneCountBadge()
-      // Remove the gene div from the UI
-      const geneDiv = document.getElementById(`gene-result-${stableId}`)
-      if (geneDiv) {
-        geneDiv.remove()
-      }
-      // If no genes left, clear the results
-      if (this.geneTags.length === 0) {
-        const resultsDiv = document.getElementById('gene-expression-results')
-        if (resultsDiv) {
-          resultsDiv.innerHTML = ''
-        }
+      } finally {
+        this.endGeneListHistoryBatch()
       }
     }
   }
@@ -1474,42 +1712,47 @@ export class GeneManager {
   clearAllGenes() {
     if (!Array.isArray(this.geneTags) || this.geneTags.length === 0) return
 
-    const stableIdsToClear = this.geneTags.map((gene) => String(gene.stableId || '').trim()).filter((id) => id.length > 0)
-    const metadataIdsToClear = new Set()
-    stableIdsToClear.forEach((stableId) => {
-      const metadataKeys = this.getGeneMetadataKeys(stableId, this.currentMatrixAnnotId)
-      if (metadataKeys.baseKey) metadataIdsToClear.add(metadataKeys.baseKey)
-      if (metadataKeys.layerKey) metadataIdsToClear.add(metadataKeys.layerKey)
-    })
+    this.beginGeneListHistoryBatch()
+    try {
+      const stableIdsToClear = this.geneTags.map((gene) => String(gene.stableId || '').trim()).filter((id) => id.length > 0)
+      const metadataIdsToClear = new Set()
+      stableIdsToClear.forEach((stableId) => {
+        const metadataKeys = this.getGeneMetadataKeys(stableId, this.currentMatrixAnnotId)
+        if (metadataKeys.baseKey) metadataIdsToClear.add(metadataKeys.baseKey)
+        if (metadataKeys.layerKey) metadataIdsToClear.add(metadataKeys.layerKey)
+      })
 
-    metadataIdsToClear.forEach((metadataId) => {
-      if (this.controller?.loadedMetadataVectors && this.controller.loadedMetadataVectors[metadataId]) {
-        delete this.controller.loadedMetadataVectors[metadataId]
-      }
-      if (this.controller?.inlineRangeSliderData && this.controller.inlineRangeSliderData[metadataId]) {
-        delete this.controller.inlineRangeSliderData[metadataId]
-      }
-      if (this.controller?.selectedRanges && this.controller.selectedRanges[metadataId]) {
-        delete this.controller.selectedRanges[metadataId]
-      }
-    })
+      metadataIdsToClear.forEach((metadataId) => {
+        if (this.controller?.loadedMetadataVectors && this.controller.loadedMetadataVectors[metadataId]) {
+          delete this.controller.loadedMetadataVectors[metadataId]
+        }
+        if (this.controller?.inlineRangeSliderData && this.controller.inlineRangeSliderData[metadataId]) {
+          delete this.controller.inlineRangeSliderData[metadataId]
+        }
+        if (this.controller?.selectedRanges && this.controller.selectedRanges[metadataId]) {
+          delete this.controller.selectedRanges[metadataId]
+        }
+      })
 
-    this.geneTags = []
-    this.notFoundQueries = []
-    this.clearGeneMetadataStateForStableIds(stableIdsToClear)
-    this.syncGeneExpressionFilterStateForGenes([])
-    this.updateGeneCountBadge()
+      this.geneTags = []
+      this.notFoundQueries = []
+      this.clearGeneMetadataStateForStableIds(stableIdsToClear)
+      this.syncGeneExpressionFilterStateForGenes([])
+      this.updateGeneCountBadge()
 
-    const resultsDiv = document.getElementById('gene-expression-results')
-    if (resultsDiv) {
-      while (resultsDiv.firstChild) {
-        resultsDiv.removeChild(resultsDiv.firstChild)
+      const resultsDiv = document.getElementById('gene-expression-results')
+      if (resultsDiv) {
+        while (resultsDiv.firstChild) {
+          resultsDiv.removeChild(resultsDiv.firstChild)
+        }
       }
-    }
 
-    const summaryDiv = document.getElementById('gene-results-summary')
-    if (summaryDiv) {
-      summaryDiv.style.display = 'none'
+      const summaryDiv = document.getElementById('gene-results-summary')
+      if (summaryDiv) {
+        summaryDiv.style.display = 'none'
+      }
+    } finally {
+      this.endGeneListHistoryBatch()
     }
   }
 
@@ -1530,15 +1773,20 @@ export class GeneManager {
       // Check if already in tags
       const existingIndex = this.geneTags.findIndex(g => String(g.stableId) === String(matched.stableId))
       if (existingIndex === -1) {
-        this.geneTags.push(matched)
-        // Update badge when gene is added
-        this.updateGeneCountBadge()
-        // Only add the new gene instead of re-rendering all genes
-        // This preserves the state of existing genes (filter icons, expansion, etc.)
-        const resultsDiv = document.getElementById('gene-expression-results')
-        if (resultsDiv) {
-          this.displayBulkGene(matched, resultsDiv)
-          this.loadGeneExpressionData(matched, resultsDiv)
+        this.beginGeneListHistoryBatch()
+        try {
+          this.geneTags.push(matched)
+          // Update badge when gene is added
+          this.updateGeneCountBadge()
+          // Only add the new gene instead of re-rendering all genes
+          // This preserves the state of existing genes (filter icons, expansion, etc.)
+          const resultsDiv = document.getElementById('gene-expression-results')
+          if (resultsDiv) {
+            this.displayBulkGene(matched, resultsDiv)
+            this.loadGeneExpressionData(matched, resultsDiv)
+          }
+        } finally {
+          this.endGeneListHistoryBatch()
         }
         return { found: true, gene: matched }
       }
@@ -1562,19 +1810,24 @@ export class GeneManager {
     const notFoundGenes = []
 
     // Process each gene
-    for (const gene of genes) {
-      const result = this.processGeneInput(gene, true)
-      if (result) {
-        if (result.found) {
-          if (result.duplicate) {
-            foundCount.duplicates++
+    this.beginGeneListHistoryBatch()
+    try {
+      for (const gene of genes) {
+        const result = this.processGeneInput(gene, true)
+        if (result) {
+          if (result.found) {
+            if (result.duplicate) {
+              foundCount.duplicates++
+            } else {
+              foundCount.count++
+            }
           } else {
-            foundCount.count++
+            notFoundGenes.push(result.query)
           }
-        } else {
-          notFoundGenes.push(result.query)
         }
       }
+    } finally {
+      this.endGeneListHistoryBatch()
     }
 
     // Update notFoundQueries

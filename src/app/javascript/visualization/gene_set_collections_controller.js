@@ -676,7 +676,7 @@ export class GeneSetCollectionsController {
           if (geneManager && typeof geneManager.replaceGenesFromGeneSet === 'function') {
             await this.loadGeneSetItemIntoGenePanel(itemId)
           } else {
-            // Heatmap (and any host without a gene panel): show the shared genes popup.
+            // Hosts without a gene panel (no replaceGenesFromGeneSet): show the shared genes popup.
             await this.toggleGeneSetGenesPopover(row, itemId)
           }
         } catch (error) {

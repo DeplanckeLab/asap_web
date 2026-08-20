@@ -9073,6 +9073,9 @@ export default class extends Controller {
 
     this.closeAllDownloadMenus()
     this.closeColoringHistoryMenu()
+    if (this.geneManager && typeof this.geneManager.closeGeneListHistoryMenu === 'function') {
+      this.geneManager.closeGeneListHistoryMenu()
+    }
 
     const embeddingMenu = document.getElementById('embedding-selection-menu')
     if (embeddingMenu) {
@@ -10081,6 +10084,7 @@ export default class extends Controller {
     this.setGlobalFiltersEnabled(state.filters?.globalFiltersEnabled !== false)
 
     if (this.geneManager && Array.isArray(state.genes?.tags)) {
+      this.geneManager.geneListHistory = []
       this.geneManager.geneTags = state.genes.tags.map((gene) => ({
         stableId: String(gene.stableId),
         symbol: gene.symbol,
@@ -10088,6 +10092,9 @@ export default class extends Controller {
         query: gene.symbol
       }))
       await this.geneManager.processAllGenes()
+      if (typeof this.geneManager.updateGeneListHistoryControls === 'function') {
+        this.geneManager.updateGeneListHistoryControls()
+      }
     }
 
     if (state.display) {

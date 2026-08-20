@@ -52,7 +52,8 @@ export default class extends Controller {
     "selectedGenesCount", "selectedCellsCount",
     "savedCellSetsList",
     "geneSelectionStatus", "cellSelectionStatus",
-    "clearGeneSelectionBtn", "clearCellSelectionBtn",
+    "clearGeneSelectionBtn", "clearCellSelectionBtn", "restorePreviousGenesBtn",
+    "geneListHistoryBtn", "geneListHistoryMenu",
     "geneSearchInput", "geneSearchDropdown", "geneSearchList", "geneSearchListEmpty",
     "geneSetOverlapBtn", "toggleAllGenesBtn"
   ]
@@ -73,6 +74,10 @@ export default class extends Controller {
     // Ordered list of genes added via search or rectangle selection.
     // checked=true genes are highlighted on the heatmap and used for gene-set creation.
     this.geneListItems = []
+    this.geneListHistory = []
+    this._geneListHistoryBatchDepth = 0
+    this._geneListHistoryBefore = null
+    this._skipGeneListHistoryRecord = false
     this.geneRowIndexBySymbol = new Map()
     this.geneSearchMatches = []
     this.geneSearchActiveIndex = -1
@@ -108,7 +113,7 @@ export default class extends Controller {
     this.hoveringTrackLegendKey = null
     this.geneSetCollectionsController = new GeneSetCollectionsController(this, {
       idPrefix: "heatmap",
-      root: this.element.querySelector("#heatmap-genes-panel") || this.element,
+      root: this.element.querySelector("#heatmap-cells-panel") || this.element,
       enableModuleScoreColoring: false,
       createCollectionType: "from_heatmap"
     })
@@ -122,7 +127,11 @@ export default class extends Controller {
       backgroundContextLabel: "Genes in this heatmap",
       getCsrfToken: () => this.csrfToken()
     })
-    this.currentGenesPanelTab = "genes"
+    // Shared gene-set click path expects geneManager.replaceGenesFromGeneSet (same as visualization).
+    this.geneManager = {
+      replaceGenesFromGeneSet: (geneEntries) => this.replaceGenesFromGeneSet(geneEntries)
+    }
+    this.currentSelectionTab = "cells"
     this.editingGradientTarget = { type: "expression" }
     this.expressionCustomColorRange = null
     this.checkpointHistory = []
@@ -198,6 +207,15 @@ export default class extends Controller {
     this.syncLegendWidthControls()
     this.syncRightMarginControls()
     this.initializePanelLayout()
+    this.boundGeneListHistoryOutsideClick = (event) => {
+      if (!this.hasGeneListHistoryMenuTarget) return
+      if (this.geneListHistoryMenuTarget.style.display !== "block") return
+      const target = event?.target
+      if (this.geneListHistoryMenuTarget.contains(target)) return
+      if (this.hasGeneListHistoryBtnTarget && this.geneListHistoryBtnTarget.contains(target)) return
+      this.closeGeneListHistoryMenu()
+    }
+    document.addEventListener("click", this.boundGeneListHistoryOutsideClick)
     this.loadData()
   }
 
@@ -206,6 +224,10 @@ export default class extends Controller {
     this.teardownPanelLayout()
     this.teardownSavedCellSetLiveUpdates()
     this.teardownSavedCellSetsFilterMenus()
+    if (this.boundGeneListHistoryOutsideClick) {
+      document.removeEventListener("click", this.boundGeneListHistoryOutsideClick)
+      this.boundGeneListHistoryOutsideClick = null
+    }
     if (this.geneSearchBlurTimer) {
       clearTimeout(this.geneSearchBlurTimer)
       this.geneSearchBlurTimer = null
@@ -2382,12 +2404,17 @@ export default class extends Controller {
       }
     }
 
-    for (const symbol of newlySelectedSymbols) {
-      this.addGeneToList(symbol, { checked: true, render: false, sync: false })
-    }
-    if (newlySelectedSymbols.length) {
-      this.applyGeneListHighlightState()
-      this.renderGeneSearchList()
+    this.beginGeneListHistoryBatch()
+    try {
+      for (const symbol of newlySelectedSymbols) {
+        this.addGeneToList(symbol, { checked: true, render: false, sync: false })
+      }
+      if (newlySelectedSymbols.length) {
+        this.applyGeneListHighlightState()
+        this.renderGeneSearchList()
+      }
+    } finally {
+      this.endGeneListHistoryBatch()
     }
 
     for (let d = range.colStart; d <= range.colEnd; d++) {
@@ -2420,28 +2447,38 @@ export default class extends Controller {
 
   clearLiveSelection(event) {
     if (event) event.preventDefault()
-    this.selectedGenes.clear()
-    this.selectedCells.clear()
-    this.selectedOrigRows.clear()
-    this.selectedOrigCols.clear()
-    this.geneListItems = []
-    this.selectionRect = null
-    this.selecting = false
-    this.renderGeneSearchList()
-    this.updateSelectionPanels()
-    this.drawOverlay()
-    this.persistCurrentCheckpointOnServer("selection-change")
+    this.beginGeneListHistoryBatch()
+    try {
+      this.selectedGenes.clear()
+      this.selectedCells.clear()
+      this.selectedOrigRows.clear()
+      this.selectedOrigCols.clear()
+      this.geneListItems = []
+      this.selectionRect = null
+      this.selecting = false
+      this.renderGeneSearchList()
+      this.updateSelectionPanels()
+      this.drawOverlay()
+      this.persistCurrentCheckpointOnServer("selection-change")
+    } finally {
+      this.endGeneListHistoryBatch()
+    }
   }
 
   clearGeneSelection(event) {
     if (event) event.preventDefault()
-    this.selectedGenes.clear()
-    this.selectedOrigRows.clear()
-    this.geneListItems = []
-    this.renderGeneSearchList()
-    this.updateSelectionPanels()
-    this.drawOverlay()
-    this.persistCurrentCheckpointOnServer("selection-change")
+    this.beginGeneListHistoryBatch()
+    try {
+      this.selectedGenes.clear()
+      this.selectedOrigRows.clear()
+      this.geneListItems = []
+      this.renderGeneSearchList()
+      this.updateSelectionPanels()
+      this.drawOverlay()
+      this.persistCurrentCheckpointOnServer("selection-change")
+    } finally {
+      this.endGeneListHistoryBatch()
+    }
   }
 
   clearCellSelection(event) {
@@ -2465,6 +2502,7 @@ export default class extends Controller {
     if (this.hasClearGeneSelectionBtnTarget) {
       this.clearGeneSelectionBtnTarget.style.display = this.geneListItems.length > 0 ? "inline-flex" : "none"
     }
+    this.updateGeneListHistoryControls()
     if (this.hasGeneSetOverlapBtnTarget) {
       this.geneSetOverlapBtnTarget.style.display = highlightedCount > 0 ? "inline-flex" : "none"
     }
@@ -2512,21 +2550,22 @@ export default class extends Controller {
     this.geneSetOverlapPopup.open()
   }
 
-  switchGenesPanelTab(event) {
+  switchSelectionTab(event) {
     if (event) event.preventDefault()
     const tab = event?.currentTarget?.dataset?.tab
-    this.setGenesPanelTab(tab)
+    this.setSelectionTab(tab)
   }
 
-  setGenesPanelTab(tab = "genes") {
-    const normalizedTab = tab === "gene-sets" ? "gene-sets" : "genes"
-    const genesTab = this.element.querySelector("#heatmap-genes-tab")
+  // Used by GeneSetCollectionsController after creating/saving collections.
+  setSelectionTab(tab = "cells") {
+    const normalizedTab = tab === "gene-sets" ? "gene-sets" : "cells"
+    const cellsTab = this.element.querySelector("#heatmap-cells-tab")
     const geneSetsTab = this.element.querySelector("#heatmap-gene-sets-tab")
-    const genesContent = this.element.querySelector("#heatmap-genes-tab-content")
+    const cellsContent = this.element.querySelector("#heatmap-cells-tab-content")
     const geneSetsContent = this.element.querySelector("#heatmap-gene-sets-tab-content")
-    if (!genesTab || !geneSetsTab || !genesContent || !geneSetsContent) return
+    if (!cellsTab || !geneSetsTab || !cellsContent || !geneSetsContent) return
 
-    this.currentGenesPanelTab = normalizedTab
+    this.currentSelectionTab = normalizedTab
 
     const activate = (button, content, active) => {
       button.style.color = active ? "#3b82f6" : "#6b7280"
@@ -2534,18 +2573,208 @@ export default class extends Controller {
       content.style.display = active ? "flex" : "none"
     }
 
-    activate(genesTab, genesContent, normalizedTab === "genes")
+    activate(cellsTab, cellsContent, normalizedTab === "cells")
     activate(geneSetsTab, geneSetsContent, normalizedTab === "gene-sets")
   }
 
-  // Used by GeneSetCollectionsController after creating/saving collections.
-  setSelectionTab(tab = "genes") {
-    if (tab === "gene-sets") {
-      this.setGenesPanelTab("gene-sets")
+  async replaceGenesFromGeneSet(geneEntries) {
+    this.beginGeneListHistoryBatch()
+    try {
+      const entries = Array.isArray(geneEntries) ? geneEntries : []
+      this.geneListItems = []
+      for (const entry of entries) {
+        const candidates = [
+          entry?.symbol,
+          entry?.name,
+          entry?.ensembl_id,
+          entry?.ensemblId
+        ]
+        for (const candidate of candidates) {
+          const query = String(candidate || "").trim()
+          if (!query) continue
+          if (this.addGeneToList(query, { checked: true, render: false, sync: false })) break
+        }
+      }
+      this.applyGeneListHighlightState()
+      this.renderGeneSearchList()
+      this.persistCurrentCheckpointOnServer("selection-change")
+    } finally {
+      this.endGeneListHistoryBatch()
+    }
+  }
+
+  snapshotGeneList() {
+    return (Array.isArray(this.geneListItems) ? this.geneListItems : []).map((item) => ({ ...item }))
+  }
+
+  geneListHistoryKey(items) {
+    return (Array.isArray(items) ? items : [])
+      .map((item) => String(item?.symbol || "").trim().toLowerCase())
+      .filter((symbol) => symbol.length > 0)
+      .join("|")
+  }
+
+  geneListHistoryLabel(items) {
+    const list = Array.isArray(items) ? items : []
+    if (list.length === 0) return "Empty gene list"
+    const symbols = list
+      .map((item) => String(item?.symbol || "").trim())
+      .filter((symbol) => symbol.length > 0)
+    const preview = symbols.slice(0, 3).join(", ")
+    const suffix = symbols.length > 3 ? ", ..." : ""
+    return `${list.length} gene${list.length === 1 ? "" : "s"}: ${preview}${suffix}`
+  }
+
+  beginGeneListHistoryBatch() {
+    if (this._geneListHistoryBatchDepth === 0) {
+      this._geneListHistoryBefore = this.snapshotGeneList()
+    }
+    this._geneListHistoryBatchDepth += 1
+  }
+
+  endGeneListHistoryBatch() {
+    if (this._geneListHistoryBatchDepth <= 0) return
+    this._geneListHistoryBatchDepth -= 1
+    if (this._geneListHistoryBatchDepth > 0) return
+
+    const before = this._geneListHistoryBefore
+    this._geneListHistoryBefore = null
+    if (this._skipGeneListHistoryRecord) {
+      this.updateGeneListHistoryControls()
       return
     }
-    if (tab === "genes" || tab === "cells") {
-      this.setGenesPanelTab("genes")
+    if (!before) {
+      this.updateGeneListHistoryControls()
+      return
+    }
+    const beforeKey = this.geneListHistoryKey(before)
+    const afterKey = this.geneListHistoryKey(this.geneListItems)
+    if (beforeKey === afterKey) {
+      this.updateGeneListHistoryControls()
+      return
+    }
+    this.pushGeneListHistoryEntry(before)
+    this.updateGeneListHistoryControls()
+  }
+
+  pushGeneListHistoryEntry(snapshot) {
+    if (!Array.isArray(this.geneListHistory)) this.geneListHistory = []
+    const genes = Array.isArray(snapshot) ? snapshot.map((item) => ({ ...item })) : []
+    this.geneListHistory.unshift({
+      genes,
+      label: this.geneListHistoryLabel(genes)
+    })
+    if (this.geneListHistory.length > 10) {
+      this.geneListHistory = this.geneListHistory.slice(0, 10)
+    }
+  }
+
+  updateGeneListHistoryControls() {
+    const historyCount = Array.isArray(this.geneListHistory) ? this.geneListHistory.length : 0
+    const showControls = historyCount > 0
+
+    if (this.hasRestorePreviousGenesBtnTarget) {
+      this.restorePreviousGenesBtnTarget.style.display = showControls ? "inline-flex" : "none"
+      this.restorePreviousGenesBtnTarget.disabled = !showControls
+    }
+    if (this.hasGeneListHistoryBtnTarget) {
+      this.geneListHistoryBtnTarget.style.display = showControls ? "inline-flex" : "none"
+      this.geneListHistoryBtnTarget.disabled = !showControls
+      this.geneListHistoryBtnTarget.title = showControls
+        ? `Gene list history (${historyCount})`
+        : "Gene list history"
+    }
+    if (!showControls) this.closeGeneListHistoryMenu()
+  }
+
+  closeGeneListHistoryMenu() {
+    if (this.hasGeneListHistoryMenuTarget) {
+      this.geneListHistoryMenuTarget.style.display = "none"
+    }
+  }
+
+  preventGeneListHistoryMenuClose(event) {
+    if (event) event.stopPropagation()
+  }
+
+  toggleGeneListHistoryMenu(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    if (!this.hasGeneListHistoryMenuTarget) return
+    const isOpen = this.geneListHistoryMenuTarget.style.display === "block"
+    this.closeGeneListHistoryMenu()
+    if (isOpen) return
+    this.renderGeneListHistoryMenu()
+    this.geneListHistoryMenuTarget.style.display = "block"
+  }
+
+  renderGeneListHistoryMenu() {
+    if (!this.hasGeneListHistoryMenuTarget) return
+    const menu = this.geneListHistoryMenuTarget
+    menu.innerHTML = ""
+    const entries = Array.isArray(this.geneListHistory) ? this.geneListHistory : []
+    if (entries.length === 0) {
+      const empty = document.createElement("div")
+      empty.style.cssText = "padding:10px 12px;font-size:12px;color:#6b7280;"
+      empty.textContent = "No previous gene lists"
+      menu.appendChild(empty)
+      return
+    }
+
+    entries.forEach((entry, index) => {
+      const button = document.createElement("button")
+      button.type = "button"
+      button.dataset.historyIndex = String(index)
+      button.style.cssText = "display:block;width:100%;text-align:left;padding:8px 12px;border:none;background:none;cursor:pointer;font-size:12px;color:#374151;border-bottom:1px solid #f3f4f6;"
+      const label = entry.label || this.geneListHistoryLabel(entry.genes)
+      button.textContent = label
+      button.title = label
+      button.addEventListener("mouseenter", () => { button.style.backgroundColor = "#f3f4f6" })
+      button.addEventListener("mouseleave", () => { button.style.backgroundColor = "" })
+      button.addEventListener("click", (clickEvent) => this.applyGeneListHistoryEntry(clickEvent))
+      menu.appendChild(button)
+    })
+  }
+
+  restorePreviousGenes(event) {
+    if (event) event.preventDefault()
+    this.closeGeneListHistoryMenu()
+    if (!Array.isArray(this.geneListHistory) || this.geneListHistory.length === 0) return
+    const previous = this.geneListHistory.shift()
+    this.updateGeneListHistoryControls()
+    this.applyGeneListSnapshot(previous?.genes || [])
+  }
+
+  applyGeneListHistoryEntry(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const button = event?.currentTarget
+    const index = parseInt(button?.dataset?.historyIndex, 10)
+    if (!Number.isInteger(index) || index < 0 || !Array.isArray(this.geneListHistory)) return
+    if (index >= this.geneListHistory.length) return
+    const [entry] = this.geneListHistory.splice(index, 1)
+    this.closeGeneListHistoryMenu()
+    this.updateGeneListHistoryControls()
+    this.applyGeneListSnapshot(entry?.genes || [])
+  }
+
+  applyGeneListSnapshot(items) {
+    this.beginGeneListHistoryBatch()
+    try {
+      this.geneListItems = (Array.isArray(items) ? items : []).map((item) => ({
+        symbol: item.symbol,
+        checked: item.checked !== false,
+        expanded: !!item.expanded
+      }))
+      this.applyGeneListHighlightState()
+      this.renderGeneSearchList()
+      this.persistCurrentCheckpointOnServer("selection-change")
+    } finally {
+      this.endGeneListHistoryBatch()
     }
   }
 
@@ -2591,11 +2820,16 @@ export default class extends Controller {
       }
       return existing
     }
-    const item = { symbol: resolved, checked: !!checked, expanded: false }
-    this.geneListItems.push(item)
-    if (sync && checked) this.applyGeneListHighlightState()
-    if (render) this.renderGeneSearchList()
-    return item
+    this.beginGeneListHistoryBatch()
+    try {
+      const item = { symbol: resolved, checked: !!checked, expanded: false }
+      this.geneListItems.push(item)
+      if (sync && checked) this.applyGeneListHighlightState()
+      if (render) this.renderGeneSearchList()
+      return item
+    } finally {
+      this.endGeneListHistoryBatch()
+    }
   }
 
   applyGeneListHighlightState() {
@@ -2755,10 +2989,15 @@ export default class extends Controller {
     }
     const symbol = event?.currentTarget?.dataset?.geneSymbol
     if (!symbol) return
-    this.geneListItems = this.geneListItems.filter((entry) => entry.symbol !== symbol)
-    this.applyGeneListHighlightState()
-    this.renderGeneSearchList()
-    this.persistCurrentCheckpointOnServer("selection-change")
+    this.beginGeneListHistoryBatch()
+    try {
+      this.geneListItems = this.geneListItems.filter((entry) => entry.symbol !== symbol)
+      this.applyGeneListHighlightState()
+      this.renderGeneSearchList()
+      this.persistCurrentCheckpointOnServer("selection-change")
+    } finally {
+      this.endGeneListHistoryBatch()
+    }
   }
 
   expressionValuesForGene(symbol) {
@@ -4374,7 +4613,7 @@ export default class extends Controller {
             ).catch(() => {})
           }
         }
-        this.setGenesPanelTab("gene-sets")
+        this.setSelectionTab("gene-sets")
         if (this.hasGeneSelectionStatusTarget) {
           this.geneSelectionStatusTarget.textContent = `Saved "${cleanName}" (${genes.length} genes).`
         }
@@ -6349,6 +6588,7 @@ export default class extends Controller {
   applySelectionCheckpointState(selection) {
     const sel = selection && typeof selection === "object" ? selection : null
 
+    this.geneListHistory = []
     this.geneListItems = Array.isArray(sel?.geneListItems)
       ? sel.geneListItems
         .map((item) => {
@@ -6365,6 +6605,7 @@ export default class extends Controller {
 
     this.applyGeneListHighlightState()
     this.renderGeneSearchList()
+    this.updateGeneListHistoryControls()
 
     const nCols = Number.isInteger(this.nOrigCols) ? this.nOrigCols : 0
     this.selectedOrigCols = new Set(

@@ -80,6 +80,18 @@
               Annot.where(project_id: @project.id, nber_rows: 2).exists?
             end %>
         <%
+          heatmap_nav_docker = Basic.get_asap_docker(@project.version)
+          heatmap_nav_step_ids =
+            if heatmap_nav_docker
+              Step.where(docker_image_id: heatmap_nav_docker.id, name: 'heatmap').pluck(:id)
+            else
+              Step.where(name: 'heatmap').pluck(:id)
+            end
+          has_heatmap_runs =
+            heatmap_nav_step_ids.any? &&
+            @project.runs.where(step_id: heatmap_nav_step_ids, status_id: 3).exists?
+        %>
+        <%
           # Get run counts from project_steps (more efficient than counting runs)
           run_counts = project_run_counts(@project)
           visible_step_ids = visible_step_ids_for_run_counts
@@ -392,6 +404,14 @@
               Visualization
             <% end %>
 
+            <!-- Heatmap -->
+            <%= link_to project_path(@project, view: 'heatmap'),
+                class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'heatmap' ? 'bg-gray-100 font-medium' : ''}",
+                data: { guided_tour: "project-nav-heatmap" } do %>
+              <i class="fas fa-th text-lg mr-3 <%= has_heatmap_runs ? 'text-emerald-500' : 'text-white' %>"></i>
+              Heatmap
+            <% end %>
+
             <!-- Annotations -->
             <%= link_to project_path(@project, view: 'annotations'),
                 class: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{@view_type == 'annotations' ? 'bg-gray-100 font-medium' : ''}",
@@ -552,10 +572,13 @@
       <div class="hidden lg:flex items-stretch gap-1">
         <% nav_available_icon_class = 'text-emerald-300' %>
         <% nav_visualization_icon_class = has_visualization_embeddings ? 'text-emerald-300' : 'text-white' %>
+        <% nav_heatmap_icon_class = has_heatmap_runs ? 'text-emerald-300' : 'text-white' %>
         <%= link_to project_path(@project, view: 'summary'),
             class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'summary' ? 'bg-gray-700' : ''}", title: "Summary", data: { guided_tour: "project-nav-summary" } do %><i class="fas fa-info-circle text-lg"></i><% end %>
         <%= link_to project_path(@project, view: 'visualization'),
             class: "p-2 rounded-lg hover:bg-gray-700 #{nav_visualization_icon_class} #{@view_type == 'visualization' ? 'bg-gray-700' : ''}", title: "Visualization", data: { guided_tour: "project-nav-visualization" } do %><span class="inline-flex text-lg"><%= render 'shared/scatter_plot_icon' %></span><% end %>
+        <%= link_to project_path(@project, view: 'heatmap'),
+            class: "p-2 rounded-lg hover:bg-gray-700 #{nav_heatmap_icon_class} #{@view_type == 'heatmap' ? 'bg-gray-700' : ''}", title: "Heatmap", data: { guided_tour: "project-nav-heatmap" } do %><i class="fas fa-th text-lg"></i><% end %>
         <%= link_to project_path(@project, view: 'annotations'),
             class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'annotations' ? 'bg-gray-700' : ''}", title: "Annotations", data: { guided_tour: "project-nav-annotations" } do %><i class="fas fa-bookmark text-lg"></i><% end %>
         <%= link_to project_path(@project, view: 'analysis'),

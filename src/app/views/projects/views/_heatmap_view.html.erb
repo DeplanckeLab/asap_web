@@ -521,26 +521,10 @@
 
     <aside id="heatmap-right-panel" class="heatmap-right-panel" aria-label="Heatmap selections">
       <div id="heatmap-genes-panel" style="height:50%; display:flex; flex-direction:column; min-height:0; background:#ffffff; overflow:hidden;">
-        <div id="heatmap-genes-panel-tabs" style="border-bottom:1px solid #e5e7eb; flex-shrink:0;">
-          <nav style="display:flex; align-items:center; gap:8px; padding:0 14px;" aria-label="Genes panel tabs">
-            <button type="button"
-                    id="heatmap-genes-tab"
-                    data-action="click->heatmap#switchGenesPanelTab"
-                    data-tab="genes"
-                    style="padding:10px 12px; border-bottom:2px solid #3b82f6; font-weight:500; font-size:14px; color:#3b82f6; background:none; border-top:none; border-left:none; border-right:none; cursor:pointer;">
-              Genes
-            </button>
-            <button type="button"
-                    id="heatmap-gene-sets-tab"
-                    data-action="click->heatmap#switchGenesPanelTab"
-                    data-tab="gene-sets"
-                    style="padding:10px 12px; border-bottom:2px solid transparent; font-weight:500; font-size:14px; color:#6b7280; background:none; border-top:none; border-left:none; border-right:none; cursor:pointer; transition:all 0.2s;">
-              Gene sets
-            </button>
-          </nav>
+        <div style="padding:12px 14px; border-bottom:1px solid #e5e7eb; flex-shrink:0; background:#fff;">
+          <h3 style="margin:0; font-size:14px; font-weight:600; color:#111827;">Genes</h3>
         </div>
-
-        <div id="heatmap-genes-tab-content" style="flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden;">
+        <div style="flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden;">
           <div style="flex-shrink:0; padding:10px 14px 0 14px; display:flex; flex-direction:column; gap:8px;">
             <div style="display:flex; align-items:center; gap:8px;">
               <div style="position:relative; flex:1; min-width:0;">
@@ -585,16 +569,43 @@
               <span style="font-size:13px; color:#6b7280;">
                 <span data-heatmap-target="selectedGenesCount">0</span> genes highlighted
               </span>
-              <button type="button"
-                      data-heatmap-target="toggleAllGenesBtn"
-                      data-action="heatmap#toggleAllGeneSelection"
-                      title="Select or unselect all genes in the list"
-                      aria-label="Select or unselect all genes in the list"
-                      style="display:none; padding:3px 8px; font-size:11px; font-weight:500; color:#374151; background:#fff; border:1px solid #d1d5db; border-radius:4px; cursor:pointer; white-space:nowrap;"
-                      onmouseover="this.style.backgroundColor='#f3f4f6'"
-                      onmouseout="this.style.backgroundColor='#fff'">
-                Select all
-              </button>
+              <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+                <button type="button"
+                        data-heatmap-target="restorePreviousGenesBtn"
+                        data-action="heatmap#restorePreviousGenes"
+                        title="Previous gene list"
+                        aria-label="Previous gene list"
+                        style="display:none; align-items:center; justify-content:center; width:22px; height:22px; padding:0; background:white; color:#6b7280; border:1px solid #d1d5db; border-radius:4px; cursor:pointer;"
+                        onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.color='#374151'"
+                        onmouseout="this.style.backgroundColor='white'; this.style.color='#6b7280'">
+                  <i class="fas fa-rotate-left" style="font-size:10px;" aria-hidden="true"></i>
+                </button>
+                <div style="position:relative; flex-shrink:0;">
+                  <button type="button"
+                          data-heatmap-target="geneListHistoryBtn"
+                          data-action="heatmap#toggleGeneListHistoryMenu"
+                          title="Gene list history"
+                          aria-label="Gene list history"
+                          style="display:none; align-items:center; justify-content:center; width:22px; height:22px; padding:0; background:white; color:#6b7280; border:1px solid #d1d5db; border-radius:4px; cursor:pointer;"
+                          onmouseover="this.style.backgroundColor='#f3f4f6'; this.style.color='#374151'"
+                          onmouseout="this.style.backgroundColor='white'; this.style.color='#6b7280'">
+                    <i class="fas fa-history" style="font-size:10px;" aria-hidden="true"></i>
+                  </button>
+                  <div data-heatmap-target="geneListHistoryMenu"
+                       data-action="click->heatmap#preventGeneListHistoryMenuClose"
+                       style="display:none; position:absolute; top:26px; right:0; min-width:200px; max-width:320px; max-height:260px; overflow-y:auto; background:white; border:1px solid #d1d5db; border-radius:6px; box-shadow:0 6px 12px rgba(0,0,0,0.1); z-index:30;"></div>
+                </div>
+                <button type="button"
+                        data-heatmap-target="toggleAllGenesBtn"
+                        data-action="heatmap#toggleAllGeneSelection"
+                        title="Select or unselect all genes in the list"
+                        aria-label="Select or unselect all genes in the list"
+                        style="display:none; padding:3px 8px; font-size:11px; font-weight:500; color:#374151; background:#fff; border:1px solid #d1d5db; border-radius:4px; cursor:pointer; white-space:nowrap;"
+                        onmouseover="this.style.backgroundColor='#f3f4f6'"
+                        onmouseout="this.style.backgroundColor='#fff'">
+                  Select all
+                </button>
+              </div>
             </div>
           </div>
           <div data-heatmap-target="geneSearchList"
@@ -606,6 +617,137 @@
           </div>
           <div data-heatmap-target="geneSelectionStatus"
                style="flex-shrink:0; padding:6px 14px 8px 14px; font-size:12px; color:#6b7280; min-height:18px;"></div>
+        </div>
+      </div>
+      <div id="heatmap-right-divider" class="heatmap-row-resizer" title="Resize panels"></div>
+      <div id="heatmap-cells-panel" style="flex:1; display:flex; flex-direction:column; min-height:0; background:#f9fafb; overflow:hidden;">
+        <div id="heatmap-selection-tabs" style="border-bottom:1px solid #e5e7eb; flex-shrink:0; background:#fff;">
+          <nav style="display:flex; align-items:center; gap:8px; padding:0 14px;" aria-label="Cell and gene set tabs">
+            <button type="button"
+                    id="heatmap-cells-tab"
+                    data-action="click->heatmap#switchSelectionTab"
+                    data-tab="cells"
+                    style="padding:10px 12px; border-bottom:2px solid #3b82f6; font-weight:500; font-size:14px; color:#3b82f6; background:none; border-top:none; border-left:none; border-right:none; cursor:pointer;">
+              Cell sets
+            </button>
+            <button type="button"
+                    id="heatmap-gene-sets-tab"
+                    data-action="click->heatmap#switchSelectionTab"
+                    data-tab="gene-sets"
+                    style="padding:10px 12px; border-bottom:2px solid transparent; font-weight:500; font-size:14px; color:#6b7280; background:none; border-top:none; border-left:none; border-right:none; cursor:pointer; transition:all 0.2s;">
+              Gene sets
+            </button>
+          </nav>
+        </div>
+
+        <div id="heatmap-cells-tab-content" style="flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden;">
+          <div style="flex-shrink:0; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:8px; background:#fff;">
+            <span style="font-size:14px; color:#6b7280;">
+              <span data-heatmap-target="selectedCellsCount">0</span> cells selected
+            </span>
+            <div style="display:flex; gap:8px;">
+              <% if can_analyze_heatmap %>
+                <button type="button"
+                        class="heatmap-icon-btn heatmap-icon-btn-save"
+                        data-action="heatmap#saveCellSelection"
+                        title="Save cell selection"
+                        aria-label="Save cell selection">
+                  <i class="fas fa-save" style="font-size:14px;" aria-hidden="true"></i>
+                </button>
+              <% end %>
+              <button type="button"
+                      class="heatmap-icon-btn heatmap-icon-btn-clear"
+                      data-heatmap-target="clearCellSelectionBtn"
+                      data-action="heatmap#clearCellSelection"
+                      title="Clear cell selection"
+                      aria-label="Clear cell selection"
+                      style="display:none;">
+                <i class="fas fa-times" style="font-size:14px;" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+          <div data-heatmap-target="cellSelectionStatus"
+               style="flex-shrink:0; padding:0 14px 8px 14px; font-size:12px; color:#6b7280; min-height:18px; background:#fff;"></div>
+          <div style="height:1px; background-color:#e5e7eb; margin:0 14px 8px 14px; flex-shrink:0;"></div>
+          <div style="flex:1; min-height:0; overflow:auto; padding:0 14px 12px 14px; display:flex; flex-direction:column;">
+            <div style="display:flex; align-items:center; justify-content:space-between; margin:0 0 8px 0; flex-shrink:0;">
+              <input id="heatmap-saved-selections-name-filter-input"
+                     type="text"
+                     placeholder="Filter by name"
+                     style="flex:1;min-width:0;max-width:220px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#111827;background:#fff;" />
+              <div style="display:flex;align-items:center;gap:8px;position:relative;margin-left:8px;">
+                <button id="heatmap-sort-saved-selections-btn"
+                        type="button"
+                        style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:white;color:#374151;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;"
+                        title="Sort saved cell sets"
+                        aria-label="Sort saved cell sets">
+                  <i class="fas fa-sort" style="font-size:12px;"></i>
+                </button>
+                <div id="heatmap-sort-saved-selections-menu"
+                     style="display:none;position:absolute;top:34px;right:0;z-index:30;min-width:220px;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 18px rgba(0,0,0,0.12);padding:10px;">
+                  <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:8px;">Sort cell sets</div>
+                  <label for="heatmap-sort-saved-selections-by" style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Sort by</label>
+                  <select id="heatmap-sort-saved-selections-by"
+                          style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#111827;background:#fff;margin-bottom:8px;">
+                    <option value="created_at">By creation date</option>
+                    <option value="name">By name</option>
+                    <option value="selected_count">By number of cells</option>
+                  </select>
+                  <label for="heatmap-sort-saved-selections-order" style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Order</label>
+                  <select id="heatmap-sort-saved-selections-order"
+                          style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#111827;background:#fff;">
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
+                  </select>
+                </div>
+                <button id="heatmap-filter-saved-selections-btn"
+                        type="button"
+                        style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:white;color:#374151;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;"
+                        title="Filter saved cell sets"
+                        aria-label="Filter saved cell sets">
+                  <i class="fas fa-filter" style="font-size:12px;"></i>
+                </button>
+                <div id="heatmap-filter-saved-selections-menu"
+                     style="display:none;position:absolute;top:34px;right:0;z-index:30;min-width:220px;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 18px rgba(0,0,0,0.12);padding:6px;">
+                  <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:8px;">Filter cell sets</div>
+                  <div style="display:flex;flex-direction:column;gap:0;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
+                    <button type="button" data-heatmap-filter-type-option="all" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;border-bottom:1px solid #e5e7eb;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
+                      <span>All type sets</span>
+                      <span data-heatmap-filter-check="all" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
+                    </button>
+                    <button type="button" data-heatmap-filter-type-option="lasso" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;border-bottom:1px solid #e5e7eb;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
+                      <span>Lasso sets</span>
+                      <span data-heatmap-filter-check="lasso" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
+                    </button>
+                    <button type="button" data-heatmap-filter-type-option="visible" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;border-bottom:1px solid #e5e7eb;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
+                      <span>Visible cells sets</span>
+                      <span data-heatmap-filter-check="visible" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
+                    </button>
+                    <button type="button" data-heatmap-filter-type-option="compose" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;border-bottom:1px solid #e5e7eb;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
+                      <span>Composed sets</span>
+                      <span data-heatmap-filter-check="compose" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
+                    </button>
+                    <button type="button" data-heatmap-filter-type-option="heatmap-rect" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
+                      <span>Heatmap sets</span>
+                      <span data-heatmap-filter-check="heatmap-rect" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
+                    </button>
+                  </div>
+                </div>
+                <% if can_analyze_heatmap %>
+                  <button id="heatmap-delete-all-saved-selections-btn"
+                          type="button"
+                          data-action="heatmap#deleteAllSavedCellSets"
+                          style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;"
+                          title="Delete all saved cell sets"
+                          aria-label="Delete all saved cell sets">
+                    <i class="fas fa-trash" style="font-size:12px;"></i>
+                  </button>
+                <% end %>
+              </div>
+            </div>
+            <div data-heatmap-target="savedCellSetsList"
+                 style="flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;font-size:12px;color:#6b7280;font-style:italic;">No cell sets yet</div>
+          </div>
         </div>
 
         <div id="heatmap-gene-sets-tab-content" style="flex:1; min-height:0; display:none; flex-direction:column; overflow:hidden; padding:10px 0 8px 0;">
@@ -758,119 +900,6 @@
               No gene sets found
             </div>
           </div>
-        </div>
-      </div>
-      <div id="heatmap-right-divider" class="heatmap-row-resizer" title="Resize panels"></div>
-      <div id="heatmap-cells-panel" style="flex:1; display:flex; flex-direction:column; min-height:0; background:#f9fafb;">
-        <div style="padding:12px 14px; border-bottom:1px solid #e5e7eb; flex-shrink:0; background:#fff;">
-          <h3 style="margin:0; font-size:14px; font-weight:600; color:#111827;">Cells</h3>
-        </div>
-        <div style="flex-shrink:0; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:8px; background:#fff;">
-          <span style="font-size:14px; color:#6b7280;">
-            <span data-heatmap-target="selectedCellsCount">0</span> cells selected
-          </span>
-          <div style="display:flex; gap:8px;">
-            <% if can_analyze_heatmap %>
-              <button type="button"
-                      class="heatmap-icon-btn heatmap-icon-btn-save"
-                      data-action="heatmap#saveCellSelection"
-                      title="Save cell selection"
-                      aria-label="Save cell selection">
-                <i class="fas fa-save" style="font-size:14px;" aria-hidden="true"></i>
-              </button>
-            <% end %>
-            <button type="button"
-                    class="heatmap-icon-btn heatmap-icon-btn-clear"
-                    data-heatmap-target="clearCellSelectionBtn"
-                    data-action="heatmap#clearCellSelection"
-                    title="Clear cell selection"
-                    aria-label="Clear cell selection"
-                    style="display:none;">
-              <i class="fas fa-times" style="font-size:14px;" aria-hidden="true"></i>
-            </button>
-          </div>
-        </div>
-        <div data-heatmap-target="cellSelectionStatus"
-             style="flex-shrink:0; padding:0 14px 8px 14px; font-size:12px; color:#6b7280; min-height:18px; background:#fff;"></div>
-        <div style="height:1px; background-color:#e5e7eb; margin:0 14px 8px 14px; flex-shrink:0;"></div>
-        <div style="flex:1; min-height:0; overflow:auto; padding:0 14px 12px 14px; display:flex; flex-direction:column;">
-          <div style="display:flex; align-items:center; justify-content:space-between; margin:0 0 8px 0; flex-shrink:0;">
-            <input id="heatmap-saved-selections-name-filter-input"
-                   type="text"
-                   placeholder="Filter by name"
-                   style="flex:1;min-width:0;max-width:220px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#111827;background:#fff;" />
-            <div style="display:flex;align-items:center;gap:8px;position:relative;margin-left:8px;">
-              <button id="heatmap-sort-saved-selections-btn"
-                      type="button"
-                      style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:white;color:#374151;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;"
-                      title="Sort saved cell sets"
-                      aria-label="Sort saved cell sets">
-                <i class="fas fa-sort" style="font-size:12px;"></i>
-              </button>
-              <div id="heatmap-sort-saved-selections-menu"
-                   style="display:none;position:absolute;top:34px;right:0;z-index:30;min-width:220px;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 18px rgba(0,0,0,0.12);padding:10px;">
-                <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:8px;">Sort cell sets</div>
-                <label for="heatmap-sort-saved-selections-by" style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Sort by</label>
-                <select id="heatmap-sort-saved-selections-by"
-                        style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#111827;background:#fff;margin-bottom:8px;">
-                  <option value="created_at">By creation date</option>
-                  <option value="name">By name</option>
-                  <option value="selected_count">By number of cells</option>
-                </select>
-                <label for="heatmap-sort-saved-selections-order" style="display:block;font-size:11px;color:#6b7280;margin-bottom:4px;">Order</label>
-                <select id="heatmap-sort-saved-selections-order"
-                        style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px;color:#111827;background:#fff;">
-                  <option value="asc">Ascending</option>
-                  <option value="desc">Descending</option>
-                </select>
-              </div>
-              <button id="heatmap-filter-saved-selections-btn"
-                      type="button"
-                      style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:white;color:#374151;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;"
-                      title="Filter saved cell sets"
-                      aria-label="Filter saved cell sets">
-                <i class="fas fa-filter" style="font-size:12px;"></i>
-              </button>
-              <div id="heatmap-filter-saved-selections-menu"
-                   style="display:none;position:absolute;top:34px;right:0;z-index:30;min-width:220px;background:#ffffff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 18px rgba(0,0,0,0.12);padding:6px;">
-                <div style="font-size:12px;font-weight:600;color:#111827;margin-bottom:8px;">Filter cell sets</div>
-                <div style="display:flex;flex-direction:column;gap:0;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;">
-                  <button type="button" data-heatmap-filter-type-option="all" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;border-bottom:1px solid #e5e7eb;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
-                    <span>All type sets</span>
-                    <span data-heatmap-filter-check="all" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
-                  </button>
-                  <button type="button" data-heatmap-filter-type-option="lasso" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;border-bottom:1px solid #e5e7eb;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
-                    <span>Lasso sets</span>
-                    <span data-heatmap-filter-check="lasso" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
-                  </button>
-                  <button type="button" data-heatmap-filter-type-option="visible" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;border-bottom:1px solid #e5e7eb;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
-                    <span>Visible cells sets</span>
-                    <span data-heatmap-filter-check="visible" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
-                  </button>
-                  <button type="button" data-heatmap-filter-type-option="compose" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;border-bottom:1px solid #e5e7eb;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
-                    <span>Composed sets</span>
-                    <span data-heatmap-filter-check="compose" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
-                  </button>
-                  <button type="button" data-heatmap-filter-type-option="heatmap-rect" style="display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;padding:7px 8px;border:none;background:#fff;color:#111827;font-size:12px;cursor:pointer;">
-                    <span>Heatmap sets</span>
-                    <span data-heatmap-filter-check="heatmap-rect" style="display:none;color:#16a34a;"><i class="fas fa-check" style="font-size:11px;"></i></span>
-                  </button>
-                </div>
-              </div>
-              <% if can_analyze_heatmap %>
-                <button id="heatmap-delete-all-saved-selections-btn"
-                        type="button"
-                        data-action="heatmap#deleteAllSavedCellSets"
-                        style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer;"
-                        title="Delete all saved cell sets"
-                        aria-label="Delete all saved cell sets">
-                  <i class="fas fa-trash" style="font-size:12px;"></i>
-                </button>
-              <% end %>
-            </div>
-          </div>
-          <div data-heatmap-target="savedCellSetsList"
-               style="flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;font-size:12px;color:#6b7280;font-style:italic;">No cell sets yet</div>
         </div>
       </div>
     </aside>

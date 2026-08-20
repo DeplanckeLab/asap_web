@@ -104,7 +104,7 @@ module ExternalCatalog
       results
     end
 
-    def import_one(entry)
+    def import_one(entry, on_project_ready: nil)
       @logger.info(
         "[ExternalCatalog] start source=#{entry.source} id=#{entry.external_id} " \
         "title=#{entry.title.inspect} format=#{entry.format_kind} url=#{entry.url}"
@@ -142,12 +142,15 @@ module ExternalCatalog
         link_existing_project!(existing, entry, provider)
         discard_unused_fu!(fu)
         @last_import_outcome = :linked
+        on_project_ready&.call(existing, :linked)
         return existing
       end
 
       project = create_project!(entry, fu, organism, parsing_attrs, preparsing_fp)
       attach_project_collection!(project, entry)
       attach_provider_label!(project, provider, entry)
+      # parse_files has already been queued inside create_project!; notify so the UI can open analysis.
+      on_project_ready&.call(project, :created)
       wait_for_parse!(project)
       attach_reference_metadata!(project, entry)
       project.reload

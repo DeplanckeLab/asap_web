@@ -66,7 +66,23 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       sandbox_key: sandbox_key
     )
 
-    result = importer.import_one(candidate.to_entry)
+    project_ready = false
+    result = importer.import_one(
+      candidate.to_entry,
+      on_project_ready: lambda { |project, outcome|
+        project_ready = true
+        if outcome == :created
+          candidate.update!(import_project_id: project.id)
+          candidate.link_matched_project!(project, link_kind: 'import')
+        else
+          candidate.link_matched_project!(project, link_kind: 'content_match')
+        end
+        Rails.logger.info(
+          "[ExternalCatalogImportCandidateJob] project ready candidate=#{candidate.id} " \
+          "outcome=#{outcome} project=#{project.id} key=#{project.key}"
+        )
+      }
+    )
     if result == :dry_run
       candidate.update!(import_status: 'failed', import_error: 'dry_run unexpected')
       return
@@ -81,10 +97,12 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
     attrs = { import_status: 'idle', import_error: nil }
     attrs[:import_project_id] = result.id if created
     candidate.update!(attrs)
-    candidate.link_matched_project!(
-      result,
-      link_kind: created ? 'import' : 'content_match'
-    )
+    unless project_ready
+      candidate.link_matched_project!(
+        result,
+        link_kind: created ? 'import' : 'content_match'
+      )
+    end
     Rails.logger.info(
       "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} " \
       "outcome=#{importer.last_import_outcome} project=#{result.id} key=#{result.key} " \

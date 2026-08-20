@@ -440,7 +440,8 @@ export class CustomPlotManager {
       if (this.is2DPlotMinimized) {
         this.restore2DPlotModal()
       }
-      this.undock2DPlotModalFromMobileFooter(modal)
+      this.undock2DPlotModalFromMobileFooter(modal, { mountForExpanded: false })
+      this.return2DPlotModalHome(modal)
       modal.style.display = 'none'
     }
     this.is2DPlotMinimized = false
@@ -487,10 +488,29 @@ export class CustomPlotManager {
     return this.controller?.isMobileVizLayout?.() === true
   }
 
+  is2DPlotModalDockOrPlotFooterParent(parent) {
+    if (!parent || parent === document.body || parent === document.documentElement) return true
+    if (parent.id === 'viz-mobile-custom-plot-dock' || parent.id === 'viz-plot-footer' || parent.id === 'viz-plot-area-wrap') {
+      return true
+    }
+    return typeof parent.closest === 'function' && !!parent.closest('#viz-plot-area-wrap, #viz-mobile-custom-plot-dock')
+  }
+
   remember2DPlotModalHome(modal = document.getElementById('2d-plot-modal')) {
     if (!modal) return
-    if (!this._2dPlotModalHome || !document.contains(this._2dPlotModalHome)) {
-      this._2dPlotModalHome = modal.parentElement
+    if (this._2dPlotModalHome && document.contains(this._2dPlotModalHome)) return
+
+    const parent = modal.parentElement
+    // Never treat the mobile footer dock (z-index:1 plot wrap) as the permanent home.
+    if (this.is2DPlotModalDockOrPlotFooterParent(parent)) return
+    this._2dPlotModalHome = parent
+  }
+
+  return2DPlotModalHome(modal = document.getElementById('2d-plot-modal')) {
+    if (!modal) return
+    const home = this._2dPlotModalHome
+    if (home && document.contains(home) && modal.parentElement !== home) {
+      home.appendChild(modal)
     }
   }
 
@@ -524,14 +544,22 @@ export class CustomPlotManager {
     return true
   }
 
-  undock2DPlotModalFromMobileFooter(modal = document.getElementById('2d-plot-modal')) {
+  undock2DPlotModalFromMobileFooter(modal = document.getElementById('2d-plot-modal'), { mountForExpanded = true } = {}) {
     if (!modal) return
 
     modal.classList.remove('is-mobile-docked')
-    const home = this._2dPlotModalHome
-    if (home && modal.parentElement !== home) {
-      home.appendChild(modal)
+    this.remember2DPlotModalHome(modal)
+
+    // Expanded mobile plot must leave #viz-plot-area-wrap (z-index:1 / overflow:hidden)
+    // or it paints under the panel selector (z-index:40) and side panels (z-index:60).
+    if (mountForExpanded && this.isMobileVizLayout()) {
+      if (modal.parentElement !== document.body) {
+        document.body.appendChild(modal)
+      }
+    } else {
+      this.return2DPlotModalHome(modal)
     }
+    modal.style.zIndex = '10050'
   }
 
   applyDesktopMinimized2DPlotGeometry(modal = document.getElementById('2d-plot-modal')) {
@@ -560,6 +588,7 @@ export class CustomPlotManager {
     modal.style.maxWidth = '240px'
     modal.style.maxHeight = '48px'
     modal.style.position = 'fixed'
+    modal.style.zIndex = '10000'
   }
 
   syncMinimized2DPlotDock() {
@@ -586,19 +615,32 @@ export class CustomPlotManager {
     const header = document.getElementById('2d-plot-header')
     const titleRow = document.getElementById('2d-plot-title-row')
     const controls = document.getElementById('2d-plot-window-controls')
+    const title = document.getElementById('2d-plot-title')
     if (header) {
       header.style.height = '100%'
-      header.style.padding = '0 10px'
+      header.style.padding = this.isMobileVizLayout() ? '0 6px' : '0 10px'
       header.style.borderBottom = 'none'
       header.style.borderRadius = '12px'
       header.style.justifyContent = 'center'
-      header.style.gap = '12px'
+      header.style.gap = this.isMobileVizLayout() ? '6px' : '12px'
     }
     if (titleRow) {
       titleRow.style.margin = '0'
+      titleRow.style.minWidth = '0'
+      titleRow.style.flex = '1 1 auto'
+    }
+    if (title && this.isMobileVizLayout()) {
+      title.style.setProperty('font-size', '9px', 'important')
+      title.style.setProperty('font-weight', '600', 'important')
+      title.style.setProperty('line-height', '1.15', 'important')
+      title.style.setProperty('max-width', '72px', 'important')
+      title.style.setProperty('overflow', 'hidden', 'important')
+      title.style.setProperty('text-overflow', 'ellipsis', 'important')
+      title.style.setProperty('white-space', 'nowrap', 'important')
     }
     if (controls) {
       controls.style.marginLeft = '0'
+      controls.style.flexShrink = '0'
     }
     const resizeRight = document.getElementById('2d-plot-resize-right')
     const resizeBottom = document.getElementById('2d-plot-resize-bottom')
@@ -646,10 +688,16 @@ export class CustomPlotManager {
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
     const margin = 8
+    const selector = document.getElementById('viz-mobile-panel-selector')
+    const selectorBottom = selector?.getBoundingClientRect?.().bottom
+    const topFloor = Number.isFinite(selectorBottom) && selectorBottom > 0
+      ? Math.ceil(selectorBottom) + margin
+      : margin
     const width = Math.max(280, Math.round(viewportWidth - margin * 2))
-    const height = Math.max(280, Math.round(viewportHeight * 0.72))
+    const availableHeight = Math.max(240, viewportHeight - topFloor - margin)
+    const height = Math.min(Math.round(viewportHeight * 0.72), availableHeight)
     const left = Math.max(margin, Math.round((viewportWidth - width) / 2))
-    const top = Math.max(margin, Math.round((viewportHeight - height) / 2))
+    const top = Math.max(topFloor, Math.round((viewportHeight - height) / 2))
 
     modal.style.transform = 'none'
     modal.style.left = `${left}px`
@@ -657,10 +705,11 @@ export class CustomPlotManager {
     modal.style.width = `${width}px`
     modal.style.height = `${height}px`
     modal.style.minWidth = '280px'
-    modal.style.minHeight = '280px'
+    modal.style.minHeight = '240px'
     modal.style.maxWidth = '96vw'
     modal.style.maxHeight = '90vh'
     modal.style.position = 'fixed'
+    modal.style.zIndex = '10050'
   }
 
   restore2DPlotModal(event) {
@@ -690,6 +739,7 @@ export class CustomPlotManager {
       modal.style.maxWidth = '90vw'
       modal.style.maxHeight = '90vh'
       modal.style.position = 'fixed'
+      modal.style.zIndex = '10000'
     }
 
     const content = document.getElementById('2d-plot-content')
@@ -699,6 +749,7 @@ export class CustomPlotManager {
     const header = document.getElementById('2d-plot-header')
     const titleRow = document.getElementById('2d-plot-title-row')
     const controls = document.getElementById('2d-plot-window-controls')
+    const title = document.getElementById('2d-plot-title')
     if (header) {
       header.style.height = ''
       header.style.padding = '12px 16px'
@@ -709,9 +760,21 @@ export class CustomPlotManager {
     }
     if (titleRow) {
       titleRow.style.margin = ''
+      titleRow.style.minWidth = ''
+      titleRow.style.flex = ''
+    }
+    if (title) {
+      title.style.removeProperty('font-size')
+      title.style.removeProperty('font-weight')
+      title.style.removeProperty('line-height')
+      title.style.removeProperty('max-width')
+      title.style.removeProperty('overflow')
+      title.style.removeProperty('text-overflow')
+      title.style.removeProperty('white-space')
     }
     if (controls) {
       controls.style.marginLeft = ''
+      controls.style.flexShrink = ''
     }
     const resizeRight = document.getElementById('2d-plot-resize-right')
     const resizeBottom = document.getElementById('2d-plot-resize-bottom')

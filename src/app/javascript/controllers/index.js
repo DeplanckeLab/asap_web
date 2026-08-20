@@ -209,6 +209,9 @@ import CloneOverlayController from "controllers/clone_overlay_controller"
 application.register("clone-overlay", CloneOverlayController)
 console.log('Clone overlay controller registered')
 
+import CatalogImportController from "controllers/catalog_import_controller"
+application.register("catalog-import", CatalogImportController)
+
 import CloneStatusController from "controllers/clone_status_controller"
 application.register("clone-status", CloneStatusController)
 

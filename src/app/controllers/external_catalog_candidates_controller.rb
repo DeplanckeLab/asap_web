@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 class ExternalCatalogCandidatesController < ApplicationController
-  skip_before_action :authenticate_user!, only: %i[index show create_project], raise: false
+  skip_before_action :authenticate_user!, only: %i[index show create_project import_status], raise: false
   before_action :authenticate_user!, only: %i[destroy]
   before_action :authorize_admin, only: %i[destroy]
   before_action :ensure_synced_reference_data_writable!, only: %i[destroy]
-  before_action :set_candidate, only: %i[show create_project destroy]
+  before_action :set_candidate, only: %i[show create_project destroy import_status]
 
   PER_PAGE = 25
   # Same technical owner as projects#create for guest sandboxes.
@@ -53,6 +53,9 @@ class ExternalCatalogCandidatesController < ApplicationController
       session_unarchive_cleared? &&
       session[:pending_external_catalog_import_id].to_i == @candidate.id
     session.delete(:pending_external_catalog_import_id) if @auto_start_guest_import
+    @watch_import =
+      ActiveModel::Type::Boolean.new.cast(params[:importing]) ||
+      @auto_start_guest_import
   end
 
   def create_project
@@ -70,6 +73,35 @@ class ExternalCatalogCandidatesController < ApplicationController
     else
       start_guest_import!
     end
+  end
+
+  def import_status
+    if @candidate.obsolete?
+      render json: { import_status: 'failed', import_error: 'This candidate is obsolete.', project_url: nil }
+      return
+    end
+
+    project = import_redirect_project
+    project_url =
+      if project
+        project_path(project, view: 'analysis', **analysis_step_params(project))
+      end
+
+    error =
+      if @candidate.failed?
+        if admin? || !@candidate.scfair_validation_error?
+          @candidate.import_error
+        else
+          'Import failed.'
+        end
+      end
+
+    render json: {
+      import_status: @candidate.import_status,
+      import_error: error,
+      project_url: project_url,
+      project_key: project&.key
+    }
   end
 
   def destroy
@@ -110,8 +142,8 @@ class ExternalCatalogCandidatesController < ApplicationController
 
     ExternalCatalogImportCandidateJob.perform_later(@candidate.id, current_user.id)
 
-    redirect_to external_catalog_candidate_path(@candidate),
-                notice: 'Import started. Refresh this page to see progress.'
+    redirect_to external_catalog_candidate_path(@candidate, importing: 1),
+                notice: 'Import started. Opening the project when parsing begins.'
   end
 
   def start_guest_import!
@@ -151,8 +183,46 @@ class ExternalCatalogCandidatesController < ApplicationController
       sandbox_key: session[:sandbox]
     )
 
-    redirect_to external_catalog_candidate_path(@candidate),
-                notice: 'Import started into your sandbox project. Refresh this page to see progress.'
+    redirect_to external_catalog_candidate_path(@candidate, importing: 1),
+                notice: 'Import started into your sandbox project. Opening the project when parsing begins.'
+  end
+
+  # Prefer the project created by this import (parsing started). While importing,
+  # also accept a just-linked content match. When idle, any readable ASAP project.
+  def import_redirect_project
+    if @candidate.import_project_id.present?
+      project = @candidate.import_project
+      return project if project && !project.being_deleted && readable?(project)
+    end
+
+    matched = @candidate.external_catalog_candidate_projects
+                        .includes(:project)
+                        .order(id: :desc)
+                        .filter_map(&:project)
+                        .find { |project| project && !project.being_deleted && readable?(project) }
+    return matched if matched
+
+    return nil if @candidate.importing?
+
+    accessible_asap_projects_for(@candidate).max_by(&:id)
+  end
+
+  def analysis_step_params(project)
+    step = parsing_step_for_catalog_project(project)
+    step ? { step_id: step.id } : {}
+  end
+
+  def parsing_step_for_catalog_project(project)
+    return nil unless project&.version
+
+    asap_docker_image = Basic.get_asap_docker(project.version)
+    return nil unless asap_docker_image
+
+    Step.find_by(
+      docker_image_id: asap_docker_image.id,
+      version_id: project.version_id,
+      name: 'parsing'
+    )
   end
 
   def create_blocked_message(accessible = nil)

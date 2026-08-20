@@ -245,6 +245,305 @@
       color: #374151;
     }
     .heatmap-icon-btn-clear:hover { background-color: #9ca3af; }
+
+    /* Mobile heatmap layout (below lg / 1024px) — hidden on desktop */
+    #heatmap-mobile-panel-selector,
+    #heatmap-mobile-panel-loading,
+    #heatmap-legend-panel,
+    #heatmap-mobile-selections-header,
+    .heatmap-mobile-panel-close-btn {
+      display: none;
+    }
+
+    .heatmap-panel-header-icon-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      height: 28px;
+      min-height: 28px;
+      min-width: 28px;
+      padding: 4px 8px;
+      font-size: 12px;
+      line-height: 1;
+      color: #6b7280;
+      background: #f9fafb;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .heatmap-panel-header-icon-btn.heatmap-mobile-panel-close-btn {
+      display: none;
+    }
+
+    body.heatmap-mobile-panel-open #project-page-header,
+    body.heatmap-mobile-panel-open #heatmap-page-header {
+      display: none !important;
+    }
+
+    @media (max-width: 1023px) {
+      .heatmap-viewer-full .heatmap-body-row {
+        flex-direction: column !important;
+      }
+
+      .heatmap-viewer-full #heatmap-left-resizer,
+      .heatmap-viewer-full #heatmap-right-resizer {
+        display: none !important;
+      }
+
+      .heatmap-viewer-full #heatmap-left-panel,
+      .heatmap-viewer-full #heatmap-right-panel,
+      .heatmap-viewer-full #heatmap-legend-panel {
+        display: none !important;
+      }
+
+      .heatmap-viewer-full #heatmap-main-panel {
+        width: 100% !important;
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+        order: 0;
+      }
+
+      .heatmap-viewer-full .heatmap-toolbar {
+        padding: 8px 10px !important;
+        flex-shrink: 0;
+        box-sizing: border-box;
+      }
+
+      [data-controller="heatmap"][data-mobile-panel] .heatmap-toolbar {
+        display: none !important;
+      }
+
+      #heatmap-mobile-panel-selector {
+        display: flex;
+        flex-shrink: 0;
+        width: 100%;
+        gap: 3px;
+        padding: 4px 6px;
+        background: white;
+        border-bottom: 1px solid #e5e7eb;
+        box-sizing: border-box;
+        overflow-x: hidden;
+        position: relative;
+        z-index: 40;
+      }
+
+      [data-controller="heatmap"][data-mobile-panel] #heatmap-mobile-panel-selector {
+        position: sticky;
+        top: 0;
+      }
+
+      #heatmap-mobile-panel-selector button {
+        flex: 1 1 0;
+        min-width: 0;
+        max-width: 100%;
+        padding: 3px 2px;
+        font-size: clamp(9px, 2.1vw, 11px);
+        font-weight: 600;
+        color: #374151;
+        background: #f3f4f6;
+        border: 1px solid #d1d5db;
+        border-radius: 4px;
+        cursor: pointer;
+        white-space: normal;
+        text-align: center;
+        line-height: 1.1;
+        overflow-wrap: anywhere;
+        hyphens: auto;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+        transition: background-color 0.08s ease, color 0.08s ease, border-color 0.08s ease;
+      }
+
+      #heatmap-mobile-panel-selector button:active {
+        background: #e5e7eb;
+      }
+
+      #heatmap-mobile-panel-selector button[aria-pressed="true"] {
+        color: #1d4ed8;
+        background: #dbeafe;
+        border-color: #93c5fd;
+      }
+
+      #heatmap-mobile-panel-selector button[aria-pressed="true"]:active {
+        background: #bfdbfe;
+      }
+
+      #heatmap-mobile-panel-loading {
+        display: none;
+        position: fixed;
+        top: var(--heatmap-mobile-panel-top, 120px);
+        left: 0;
+        right: 0;
+        height: var(--heatmap-mobile-panel-region-height, 40vh);
+        z-index: 70;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        background: rgba(255, 255, 255, 0.78);
+        color: #4b5563;
+        font-size: 12px;
+        font-weight: 500;
+        pointer-events: none;
+      }
+
+      #heatmap-mobile-panel-loading.is-visible {
+        display: flex;
+      }
+
+      #heatmap-mobile-panel-selector button.is-loading {
+        position: relative;
+      }
+
+      #heatmap-mobile-panel-selector button.is-loading .heatmap-mobile-panel-btn-label {
+        opacity: 0.35;
+      }
+
+      #heatmap-mobile-panel-selector button.is-loading .heatmap-mobile-panel-btn-spinner {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        color: #2563eb;
+        pointer-events: none;
+      }
+
+      .heatmap-mobile-panel-close-btn,
+      .heatmap-panel-header-icon-btn.heatmap-mobile-panel-close-btn {
+        display: inline-flex;
+      }
+
+      .heatmap-viewer-full .heatmap-canvas-area {
+        position: relative !important;
+        flex: 1 1 auto !important;
+        min-height: 160px !important;
+        height: auto !important;
+        max-height: none !important;
+        width: 100% !important;
+        touch-action: none;
+      }
+
+      [data-controller="heatmap"][data-mobile-panel] .heatmap-canvas-area {
+        flex: 0 0 auto !important;
+        height: var(--heatmap-mobile-plot-height, 200px) !important;
+        max-height: var(--heatmap-mobile-plot-height, 200px) !important;
+        min-height: 0 !important;
+        margin-top: auto !important;
+      }
+
+      .heatmap-viewer-full .heatmap-main-panel > div:last-child {
+        font-size: 11px !important;
+        padding: 4px 10px !important;
+      }
+
+      /* Active panel overlays above the plot */
+      [data-controller="heatmap"][data-mobile-panel="cell-tracks"] #heatmap-left-panel,
+      [data-controller="heatmap"][data-mobile-panel="gene-tracks"] #heatmap-left-panel,
+      [data-controller="heatmap"][data-mobile-panel="genes"] #heatmap-right-panel,
+      [data-controller="heatmap"][data-mobile-panel="cells"] #heatmap-right-panel,
+      [data-controller="heatmap"][data-mobile-panel="gene-sets"] #heatmap-right-panel,
+      [data-controller="heatmap"][data-mobile-panel="legend"] #heatmap-legend-panel {
+        display: flex !important;
+        flex-direction: column !important;
+        position: fixed !important;
+        top: var(--heatmap-mobile-panel-top, 120px);
+        left: 0;
+        right: 0;
+        height: var(--heatmap-mobile-panel-region-height, 40vh) !important;
+        z-index: 60;
+        width: 100% !important;
+        max-width: none !important;
+        background: white;
+        border: none !important;
+        box-shadow: none !important;
+        overflow: hidden !important;
+        border-bottom: 1px solid #e5e7eb !important;
+      }
+
+      [data-controller="heatmap"][data-mobile-panel="cell-tracks"] #heatmap-right-panel,
+      [data-controller="heatmap"][data-mobile-panel="gene-tracks"] #heatmap-right-panel,
+      [data-controller="heatmap"][data-mobile-panel="genes"] #heatmap-left-panel,
+      [data-controller="heatmap"][data-mobile-panel="cells"] #heatmap-left-panel,
+      [data-controller="heatmap"][data-mobile-panel="gene-sets"] #heatmap-left-panel,
+      [data-controller="heatmap"][data-mobile-panel="legend"] #heatmap-left-panel,
+      [data-controller="heatmap"][data-mobile-panel="legend"] #heatmap-right-panel {
+        display: none !important;
+      }
+
+      [data-controller="heatmap"][data-mobile-panel="cell-tracks"] #heatmap-gene-tracks-panel,
+      [data-controller="heatmap"][data-mobile-panel="cell-tracks"] #heatmap-left-divider,
+      [data-controller="heatmap"][data-mobile-panel="gene-tracks"] #heatmap-cell-tracks-panel,
+      [data-controller="heatmap"][data-mobile-panel="gene-tracks"] #heatmap-left-divider,
+      [data-controller="heatmap"][data-mobile-panel="genes"] #heatmap-cells-panel,
+      [data-controller="heatmap"][data-mobile-panel="genes"] #heatmap-right-divider,
+      [data-controller="heatmap"][data-mobile-panel="cells"] #heatmap-genes-panel,
+      [data-controller="heatmap"][data-mobile-panel="cells"] #heatmap-right-divider,
+      [data-controller="heatmap"][data-mobile-panel="gene-sets"] #heatmap-genes-panel,
+      [data-controller="heatmap"][data-mobile-panel="gene-sets"] #heatmap-right-divider {
+        display: none !important;
+      }
+
+      [data-controller="heatmap"][data-mobile-panel="cell-tracks"] #heatmap-cell-tracks-panel,
+      [data-controller="heatmap"][data-mobile-panel="gene-tracks"] #heatmap-gene-tracks-panel,
+      [data-controller="heatmap"][data-mobile-panel="genes"] #heatmap-genes-panel,
+      [data-controller="heatmap"][data-mobile-panel="cells"] #heatmap-cells-panel,
+      [data-controller="heatmap"][data-mobile-panel="gene-sets"] #heatmap-cells-panel {
+        height: 100% !important;
+        flex: 1 1 auto !important;
+        min-height: 0 !important;
+        border: none !important;
+        overflow: hidden !important;
+      }
+
+      [data-controller="heatmap"][data-mobile-panel="cells"] #heatmap-selection-tabs,
+      [data-controller="heatmap"][data-mobile-panel="gene-sets"] #heatmap-selection-tabs {
+        display: none !important;
+      }
+
+      [data-controller="heatmap"][data-mobile-panel="cells"] #heatmap-mobile-selections-header,
+      [data-controller="heatmap"][data-mobile-panel="gene-sets"] #heatmap-mobile-selections-header {
+        display: flex !important;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-shrink: 0;
+        padding: 10px 12px;
+        border-bottom: 1px solid #e5e7eb;
+        background: #f9fafb;
+        box-sizing: border-box;
+      }
+
+      #heatmap-mobile-selections-header h3 {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: #111827;
+        line-height: 1.2;
+      }
+
+      [data-controller="heatmap"][data-mobile-panel="cells"] #heatmap-mobile-selections-title-gene-sets,
+      [data-controller="heatmap"][data-mobile-panel="gene-sets"] #heatmap-mobile-selections-title-cells {
+        display: none !important;
+      }
+
+      #heatmap-legend-panel .heatmap-legend-panel-body {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: auto;
+        padding: 12px 14px;
+        box-sizing: border-box;
+      }
+
+      #heatmap-legend-panel canvas[data-heatmap-target="mobileLegend"] {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+      }
+    }
   </style>
   <% if full_height %>
   <div class="heatmap-body-row">
@@ -274,6 +573,13 @@
                     onmouseover="this.style.color='#22c55e'"
                     onmouseout="this.style.color='#9ca3af'">
               <i class="fas fa-layer-group" style="font-size:13px;" aria-hidden="true"></i>
+            </button>
+            <button type="button"
+                    class="heatmap-panel-header-icon-btn heatmap-mobile-panel-close-btn"
+                    data-action="click->heatmap#closeMobilePanel"
+                    title="Close panel"
+                    aria-label="Close panel">
+              <i class="fas fa-times" style="font-size:12px;" aria-hidden="true"></i>
             </button>
           </div>
         </div>
@@ -310,6 +616,13 @@
                     onmouseover="this.style.color='#22c55e'"
                     onmouseout="this.style.color='#9ca3af'">
               <i class="fas fa-layer-group" style="font-size:13px;" aria-hidden="true"></i>
+            </button>
+            <button type="button"
+                    class="heatmap-panel-header-icon-btn heatmap-mobile-panel-close-btn"
+                    data-action="click->heatmap#closeMobilePanel"
+                    title="Close panel"
+                    aria-label="Close panel">
+              <i class="fas fa-times" style="font-size:12px;" aria-hidden="true"></i>
             </button>
           </div>
         </div>
@@ -485,6 +798,48 @@
     </div>
   </div>
   <% if full_height %>
+      <div id="heatmap-mobile-panel-selector" role="toolbar" aria-label="Heatmap panels">
+        <button type="button"
+                data-action="pointerdown->heatmap#openMobilePanel"
+                data-mobile-panel="cell-tracks"
+                aria-pressed="false">
+          <span class="heatmap-mobile-panel-btn-label">Cell tracks</span>
+        </button>
+        <button type="button"
+                data-action="pointerdown->heatmap#openMobilePanel"
+                data-mobile-panel="gene-tracks"
+                aria-pressed="false">
+          <span class="heatmap-mobile-panel-btn-label">Gene tracks</span>
+        </button>
+        <button type="button"
+                data-action="pointerdown->heatmap#openMobilePanel"
+                data-mobile-panel="genes"
+                aria-pressed="false">
+          <span class="heatmap-mobile-panel-btn-label">Genes</span>
+        </button>
+        <button type="button"
+                data-action="pointerdown->heatmap#openMobilePanel"
+                data-mobile-panel="cells"
+                aria-pressed="false">
+          <span class="heatmap-mobile-panel-btn-label">Cell sets</span>
+        </button>
+        <button type="button"
+                data-action="pointerdown->heatmap#openMobilePanel"
+                data-mobile-panel="gene-sets"
+                aria-pressed="false">
+          <span class="heatmap-mobile-panel-btn-label">Gene sets</span>
+        </button>
+        <button type="button"
+                data-action="pointerdown->heatmap#openMobilePanel"
+                data-mobile-panel="legend"
+                aria-pressed="false">
+          <span class="heatmap-mobile-panel-btn-label">Legend</span>
+        </button>
+      </div>
+      <div id="heatmap-mobile-panel-loading" aria-live="polite" aria-busy="false">
+        <i class="fas fa-spinner fa-spin" aria-hidden="true"></i>
+        <span>Loading</span>
+      </div>
       <div class="heatmap-canvas-area" style="position:relative; width:100%; height:660px; background:#ffffff; overflow:hidden;">
         <canvas data-heatmap-target="webgl"></canvas>
         <canvas data-heatmap-target="overlay"></canvas>
@@ -522,7 +877,16 @@
     <aside id="heatmap-right-panel" class="heatmap-right-panel" aria-label="Heatmap selections">
       <div id="heatmap-genes-panel" style="height:50%; display:flex; flex-direction:column; min-height:0; background:#ffffff; overflow:hidden;">
         <div style="padding:12px 14px; border-bottom:1px solid #e5e7eb; flex-shrink:0; background:#fff;">
-          <h3 style="margin:0; font-size:14px; font-weight:600; color:#111827;">Genes</h3>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <h3 style="margin:0; font-size:14px; font-weight:600; color:#111827; flex:1; min-width:0;">Genes</h3>
+            <button type="button"
+                    class="heatmap-panel-header-icon-btn heatmap-mobile-panel-close-btn"
+                    data-action="click->heatmap#closeMobilePanel"
+                    title="Close panel"
+                    aria-label="Close panel">
+              <i class="fas fa-times" style="font-size:12px;" aria-hidden="true"></i>
+            </button>
+          </div>
         </div>
         <div style="flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden;">
           <div style="flex-shrink:0; padding:10px 14px 0 14px; display:flex; flex-direction:column; gap:8px;">
@@ -621,6 +985,19 @@
       </div>
       <div id="heatmap-right-divider" class="heatmap-row-resizer" title="Resize panels"></div>
       <div id="heatmap-cells-panel" style="flex:1; display:flex; flex-direction:column; min-height:0; background:#f9fafb; overflow:hidden;">
+        <div id="heatmap-mobile-selections-header">
+          <h3>
+            <span id="heatmap-mobile-selections-title-cells">Cell sets</span>
+            <span id="heatmap-mobile-selections-title-gene-sets">Gene sets</span>
+          </h3>
+          <button type="button"
+                  class="heatmap-panel-header-icon-btn heatmap-mobile-panel-close-btn"
+                  data-action="click->heatmap#closeMobilePanel"
+                  title="Close panel"
+                  aria-label="Close panel">
+            <i class="fas fa-times" style="font-size:12px;" aria-hidden="true"></i>
+          </button>
+        </div>
         <div id="heatmap-selection-tabs" style="border-bottom:1px solid #e5e7eb; flex-shrink:0; background:#fff;">
           <nav style="display:flex; align-items:center; gap:8px; padding:0 14px;" aria-label="Cell and gene set tabs">
             <button type="button"
@@ -902,6 +1279,22 @@
             </div>
           </div>
         </div>
+      </div>
+    </aside>
+
+    <aside id="heatmap-legend-panel" class="heatmap-legend-panel" aria-label="Heatmap legend">
+      <div style="padding:12px 14px; border-bottom:1px solid #e5e7eb; flex-shrink:0; background:#f9fafb; display:flex; align-items:center; gap:8px;">
+        <h3 style="margin:0; font-size:16px; font-weight:600; color:#111827; flex:1; min-width:0;">Legend</h3>
+        <button type="button"
+                class="heatmap-panel-header-icon-btn heatmap-mobile-panel-close-btn"
+                data-action="click->heatmap#closeMobilePanel"
+                title="Close panel"
+                aria-label="Close panel">
+          <i class="fas fa-times" style="font-size:12px;" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div class="heatmap-legend-panel-body">
+        <canvas data-heatmap-target="mobileLegend"></canvas>
       </div>
     </aside>
   </div>

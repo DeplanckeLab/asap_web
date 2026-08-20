@@ -164,6 +164,7 @@ Rails.application.routes.draw do
   resources :external_catalog_candidates, only: [:index, :show, :destroy] do
     member do
       post :create_project
+      get :import_status
     end
   end
   resources :data_classes

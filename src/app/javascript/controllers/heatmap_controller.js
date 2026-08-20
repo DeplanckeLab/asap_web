@@ -56,7 +56,8 @@ export default class extends Controller {
     "clearGeneSelectionBtn", "clearCellSelectionBtn", "restorePreviousGenesBtn",
     "geneListHistoryBtn", "geneListHistoryMenu",
     "geneSearchInput", "geneSearchDropdown", "geneSearchList", "geneSearchListEmpty",
-    "geneSetOverlapBtn", "toggleAllGenesBtn"
+    "geneSetOverlapBtn", "toggleAllGenesBtn",
+    "mobileLegend"
   ]
 
   connect() {
@@ -213,6 +214,7 @@ export default class extends Controller {
     this.syncLegendWidthControls()
     this.syncRightMarginControls()
     this.initializePanelLayout()
+    this.initializeMobileHeatmapLayout()
     this.boundGeneListHistoryOutsideClick = (event) => {
       if (!this.hasGeneListHistoryMenuTarget) return
       if (this.geneListHistoryMenuTarget.style.display !== "block") return
@@ -227,6 +229,7 @@ export default class extends Controller {
 
   disconnect() {
     this.persistCurrentCheckpointBeforeTeardown("disconnect")
+    this.teardownMobileHeatmapLayout()
     this.teardownPanelLayout()
     this.teardownSavedCellSetLiveUpdates()
     this.teardownSavedCellSetsFilterMenus()
@@ -1873,6 +1876,14 @@ export default class extends Controller {
 
   handleResize() {
     if (!this.renderer) return
+    if (this.isMobileHeatmapLayout()) {
+      // Recalculate locked plot height only while panels are closed so an open
+      // overlay does not jump the canvas when chrome is hidden.
+      if (!this.element?.dataset?.mobilePanel) {
+        this._mobilePlotHeightLock = null
+      }
+      this.updateMobileHeatmapChromeHeight()
+    }
     const container = this.element.querySelector(".heatmap-canvas-area")
     if (!container) return
     const w = container.clientWidth
@@ -1910,11 +1921,14 @@ export default class extends Controller {
 
   computeLayout() {
     const L = this.layout
+    const mobile = this.isMobileHeatmapLayout()
     const colTracks = this.colTracks.filter((t) => !t.loading)
     const rowTracks = this.rowTracks.filter((t) => !t.loading)
 
-    const colTreeH = this.showColTree && this.colTree ? L.colTreeH : 0
-    const rowTreeW = this.showRowTree && this.rowTree ? L.rowTreeW : 0
+    const colTreeMax = mobile ? 48 : L.colTreeH
+    const rowTreeMax = mobile ? 48 : L.rowTreeW
+    const colTreeH = this.showColTree && this.colTree ? colTreeMax : 0
+    const rowTreeW = this.showRowTree && this.rowTree ? rowTreeMax : 0
 
     this.colTrackOffsets = []
     let colTracksH = 0
@@ -1943,11 +1957,11 @@ export default class extends Controller {
     this.my = L.pad + colTreeH + this.topTracksH
     this.colTreeH = colTreeH
     this.rowTreeW = rowTreeW
-    this.rightLegendW = this.estimateRightLegendWidth()
-    this.rightMargin = this.estimateRightMargin()
-    this.labelW = this.showLabels ? L.rowLabelW : 0
+    this.rightLegendW = mobile ? 0 : this.estimateRightLegendWidth()
+    this.rightMargin = mobile ? 0 : this.estimateRightMargin()
+    this.labelW = this.showLabels ? (mobile ? Math.min(L.rowLabelW, 36) : L.rowLabelW) : 0
 
-    const labelH = this.showLabels ? L.colLabelH : 0
+    const labelH = this.showLabels ? (mobile ? Math.min(L.colLabelH, 40) : L.colLabelH) : 0
     // Right side: [matrix][gene labels][rightMargin][legend][pad]
     this.mw = Math.max(20, this.containerW - this.mx - this.labelW - this.rightMargin - this.rightLegendW - L.pad)
     this.mh = Math.max(20, this.containerH - this.my - labelH - L.pad)
@@ -2249,6 +2263,488 @@ export default class extends Controller {
     this._onPanelResizeMove = null
     this._onPanelResizeUp = null
     this._panelResizeState = null
+  }
+
+  isMobileHeatmapLayout() {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return false
+    }
+    if (!this.element?.querySelector?.("#heatmap-mobile-panel-selector")) {
+      return false
+    }
+    return window.matchMedia("(max-width: 1023px)").matches
+  }
+
+  initializeMobileHeatmapLayout() {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return
+    }
+    if (!this.element?.querySelector?.("#heatmap-mobile-panel-selector")) {
+      return
+    }
+
+    this.mobileHeatmapMediaQuery = window.matchMedia("(max-width: 1023px)")
+    this.boundSyncMobileHeatmapLayout = () => this.syncMobileHeatmapLayout()
+    this.boundMobileHeatmapEscape = (event) => {
+      if (event.key !== "Escape") return
+      if (!this.element?.dataset?.mobilePanel) return
+      this.closeMobilePanel()
+    }
+
+    if (typeof this.mobileHeatmapMediaQuery.addEventListener === "function") {
+      this.mobileHeatmapMediaQuery.addEventListener("change", this.boundSyncMobileHeatmapLayout)
+    } else if (typeof this.mobileHeatmapMediaQuery.addListener === "function") {
+      this.mobileHeatmapMediaQuery.addListener(this.boundSyncMobileHeatmapLayout)
+    }
+
+    document.addEventListener("keydown", this.boundMobileHeatmapEscape)
+    this.bindMobileLegendInteractions()
+    this.syncMobileHeatmapLayout({ redraw: false })
+  }
+
+  teardownMobileHeatmapLayout() {
+    if (this.mobileHeatmapMediaQuery && this.boundSyncMobileHeatmapLayout) {
+      if (typeof this.mobileHeatmapMediaQuery.removeEventListener === "function") {
+        this.mobileHeatmapMediaQuery.removeEventListener("change", this.boundSyncMobileHeatmapLayout)
+      } else if (typeof this.mobileHeatmapMediaQuery.removeListener === "function") {
+        this.mobileHeatmapMediaQuery.removeListener(this.boundSyncMobileHeatmapLayout)
+      }
+    }
+    this.mobileHeatmapMediaQuery = null
+    this.boundSyncMobileHeatmapLayout = null
+
+    if (this.boundMobileHeatmapEscape) {
+      document.removeEventListener("keydown", this.boundMobileHeatmapEscape)
+      this.boundMobileHeatmapEscape = null
+    }
+
+    if (this._mobileSplitLayoutTimer) {
+      window.clearTimeout(this._mobileSplitLayoutTimer)
+      this._mobileSplitLayoutTimer = null
+    }
+
+    this.unbindMobileLegendInteractions()
+    this.closeMobilePanel({ redraw: false })
+    document.body.classList.remove("heatmap-mobile-panel-open")
+    this.element?.classList?.remove("heatmap-mobile-layout")
+    this._mobilePlotHeightLock = null
+    this._mobileStableHeaderHeight = null
+    this._mobileStableToolbarHeight = null
+    this._pendingMobilePanel = null
+    this._mobileLegendHit = null
+    this.hideMobilePanelLoading()
+    this.element?.style?.removeProperty?.("--heatmap-mobile-panel-top")
+    this.element?.style?.removeProperty?.("--heatmap-mobile-panel-region-height")
+    this.element?.style?.removeProperty?.("--heatmap-mobile-plot-height")
+  }
+
+  syncMobileHeatmapLayout({ redraw = true } = {}) {
+    if (!this.element) return
+
+    const isMobile = this.isMobileHeatmapLayout()
+    this.element.classList.toggle("heatmap-mobile-layout", isMobile)
+
+    if (!isMobile && this.element.dataset.mobilePanel) {
+      this.closeMobilePanel({ redraw: false })
+    }
+
+    this.updateMobileHeatmapChromeHeight()
+    this.updateMobilePanelSelectorState()
+
+    if (redraw && this.renderer) {
+      requestAnimationFrame(() => this.handleResize())
+    }
+  }
+
+  updateMobileHeatmapChromeHeight() {
+    if (!this.element || !this.isMobileHeatmapLayout()) {
+      document.body.classList.remove("heatmap-mobile-panel-open")
+      this._mobilePlotHeightLock = null
+      this._mobileStableHeaderHeight = null
+      this._mobileStableToolbarHeight = null
+      this._pendingMobilePanel = null
+      this.hideMobilePanelLoading()
+      this.element?.style?.removeProperty?.("--heatmap-mobile-panel-top")
+      this.element?.style?.removeProperty?.("--heatmap-mobile-panel-region-height")
+      this.element?.style?.removeProperty?.("--heatmap-mobile-plot-height")
+      return
+    }
+
+    const header = document.getElementById("project-page-header")
+    const pageHeader = document.getElementById("heatmap-page-header")
+    const toolbar = this.element.querySelector(".heatmap-toolbar")
+    const selector = this.element.querySelector("#heatmap-mobile-panel-selector")
+    const footer = this.element.querySelector("#heatmap-main-panel > div:last-of-type")
+    const panelOpen = !!this.element.dataset.mobilePanel
+
+    if (!panelOpen) {
+      this._mobileStableHeaderHeight =
+        (header?.getBoundingClientRect?.().height || 0) +
+        (pageHeader?.getBoundingClientRect?.().height || 0) || 64
+      this._mobileStableToolbarHeight = toolbar?.getBoundingClientRect?.().height || 0
+    }
+
+    document.body.classList.toggle("heatmap-mobile-panel-open", panelOpen)
+
+    const headerHeight = this._mobileStableHeaderHeight || 64
+    const toolbarHeight = this._mobileStableToolbarHeight || 0
+    const selectorHeight = selector?.getBoundingClientRect?.().height || 0
+    const footerHeight = footer?.getBoundingClientRect?.().height || 28
+    const stableChromeHeight = Math.ceil(headerHeight + toolbarHeight + selectorHeight + footerHeight + 8)
+
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+    const canvasArea = this.element.querySelector(".heatmap-canvas-area")
+
+    // Capture the closed-layout canvas height so opening a panel does not resize it.
+    if (!panelOpen) {
+      const measured = canvasArea?.clientHeight || 0
+      this._mobilePlotHeightLock = measured > 0
+        ? measured
+        : Math.max(160, Math.round(viewportHeight - stableChromeHeight))
+      this.element.style.removeProperty("--heatmap-mobile-plot-height")
+      this.element.style.removeProperty("--heatmap-mobile-panel-top")
+      this.element.style.removeProperty("--heatmap-mobile-panel-region-height")
+      return
+    }
+
+    this.element.style.setProperty(
+      "--heatmap-mobile-plot-height",
+      `${this._mobilePlotHeightLock || Math.max(160, Math.round(viewportHeight - stableChromeHeight))}px`
+    )
+
+    const selectorBottom = selector?.getBoundingClientRect?.().bottom
+    const panelTop = Math.ceil(
+      Number.isFinite(selectorBottom) && selectorBottom > 0
+        ? selectorBottom
+        : selectorHeight
+    )
+    const availableBelowChrome = Math.max(180, viewportHeight - panelTop)
+    const plotReserve = (this._mobilePlotHeightLock || 200) + footerHeight + 4
+    const panelRegionHeight = Math.max(160, availableBelowChrome - plotReserve)
+
+    this.element.style.setProperty("--heatmap-mobile-panel-top", `${panelTop}px`)
+    this.element.style.setProperty("--heatmap-mobile-panel-region-height", `${panelRegionHeight}px`)
+  }
+
+  scheduleMobileSplitLayoutRefresh({ redraw = false } = {}) {
+    if (this._mobileSplitLayoutTimer) {
+      window.clearTimeout(this._mobileSplitLayoutTimer)
+      this._mobileSplitLayoutTimer = null
+    }
+
+    this._mobileSplitLayoutTimer = window.setTimeout(() => {
+      this._mobileSplitLayoutTimer = null
+      if (!this.element || !this.isMobileHeatmapLayout()) return
+      this.updateMobileHeatmapChromeHeight()
+      if (redraw && this.renderer) {
+        this.handleResize()
+      } else if (this.element.dataset.mobilePanel === "legend") {
+        this.drawMobileLegend()
+      }
+    }, 0)
+  }
+
+  openMobilePanel(eventOrKey) {
+    if (eventOrKey?.type === "pointerdown") {
+      if (eventOrKey.pointerType === "mouse" && eventOrKey.button !== 0) return
+      eventOrKey.preventDefault()
+      eventOrKey.stopPropagation?.()
+    } else if (eventOrKey?.preventDefault) {
+      eventOrKey.preventDefault()
+      eventOrKey.stopPropagation?.()
+    }
+
+    const panelKey = typeof eventOrKey === "string"
+      ? eventOrKey
+      : (eventOrKey?.currentTarget?.dataset?.mobilePanel || eventOrKey?.target?.dataset?.mobilePanel || "")
+    const normalizedKey = String(panelKey || "").trim()
+    const allowed = new Set(["cell-tracks", "gene-tracks", "genes", "cells", "gene-sets", "legend"])
+    if (!allowed.has(normalizedKey)) return
+
+    if (!this.isMobileHeatmapLayout()) {
+      if (normalizedKey === "cells" || normalizedKey === "gene-sets") {
+        this.setSelectionTab(normalizedKey === "gene-sets" ? "gene-sets" : "cells")
+      }
+      return
+    }
+
+    const previousPanel = this.element.dataset.mobilePanel || this._pendingMobilePanel || ""
+    const isUserGesture = typeof eventOrKey !== "string" && !!eventOrKey?.type
+
+    if (isUserGesture && previousPanel === normalizedKey) {
+      this.closeMobilePanel({ redraw: false })
+      return
+    }
+
+    const wasClosed = !previousPanel
+    this._mobilePanelSwitchToken = (this._mobilePanelSwitchToken || 0) + 1
+    const switchToken = this._mobilePanelSwitchToken
+    this._pendingMobilePanel = normalizedKey
+
+    this.updateMobilePanelSelectorState(normalizedKey, { loadingKey: normalizedKey })
+    this.ensureMobilePanelRegionVars()
+    this.showMobilePanelLoading()
+
+    const revealPanel = () => {
+      if (switchToken !== this._mobilePanelSwitchToken) return
+
+      // Measure closed-layout plot height before hiding toolbar/header.
+      if (wasClosed) {
+        this.updateMobileHeatmapChromeHeight()
+      }
+
+      this.element.dataset.mobilePanel = normalizedKey
+      this._pendingMobilePanel = null
+      this.updateMobilePanelSelectorState(normalizedKey, { loadingKey: normalizedKey })
+
+      if (normalizedKey === "cells" || normalizedKey === "gene-sets") {
+        this.setSelectionTab(normalizedKey === "gene-sets" ? "gene-sets" : "cells")
+      }
+
+      if (wasClosed) {
+        this.updateMobileHeatmapChromeHeight()
+      }
+
+      const finishLoading = () => {
+        if (switchToken !== this._mobilePanelSwitchToken) return
+        if (normalizedKey === "legend") {
+          this.drawMobileLegend()
+        }
+        window.setTimeout(() => {
+          if (switchToken !== this._mobilePanelSwitchToken) return
+          this.hideMobilePanelLoading()
+          this.updateMobilePanelSelectorState(normalizedKey)
+        }, 50)
+      }
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(finishLoading)
+      })
+    }
+
+    window.setTimeout(revealPanel, 0)
+  }
+
+  closeMobilePanel(eventOrOptions) {
+    if (eventOrOptions?.preventDefault) {
+      eventOrOptions.preventDefault()
+      eventOrOptions.stopPropagation?.()
+    }
+
+    const redraw = eventOrOptions?.redraw === true
+    this._mobilePanelSwitchToken = (this._mobilePanelSwitchToken || 0) + 1
+    this._pendingMobilePanel = null
+    this.hideMobilePanelLoading()
+
+    if (!this.element?.dataset?.mobilePanel) {
+      this.updateMobilePanelSelectorState("")
+      return
+    }
+
+    delete this.element.dataset.mobilePanel
+    document.body.classList.remove("heatmap-mobile-panel-open")
+    this.updateMobilePanelSelectorState("")
+    this.updateMobileHeatmapChromeHeight()
+
+    if (redraw) {
+      this.scheduleMobileSplitLayoutRefresh({ redraw: true })
+    }
+  }
+
+  ensureMobilePanelRegionVars() {
+    if (!this.element) return
+    const hasTop = this.element.style.getPropertyValue("--heatmap-mobile-panel-top")
+    const hasHeight = this.element.style.getPropertyValue("--heatmap-mobile-panel-region-height")
+    if (hasTop && hasHeight) return
+
+    const selector = this.element.querySelector("#heatmap-mobile-panel-selector")
+    const selectorBottom = selector?.getBoundingClientRect?.().bottom
+    const panelTop = Math.ceil(
+      Number.isFinite(selectorBottom) && selectorBottom > 0
+        ? selectorBottom
+        : (selector?.getBoundingClientRect?.().height || 40)
+    )
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+    const plotReserve = (this._mobilePlotHeightLock || 200) + 28 + 4
+    const panelRegionHeight = Math.max(160, viewportHeight - panelTop - plotReserve)
+
+    this.element.style.setProperty("--heatmap-mobile-panel-top", `${panelTop}px`)
+    this.element.style.setProperty("--heatmap-mobile-panel-region-height", `${panelRegionHeight}px`)
+  }
+
+  showMobilePanelLoading() {
+    const el = this.element?.querySelector?.("#heatmap-mobile-panel-loading")
+    if (!el) return
+    el.classList.add("is-visible")
+    el.setAttribute("aria-busy", "true")
+  }
+
+  hideMobilePanelLoading() {
+    const el = this.element?.querySelector?.("#heatmap-mobile-panel-loading")
+    if (!el) return
+    el.classList.remove("is-visible")
+    el.setAttribute("aria-busy", "false")
+  }
+
+  updateMobilePanelSelectorState(activePanel = null, { loadingKey = null } = {}) {
+    const resolvedActive = activePanel != null
+      ? String(activePanel)
+      : (this._pendingMobilePanel || this.element?.dataset?.mobilePanel || "")
+    const buttons = this.element?.querySelectorAll?.("#heatmap-mobile-panel-selector [data-mobile-panel]") || []
+    buttons.forEach((button) => {
+      const key = button.dataset.mobilePanel || ""
+      const isActive = key === resolvedActive
+      const isLoading = loadingKey != null && key === loadingKey
+      button.setAttribute("aria-pressed", isActive ? "true" : "false")
+      button.classList.toggle("is-loading", isLoading)
+
+      const existingSpinner = button.querySelector(".heatmap-mobile-panel-btn-spinner")
+      if (isLoading && !existingSpinner) {
+        const spinner = document.createElement("span")
+        spinner.className = "heatmap-mobile-panel-btn-spinner"
+        spinner.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>'
+        button.appendChild(spinner)
+      } else if (!isLoading && existingSpinner) {
+        existingSpinner.remove()
+      }
+    })
+  }
+
+  bindMobileLegendInteractions() {
+    if (!this.hasMobileLegendTarget) return
+    this.unbindMobileLegendInteractions()
+    this._onMobileLegendClick = (e) => this.onMobileLegendClick(e)
+    this._onMobileLegendMove = (e) => this.onMobileLegendMove(e)
+    this._onMobileLegendLeave = () => this.onMobileLegendLeave()
+    this.mobileLegendTarget.addEventListener("click", this._onMobileLegendClick)
+    this.mobileLegendTarget.addEventListener("pointermove", this._onMobileLegendMove)
+    this.mobileLegendTarget.addEventListener("pointerleave", this._onMobileLegendLeave)
+  }
+
+  unbindMobileLegendInteractions() {
+    if (!this.hasMobileLegendTarget) return
+    if (this._onMobileLegendClick) {
+      this.mobileLegendTarget.removeEventListener("click", this._onMobileLegendClick)
+    }
+    if (this._onMobileLegendMove) {
+      this.mobileLegendTarget.removeEventListener("pointermove", this._onMobileLegendMove)
+    }
+    if (this._onMobileLegendLeave) {
+      this.mobileLegendTarget.removeEventListener("pointerleave", this._onMobileLegendLeave)
+    }
+    this._onMobileLegendClick = null
+    this._onMobileLegendMove = null
+    this._onMobileLegendLeave = null
+  }
+
+  mobileLegendLocalPoint(e) {
+    const rect = this.mobileLegendTarget.getBoundingClientRect()
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  }
+
+  hitTestMobileLegend(p) {
+    const store = this._mobileLegendHit
+    if (!store) return null
+    const b = store.legendBounds
+    if (b && p.x >= b.x && p.x <= b.x + b.width && p.y >= b.y && p.y <= b.y + b.height) {
+      return { type: "expression" }
+    }
+    for (const entry of (store.trackLegendBounds || [])) {
+      const bb = entry.bounds
+      if (p.x >= bb.x && p.x <= bb.x + bb.width && p.y >= bb.y && p.y <= bb.y + bb.height) {
+        return { type: "track", track: entry.track, axis: entry.axis }
+      }
+    }
+    return null
+  }
+
+  onMobileLegendClick(e) {
+    const p = this.mobileLegendLocalPoint(e)
+    const legendHit = this.hitTestMobileLegend(p)
+    if (!legendHit) return
+    if (legendHit.type === "expression") this.openExpressionGradientEditor()
+    else this.openTrackGradientEditor(legendHit.track, legendHit.axis)
+  }
+
+  onMobileLegendMove(e) {
+    const p = this.mobileLegendLocalPoint(e)
+    const hoveringTarget = this.hitTestMobileLegend(p)
+    const hoveringLegend = !!hoveringTarget
+    const hoverKey = hoveringTarget?.type === "track"
+      ? `${hoveringTarget.axis}:${hoveringTarget.track.id}`
+      : (hoveringTarget ? "expression" : null)
+    if (hoveringLegend !== this.isHoveringLegend || hoverKey !== this.hoveringTrackLegendKey) {
+      this.isHoveringLegend = hoveringLegend
+      this.hoveringTrackLegendKey = hoverKey
+      this.mobileLegendTarget.style.cursor = hoveringLegend ? "pointer" : "default"
+      this.drawMobileLegend()
+    }
+  }
+
+  onMobileLegendLeave() {
+    if (!this.isHoveringLegend && !this.hoveringTrackLegendKey) return
+    this.isHoveringLegend = false
+    this.hoveringTrackLegendKey = null
+    if (this.hasMobileLegendTarget) this.mobileLegendTarget.style.cursor = "default"
+    this.drawMobileLegend()
+  }
+
+  estimateMobileLegendHeight() {
+    let height = 72
+    const tracks = this.tracksWithInPlotLegends()
+    if (tracks.length) height += 24
+    tracks.forEach((track) => {
+      height += 18
+      if (track.type === "numerical") {
+        height += 22
+      } else {
+        const cats = Array.isArray(track.categories) ? track.categories.length : 0
+        height += Math.max(1, Math.ceil(cats / 2)) * 16 + 8
+      }
+    })
+    return Math.max(120, height + 24)
+  }
+
+  drawMobileLegend() {
+    if (!this.hasMobileLegendTarget) return
+    if (!this.isMobileHeatmapLayout()) return
+
+    const canvas = this.mobileLegendTarget
+    const body = canvas.closest(".heatmap-legend-panel-body") || canvas.parentElement
+    const cssW = Math.max(160, Math.floor(body?.clientWidth || canvas.clientWidth || 280))
+    const cssH = this.estimateMobileLegendHeight()
+
+    const prevLeft = this.legendLeft
+    const prevLegendW = this.rightLegendW
+    const prevContainerH = this.containerH
+
+    this.legendLeft = 0
+    this.rightLegendW = cssW
+    this.containerH = cssH
+
+    canvas.style.width = `${cssW}px`
+    canvas.style.height = `${cssH}px`
+    canvas.width = Math.max(1, Math.round(cssW * this.dpr))
+    canvas.height = Math.max(1, Math.round(cssH * this.dpr))
+
+    const ctx = canvas.getContext("2d")
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0)
+    ctx.clearRect(0, 0, cssW, cssH)
+    ctx.lineWidth = 1
+
+    this.drawLegend(ctx)
+    this.drawTrackLegends(ctx)
+
+    this._mobileLegendHit = {
+      legendBounds: this.legendBounds,
+      trackLegendBounds: Array.isArray(this.trackLegendBounds) ? [...this.trackLegendBounds] : []
+    }
+    this.legendBounds = null
+    this.trackLegendBounds = []
+
+    this.legendLeft = prevLeft
+    this.rightLegendW = prevLegendW
+    this.containerH = prevContainerH
   }
 
   onWheel(e) {
@@ -3406,8 +3902,16 @@ export default class extends Controller {
     this.drawTracks(ctx)
     if (this.showLabels) this.drawLabels(ctx)
     this.drawSelectedGeneZoomedOutMarks(ctx)
-    this.drawLegend(ctx)
-    this.drawTrackLegends(ctx)
+    if (this.isMobileHeatmapLayout()) {
+      this.legendBounds = null
+      this.trackLegendBounds = []
+      if (this.element?.dataset?.mobilePanel === "legend") {
+        this.drawMobileLegend()
+      }
+    } else {
+      this.drawLegend(ctx)
+      this.drawTrackLegends(ctx)
+    }
     this.drawActiveSelectionRect(ctx)
   }
 

@@ -29,9 +29,19 @@
                       method: :post,
                       form: {
                         id: "catalog-import-form",
-                        data: (import_confirm ? { turbo_confirm: import_confirm } : {})
+                        data: {
+                          controller: "catalog-import",
+                          catalog_import_status_url_value: import_status_external_catalog_candidate_path(@candidate),
+                          catalog_import_watch_value: !!@watch_import,
+                          **(import_confirm ? { turbo_confirm: import_confirm } : {})
+                        }
                       },
                       class: "inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900" %>
+      <% elsif @candidate.importing? || @watch_import %>
+        <div id="catalog-import-watcher"
+             data-controller="catalog-import"
+             data-catalog-import-status-url-value="<%= import_status_external_catalog_candidate_path(@candidate) %>"
+             data-catalog-import-watch-value="<%= @watch_import ? 'true' : 'false' %>"></div>
       <% end %>
       <% if admin? && synced_reference_data_writable? && @candidate.can_mark_obsolete? %>
         <%= button_to "Mark obsolete",
@@ -145,7 +155,7 @@
   <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 space-y-3">
     <h2 class="text-lg font-semibold text-gray-900 dark:text-white">ASAP projects</h2>
     <% if @candidate.importing? %>
-      <p class="text-sm text-amber-700 dark:text-amber-300">Import in progress. Refresh this page to update status.</p>
+      <p class="text-sm text-amber-700 dark:text-amber-300">Import in progress. The analysis view will open when parsing starts.</p>
     <% end %>
     <% if @candidate.failed? && @candidate.import_error.present? %>
       <% if admin? || !@candidate.scfair_validation_error? %>

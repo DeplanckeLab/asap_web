@@ -8326,9 +8326,19 @@ class ProjectsController < ApplicationController
     # This is separate from is_current (which is for the unlock icon)
     @selected_step_id = params[:selected_step_id].present? ? params[:selected_step_id].to_i : nil
 
+    desktop_html = render_to_string(partial: 'projects/views/steps_panel', formats: [:html], layout: false)
+    mobile_html = render_to_string(partial: 'projects/views/steps_panel_mobile', formats: [:html], layout: false)
+
     respond_to do |format|
-      format.html { render partial: 'projects/views/steps_panel', layout: false }
-      format.json { render json: { steps: @steps_with_status } }
+      # Desktop-only HTML kept for backward compatibility; the analysis view
+      # requests JSON so mobile and desktop panels stay in sync.
+      format.html { render html: desktop_html.html_safe }
+      format.json {
+        render json: {
+          desktop_html: desktop_html,
+          mobile_html: mobile_html
+        }
+      }
     end
   end
 

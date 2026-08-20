@@ -15,9 +15,10 @@
     <div class="flex items-center justify-between gap-3 mb-2">
       <div class="flex items-center gap-3">
         <h2 class="text-lg font-bold text-gray-900">Analysis</h2>
-        <% if @project_type %>
-          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
-            <%= @project_type.name %>
+        <% if @project_type&.tag.present? %>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200"
+                title="<%= @project_type.name %>">
+            <%= @project_type.tag %>
           </span>
         <% end %>
       </div>
@@ -114,7 +115,9 @@
   </div>
 
   <!-- Step Selector for Narrow Screens (Mobile/Tablet) -->
-  <%= render partial: 'projects/views/steps_panel_mobile' %>
+  <div data-step-selector-target="stepsPanelMobile">
+    <%= render partial: 'projects/views/steps_panel_mobile' %>
+  </div>
 
   <!-- Two Column Layout: Steps Panel (Left) and Step Results (Right) -->
   <div class="flex flex-row gap-4 flex-1 min-h-0 w-full overflow-hidden" style="width: 100%; max-width: 100%; min-width: 0;">

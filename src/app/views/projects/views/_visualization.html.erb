@@ -811,7 +811,7 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       bottom: auto !important;
       transform: none !important;
       width: 100% !important;
-      max-width: 220px !important;
+      max-width: 200px !important;
       min-width: 0 !important;
       height: 32px !important;
       min-height: 32px !important;
@@ -822,17 +822,47 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       z-index: 5 !important;
     }
 
-    [data-controller="visualization"] .viz-mobile-custom-plot-dock #2d-plot-modal.is-mobile-docked #2d-plot-title {
-      font-size: 12px !important;
+    [data-controller="visualization"] .viz-mobile-custom-plot-dock #2d-plot-modal.is-mobile-docked #2d-plot-header {
+      padding: 0 6px !important;
+      gap: 6px !important;
+    }
+
+    [data-controller="visualization"] .viz-mobile-custom-plot-dock #2d-plot-modal.is-mobile-docked #2d-plot-title-row {
+      gap: 4px !important;
+      min-width: 0 !important;
+      flex: 1 1 auto !important;
+    }
+
+    [data-controller="visualization"] .viz-mobile-custom-plot-dock #2d-plot-modal.is-mobile-docked #2d-plot-title,
+    #2d-plot-modal.is-mobile-docked #2d-plot-title {
+      font-size: 9px !important;
       font-weight: 600 !important;
+      line-height: 1.15 !important;
       white-space: nowrap !important;
       overflow: hidden !important;
       text-overflow: ellipsis !important;
-      max-width: 120px !important;
+      max-width: 72px !important;
+    }
+
+    [data-controller="visualization"] .viz-mobile-custom-plot-dock #2d-plot-modal.is-mobile-docked #2d-plot-window-controls {
+      gap: 2px !important;
+      flex-shrink: 0 !important;
+    }
+
+    [data-controller="visualization"] .viz-mobile-custom-plot-dock #2d-plot-modal.is-mobile-docked #2d-plot-window-controls button {
+      padding: 2px 4px !important;
+      font-size: 12px !important;
+      line-height: 1 !important;
     }
 
     [data-controller="visualization"] .viz-mobile-custom-plot-dock #2d-plot-modal.is-mobile-docked .drag-handle {
       display: none !important;
+    }
+
+    /* Expanded custom plot must sit above mobile panel selector / overlays.
+       Modal may be reparented to document.body, so do not require the viz controller ancestor. */
+    #2d-plot-modal:not(.is-mobile-docked) {
+      z-index: 10050 !important;
     }
 
     [data-controller="visualization"] .viz-mobile-zoom-btn {

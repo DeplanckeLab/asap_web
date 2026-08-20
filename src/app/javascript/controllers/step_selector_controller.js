@@ -28,7 +28,7 @@ if (typeof document !== 'undefined') {
 }
 
 export default class extends Controller {
-  static targets = ["resultsContainer", "emptyState", "loadingState", "content", "stepsPanel", "stepHelpModal", "stepHelpTitle", "stepHelpBody"]
+  static targets = ["resultsContainer", "emptyState", "loadingState", "content", "stepsPanel", "stepsPanelMobile", "stepHelpModal", "stepHelpTitle", "stepHelpBody"]
   static values = {
     projectId: Number,
     projectKey: String,
@@ -1404,7 +1404,7 @@ export default class extends Controller {
     this._refreshingStepsPanel = true
     // Send selected_step_id so the server can render the blue border correctly
     const selectedStepId = this.currentStepId || this.element.getAttribute('data-current-step-id')
-    let url = `/projects/${this.projectIdentifier}/refresh_steps_panel.html`
+    let url = `/projects/${this.projectIdentifier}/refresh_steps_panel.json`
     if (selectedStepId) {
       url += `?selected_step_id=${selectedStepId}`
     }
@@ -1415,7 +1415,7 @@ export default class extends Controller {
     const refreshPromise = fetch(url, {
       method: 'GET',
       headers: {
-        'Accept': 'text/html',
+        'Accept': 'application/json',
         'X-Requested-With': 'XMLHttpRequest'
       },
       credentials: 'same-origin'
@@ -1424,20 +1424,23 @@ export default class extends Controller {
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
       }
-      return response.text()
+      return response.json()
     })
-    .then((html) => {
+    .then((payload) => {
+      const desktopHtml = payload && payload.desktop_html
+      const mobileHtml = payload && payload.mobile_html
+
       // Find the steps panel container using the target or fallback to class selectors
       const stepsPanelContainer = controller.hasStepsPanelTarget
         ? controller.stepsPanelTarget
         : (controller.element.querySelector('.w-75') || controller.element.querySelector('.w-64') || controller.element.querySelector('.w-1\\/4'))
-      if (stepsPanelContainer) {
+      if (stepsPanelContainer && typeof desktopHtml === 'string') {
         const panelWrapper = stepsPanelContainer.querySelector('.bg-white.rounded-lg.shadow-sm.border')
         if (panelWrapper) {
           const previousScrollContainer = panelWrapper.querySelector('.flex-1.overflow-y-auto')
           preservedScrollTop = previousScrollContainer ? previousScrollContainer.scrollTop : 0
 
-          panelWrapper.innerHTML = html
+          panelWrapper.innerHTML = desktopHtml
 
           const refreshedScrollContainer = panelWrapper.querySelector('.flex-1.overflow-y-auto')
           if (refreshedScrollContainer) {
@@ -1472,10 +1475,17 @@ export default class extends Controller {
           if (typeof window.updateStepPipelineColorDots === 'function') {
             window.updateStepPipelineColorDots()
           }
-
-          controller.updateActiveStep(controller.currentStepId)
         }
       }
+
+      // Mobile/tablet dropdown is a separate DOM tree (lg:hidden). Without this,
+      // parsing status and step unlocks only update after a full page reload.
+      if (controller.hasStepsPanelMobileTarget && typeof mobileHtml === 'string') {
+        controller.stepsPanelMobileTarget.innerHTML = mobileHtml
+      }
+
+      controller.updateActiveStep(controller.currentStepId)
+      controller.syncMobileDropdownButtonFromSelectedStep()
     })
     .catch((error) => {
       console.error('[StepSelectorController] Error refreshing steps panel:', error)
@@ -1494,6 +1504,26 @@ export default class extends Controller {
 
     this._refreshingStepsPanelPromise = refreshPromise
     return refreshPromise
+  }
+
+  syncMobileDropdownButtonFromSelectedStep() {
+    const stepId = this.currentStepId || this.element.getAttribute('data-current-step-id')
+    if (!stepId) return
+
+    const dropdownMenu = this.hasStepsPanelMobileTarget
+      ? this.stepsPanelMobileTarget.querySelector('[data-dropdown-target="menu"]')
+      : document.querySelector('[data-controller~="dropdown"] [data-dropdown-target="menu"]')
+    if (!dropdownMenu) return
+
+    const stepElement = dropdownMenu.querySelector(`[data-step-id="${stepId}"]`)
+    if (!stepElement) return
+
+    const dropdownElement = dropdownMenu.closest('[data-controller~="dropdown"]')
+    if (dropdownElement) {
+      dropdownElement.setAttribute('data-selected-step-id', stepId.toString())
+    }
+
+    this.updateDropdownButton(stepElement)
   }
 
   stepsPanelSignature(data, stepId) {
@@ -1680,6 +1710,14 @@ export default class extends Controller {
 
       stepElement.setAttribute('data-step-status', status)
     })
+
+    if (
+      statusChanged &&
+      this.currentStepId &&
+      this.currentStepId.toString() === stepId.toString()
+    ) {
+      this.syncMobileDropdownButtonFromSelectedStep()
+    }
 
     if (shouldReload) {
       clearTimeout(this.reloadTimeout)
@@ -1915,7 +1953,9 @@ export default class extends Controller {
     
     const statusCol = stepElement.querySelector('.flex-shrink-0.mr-3')
     const iconElement = statusCol ? statusCol.querySelector('i') : stepElement.querySelector('i')
-    const iconClass = iconElement ? iconElement.className : 'far fa-circle text-base text-gray-400'
+    const rawIconClass = iconElement ? iconElement.className : 'far fa-circle text-base text-gray-400'
+    // Closed mobile button uses text-base; menu rows use text-sm.
+    const iconClass = rawIconClass.replace(/\btext-sm\b/g, 'text-base')
     
     // Get text color class
     const textColorClass = stepElement.classList.contains('text-gray-500') ? 'text-gray-500' :
@@ -2773,9 +2813,13 @@ export default class extends Controller {
     if (this.hasStepsPanelTarget) {
       roots.push(this.stepsPanelTarget)
     }
-    const dropdownMenu = document.querySelector('[data-controller~="dropdown"] [data-dropdown-target="menu"]')
-    if (dropdownMenu) {
-      roots.push(dropdownMenu)
+    if (this.hasStepsPanelMobileTarget) {
+      roots.push(this.stepsPanelMobileTarget)
+    } else {
+      const dropdownMenu = document.querySelector('[data-controller~="dropdown"] [data-dropdown-target="menu"]')
+      if (dropdownMenu) {
+        roots.push(dropdownMenu)
+      }
     }
 
     const contentRoots = Array.from(this.element.querySelectorAll('[data-step-selector-target="content"]'))

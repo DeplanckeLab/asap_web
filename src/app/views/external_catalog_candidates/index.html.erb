@@ -142,7 +142,11 @@
                               method: :post,
                               form: {
                                 class: "inline ml-2",
-                                data: (import_confirm ? { turbo_confirm: import_confirm } : {})
+                                data: {
+                                  controller: "catalog-import",
+                                  catalog_import_status_url_value: import_status_external_catalog_candidate_path(candidate),
+                                  **(import_confirm ? { turbo_confirm: import_confirm } : {})
+                                }
                               },
                               class: "inline-flex items-center rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900" %>
               <% end %>

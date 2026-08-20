@@ -2008,6 +2008,16 @@ export class DataManager {
     return mask
   }
 
+  // O(1) visibility test for a single cell. Never scan currentVisibleCells with includes():
+  // that is O(visible cells) per call and turns per-point loops (hover / click picking)
+  // into O(points x visible cells).
+  isCellVisible(cellIndex) {
+    const visibleCells = this.controller.currentVisibleCells
+    if (!visibleCells) return true
+    const mask = this.ensureVisibleMask(visibleCells)
+    return mask ? mask[cellIndex] === 1 : false
+  }
+
   ensureVisibleMask(filteredIndices = this.controller.currentVisibleCells) {
     if (!filteredIndices) {
       this.controller.currentVisibleMask = null
@@ -2818,7 +2828,14 @@ export class DataManager {
       
       // Update the current visible cells state immediately
       this.controller.currentVisibleCells = filteredIndices
-    this.bumpFilterGeneration()
+      // Keep the Uint8Array mask paired with the index list: picking and visibility
+      // updates read the mask, never the index list.
+      if (!filteredIndices) {
+        this.controller.currentVisibleMask = null
+      } else {
+        this.syncVisibleMaskFromIndices(filteredIndices)
+      }
+      this.bumpFilterGeneration()
       
       // Update visualization synchronously to hide filtered points immediately
       // This prevents the glitch where all points are briefly visible

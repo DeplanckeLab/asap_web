@@ -5726,6 +5726,7 @@ export default class extends Controller {
     this.numPoints = coordinates.length
     this.spritesRenderType = 'default'
     this.currentVisibleCells = null
+    this.currentVisibleMask = null
     if (this.dataManager && typeof this.dataManager.bumpFilterGeneration === 'function') {
       this.dataManager.bumpFilterGeneration()
     }
@@ -24511,11 +24512,16 @@ export default class extends Controller {
     let closestPointIndex = -1
     let closestDistance = Infinity
 
+    // Uint8Array mask hoisted out of the loop: includes() per point is O(visible cells)
+    // and made picking O(points x visible cells) as soon as any filter was active.
+    const hasFilter = !!this.currentVisibleCells
+    const visibleMask = hasFilter ? this.dataManager.ensureVisibleMask(this.currentVisibleCells) : null
+
     for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
       const cellIndex = this.displayOrder[drawPos]
       
       // Skip hidden cells - only consider visible ones
-      if (this.currentVisibleCells && !this.currentVisibleCells.includes(cellIndex)) {
+      if (hasFilter && !(visibleMask && visibleMask[cellIndex] === 1)) {
         continue
       }
       
@@ -24625,11 +24631,16 @@ export default class extends Controller {
     let closestPointIndex = -1
     let closestDistance = Infinity
 
+    // Uint8Array mask hoisted out of the loop: includes() per point is O(visible cells)
+    // and made every hover O(points x visible cells) as soon as any filter was active.
+    const hasFilter = !!this.currentVisibleCells
+    const visibleMask = hasFilter ? this.dataManager.ensureVisibleMask(this.currentVisibleCells) : null
+
     for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
       const cellIndex = this.displayOrder[drawPos]
       
       // Skip hidden cells - only consider visible ones
-      if (this.currentVisibleCells && !this.currentVisibleCells.includes(cellIndex)) {
+      if (hasFilter && !(visibleMask && visibleMask[cellIndex] === 1)) {
         continue
       }
       

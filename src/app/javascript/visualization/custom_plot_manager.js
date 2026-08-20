@@ -1107,7 +1107,7 @@ export class CustomPlotManager {
     }
     // Check if the cell is visible (not hidden by filters)
     const cellId = closest.point.cellIndex
-    if (this.controller.currentVisibleCells && !this.controller.currentVisibleCells.includes(cellId)) {
+    if (!this.controller.dataManager.isCellVisible(cellId)) {
       // Cell is hidden - hide tooltip only if not fixed
       if (!this.controller.isTooltipFixed && typeof this.controller.hideSimpleTooltip === 'function') {
         this.controller.hideSimpleTooltip()
@@ -1160,7 +1160,7 @@ export class CustomPlotManager {
     }
     // Check if the cell is visible (not hidden by filters)
     const cellId = closest.point.cellIndex
-    if (this.controller.currentVisibleCells && !this.controller.currentVisibleCells.includes(cellId)) {
+    if (!this.controller.dataManager.isCellVisible(cellId)) {
       // Cell is hidden - don't fix tooltip, hide it instead
       if (this.controller.isTooltipFixed && typeof this.controller.unfixTooltip === 'function') {
         this.controller.unfixTooltip()

@@ -14346,7 +14346,7 @@ export default class extends Controller {
     const headerHeight = this._mobileStableHeaderHeight || 64
     const toolbarHeight = this._mobileStableToolbarHeight || 0
     const selectorHeight = selector?.getBoundingClientRect?.().height || 0
-    const footerHeight = 22
+    const footerHeight = 36
     const stableChromeHeight = Math.ceil(headerHeight + toolbarHeight + selectorHeight + footerHeight + 24)
 
     this.element.style.setProperty('--viz-mobile-chrome-height', `${stableChromeHeight}px`)
@@ -15375,81 +15375,98 @@ export default class extends Controller {
     const canvas = this.canvas
     const pointer = this.clientPointToCanvasBuffer(event.clientX, event.clientY, canvas)
     if (!pointer) return false
-    const mouseX = pointer.x
-    const mouseY = pointer.y
-    
-    // Basic zoom implementation with faster increments, zooming around mouse cursor
+
     const delta = event.deltaY > 0 ? 1.05 : 0.95
-    
-    // Get canvas dimensions
+    this.zoomAtCanvasPoint(pointer.x, pointer.y, delta)
+    return false
+  }
+
+  zoomIn(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    this.zoomByFactor(0.95)
+  }
+
+  zoomOut(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    this.zoomByFactor(1.05)
+  }
+
+  zoomByFactor(delta) {
+    if (this.isPanning || !this.currentCoordinates || !this.currentBounds || !this.canvas) {
+      return false
+    }
+    const anchorX = this.canvas.width / 2
+    const anchorY = this.canvas.height / 2
+    return this.zoomAtCanvasPoint(anchorX, anchorY, delta)
+  }
+
+  zoomAtCanvasPoint(anchorX, anchorY, delta) {
+    if (!this.currentCoordinates || !this.currentBounds || !this.canvas) {
+      return false
+    }
+    if (!(Number.isFinite(anchorX) && Number.isFinite(anchorY) && Number.isFinite(delta) && delta > 0)) {
+      return false
+    }
+
     const canvasWidth = this.canvas.width
     const canvasHeight = this.canvas.height
-    
-    // Convert mouse position to data coordinates
-    const mouseDataX = this.currentBounds.minX + (mouseX / canvasWidth) * (this.currentBounds.maxX - this.currentBounds.minX)
-    const mouseDataY = this.currentBounds.minY + (mouseY / canvasHeight) * (this.currentBounds.maxY - this.currentBounds.minY)
-    
-    // Zoom around mouse cursor position
+    if (!(canvasWidth > 0) || !(canvasHeight > 0)) {
+      return false
+    }
+
+    // Convert anchor to data coordinates, then zoom around that point.
+    const mouseDataX = this.currentBounds.minX + (anchorX / canvasWidth) * (this.currentBounds.maxX - this.currentBounds.minX)
+    const mouseDataY = this.currentBounds.minY + (anchorY / canvasHeight) * (this.currentBounds.maxY - this.currentBounds.minY)
+
     const newBounds = {
       minX: mouseDataX - (mouseDataX - this.currentBounds.minX) * delta,
       maxX: mouseDataX + (this.currentBounds.maxX - mouseDataX) * delta,
       minY: mouseDataY - (mouseDataY - this.currentBounds.minY) * delta,
       maxY: mouseDataY + (this.currentBounds.maxY - mouseDataY) * delta
     }
-    
-    //console.log('Zoom: Updating bounds to:', newBounds, 'Mouse position:', { mouseX, mouseY })
-    
-    // Store the old bounds for translation calculation
+
     const oldBounds = { ...this.currentBounds }
-    
-    // Update current bounds
     this.currentBounds = newBounds
 
     // Keep Visium spots proportional to the tissue while zooming.
     if (this.isSpatialView) {
       this.applySpatialSpotSize()
     }
-    
-    // Use shape-based zooming for smooth performance with large datasets
-    // Only use for very large visible point counts (legacy path)
-    const boundsArea = (newBounds.maxX - newBounds.minX) * (newBounds.maxY - newBounds.minY)
-    const totalArea = (this.currentBounds.maxX - this.currentBounds.minX) * (this.currentBounds.maxY - this.currentBounds.minY)
-    const estimatedVisiblePoints = Math.floor((boundsArea / totalArea) * this.currentCoordinates.length)
-      
-      // Clear any existing timeout
-      if (this.zoomTimeout) {
-        clearTimeout(this.zoomTimeout)
-        this.zoomTimeout = null
-      }
-      
-      // Update sprite positions immediately for instant visual feedback
-      this.translatePointsForZoom(oldBounds, newBounds, mouseX, mouseY)
-      
-      // Throttle axes/grid/labels updates to avoid re-rendering on every wheel event
-      if (this.zoomAxisUpdateTimeout) {
-        clearTimeout(this.zoomAxisUpdateTimeout)
-      }
-      this.zoomAxisUpdateTimeout = setTimeout(() => {
-        requestAnimationFrame(() => {
-          // For Canvas 2D overlay (ReGL mode), order matters:
-          // 1. renderGrid() - clears canvas and draws grid
-          // 2. renderAxes() - draws axes on top
-          // 3. renderCategoryLabels() or renderContinuousColorLegend() - draws labels/legend on top
-          this.rendererManager.renderGrid()
-          this.rendererManager.renderAxes()
-          
-          // Re-render the appropriate legend/labels based on metadata type
-          if (this.currentMetadataVector?.data_type === 'DISCRETE' || this.currentMetadataVector?.data_type === 'STRING') {
-            this.rendererManager.renderCategoryLabels()
-          } else if (this.currentMetadataVector?.data_type === 'NUMERIC') {
-            this.renderContinuousColorLegend()
-          }
-          this.updateSelectionCount()
-        })
-      }, 100) // Update UI elements after zoom stabilizes
-    
-    
-    // Return false to ensure no default scroll behavior
+
+    if (this.zoomTimeout) {
+      clearTimeout(this.zoomTimeout)
+      this.zoomTimeout = null
+    }
+
+    this.translatePointsForZoom(oldBounds, newBounds, anchorX, anchorY)
+
+    if (this.zoomAxisUpdateTimeout) {
+      clearTimeout(this.zoomAxisUpdateTimeout)
+    }
+    this.zoomAxisUpdateTimeout = setTimeout(() => {
+      requestAnimationFrame(() => {
+        // For Canvas 2D overlay (ReGL mode), order matters:
+        // 1. renderGrid() - clears canvas and draws grid
+        // 2. renderAxes() - draws axes on top
+        // 3. renderCategoryLabels() or renderContinuousColorLegend() - draws labels/legend on top
+        this.rendererManager.renderGrid()
+        this.rendererManager.renderAxes()
+
+        if (this.currentMetadataVector?.data_type === 'DISCRETE' || this.currentMetadataVector?.data_type === 'STRING') {
+          this.rendererManager.renderCategoryLabels()
+        } else if (this.currentMetadataVector?.data_type === 'NUMERIC') {
+          this.renderContinuousColorLegend()
+        }
+        this.updateSelectionCount()
+      })
+    }, 100)
+
     return false
   }
 

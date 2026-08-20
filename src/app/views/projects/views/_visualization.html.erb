@@ -122,6 +122,11 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
     display: none;
   }
 
+  /* Mobile-only plot zoom buttons (shown under max-width: 1023px) */
+  .viz-mobile-zoom-controls {
+    display: none;
+  }
+
   body.viz-mobile-panel-open #project-page-header {
     display: none !important;
   }
@@ -430,8 +435,8 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       margin-top: auto !important;
       flex: 0 0 auto !important;
       width: 100% !important;
-      height: calc(var(--viz-mobile-plot-size, 200px) + var(--viz-mobile-plot-footer-height, 22px)) !important;
-      max-height: calc(var(--viz-mobile-plot-size, 200px) + var(--viz-mobile-plot-footer-height, 22px)) !important;
+      height: calc(var(--viz-mobile-plot-size, 200px) + var(--viz-mobile-plot-footer-height, 36px)) !important;
+      max-height: calc(var(--viz-mobile-plot-size, 200px) + var(--viz-mobile-plot-footer-height, 36px)) !important;
       margin-left: 0 !important;
       margin-right: 0 !important;
       margin-bottom: 0 !important;
@@ -459,37 +464,80 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       pointer-events: auto;
     }
 
-    /* Tiny band under the plot for the cell count only */
-    #viz-plot-area-wrap > div:last-child {
+    /* Band under the plot for zoom controls + cell count */
+    #viz-plot-area-wrap > div:last-child,
+    #viz-plot-area-wrap > #viz-plot-footer {
       flex: 0 0 auto !important;
       width: 100% !important;
-      height: var(--viz-mobile-plot-footer-height, 22px) !important;
-      min-height: var(--viz-mobile-plot-footer-height, 22px) !important;
+      height: var(--viz-mobile-plot-footer-height, 36px) !important;
+      min-height: var(--viz-mobile-plot-footer-height, 36px) !important;
       margin: 0 !important;
       padding: 0 4px !important;
       display: flex !important;
-      justify-content: center !important;
+      justify-content: space-between !important;
       align-items: center !important;
       font-size: 11px !important;
       line-height: 1 !important;
       color: #6b7280 !important;
       box-sizing: border-box !important;
       pointer-events: none;
+      gap: 8px;
     }
 
-    #viz-plot-area-wrap > div:last-child > div:first-child {
-      display: none !important;
+    #viz-plot-area-wrap > #viz-plot-footer > div:first-child {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: flex-start !important;
+      flex: 0 0 auto !important;
+      pointer-events: auto;
     }
 
     [data-controller="visualization"] #viz-plot-area-wrap #plot-info {
       display: flex !important;
-      justify-content: center !important;
+      justify-content: flex-end !important;
       align-items: center !important;
-      width: 100% !important;
+      width: auto !important;
+      flex: 1 1 auto !important;
+      min-width: 0 !important;
     }
 
     [data-controller="visualization"] #control-instructions {
       display: none;
+    }
+
+    [data-controller="visualization"] .viz-mobile-zoom-controls {
+      display: inline-flex !important;
+      align-items: center;
+      gap: 6px;
+      pointer-events: auto;
+    }
+
+    [data-controller="visualization"] .viz-mobile-zoom-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      width: 32px;
+      height: 32px;
+      min-width: 32px;
+      min-height: 32px;
+      padding: 0;
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+      line-height: 1;
+      color: #374151;
+      background: #f9fafb;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      user-select: none;
+    }
+
+    [data-controller="visualization"] .viz-mobile-zoom-btn:active {
+      background: #e5e7eb;
     }
 
     #viz-selection-tabs {
@@ -505,8 +553,8 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       margin-top: auto !important;
       flex: 0 0 auto !important;
       width: 100% !important;
-      height: calc(var(--viz-mobile-plot-size, 200px) + var(--viz-mobile-plot-footer-height, 22px)) !important;
-      max-height: calc(var(--viz-mobile-plot-size, 200px) + var(--viz-mobile-plot-footer-height, 22px)) !important;
+      height: calc(var(--viz-mobile-plot-size, 200px) + var(--viz-mobile-plot-footer-height, 36px)) !important;
+      max-height: calc(var(--viz-mobile-plot-size, 200px) + var(--viz-mobile-plot-footer-height, 36px)) !important;
       padding: 0 4px 2px !important;
       justify-content: flex-end !important;
     }
@@ -2361,9 +2409,23 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
       </div>
       
       <!-- Plot Controls -->
-      <div style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6b7280;">
+      <div id="viz-plot-footer" style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6b7280;">
         <div>
           <span id="control-instructions">Click to pick a cell, click and drag to move a label, scroll to zoom</span>
+          <div id="viz-mobile-zoom-controls" class="viz-mobile-zoom-controls" aria-label="Zoom controls">
+            <button type="button"
+                    id="viz-zoom-out-btn"
+                    class="viz-mobile-zoom-btn"
+                    title="Zoom out"
+                    aria-label="Zoom out"
+                    data-action="click->visualization#zoomOut">-</button>
+            <button type="button"
+                    id="viz-zoom-in-btn"
+                    class="viz-mobile-zoom-btn"
+                    title="Zoom in"
+                    aria-label="Zoom in"
+                    data-action="click->visualization#zoomIn">+</button>
+          </div>
         </div>
         <div id="plot-info" style="display: none;">
           <span id="point-count"><%= number_with_delimiter(default_cells || 0) %> / <%= number_with_delimiter(default_cells || 0) %></span>

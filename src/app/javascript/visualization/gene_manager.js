@@ -605,6 +605,9 @@ export class GeneManager {
         ensembl_id: gene.ensemblId || gene.ensembl_id || '',
         stable_id: gene.stableId || gene.stable_id || ''
       })),
+      getBackgroundGenes: () => [],
+      getLoomFile: () => this.resolveCurrentLoomFile?.() || this.controller?.getCurrentLoomFileForRequest?.() || this.controller?.currentLoomFile || '',
+      backgroundContextLabel: "Genes in gene panel",
       getCsrfToken: () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
     })
     const overlapBtn = document.getElementById('gene-set-overlap-btn')

@@ -930,33 +930,17 @@
                   class="form-select form-select-sm" style="width:100%;"></select>
         </div>
         <div data-heatmap-target="trackModalGeneSetWrap" style="display:none;">
-          <div style="display:flex; flex-direction:column; gap:10px;">
-            <div>
-              <label for="heatmap-track-gene-set-collection" style="display:block; font-size:12px; font-weight:500; color:#374151; margin-bottom:4px;">Gene set collection</label>
-              <select id="heatmap-track-gene-set-collection"
-                      data-heatmap-target="trackModalGeneSetCollection"
-                      data-action="change->heatmap#trackModalGeneSetCollectionChanged"
-                      class="form-select form-select-sm"
-                      style="width:100%;"></select>
-            </div>
-            <div>
-              <label for="heatmap-track-gene-set-filter" style="display:block; font-size:12px; font-weight:500; color:#374151; margin-bottom:4px;">Filter gene sets</label>
-              <input id="heatmap-track-gene-set-filter"
-                     type="text"
-                     data-heatmap-target="trackModalGeneSetFilter"
-                     data-action="input->heatmap#trackModalGeneSetFilterChanged"
-                     placeholder="Filter by name..."
-                     autocomplete="off"
-                     style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; color:#111827; background:#fff; box-sizing:border-box;" />
-            </div>
-            <div>
-              <label for="heatmap-track-gene-set-item" style="display:block; font-size:12px; font-weight:500; color:#374151; margin-bottom:4px;">Gene set</label>
-              <select id="heatmap-track-gene-set-item"
-                      data-heatmap-target="trackModalGeneSetItem"
-                      data-action="change->heatmap#trackModalGeneSetItemChanged"
-                      class="form-select form-select-sm"
-                      style="width:100%;"></select>
-            </div>
+          <label for="heatmap-track-gene-set-search" style="display:block; font-size:12px; font-weight:500; color:#374151; margin-bottom:4px;">Gene set</label>
+          <div style="position:relative;">
+            <input id="heatmap-track-gene-set-search"
+                   type="text"
+                   data-heatmap-target="trackModalGeneSetSearch"
+                   data-action="input->heatmap#trackModalGeneSetSearchInputChanged focus->heatmap#trackModalGeneSetSearchInputChanged keydown->heatmap#trackModalGeneSetSearchKeydown blur->heatmap#trackModalGeneSetSearchBlur"
+                   placeholder="Search gene sets..."
+                   autocomplete="off"
+                   style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; color:#111827; background:#fff; box-sizing:border-box;" />
+            <div data-heatmap-target="trackModalGeneSetSearchResults"
+                 style="display:none; position:absolute; top:100%; left:0; right:0; z-index:30; max-height:240px; overflow-y:auto; margin-top:4px; background:#fff; border:1px solid #d1d5db; border-radius:6px; box-shadow:0 8px 16px rgba(0,0,0,0.12);"></div>
           </div>
         </div>
         <div>

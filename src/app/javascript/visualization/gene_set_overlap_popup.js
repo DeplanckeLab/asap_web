@@ -1,12 +1,17 @@
-// Popup that ranks gene sets by overlap with a selected gene list.
+// Popup that ranks gene sets by overlap / Fisher enrichment against a chosen background.
 export class GeneSetOverlapPopup {
   constructor(options = {}) {
     this.getProjectIdentifier = options.getProjectIdentifier || (() => null)
     this.getGenes = options.getGenes || (() => [])
+    this.getBackgroundGenes = options.getBackgroundGenes || (() => [])
+    this.getLoomFile = options.getLoomFile || (() => null)
+    this.backgroundContextLabel = options.backgroundContextLabel || "Genes in current view"
     this.getCsrfToken = options.getCsrfToken || (() => {
       return document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || ""
     })
     this.overlay = null
+    this.currentGenes = []
+    this.selectedBackground = null
   }
 
   open() {
@@ -16,9 +21,16 @@ export class GeneSetOverlapPopup {
       return
     }
     this.close()
-    this.overlay = this.buildOverlay(genes.length)
+    this.currentGenes = genes
+    const modes = this.availableBackgroundModes(genes)
+    if (!modes.length) {
+      alert("No background is available for enrichment (dataset loom or a larger gene context).")
+      return
+    }
+    this.selectedBackground = modes[0].value
+    this.overlay = this.buildOverlay(genes.length, modes)
     document.body.appendChild(this.overlay)
-    this.loadResults(genes)
+    this.loadResults()
   }
 
   close() {
@@ -26,6 +38,7 @@ export class GeneSetOverlapPopup {
       this.overlay.remove()
       this.overlay = null
     }
+    this.currentGenes = []
   }
 
   normalizeGenes(rawGenes) {
@@ -48,20 +61,44 @@ export class GeneSetOverlapPopup {
     return genes
   }
 
-  buildOverlay(geneCount) {
+  availableBackgroundModes(queryGenes) {
+    const modes = []
+    const loomFile = String(this.getLoomFile() || "").trim()
+    if (loomFile) {
+      modes.push({ value: "dataset", label: "Dataset genes" })
+    }
+    const contextGenes = this.normalizeGenes(this.getBackgroundGenes())
+    if (contextGenes.length > queryGenes.length) {
+      modes.push({ value: "context", label: this.backgroundContextLabel })
+    }
+    return modes
+  }
+
+  buildOverlay(geneCount, modes) {
     const overlay = document.createElement("div")
     overlay.id = "gene-set-overlap-modal-overlay"
     overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:14000;display:flex;align-items:center;justify-content:center;padding:20px;"
+    const optionsHtml = modes.map((mode) => {
+      const selected = mode.value === this.selectedBackground ? " selected" : ""
+      return `<option value="${this.escapeHtml(mode.value)}"${selected}>${this.escapeHtml(mode.label)}</option>`
+    }).join("")
     overlay.innerHTML = `
       <div data-role="gene-set-overlap-panel" style="background:#fff;border-radius:8px;padding:20px;max-width:720px;width:100%;max-height:85vh;overflow:hidden;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1);display:flex;flex-direction:column;gap:12px;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
           <div>
             <h3 style="margin:0;font-size:18px;font-weight:600;color:#111827;">Gene sets overlapping selected genes</h3>
             <div data-role="gene-set-overlap-subtitle" style="margin-top:4px;font-size:12px;color:#6b7280;">
-              Ranking gene sets by overlap with the ${geneCount} selected gene${geneCount === 1 ? "" : "s"} (percentage is share of each gene set covered)
+              Ranking by Fisher enrichment against the chosen background (${geneCount} selected gene${geneCount === 1 ? "" : "s"})
             </div>
           </div>
           <button type="button" data-role="gene-set-overlap-close" style="background:none;border:none;font-size:22px;color:#6b7280;cursor:pointer;line-height:1;">x</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <label for="gene-set-overlap-background" style="font-size:12px;color:#374151;font-weight:500;">Background</label>
+          <select id="gene-set-overlap-background" data-role="gene-set-overlap-background"
+                  style="font-size:12px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px;color:#111827;background:#fff;min-width:180px;">
+            ${optionsHtml}
+          </select>
         </div>
         <div data-role="gene-set-overlap-status" style="font-size:13px;color:#6b7280;">Loading gene sets...</div>
         <div data-role="gene-set-overlap-list" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
@@ -83,6 +120,13 @@ export class GeneSetOverlapPopup {
         this.close()
       })
     })
+    const backgroundSelect = overlay.querySelector('[data-role="gene-set-overlap-background"]')
+    if (backgroundSelect) {
+      backgroundSelect.addEventListener("change", (event) => {
+        this.selectedBackground = String(event.target.value || "").trim()
+        this.loadResults()
+      })
+    }
     return overlay
   }
 
@@ -93,12 +137,42 @@ export class GeneSetOverlapPopup {
     statusEl.style.color = error ? "#b91c1c" : "#6b7280"
   }
 
-  async loadResults(genes) {
+  async loadResults() {
     const projectIdentifier = this.getProjectIdentifier()
     if (!projectIdentifier) {
       this.setStatus("Project identifier is missing.", { error: true })
       return
     }
+    const genes = this.currentGenes
+    if (!genes.length) {
+      this.setStatus("No genes selected.", { error: true })
+      return
+    }
+
+    const background = this.selectedBackground || "dataset"
+    const body = {
+      genes,
+      limit: 100,
+      background
+    }
+    if (background === "dataset") {
+      const loomFile = String(this.getLoomFile() || "").trim()
+      if (!loomFile) {
+        this.setStatus("Dataset loom file is missing.", { error: true })
+        return
+      }
+      body.loom_file = loomFile
+    } else if (background === "context") {
+      body.background_genes = this.normalizeGenes(this.getBackgroundGenes())
+      if (!body.background_genes.length) {
+        this.setStatus("Context background genes are missing.", { error: true })
+        return
+      }
+    }
+
+    const listEl = this.overlay?.querySelector('[data-role="gene-set-overlap-list"]')
+    if (listEl) listEl.innerHTML = ""
+    this.setStatus("Loading gene sets...")
 
     try {
       const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/search_gene_set_overlaps`, {
@@ -109,7 +183,7 @@ export class GeneSetOverlapPopup {
           Accept: "application/json",
           "X-CSRF-Token": this.getCsrfToken()
         },
-        body: JSON.stringify({ genes, limit: 100 })
+        body: JSON.stringify(body)
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok || payload.status !== "ok") {
@@ -118,7 +192,6 @@ export class GeneSetOverlapPopup {
       this.renderResults(payload)
     } catch (error) {
       this.setStatus(error.message || "Failed to rank gene sets", { error: true })
-      const listEl = this.overlay?.querySelector('[data-role="gene-set-overlap-list"]')
       if (listEl) listEl.innerHTML = ""
     }
   }
@@ -131,13 +204,23 @@ export class GeneSetOverlapPopup {
       .replace(/"/g, "&quot;")
   }
 
+  formatPValue(value) {
+    const n = Number(value)
+    if (!Number.isFinite(n)) return "n/a"
+    if (n < 0.001) return n.toExponential(1)
+    return n.toFixed(3)
+  }
+
   renderResults(payload) {
     const items = Array.isArray(payload.items) ? payload.items : []
-    const queryCount = Number(payload.query_gene_count || 0)
+    const queryCount = Number(payload.query_in_background_count || payload.query_gene_count || 0)
     const unresolved = Number(payload.unresolved_count || 0)
+    const bgCount = Number(payload.background_gene_count || 0)
+    const background = String(payload.background || this.selectedBackground || "")
     const subtitle = this.overlay?.querySelector('[data-role="gene-set-overlap-subtitle"]')
     if (subtitle) {
-      let text = `Percentage is the share of each gene set covered by the ${queryCount} resolved gene${queryCount === 1 ? "" : "s"}`
+      const bgLabel = background === "context" ? this.backgroundContextLabel.toLowerCase() : "dataset genes"
+      let text = `Ranked by FDR (Fisher) using ${bgLabel} as background (${bgCount} genes; ${queryCount} selected in background)`
       if (unresolved > 0) text += ` (${unresolved} unresolved)`
       subtitle.textContent = text
     }
@@ -149,7 +232,7 @@ export class GeneSetOverlapPopup {
       return
     }
 
-    this.setStatus(`${items.length} gene set${items.length === 1 ? "" : "s"} ranked by overlap`)
+    this.setStatus(`${items.length} gene set${items.length === 1 ? "" : "s"} ranked by FDR`)
     const listEl = this.overlay?.querySelector('[data-role="gene-set-overlap-list"]')
     if (!listEl) return
 
@@ -160,6 +243,7 @@ export class GeneSetOverlapPopup {
       const overlap = Number(item.overlap_count || 0)
       const setSize = Number(item.gene_set_size || 0)
       const queryCountForItem = Number(item.query_gene_count || queryCount || 0)
+      const padj = this.formatPValue(item.padj)
       const typeLabel = this.escapeHtml(item.type_label || "")
       const typeIcon = this.escapeHtml(item.type_icon || "fas fa-folder")
       const typeColor = this.escapeHtml(item.type_icon_color || "#6b7280")
@@ -176,6 +260,7 @@ export class GeneSetOverlapPopup {
           </div>
           <div style="flex:0 0 auto;text-align:right;">
             <div style="font-size:14px;font-weight:700;color:#0f766e;">${pct.toFixed(1)}%</div>
+            <div style="font-size:11px;color:#6b7280;">FDR ${padj}</div>
             <div style="font-size:11px;color:#6b7280;">${overlap} / ${setSize} of set</div>
             <div style="font-size:11px;color:#9ca3af;">${overlap} / ${queryCountForItem} of selected</div>
           </div>

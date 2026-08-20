@@ -2723,7 +2723,8 @@ class ProjectsController < ApplicationController
 
   # POST /projects/:id/search_gene_set_overlaps
   # Ranks gene sets by overlap with the query gene list.
-  # overlap_pct is the share of the gene set covered (overlap / gene_set_size).
+  # When a background is provided (dataset loom or context gene list), ranks by
+  # one-sided Fisher FDR; overlap_pct remains overlap / gene_set_size_in_background.
   def search_gene_set_overlaps
     raw_genes = params[:genes]
     raw_genes = raw_genes.values if raw_genes.respond_to?(:values) && !raw_genes.is_a?(Array)
@@ -2746,6 +2747,13 @@ class ProjectsController < ApplicationController
     limit = 100 if limit <= 0
     limit = 250 if limit > 250
 
+    background_mode = params[:background].to_s.strip.downcase
+    background_mode = 'dataset' if background_mode.blank?
+    unless %w[dataset context].include?(background_mode)
+      render json: { status: 'error', message: 'Invalid background' }, status: :unprocessable_entity
+      return
+    end
+
     h_env = Basic.safe_parse_json(@project.version.env_json, {})
     db_version = asap_data_db_name_for_env(h_env, context: 'search_gene_set_overlaps')
     resolved = resolve_manual_gene_ids(submitted_genes, db_version)
@@ -2758,17 +2766,41 @@ class ProjectsController < ApplicationController
         query_gene_count: 0,
         submitted_gene_count: submitted_genes.size,
         unresolved_count: unresolved_count,
+        background: background_mode,
+        background_gene_count: 0,
         items: []
       }
       return
     end
 
-    items = build_gene_set_overlaps_for_genes(gene_ids, db_version, limit: limit)
+    background_ids = resolve_gene_set_overlap_background_ids(
+      background_mode: background_mode,
+      loom_file: params[:loom_file].to_s.strip,
+      db_version: db_version
+    )
+    if background_ids.blank?
+      render json: {
+        status: 'error',
+        message: background_mode == 'dataset' ? 'Dataset background genes could not be resolved' : 'Context background genes are required'
+      }, status: :unprocessable_entity
+      return
+    end
+
+    items = build_gene_set_overlaps_for_genes(
+      gene_ids,
+      db_version,
+      limit: limit,
+      background_ids: background_ids
+    )
+    query_in_bg = gene_ids.count { |gid| background_ids.include?(gid) }
     render json: {
       status: 'ok',
       query_gene_count: gene_ids.size,
+      query_in_background_count: query_in_bg,
       submitted_gene_count: submitted_genes.size,
       unresolved_count: unresolved_count,
+      background: background_mode,
+      background_gene_count: background_ids.size,
       items: items
     }
   rescue StandardError => e
@@ -10134,12 +10166,19 @@ class ProjectsController < ApplicationController
       memberships.sort_by { |entry| entry[:label].to_s.downcase }
     end
 
-    def build_gene_set_overlaps_for_genes(gene_ids, db_version, limit: 100)
+    def build_gene_set_overlaps_for_genes(gene_ids, db_version, limit: 100, background_ids: nil)
       selected_ids = Array(gene_ids).map(&:to_i).select(&:positive?).uniq
       return [] if selected_ids.empty?
 
-      selected_set = selected_ids.to_set
-      selected_count = selected_ids.size
+      background_set = Array(background_ids).map(&:to_i).select(&:positive?).to_set
+      return [] if background_set.empty?
+
+      selected_in_bg = selected_ids.select { |gid| background_set.include?(gid) }
+      return [] if selected_in_bg.empty?
+
+      selected_set = selected_in_bg.to_set
+      selected_count = selected_in_bg.size
+      background_size = background_set.size
       results = []
       current_user_id = current_user&.id
       global_type_presentation = gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_GLOBAL)
@@ -10156,7 +10195,7 @@ class ProjectsController < ApplicationController
             where_sql << "(gs.project_id IS NULL AND gs.user_id = #{current_user_id.to_i} AND gs.ref_id IS NULL)"
           end
 
-          ids_sql = selected_ids.join(',')
+          ids_sql = selected_in_bg.join(',')
           obsolete_item_sql = begin
             has_obsolete = conn.select_value(<<~SQL).present?
               SELECT 1
@@ -10174,7 +10213,7 @@ class ProjectsController < ApplicationController
             conn.select_value("SELECT ARRAY[1]::int[] && ARRAY[1]::int[]")
             "string_to_array(COALESCE(gsi.content, ''), ',')::int[] && ARRAY[#{ids_sql}]::int[]"
           rescue StandardError
-            selected_ids.map { |id| "(',' || COALESCE(gsi.content, '') || ',') LIKE '%,#{id},%'" }.join(' OR ')
+            selected_in_bg.map { |id| "(',' || COALESCE(gsi.content, '') || ',') LIKE '%,#{id},%'" }.join(' OR ')
           end
 
           rows = conn.select_all(<<~SQL)
@@ -10200,30 +10239,21 @@ class ProjectsController < ApplicationController
 
           rows.each do |row|
             set_ids = row['item_content'].to_s.split(',').map(&:to_i).select(&:positive?)
-            set_size = set_ids.size
-            next if set_size <= 0
-
-            overlap_count = set_ids.count { |gid| selected_set.include?(gid) }
-            next if overlap_count <= 0
-
-            project_id = row['project_id']&.to_i
-            ref_id = row['ref_id']&.to_i
-            type_data = project_id.blank? && ref_id.present? ? global_type_presentation : imported_type_presentation
-            item_label = row['item_name'].to_s.strip
-            item_identifier = row['item_identifier'].to_s.strip
-            results << {
-              id: row['item_id'].to_i,
-              name: item_label.presence || item_identifier,
-              identifier: item_identifier,
+            entry = build_gene_set_overlap_entry(
+              set_ids: set_ids,
+              selected_set: selected_set,
+              selected_count: selected_count,
+              background_set: background_set,
+              background_size: background_size,
+              item_id: row['item_id'].to_i,
+              item_name: row['item_name'].to_s.strip,
+              item_identifier: row['item_identifier'].to_s.strip,
               collection_id: row['collection_id'].to_i,
               collection_label: row['collection_label'].to_s,
               database_name: row['database_name'].to_s,
-              overlap_count: overlap_count,
-              gene_set_size: set_size,
-              query_gene_count: selected_count,
-              overlap_pct: ((100.0 * overlap_count) / set_size).round(1),
-              selected_overlap_pct: ((100.0 * overlap_count) / selected_count).round(1)
-            }.merge(type_data)
+              type_data: (row['project_id'].blank? && row['ref_id'].present? ? global_type_presentation : imported_type_presentation)
+            )
+            results << entry if entry
           end
         end
       end
@@ -10236,35 +10266,153 @@ class ProjectsController < ApplicationController
           next unless item
 
           set_ids = Array(item[:genes]).map { |gene| gene[:gene_id].to_i }.select(&:positive?).uniq
-          set_size = set_ids.size
-          # Fall back to gene count from payload when ids are missing.
-          set_size = Array(item[:genes]).size if set_size <= 0
-          next if set_size <= 0
+          next if set_ids.empty?
 
-          overlap_count = set_ids.count { |gid| selected_set.include?(gid) }
-          next if overlap_count <= 0
-
-          results << {
-            id: item[:id].to_s,
-            name: item[:name].presence || item[:identifier].to_s,
-            identifier: item[:identifier].to_s,
+          entry = build_gene_set_overlap_entry(
+            set_ids: set_ids,
+            selected_set: selected_set,
+            selected_count: selected_count,
+            background_set: background_set,
+            background_size: background_size,
+            item_id: item[:id].to_s,
+            item_name: item[:name].to_s.strip,
+            item_identifier: item[:identifier].to_s.strip,
             collection_id: local_gene_set_collection_id(collection),
             collection_label: collection.name.to_s,
             database_name: '',
-            overlap_count: overlap_count,
-            gene_set_size: set_size,
-            query_gene_count: selected_count,
-            overlap_pct: ((100.0 * overlap_count) / set_size).round(1),
-            selected_overlap_pct: ((100.0 * overlap_count) / selected_count).round(1)
-          }.merge(type_data)
+            type_data: type_data
+          )
+          results << entry if entry
         end
       end
 
-      # Rank by decreasing share of the gene set covered, then by absolute overlap.
+      pvalues = results.map { |entry| entry[:p_value].to_f }
+      adjusted = GeneSetOverlapStats.bh_adjust(pvalues)
+      results.each_with_index do |entry, idx|
+        entry[:padj] = adjusted[idx].to_f
+      end
+
       results.sort_by! do |entry|
-        [-entry[:overlap_pct].to_f, -entry[:overlap_count].to_i, entry[:name].to_s.downcase]
+        [entry[:padj].to_f, entry[:p_value].to_f, -entry[:overlap_pct].to_f, -entry[:overlap_count].to_i, entry[:name].to_s.downcase]
       end
       results.first(limit)
+    end
+
+    def build_gene_set_overlap_entry(set_ids:, selected_set:, selected_count:, background_set:, background_size:,
+                                    item_id:, item_name:, item_identifier:, collection_id:, collection_label:,
+                                    database_name:, type_data:)
+      set_in_bg = Array(set_ids).select { |gid| background_set.include?(gid) }
+      set_size = set_in_bg.size
+      return nil if set_size <= 0
+
+      overlap_count = set_in_bg.count { |gid| selected_set.include?(gid) }
+      return nil if overlap_count <= 0
+
+      p_value, odds_ratio = GeneSetOverlapStats.fisher_greater(
+        overlap: overlap_count,
+        set_in_bg: set_size,
+        query_in_bg: selected_count,
+        background_size: background_size
+      )
+
+      {
+        id: item_id,
+        name: item_name.presence || item_identifier,
+        identifier: item_identifier,
+        collection_id: collection_id,
+        collection_label: collection_label,
+        database_name: database_name,
+        overlap_count: overlap_count,
+        gene_set_size: set_size,
+        query_gene_count: selected_count,
+        overlap_pct: ((100.0 * overlap_count) / set_size).round(1),
+        selected_overlap_pct: ((100.0 * overlap_count) / selected_count).round(1),
+        p_value: p_value.to_f,
+        odds_ratio: odds_ratio.finite? ? odds_ratio.to_f : nil,
+        odds_ratio_infinite: !odds_ratio.finite?
+      }.merge(type_data)
+    end
+
+    def resolve_gene_set_overlap_background_ids(background_mode:, loom_file:, db_version:)
+      case background_mode
+      when 'dataset'
+        resolve_dataset_overlap_background_ids(loom_file, db_version)
+      when 'context'
+        raw_bg = params[:background_genes]
+        raw_bg = raw_bg.values if raw_bg.respond_to?(:values) && !raw_bg.is_a?(Array)
+        submitted = Array(raw_bg).filter_map do |gene|
+          next unless gene.respond_to?(:to_h) || gene.is_a?(Hash)
+          h = gene.respond_to?(:to_unsafe_h) ? gene.to_unsafe_h : gene.to_h
+          h = h.with_indifferent_access
+          symbol = h[:symbol].to_s.strip
+          ensembl_id = h[:ensembl_id].to_s.strip
+          next if symbol.blank? && ensembl_id.blank?
+          { symbol: symbol, ensembl_id: ensembl_id, stable_id: h[:stable_id].to_s.strip }
+        end
+        return [] if submitted.empty?
+        resolve_manual_gene_ids(submitted, db_version).map { |gene| gene[:gene_id].to_i }.select(&:positive?).uniq
+      else
+        []
+      end
+    end
+
+    def resolve_dataset_overlap_background_ids(loom_file, db_version)
+      loom_file = loom_file.to_s.strip
+      return [] if loom_file.blank? || db_version.blank?
+
+      user_data_dir = ENV['USER_DATA_DIR'] || Rails.root.join('storage', 'user_data').to_s
+      project_dir = Pathname.new(user_data_dir) + @project.user_id.to_s + @project.key
+      loom_path = project_dir + loom_file
+      return [] unless File.exist?(loom_path)
+
+      mtime = File.mtime(loom_path).to_i
+      cache_key = [
+        'projects:gene_set_overlap_bg',
+        @project.id,
+        loom_path.to_s,
+        mtime,
+        db_version,
+        @project.organism_id
+      ].join(':')
+
+      Rails.cache.fetch(cache_key, expires_in: 6.hours) do
+        submitted = loom_gene_submissions_for_overlap(loom_path)
+        resolve_manual_gene_ids(submitted, db_version).map { |gene| gene[:gene_id].to_i }.select(&:positive?).uniq
+      end
+    end
+
+    def loom_gene_submissions_for_overlap(loom_path)
+      autocomplete_file = loom_path.dirname + 'autocomplete_genes.json'
+      if File.file?(autocomplete_file.to_s)
+        payload = JSON.parse(File.read(autocomplete_file.to_s))
+        search = payload['search'] || payload[:search]
+        if search.is_a?(Array) && search.any?
+          submitted = search.filter_map do |line|
+            m = line.to_s.match(AsapData::DatasetStableLookup::SEARCH_LINE_RE)
+            next unless m
+            {
+              symbol: m[1].to_s.strip,
+              ensembl_id: m[2].to_s.strip,
+              stable_id: m[3].to_s.strip
+            }
+          end
+          return submitted if submitted.any?
+        end
+      end
+
+      accessions = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Accession')
+      symbols = H5DataService.get_metadata_vector(loom_path.to_s, '/row_attrs/Gene')
+      n = [accessions.length, symbols.length].min
+      n.times.map do |idx|
+        {
+          symbol: symbols[idx].to_s.strip,
+          ensembl_id: accessions[idx].to_s.strip,
+          stable_id: ''
+        }
+      end
+    rescue StandardError => e
+      Rails.logger.error("loom_gene_submissions_for_overlap failed: #{e.class} - #{e.message}")
+      []
     end
 
     def apply_publication_snapshot_to_runs(relation)

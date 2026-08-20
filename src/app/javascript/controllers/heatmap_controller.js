@@ -35,8 +35,7 @@ export default class extends Controller {
     "trackModal", "trackModalTitle", "trackModalSelect",
     "trackModalSize", "trackModalShowLegend", "trackModalLegendWrap", "trackModalHint",
     "trackModalSourceWrap", "trackModalSource", "trackModalMetadataWrap",
-    "trackModalGeneSetWrap", "trackModalGeneSetCollection", "trackModalGeneSetFilter",
-    "trackModalGeneSetItem",
+    "trackModalGeneSetWrap", "trackModalGeneSetSearch", "trackModalGeneSetSearchResults",
     "editTrackModal", "editTrackModalTitle", "editTrackModalName",
     "editTrackType", "editTrackTypeWrap", "editTrackTypeHint",
     "editTrackDisplayMode", "editTrackDisplayModeWrap",
@@ -79,7 +78,10 @@ export default class extends Controller {
     this.geneSearchActiveIndex = -1
     this.geneSearchBlurTimer = null
     this.trackModalGeneSetFilterTimer = null
-    this.trackModalGeneSetItems = []
+    this.trackModalGeneSetSearchMatches = []
+    this.trackModalGeneSetSearchActiveIndex = -1
+    this.trackModalGeneSetSearchRequestId = 0
+    this.trackModalGeneSetSearchSelectedLabel = ""
     this.pendingTrackGeneSetItemId = null
     this.pendingTrackGeneSetItemName = null
     this.savedCellSets = []
@@ -115,6 +117,9 @@ export default class extends Controller {
       getGenes: () => this.geneListItems
         .filter((item) => item.checked)
         .map((item) => ({ symbol: item.symbol })),
+      getBackgroundGenes: () => (this.meta?.row_labels || []).map((symbol) => ({ symbol })),
+      getLoomFile: () => this.loomFile || "",
+      backgroundContextLabel: "Genes in this heatmap",
       getCsrfToken: () => this.csrfToken()
     })
     this.editingGradientTarget = { type: "expression" }
@@ -546,6 +551,9 @@ export default class extends Controller {
     this.pendingTrackAxis = axis
     this.pendingTrackGeneSetItemId = null
     this.pendingTrackGeneSetItemName = null
+    this.trackModalGeneSetSearchSelectedLabel = ""
+    this.trackModalGeneSetSearchMatches = []
+    this.trackModalGeneSetSearchActiveIndex = -1
     if (this.hasTrackModalTitleTarget) {
       this.trackModalTitleTarget.textContent = axis === "column"
         ? "Add cell metadata track"
@@ -554,10 +562,10 @@ export default class extends Controller {
     if (this.hasTrackModalSizeTarget) this.trackModalSizeTarget.value = "normal"
     if (this.hasTrackModalShowLegendTarget) this.trackModalShowLegendTarget.checked = false
     if (this.hasTrackModalSourceTarget) this.trackModalSourceTarget.value = "metadata"
-    if (this.hasTrackModalGeneSetFilterTarget) this.trackModalGeneSetFilterTarget.value = ""
+    if (this.hasTrackModalGeneSetSearchTarget) this.trackModalGeneSetSearchTarget.value = ""
+    this.hideTrackModalGeneSetSearchResults()
     this.syncTrackModalSourceVisibility()
     this.fillTrackModalSelect(axis)
-    if (axis === "row") this.fillTrackModalGeneSetCollections()
     if (this.hasTrackModalTarget) {
       this.trackModalTarget.style.display = "flex"
     }
@@ -567,11 +575,14 @@ export default class extends Controller {
     this.pendingTrackAxis = null
     this.pendingTrackGeneSetItemId = null
     this.pendingTrackGeneSetItemName = null
-    this.trackModalGeneSetItems = []
+    this.trackModalGeneSetSearchSelectedLabel = ""
+    this.trackModalGeneSetSearchMatches = []
+    this.trackModalGeneSetSearchActiveIndex = -1
     if (this.trackModalGeneSetFilterTimer) {
       clearTimeout(this.trackModalGeneSetFilterTimer)
       this.trackModalGeneSetFilterTimer = null
     }
+    this.hideTrackModalGeneSetSearchResults()
     if (this.hasTrackModalTarget) this.trackModalTarget.style.display = "none"
   }
 
@@ -609,131 +620,225 @@ export default class extends Controller {
   trackModalSourceChanged() {
     this.syncTrackModalSourceVisibility()
     if (this.currentTrackModalSource() === "gene_set_membership") {
-      this.fillTrackModalGeneSetCollections()
-      const collectionId = this.hasTrackModalGeneSetCollectionTarget
-        ? this.trackModalGeneSetCollectionTarget.value
-        : ""
-      if (collectionId) this.loadTrackModalGeneSetItems()
+      this.pendingTrackGeneSetItemId = null
+      this.pendingTrackGeneSetItemName = null
+      this.trackModalGeneSetSearchSelectedLabel = ""
+      if (this.hasTrackModalGeneSetSearchTarget) this.trackModalGeneSetSearchTarget.value = ""
+      this.hideTrackModalGeneSetSearchResults()
+      this.trackModalMetadataChanged()
     }
   }
 
-  fillTrackModalGeneSetCollections() {
-    if (!this.hasTrackModalGeneSetCollectionTarget) return
-    const collections = Array.isArray(this.metadataCatalog?.gene_set_collections)
-      ? this.metadataCatalog.gene_set_collections
-      : []
-    const selectEl = this.trackModalGeneSetCollectionTarget
-    const previous = selectEl.value
-    selectEl.innerHTML = ""
-    const placeholder = document.createElement("option")
-    placeholder.value = ""
-    placeholder.textContent = collections.length ? "Select collection..." : "No gene set collections available"
-    selectEl.appendChild(placeholder)
-    collections.forEach((collection) => {
-      const option = document.createElement("option")
-      option.value = String(collection.id)
-      option.textContent = collection.label || String(collection.id)
-      selectEl.appendChild(option)
-    })
-    if (previous && Array.from(selectEl.options).some((opt) => opt.value === previous)) {
-      selectEl.value = previous
+  trackModalGeneSetSearchInputChanged() {
+    if (!this.hasTrackModalGeneSetSearchTarget) return
+    const query = String(this.trackModalGeneSetSearchTarget.value || "")
+    if (this.trackModalGeneSetSearchSelectedLabel && query !== this.trackModalGeneSetSearchSelectedLabel) {
+      this.pendingTrackGeneSetItemId = null
+      this.pendingTrackGeneSetItemName = null
+      this.trackModalGeneSetSearchSelectedLabel = ""
+      this.trackModalMetadataChanged()
     }
-    this.renderTrackModalGeneSetItems([])
-  }
-
-  trackModalGeneSetCollectionChanged() {
-    this.pendingTrackGeneSetItemId = null
-    this.pendingTrackGeneSetItemName = null
-    if (this.hasTrackModalGeneSetFilterTarget) this.trackModalGeneSetFilterTarget.value = ""
-    this.loadTrackModalGeneSetItems()
-  }
-
-  trackModalGeneSetFilterChanged() {
     if (this.trackModalGeneSetFilterTimer) clearTimeout(this.trackModalGeneSetFilterTimer)
     this.trackModalGeneSetFilterTimer = setTimeout(() => {
-      this.loadTrackModalGeneSetItems()
+      this.searchTrackModalGeneSets(query.trim())
     }, 250)
   }
 
-  trackModalGeneSetItemChanged() {
-    if (!this.hasTrackModalGeneSetItemTarget) return
-    const selected = this.trackModalGeneSetItemTarget.selectedOptions[0]
-    this.pendingTrackGeneSetItemId = selected?.value || null
-    this.pendingTrackGeneSetItemName = selected?.dataset?.itemName || selected?.textContent || null
-    this.trackModalMetadataChanged()
-  }
-
-  async loadTrackModalGeneSetItems() {
-    if (!this.hasTrackModalGeneSetItemTarget || !this.projectKeyValue) return
-    const collectionId = this.hasTrackModalGeneSetCollectionTarget
-      ? String(this.trackModalGeneSetCollectionTarget.value || "").trim()
-      : ""
-    if (!collectionId) {
-      this.trackModalGeneSetItems = []
-      this.renderTrackModalGeneSetItems([])
+  trackModalGeneSetSearchKeydown(event) {
+    const key = event?.key
+    if (key === "Escape") {
+      this.hideTrackModalGeneSetSearchResults()
       return
     }
-    const query = this.hasTrackModalGeneSetFilterTarget
-      ? String(this.trackModalGeneSetFilterTarget.value || "").trim()
-      : ""
-    const params = new URLSearchParams({
-      collection_id: collectionId,
-      query,
-      loom_file: String(this.loomFile || "")
-    })
-    try {
-      const response = await fetch(
-        `/projects/${encodeURIComponent(this.projectKeyValue)}/gene_set_collection_items?${params.toString()}`,
-        { headers: { Accept: "application/json" }, credentials: "same-origin" }
+    if (key === "ArrowDown") {
+      if (!this.trackModalGeneSetSearchMatches.length) return
+      event.preventDefault()
+      this.trackModalGeneSetSearchActiveIndex = Math.min(
+        this.trackModalGeneSetSearchMatches.length - 1,
+        this.trackModalGeneSetSearchActiveIndex + 1
       )
-      const payload = await response.json()
-      if (!response.ok || payload.status !== "ok") {
-        throw new Error(payload.message || "Failed to load gene sets")
-      }
-      this.trackModalGeneSetItems = Array.isArray(payload.items) ? payload.items : []
-      this.renderTrackModalGeneSetItems(this.trackModalGeneSetItems)
-    } catch (error) {
-      console.warn("[heatmap] gene set items failed", error)
-      this.trackModalGeneSetItems = []
-      this.renderTrackModalGeneSetItems([])
-      if (this.hasTrackModalHintTarget) {
-        this.trackModalHintTarget.textContent = error.message || "Failed to load gene sets."
+      this.renderTrackModalGeneSetSearchResults()
+      return
+    }
+    if (key === "ArrowUp") {
+      if (!this.trackModalGeneSetSearchMatches.length) return
+      event.preventDefault()
+      this.trackModalGeneSetSearchActiveIndex = Math.max(0, this.trackModalGeneSetSearchActiveIndex - 1)
+      this.renderTrackModalGeneSetSearchResults()
+      return
+    }
+    if (key === "Enter") {
+      if (this.trackModalGeneSetSearchMatches.length && this.trackModalGeneSetSearchActiveIndex >= 0) {
+        event.preventDefault()
+        this.selectTrackModalGeneSetMatch(this.trackModalGeneSetSearchMatches[this.trackModalGeneSetSearchActiveIndex])
       }
     }
   }
 
-  renderTrackModalGeneSetItems(items) {
-    if (!this.hasTrackModalGeneSetItemTarget) return
-    const selectEl = this.trackModalGeneSetItemTarget
+  trackModalGeneSetSearchBlur() {
+    setTimeout(() => this.hideTrackModalGeneSetSearchResults(), 150)
+  }
+
+  async searchTrackModalGeneSets(query) {
+    if (!this.hasTrackModalGeneSetSearchResultsTarget || !this.projectKeyValue) return
+    const collections = Array.isArray(this.metadataCatalog?.gene_set_collections)
+      ? this.metadataCatalog.gene_set_collections
+      : []
+    if (!collections.length) {
+      this.trackModalGeneSetSearchMatches = []
+      this.trackModalGeneSetSearchActiveIndex = -1
+      this.renderTrackModalGeneSetSearchMessage("No gene set collections available")
+      return
+    }
+    if (!String(query || "").trim()) {
+      this.trackModalGeneSetSearchMatches = []
+      this.trackModalGeneSetSearchActiveIndex = -1
+      this.renderTrackModalGeneSetSearchMessage("Type to search gene sets...")
+      return
+    }
+
+    const loomFile = String(this.loomFile || "")
+    if (!loomFile) {
+      this.trackModalGeneSetSearchMatches = []
+      this.trackModalGeneSetSearchActiveIndex = -1
+      this.renderTrackModalGeneSetSearchMessage("Heatmap loom file is not available yet")
+      return
+    }
+
+    const requestId = ++this.trackModalGeneSetSearchRequestId
     const activeIds = new Set(
       this.rowTracks
         .filter((t) => t.source === "gene_set_membership")
         .map((t) => String(t.geneSetItemId || ""))
     )
-    const previous = this.pendingTrackGeneSetItemId || selectEl.value
-    selectEl.innerHTML = ""
-    const placeholder = document.createElement("option")
-    placeholder.value = ""
-    placeholder.textContent = items.length ? "Select gene set..." : "No gene sets found"
-    selectEl.appendChild(placeholder)
-    items.forEach((item) => {
-      const itemId = String(item.id || "").trim()
-      if (!itemId || activeIds.has(itemId)) return
-      const option = document.createElement("option")
-      option.value = itemId
-      option.dataset.itemName = item.name || item.label || itemId
-      option.textContent = item.name || item.label || itemId
-      selectEl.appendChild(option)
-    })
-    if (previous && Array.from(selectEl.options).some((opt) => opt.value === previous)) {
-      selectEl.value = previous
-      this.pendingTrackGeneSetItemId = previous
-      const selected = selectEl.selectedOptions[0]
-      this.pendingTrackGeneSetItemName = selected?.dataset?.itemName || selected?.textContent || previous
-    } else {
-      this.pendingTrackGeneSetItemId = null
-      this.pendingTrackGeneSetItemName = null
+
+    try {
+      const batches = await Promise.all(collections.map(async (collection) => {
+        const collectionId = String(collection.id || "").trim()
+        if (!collectionId) return []
+        const params = new URLSearchParams({
+          collection_id: collectionId,
+          query: String(query || "").trim(),
+          loom_file: loomFile
+        })
+        const response = await fetch(
+          `/projects/${encodeURIComponent(this.projectKeyValue)}/gene_set_collection_items?${params.toString()}`,
+          { headers: { Accept: "application/json" }, credentials: "same-origin" }
+        )
+        const payload = await response.json().catch(() => ({}))
+        if (!response.ok || payload.status !== "ok") return []
+        const collectionLabel = collection.label || collectionId
+        return (Array.isArray(payload.items) ? payload.items : []).map((item) => ({
+          ...item,
+          collection_id: collectionId,
+          collection_label: collectionLabel
+        }))
+      }))
+
+      if (requestId !== this.trackModalGeneSetSearchRequestId) return
+
+      const merged = []
+      const seen = new Set()
+      for (const item of batches.flat()) {
+        const itemId = String(item.id || "").trim()
+        if (!itemId || activeIds.has(itemId) || seen.has(itemId)) continue
+        seen.add(itemId)
+        merged.push(item)
+      }
+      merged.sort((a, b) => {
+        const aName = String(a.name || a.identifier || a.id || "").toLowerCase()
+        const bName = String(b.name || b.identifier || b.id || "").toLowerCase()
+        return aName.localeCompare(bName)
+      })
+      this.trackModalGeneSetSearchMatches = merged.slice(0, 50)
+      this.trackModalGeneSetSearchActiveIndex = this.trackModalGeneSetSearchMatches.length ? 0 : -1
+      this.renderTrackModalGeneSetSearchResults()
+    } catch (error) {
+      if (requestId !== this.trackModalGeneSetSearchRequestId) return
+      console.warn("[heatmap] gene set search failed", error)
+      this.trackModalGeneSetSearchMatches = []
+      this.trackModalGeneSetSearchActiveIndex = -1
+      this.renderTrackModalGeneSetSearchMessage(error.message || "Failed to search gene sets")
     }
+  }
+
+  renderTrackModalGeneSetSearchMessage(message) {
+    if (!this.hasTrackModalGeneSetSearchResultsTarget) return
+    const resultsEl = this.trackModalGeneSetSearchResultsTarget
+    resultsEl.innerHTML = ""
+    const row = document.createElement("div")
+    row.style.cssText = "padding:10px 12px;font-size:12px;color:#6b7280;"
+    row.textContent = message
+    resultsEl.appendChild(row)
+    resultsEl.style.display = "block"
+  }
+
+  renderTrackModalGeneSetSearchResults() {
+    if (!this.hasTrackModalGeneSetSearchResultsTarget) return
+    const resultsEl = this.trackModalGeneSetSearchResultsTarget
+    resultsEl.innerHTML = ""
+    if (!this.trackModalGeneSetSearchMatches.length) {
+      this.renderTrackModalGeneSetSearchMessage("No matching gene sets")
+      return
+    }
+
+    this.trackModalGeneSetSearchMatches.forEach((item, index) => {
+      const itemId = String(item.id || "").trim()
+      const name = String(item.name || item.identifier || itemId).trim() || itemId
+      const identifier = String(item.identifier || "").trim()
+      const collectionLabel = String(item.collection_label || "").trim()
+      const button = document.createElement("button")
+      button.type = "button"
+      button.dataset.action = "mousedown->heatmap#onTrackModalGeneSetSearchOptionSelect"
+      button.dataset.itemId = itemId
+      button.dataset.itemIndex = String(index)
+      const active = index === this.trackModalGeneSetSearchActiveIndex
+      button.style.cssText = `display:block;width:100%;text-align:left;padding:8px 12px;border:none;border-bottom:1px solid #f3f4f6;cursor:pointer;background:${active ? "#eff6ff" : "#fff"};`
+      button.onmouseover = function () { this.style.backgroundColor = "#f3f4f6" }
+      button.onmouseout = function () { this.style.backgroundColor = active ? "#eff6ff" : "#fff" }
+      const countParts = []
+      if (item.gene_count != null) countParts.push(`${item.gene_count} genes`)
+      if (item.in_dataset_count != null) countParts.push(`${item.in_dataset_count} in dataset`)
+      const titleBits = []
+      if (identifier && identifier !== name) titleBits.push(this.escapeHtml(identifier))
+      titleBits.push(this.escapeHtml(name))
+      button.innerHTML = `
+        <div style="font-size:12px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${titleBits.join(" ")}</div>
+        <div style="margin-top:2px;font-size:11px;color:#6b7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+          ${this.escapeHtml(collectionLabel)}${countParts.length ? ` · ${this.escapeHtml(countParts.join(", "))}` : ""}
+        </div>
+      `
+      resultsEl.appendChild(button)
+    })
+    resultsEl.style.display = "block"
+  }
+
+  hideTrackModalGeneSetSearchResults() {
+    if (!this.hasTrackModalGeneSetSearchResultsTarget) return
+    this.trackModalGeneSetSearchResultsTarget.style.display = "none"
+    this.trackModalGeneSetSearchResultsTarget.innerHTML = ""
+  }
+
+  onTrackModalGeneSetSearchOptionSelect(event) {
+    if (event) event.preventDefault()
+    const index = Number(event?.currentTarget?.dataset?.itemIndex)
+    const item = Number.isInteger(index) ? this.trackModalGeneSetSearchMatches[index] : null
+    if (!item) return
+    this.selectTrackModalGeneSetMatch(item)
+  }
+
+  selectTrackModalGeneSetMatch(item) {
+    if (!item) return
+    const itemId = String(item.id || "").trim()
+    if (!itemId) return
+    const name = String(item.name || item.identifier || itemId).trim() || itemId
+    const collectionLabel = String(item.collection_label || "").trim()
+    const label = collectionLabel ? `${name} (${collectionLabel})` : name
+    this.pendingTrackGeneSetItemId = itemId
+    this.pendingTrackGeneSetItemName = name
+    this.trackModalGeneSetSearchSelectedLabel = label
+    if (this.hasTrackModalGeneSetSearchTarget) this.trackModalGeneSetSearchTarget.value = label
+    this.hideTrackModalGeneSetSearchResults()
     this.trackModalMetadataChanged()
   }
 
@@ -746,7 +851,7 @@ export default class extends Controller {
           this.trackModalHintTarget.textContent =
             "Adds a boolean track colored by whether each gene is present or absent in the selected gene set."
         } else {
-          this.trackModalHintTarget.textContent = "Choose a gene set collection and gene set."
+          this.trackModalHintTarget.textContent = "Search and choose a gene set."
         }
       }
       return
@@ -781,11 +886,9 @@ export default class extends Controller {
     const thickness = this.trackSizePx[sizeKey] || this.layout.trackH
 
     if (axis === "row" && this.currentTrackModalSource() === "gene_set_membership") {
-      const itemId = this.pendingTrackGeneSetItemId || this.trackModalGeneSetItemTarget?.value
+      const itemId = this.pendingTrackGeneSetItemId
       if (!itemId) return
-      const itemName = this.pendingTrackGeneSetItemName ||
-        this.trackModalGeneSetItemTarget?.selectedOptions?.[0]?.textContent ||
-        itemId
+      const itemName = this.pendingTrackGeneSetItemName || itemId
       const showLegend = !!(this.trackModalShowLegendTarget?.checked)
       this.closeTrackModal()
       await this.addGeneSetMembershipTrack(itemId, {

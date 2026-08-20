@@ -2625,7 +2625,16 @@ export default class extends Controller {
           ${thumbHtml || ''}
         </div>
         <div style="min-width:0;">
-          <div title="${this.escapeHtml(checkpoint.title || '')}" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.escapeHtml(checkpoint.title || '')}</div>
+          <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+            <div title="${this.escapeHtml(checkpoint.title || '')}" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">${this.escapeHtml(checkpoint.title || '')}</div>
+            <button type="button"
+                    data-checkpoint-id="${checkpointId}"
+                    onclick="if (window.visualizationController) window.visualizationController.editCheckpointTitleById('${checkpointId}')"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:2px 6px;cursor:pointer;font-size:11px;font-weight:500;white-space:nowrap;flex-shrink:0;"
+                    title="Edit checkpoint name">
+              Edit
+            </button>
+          </div>
           <div style="font-size:11px;color:#6b7280;">${this.escapeHtml(createdAt)} - ${commentCount} comment${commentCount === 1 ? '' : 's'}</div>
         </div>
         <div style="display:flex;align-items:center;justify-content:center;">
@@ -3477,6 +3486,51 @@ export default class extends Controller {
 
     await this.fetchCheckpointHistory()
     this.renderCheckpointHistory()
+  }
+
+  async editCheckpointTitleById(checkpointId) {
+    if (!checkpointId) return
+
+    const checkpoint = (this.checkpointHistory || []).find((item) => String(item.id) === String(checkpointId))
+    if (!checkpoint) return
+
+    const currentTitle = String(checkpoint.title || '').trim()
+    const nextTitleRaw = window.prompt('Edit checkpoint name', currentTitle)
+    if (nextTitleRaw === null) return
+
+    const nextTitle = String(nextTitleRaw).trim()
+    if (!nextTitle) {
+      alert('Checkpoint name cannot be empty.')
+      return
+    }
+    if (nextTitle === currentTitle) return
+
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) return
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(checkpointId)}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ checkpoint: { title: nextTitle } })
+    })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || 'Failed to update checkpoint name.')
+      return
+    }
+
+    const payload = await response.json()
+    const updated = payload.checkpoint || { ...checkpoint, title: nextTitle }
+    this.mergeCheckpointIntoHistory(updated)
+    this.renderCheckpointHistory()
+    this.updateCheckpointCommentsModalTitle()
   }
 
   async deleteCheckpointById(checkpointId) {

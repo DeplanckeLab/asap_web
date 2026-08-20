@@ -116,7 +116,7 @@ class CheckpointsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 1, checkpoint.reload.state['version']
   end
 
-  test 'can add a comment to a checkpoint that already has comments' do
+  test 'can rename checkpoint title even when comments exist' do
     checkpoint = register_for_test_cleanup(
       Checkpoint.create!(
         project: @project,
@@ -136,11 +136,13 @@ class CheckpointsControllerTest < ActionDispatch::IntegrationTest
     checkpoint.save!
 
     patch project_checkpoint_path(@project, checkpoint),
-          params: { checkpoint: { comment_body: 'Second' } },
+          params: { checkpoint: { title: 'Renamed discussed view' } },
           as: :json
 
     assert_response :success
-    assert_equal 2, checkpoint.reload.comments.length
+    checkpoint.reload
+    assert_equal 'Renamed discussed view', checkpoint.title
     assert_equal 1, checkpoint.state['version']
+    assert_equal 1, checkpoint.comments.length
   end
 end

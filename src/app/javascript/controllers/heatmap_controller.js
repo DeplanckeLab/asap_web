@@ -4618,7 +4618,7 @@ export default class extends Controller {
     if (normalizedSource === "heatmap-rect") {
       return '<i class="fas fa-th" title="Heatmap selection" style="font-size:11px;color:#ea580c;flex:0 0 auto;"></i>'
     }
-    return '<i class="fas fa-draw-polygon" title="Lasso selection" style="font-size:11px;color:#2563eb;flex:0 0 auto;"></i>'
+    return '<span title="Lasso selection" style="display:inline-flex;align-items:center;justify-content:center;color:#2563eb;flex:0 0 auto;line-height:0;"><svg width="12" height="12" viewBox="0 0 496.149 496.149" style="fill: currentColor;" xmlns="http://www.w3.org/2000/svg"><g><path d="M250.201,81.608c97.43,0,179.746,43.434,179.746,94.834c0,12.449-4.934,24.449-13.645,35.465l35.402,10.404 c8.613-14.227,13.533-29.629,13.533-45.869c0-72.965-94.463-130.123-215.037-130.123S35.164,103.477,35.164,176.442 c0,26.918,12.936,51.643,35.189,72.172c-6.951,4.502-13.756,10.502-18.836,18.984c-10.453,17.449-10.66,39.094-0.645,64.35 c9.433,23.791,7.125,32.582,5.693,35.242c-3.354,6.322-18.127,9.514-32.385,12.596c-3.486,0.758-7.035,1.531-10.582,2.371 c-9.484,2.24-15.353,11.725-13.129,21.225c1.902,8.111,9.164,13.596,17.16,13.596c1.34,0,2.709-0.16,4.068-0.467 c3.32-0.791,6.656-1.518,9.932-2.227c21.111-4.564,45.016-9.742,56.076-30.482c8.486-15.902,7.195-36.516-4.031-64.85 c-5.725-14.435-6.385-25.564-1.947-33.098c4.965-8.451,16.141-12.207,22.19-13.467c35.705,19.902,82.85,32.354,135.592,33.869 l-10.504-35.74c-87.867-5.758-158.555-46.447-158.555-94.074C70.451,125.041,152.772,81.608,250.201,81.608z"/><path d="M487.573,269.629l-222.049-65.271c-1.115-0.338-2.244-0.482-3.373-0.482c-3.113,0-6.158,1.227-8.434,3.5 c-3.096,3.08-4.258,7.613-3.018,11.789l65.271,222.102c1.34,4.613,5.352,7.982,10.143,8.5c0.453,0.047,0.891,0.064,1.322,0.064 c4.309,0,8.307-2.338,10.439-6.162l54.076-98.043l98.025-54.094c4.225-2.322,6.629-6.951,6.1-11.727 C495.561,275.018,492.201,271,487.573,269.629z"/></g></svg></span>'
   }
 
   selectionStatusBadgeHtml(status) {
@@ -5797,7 +5797,11 @@ export default class extends Controller {
             ${thumbHtml || ""}
           </div>
           <div style="min-width:0;">
-            <div style="font-size:13px;font-weight:600;color:#111827;">${this.escape(checkpoint.title || "Untitled")}</div>
+            <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+              <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">${this.escape(checkpoint.title || "Untitled")}</div>
+              ${this.canAnalyzeValue ? `<button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-gray-100 text-gray-700 rounded border border-gray-300 text-xs"
+                data-action="heatmap#editCheckpointTitleFromHistory" data-heatmap-id-param="${this.escape(id)}" title="Edit checkpoint name">Edit</button>` : ""}
+            </div>
             <div style="font-size:11px;color:#6b7280;margin-top:2px;">${this.escape(createdAt)} · ${this.escape(author)} · ${commentCount} comment${commentCount === 1 ? "" : "s"}</div>
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0;">
@@ -5877,6 +5881,52 @@ export default class extends Controller {
       this.updateCheckpointCommentsButtonState(0)
     }
     this.renderCheckpointHistory()
+  }
+
+  async editCheckpointTitleFromHistory(event) {
+    const id = event.params.id
+    if (!this.canAnalyzeValue) return
+
+    const checkpoint = this.checkpointForId(id)
+    if (!checkpoint) return
+
+    const currentTitle = String(checkpoint.title || "").trim()
+    const nextTitleRaw = window.prompt("Edit checkpoint name", currentTitle)
+    if (nextTitleRaw === null) return
+
+    const nextTitle = String(nextTitleRaw).trim()
+    if (!nextTitle) {
+      alert("Checkpoint name cannot be empty.")
+      return
+    }
+    if (nextTitle === currentTitle) return
+
+    const response = await fetch(`${this.checkpointsUrl(id)}?${this.checkpointsQuery()}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "X-CSRF-Token": this.csrfToken()
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        kind: "heatmap",
+        run_id: this.runIdValue,
+        checkpoint: { title: nextTitle }
+      })
+    })
+
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}))
+      alert(errorPayload.error || `Failed to update checkpoint name (${response.status})`)
+      return
+    }
+
+    const payload = await response.json()
+    const updated = payload.checkpoint || { ...checkpoint, title: nextTitle }
+    this.mergeCheckpointIntoHistory(updated)
+    this.renderCheckpointHistory()
+    this.renderCheckpointComments()
   }
 
   clearCurrentCheckpointFromSession() {

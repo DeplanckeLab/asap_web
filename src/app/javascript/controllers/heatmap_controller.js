@@ -117,6 +117,7 @@ export default class extends Controller {
       enableModuleScoreColoring: false,
       createCollectionType: "from_heatmap"
     })
+    this.wrapGeneSetCollectionsCheckpointHooks()
     this.geneSetOverlapPopup = new GeneSetOverlapPopup({
       getProjectIdentifier: () => this.getProjectIdentifier(),
       getGenes: () => this.geneListItems
@@ -2554,6 +2555,7 @@ export default class extends Controller {
     if (event) event.preventDefault()
     const tab = event?.currentTarget?.dataset?.tab
     this.setSelectionTab(tab)
+    this.persistCurrentCheckpointOnServer("selection-tab-change")
   }
 
   // Used by GeneSetCollectionsController after creating/saving collections.
@@ -5294,7 +5296,9 @@ export default class extends Controller {
            </button>`
         : ""
 
-      return `<div data-selection-id="${selectionId}"
+      return `<div id="heatmap-saved-selection-row-${selectionId}"
+                   data-role="saved-selection-row"
+                   data-selection-id="${selectionId}"
                    style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;padding:8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;">
         <div style="flex:1;min-width:0;display:flex;align-items:flex-start;gap:6px;">
           <div style="flex:1;min-width:0;">
@@ -5682,8 +5686,120 @@ export default class extends Controller {
           expanded: !!item.expanded
         })),
         selectedOrigCols: Array.from(this.selectedOrigCols || []).sort((a, b) => a - b),
-        selectedCells: Array.from(this.selectedCells || []).sort((a, b) => a - b)
+        selectedCells: Array.from(this.selectedCells || []).sort((a, b) => a - b),
+        activeTab: this.getCurrentBottomRightPanelSubView()
+      },
+      bottomRightPanel: this.buildBottomRightPanelCheckpointState()
+    }
+  }
+
+  getCurrentBottomRightPanelSubView() {
+    if (this.currentSelectionTab === "gene-sets" || this.currentSelectionTab === "cells") {
+      return this.currentSelectionTab
+    }
+    const cellsContent = this.element.querySelector("#heatmap-cells-tab-content")
+    if (cellsContent && cellsContent.style.display !== "none") return "cells"
+    return "gene-sets"
+  }
+
+  buildBottomRightPanelCheckpointState() {
+    const subView = this.getCurrentBottomRightPanelSubView()
+    const geneSetsState = this.geneSetCollectionsController?.getCheckpointState?.() || null
+    const panelState = { geneSetsState }
+    const scrollContainer = this.getBottomRightPanelScrollContainer(subView, panelState)
+    const anchorElement = this.getBottomRightPanelTopVisibleElement(scrollContainer, subView)
+
+    return {
+      subView,
+      firstVisibleElementId: anchorElement?.id || null,
+      scrollTop: scrollContainer ? Math.max(0, Number(scrollContainer.scrollTop || 0)) : 0,
+      geneSetsState
+    }
+  }
+
+  getBottomRightPanelScrollContainer(subView = null, panelState = null) {
+    const normalizedSubView = subView === "gene-sets" ? "gene-sets" : this.getCurrentBottomRightPanelSubView()
+    if (normalizedSubView === "gene-sets") {
+      const isDetailMode = panelState?.geneSetsState?.mode === "detail"
+      if (isDetailMode) return this.element.querySelector("#heatmap-gene-set-items-list")
+      return this.element.querySelector("#heatmap-gene-set-collections-list")
+    }
+    return this.element.querySelector("#heatmap-saved-selections-list")
+  }
+
+  getBottomRightPanelTopVisibleElement(containerEl, subView) {
+    if (!containerEl) return null
+    const selector = (() => {
+      if (subView !== "gene-sets") return '[data-role="saved-selection-row"]'
+      if (containerEl.id === "heatmap-gene-set-items-list") return '[data-gene-set-item-row="true"]'
+      return '[data-gene-set-collection-row="true"]'
+    })()
+    const candidates = Array.from(containerEl.querySelectorAll(selector))
+    const containerRect = containerEl.getBoundingClientRect()
+    let bestCandidate = null
+    let bestDistance = Number.POSITIVE_INFINITY
+    candidates.forEach((candidate) => {
+      const rect = candidate.getBoundingClientRect()
+      if ((rect.bottom - containerRect.top) <= 0) return
+      const distance = Math.abs(rect.top - containerRect.top)
+      if (distance < bestDistance) {
+        bestDistance = distance
+        bestCandidate = candidate
       }
+    })
+    return bestCandidate
+  }
+
+  async restoreBottomRightPanelState(state) {
+    const panelState = state?.bottomRightPanel
+    if (!panelState || typeof panelState !== "object") return
+    const subView = panelState.subView === "gene-sets" ? "gene-sets" : "cells"
+    this.setSelectionTab(subView)
+    if (subView === "gene-sets" && panelState.geneSetsState && this.geneSetCollectionsController?.applyCheckpointState) {
+      await this.geneSetCollectionsController.applyCheckpointState(panelState.geneSetsState)
+    }
+
+    const applyRestore = () => {
+      const containerEl = this.getBottomRightPanelScrollContainer(subView, panelState)
+      if (!containerEl) return
+
+      const anchorId = String(panelState.firstVisibleElementId || "").trim()
+      if (anchorId) {
+        const anchorEl = document.getElementById(anchorId)
+        if (anchorEl && containerEl.contains(anchorEl)) {
+          const containerRect = containerEl.getBoundingClientRect()
+          const anchorRect = anchorEl.getBoundingClientRect()
+          containerEl.scrollTop = Math.max(0, Math.round((containerEl.scrollTop || 0) + (anchorRect.top - containerRect.top)))
+          return
+        }
+      }
+
+      if (Number.isFinite(Number(panelState.scrollTop))) {
+        containerEl.scrollTop = Math.max(0, Number(panelState.scrollTop || 0))
+      }
+    }
+
+    applyRestore()
+    requestAnimationFrame(() => requestAnimationFrame(applyRestore))
+  }
+
+  wrapGeneSetCollectionsCheckpointHooks() {
+    const gsc = this.geneSetCollectionsController
+    if (!gsc || gsc._heatmapCheckpointHooksWrapped) return
+    gsc._heatmapCheckpointHooksWrapped = true
+
+    const persist = () => this.persistCurrentCheckpointOnServer("gene-sets-nav")
+    const openCollectionDetail = gsc.openCollectionDetail.bind(gsc)
+    gsc.openCollectionDetail = async (...args) => {
+      const result = await openCollectionDetail(...args)
+      persist()
+      return result
+    }
+    const closeCollectionDetail = gsc.closeCollectionDetail.bind(gsc)
+    gsc.closeCollectionDetail = (...args) => {
+      const result = closeCollectionDetail(...args)
+      persist()
+      return result
     }
   }
 
@@ -6581,6 +6697,12 @@ export default class extends Controller {
     }
 
     this.applySelectionCheckpointState(state.selection)
+
+    if (state.bottomRightPanel && typeof state.bottomRightPanel === "object") {
+      await this.restoreBottomRightPanelState(state)
+    } else {
+      this.setSelectionTab(state.selection?.activeTab === "gene-sets" ? "gene-sets" : "cells")
+    }
 
     this.handleResize()
   }

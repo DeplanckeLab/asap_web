@@ -17,9 +17,9 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access annotations].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public transfer_ownership cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public transfer_ownership cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_overlaps search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
-  before_action :authorize_project_read_access, only: %i[show clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
+  before_action :authorize_project_read_access, only: %i[show clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_overlaps search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection collection_owned_project_autocomplete collection_add_project transfer_ownership]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection save_batch_compose_metadata]
   before_action :authorize_project_owner_access, only: %i[export_consensus_annotation preview_consensus_annotation]
@@ -2719,6 +2719,60 @@ class ProjectsController < ApplicationController
       "collection_id=#{collection_id} items=#{@gene_set_membership_items.size} total_ms=#{total_ms}"
     )
     render partial: 'projects/views/gene_details_membership_items', layout: false
+  end
+
+  # POST /projects/:id/search_gene_set_overlaps
+  # Ranks gene sets by how much of the query gene list they contain.
+  def search_gene_set_overlaps
+    raw_genes = params[:genes]
+    raw_genes = raw_genes.values if raw_genes.respond_to?(:values) && !raw_genes.is_a?(Array)
+    submitted_genes = Array(raw_genes).filter_map do |gene|
+      next unless gene.respond_to?(:to_h) || gene.is_a?(Hash)
+      h = gene.respond_to?(:to_unsafe_h) ? gene.to_unsafe_h : gene.to_h
+      h = h.with_indifferent_access
+      symbol = h[:symbol].to_s.strip
+      ensembl_id = h[:ensembl_id].to_s.strip
+      next if symbol.blank? && ensembl_id.blank?
+      { symbol: symbol, ensembl_id: ensembl_id, stable_id: h[:stable_id].to_s.strip }
+    end
+
+    if submitted_genes.empty?
+      render json: { status: 'error', message: 'At least one gene is required' }, status: :unprocessable_entity
+      return
+    end
+
+    limit = params[:limit].to_i
+    limit = 100 if limit <= 0
+    limit = 250 if limit > 250
+
+    h_env = Basic.safe_parse_json(@project.version.env_json, {})
+    db_version = asap_data_db_name_for_env(h_env, context: 'search_gene_set_overlaps')
+    resolved = resolve_manual_gene_ids(submitted_genes, db_version)
+    gene_ids = resolved.map { |gene| gene[:gene_id].to_i }.select(&:positive?).uniq
+    unresolved_count = submitted_genes.size - resolved.count { |gene| gene[:gene_id].to_i.positive? }
+
+    if gene_ids.empty?
+      render json: {
+        status: 'ok',
+        query_gene_count: 0,
+        submitted_gene_count: submitted_genes.size,
+        unresolved_count: unresolved_count,
+        items: []
+      }
+      return
+    end
+
+    items = build_gene_set_overlaps_for_genes(gene_ids, db_version, limit: limit)
+    render json: {
+      status: 'ok',
+      query_gene_count: gene_ids.size,
+      submitted_gene_count: submitted_genes.size,
+      unresolved_count: unresolved_count,
+      items: items
+    }
+  rescue StandardError => e
+    Rails.logger.error("search_gene_set_overlaps failed: #{e.class} - #{e.message}")
+    render json: { status: 'error', message: 'Failed to rank gene sets' }, status: :internal_server_error
   end
 
   # GET /projects/1/search_gene_set_items
@@ -7250,7 +7304,8 @@ class ProjectsController < ApplicationController
     render json: {
       loom_file: loom_file,
       column_metadata: heatmap_metadata_options_for(loom_file, dim: 1),
-      row_metadata: heatmap_metadata_options_for(loom_file, dim: 2)
+      row_metadata: heatmap_metadata_options_for(loom_file, dim: 2),
+      gene_set_collections: gene_set_collections_for_heatmap_membership_tracks
     }
   rescue StandardError => e
     Rails.logger.error("[heatmap_metadata_catalog] #{e.class} - #{e.message}")
@@ -10076,6 +10131,136 @@ class ProjectsController < ApplicationController
       end
 
       memberships.sort_by { |entry| entry[:label].to_s.downcase }
+    end
+
+    def build_gene_set_overlaps_for_genes(gene_ids, db_version, limit: 100)
+      selected_ids = Array(gene_ids).map(&:to_i).select(&:positive?).uniq
+      return [] if selected_ids.empty?
+
+      selected_set = selected_ids.to_set
+      selected_count = selected_ids.size
+      results = []
+      current_user_id = current_user&.id
+      global_type_presentation = gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_GLOBAL)
+      imported_type_presentation = gene_set_collection_type_presentation(GENE_SET_COLLECTION_TYPE_IMPORTED)
+
+      if db_version.present?
+        RemoteGene.with_remote(db_version) do
+          conn = RemoteGene.connection
+          where_sql = [
+            '(gs.project_id IS NULL AND gs.ref_id IS NOT NULL)',
+            "gs.project_id = #{@project.id}"
+          ]
+          if current_user_id.present?
+            where_sql << "(gs.project_id IS NULL AND gs.user_id = #{current_user_id.to_i} AND gs.ref_id IS NULL)"
+          end
+
+          ids_sql = selected_ids.join(',')
+          obsolete_item_sql = begin
+            has_obsolete = conn.select_value(<<~SQL).present?
+              SELECT 1
+              FROM information_schema.columns
+              WHERE table_name = 'gene_set_items' AND column_name = 'obsolete'
+              LIMIT 1
+            SQL
+            has_obsolete ? 'AND COALESCE(gsi.obsolete, FALSE) = FALSE' : ''
+          rescue StandardError
+            ''
+          end
+
+          # Prefer PostgreSQL array overlap when available; fall back to OR LIKE matching.
+          overlap_predicate = begin
+            conn.select_value("SELECT ARRAY[1]::int[] && ARRAY[1]::int[]")
+            "string_to_array(COALESCE(gsi.content, ''), ',')::int[] && ARRAY[#{ids_sql}]::int[]"
+          rescue StandardError
+            selected_ids.map { |id| "(',' || COALESCE(gsi.content, '') || ',') LIKE '%,#{id},%'" }.join(' OR ')
+          end
+
+          rows = conn.select_all(<<~SQL)
+            SELECT
+              gs.id AS collection_id,
+              gs.label AS collection_label,
+              gs.ref_id,
+              gs.project_id,
+              ds.label AS database_name,
+              gsi.id AS item_id,
+              gsi.identifier AS item_identifier,
+              gsi.name AS item_name,
+              gsi.content AS item_content
+            FROM gene_sets gs
+            JOIN gene_set_items gsi ON gsi.gene_set_id = gs.id
+            LEFT JOIN db_sets ds ON ds.id = gs.ref_id
+            WHERE gs.organism_id = #{@project.organism_id.to_i}
+              AND COALESCE(gs.obsolete, FALSE) = FALSE
+              #{obsolete_item_sql}
+              AND (#{where_sql.join(' OR ')})
+              AND (#{overlap_predicate})
+          SQL
+
+          rows.each do |row|
+            set_ids = row['item_content'].to_s.split(',').map(&:to_i).select(&:positive?)
+            set_size = set_ids.size
+            next if set_size <= 0
+
+            overlap_count = set_ids.count { |gid| selected_set.include?(gid) }
+            next if overlap_count <= 0
+
+            project_id = row['project_id']&.to_i
+            ref_id = row['ref_id']&.to_i
+            type_data = project_id.blank? && ref_id.present? ? global_type_presentation : imported_type_presentation
+            item_label = row['item_name'].to_s.strip
+            item_identifier = row['item_identifier'].to_s.strip
+            results << {
+              id: row['item_id'].to_i,
+              name: item_label.presence || item_identifier,
+              identifier: item_identifier,
+              collection_id: row['collection_id'].to_i,
+              collection_label: row['collection_label'].to_s,
+              database_name: row['database_name'].to_s,
+              overlap_count: overlap_count,
+              gene_set_size: set_size,
+              query_gene_count: selected_count,
+              overlap_pct: ((100.0 * overlap_count) / selected_count).round(1)
+            }.merge(type_data)
+          end
+        end
+      end
+
+      GeneSetCollection.where(project_id: @project.id).includes(:gene_set_collection_type).order(created_at: :desc).each do |collection|
+        payload = load_local_gene_set_collection_payload(collection.file_key, collection.name)
+        type_data = gene_set_collection_type_presentation(gene_set_collection_type_key(collection))
+        Array(payload['items']).each do |raw_item|
+          item = normalize_manual_gene_set_item(raw_item)
+          next unless item
+
+          set_ids = Array(item[:genes]).map { |gene| gene[:gene_id].to_i }.select(&:positive?).uniq
+          set_size = set_ids.size
+          # Fall back to gene count from payload when ids are missing.
+          set_size = Array(item[:genes]).size if set_size <= 0
+          next if set_size <= 0
+
+          overlap_count = set_ids.count { |gid| selected_set.include?(gid) }
+          next if overlap_count <= 0
+
+          results << {
+            id: item[:id].to_s,
+            name: item[:name].presence || item[:identifier].to_s,
+            identifier: item[:identifier].to_s,
+            collection_id: local_gene_set_collection_id(collection),
+            collection_label: collection.name.to_s,
+            database_name: '',
+            overlap_count: overlap_count,
+            gene_set_size: set_size,
+            query_gene_count: selected_count,
+            overlap_pct: ((100.0 * overlap_count) / selected_count).round(1)
+          }.merge(type_data)
+        end
+      end
+
+      results.sort_by! do |entry|
+        [-entry[:overlap_pct].to_f, -entry[:overlap_count].to_i, entry[:name].to_s.downcase]
+      end
+      results.first(limit)
     end
 
     def apply_publication_snapshot_to_runs(relation)
@@ -14873,6 +15058,17 @@ class ProjectsController < ApplicationController
           path: annot.name,
           data_type: annot.data_type&.name,
           nber_cats: annot.nber_cats.to_i
+        }
+      end
+    end
+
+    def gene_set_collections_for_heatmap_membership_tracks
+      load_gene_set_collections if @gene_set_collections.nil?
+      Array(@gene_set_collections).map do |collection|
+        {
+          id: collection[:id],
+          label: collection[:label].to_s,
+          nb_items: collection[:nb_items].to_i
         }
       end
     end

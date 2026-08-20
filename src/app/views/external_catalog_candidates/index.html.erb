@@ -133,10 +133,17 @@
             <td class="whitespace-nowrap px-3 py-2 text-xs">
               <%= link_to "Details", external_catalog_candidate_path(candidate), class: "text-gray-600 hover:text-gray-900 dark:text-gray-300" %>
               <% if candidate.can_create_project?(accessible_asap_projects: asap_projects) %>
+                <% import_confirm =
+                     if !user_signed_in? && guest_sandbox_project
+                       "Importing will replace your current sandbox project (#{guest_sandbox_project.display_name}). Continue?"
+                     end %>
                 <%= button_to "Import",
                               create_project_external_catalog_candidate_path(candidate),
                               method: :post,
-                              form: { class: "inline ml-2" },
+                              form: {
+                                class: "inline ml-2",
+                                data: (import_confirm ? { turbo_confirm: import_confirm } : {})
+                              },
                               class: "inline-flex items-center rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900" %>
               <% end %>
               <% if admin? && synced_reference_data_writable? && candidate.can_mark_obsolete? %>

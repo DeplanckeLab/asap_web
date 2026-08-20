@@ -4,7 +4,10 @@
 class ExternalCatalogImportCandidateJob < ApplicationJob
   queue_as :default
 
-  def perform(candidate_id, user_id, version_id: nil, skip_archive: true)
+  def perform(candidate_id, user_id, version_id: nil, skip_archive: true, sandbox_key: nil)
+    sandbox_key = sandbox_key.to_s.strip.presence
+    guest_import = sandbox_key.present?
+
     candidate = ExternalCatalogCandidate.find_by(id: candidate_id)
     unless candidate
       Rails.logger.error("[ExternalCatalogImportCandidateJob] candidate=#{candidate_id} not found")
@@ -34,16 +37,18 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       import_user_id: user.id
     )
 
-    accessible = candidate.asap_projects_accessible_to(user)
-    if accessible.exists?
-      project = accessible.order(id: :desc).first
-      candidate.update!(import_status: 'idle', import_error: nil)
-      candidate.link_matched_project!(project, link_kind: 'provider_match') if project
-      Rails.logger.info(
-        "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} already accessible in ASAP " \
-        "project=#{project&.key} user=#{user.id} (matched, import_project_id unchanged)"
-      )
-      return
+    unless guest_import
+      accessible = candidate.asap_projects_accessible_to(user)
+      if accessible.exists?
+        project = accessible.order(id: :desc).first
+        candidate.update!(import_status: 'idle', import_error: nil)
+        candidate.link_matched_project!(project, link_kind: 'provider_match') if project
+        Rails.logger.info(
+          "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} already accessible in ASAP " \
+          "project=#{project&.key} user=#{user.id} (matched, import_project_id unchanged)"
+        )
+        return
+      end
     end
 
     importer = ExternalCatalog::ProjectImporter.new(
@@ -51,11 +56,14 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       version: version,
       dry_run: false,
       skip_archive: skip_archive,
+      skip_publish: guest_import,
       strict: true,
       allow_scfair_warnings: ActiveModel::Type::Boolean.new.cast(
         ENV.fetch('ALLOW_SCFAIR_WARNINGS', '0')
       ),
-      archiver: nil
+      archiver: nil,
+      sandbox: guest_import,
+      sandbox_key: sandbox_key
     )
 
     result = importer.import_one(candidate.to_entry)
@@ -80,11 +88,11 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
     Rails.logger.info(
       "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} " \
       "outcome=#{importer.last_import_outcome} project=#{result.id} key=#{result.key} " \
-      "import_project_id=#{candidate.import_project_id}"
+      "sandbox=#{guest_import} import_project_id=#{candidate.import_project_id}"
     )
   rescue ExternalCatalog::ProjectImporter::SkipEntry => e
     project = candidate&.asap_projects&.order(id: :desc)&.first
-    if project
+    if project && !guest_import
       candidate.update!(import_status: 'idle', import_error: nil)
       candidate.link_matched_project!(project, link_kind: 'provider_match')
     else
@@ -97,5 +105,7 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
     )
     Rails.logger.error(e.backtrace.first(20).join("\n")) if e.backtrace
     candidate&.update!(import_status: 'failed', import_error: "#{e.class}: #{e.message}".truncate(2000))
+  ensure
+    ExternalCatalog::ImportRateLimit.release_inflight!(session_key: sandbox_key) if sandbox_key.present?
   end
 end

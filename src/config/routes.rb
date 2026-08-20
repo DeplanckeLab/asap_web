@@ -59,6 +59,7 @@ Rails.application.routes.draw do
       get :search_gene
       get :search_gene_memberships
       get :search_gene_membership_items
+      post :search_gene_set_overlaps
       get :search_gene_set_items
       get :gene_set_collection_items
       get :gene_set_collection_status

@@ -1,5 +1,6 @@
 import consumer from "channels/consumer"
 import { renderGeneCategoryBoxplot } from "visualization/regl_boxplot"
+import { GeneSetOverlapPopup } from "visualization/gene_set_overlap_popup"
 
 // GeneManager - Handles gene autocomplete and expression visualization
 export class GeneManager {
@@ -28,6 +29,7 @@ export class GeneManager {
     this.projectChannelId = null
     this.pendingCollectionImportIds = new Set()
     this.pendingCollectionImportPollers = new Map()
+    this.geneSetOverlapPopup = null
     // Expose globally for diagnostics and inline handlers
     window.geneManager = this
     this.init()
@@ -596,6 +598,25 @@ export class GeneManager {
       })
     }
 
+    this.geneSetOverlapPopup = new GeneSetOverlapPopup({
+      getProjectIdentifier: () => this.projectIdentifier || this.controller?.getProjectIdentifier?.() || null,
+      getGenes: () => (Array.isArray(this.geneTags) ? this.geneTags : []).map((gene) => ({
+        symbol: gene.symbol || gene.query || '',
+        ensembl_id: gene.ensemblId || gene.ensembl_id || '',
+        stable_id: gene.stableId || gene.stable_id || ''
+      })),
+      getCsrfToken: () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
+    })
+    const overlapBtn = document.getElementById('gene-set-overlap-btn')
+    if (overlapBtn && overlapBtn.dataset.bound !== 'true') {
+      overlapBtn.dataset.bound = 'true'
+      overlapBtn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
+        this.geneSetOverlapPopup?.open()
+      })
+    }
+
     const clearAllBtn = document.getElementById('clear-genes-btn')
     if (clearAllBtn && clearAllBtn.dataset.bound !== 'true') {
       clearAllBtn.dataset.bound = 'true'
@@ -736,6 +757,11 @@ export class GeneManager {
     const addBtn = document.getElementById('add-gene-set-btn')
     if (addBtn) {
       addBtn.style.display = this.geneTags.length > 0 ? 'inline-flex' : 'none'
+    }
+
+    const overlapBtn = document.getElementById('gene-set-overlap-btn')
+    if (overlapBtn) {
+      overlapBtn.style.display = this.geneTags.length > 0 ? 'inline-flex' : 'none'
     }
 
     const clearAllBtn = document.getElementById('clear-genes-btn')

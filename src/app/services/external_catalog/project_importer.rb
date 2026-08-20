@@ -53,7 +53,9 @@ module ExternalCatalog
       strict: false,
       allow_scfair_warnings: false,
       parse_timeout_sec: nil,
-      archiver: nil
+      archiver: nil,
+      sandbox: false,
+      sandbox_key: nil
     )
       @user = user
       @version = version
@@ -65,6 +67,10 @@ module ExternalCatalog
       @allow_scfair_warnings = allow_scfair_warnings
       @parse_timeout_sec = (parse_timeout_sec || ENV.fetch('PARSE_TIMEOUT_SEC', DEFAULT_PARSE_TIMEOUT_SEC)).to_i
       @archiver = archiver
+      @sandbox = ActiveModel::Type::Boolean.new.cast(sandbox)
+      @sandbox_key = sandbox_key.to_s.strip.presence
+      raise Error, 'sandbox_key required for sandbox import' if @sandbox && @sandbox_key.blank?
+
       @formats_by_name = FileFormat.all.index_by(&:name)
       @sc_type = ProjectType.find_by(tag: 'sc') || ProjectType.find_by('name ILIKE ?', '%single%')
       @bulk_type = ProjectType.find_by(tag: 'bulk') || ProjectType.find_by('name ILIKE ?', '%bulk%')
@@ -105,7 +111,7 @@ module ExternalCatalog
       )
 
       provider = ensure_provider!(entry)
-      if already_imported?(provider, entry.external_id)
+      if !@sandbox && already_imported?(provider, entry.external_id)
         raise SkipEntry, "already imported provider=#{provider.name} key=#{entry.external_id}"
       end
 
@@ -126,7 +132,7 @@ module ExternalCatalog
       parsing_attrs = build_parsing_attrs(entry, sel_name, dims, file_type)
       preparsing_fp = preparsing_fingerprint(parsing_attrs)
       content_sha = InputFileSha256.ensure_for_fu!(fu)
-      existing = find_live_project_by_content_and_preparsing(content_sha, preparsing_fp)
+      existing = @sandbox ? nil : find_live_project_by_content_and_preparsing(content_sha, preparsing_fp)
       if existing
         @logger.info(
           "[ExternalCatalog] content+preparsing match source=#{entry.source}/#{entry.external_id} " \
@@ -617,9 +623,11 @@ module ExternalCatalog
 
     def create_project!(entry, fu, organism, parsing_attrs, preparsing_fp)
       ptype = project_type_for(entry)
+      replace_existing_sandbox_project! if @sandbox
+
       project = Project.new(
         user_id: @user.id,
-        key: Project.generate_unique_key,
+        key: @sandbox ? @sandbox_key : Project.generate_unique_key,
         name: entry.project_name,
         description: "Imported from #{entry.provider_name} (#{entry.external_id})",
         organism_id: organism.id,
@@ -630,7 +638,8 @@ module ExternalCatalog
         nber_cols: parsing_attrs[:nber_cols],
         parsing_attrs_json: parsing_attrs.to_json,
         input_preparsing_fingerprint: preparsing_fp,
-        status_id: Status.find_by(name: 'pending')&.id || 1
+        status_id: Status.find_by(name: 'pending')&.id || 1,
+        sandbox: @sandbox
       )
       project.save!
       project.ensure_project_steps
@@ -649,6 +658,16 @@ module ExternalCatalog
 
       project.parse_files({})
       project
+    end
+
+    # Guest sandboxes reuse session[:sandbox] as the project key (same as projects#create).
+    def replace_existing_sandbox_project!
+      existing = Project.find_by(key: @sandbox_key)
+      return unless existing
+
+      Fu.where(project_id: existing.id).update_all(project_id: nil)
+      existing.destroy!
+      @logger.info("[ExternalCatalog] replaced existing sandbox project key=#{@sandbox_key}")
     end
 
     def attach_project_collection!(project, entry)

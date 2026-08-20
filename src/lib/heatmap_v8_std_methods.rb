@@ -64,7 +64,7 @@ module HeatmapV8StdMethods
       "dataset_field" => "output_dataset",
       "constraints" => { "in_loom" => ["input_matrix"] },
       "requires" => ["input_matrix"],
-      "source_steps" => %w[import_metadata parsing cell_filtering gene_filtering clustering],
+      "source_steps" => %w[import_metadata parsing cell_filtering gene_filtering clustering cell_selection],
       "req_data_structure" => "array",
       "min_nber_items" => 0,
       "max_nber_items" => 1,
@@ -116,7 +116,7 @@ module HeatmapV8StdMethods
         "required_if" => [{ "attr" => "column_mode", "equals" => "group" }]
       },
       "requires" => ["input_matrix"],
-      "source_steps" => %w[import_metadata parsing cell_filtering gene_filtering clustering],
+      "source_steps" => %w[import_metadata parsing cell_filtering gene_filtering clustering cell_selection],
       "req_data_structure" => "array",
       "min_nber_items" => 0,
       "max_nber_items" => 1,

@@ -234,6 +234,11 @@
       color: white;
     }
     .heatmap-icon-btn-save:hover { background-color: #1d4ed8; }
+    .heatmap-icon-btn-overlap {
+      background-color: #0f766e;
+      color: white;
+    }
+    .heatmap-icon-btn-overlap:hover { background-color: #0d9488; }
     .heatmap-icon-btn-clear {
       background-color: #d1d5db;
       color: #374151;
@@ -514,33 +519,61 @@
         <div style="padding:12px 14px; border-bottom:1px solid #e5e7eb; flex-shrink:0;">
           <h3 style="margin:0; font-size:14px; font-weight:600; color:#111827;">Genes</h3>
         </div>
-        <div style="flex-shrink:0; padding:10px 14px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
-          <span style="font-size:14px; color:#6b7280;">
-            <span data-heatmap-target="selectedGenesCount">0</span> genes selected
-          </span>
-          <div style="display:flex; gap:8px;">
+        <div style="flex-shrink:0; padding:10px 14px 0 14px; display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <div style="position:relative; flex:1; min-width:0;">
+              <input type="text"
+                     data-heatmap-target="geneSearchInput"
+                     data-action="input->heatmap#onGeneSearchInput keydown->heatmap#onGeneSearchKeydown blur->heatmap#onGeneSearchBlur"
+                     placeholder="Search genes in heatmap..."
+                     autocomplete="off"
+                     style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; color:#111827; background:#fff; box-sizing:border-box;" />
+              <div data-heatmap-target="geneSearchDropdown"
+                   style="display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #d1d5db; border-top:none; border-radius:0 0 6px 6px; max-height:180px; overflow-y:auto; z-index:20; box-shadow:0 4px 6px rgba(0,0,0,0.1);"></div>
+            </div>
             <% if can_analyze_heatmap %>
+              <button type="button"
+                      class="heatmap-icon-btn heatmap-icon-btn-overlap"
+                      data-heatmap-target="geneSetOverlapBtn"
+                      data-action="heatmap#openGeneSetOverlapPopup"
+                      title="Find gene sets overlapping selected genes"
+                      aria-label="Find gene sets overlapping selected genes"
+                      style="display:none;">
+                <i class="fas fa-chart-pie" style="font-size:12px;" aria-hidden="true"></i>
+              </button>
               <button type="button"
                       class="heatmap-icon-btn heatmap-icon-btn-save"
                       data-action="heatmap#saveGeneSelection"
-                      title="Save gene set"
-                      aria-label="Save gene set">
-                <i class="fas fa-save" style="font-size:14px;" aria-hidden="true"></i>
+                      title="Create gene set from checked genes"
+                      aria-label="Create gene set from checked genes">
+                <span style="font-size:14px; font-weight:700; line-height:1;">+</span>
               </button>
             <% end %>
             <button type="button"
                     class="heatmap-icon-btn heatmap-icon-btn-clear"
                     data-heatmap-target="clearGeneSelectionBtn"
                     data-action="heatmap#clearGeneSelection"
-                    title="Clear gene selection"
-                    aria-label="Clear gene selection"
+                    title="Clear gene list"
+                    aria-label="Clear gene list"
                     style="display:none;">
               <i class="fas fa-times" style="font-size:14px;" aria-hidden="true"></i>
             </button>
           </div>
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+            <span style="font-size:13px; color:#6b7280;">
+              <span data-heatmap-target="selectedGenesCount">0</span> genes highlighted
+            </span>
+          </div>
+          <div data-heatmap-target="geneSearchList"
+               style="max-height:120px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; border:1px solid #e5e7eb; border-radius:6px; padding:4px; background:#f9fafb; min-height:36px;">
+            <div data-heatmap-target="geneSearchListEmpty"
+                 style="font-size:12px; color:#9ca3af; font-style:italic; padding:6px 4px;">
+              Search or select genes on the heatmap
+            </div>
+          </div>
         </div>
         <div data-heatmap-target="geneSelectionStatus"
-             style="flex-shrink:0; padding:0 14px 8px 14px; font-size:12px; color:#6b7280; min-height:18px;"></div>
+             style="flex-shrink:0; padding:6px 14px 8px 14px; font-size:12px; color:#6b7280; min-height:18px;"></div>
         <div style="height:1px; background-color:#e5e7eb; margin:0 14px 8px 14px; flex-shrink:0;"></div>
         <div style="flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; padding:0 0 8px 0;">
           <div id="heatmap-gene-set-collections-list-view" style="display:flex;flex-direction:column;gap:8px;height:100%;min-height:0;width:100%;">
@@ -869,10 +902,51 @@
         <button type="button" data-action="heatmap#closeTrackModal" class="<%= heatmap_btn %>" aria-label="Close">Close</button>
       </div>
       <div style="display:flex; flex-direction:column; gap:12px;">
-        <div>
+        <div data-heatmap-target="trackModalSourceWrap" style="display:none;">
+          <label for="heatmap-track-source" style="display:block; font-size:12px; font-weight:500; color:#374151; margin-bottom:4px;">Track source</label>
+          <select id="heatmap-track-source"
+                  data-heatmap-target="trackModalSource"
+                  data-action="change->heatmap#trackModalSourceChanged"
+                  class="form-select form-select-sm"
+                  style="width:100%;">
+            <option value="metadata">Gene metadata</option>
+            <option value="gene_set_membership">Gene set membership (present / absent)</option>
+          </select>
+        </div>
+        <div data-heatmap-target="trackModalMetadataWrap">
           <label for="heatmap-track-metadata" style="display:block; font-size:12px; font-weight:500; color:#374151; margin-bottom:4px;">Metadata</label>
           <select id="heatmap-track-metadata" data-heatmap-target="trackModalSelect" data-action="change->heatmap#trackModalMetadataChanged"
                   class="form-select form-select-sm" style="width:100%;"></select>
+        </div>
+        <div data-heatmap-target="trackModalGeneSetWrap" style="display:none;">
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <div>
+              <label for="heatmap-track-gene-set-collection" style="display:block; font-size:12px; font-weight:500; color:#374151; margin-bottom:4px;">Gene set collection</label>
+              <select id="heatmap-track-gene-set-collection"
+                      data-heatmap-target="trackModalGeneSetCollection"
+                      data-action="change->heatmap#trackModalGeneSetCollectionChanged"
+                      class="form-select form-select-sm"
+                      style="width:100%;"></select>
+            </div>
+            <div>
+              <label for="heatmap-track-gene-set-filter" style="display:block; font-size:12px; font-weight:500; color:#374151; margin-bottom:4px;">Filter gene sets</label>
+              <input id="heatmap-track-gene-set-filter"
+                     type="text"
+                     data-heatmap-target="trackModalGeneSetFilter"
+                     data-action="input->heatmap#trackModalGeneSetFilterChanged"
+                     placeholder="Filter by name..."
+                     autocomplete="off"
+                     style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; color:#111827; background:#fff; box-sizing:border-box;" />
+            </div>
+            <div>
+              <label for="heatmap-track-gene-set-item" style="display:block; font-size:12px; font-weight:500; color:#374151; margin-bottom:4px;">Gene set</label>
+              <select id="heatmap-track-gene-set-item"
+                      data-heatmap-target="trackModalGeneSetItem"
+                      data-action="change->heatmap#trackModalGeneSetItemChanged"
+                      class="form-select form-select-sm"
+                      style="width:100%;"></select>
+            </div>
+          </div>
         </div>
         <div>
           <label for="heatmap-track-size" style="display:block; font-size:12px; font-weight:500; color:#374151; margin-bottom:4px;">Track size</label>
@@ -1095,7 +1169,7 @@
     <div id="heatmap-gene-set-modal-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:13000;display:flex;align-items:center;justify-content:center;padding:20px;">
       <div style="background:#fff;border-radius:8px;padding:24px;max-width:560px;width:100%;max-height:80vh;overflow:auto;box-shadow:0 20px 25px -5px rgba(0,0,0,0.1);">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
-          <h3 style="margin:0;font-size:18px;font-weight:600;color:#111827;">Save heatmap gene set</h3>
+          <h3 style="margin:0;font-size:18px;font-weight:600;color:#111827;">Create heatmap gene set</h3>
           <button type="button" data-role="heatmap-gene-set-close" style="background:none;border:none;font-size:22px;color:#6b7280;cursor:pointer;line-height:1;">x</button>
         </div>
         <form data-role="heatmap-gene-set-form" style="display:flex;flex-direction:column;gap:16px;">

@@ -1,12 +1,22 @@
 <div class="max-w-xl mx-auto mt-16 mb-16 px-4">
   <h1 class="text-2xl font-bold text-gray-900">Session verification</h1>
-  <p class="mt-3 text-gray-800">
-    This project is archived. Move the tile onto the dashed square to restore it.
-  </p>
-  <p class="mt-2 text-sm text-gray-700">
-    Drag the tile, or click the tile and then click the dashed square.
-    After this check, you will not be asked again during this session, including for other projects.
-  </p>
+  <% if @session_cookie_challenge_context == :catalog_import %>
+    <p class="mt-3 text-gray-800">
+      Before importing a dataset as a guest, move the tile onto the dashed square.
+    </p>
+    <p class="mt-2 text-sm text-gray-700">
+      Drag the tile, or click the tile and then click the dashed square.
+      After this check, you will not be asked again during this session.
+    </p>
+  <% else %>
+    <p class="mt-3 text-gray-800">
+      This project is archived. Move the tile onto the dashed square to restore it.
+    </p>
+    <p class="mt-2 text-sm text-gray-700">
+      Drag the tile, or click the tile and then click the dashed square.
+      After this check, you will not be asked again during this session, including for other projects.
+    </p>
+  <% end %>
 
   <div class="mt-6 inline-block bg-white border border-gray-300 p-3">
     <div id="asap-challenge-board"

@@ -1,13 +1,15 @@
 # frozen_string_literal: true
 
 class ExternalCatalogCandidatesController < ApplicationController
-  skip_before_action :authenticate_user!, only: %i[index show], raise: false
-  before_action :authenticate_user!, only: %i[create_project destroy]
+  skip_before_action :authenticate_user!, only: %i[index show create_project], raise: false
+  before_action :authenticate_user!, only: %i[destroy]
   before_action :authorize_admin, only: %i[destroy]
   before_action :ensure_synced_reference_data_writable!, only: %i[destroy]
   before_action :set_candidate, only: %i[show create_project destroy]
 
   PER_PAGE = 25
+  # Same technical owner as projects#create for guest sandboxes.
+  GUEST_SANDBOX_USER_ID = 1
 
   def index
     @source = params[:source].to_s.presence
@@ -38,7 +40,19 @@ class ExternalCatalogCandidatesController < ApplicationController
       return
     end
 
+    if guest_import_challenge_requested?
+      session[:pending_external_catalog_import_id] = @candidate.id
+      @session_cookie_challenge_context = :catalog_import
+      render_session_cookie_challenge(request.remote_ip.to_s)
+      return
+    end
+
     @asap_projects = @candidate.asap_projects.order(id: :desc).select { |project| readable?(project) }
+    @auto_start_guest_import =
+      !user_signed_in? &&
+      session_unarchive_cleared? &&
+      session[:pending_external_catalog_import_id].to_i == @candidate.id
+    session.delete(:pending_external_catalog_import_id) if @auto_start_guest_import
   end
 
   def create_project
@@ -51,16 +65,11 @@ class ExternalCatalogCandidatesController < ApplicationController
       return
     end
 
-    @candidate.update!(
-      import_status: 'importing',
-      import_error: nil,
-      import_user_id: current_user.id
-    )
-
-    ExternalCatalogImportCandidateJob.perform_later(@candidate.id, current_user.id)
-
-    redirect_to external_catalog_candidate_path(@candidate),
-                notice: 'Import started. Refresh this page to see progress.'
+    if user_signed_in?
+      start_signed_in_import!
+    else
+      start_guest_import!
+    end
   end
 
   def destroy
@@ -81,6 +90,69 @@ class ExternalCatalogCandidatesController < ApplicationController
 
   def set_candidate
     @candidate = ExternalCatalogCandidate.find(params[:id])
+  end
+
+  def guest_import_challenge_requested?
+    return false if user_signed_in?
+    return false unless ActiveModel::Type::Boolean.new.cast(params[:verify_session])
+    return false unless SessionCookieGate.enabled?
+    return false if session_unarchive_cleared?
+
+    true
+  end
+
+  def start_signed_in_import!
+    @candidate.update!(
+      import_status: 'importing',
+      import_error: nil,
+      import_user_id: current_user.id
+    )
+
+    ExternalCatalogImportCandidateJob.perform_later(@candidate.id, current_user.id)
+
+    redirect_to external_catalog_candidate_path(@candidate),
+                notice: 'Import started. Refresh this page to see progress.'
+  end
+
+  def start_guest_import!
+    if SessionCookieGate.enabled? && !session_unarchive_cleared?
+      session[:pending_external_catalog_import_id] = @candidate.id
+      redirect_to external_catalog_candidate_path(@candidate, verify_session: 1)
+      return
+    end
+
+    session[:sandbox] ||= create_sandbox_key
+    rate = ExternalCatalog::ImportRateLimit.allow_guest_start!(
+      ip: request.remote_ip.to_s,
+      session_key: session[:sandbox]
+    )
+    unless rate.allowed?
+      redirect_to external_catalog_candidate_path(@candidate), alert: rate.reason
+      return
+    end
+
+    guest_user = User.find_by(id: GUEST_SANDBOX_USER_ID)
+    unless guest_user
+      ExternalCatalog::ImportRateLimit.release_inflight!(session_key: session[:sandbox])
+      redirect_to external_catalog_candidate_path(@candidate),
+                  alert: 'Guest import is temporarily unavailable.'
+      return
+    end
+
+    @candidate.update!(
+      import_status: 'importing',
+      import_error: nil,
+      import_user_id: guest_user.id
+    )
+
+    ExternalCatalogImportCandidateJob.perform_later(
+      @candidate.id,
+      guest_user.id,
+      sandbox_key: session[:sandbox]
+    )
+
+    redirect_to external_catalog_candidate_path(@candidate),
+                notice: 'Import started into your sandbox project. Refresh this page to see progress.'
   end
 
   def create_blocked_message(accessible = nil)

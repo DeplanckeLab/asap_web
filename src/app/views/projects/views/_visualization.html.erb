@@ -2551,6 +2551,15 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
             </div>
           </div>
           <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-shrink:0;">
+            <button id="gene-set-overlap-btn"
+                    type="button"
+                    style="display:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#0f766e;color:white;border:none;border-radius:6px;cursor:pointer;transition:background-color 0.2s;"
+                    onmouseover="this.style.backgroundColor='#0d9488'"
+                    onmouseout="this.style.backgroundColor='#0f766e'"
+                    title="Find gene sets overlapping selected genes"
+                    aria-label="Find gene sets overlapping selected genes">
+              <i class="fas fa-chart-pie" style="font-size:12px;" aria-hidden="true"></i>
+            </button>
             <button id="add-gene-set-btn" data-gene-set-add-trigger="true" style="display:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;background-color:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;transition:background-color 0.2s;" 
                     onmouseover="this.style.backgroundColor='#1d4ed8'" 
                     onmouseout="this.style.backgroundColor='#2563eb'"

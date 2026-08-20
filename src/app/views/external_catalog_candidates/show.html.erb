@@ -20,9 +20,17 @@
     </div>
     <div class="flex items-start gap-2">
       <% if @candidate.can_create_project?(accessible_asap_projects: @asap_projects) %>
+        <% import_confirm =
+             if !@auto_start_guest_import && !user_signed_in? && guest_sandbox_project
+               "Importing will replace your current sandbox project (#{guest_sandbox_project.display_name}). Continue?"
+             end %>
         <%= button_to "Import",
                       create_project_external_catalog_candidate_path(@candidate),
                       method: :post,
+                      form: {
+                        id: "catalog-import-form",
+                        data: (import_confirm ? { turbo_confirm: import_confirm } : {})
+                      },
                       class: "inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900" %>
       <% end %>
       <% if admin? && synced_reference_data_writable? && @candidate.can_mark_obsolete? %>
@@ -34,6 +42,15 @@
       <% end %>
     </div>
   </div>
+
+  <% if @auto_start_guest_import %>
+    <%= javascript_tag nonce: true do %>
+      (function() {
+        var form = document.getElementById('catalog-import-form');
+        if (form) { form.requestSubmit(); }
+      })();
+    <% end %>
+  <% end %>
 
   <% if notice.present? %>
     <div class="rounded-md bg-green-100 px-4 py-3 text-sm text-green-700 dark:bg-green-900/30 dark:text-green-200"><%= notice %></div>

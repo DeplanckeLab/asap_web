@@ -3,6 +3,7 @@ import { ReglHeatmap } from "visualization/regl_heatmap"
 import { GradientManager } from "visualization/gradient_manager"
 import { ColorManager } from "visualization/color_manager"
 import { GeneSetCollectionsController } from "visualization/gene_set_collections_controller"
+import { GeneSetOverlapPopup } from "visualization/gene_set_overlap_popup"
 import { canvasToJpegThumbnailDataUrl, isCheckpointThumbnailDataUrl } from "lib/checkpoint_thumbnail"
 import { DEFAULT_NAN_COLOR_INT, nanColorToHex, parseNanColor } from "lib/nan_color"
 import consumer from "channels/consumer"
@@ -32,6 +33,9 @@ export default class extends Controller {
     "addColTrackBtn", "addRowTrackBtn",
     "trackModal", "trackModalTitle", "trackModalSelect",
     "trackModalSize", "trackModalShowLegend", "trackModalLegendWrap", "trackModalHint",
+    "trackModalSourceWrap", "trackModalSource", "trackModalMetadataWrap",
+    "trackModalGeneSetWrap", "trackModalGeneSetCollection", "trackModalGeneSetFilter",
+    "trackModalGeneSetItem",
     "editTrackModal", "editTrackModalTitle", "editTrackModalName",
     "editTrackType", "editTrackTypeWrap", "editTrackTypeHint",
     "editTrackDisplayMode", "editTrackDisplayModeWrap",
@@ -48,7 +52,9 @@ export default class extends Controller {
     "selectedGenesCount", "selectedCellsCount",
     "savedCellSetsList",
     "geneSelectionStatus", "cellSelectionStatus",
-    "clearGeneSelectionBtn", "clearCellSelectionBtn"
+    "clearGeneSelectionBtn", "clearCellSelectionBtn",
+    "geneSearchInput", "geneSearchDropdown", "geneSearchList", "geneSearchListEmpty",
+    "geneSetOverlapBtn"
   ]
 
   connect() {
@@ -64,6 +70,17 @@ export default class extends Controller {
     this.selectedCells = new Set()
     this.selectedOrigRows = new Set()
     this.selectedOrigCols = new Set()
+    // Ordered list of genes added via search or rectangle selection.
+    // checked=true genes are highlighted on the heatmap and used for gene-set creation.
+    this.geneListItems = []
+    this.geneRowIndexBySymbol = new Map()
+    this.geneSearchMatches = []
+    this.geneSearchActiveIndex = -1
+    this.geneSearchBlurTimer = null
+    this.trackModalGeneSetFilterTimer = null
+    this.trackModalGeneSetItems = []
+    this.pendingTrackGeneSetItemId = null
+    this.pendingTrackGeneSetItemName = null
     this.savedCellSets = []
     this.recentlyCreatedSavedCellSetId = null
     this.editingSavedCellSetId = null
@@ -91,6 +108,13 @@ export default class extends Controller {
       root: this.element.querySelector("#heatmap-genes-panel") || this.element,
       enableModuleScoreColoring: false,
       createCollectionType: "from_heatmap"
+    })
+    this.geneSetOverlapPopup = new GeneSetOverlapPopup({
+      getProjectIdentifier: () => this.getProjectIdentifier(),
+      getGenes: () => this.geneListItems
+        .filter((item) => item.checked)
+        .map((item) => ({ symbol: item.symbol })),
+      getCsrfToken: () => this.csrfToken()
     })
     this.editingGradientTarget = { type: "expression" }
     this.expressionCustomColorRange = null
@@ -175,6 +199,18 @@ export default class extends Controller {
     this.teardownPanelLayout()
     this.teardownSavedCellSetLiveUpdates()
     this.teardownSavedCellSetsFilterMenus()
+    if (this.geneSearchBlurTimer) {
+      clearTimeout(this.geneSearchBlurTimer)
+      this.geneSearchBlurTimer = null
+    }
+    if (this.trackModalGeneSetFilterTimer) {
+      clearTimeout(this.trackModalGeneSetFilterTimer)
+      this.trackModalGeneSetFilterTimer = null
+    }
+    if (this.geneSetOverlapPopup) {
+      this.geneSetOverlapPopup.close()
+      this.geneSetOverlapPopup = null
+    }
     this.geneSetCollectionsController = null
     window.removeEventListener("resize", this.boundResize)
     window.removeEventListener("beforeunload", this.boundPersistCurrent)
@@ -261,6 +297,7 @@ export default class extends Controller {
       this.embeddingMetadataId = this.meta.embedding_metadata_id
         ? Number(this.meta.embedding_metadata_id)
         : null
+      this.rebuildGeneRowIndex()
 
       this.setupExpressionGradient()
       this.setStatus("")
@@ -506,6 +543,8 @@ export default class extends Controller {
 
   openTrackModal(axis) {
     this.pendingTrackAxis = axis
+    this.pendingTrackGeneSetItemId = null
+    this.pendingTrackGeneSetItemName = null
     if (this.hasTrackModalTitleTarget) {
       this.trackModalTitleTarget.textContent = axis === "column"
         ? "Add cell metadata track"
@@ -513,7 +552,11 @@ export default class extends Controller {
     }
     if (this.hasTrackModalSizeTarget) this.trackModalSizeTarget.value = "normal"
     if (this.hasTrackModalShowLegendTarget) this.trackModalShowLegendTarget.checked = false
+    if (this.hasTrackModalSourceTarget) this.trackModalSourceTarget.value = "metadata"
+    if (this.hasTrackModalGeneSetFilterTarget) this.trackModalGeneSetFilterTarget.value = ""
+    this.syncTrackModalSourceVisibility()
     this.fillTrackModalSelect(axis)
+    if (axis === "row") this.fillTrackModalGeneSetCollections()
     if (this.hasTrackModalTarget) {
       this.trackModalTarget.style.display = "flex"
     }
@@ -521,6 +564,13 @@ export default class extends Controller {
 
   closeTrackModal() {
     this.pendingTrackAxis = null
+    this.pendingTrackGeneSetItemId = null
+    this.pendingTrackGeneSetItemName = null
+    this.trackModalGeneSetItems = []
+    if (this.trackModalGeneSetFilterTimer) {
+      clearTimeout(this.trackModalGeneSetFilterTimer)
+      this.trackModalGeneSetFilterTimer = null
+    }
     if (this.hasTrackModalTarget) this.trackModalTarget.style.display = "none"
   }
 
@@ -532,7 +582,174 @@ export default class extends Controller {
     event.stopPropagation()
   }
 
+  currentTrackModalSource() {
+    if (this.pendingTrackAxis !== "row") return "metadata"
+    if (!this.hasTrackModalSourceTarget) return "metadata"
+    return this.trackModalSourceTarget.value === "gene_set_membership"
+      ? "gene_set_membership"
+      : "metadata"
+  }
+
+  syncTrackModalSourceVisibility() {
+    const isRow = this.pendingTrackAxis === "row"
+    const source = this.currentTrackModalSource()
+    if (this.hasTrackModalSourceWrapTarget) {
+      this.trackModalSourceWrapTarget.style.display = isRow ? "block" : "none"
+    }
+    if (this.hasTrackModalMetadataWrapTarget) {
+      this.trackModalMetadataWrapTarget.style.display = (!isRow || source === "metadata") ? "block" : "none"
+    }
+    if (this.hasTrackModalGeneSetWrapTarget) {
+      this.trackModalGeneSetWrapTarget.style.display = (isRow && source === "gene_set_membership") ? "block" : "none"
+    }
+    this.trackModalMetadataChanged()
+  }
+
+  trackModalSourceChanged() {
+    this.syncTrackModalSourceVisibility()
+    if (this.currentTrackModalSource() === "gene_set_membership") {
+      this.fillTrackModalGeneSetCollections()
+      const collectionId = this.hasTrackModalGeneSetCollectionTarget
+        ? this.trackModalGeneSetCollectionTarget.value
+        : ""
+      if (collectionId) this.loadTrackModalGeneSetItems()
+    }
+  }
+
+  fillTrackModalGeneSetCollections() {
+    if (!this.hasTrackModalGeneSetCollectionTarget) return
+    const collections = Array.isArray(this.metadataCatalog?.gene_set_collections)
+      ? this.metadataCatalog.gene_set_collections
+      : []
+    const selectEl = this.trackModalGeneSetCollectionTarget
+    const previous = selectEl.value
+    selectEl.innerHTML = ""
+    const placeholder = document.createElement("option")
+    placeholder.value = ""
+    placeholder.textContent = collections.length ? "Select collection..." : "No gene set collections available"
+    selectEl.appendChild(placeholder)
+    collections.forEach((collection) => {
+      const option = document.createElement("option")
+      option.value = String(collection.id)
+      option.textContent = collection.label || String(collection.id)
+      selectEl.appendChild(option)
+    })
+    if (previous && Array.from(selectEl.options).some((opt) => opt.value === previous)) {
+      selectEl.value = previous
+    }
+    this.renderTrackModalGeneSetItems([])
+  }
+
+  trackModalGeneSetCollectionChanged() {
+    this.pendingTrackGeneSetItemId = null
+    this.pendingTrackGeneSetItemName = null
+    if (this.hasTrackModalGeneSetFilterTarget) this.trackModalGeneSetFilterTarget.value = ""
+    this.loadTrackModalGeneSetItems()
+  }
+
+  trackModalGeneSetFilterChanged() {
+    if (this.trackModalGeneSetFilterTimer) clearTimeout(this.trackModalGeneSetFilterTimer)
+    this.trackModalGeneSetFilterTimer = setTimeout(() => {
+      this.loadTrackModalGeneSetItems()
+    }, 250)
+  }
+
+  trackModalGeneSetItemChanged() {
+    if (!this.hasTrackModalGeneSetItemTarget) return
+    const selected = this.trackModalGeneSetItemTarget.selectedOptions[0]
+    this.pendingTrackGeneSetItemId = selected?.value || null
+    this.pendingTrackGeneSetItemName = selected?.dataset?.itemName || selected?.textContent || null
+    this.trackModalMetadataChanged()
+  }
+
+  async loadTrackModalGeneSetItems() {
+    if (!this.hasTrackModalGeneSetItemTarget || !this.projectKeyValue) return
+    const collectionId = this.hasTrackModalGeneSetCollectionTarget
+      ? String(this.trackModalGeneSetCollectionTarget.value || "").trim()
+      : ""
+    if (!collectionId) {
+      this.trackModalGeneSetItems = []
+      this.renderTrackModalGeneSetItems([])
+      return
+    }
+    const query = this.hasTrackModalGeneSetFilterTarget
+      ? String(this.trackModalGeneSetFilterTarget.value || "").trim()
+      : ""
+    const params = new URLSearchParams({
+      collection_id: collectionId,
+      query,
+      loom_file: String(this.loomFile || "")
+    })
+    try {
+      const response = await fetch(
+        `/projects/${encodeURIComponent(this.projectKeyValue)}/gene_set_collection_items?${params.toString()}`,
+        { headers: { Accept: "application/json" }, credentials: "same-origin" }
+      )
+      const payload = await response.json()
+      if (!response.ok || payload.status !== "ok") {
+        throw new Error(payload.message || "Failed to load gene sets")
+      }
+      this.trackModalGeneSetItems = Array.isArray(payload.items) ? payload.items : []
+      this.renderTrackModalGeneSetItems(this.trackModalGeneSetItems)
+    } catch (error) {
+      console.warn("[heatmap] gene set items failed", error)
+      this.trackModalGeneSetItems = []
+      this.renderTrackModalGeneSetItems([])
+      if (this.hasTrackModalHintTarget) {
+        this.trackModalHintTarget.textContent = error.message || "Failed to load gene sets."
+      }
+    }
+  }
+
+  renderTrackModalGeneSetItems(items) {
+    if (!this.hasTrackModalGeneSetItemTarget) return
+    const selectEl = this.trackModalGeneSetItemTarget
+    const activeIds = new Set(
+      this.rowTracks
+        .filter((t) => t.source === "gene_set_membership")
+        .map((t) => String(t.geneSetItemId || ""))
+    )
+    const previous = this.pendingTrackGeneSetItemId || selectEl.value
+    selectEl.innerHTML = ""
+    const placeholder = document.createElement("option")
+    placeholder.value = ""
+    placeholder.textContent = items.length ? "Select gene set..." : "No gene sets found"
+    selectEl.appendChild(placeholder)
+    items.forEach((item) => {
+      const itemId = String(item.id || "").trim()
+      if (!itemId || activeIds.has(itemId)) return
+      const option = document.createElement("option")
+      option.value = itemId
+      option.dataset.itemName = item.name || item.label || itemId
+      option.textContent = item.name || item.label || itemId
+      selectEl.appendChild(option)
+    })
+    if (previous && Array.from(selectEl.options).some((opt) => opt.value === previous)) {
+      selectEl.value = previous
+      this.pendingTrackGeneSetItemId = previous
+      const selected = selectEl.selectedOptions[0]
+      this.pendingTrackGeneSetItemName = selected?.dataset?.itemName || selected?.textContent || previous
+    } else {
+      this.pendingTrackGeneSetItemId = null
+      this.pendingTrackGeneSetItemName = null
+    }
+    this.trackModalMetadataChanged()
+  }
+
   trackModalMetadataChanged() {
+    if (this.currentTrackModalSource() === "gene_set_membership") {
+      if (this.hasTrackModalLegendWrapTarget) this.trackModalLegendWrapTarget.style.display = "flex"
+      if (this.hasTrackModalShowLegendTarget) this.trackModalShowLegendTarget.checked = true
+      if (this.hasTrackModalHintTarget) {
+        if (this.pendingTrackGeneSetItemId) {
+          this.trackModalHintTarget.textContent =
+            "Adds a boolean track colored by whether each gene is present or absent in the selected gene set."
+        } else {
+          this.trackModalHintTarget.textContent = "Choose a gene set collection and gene set."
+        }
+      }
+      return
+    }
     if (!this.hasTrackModalSelectTarget) return
     const selected = this.trackModalSelectTarget.selectedOptions[0]
     const dataType = (selected?.dataset?.dataType || "").toUpperCase()
@@ -558,16 +775,35 @@ export default class extends Controller {
 
   async confirmAddTrack() {
     const axis = this.pendingTrackAxis
-    const id = this.trackModalSelectTarget?.value
-    if (!axis || !id) return
+    if (!axis) return
     const sizeKey = this.trackModalSizeTarget?.value || "normal"
+    const thickness = this.trackSizePx[sizeKey] || this.layout.trackH
+
+    if (axis === "row" && this.currentTrackModalSource() === "gene_set_membership") {
+      const itemId = this.pendingTrackGeneSetItemId || this.trackModalGeneSetItemTarget?.value
+      if (!itemId) return
+      const itemName = this.pendingTrackGeneSetItemName ||
+        this.trackModalGeneSetItemTarget?.selectedOptions?.[0]?.textContent ||
+        itemId
+      const showLegend = !!(this.trackModalShowLegendTarget?.checked)
+      this.closeTrackModal()
+      await this.addGeneSetMembershipTrack(itemId, {
+        thickness,
+        showLegend,
+        name: itemName
+      })
+      return
+    }
+
+    const id = this.trackModalSelectTarget?.value
+    if (!id) return
     const selected = this.trackModalSelectTarget.selectedOptions[0]
     const dataType = (selected?.dataset?.dataType || "").toUpperCase()
     const isCategorical = dataType !== "NUMERIC" && dataType !== "CONTINUOUS"
     const showLegend = isCategorical && !!(this.trackModalShowLegendTarget?.checked)
     this.closeTrackModal()
     await this.addTrack(id, axis, {
-      thickness: this.trackSizePx[sizeKey] || this.layout.trackH,
+      thickness,
       showLegend
     })
   }
@@ -578,6 +814,114 @@ export default class extends Controller {
 
   async addRowTrack() {
     this.openAddRowTrackModal()
+  }
+
+  geneSetMembershipTrackId(itemId) {
+    return `gene_set_membership:${String(itemId)}`
+  }
+
+  async fetchGeneSetItemGenesForTrack(itemId) {
+    const params = new URLSearchParams({
+      item_id: String(itemId),
+      loom_file: String(this.loomFile || "")
+    })
+    const response = await fetch(
+      `/projects/${encodeURIComponent(this.projectKeyValue)}/gene_set_item_genes?${params.toString()}`,
+      { headers: { Accept: "application/json" }, credentials: "same-origin" }
+    )
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || payload.status !== "ok") {
+      throw new Error(payload.message || "Failed to load genes from gene set")
+    }
+    return payload
+  }
+
+  buildGeneSetMembershipValues(genes) {
+    const present = new Set()
+    for (const gene of Array.isArray(genes) ? genes : []) {
+      const symbol = gene?.symbol != null ? String(gene.symbol).trim() : ""
+      if (symbol) present.add(symbol.toLowerCase())
+      const ensembl = gene?.ensembl_id != null ? String(gene.ensembl_id).trim() : ""
+      if (ensembl) present.add(ensembl.toLowerCase())
+    }
+    const rowLabels = this.meta?.row_labels || []
+    return rowLabels.map((label) => {
+      const key = label == null ? "" : String(label).trim().toLowerCase()
+      if (!key) return "absent"
+      return present.has(key) ? "present" : "absent"
+    })
+  }
+
+  async addGeneSetMembershipTrack(itemId, options = {}) {
+    const cleanItemId = String(itemId || "").trim()
+    if (!cleanItemId) return
+    const trackId = this.geneSetMembershipTrackId(cleanItemId)
+    if (this.rowTracks.some((t) => String(t.id) === trackId)) return
+
+    const loading = {
+      id: trackId,
+      name: options.name || "Loading gene set...",
+      type: "categorical",
+      values: [],
+      loading: true,
+      thickness: options.thickness || this.layout.trackH,
+      source: "gene_set_membership",
+      geneSetItemId: cleanItemId
+    }
+    this.rowTracks.push(loading)
+    this.renderTrackLists()
+    this.handleResize()
+
+    try {
+      const payload = await this.fetchGeneSetItemGenesForTrack(cleanItemId)
+      const values = this.buildGeneSetMembershipValues(payload.genes)
+      const trackName = options.name || payload.item?.name || payload.name || cleanItemId
+      const track = {
+        id: trackId,
+        name: String(trackName).startsWith("Gene set:") ? trackName : `Gene set: ${trackName}`,
+        type: "categorical",
+        values,
+        categories: ["absent", "present"],
+        source: "gene_set_membership",
+        geneSetItemId: cleanItemId,
+        categoryColors: {
+          absent: "#d1d5db",
+          present: "#2563eb"
+        }
+      }
+      const prepared = this.prepareTrack(track, {
+        thickness: options.thickness || this.layout.trackH,
+        showLegend: Object.prototype.hasOwnProperty.call(options, "showLegend")
+          ? !!options.showLegend
+          : true,
+        type: "categorical"
+      })
+      prepared.source = "gene_set_membership"
+      prepared.geneSetItemId = cleanItemId
+      prepared.categoryColors = {
+        absent: "#d1d5db",
+        present: "#2563eb"
+      }
+      // Keep stable category order and colors for the boolean legend.
+      prepared.categories = ["absent", "present"]
+      prepared._catIndex = { absent: 0, present: 1 }
+      const idx = this.rowTracks.findIndex((t) => String(t.id) === trackId && t.loading)
+      if (idx >= 0) this.rowTracks[idx] = prepared
+      else this.rowTracks.push(prepared)
+    } catch (e) {
+      const idx = this.rowTracks.findIndex((t) => String(t.id) === trackId && t.loading)
+      if (idx >= 0) this.rowTracks.splice(idx, 1)
+      console.error("[heatmap] add gene set membership track failed", e)
+      if (options.persist !== false) {
+        alert(e.message || "Failed to add gene set membership track")
+      }
+    }
+    this.populateTrackSelects()
+    this.renderTrackLists()
+    this.handleResize()
+    if (options.persist !== false) {
+      this.persistCurrentCheckpointOnServer("add-gene-set-membership-track")
+    }
   }
 
   async addTrack(metadataId, axis, options = {}) {
@@ -1920,15 +2264,25 @@ export default class extends Controller {
     const colLabels = this.meta?.col_labels || []
     const colCellIndices = this.meta?.col_cell_indices
     const columnMode = String(this.meta?.column_mode || "cells")
+    const newlySelectedSymbols = []
 
     for (let d = range.rowStart; d <= range.rowEnd; d++) {
       const group = this.rowGroups[d]
       if (!group) continue
       for (let i = group[0]; i <= group[1]; i++) {
-        this.selectedOrigRows.add(i)
         const label = rowLabels[i]
-        if (label != null && String(label).trim() !== "") this.selectedGenes.add(String(label))
+        if (label != null && String(label).trim() !== "") {
+          newlySelectedSymbols.push(String(label))
+        }
       }
+    }
+
+    for (const symbol of newlySelectedSymbols) {
+      this.addGeneToList(symbol, { checked: true, render: false, sync: false })
+    }
+    if (newlySelectedSymbols.length) {
+      this.applyGeneListHighlightState()
+      this.renderGeneSearchList()
     }
 
     for (let d = range.colStart; d <= range.colEnd; d++) {
@@ -1963,8 +2317,10 @@ export default class extends Controller {
     this.selectedCells.clear()
     this.selectedOrigRows.clear()
     this.selectedOrigCols.clear()
+    this.geneListItems = []
     this.selectionRect = null
     this.selecting = false
+    this.renderGeneSearchList()
     this.updateSelectionPanels()
     this.drawOverlay()
   }
@@ -1973,6 +2329,8 @@ export default class extends Controller {
     if (event) event.preventDefault()
     this.selectedGenes.clear()
     this.selectedOrigRows.clear()
+    this.geneListItems = []
+    this.renderGeneSearchList()
     this.updateSelectionPanels()
     this.drawOverlay()
   }
@@ -1986,18 +2344,303 @@ export default class extends Controller {
   }
 
   updateSelectionPanels() {
+    const highlightedCount = this.geneListItems.filter((item) => item.checked).length
     if (this.hasSelectedGenesCountTarget) {
-      this.selectedGenesCountTarget.textContent = String(this.selectedGenes.size)
+      this.selectedGenesCountTarget.textContent = String(highlightedCount)
     }
     if (this.hasSelectedCellsCountTarget) {
       this.selectedCellsCountTarget.textContent = String(this.selectedCells.size)
     }
     if (this.hasClearGeneSelectionBtnTarget) {
-      this.clearGeneSelectionBtnTarget.style.display = this.selectedGenes.size > 0 ? "inline-flex" : "none"
+      this.clearGeneSelectionBtnTarget.style.display = this.geneListItems.length > 0 ? "inline-flex" : "none"
+    }
+    if (this.hasGeneSetOverlapBtnTarget) {
+      this.geneSetOverlapBtnTarget.style.display = highlightedCount > 0 ? "inline-flex" : "none"
     }
     if (this.hasClearCellSelectionBtnTarget) {
       this.clearCellSelectionBtnTarget.style.display = this.selectedCells.size > 0 ? "inline-flex" : "none"
     }
+  }
+
+  openGeneSetOverlapPopup(event) {
+    if (event) event.preventDefault()
+    if (!this.geneSetOverlapPopup) return
+    this.geneSetOverlapPopup.open()
+  }
+
+  rebuildGeneRowIndex() {
+    this.geneRowIndexBySymbol = new Map()
+    const rowLabels = this.meta?.row_labels || []
+    for (let i = 0; i < rowLabels.length; i++) {
+      const label = rowLabels[i]
+      if (label == null) continue
+      const symbol = String(label).trim()
+      if (!symbol) continue
+      const key = symbol.toLowerCase()
+      let entry = this.geneRowIndexBySymbol.get(key)
+      if (!entry) {
+        entry = { symbol, indices: [] }
+        this.geneRowIndexBySymbol.set(key, entry)
+      }
+      entry.indices.push(i)
+    }
+  }
+
+  resolveGeneSymbol(query) {
+    const raw = String(query || "").trim()
+    if (!raw) return null
+    const entry = this.geneRowIndexBySymbol.get(raw.toLowerCase())
+    return entry ? entry.symbol : null
+  }
+
+  rowIndicesForSymbol(symbol) {
+    const entry = this.geneRowIndexBySymbol.get(String(symbol || "").toLowerCase())
+    return entry ? entry.indices.slice() : []
+  }
+
+  addGeneToList(symbol, { checked = true, render = true, sync = true } = {}) {
+    const resolved = this.resolveGeneSymbol(symbol)
+    if (!resolved) return null
+    const existing = this.geneListItems.find((item) => item.symbol.toLowerCase() === resolved.toLowerCase())
+    if (existing) {
+      if (checked && !existing.checked) {
+        existing.checked = true
+        if (sync) this.applyGeneListHighlightState()
+        if (render) this.renderGeneSearchList()
+      }
+      return existing
+    }
+    const item = { symbol: resolved, checked: !!checked }
+    this.geneListItems.push(item)
+    if (sync && checked) this.applyGeneListHighlightState()
+    if (render) this.renderGeneSearchList()
+    return item
+  }
+
+  applyGeneListHighlightState() {
+    this.selectedGenes.clear()
+    this.selectedOrigRows.clear()
+    for (const item of this.geneListItems) {
+      if (!item.checked) continue
+      this.selectedGenes.add(item.symbol)
+      for (const rowIndex of this.rowIndicesForSymbol(item.symbol)) {
+        this.selectedOrigRows.add(rowIndex)
+      }
+    }
+    this.updateSelectionPanels()
+    if (typeof this.drawOverlay === "function") this.drawOverlay()
+  }
+
+  renderGeneSearchList() {
+    if (!this.hasGeneSearchListTarget) return
+    const listEl = this.geneSearchListTarget
+    const emptyEl = this.hasGeneSearchListEmptyTarget ? this.geneSearchListEmptyTarget : null
+
+    listEl.querySelectorAll("[data-heatmap-gene-item='true']").forEach((node) => node.remove())
+
+    if (!this.geneListItems.length) {
+      if (emptyEl) emptyEl.style.display = "block"
+      this.updateSelectionPanels()
+      return
+    }
+    if (emptyEl) emptyEl.style.display = "none"
+
+    for (const item of this.geneListItems) {
+      const row = document.createElement("div")
+      row.dataset.heatmapGeneItem = "true"
+      row.dataset.geneSymbol = item.symbol
+      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;background:#fff;border:1px solid #e5e7eb;"
+
+      const checkbox = document.createElement("input")
+      checkbox.type = "checkbox"
+      checkbox.checked = !!item.checked
+      checkbox.dataset.action = "change->heatmap#onGeneListCheckboxChange"
+      checkbox.dataset.geneSymbol = item.symbol
+      checkbox.setAttribute("aria-label", `Highlight ${item.symbol}`)
+      checkbox.style.cssText = "margin:0;flex:0 0 auto;cursor:pointer;"
+
+      const label = document.createElement("span")
+      label.textContent = item.symbol
+      label.style.cssText = "flex:1;min-width:0;font-size:12px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+      label.title = item.symbol
+
+      const removeBtn = document.createElement("button")
+      removeBtn.type = "button"
+      removeBtn.dataset.action = "heatmap#onGeneListRemove"
+      removeBtn.dataset.geneSymbol = item.symbol
+      removeBtn.title = `Remove ${item.symbol}`
+      removeBtn.setAttribute("aria-label", `Remove ${item.symbol}`)
+      removeBtn.style.cssText = "display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:none;background:transparent;color:#6b7280;cursor:pointer;flex:0 0 auto;font-size:14px;line-height:1;"
+      removeBtn.textContent = "x"
+
+      row.appendChild(checkbox)
+      row.appendChild(label)
+      row.appendChild(removeBtn)
+      listEl.appendChild(row)
+    }
+    this.updateSelectionPanels()
+  }
+
+  onGeneListCheckboxChange(event) {
+    const symbol = event?.currentTarget?.dataset?.geneSymbol
+    if (!symbol) return
+    const item = this.geneListItems.find((entry) => entry.symbol === symbol)
+    if (!item) return
+    item.checked = !!event.currentTarget.checked
+    this.applyGeneListHighlightState()
+  }
+
+  onGeneListRemove(event) {
+    if (event) event.preventDefault()
+    const symbol = event?.currentTarget?.dataset?.geneSymbol
+    if (!symbol) return
+    this.geneListItems = this.geneListItems.filter((entry) => entry.symbol !== symbol)
+    this.applyGeneListHighlightState()
+    this.renderGeneSearchList()
+  }
+
+  onGeneSearchInput(event) {
+    const query = String(event?.currentTarget?.value || "").trim()
+    if (!query) {
+      this.hideGeneSearchDropdown()
+      return
+    }
+    this.geneSearchMatches = this.findGeneSearchMatches(query, 30)
+    this.geneSearchActiveIndex = this.geneSearchMatches.length ? 0 : -1
+    this.renderGeneSearchDropdown()
+  }
+
+  onGeneSearchKeydown(event) {
+    const key = event?.key
+    if (key === "Escape") {
+      this.hideGeneSearchDropdown()
+      return
+    }
+    if (key === "ArrowDown") {
+      if (!this.geneSearchMatches.length) return
+      event.preventDefault()
+      this.geneSearchActiveIndex = Math.min(this.geneSearchMatches.length - 1, this.geneSearchActiveIndex + 1)
+      this.renderGeneSearchDropdown()
+      return
+    }
+    if (key === "ArrowUp") {
+      if (!this.geneSearchMatches.length) return
+      event.preventDefault()
+      this.geneSearchActiveIndex = Math.max(0, this.geneSearchActiveIndex - 1)
+      this.renderGeneSearchDropdown()
+      return
+    }
+    if (key === "Enter") {
+      event.preventDefault()
+      if (this.geneSearchMatches.length && this.geneSearchActiveIndex >= 0) {
+        this.selectGeneSearchMatch(this.geneSearchMatches[this.geneSearchActiveIndex])
+        return
+      }
+      const typed = String(this.hasGeneSearchInputTarget ? this.geneSearchInputTarget.value : "").trim()
+      if (!typed) return
+      const resolved = this.resolveGeneSymbol(typed)
+      if (!resolved) {
+        if (this.hasGeneSelectionStatusTarget) {
+          this.geneSelectionStatusTarget.textContent = `Gene "${typed}" is not in this heatmap.`
+        }
+        return
+      }
+      this.selectGeneSearchMatch(resolved)
+    }
+  }
+
+  onGeneSearchBlur() {
+    if (this.geneSearchBlurTimer) clearTimeout(this.geneSearchBlurTimer)
+    this.geneSearchBlurTimer = setTimeout(() => this.hideGeneSearchDropdown(), 150)
+  }
+
+  findGeneSearchMatches(query, limit = 30) {
+    const q = String(query || "").trim().toLowerCase()
+    if (!q || !this.geneRowIndexBySymbol.size) return []
+    const prefix = []
+    const contains = []
+    for (const entry of this.geneRowIndexBySymbol.values()) {
+      const symbol = entry.symbol
+      const key = symbol.toLowerCase()
+      if (key.startsWith(q)) prefix.push(symbol)
+      else if (key.includes(q)) contains.push(symbol)
+    }
+    prefix.sort((a, b) => a.localeCompare(b))
+    contains.sort((a, b) => a.localeCompare(b))
+    return prefix.concat(contains).slice(0, limit)
+  }
+
+  renderGeneSearchDropdown() {
+    if (!this.hasGeneSearchDropdownTarget) return
+    const dropdown = this.geneSearchDropdownTarget
+    dropdown.innerHTML = ""
+    if (!this.geneSearchMatches.length) {
+      dropdown.style.display = "none"
+      return
+    }
+    this.geneSearchMatches.forEach((symbol, index) => {
+      const already = this.geneListItems.some((item) => item.symbol.toLowerCase() === symbol.toLowerCase())
+      const option = document.createElement("button")
+      option.type = "button"
+      option.dataset.geneSymbol = symbol
+      option.dataset.action = "mousedown->heatmap#onGeneSearchOptionSelect"
+      option.dataset.heatmapSearchIndex = String(index)
+      const active = index === this.geneSearchActiveIndex
+      option.style.cssText = [
+        "display:flex",
+        "align-items:center",
+        "justify-content:space-between",
+        "width:100%",
+        "padding:7px 10px",
+        "border:none",
+        "background:" + (active ? "#eff6ff" : "#fff"),
+        "color:#111827",
+        "font-size:12px",
+        "text-align:left",
+        "cursor:pointer"
+      ].join(";")
+      const nameSpan = document.createElement("span")
+      nameSpan.textContent = symbol
+      option.appendChild(nameSpan)
+      if (already) {
+        const badge = document.createElement("span")
+        badge.textContent = "added"
+        badge.style.cssText = "font-size:11px;color:#6b7280;"
+        option.appendChild(badge)
+      }
+      option.addEventListener("mouseenter", () => {
+        this.geneSearchActiveIndex = index
+        dropdown.querySelectorAll("button[data-heatmap-search-index]").forEach((btn) => {
+          const isActive = Number(btn.dataset.heatmapSearchIndex) === index
+          btn.style.background = isActive ? "#eff6ff" : "#fff"
+        })
+      })
+      dropdown.appendChild(option)
+    })
+    dropdown.style.display = "block"
+  }
+
+  hideGeneSearchDropdown() {
+    this.geneSearchMatches = []
+    this.geneSearchActiveIndex = -1
+    if (this.hasGeneSearchDropdownTarget) {
+      this.geneSearchDropdownTarget.style.display = "none"
+      this.geneSearchDropdownTarget.innerHTML = ""
+    }
+  }
+
+  onGeneSearchOptionSelect(event) {
+    if (event) event.preventDefault()
+    const symbol = event?.currentTarget?.dataset?.geneSymbol
+    if (!symbol) return
+    this.selectGeneSearchMatch(symbol)
+  }
+
+  selectGeneSearchMatch(symbol) {
+    this.addGeneToList(symbol, { checked: true, render: true })
+    if (this.hasGeneSearchInputTarget) this.geneSearchInputTarget.value = ""
+    this.hideGeneSearchDropdown()
+    if (this.hasGeneSelectionStatusTarget) this.geneSelectionStatusTarget.textContent = ""
   }
 
   escapeHtml(value) {
@@ -2216,12 +2859,15 @@ export default class extends Controller {
       const colorInt = this.interpolateGradientColor(this.activeTrackControlPoints(track), t)
       return this.colorIntToCss(colorInt)
     }
+    const key = value === null || value === undefined ? null : String(value)
+    if (key != null && track.categoryColors && track.categoryColors[key]) {
+      return track.categoryColors[key]
+    }
     if (!track._catIndex) {
       track._catIndex = {}
       let i = 0
       ;(track.categories || []).forEach((cat) => { track._catIndex[cat] = i++ })
     }
-    const key = value === null || value === undefined ? null : String(value)
     let idx = key === null ? undefined : track._catIndex[key]
     if (idx === undefined && key !== null) {
       idx = Object.keys(track._catIndex).length
@@ -2610,7 +3256,9 @@ export default class extends Controller {
             x = x0
             y += rowH
           }
-          const color = this.categoricalPalette(track._catIndex[cat] ?? 0)
+          const color = (track.categoryColors && track.categoryColors[cat])
+            ? track.categoryColors[cat]
+            : this.categoricalPalette(track._catIndex[cat] ?? 0)
           ctx.fillStyle = color
           ctx.fillRect(x, y + 2, 10, 10)
           ctx.strokeStyle = "#94a3b8"
@@ -3081,20 +3729,29 @@ export default class extends Controller {
       alert("Analyze permission is required to save a gene set.")
       return
     }
-    if (!this.selectedGenes.size) {
-      alert("No genes selected to save.")
+    const checkedGenes = this.geneListItems.filter((item) => item.checked).map((item) => item.symbol)
+    if (!checkedGenes.length) {
+      alert("No checked genes to save. Search or select genes, then check the ones to include.")
       return
     }
-    this.openHeatmapGeneSetModal()
+    this.openHeatmapGeneSetModal(checkedGenes)
   }
 
-  openHeatmapGeneSetModal() {
+  openHeatmapGeneSetModal(genesToSave = null) {
     const existing = document.getElementById("heatmap-gene-set-modal-overlay")
     if (existing) existing.remove()
 
     const template = document.getElementById("save-heatmap-gene-set-modal-template")
     if (!template?.content?.firstElementChild) {
       alert("Gene set save form is missing.")
+      return
+    }
+
+    const geneSymbols = Array.isArray(genesToSave) && genesToSave.length
+      ? genesToSave.map((symbol) => String(symbol))
+      : this.geneListItems.filter((item) => item.checked).map((item) => item.symbol)
+    if (!geneSymbols.length) {
+      alert("No checked genes to save.")
       return
     }
 
@@ -3109,7 +3766,7 @@ export default class extends Controller {
     const newCollectionValue = "__new_heatmap_collection__"
     const defaultCollectionName = "Heatmap selection"
 
-    if (countEl) countEl.textContent = String(this.selectedGenes.size)
+    if (countEl) countEl.textContent = String(geneSymbols.length)
 
     const hasExisting = !!(collectionSelect && collectionSelect.querySelectorAll("option").length > 1)
     const syncNewVisibility = () => {
@@ -3162,7 +3819,7 @@ export default class extends Controller {
         }
       }
 
-      const genes = Array.from(this.selectedGenes).map((symbol) => ({ symbol: String(symbol) }))
+      const genes = geneSymbols.map((symbol) => ({ symbol: String(symbol) }))
       const submitBtn = overlay.querySelector('[data-role="heatmap-gene-set-submit"]')
       if (submitBtn) submitBtn.disabled = true
       try {
@@ -4236,6 +4893,15 @@ export default class extends Controller {
       type: track.type === "numerical" ? "numerical" : "categorical",
       displayMode: track.displayMode === "barplot" ? "barplot" : "color"
     }
+    if (track.source === "gene_set_membership") {
+      payload.source = "gene_set_membership"
+      payload.geneSetItemId = track.geneSetItemId
+      payload.name = track.name
+      payload.categoryColors = track.categoryColors
+        ? { ...track.categoryColors }
+        : { absent: "#d1d5db", present: "#2563eb" }
+      return payload
+    }
     if (track.type === "numerical") {
       this.ensureTrackGradient(track)
       const points = this.activeTrackControlPoints(track)
@@ -4954,6 +5620,16 @@ export default class extends Controller {
   async restoreTrack(spec, axis) {
     if (!spec || spec.id == null) return
     try {
+      if (spec.source === "gene_set_membership" || String(spec.id).startsWith("gene_set_membership:")) {
+        const itemId = spec.geneSetItemId || String(spec.id).replace(/^gene_set_membership:/, "")
+        await this.addGeneSetMembershipTrack(itemId, {
+          thickness: spec.thickness,
+          showLegend: Object.prototype.hasOwnProperty.call(spec, "showLegend") ? !!spec.showLegend : true,
+          name: spec.name ? String(spec.name).replace(/^Gene set:\s*/i, "") : itemId,
+          persist: false
+        })
+        return
+      }
       const track = await this.fetchTrack(spec.id, axis)
       const options = {
         thickness: spec.thickness,

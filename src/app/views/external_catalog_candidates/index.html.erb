@@ -121,9 +121,9 @@
                 <% if asap_projects.size > 3 %>
                   <div class="text-gray-400">+<%= asap_projects.size - 3 %> more</div>
                 <% end %>
-              <% elsif candidate.failed? %>
+              <% elsif admin? && candidate.failed? %>
                 <span class="inline-flex rounded bg-red-100 px-2 py-0.5 font-medium text-red-800 dark:bg-red-900/40 dark:text-red-200">Failed</span>
-                <% if candidate.import_error.present? && (admin? || !candidate.scfair_validation_error?) %>
+                <% if candidate.import_error.present? %>
                   <div class="mt-0.5 max-w-xs truncate text-red-500" title="<%= candidate.import_error %>"><%= candidate.import_error.to_s.truncate(80) %></div>
                 <% end %>
               <% else %>

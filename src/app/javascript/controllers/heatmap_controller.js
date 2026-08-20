@@ -2,6 +2,7 @@ import { Controller } from "@hotwired/stimulus"
 import { ReglHeatmap } from "visualization/regl_heatmap"
 import { GradientManager } from "visualization/gradient_manager"
 import { ColorManager } from "visualization/color_manager"
+import { DataManager } from "visualization/data_manager"
 import { GeneSetCollectionsController } from "visualization/gene_set_collections_controller"
 import { GeneSetOverlapPopup } from "visualization/gene_set_overlap_popup"
 import { canvasToJpegThumbnailDataUrl, isCheckpointThumbnailDataUrl } from "lib/checkpoint_thumbnail"
@@ -90,6 +91,10 @@ export default class extends Controller {
     this.pendingTrackGeneSetItemId = null
     this.pendingTrackGeneSetItemName = null
     this.savedCellSets = []
+    this.savedCellSetCellsCache = new Map()
+    this._cellToOrigColMap = null
+    this.loadedMetadataVectors = {}
+    this.selectionDataManager = new DataManager(this)
     this.recentlyCreatedSavedCellSetId = null
     this.editingSavedCellSetId = null
     this.pendingSavedCellSetName = null
@@ -292,6 +297,8 @@ export default class extends Controller {
         return
       }
       this.meta = await metaRes.json()
+      this._cellToOrigColMap = null
+      this.savedCellSetCellsCache = new Map()
 
       if ((this.meta.warnings || []).length) {
         console.warn("[heatmap] warnings:", this.meta.warnings)
@@ -5299,7 +5306,10 @@ export default class extends Controller {
       return `<div id="heatmap-saved-selection-row-${selectionId}"
                    data-role="saved-selection-row"
                    data-selection-id="${selectionId}"
-                   style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;padding:8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;">
+                   data-action="click->heatmap#applySavedCellSet"
+                   role="button"
+                   tabindex="0"
+                   style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;padding:8px;background-color:white;border-radius:6px;border:1px solid #e5e7eb;cursor:pointer;">
         <div style="flex:1;min-width:0;display:flex;align-items:flex-start;gap:6px;">
           <div style="flex:1;min-width:0;">
             <div style="display:flex;align-items:center;gap:6px;min-width:0;">
@@ -5319,7 +5329,7 @@ export default class extends Controller {
             </div>
             <div style="display:flex;align-items:center;gap:6px;">
               <button type="button"
-                      data-action="heatmap#openSavedCellSetDetails"
+                      data-action="click->heatmap#openSavedCellSetDetails"
                       data-selection-id="${selectionId}"
                       title="Selection details"
                       aria-label="Selection details"
@@ -5463,7 +5473,162 @@ export default class extends Controller {
     }
   }
 
-  openSavedCellSetDetails(event) {
+  async applySavedCellSet(event) {
+    if (event) event.preventDefault()
+    const selectionId = event?.currentTarget?.dataset?.selectionId
+    if (!selectionId) return
+    const item = (this.savedCellSets || []).find((entry) => String(entry.id) === String(selectionId))
+    if (!item) return
+
+    const status = String(item.status || "")
+    if (status === "queued" || status === "running") {
+      alert("This cell set is still being created. Try again when it is completed.")
+      return
+    }
+    if (!item.metadataId) {
+      alert("This cell set has no metadata yet and cannot be highlighted on the heatmap.")
+      return
+    }
+
+    try {
+      const mapping = await this.mapSavedCellSetToHeatmap(item)
+      if (this.ensureCellToOrigColMap().size === 0) {
+        alert("This heatmap does not expose cell-to-column mapping, so the cell set cannot be highlighted.")
+        return
+      }
+      // Replace any existing live selection with this cell set.
+      this.selectedCells.clear()
+      this.selectedOrigCols.clear()
+      for (const cellIndex of mapping.heatmapCellIndices) {
+        this.selectedCells.add(cellIndex)
+      }
+      for (const origCol of mapping.origCols) {
+        this.selectedOrigCols.add(origCol)
+      }
+      this.updateSelectionPanels()
+      this.refreshExpandedGeneHistograms()
+      this.drawOverlay()
+      this.persistCurrentCheckpointOnServer("apply-saved-cell-set")
+      if (this.hasCellSelectionStatusTarget) {
+        const total = Number(item.selectedCount || mapping.totalInSet || 0)
+        const inHeatmap = mapping.heatmapCellIndices.length
+        this.cellSelectionStatusTarget.textContent =
+          `Highlighted ${inHeatmap.toLocaleString()}/${total.toLocaleString()} cells from "${this.savedCellSetDisplayName(item)}".`
+      }
+    } catch (error) {
+      console.error("[heatmap] apply saved cell set failed", error)
+      alert(error.message || "Failed to highlight cell set on the heatmap")
+    }
+  }
+
+  ensureCellToOrigColMap() {
+    if (this._cellToOrigColMap instanceof Map) return this._cellToOrigColMap
+    const map = new Map()
+    const colCellIndices = this.meta?.col_cell_indices
+    if (Array.isArray(colCellIndices)) {
+      for (let origCol = 0; origCol < colCellIndices.length; origCol++) {
+        const indices = colCellIndices[origCol]
+        if (!Array.isArray(indices)) continue
+        for (const idx of indices) {
+          const n = Number(idx)
+          if (!Number.isInteger(n) || n < 0) continue
+          if (!map.has(n)) map.set(n, origCol)
+        }
+      }
+    }
+    if (map.size === 0 && Array.isArray(this.meta?.col_labels)) {
+      const labels = this.meta.col_labels
+      for (let origCol = 0; origCol < labels.length; origCol++) {
+        const label = labels[origCol]
+        if (label == null || String(label).trim() === "") continue
+        const asInt = Number(label)
+        if (Number.isInteger(asInt) && String(asInt) === String(label).trim()) {
+          if (!map.has(asInt)) map.set(asInt, origCol)
+        }
+      }
+    }
+    this._cellToOrigColMap = map
+    return map
+  }
+
+  isSelectionExcludedCategoryValue(rawValue, unselectedName) {
+    if (rawValue === null || rawValue === undefined) return true
+    const value = String(rawValue).trim()
+    if (value.length === 0) return true
+    if (value === "0") return true
+    if (value === String(unselectedName || "Not selected").trim()) return true
+    return false
+  }
+
+  async fetchSelectionMetadataVector(metadataId) {
+    const mid = String(metadataId || "").trim()
+    if (!mid) return null
+    if (this.loadedMetadataVectors?.[mid]?.values?.length) {
+      return this.selectionDataManager.ensureMetadataVectorValues(mid, this.loadedMetadataVectors[mid])
+    }
+
+    const loomFile = this.loomFile || ""
+    const url = `/projects/${encodeURIComponent(this.projectKeyValue)}/metadata_vectors?metadata_ids=${encodeURIComponent(mid)}&loom_file=${encodeURIComponent(loomFile)}`
+    const response = await fetch(url, {
+      headers: { Accept: "application/json" },
+      credentials: "same-origin"
+    })
+    if (!response.ok) {
+      throw new Error(`Failed to load cell set metadata (${response.status})`)
+    }
+    const payload = await response.json()
+    const vectorData = payload?.metadata_vectors?.[mid]
+    if (!vectorData) {
+      throw new Error("Cell set metadata was not found")
+    }
+    const normalized = this.selectionDataManager.ensureMetadataVectorValues(mid, vectorData)
+    this.loadedMetadataVectors[mid] = normalized
+    return normalized
+  }
+
+  async getCellIndicesForSavedCellSet(item) {
+    const cacheKey = String(item?.id || "")
+    if (cacheKey && this.savedCellSetCellsCache.has(cacheKey)) {
+      return Array.from(this.savedCellSetCellsCache.get(cacheKey))
+    }
+    const metadataId = String(item?.metadataId || "").trim()
+    if (!metadataId) return []
+
+    const metadataVector = await this.fetchSelectionMetadataVector(metadataId)
+    if (!metadataVector?.values || typeof metadataVector.values.length !== "number") {
+      throw new Error("Cell set metadata has no values")
+    }
+
+    const unselectedName = String(item.unselectedName || "Not selected")
+    const cellIndices = []
+    for (let index = 0; index < metadataVector.values.length; index++) {
+      const displayValue = this.selectionDataManager.getDisplayValue(metadataVector, index)
+      if (!this.isSelectionExcludedCategoryValue(displayValue, unselectedName)) {
+        cellIndices.push(index)
+      }
+    }
+    if (cacheKey) this.savedCellSetCellsCache.set(cacheKey, cellIndices.slice())
+    return cellIndices
+  }
+
+  async mapSavedCellSetToHeatmap(item) {
+    const allCellIndices = await this.getCellIndicesForSavedCellSet(item)
+    const cellToOrigCol = this.ensureCellToOrigColMap()
+    const heatmapCellIndices = []
+    const origCols = new Set()
+    for (const cellIndex of allCellIndices) {
+      if (!cellToOrigCol.has(cellIndex)) continue
+      heatmapCellIndices.push(cellIndex)
+      origCols.add(cellToOrigCol.get(cellIndex))
+    }
+    return {
+      totalInSet: allCellIndices.length,
+      heatmapCellIndices,
+      origCols: Array.from(origCols).sort((a, b) => a - b)
+    }
+  }
+
+  async openSavedCellSetDetails(event) {
     if (event) {
       event.preventDefault()
       event.stopPropagation()
@@ -5490,15 +5655,35 @@ export default class extends Controller {
       .map((line) => `<div style="font-size:11px;color:#6b7280;margin-top:2px;">${this.escapeHtml(line)}</div>`)
       .join("")
     const parametersHtml = this.renderHeatmapParametersHtml(item)
+    const totalCount = Number(item.selectedCount || 0)
     summary.innerHTML = `
       <div style="font-size:13px;color:#111827;font-weight:600;word-break:break-word;">${this.escapeHtml(selectionLabel)}</div>
-      <div style="font-size:12px;color:#374151;margin-top:4px;">Final result: <span style="font-weight:600;color:#065f46;">${Number(item.selectedCount || 0).toLocaleString()} cells</span></div>
+      <div data-role="heatmap-cell-set-in-heatmap-count" style="font-size:12px;color:#374151;margin-top:4px;">Final result: <span style="font-weight:600;color:#065f46;">computing...</span></div>
       <div style="font-size:11px;color:#6b7280;margin-top:2px;">Source: ${this.escapeHtml(sourceText)}</div>
       ${originLines}
       ${parametersHtml}
       <div style="font-size:11px;color:#6b7280;margin-top:2px;">Created: ${this.escapeHtml(createdLabel)}</div>
     `
     overlay.style.display = "flex"
+
+    const countEl = summary.querySelector('[data-role="heatmap-cell-set-in-heatmap-count"]')
+    try {
+      const mapping = await this.mapSavedCellSetToHeatmap(item)
+      const inHeatmap = mapping.heatmapCellIndices.length
+      const totalInSet = Number.isFinite(mapping.totalInSet) && mapping.totalInSet > 0
+        ? mapping.totalInSet
+        : totalCount
+      if (countEl) {
+        countEl.innerHTML =
+          `Final result: <span style="font-weight:600;color:#065f46;">${inHeatmap.toLocaleString()}/${totalInSet.toLocaleString()} cells</span>`
+      }
+    } catch (error) {
+      if (countEl) {
+        countEl.innerHTML =
+          `Final result: <span style="font-weight:600;color:#065f46;">${totalCount.toLocaleString()} cells</span>`
+      }
+      console.warn("[heatmap] failed to compute cell set overlap", error)
+    }
   }
 
   closeSavedCellSetDetails(event) {

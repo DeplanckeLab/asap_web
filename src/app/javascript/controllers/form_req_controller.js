@@ -38,6 +38,7 @@ export default class extends Controller {
 
   connect() {
     this._predictionPreventSubmit = false
+    this._attrsLoading = false
     this._applyingDefaultExpr = false
     this._resourcePredictionTimer = null
     this._invalidAttrNames = new Set()
@@ -48,6 +49,9 @@ export default class extends Controller {
     console.log("[FormReqController] Submit URL:", this.submitUrlValue)
     console.log("[FormReqController] Has submit button target:", this.hasSubmitButtonTarget)
     console.log("[FormReqController] Has method select target:", this.hasMethodSelectTarget)
+
+    // Block submit until attributes are loaded / first validateForm runs.
+    this.setSubmitEnabled(false)
     
     // Initialize method selection
     if (this.hasMethodSelectTarget) {
@@ -59,22 +63,48 @@ export default class extends Controller {
       this.methodSelectTarget.addEventListener('change', () => {
         console.log("[FormReqController] Method selection changed")
         this.handleMethodChange()
-        // Validate form after method change
-        setTimeout(() => this.validateForm(), 100)
       })
     } else {
       console.warn("[FormReqController] Method select target not found")
+      // Hidden method field: load attrs for the preselected method if present.
+      const stdMethodId = this.getStdMethodId()
+      if (stdMethodId && this.hasAttrsContainerTarget) {
+        this.loadAttributes(stdMethodId)
+      } else if (this.hasSubmitButtonTarget) {
+        setTimeout(() => this.validateForm(), 100)
+      }
     }
     
     // Verify submit button exists
     if (this.hasSubmitButtonTarget) {
       console.log("[FormReqController] Submit button found:", this.submitButtonTarget)
       console.log("[FormReqController] Submit button ID:", this.submitButtonTarget.id)
-      // Initial validation
-      setTimeout(() => this.validateForm(), 100)
     } else {
       console.error("[FormReqController] Submit button target NOT found!")
     }
+  }
+
+  setSubmitEnabled(enabled) {
+    if (!this.hasSubmitButtonTarget || this.isCellFilteringManagedSubmit()) {
+      return
+    }
+    this.submitButtonTarget.disabled = !enabled
+    if (enabled) {
+      this.submitButtonTarget.classList.remove('opacity-50', 'cursor-not-allowed')
+      this.submitButtonTarget.classList.add('cursor-pointer')
+    } else {
+      this.submitButtonTarget.classList.add('opacity-50', 'cursor-not-allowed')
+      this.submitButtonTarget.classList.remove('cursor-pointer')
+    }
+  }
+
+  beginAttrsLoading() {
+    this._attrsLoading = true
+    this.setSubmitEnabled(false)
+  }
+
+  endAttrsLoading() {
+    this._attrsLoading = false
   }
 
   isCellFilteringManagedSubmit() {
@@ -147,11 +177,10 @@ export default class extends Controller {
       const [speedId, description, link] = method
       const isUnavailable = unavailableMethods && unavailableMethods[selectedMethodId]
 
-      // Update button state
-      if (this.hasSubmitButtonTarget) {
-        if (!this.isCellFilteringManagedSubmit()) {
-          this.submitButtonTarget.disabled = isUnavailable || false
-        }
+      // Unavailable methods stay blocked; otherwise button state comes from
+      // loadAttributes / validateForm after attrs are ready.
+      if (isUnavailable) {
+        this.setSubmitEnabled(false)
       }
 
       // Update method description
@@ -175,16 +204,22 @@ export default class extends Controller {
       })
 
       // Load attributes when method is selected
-      if (this.hasAttrsContainerTarget && selectedMethodId) {
+      if (isUnavailable) {
+        if (this.hasAttrsContainerTarget) {
+          this.attrsContainerTarget.innerHTML = '<p class="text-gray-500 text-sm">This method is not available.</p>'
+        }
+      } else if (this.hasAttrsContainerTarget && selectedMethodId) {
         this.loadAttributes(selectedMethodId)
       } else if (this.hasAttrsContainerTarget) {
         this.attrsContainerTarget.innerHTML = '<p class="text-gray-500 text-sm">Select a method to configure parameters...</p>'
+        this.endAttrsLoading()
         this.validateForm()
       }
     } else {
       if (this.hasAttrsContainerTarget) {
         this.attrsContainerTarget.innerHTML = ''
       }
+      this.setSubmitEnabled(false)
     }
   }
 
@@ -414,7 +449,10 @@ export default class extends Controller {
     const preservedAttrValues = this.collectCurrentAttributeValues()
     const stepId = this.stepIdValue
     const projectKey = this.projectKeyValue
-    
+    const loadToken = Symbol('attrsLoad')
+    this._attrsLoadToken = loadToken
+
+    this.beginAttrsLoading()
     // Show loading state
     this.attrsContainerTarget.innerHTML = '<div class="flex items-center justify-center p-4"><i class="fa fa-spinner fa-pulse mr-2"></i>Loading attributes...</div>'
     
@@ -437,21 +475,35 @@ export default class extends Controller {
       return response.text()
     })
     .then(html => {
+      if (this._attrsLoadToken !== loadToken) {
+        return
+      }
       if (html && html.trim().length > 0) {
         this.attrsContainerTarget.innerHTML = html
         this.restoreAttributeValues(preservedAttrValues)
         // Re-initialize any event listeners that might be needed
         this.initializeAttributeListeners()
+        this.endAttrsLoading()
         // Validate form after attributes are loaded
-        setTimeout(() => this.validateForm(), 100)
+        setTimeout(() => {
+          if (this._attrsLoadToken === loadToken) {
+            this.validateForm()
+          }
+        }, 100)
       } else {
         this.attrsContainerTarget.innerHTML = '<p class="text-gray-500 text-sm">No attributes available for this method.</p>'
+        this.endAttrsLoading()
         this.validateForm()
       }
     })
     .catch(error => {
+      if (this._attrsLoadToken !== loadToken) {
+        return
+      }
       console.error('[FormReqController] Error loading attributes:', error)
       this.attrsContainerTarget.innerHTML = `<p class="text-red-600 text-sm">Error loading attributes: ${error.message}</p>`
+      this.endAttrsLoading()
+      this.setSubmitEnabled(false)
     })
   }
 
@@ -1354,6 +1406,12 @@ export default class extends Controller {
     if (this.isCellFilteringManagedSubmit()) {
       return true
     }
+
+    // Attributes still loading: keep Scale/Submit disabled (avoids empty-attrs race).
+    if (this._attrsLoading) {
+      this.setSubmitEnabled(false)
+      return false
+    }
     
     let isValid = true
     const errors = []
@@ -1372,14 +1430,7 @@ export default class extends Controller {
     if (!this.hasAttrsContainerTarget) {
       const blockedByPrediction = this._predictionPreventSubmit === true
       const submitEnabled = isValid && !blockedByPrediction
-      this.submitButtonTarget.disabled = !submitEnabled
-      if (submitEnabled) {
-        this.submitButtonTarget.classList.remove('opacity-50', 'cursor-not-allowed')
-        this.submitButtonTarget.classList.add('cursor-pointer')
-      } else {
-        this.submitButtonTarget.classList.add('opacity-50', 'cursor-not-allowed')
-        this.submitButtonTarget.classList.remove('cursor-pointer')
-      }
+      this.setSubmitEnabled(submitEnabled)
       this.syncAttrValidationVisuals(invalidFields)
       return isValid && !blockedByPrediction
     }
@@ -1576,15 +1627,7 @@ export default class extends Controller {
     // Update submit button state (resource prediction can block submit like legacy ASAP)
     const blockedByPrediction = this._predictionPreventSubmit === true
     const submitEnabled = isValid && !blockedByPrediction
-    this.submitButtonTarget.disabled = !submitEnabled
-
-    if (submitEnabled) {
-      this.submitButtonTarget.classList.remove('opacity-50', 'cursor-not-allowed')
-      this.submitButtonTarget.classList.add('cursor-pointer')
-    } else {
-      this.submitButtonTarget.classList.add('opacity-50', 'cursor-not-allowed')
-      this.submitButtonTarget.classList.remove('cursor-pointer')
-    }
+    this.setSubmitEnabled(submitEnabled)
     
     // Log validation result
     if (!isValid || blockedByPrediction) {
@@ -1740,6 +1783,12 @@ export default class extends Controller {
 
     if (!this.hasSubmitButtonTarget) {
       console.error("[FormReqController] Submit button target not found")
+      return
+    }
+
+    if (this._attrsLoading) {
+      console.warn("[FormReqController] Attributes still loading, preventing submission")
+      this.setSubmitEnabled(false)
       return
     }
     

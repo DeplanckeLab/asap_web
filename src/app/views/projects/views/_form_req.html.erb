@@ -166,7 +166,8 @@
       <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
         <% if analyzable?(@project) %>
           <button id="<%= @step.name %>_button" type="button" 
-                  class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors cursor-pointer req_submit"
+                  class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors opacity-50 cursor-not-allowed req_submit"
+                  disabled
                   data-form-req-target="submitButton"
                   data-action="click->form-req#submit">
             <%= @h_step_attrs['action_button_label'] || 'Submit' %>

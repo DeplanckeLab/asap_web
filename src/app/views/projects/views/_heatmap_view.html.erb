@@ -520,77 +520,95 @@
     <div id="heatmap-right-resizer" class="heatmap-col-resizer" title="Resize right panel"></div>
 
     <aside id="heatmap-right-panel" class="heatmap-right-panel" aria-label="Heatmap selections">
-      <div id="heatmap-genes-panel" style="height:50%; display:flex; flex-direction:column; min-height:0; background:#ffffff;">
-        <div style="padding:12px 14px; border-bottom:1px solid #e5e7eb; flex-shrink:0;">
-          <h3 style="margin:0; font-size:14px; font-weight:600; color:#111827;">Genes</h3>
+      <div id="heatmap-genes-panel" style="height:50%; display:flex; flex-direction:column; min-height:0; background:#ffffff; overflow:hidden;">
+        <div id="heatmap-genes-panel-tabs" style="border-bottom:1px solid #e5e7eb; flex-shrink:0;">
+          <nav style="display:flex; align-items:center; gap:8px; padding:0 14px;" aria-label="Genes panel tabs">
+            <button type="button"
+                    id="heatmap-genes-tab"
+                    data-action="click->heatmap#switchGenesPanelTab"
+                    data-tab="genes"
+                    style="padding:10px 12px; border-bottom:2px solid #3b82f6; font-weight:500; font-size:14px; color:#3b82f6; background:none; border-top:none; border-left:none; border-right:none; cursor:pointer;">
+              Genes
+            </button>
+            <button type="button"
+                    id="heatmap-gene-sets-tab"
+                    data-action="click->heatmap#switchGenesPanelTab"
+                    data-tab="gene-sets"
+                    style="padding:10px 12px; border-bottom:2px solid transparent; font-weight:500; font-size:14px; color:#6b7280; background:none; border-top:none; border-left:none; border-right:none; cursor:pointer; transition:all 0.2s;">
+              Gene sets
+            </button>
+          </nav>
         </div>
-        <div style="flex-shrink:0; padding:10px 14px 0 14px; display:flex; flex-direction:column; gap:8px;">
-          <div style="display:flex; align-items:center; gap:8px;">
-            <div style="position:relative; flex:1; min-width:0;">
-              <input type="text"
-                     data-heatmap-target="geneSearchInput"
-                     data-action="input->heatmap#onGeneSearchInput keydown->heatmap#onGeneSearchKeydown blur->heatmap#onGeneSearchBlur"
-                     placeholder="Search genes in heatmap..."
-                     autocomplete="off"
-                     style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; color:#111827; background:#fff; box-sizing:border-box;" />
-              <div data-heatmap-target="geneSearchDropdown"
-                   style="display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #d1d5db; border-top:none; border-radius:0 0 6px 6px; max-height:180px; overflow-y:auto; z-index:20; box-shadow:0 4px 6px rgba(0,0,0,0.1);"></div>
-            </div>
-            <% if can_analyze_heatmap %>
+
+        <div id="heatmap-genes-tab-content" style="flex:1; min-height:0; display:flex; flex-direction:column; overflow:hidden;">
+          <div style="flex-shrink:0; padding:10px 14px 0 14px; display:flex; flex-direction:column; gap:8px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <div style="position:relative; flex:1; min-width:0;">
+                <input type="text"
+                       data-heatmap-target="geneSearchInput"
+                       data-action="input->heatmap#onGeneSearchInput keydown->heatmap#onGeneSearchKeydown blur->heatmap#onGeneSearchBlur"
+                       placeholder="Search genes in heatmap..."
+                       autocomplete="off"
+                       style="width:100%; padding:6px 8px; border:1px solid #d1d5db; border-radius:6px; font-size:12px; color:#111827; background:#fff; box-sizing:border-box;" />
+                <div data-heatmap-target="geneSearchDropdown"
+                     style="display:none; position:absolute; top:100%; left:0; right:0; background:#fff; border:1px solid #d1d5db; border-top:none; border-radius:0 0 6px 6px; max-height:180px; overflow-y:auto; z-index:20; box-shadow:0 4px 6px rgba(0,0,0,0.1);"></div>
+              </div>
+              <% if can_analyze_heatmap %>
+                <button type="button"
+                        class="heatmap-icon-btn heatmap-icon-btn-overlap"
+                        data-heatmap-target="geneSetOverlapBtn"
+                        data-action="heatmap#openGeneSetOverlapPopup"
+                        title="Find gene sets overlapping selected genes"
+                        aria-label="Find gene sets overlapping selected genes"
+                        style="display:none;">
+                  <i class="fas fa-chart-pie" style="font-size:12px;" aria-hidden="true"></i>
+                </button>
+                <button type="button"
+                        class="heatmap-icon-btn heatmap-icon-btn-save"
+                        data-action="heatmap#saveGeneSelection"
+                        title="Create gene set from checked genes"
+                        aria-label="Create gene set from checked genes">
+                  <span style="font-size:14px; font-weight:700; line-height:1;">+</span>
+                </button>
+              <% end %>
               <button type="button"
-                      class="heatmap-icon-btn heatmap-icon-btn-overlap"
-                      data-heatmap-target="geneSetOverlapBtn"
-                      data-action="heatmap#openGeneSetOverlapPopup"
-                      title="Find gene sets overlapping selected genes"
-                      aria-label="Find gene sets overlapping selected genes"
+                      class="heatmap-icon-btn heatmap-icon-btn-clear"
+                      data-heatmap-target="clearGeneSelectionBtn"
+                      data-action="heatmap#clearGeneSelection"
+                      title="Clear gene list"
+                      aria-label="Clear gene list"
                       style="display:none;">
-                <i class="fas fa-chart-pie" style="font-size:12px;" aria-hidden="true"></i>
+                <i class="fas fa-times" style="font-size:14px;" aria-hidden="true"></i>
               </button>
+            </div>
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+              <span style="font-size:13px; color:#6b7280;">
+                <span data-heatmap-target="selectedGenesCount">0</span> genes highlighted
+              </span>
               <button type="button"
-                      class="heatmap-icon-btn heatmap-icon-btn-save"
-                      data-action="heatmap#saveGeneSelection"
-                      title="Create gene set from checked genes"
-                      aria-label="Create gene set from checked genes">
-                <span style="font-size:14px; font-weight:700; line-height:1;">+</span>
+                      data-heatmap-target="toggleAllGenesBtn"
+                      data-action="heatmap#toggleAllGeneSelection"
+                      title="Select or unselect all genes in the list"
+                      aria-label="Select or unselect all genes in the list"
+                      style="display:none; padding:3px 8px; font-size:11px; font-weight:500; color:#374151; background:#fff; border:1px solid #d1d5db; border-radius:4px; cursor:pointer; white-space:nowrap;"
+                      onmouseover="this.style.backgroundColor='#f3f4f6'"
+                      onmouseout="this.style.backgroundColor='#fff'">
+                Select all
               </button>
-            <% end %>
-            <button type="button"
-                    class="heatmap-icon-btn heatmap-icon-btn-clear"
-                    data-heatmap-target="clearGeneSelectionBtn"
-                    data-action="heatmap#clearGeneSelection"
-                    title="Clear gene list"
-                    aria-label="Clear gene list"
-                    style="display:none;">
-              <i class="fas fa-times" style="font-size:14px;" aria-hidden="true"></i>
-            </button>
-          </div>
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-            <span style="font-size:13px; color:#6b7280;">
-              <span data-heatmap-target="selectedGenesCount">0</span> genes highlighted
-            </span>
-            <button type="button"
-                    data-heatmap-target="toggleAllGenesBtn"
-                    data-action="heatmap#toggleAllGeneSelection"
-                    title="Select or unselect all genes in the list"
-                    aria-label="Select or unselect all genes in the list"
-                    style="display:none; padding:3px 8px; font-size:11px; font-weight:500; color:#374151; background:#fff; border:1px solid #d1d5db; border-radius:4px; cursor:pointer; white-space:nowrap;"
-                    onmouseover="this.style.backgroundColor='#f3f4f6'"
-                    onmouseout="this.style.backgroundColor='#fff'">
-              Select all
-            </button>
+            </div>
           </div>
           <div data-heatmap-target="geneSearchList"
-               style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; border:1px solid #e5e7eb; border-radius:6px; padding:4px; background:#f9fafb; min-height:36px;">
+               style="flex:1; min-height:0; overflow-y:auto; display:flex; flex-direction:column; gap:4px; margin:8px 14px 0 14px; border:1px solid #e5e7eb; border-radius:6px; padding:4px; background:#f9fafb;">
             <div data-heatmap-target="geneSearchListEmpty"
                  style="font-size:12px; color:#9ca3af; font-style:italic; padding:6px 4px;">
               Search or select genes on the heatmap
             </div>
           </div>
+          <div data-heatmap-target="geneSelectionStatus"
+               style="flex-shrink:0; padding:6px 14px 8px 14px; font-size:12px; color:#6b7280; min-height:18px;"></div>
         </div>
-        <div data-heatmap-target="geneSelectionStatus"
-             style="flex-shrink:0; padding:6px 14px 8px 14px; font-size:12px; color:#6b7280; min-height:18px;"></div>
-        <div style="height:1px; background-color:#e5e7eb; margin:0 14px 8px 14px; flex-shrink:0;"></div>
-        <div style="flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; padding:0 0 8px 0;">
+
+        <div id="heatmap-gene-sets-tab-content" style="flex:1; min-height:0; display:none; flex-direction:column; overflow:hidden; padding:10px 0 8px 0;">
           <div id="heatmap-gene-set-collections-list-view" style="display:flex;flex-direction:column;gap:8px;height:100%;min-height:0;width:100%;">
             <div style="display:flex; align-items:center; justify-content:space-between; margin:0; width:100%; padding:0 14px; box-sizing:border-box;">
               <input id="heatmap-gene-set-collections-name-filter-input"
@@ -1089,17 +1107,24 @@
 
   <div data-heatmap-target="checkpointHistoryOverlay"
        data-action="click->heatmap#checkpointHistoryBackdropClick"
-       style="display:none; position:fixed; inset:0; z-index:12000; background:rgba(0,0,0,0.5); justify-content:center; align-items:center;">
-    <div style="background:#fff; border-radius:10px; width:min(820px,96vw); max-height:80vh; overflow:hidden; display:flex; flex-direction:column; box-shadow:0 20px 25px -5px rgba(0,0,0,0.2);"
+       style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background-color:rgba(0,0,0,0.5); z-index:12000; justify-content:center; align-items:center;">
+    <div style="background:white; border-radius:10px; width:1020px; max-width:98vw; max-height:80vh; overflow:hidden; display:flex; flex-direction:column;"
          data-action="click->heatmap#stopModalPropagation">
-      <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; border-bottom:1px solid #e5e7eb;">
-        <div>
-          <div style="font-size:15px; font-weight:600; color:#111827;">Heatmap checkpoints</div>
-          <div style="font-size:12px; color:#6b7280;">Run <%= run.id %> only</div>
-        </div>
-        <button type="button" data-action="heatmap#closeCheckpointHistory" class="<%= heatmap_btn %>">Close</button>
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #e5e7eb;">
+        <div style="font-size:15px; font-weight:600; color:#111827;">Checkpoint history</div>
+        <button type="button"
+                data-action="heatmap#closeCheckpointHistory"
+                style="background:none; border:none; font-size:18px; color:#6b7280; cursor:pointer;"
+                aria-label="Close checkpoint history">
+          <i class="fas fa-times" aria-hidden="true"></i>
+        </button>
       </div>
-      <div data-heatmap-target="checkpointHistoryList" style="flex:1; min-height:0; overflow:auto; padding:8px;"></div>
+      <div data-heatmap-target="checkpointHistoryLoading"
+           style="display:none; flex:1; align-items:center; justify-content:center; color:#6b7280; font-size:13px; gap:8px;">
+        <i class="fas fa-spinner fa-spin" style="font-size:14px;" aria-hidden="true"></i>
+        <span>Loading checkpoints...</span>
+      </div>
+      <div data-heatmap-target="checkpointHistoryList" style="flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; position:relative;"></div>
     </div>
   </div>
 

@@ -141,13 +141,22 @@ class ProjectsController < ApplicationController
        return
     end
 
-    # Bare project URLs should open the curated landing visualization checkpoint when set
+    # Bare project URLs should open the curated landing checkpoint when set
     # (legacy landing_page_json behavior). Explicit ?view=... keeps normal navigation.
     # Search-engine crawlers must keep archived projects on the summary page and never restore files.
-    if params[:view].blank? && params[:checkpoint_id].blank? && !crawler_archived_summary_only?
-      landing_checkpoint = @project.checkpoints.visualization.find_by(is_landing_page: true)
+    if params[:view].blank? && params[:checkpoint_id].blank? && params[:heatmap_checkpoint_id].blank? && !crawler_archived_summary_only?
+      landing_checkpoint = @project.checkpoints.where(is_landing_page: true).where.not(title: Checkpoint::CURRENT_TITLES).first
       if landing_checkpoint
-        redirect_to project_path(@project, view: 'visualization', checkpoint_id: landing_checkpoint.id)
+        if landing_checkpoint.heatmap?
+          redirect_to project_path(
+            @project,
+            view: 'heatmap',
+            run_id: landing_checkpoint.run_id,
+            heatmap_checkpoint_id: landing_checkpoint.id
+          )
+        else
+          redirect_to project_path(@project, view: 'visualization', checkpoint_id: landing_checkpoint.id)
+        end
         return
       end
     end

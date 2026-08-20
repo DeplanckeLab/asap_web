@@ -44,7 +44,7 @@ export default class extends Controller {
     "colTreeState", "rowTreeState", "labelsState",
     "settingsBtn", "settingsMenu", "legendWidthSlider", "legendWidthValue",
     "rightMarginSlider", "rightMarginValue",
-    "checkpointHistoryOverlay", "checkpointHistoryList", "checkpointHistoryBtn",
+    "checkpointHistoryOverlay", "checkpointHistoryList", "checkpointHistoryLoading", "checkpointHistoryBtn",
     "checkpointCommentsOverlay", "checkpointCommentsTitle", "checkpointCommentsList",
     "checkpointCommentSelect", "checkpointCommentInput", "checkpointCommentsBtn",
     "checkpointLoadingOverlay", "checkpointLoadingMessage",
@@ -122,6 +122,7 @@ export default class extends Controller {
       backgroundContextLabel: "Genes in this heatmap",
       getCsrfToken: () => this.csrfToken()
     })
+    this.currentGenesPanelTab = "genes"
     this.editingGradientTarget = { type: "expression" }
     this.expressionCustomColorRange = null
     this.checkpointHistory = []
@@ -2414,6 +2415,7 @@ export default class extends Controller {
 
     this.updateSelectionPanels()
     this.refreshExpandedGeneHistograms()
+    this.persistCurrentCheckpointOnServer("selection-change")
   }
 
   clearLiveSelection(event) {
@@ -2428,6 +2430,7 @@ export default class extends Controller {
     this.renderGeneSearchList()
     this.updateSelectionPanels()
     this.drawOverlay()
+    this.persistCurrentCheckpointOnServer("selection-change")
   }
 
   clearGeneSelection(event) {
@@ -2438,6 +2441,7 @@ export default class extends Controller {
     this.renderGeneSearchList()
     this.updateSelectionPanels()
     this.drawOverlay()
+    this.persistCurrentCheckpointOnServer("selection-change")
   }
 
   clearCellSelection(event) {
@@ -2447,6 +2451,7 @@ export default class extends Controller {
     this.updateSelectionPanels()
     this.refreshExpandedGeneHistograms()
     this.drawOverlay()
+    this.persistCurrentCheckpointOnServer("selection-change")
   }
 
   updateSelectionPanels() {
@@ -2498,12 +2503,50 @@ export default class extends Controller {
     }
     this.applyGeneListHighlightState()
     this.renderGeneSearchList()
+    this.persistCurrentCheckpointOnServer("selection-change")
   }
 
   openGeneSetOverlapPopup(event) {
     if (event) event.preventDefault()
     if (!this.geneSetOverlapPopup) return
     this.geneSetOverlapPopup.open()
+  }
+
+  switchGenesPanelTab(event) {
+    if (event) event.preventDefault()
+    const tab = event?.currentTarget?.dataset?.tab
+    this.setGenesPanelTab(tab)
+  }
+
+  setGenesPanelTab(tab = "genes") {
+    const normalizedTab = tab === "gene-sets" ? "gene-sets" : "genes"
+    const genesTab = this.element.querySelector("#heatmap-genes-tab")
+    const geneSetsTab = this.element.querySelector("#heatmap-gene-sets-tab")
+    const genesContent = this.element.querySelector("#heatmap-genes-tab-content")
+    const geneSetsContent = this.element.querySelector("#heatmap-gene-sets-tab-content")
+    if (!genesTab || !geneSetsTab || !genesContent || !geneSetsContent) return
+
+    this.currentGenesPanelTab = normalizedTab
+
+    const activate = (button, content, active) => {
+      button.style.color = active ? "#3b82f6" : "#6b7280"
+      button.style.borderBottomColor = active ? "#3b82f6" : "transparent"
+      content.style.display = active ? "flex" : "none"
+    }
+
+    activate(genesTab, genesContent, normalizedTab === "genes")
+    activate(geneSetsTab, geneSetsContent, normalizedTab === "gene-sets")
+  }
+
+  // Used by GeneSetCollectionsController after creating/saving collections.
+  setSelectionTab(tab = "genes") {
+    if (tab === "gene-sets") {
+      this.setGenesPanelTab("gene-sets")
+      return
+    }
+    if (tab === "genes" || tab === "cells") {
+      this.setGenesPanelTab("genes")
+    }
   }
 
   rebuildGeneRowIndex() {
@@ -2685,6 +2728,7 @@ export default class extends Controller {
     if (!item) return
     item.checked = !!event.currentTarget.checked
     this.applyGeneListHighlightState()
+    this.persistCurrentCheckpointOnServer("selection-change")
   }
 
   onGeneListInfoClick(event) {
@@ -2714,6 +2758,7 @@ export default class extends Controller {
     this.geneListItems = this.geneListItems.filter((entry) => entry.symbol !== symbol)
     this.applyGeneListHighlightState()
     this.renderGeneSearchList()
+    this.persistCurrentCheckpointOnServer("selection-change")
   }
 
   expressionValuesForGene(symbol) {
@@ -3000,6 +3045,7 @@ export default class extends Controller {
     if (this.hasGeneSelectionStatusTarget) this.geneSelectionStatusTarget.textContent = ""
     this.focusGeneInHeatmap(symbol)
     this.scrollGeneListToSymbol(symbol)
+    this.persistCurrentCheckpointOnServer("selection-change")
   }
 
   focusGeneInHeatmap(symbol) {
@@ -4328,6 +4374,7 @@ export default class extends Controller {
             ).catch(() => {})
           }
         }
+        this.setGenesPanelTab("gene-sets")
         if (this.hasGeneSelectionStatusTarget) {
           this.geneSelectionStatusTarget.textContent = `Saved "${cleanName}" (${genes.length} genes).`
         }
@@ -5388,6 +5435,15 @@ export default class extends Controller {
           ? "log"
           : "normal",
         nanColor: nanColorToHex(storedExpression?.nanColor)
+      },
+      selection: {
+        geneListItems: (this.geneListItems || []).map((item) => ({
+          symbol: String(item.symbol),
+          checked: !!item.checked,
+          expanded: !!item.expanded
+        })),
+        selectedOrigCols: Array.from(this.selectedOrigCols || []).sort((a, b) => a - b),
+        selectedCells: Array.from(this.selectedCells || []).sort((a, b) => a - b)
       }
     }
   }
@@ -5754,8 +5810,13 @@ export default class extends Controller {
     }
     if (!this.hasCheckpointHistoryOverlayTarget) return
     this.checkpointHistoryOverlayTarget.style.display = "flex"
-    await this.fetchCheckpointHistory()
-    this.renderCheckpointHistory()
+    this.setCheckpointHistoryLoading(true)
+    try {
+      await this.fetchCheckpointHistory()
+      this.renderCheckpointHistory()
+    } finally {
+      this.setCheckpointHistoryLoading(false)
+    }
   }
 
   closeCheckpointHistory() {
@@ -5767,82 +5828,258 @@ export default class extends Controller {
     if (event.target === this.checkpointHistoryOverlayTarget) this.closeCheckpointHistory()
   }
 
+  setCheckpointHistoryLoading(isLoading) {
+    if (this.hasCheckpointHistoryLoadingTarget) {
+      this.checkpointHistoryLoadingTarget.style.display = isLoading ? "flex" : "none"
+    }
+    if (this.hasCheckpointHistoryListTarget) {
+      this.checkpointHistoryListTarget.style.display = isLoading ? "none" : "block"
+    }
+  }
+
   renderCheckpointHistory() {
     if (!this.hasCheckpointHistoryListTarget) return
     const list = this.checkpointHistoryListTarget
     const history = this.checkpointHistory || []
     const currentAuto = this.currentAutoCheckpoint
     if (!history.length && !currentAuto) {
-      list.innerHTML = `<div style="padding:12px;color:#6b7280;font-size:13px;line-height:1.45;">
-        No checkpoints yet for this heatmap run.
-        ${this.canAnalyzeValue ? "Use <strong>Save checkpoint</strong> to store the current view, tracks, and gradient." : ""}
-      </div>`
+      list.innerHTML = `
+        <div style="padding:12px; color:#6b7280; line-height:1.45;">
+          <div style="font-size:13px; color:#6b7280;">No checkpoints yet for this heatmap run.</div>
+          <div style="margin-top:10px; font-size:12px; color:#6b7280;">
+            Create a new checkpoint from the Save checkpoint control in the toolbar.
+          </div>
+          <div style="margin-top:10px; font-size:12px; color:#6b7280; font-weight:600;">
+            Why create checkpoints:
+          </div>
+          <ul style="margin:6px 0 0 18px; padding:0; font-size:12px; color:#6b7280;">
+            <li>Share direct links to an exact heatmap view.</li>
+            <li>Set the project landing page to a specific view.</li>
+            <li>Preserve tracks, gradients, and selections.</li>
+            <li>Collaborate with comments on the same heatmap view.</li>
+          </ul>
+        </div>
+      `
       return
     }
 
-    const currentHtml = currentAuto ? this.renderCurrentAutoCheckpointCard(currentAuto) : ""
-    const namedHtml = history.map((checkpoint) => {
-      const id = String(checkpoint.id)
-      const createdAt = checkpoint.created_at ? new Date(checkpoint.created_at).toLocaleString() : ""
-      const commentCount = Number(checkpoint.comments_count || 0)
-      const isLoaded = this.lastLoadedCheckpointId && String(this.lastLoadedCheckpointId) === id
-      const author = checkpoint.user_name || "Unknown"
-      const heatmapThumb = checkpoint.state?.thumbnails?.heatmap
-      const thumbHtml = isCheckpointThumbnailDataUrl(heatmapThumb)
-        ? `<img class="checkpoint-thumb" src="${heatmapThumb}" alt="" style="width:96px;height:64px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
-        : ""
-      return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:${isLoaded ? "#fffbeb" : "#fff"};">
-        <div style="display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:12px;align-items:center;">
-          <div style="display:flex;align-items:center;justify-content:flex-start;min-height:64px;">
-            ${thumbHtml || ""}
-          </div>
-          <div style="min-width:0;">
-            <div style="display:flex;align-items:center;gap:6px;min-width:0;">
-              <div style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">${this.escape(checkpoint.title || "Untitled")}</div>
-              ${this.canAnalyzeValue ? `<button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-gray-100 text-gray-700 rounded border border-gray-300 text-xs"
-                data-action="heatmap#editCheckpointTitleFromHistory" data-heatmap-id-param="${this.escape(id)}" title="Edit checkpoint name">Edit</button>` : ""}
-            </div>
-            <div style="font-size:11px;color:#6b7280;margin-top:2px;">${this.escape(createdAt)} · ${this.escape(author)} · ${commentCount} comment${commentCount === 1 ? "" : "s"}</div>
-          </div>
-          <div style="display:flex;gap:6px;flex-shrink:0;">
-            <button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-gray-100 text-gray-700 rounded border border-gray-300 text-xs"
-              data-action="heatmap#loadCheckpointFromHistory" data-heatmap-id-param="${this.escape(id)}">Load</button>
-            <button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-gray-100 text-gray-700 rounded border border-gray-300 text-xs"
-              data-action="heatmap#loadCheckpointCommentsFromHistory" data-heatmap-id-param="${this.escape(id)}">Comments</button>
-            ${this.canAnalyzeValue ? `<button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-red-50 text-red-700 rounded border border-red-200 text-xs"
-              data-action="heatmap#deleteCheckpointFromHistory" data-heatmap-id-param="${this.escape(id)}">Delete</button>` : ""}
-          </div>
-        </div>
-      </div>`
-    }).join("")
+    const currentRowHtml = currentAuto ? this.renderCurrentAutoCheckpointRow(currentAuto) : ""
+    const rowsHtml = history.map((checkpoint) => this.renderNamedCheckpointHistoryRow(checkpoint)).join("")
+    const emptyNamedHtml = history.length === 0
+      ? `<div style="padding:10px 12px;font-size:12px;color:#6b7280;">No named checkpoints yet.</div>`
+      : ""
 
-    list.innerHTML = `${currentHtml}${namedHtml}`
+    list.innerHTML = `
+      <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #d1d5db;background:#f9fafb;column-gap:6px;position:sticky;top:0;z-index:1;">
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;">Preview</div>
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;">Checkpoint</div>
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
+          <span style="display:block;">Use as</span>
+          <span style="display:block;">landing page</span>
+        </div>
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
+          <span style="display:block;">Without</span>
+          <span style="display:block;">comments</span>
+        </div>
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
+          <span style="display:block;">With</span>
+          <span style="display:block;">comments</span>
+        </div>
+        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;">Delete</div>
+      </div>
+      ${currentRowHtml}
+      ${rowsHtml}
+      ${emptyNamedHtml}
+    `
   }
 
-  renderCurrentAutoCheckpointCard(checkpoint) {
+  checkpointHistoryThumbnailHtml(checkpoint) {
+    const heatmapThumb = checkpoint?.state?.thumbnails?.heatmap
+    return isCheckpointThumbnailDataUrl(heatmapThumb)
+      ? `<img class="checkpoint-thumb" src="${heatmapThumb}" alt="" style="width:72px;height:54px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
+      : ""
+  }
+
+  renderCurrentAutoCheckpointRow(checkpoint) {
     const updatedAt = checkpoint.updated_at ? new Date(checkpoint.updated_at).toLocaleString() : ""
-    const heatmapThumb = checkpoint.state?.thumbnails?.heatmap
-    const thumbHtml = isCheckpointThumbnailDataUrl(heatmapThumb)
-      ? `<img class="checkpoint-thumb" src="${heatmapThumb}" alt="" style="width:96px;height:64px;object-fit:cover;border:1px solid #e5e7eb;border-radius:4px;background:#fff;flex-shrink:0;" />`
-      : ""
+    const thumbHtml = this.checkpointHistoryThumbnailHtml(checkpoint)
     const resetBtn = this.canAnalyzeValue
-      ? `<button type="button" class="inline-flex items-center px-2 py-1 bg-white hover:bg-gray-100 text-gray-700 rounded border border-gray-300 text-xs"
-          data-action="heatmap#resetCurrentCheckpoint">Reset</button>`
+      ? `<button type="button"
+                  data-action="heatmap#resetCurrentCheckpoint"
+                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
+                  title="Clear the auto-saved view and reload the default heatmap">
+            Reset
+          </button>`
       : ""
-    return `<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#f8fafc;">
-      <div style="display:grid;grid-template-columns:104px minmax(0,1fr) auto;gap:12px;align-items:center;">
-        <div style="display:flex;align-items:center;justify-content:flex-start;min-height:64px;">
+    return `
+      <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;column-gap:6px;background:#f8fafc;">
+        <div style="display:flex;align-items:center;justify-content:flex-start;gap:4px;min-height:54px;">
           ${thumbHtml || ""}
         </div>
         <div style="min-width:0;">
-          <div style="font-size:13px;font-weight:600;color:#111827;">Current auto checkpoint</div>
-          <div style="font-size:11px;color:#6b7280;margin-top:2px;">Auto-saved ${this.escape(updatedAt)}. Reset if the view looks wrong after data changes.</div>
+          <div title="Current auto checkpoint" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Current auto checkpoint</div>
+          <div style="font-size:11px;color:#6b7280;">Auto-saved ${this.escape(updatedAt)}. Reset if the view looks wrong after data changes.</div>
         </div>
-        <div style="display:flex;gap:6px;flex-shrink:0;">
+        <div></div>
+        <div></div>
+        <div></div>
+        <div style="display:flex;align-items:center;justify-content:center;">
           ${resetBtn}
         </div>
       </div>
-    </div>`
+    `
+  }
+
+  renderNamedCheckpointHistoryRow(checkpoint) {
+    const id = String(checkpoint.id)
+    const createdAt = checkpoint.created_at ? new Date(checkpoint.created_at).toLocaleString() : ""
+    const commentCount = Number(checkpoint.comments_count || 0)
+    const thumbHtml = this.checkpointHistoryThumbnailHtml(checkpoint)
+    const escapedId = this.escape(id)
+    const renameBtn = this.canAnalyzeValue
+      ? `<button type="button"
+                data-action="heatmap#editCheckpointTitleFromHistory"
+                data-heatmap-id-param="${escapedId}"
+                title="Edit checkpoint name"
+                aria-label="Edit checkpoint name"
+                style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#6b7280;background:none;border:none;cursor:pointer;padding:0;flex-shrink:0;">
+            <i class="fas fa-pen" style="font-size:10px;" aria-hidden="true"></i>
+          </button>`
+      : ""
+    const deleteBtn = this.canAnalyzeValue
+      ? `<button type="button"
+                data-action="heatmap#deleteCheckpointFromHistory"
+                data-heatmap-id-param="${escapedId}"
+                style="border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+            Delete
+          </button>`
+      : ""
+
+    return `
+      <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;column-gap:6px;">
+        <div style="display:flex;align-items:center;justify-content:flex-start;gap:4px;min-height:54px;">
+          ${thumbHtml || ""}
+        </div>
+        <div style="min-width:0;">
+          <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+            <div title="${this.escape(checkpoint.title || "")}" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">${this.escape(checkpoint.title || "Untitled")}</div>
+            ${renameBtn}
+          </div>
+          <div style="font-size:11px;color:#6b7280;">${this.escape(createdAt)} - ${commentCount} comment${commentCount === 1 ? "" : "s"}</div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;">
+          <input type="checkbox"
+                 data-action="change->heatmap#toggleCheckpointLandingPageFromHistory"
+                 data-heatmap-id-param="${escapedId}"
+                 ${checkpoint.is_landing_page === true ? "checked" : ""}
+                 ${this.canAnalyzeValue ? "" : "disabled"}
+                 style="width:14px;height:14px;cursor:pointer;" />
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+          <button type="button"
+                  data-action="heatmap#copyCheckpointDirectLinkFromHistory"
+                  data-heatmap-id-param="${escapedId}"
+                  data-heatmap-with-comments-param="false"
+                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
+                  title="Copy direct link without comments">
+            Copy link
+          </button>
+          <button type="button"
+                  data-action="heatmap#loadCheckpointFromHistory"
+                  data-heatmap-id-param="${escapedId}"
+                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+            Open
+          </button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+          <button type="button"
+                  data-action="heatmap#copyCheckpointDirectLinkFromHistory"
+                  data-heatmap-id-param="${escapedId}"
+                  data-heatmap-with-comments-param="true"
+                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
+                  title="Copy direct link and open comments">
+            Copy link
+          </button>
+          <button type="button"
+                  data-action="heatmap#loadCheckpointCommentsFromHistory"
+                  data-heatmap-id-param="${escapedId}"
+                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+            Open
+          </button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:center;">
+          ${deleteBtn}
+        </div>
+      </div>
+    `
+  }
+
+  copyCheckpointDirectLinkFromHistory(event) {
+    const id = event.params.id
+    if (!id) return
+    const withComments = event.params.withComments === true || event.params.withComments === "true"
+    const button = event.currentTarget
+
+    const url = new URL(window.location.href)
+    url.searchParams.set("view", "heatmap")
+    if (this.runIdValue) url.searchParams.set("run_id", String(this.runIdValue))
+    url.searchParams.set("heatmap_checkpoint_id", String(id))
+    if (withComments) {
+      url.searchParams.set("open_heatmap_comments", "1")
+    } else {
+      url.searchParams.delete("open_heatmap_comments")
+    }
+
+    navigator.clipboard.writeText(url.toString()).then(() => {
+      if (button) {
+        const originalTitle = button.title
+        button.title = "Copied!"
+        setTimeout(() => {
+          button.title = originalTitle || "Copy direct link to clipboard"
+        }, 2000)
+      }
+    }).catch(() => {
+      alert("Failed to copy checkpoint link to clipboard.")
+    })
+  }
+
+  async toggleCheckpointLandingPageFromHistory(event) {
+    const id = event.params.id
+    if (!id || !this.canAnalyzeValue) return
+
+    const checkboxEl = event.currentTarget
+    const isLandingPage = !!checkboxEl?.checked
+    if (checkboxEl) checkboxEl.disabled = true
+
+    try {
+      const response = await fetch(`${this.checkpointsUrl(id)}?${this.checkpointsQuery()}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-CSRF-Token": this.csrfToken()
+        },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          kind: "heatmap",
+          run_id: this.runIdValue,
+          checkpoint: { is_landing_page: isLandingPage }
+        })
+      })
+
+      if (!response.ok) {
+        const errorPayload = await response.json().catch(() => ({}))
+        alert(errorPayload.error || "Failed to update landing page checkpoint.")
+        await this.fetchCheckpointHistory()
+        this.renderCheckpointHistory()
+        return
+      }
+
+      await this.fetchCheckpointHistory()
+      this.renderCheckpointHistory()
+    } finally {
+      if (checkboxEl) checkboxEl.disabled = false
+    }
   }
 
   async loadCheckpointFromHistory(event) {
@@ -5862,7 +6099,7 @@ export default class extends Controller {
     const id = event.params.id
     if (!this.canAnalyzeValue) return
     if (!window.confirm("Delete this checkpoint?")) return
-    const response = await fetch(this.checkpointsUrl(id), {
+    const response = await fetch(`${this.checkpointsUrl(id)}?${this.checkpointsQuery()}`, {
       method: "DELETE",
       headers: {
         Accept: "application/json",
@@ -6104,7 +6341,46 @@ export default class extends Controller {
       this.applyActiveColormap()
     }
 
+    this.applySelectionCheckpointState(state.selection)
+
     this.handleResize()
+  }
+
+  applySelectionCheckpointState(selection) {
+    const sel = selection && typeof selection === "object" ? selection : null
+
+    this.geneListItems = Array.isArray(sel?.geneListItems)
+      ? sel.geneListItems
+        .map((item) => {
+          const symbol = this.resolveGeneSymbol(item?.symbol)
+          if (!symbol) return null
+          return {
+            symbol,
+            checked: item.checked !== false,
+            expanded: !!item.expanded
+          }
+        })
+        .filter(Boolean)
+      : []
+
+    this.applyGeneListHighlightState()
+    this.renderGeneSearchList()
+
+    const nCols = Number.isInteger(this.nOrigCols) ? this.nOrigCols : 0
+    this.selectedOrigCols = new Set(
+      (Array.isArray(sel?.selectedOrigCols) ? sel.selectedOrigCols : [])
+        .map(Number)
+        .filter((n) => Number.isInteger(n) && n >= 0 && n < nCols)
+    )
+    this.selectedCells = new Set(
+      (Array.isArray(sel?.selectedCells) ? sel.selectedCells : [])
+        .map(Number)
+        .filter((n) => Number.isInteger(n) && n >= 0)
+    )
+
+    this.updateSelectionPanels()
+    this.refreshExpandedGeneHistograms()
+    if (typeof this.drawOverlay === "function") this.drawOverlay()
   }
 
   async restoreTrack(spec, axis) {

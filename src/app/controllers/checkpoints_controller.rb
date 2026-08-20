@@ -65,17 +65,13 @@ class CheckpointsController < ApplicationController
     checkpoint.comments = []
     checkpoint.kind = kind
     checkpoint.run = run
-    if checkpoint.heatmap?
-      checkpoint.is_landing_page = false
-    elsif checkpoint_is_landing_page_param_present?
+    if checkpoint_is_landing_page_param_present?
       checkpoint.is_landing_page = checkpoint_is_landing_page
     end
 
     saved = false
     Checkpoint.transaction do
-      if checkpoint.is_landing_page?
-        @project.checkpoints.visualization.where(is_landing_page: true).update_all(is_landing_page: false)
-      end
+      clear_other_landing_pages!(checkpoint) if checkpoint.is_landing_page?
       saved = checkpoint.save
       raise ActiveRecord::Rollback unless saved
     end
@@ -112,10 +108,10 @@ class CheckpointsController < ApplicationController
       @checkpoint.state = checkpoint_state
     end
 
-    if @checkpoint.visualization? && checkpoint_is_landing_page_param_present?
+    if checkpoint_is_landing_page_param_present?
       is_landing_page = checkpoint_is_landing_page
       if is_landing_page
-        @project.checkpoints.visualization.where(is_landing_page: true).where.not(id: @checkpoint.id).update_all(is_landing_page: false)
+        clear_other_landing_pages!(@checkpoint)
       end
       @checkpoint.is_landing_page = is_landing_page
     end
@@ -315,6 +311,13 @@ class CheckpointsController < ApplicationController
 
   def checkpoint_is_landing_page
     ActiveModel::Type::Boolean.new.cast(params.dig(:checkpoint, :is_landing_page))
+  end
+
+  def clear_other_landing_pages!(checkpoint)
+    @project.checkpoints
+      .where(is_landing_page: true)
+      .where.not(id: checkpoint.id)
+      .update_all(is_landing_page: false)
   end
 
   def comment_body

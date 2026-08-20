@@ -29,7 +29,7 @@ const VISUALIZATION_ONTOP_UI_IDS = [
   'checkpoint-comments-overlay',
   'checkpoint-save-overlay',
   'checkpoint-loading-overlay',
-  'module-score-loading-overlay',
+  'module-score-popups-root',
   'visualization-leave-guard-overlay',
   'annotation-popup-overlay',
   'annotation-popup-gene-modal-overlay',
@@ -953,7 +953,7 @@ export default class extends Controller {
       if (!anchor) return
       if (anchor.closest('#visualization-leave-guard-overlay')) return
       if (anchor.closest('#checkpoint-loading-overlay')) return
-      if (anchor.closest('#module-score-loading-overlay')) return
+      if (anchor.closest('#module-score-popups-root')) return
       const rawHref = (anchor.getAttribute('href') || '').trim()
       if (!rawHref || rawHref.startsWith('#') || rawHref.startsWith('javascript:')) return
       if (anchor.hasAttribute('download')) return
@@ -1031,13 +1031,8 @@ export default class extends Controller {
   disconnect() {
     this.hideViewLimitedTooltip()
     this.stopCheckpointCommentsDrag()
-    if (this.moduleScoreAbortController) {
-      this.moduleScoreAbortController.abort()
-      this.moduleScoreAbortController = null
-    }
-    this.currentModuleScoreRequestId = null
-    this.moduleScoreCancellationRequested = false
-    this.stopModuleScoreLoading()
+    this.stopModuleScorePopupDrag()
+    this.clearAllModuleScorePopups({ cancelComputing: true })
     console.info('[CheckpointPersist] disconnect; relying on prior beforeunload/turbo:before-cache save')
     if (this.boundTurboBeforeCache) {
       document.removeEventListener('turbo:before-cache', this.boundTurboBeforeCache)
@@ -2630,9 +2625,10 @@ export default class extends Controller {
             <button type="button"
                     data-checkpoint-id="${checkpointId}"
                     onclick="if (window.visualizationController) window.visualizationController.editCheckpointTitleById('${checkpointId}')"
-                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:2px 6px;cursor:pointer;font-size:11px;font-weight:500;white-space:nowrap;flex-shrink:0;"
-                    title="Edit checkpoint name">
-              Edit
+                    style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#6b7280;background:none;border:none;cursor:pointer;padding:0;flex-shrink:0;"
+                    title="Edit checkpoint name"
+                    aria-label="Edit checkpoint name">
+              <i class="fas fa-pen" style="font-size:10px;" aria-hidden="true"></i>
             </button>
           </div>
           <div style="font-size:11px;color:#6b7280;">${this.escapeHtml(createdAt)} - ${commentCount} comment${commentCount === 1 ? '' : 's'}</div>
@@ -2773,65 +2769,22 @@ export default class extends Controller {
     return this.checkpointDisplayTitle(item)
   }
 
-  setModuleScoreLoading(isLoading, contextLabel = null) {
-    const loadingOverlay = document.getElementById('module-score-loading-overlay')
-    if (!loadingOverlay) return
-    const textEl = document.getElementById('module-score-loading-text')
-    const elapsedEl = document.getElementById('module-score-loading-elapsed')
-    const estimateEl = document.getElementById('module-score-loading-estimate')
-    const cancelBtn = document.getElementById('module-score-cancel-btn')
-    if (textEl) {
-      const label = String(contextLabel || '').trim()
-      textEl.textContent = label.length > 0
-        ? `Computing ModuleScore on ${label}...`
-        : 'Computing ModuleScore...'
+  ensureModuleScorePopupsRoot() {
+    let root = document.getElementById('module-score-popups-root')
+    if (!root) {
+      root = document.createElement('div')
+      root.id = 'module-score-popups-root'
+      root.style.cssText = 'display:none;position:fixed;inset:0;z-index:12500;pointer-events:none;'
+      document.body.appendChild(root)
     }
-    if (elapsedEl) {
-      elapsedEl.textContent = 'Elapsed: 0.0s'
-    }
-    if (estimateEl) {
-      estimateEl.textContent = 'Est. remaining: --'
-    }
-    if (cancelBtn) {
-      cancelBtn.disabled = !isLoading
-      cancelBtn.style.opacity = isLoading ? '1' : '0.6'
-      cancelBtn.style.cursor = isLoading ? 'pointer' : 'not-allowed'
-    }
-    loadingOverlay.style.display = isLoading ? 'flex' : 'none'
+    return root
   }
 
-  startModuleScoreLoading(contextLabel = null, estimatedDurationMs = null) {
-    this.stopModuleScoreLoading()
-    this.setModuleScoreLoading(true, contextLabel)
-    const textEl = document.getElementById('module-score-loading-text')
-    const elapsedEl = document.getElementById('module-score-loading-elapsed')
-    const estimateEl = document.getElementById('module-score-loading-estimate')
-    const startMs = performance.now()
-    const normalizedEstimateMs = Number.isFinite(Number(estimatedDurationMs)) ? Math.max(0, Number(estimatedDurationMs)) : null
-    const label = String(contextLabel || '').trim()
-    const renderText = () => {
-      if (!elapsedEl) return
-      const elapsedMs = Math.max(0, performance.now() - startMs)
-      const elapsedSec = Math.max(0, Math.round(elapsedMs / 100) / 10)
-      elapsedEl.textContent = `Elapsed: ${elapsedSec.toFixed(1)}s`
-      if (normalizedEstimateMs && normalizedEstimateMs > 0) {
-        const remainingMs = Math.max(0, normalizedEstimateMs - elapsedMs)
-        const remainingSec = Math.max(0, Math.round(remainingMs / 100) / 10)
-        if (estimateEl) estimateEl.textContent = `Est. remaining: ${remainingSec.toFixed(1)}s`
-        return
-      }
-      if (estimateEl) estimateEl.textContent = 'Est. remaining: --'
+  getModuleScorePopupEntries() {
+    if (!(this.moduleScorePopups instanceof Map)) {
+      this.moduleScorePopups = new Map()
     }
-    renderText()
-    this.moduleScoreLoadingTimer = window.setInterval(renderText, 100)
-  }
-
-  stopModuleScoreLoading() {
-    if (this.moduleScoreLoadingTimer) {
-      window.clearInterval(this.moduleScoreLoadingTimer)
-      this.moduleScoreLoadingTimer = null
-    }
-    this.setModuleScoreLoading(false)
+    return this.moduleScorePopups
   }
 
   generateModuleScoreRequestId() {
@@ -2841,36 +2794,525 @@ export default class extends Controller {
     return `ms_${Date.now()}_${Math.floor(Math.random() * 1000000)}`
   }
 
-  async cancelModuleScoreComputation(event = null) {
+  findModuleScorePopupByItemId(itemId, status = null) {
+    const normalizedItemId = String(itemId || '').trim()
+    if (!normalizedItemId) return null
+    for (const entry of this.getModuleScorePopupEntries().values()) {
+      if (String(entry?.itemId || '') !== normalizedItemId) continue
+      if (status && entry.status !== status) continue
+      return entry
+    }
+    return null
+  }
+
+  syncModuleScorePopupsRootVisibility() {
+    const root = this.ensureModuleScorePopupsRoot()
+    root.style.display = this.getModuleScorePopupEntries().size > 0 ? 'block' : 'none'
+  }
+
+  bringModuleScorePopupToFront(popupId) {
+    if (!this._moduleScorePopupZCounter) this._moduleScorePopupZCounter = 12501
+    this._moduleScorePopupZCounter += 1
+    const entry = this.getModuleScorePopupEntries().get(popupId)
+    if (entry?.element) {
+      entry.element.style.zIndex = String(this._moduleScorePopupZCounter)
+    }
+  }
+
+  buildModuleScoreComputingBodyHtml(geneSetName) {
+    const label = String(geneSetName || '').trim()
+    const title = label.length > 0
+      ? `Computing ModuleScore on ${this.escapeHtml(label)}...`
+      : 'Computing ModuleScore...'
+    return `
+      <div style="display:flex;align-items:flex-start;gap:10px;width:100%;">
+        <i class="fas fa-spinner fa-spin" style="font-size:15px;color:#374151;margin-top:2px;flex-shrink:0;"></i>
+        <div style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;flex:1;">
+          <span data-module-score-text style="font-size:14px;color:#111827;font-weight:500;line-height:1.35;word-break:break-word;">${title}</span>
+          <div style="display:grid;grid-template-columns:minmax(120px,1fr) minmax(120px,1fr);column-gap:12px;font-size:12px;color:#4b5563;font-variant-numeric:tabular-nums;width:100%;">
+            <span data-module-score-elapsed>Elapsed: 0.0s</span>
+            <span data-module-score-estimate>Est. remaining: --</span>
+          </div>
+          <div style="width:100%;display:flex;justify-content:flex-end;margin-top:6px;">
+            <button type="button"
+                    data-module-score-cancel
+                    style="padding:6px 10px;border:1px solid #d1d5db;background:#ffffff;color:#374151;border-radius:6px;cursor:pointer;font-size:12px;">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
+  buildModuleScoreReadyBodyHtml(geneSetName) {
+    const label = String(geneSetName || '').trim() || 'gene set'
+    return `
+      <div style="font-size:14px;color:#111827;line-height:1.45;word-break:break-word;">
+        The module score <strong>${this.escapeHtml(label)}</strong> is ready.
+        <button type="button"
+                data-module-score-apply
+                style="display:inline;padding:0;margin:0;border:none;background:none;color:#2563eb;font-size:14px;font-weight:600;cursor:pointer;text-decoration:underline;">
+          Click here to color
+        </button>.
+      </div>
+    `
+  }
+
+  openModuleScoreComputingPopup(options = {}) {
+    const popupId = String(options.popupId || this.generateModuleScoreRequestId())
+    const geneSetName = String(options.geneSetName || '').trim()
+    const estimatedDurationMs = Number.isFinite(Number(options.estimatedDurationMs))
+      ? Math.max(0, Number(options.estimatedDurationMs))
+      : null
+    const root = this.ensureModuleScorePopupsRoot()
+    const existingCount = this.getModuleScorePopupEntries().size
+    const offset = existingCount * 28
+    const popup = document.createElement('div')
+    popup.dataset.moduleScorePopupId = popupId
+    popup.style.cssText = [
+      'pointer-events:auto',
+      'position:fixed',
+      `top:${80 + offset}px`,
+      `left:${24 + offset}px`,
+      'z-index:12501',
+      'background:#ffffff',
+      'border:1px solid #d1d5db',
+      'border-radius:10px',
+      'min-width:300px',
+      'max-width:min(420px, 92vw)',
+      'box-shadow:0 12px 24px rgba(0,0,0,0.12)',
+      'display:flex',
+      'flex-direction:column',
+      'overflow:hidden'
+    ].join(';')
+
+    popup.innerHTML = `
+      <div data-module-score-drag-handle="true"
+           style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 10px 8px 14px;cursor:move;user-select:none;border-bottom:1px solid #f3f4f6;background:#fafafa;">
+        <span style="font-size:13px;font-weight:600;color:#111827;">ModuleScore</span>
+        <button type="button"
+                data-module-score-close
+                title="Close"
+                aria-label="Close"
+                style="width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:none;background:transparent;color:#6b7280;border-radius:6px;cursor:pointer;font-size:18px;line-height:1;padding:0;">
+          &times;
+        </button>
+      </div>
+      <div data-module-score-body style="padding:12px 14px 14px;">
+        ${this.buildModuleScoreComputingBodyHtml(geneSetName)}
+      </div>
+    `
+
+    const entry = {
+      popupId,
+      requestId: String(options.requestId || ''),
+      itemId: String(options.itemId || ''),
+      geneSetName,
+      collectionId: options.collectionId ? String(options.collectionId) : null,
+      collectionLabel: options.collectionLabel ? String(options.collectionLabel) : '',
+      annotId: options.annotId != null ? String(options.annotId) : 'base',
+      dataset: String(options.dataset || '/matrix'),
+      loomFile: String(options.loomFile || ''),
+      status: 'computing',
+      cancelled: false,
+      abortController: options.abortController || new AbortController(),
+      timer: null,
+      startMs: performance.now(),
+      estimatedDurationMs,
+      scoreValues: null,
+      minVal: null,
+      maxVal: null,
+      element: popup
+    }
+
+    const closeBtn = popup.querySelector('[data-module-score-close]')
+    const cancelBtn = popup.querySelector('[data-module-score-cancel]')
+    const dragHandle = popup.querySelector('[data-module-score-drag-handle]')
+    if (closeBtn) {
+      closeBtn.addEventListener('click', (event) => this.closeModuleScorePopup(popupId, event))
+    }
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', (event) => this.cancelModuleScoreComputation(event, popupId))
+    }
+    if (dragHandle) {
+      dragHandle.addEventListener('mousedown', (event) => this.startModuleScorePopupDrag(event, popupId))
+    }
+    popup.addEventListener('mousedown', () => this.bringModuleScorePopupToFront(popupId), true)
+
+    root.appendChild(popup)
+    this.getModuleScorePopupEntries().set(popupId, entry)
+    this.bringModuleScorePopupToFront(popupId)
+    this.syncModuleScorePopupsRootVisibility()
+    this.startModuleScorePopupTimer(popupId)
+    return entry
+  }
+
+  startModuleScorePopupTimer(popupId) {
+    const entry = this.getModuleScorePopupEntries().get(popupId)
+    if (!entry?.element) return
+    if (entry.timer) {
+      window.clearInterval(entry.timer)
+      entry.timer = null
+    }
+    const elapsedEl = entry.element.querySelector('[data-module-score-elapsed]')
+    const estimateEl = entry.element.querySelector('[data-module-score-estimate]')
+    const renderText = () => {
+      if (!elapsedEl || entry.status !== 'computing') return
+      const elapsedMs = Math.max(0, performance.now() - entry.startMs)
+      const elapsedSec = Math.max(0, Math.round(elapsedMs / 100) / 10)
+      elapsedEl.textContent = `Elapsed: ${elapsedSec.toFixed(1)}s`
+      if (entry.estimatedDurationMs && entry.estimatedDurationMs > 0) {
+        const remainingMs = Math.max(0, entry.estimatedDurationMs - elapsedMs)
+        const remainingSec = Math.max(0, Math.round(remainingMs / 100) / 10)
+        if (estimateEl) estimateEl.textContent = `Est. remaining: ${remainingSec.toFixed(1)}s`
+        return
+      }
+      if (estimateEl) estimateEl.textContent = 'Est. remaining: --'
+    }
+    renderText()
+    entry.timer = window.setInterval(renderText, 100)
+  }
+
+  markModuleScorePopupReady(popupId, result = {}) {
+    const entry = this.getModuleScorePopupEntries().get(popupId)
+    if (!entry?.element || entry.cancelled) return
+    if (entry.timer) {
+      window.clearInterval(entry.timer)
+      entry.timer = null
+    }
+    entry.status = 'ready'
+    entry.scoreValues = Array.isArray(result.scoreValues) ? result.scoreValues : []
+    entry.minVal = Number.isFinite(Number(result.minVal)) ? Number(result.minVal) : null
+    entry.maxVal = Number.isFinite(Number(result.maxVal)) ? Number(result.maxVal) : null
+    const body = entry.element.querySelector('[data-module-score-body]')
+    if (body) {
+      body.innerHTML = this.buildModuleScoreReadyBodyHtml(entry.geneSetName)
+      const applyBtn = body.querySelector('[data-module-score-apply]')
+      if (applyBtn) {
+        applyBtn.addEventListener('click', (event) => this.applyModuleScoreFromPopup(popupId, event))
+      }
+    }
+  }
+
+  async revealGeneSetItemForModuleScore({ itemId, collectionId = null, collectionLabel = '' } = {}) {
+    if (this.isMobileVizLayout()) {
+      this.openMobilePanel('gene-sets')
+    } else {
+      this.setSelectionTab('gene-sets')
+    }
+
+    const gsc = this.geneSetCollectionsController
+    const normalizedItemId = String(itemId || '').trim()
+    const normalizedCollectionId = String(collectionId || '').trim()
+    if (gsc && normalizedCollectionId) {
+      const alreadyOpen = String(gsc.selectedCollectionId || '') === normalizedCollectionId
+      const existingRow = alreadyOpen ? gsc.findGeneSetItemRow?.({ itemId: normalizedItemId }) : null
+      if (!alreadyOpen || !existingRow) {
+        const label = String(collectionLabel || gsc.detailTitle?.textContent || '').trim()
+        await gsc.openCollectionDetail(normalizedCollectionId, label)
+      }
+    }
+
+    const row = gsc?.findGeneSetItemRow?.({ itemId: normalizedItemId })
+    if (row && typeof gsc.highlightGeneSetItemRow === 'function') {
+      gsc.highlightGeneSetItemRow(row)
+      return row
+    }
+    if (row) {
+      row.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+    }
+    return row || null
+  }
+
+  applyGeneSetModuleScoreColoring({
+    itemId,
+    geneSetName,
+    scoreValues,
+    minVal,
+    maxVal,
+    button = null
+  } = {}) {
+    const normalizedItemId = String(itemId || '').trim()
+    if (!normalizedItemId || !Array.isArray(scoreValues) || scoreValues.length === 0) return null
+
+    let resolvedMin = Number.isFinite(Number(minVal)) ? Number(minVal) : this.dataManager.safeMin(scoreValues)
+    let resolvedMax = Number.isFinite(Number(maxVal)) ? Number(maxVal) : this.dataManager.safeMax(scoreValues)
+    const metadataId = `gene_set_item_${normalizedItemId}_${this.geneManager?.currentMatrixAnnotId || 'base'}`
+    const metadataVector = {
+      id: metadataId,
+      name: geneSetName,
+      display_name: geneSetName,
+      data_type: 'NUMERIC',
+      values: scoreValues,
+      compression_info: {
+        min_val: resolvedMin,
+        max_val: resolvedMax,
+        data_type: 'NUMERIC'
+      },
+      nber_rows: 1,
+      nber_cols: scoreValues.length
+    }
+
+    if (!this.loadedMetadataVectors) this.loadedMetadataVectors = {}
+    this.loadedMetadataVectors[metadataId] = metadataVector
+
+    this.resetAllWaterDropButtons()
+    this.hideAllResetButtons()
+    this.removeAllCategoryColors()
+    if (button) this.setWaterDropButtonActive(button)
+    this.setColorRange(resolvedMin, resolvedMax)
+
+    this.currentMetadataVector = metadataVector
+    this.currentMetadataId = metadataId
+    this.colorManager.clearColorMapCache()
+    this.gradientManager.loadGradientForMetadata(metadataId)
+    this.gradientManager.initializeGradientLegendListeners()
+    this._lastNumericOrderApplied = null
+    this.updateVisualizationWithMetadataVector()
+    this.dataManager.updateAllCategoryDistributions()
+    this.dataManager.updateCellFiltering(true)
+    this.updateCurrentColoringIndicator()
+    return metadataId
+  }
+
+  async applyModuleScoreFromPopup(popupId, event = null) {
     if (event?.preventDefault) event.preventDefault()
     if (event?.stopPropagation) event.stopPropagation()
-    const requestId = String(this.currentModuleScoreRequestId || '').trim()
-    if (!requestId) return
-
-    this.moduleScoreCancellationRequested = true
-    if (this.moduleScoreAbortController) {
-      this.moduleScoreAbortController.abort()
-      this.moduleScoreAbortController = null
+    const entry = this.getModuleScorePopupEntries().get(popupId)
+    if (!entry || entry.status !== 'ready') return
+    if (!Array.isArray(entry.scoreValues) || entry.scoreValues.length === 0) {
+      alert('ModuleScore returned no values for this gene set.')
+      return
     }
 
+    this.uiManager.showMetadataDropdownSpinner()
+    try {
+      const escapedItemId = this.escapeAttributeSelectorValue(entry.itemId)
+      const buttonBeforeReveal = document.querySelector(
+        `[data-action*="geneSetWaterDropClicked"][data-gene-set-item-id="${escapedItemId}"]`
+      )
+      this.applyGeneSetModuleScoreColoring({
+        itemId: entry.itemId,
+        geneSetName: entry.geneSetName,
+        scoreValues: entry.scoreValues,
+        minVal: entry.minVal,
+        maxVal: entry.maxVal,
+        button: buttonBeforeReveal
+      })
+      await this.revealGeneSetItemForModuleScore({
+        itemId: entry.itemId,
+        collectionId: entry.collectionId,
+        collectionLabel: entry.collectionLabel
+      })
+      const buttonAfterReveal = document.querySelector(
+        `[data-action*="geneSetWaterDropClicked"][data-gene-set-item-id="${escapedItemId}"]`
+      )
+      if (buttonAfterReveal) this.setWaterDropButtonActive(buttonAfterReveal)
+    } finally {
+      this.uiManager.hideMetadataDropdownSpinner()
+    }
+  }
+
+  startModuleScorePopupDrag(event, popupId) {
+    const interactiveTarget = event.target instanceof Element
+      ? event.target.closest('button, input, textarea, select, option, a, label')
+      : null
+    if (interactiveTarget) return
+    event.preventDefault()
+    event.stopPropagation()
+    const entry = this.getModuleScorePopupEntries().get(popupId)
+    const popup = entry?.element
+    if (!popup) return
+    const rect = popup.getBoundingClientRect()
+    this._moduleScorePopupDrag = {
+      popupId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top
+    }
+    if (!this.boundModuleScorePopupDragMove) {
+      this.boundModuleScorePopupDragMove = this.handleModuleScorePopupDragMove.bind(this)
+    }
+    if (!this.boundModuleScorePopupDragStop) {
+      this.boundModuleScorePopupDragStop = this.stopModuleScorePopupDrag.bind(this)
+    }
+    document.addEventListener('mousemove', this.boundModuleScorePopupDragMove)
+    document.addEventListener('mouseup', this.boundModuleScorePopupDragStop)
+  }
+
+  handleModuleScorePopupDragMove(event) {
+    const drag = this._moduleScorePopupDrag
+    if (!drag) return
+    const entry = this.getModuleScorePopupEntries().get(drag.popupId)
+    const popup = entry?.element
+    if (!popup) return
+    const popupWidth = popup.offsetWidth || 300
+    const popupHeight = popup.offsetHeight || 120
+    const maxLeft = Math.max(8, window.innerWidth - popupWidth - 8)
+    const maxTop = Math.max(8, window.innerHeight - popupHeight - 8)
+    const nextLeft = Math.min(maxLeft, Math.max(8, event.clientX - drag.offsetX))
+    const nextTop = Math.min(maxTop, Math.max(8, event.clientY - drag.offsetY))
+    popup.style.left = `${nextLeft}px`
+    popup.style.top = `${nextTop}px`
+  }
+
+  stopModuleScorePopupDrag() {
+    this._moduleScorePopupDrag = null
+    if (this.boundModuleScorePopupDragMove) {
+      document.removeEventListener('mousemove', this.boundModuleScorePopupDragMove)
+    }
+    if (this.boundModuleScorePopupDragStop) {
+      document.removeEventListener('mouseup', this.boundModuleScorePopupDragStop)
+    }
+  }
+
+  removeModuleScorePopup(popupId) {
+    const entries = this.getModuleScorePopupEntries()
+    const entry = entries.get(popupId)
+    if (!entry) return
+    if (entry.timer) {
+      window.clearInterval(entry.timer)
+      entry.timer = null
+    }
+    if (entry.element?.parentNode) {
+      entry.element.parentNode.removeChild(entry.element)
+    }
+    entries.delete(popupId)
+    this.syncModuleScorePopupsRootVisibility()
+  }
+
+  clearAllModuleScorePopups({ cancelComputing = false } = {}) {
+    const entries = [...this.getModuleScorePopupEntries().values()]
+    entries.forEach((entry) => {
+      if (cancelComputing && entry.status === 'computing') {
+        this.cancelModuleScoreComputation(null, entry.popupId, { removePopup: true, silent: true })
+        return
+      }
+      this.removeModuleScorePopup(entry.popupId)
+    })
+  }
+
+  postCancelModuleScoreRequest(requestId) {
+    const normalizedRequestId = String(requestId || '').trim()
+    if (!normalizedRequestId) return
     const projectIdentifier = this.getProjectIdentifier()
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
-    if (projectIdentifier) {
-      fetch(`/projects/${encodeURIComponent(projectIdentifier)}/cancel_gene_set_item_module_score`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'X-CSRF-Token': csrfToken
-        },
-        credentials: 'same-origin',
-        body: JSON.stringify({ request_id: requestId })
-      }).catch(() => {})
-    }
+    if (!projectIdentifier) return
+    fetch(`/projects/${encodeURIComponent(projectIdentifier)}/cancel_gene_set_item_module_score`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ request_id: normalizedRequestId })
+    }).catch(() => {})
+  }
 
-    this.currentModuleScoreRequestId = null
-    this.stopModuleScoreLoading()
-    this.uiManager.hideMetadataDropdownSpinner()
+  async cancelModuleScoreComputation(event = null, popupId = null, options = {}) {
+    if (event?.preventDefault) event.preventDefault()
+    if (event?.stopPropagation) event.stopPropagation()
+    const resolvedPopupId = popupId
+      || (event?.currentTarget instanceof Element
+        ? event.currentTarget.closest('[data-module-score-popup-id]')?.dataset?.moduleScorePopupId
+        : null)
+      || null
+    const entry = resolvedPopupId ? this.getModuleScorePopupEntries().get(resolvedPopupId) : null
+    if (!entry) return
+
+    entry.cancelled = true
+    if (entry.abortController) {
+      try { entry.abortController.abort() } catch (_error) { /* ignore */ }
+    }
+    this.postCancelModuleScoreRequest(entry.requestId)
+    if (options.removePopup !== false) {
+      this.removeModuleScorePopup(entry.popupId)
+    }
+  }
+
+  closeModuleScorePopup(popupId, event = null) {
+    if (event?.preventDefault) event.preventDefault()
+    if (event?.stopPropagation) event.stopPropagation()
+    const entry = this.getModuleScorePopupEntries().get(popupId)
+    if (!entry) return
+    if (entry.status === 'computing') {
+      this.cancelModuleScoreComputation(event, popupId)
+      return
+    }
+    this.removeModuleScorePopup(popupId)
+  }
+
+  async runModuleScoreComputation(popupId) {
+    const entry = this.getModuleScorePopupEntries().get(popupId)
+    if (!entry || entry.status !== 'computing') return
+
+    const params = new URLSearchParams({
+      item_id: String(entry.itemId),
+      loom_file: String(entry.loomFile),
+      dataset: String(entry.dataset || '/matrix'),
+      request_id: String(entry.requestId)
+    })
+    const moduleScoreComputeStart = performance.now()
+    let payload = null
+
+    try {
+      while (!entry.cancelled) {
+        const response = await fetch(`/projects/${encodeURIComponent(this.getProjectIdentifier())}/gene_set_item_module_score?${params.toString()}`, {
+          method: 'GET',
+          credentials: 'same-origin',
+          headers: { 'Accept': 'application/json' },
+          signal: entry.abortController.signal
+        })
+        payload = await response.json()
+        if (payload?.status === 'canceled') {
+          this.removeModuleScorePopup(popupId)
+          return
+        }
+        if (payload?.status === 'pending' || payload?.status === 'running') {
+          await new Promise((resolve) => window.setTimeout(resolve, 1000))
+          continue
+        }
+        if (!response.ok || payload.status !== 'ok') {
+          throw new Error(payload.message || 'Failed to compute ModuleScore')
+        }
+        break
+      }
+
+      if (entry.cancelled || !payload || payload.status !== 'ok') {
+        this.removeModuleScorePopup(popupId)
+        return
+      }
+
+      const scoreValues = Array.isArray(payload.scores) ? payload.scores.map((value) => Number(value || 0)) : []
+      if (scoreValues.length === 0) {
+        this.removeModuleScorePopup(popupId)
+        alert('ModuleScore returned no values for this gene set.')
+        return
+      }
+      const minVal = this.dataManager.safeMin(scoreValues)
+      const maxVal = this.dataManager.safeMax(scoreValues)
+      const moduleScoreDurationMs = Math.round(Math.max(0, performance.now() - moduleScoreComputeStart))
+      this.updatePredictedModuleScoreDurationMs(String(entry.annotId), entry.dataset, moduleScoreDurationMs)
+      this.memoryManager?.storeGeneSetItemModuleScoreInIndexedDB?.(String(entry.itemId), {
+        name: entry.geneSetName,
+        values: scoreValues,
+        minVal,
+        maxVal,
+        dataset: entry.dataset,
+        annotId: String(entry.annotId),
+        durationMs: moduleScoreDurationMs
+      }).catch(() => {})
+
+      this.markModuleScorePopupReady(popupId, { scoreValues, minVal, maxVal })
+    } catch (error) {
+      if (entry.cancelled || error?.name === 'AbortError') {
+        this.removeModuleScorePopup(popupId)
+        return
+      }
+      this.removeModuleScorePopup(popupId)
+      alert(error.message || 'Failed to apply gene set coloring')
+    }
   }
 
   moduleScorePredictionStorageKey(annotId, dataset) {
@@ -3484,6 +3926,7 @@ export default class extends Controller {
       return
     }
 
+    // Landing page is project-wide: keep local list in sync after server clears others.
     await this.fetchCheckpointHistory()
     this.renderCheckpointHistory()
   }
@@ -11644,6 +12087,17 @@ export default class extends Controller {
       return
     }
 
+    const existingReady = this.findModuleScorePopupByItemId(itemId, 'ready')
+    if (existingReady) {
+      existingReady.element?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+      return
+    }
+    const existingComputing = this.findModuleScorePopupByItemId(itemId, 'computing')
+    if (existingComputing) {
+      existingComputing.element?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+      return
+    }
+
     const geneSetController = this.geneSetCollectionsController
     const geneManager = this.geneManager
     if (!geneSetController || !geneManager) {
@@ -11659,8 +12113,6 @@ export default class extends Controller {
     }
 
     this.uiManager.showMetadataDropdownSpinner()
-    let showedModuleScoreOverlay = false
-    this.moduleScoreCancellationRequested = false
     try {
       const annotId = this.geneManager?.currentMatrixAnnotId || 'base'
       const normalizedDataset = String(currentDataset || '/matrix')
@@ -11673,114 +12125,45 @@ export default class extends Controller {
       let maxVal = Number.isFinite(Number(cachedModuleScore?.maxVal)) ? Number(cachedModuleScore.maxVal) : null
 
       if (scoreValues.length === 0) {
+        const popupId = this.generateModuleScoreRequestId()
         const requestId = this.generateModuleScoreRequestId()
-        this.currentModuleScoreRequestId = requestId
-        this.moduleScoreAbortController = new AbortController()
         const predictedDurationMs = this.getPredictedModuleScoreDurationMs(String(annotId), normalizedDataset)
-        this.startModuleScoreLoading(geneSetName, predictedDurationMs)
-        showedModuleScoreOverlay = true
-        const moduleScoreComputeStart = performance.now()
-        const params = new URLSearchParams({
-          item_id: String(itemId),
-          loom_file: String(currentLoomFile),
-          dataset: normalizedDataset,
-          request_id: requestId
-        })
-        let payload = null
-        while (!this.moduleScoreCancellationRequested) {
-          const response = await fetch(`/projects/${encodeURIComponent(this.getProjectIdentifier())}/gene_set_item_module_score?${params.toString()}`, {
-            method: 'GET',
-            credentials: 'same-origin',
-            headers: { 'Accept': 'application/json' },
-            signal: this.moduleScoreAbortController.signal
-          })
-          payload = await response.json()
-          if (payload?.status === 'canceled') {
-            return
-          }
-          if (payload?.status === 'pending' || payload?.status === 'running') {
-            await new Promise((resolve) => window.setTimeout(resolve, 1000))
-            continue
-          }
-          if (!response.ok || payload.status !== 'ok') {
-            throw new Error(payload.message || 'Failed to compute ModuleScore')
-          }
-          break
-        }
-        if (this.moduleScoreCancellationRequested || !payload || payload.status !== 'ok') {
-          return
-        }
-
-        scoreValues = Array.isArray(payload.scores) ? payload.scores.map((value) => Number(value || 0)) : []
-        if (scoreValues.length === 0) {
-          alert('ModuleScore returned no values for this gene set.')
-          return
-        }
-        minVal = this.dataManager.safeMin(scoreValues)
-        maxVal = this.dataManager.safeMax(scoreValues)
-        const moduleScoreDurationMs = Math.round(Math.max(0, performance.now() - moduleScoreComputeStart))
-        this.updatePredictedModuleScoreDurationMs(String(annotId), normalizedDataset, moduleScoreDurationMs)
-        this.memoryManager?.storeGeneSetItemModuleScoreInIndexedDB?.(String(itemId), {
-          name: geneSetName,
-          values: scoreValues,
-          minVal,
-          maxVal,
-          dataset: normalizedDataset,
+        const collectionId = geneSetController.selectedCollectionId
+          ? String(geneSetController.selectedCollectionId)
+          : null
+        const collectionLabel = String(geneSetController.detailTitle?.textContent || '').trim()
+        this.openModuleScoreComputingPopup({
+          popupId,
+          requestId,
+          itemId,
+          geneSetName,
+          collectionId,
+          collectionLabel,
           annotId: String(annotId),
-          durationMs: moduleScoreDurationMs
-        }).catch(() => {})
-      } else {
-        if (!Number.isFinite(minVal)) minVal = this.dataManager.safeMin(scoreValues)
-        if (!Number.isFinite(maxVal)) maxVal = this.dataManager.safeMax(scoreValues)
-      }
-
-      const metadataId = `gene_set_item_${itemId}_${this.geneManager?.currentMatrixAnnotId || 'base'}`
-      const metadataVector = {
-        id: metadataId,
-        name: geneSetName,
-        display_name: geneSetName,
-        data_type: 'NUMERIC',
-        values: scoreValues,
-        compression_info: {
-          min_val: minVal,
-          max_val: maxVal,
-          data_type: 'NUMERIC'
-        },
-        nber_rows: 1,
-        nber_cols: scoreValues.length
-      }
-
-      if (!this.loadedMetadataVectors) this.loadedMetadataVectors = {}
-      this.loadedMetadataVectors[metadataId] = metadataVector
-
-      this.resetAllWaterDropButtons()
-      this.hideAllResetButtons()
-      this.removeAllCategoryColors()
-      this.setWaterDropButtonActive(button)
-      this.setColorRange(minVal, maxVal)
-
-      this.currentMetadataVector = metadataVector
-      this.currentMetadataId = metadataId
-      this.colorManager.clearColorMapCache()
-      this.gradientManager.loadGradientForMetadata(metadataId)
-      this.gradientManager.initializeGradientLegendListeners()
-      this._lastNumericOrderApplied = null
-      this.updateVisualizationWithMetadataVector()
-      this.dataManager.updateAllCategoryDistributions()
-      this.dataManager.updateCellFiltering(true)
-      this.updateCurrentColoringIndicator()
-    } catch (error) {
-      if (this.moduleScoreCancellationRequested === true || error?.name === 'AbortError') {
+          dataset: normalizedDataset,
+          loomFile: String(currentLoomFile),
+          estimatedDurationMs: predictedDurationMs,
+          abortController: new AbortController()
+        })
+        this.uiManager.hideMetadataDropdownSpinner()
+        this.runModuleScoreComputation(popupId)
         return
       }
+
+      if (!Number.isFinite(minVal)) minVal = this.dataManager.safeMin(scoreValues)
+      if (!Number.isFinite(maxVal)) maxVal = this.dataManager.safeMax(scoreValues)
+      this.applyGeneSetModuleScoreColoring({
+        itemId,
+        geneSetName,
+        scoreValues,
+        minVal,
+        maxVal,
+        button
+      })
+    } catch (error) {
+      if (error?.name === 'AbortError') return
       alert(error.message || 'Failed to apply gene set coloring')
     } finally {
-      this.currentModuleScoreRequestId = null
-      this.moduleScoreAbortController = null
-      this.moduleScoreCancellationRequested = false
-      if (showedModuleScoreOverlay) {
-        this.stopModuleScoreLoading()
-      }
       this.uiManager.hideMetadataDropdownSpinner()
     }
   }

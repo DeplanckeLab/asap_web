@@ -37,7 +37,7 @@
       <div>
         <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Search</label>
         <%= text_field_tag :q, @q,
-                           placeholder: "Title, id, filename",
+                           placeholder: "Title, id, DOI, PMID, accession",
                            class: "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100" %>
       </div>
     </div>
@@ -66,7 +66,16 @@
           <% asap_projects = @asap_projects_by_candidate_id[candidate.id] || [] %>
           <tr>
             <td class="whitespace-nowrap px-3 py-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              <%= candidate.source %>
+              <% if candidate.source_page_url.present? %>
+                <%= link_to candidate.source,
+                            candidate.source_page_url,
+                            target: "_blank",
+                            rel: "noopener",
+                            class: "text-blue-600 hover:underline dark:text-blue-400",
+                            title: "Open on #{candidate.source}" %>
+              <% else %>
+                <%= candidate.source %>
+              <% end %>
               <% if candidate.project_type_tag.present? %>
                 <div class="mt-0.5 normal-case tracking-normal text-gray-400"><%= candidate.project_type_tag %></div>
               <% end %>
@@ -76,11 +85,6 @@
                           external_catalog_candidate_path(candidate),
                           class: "font-medium text-blue-600 hover:underline dark:text-blue-400" %>
               <div class="mt-0.5 font-mono text-xs text-gray-500 dark:text-gray-400"><%= candidate.external_id %></div>
-              <% if candidate.source_page_url.present? %>
-                <div class="mt-0.5">
-                  <%= link_to "Open source", candidate.source_page_url, target: "_blank", rel: "noopener", class: "text-xs text-gray-500 hover:text-blue-600 dark:text-gray-400" %>
-                </div>
-              <% end %>
             </td>
             <td class="whitespace-nowrap px-3 py-2 text-xs">
               <%= candidate.organism_label.presence || "—" %>
@@ -121,6 +125,8 @@
                 <% if candidate.import_error.present? %>
                   <div class="mt-0.5 max-w-xs truncate text-red-500" title="<%= candidate.import_error %>"><%= candidate.import_error.to_s.truncate(80) %></div>
                 <% end %>
+              <% elsif candidate.already_in_asap? %>
+                <span class="text-gray-400">In ASAP</span>
               <% else %>
                 <span class="text-gray-400">Not in ASAP</span>
               <% end %>
@@ -134,7 +140,7 @@
                               form: { class: "inline ml-2" },
                               class: "inline-flex items-center rounded-md bg-gray-900 px-2 py-1 text-xs font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900" %>
               <% end %>
-              <% if synced_reference_data_writable? && candidate.can_mark_obsolete? %>
+              <% if admin? && synced_reference_data_writable? && candidate.can_mark_obsolete? %>
                 <%= button_to "Mark obsolete",
                               external_catalog_candidate_path(candidate),
                               method: :delete,
@@ -148,7 +154,9 @@
           <tr>
             <td colspan="7" class="px-3 py-10 text-center text-gray-500 dark:text-gray-400">
               No candidates match these filters.
-              Sync with <code class="text-xs">rails external_catalog:sync_candidates</code>.
+              <% if admin? %>
+                Sync with <code class="text-xs">rails external_catalog:sync_candidates</code>.
+              <% end %>
             </td>
           </tr>
         <% end %>

@@ -4705,6 +4705,9 @@ function markersStateLeadingIconMarkup(state, loading, slurmQueueHover) {
       '<i class="fas fa-check" style="position:relative;color:#d1d5db;font-size:8px;"></i>' +
       '</span>' + wrapEnd
   }
+  if (st === 'stopped') {
+    return wrapStart + '<i class="fas fa-stop-circle" style="color:#6b7280;font-size:13px;"></i>' + wrapEnd
+  }
   if (st === 'failed' || st === 'error') {
     return wrapStart + '<i class="fas fa-times-circle" style="color:#dc2626;font-size:13px;"></i>' + wrapEnd
   }
@@ -4771,6 +4774,7 @@ function markersStatusTooltip(state) {
   if (s === 'queued') return 'FindMarkers is queued on the cluster for this metadata'
   if (s === 'running') return 'FindMarkers is running for this metadata'
   if (s === 'loading') return 'Checking FindMarkers status for this metadata'
+  if (s === 'stopped') return 'FindMarkers was stopped for this metadata'
   if (s === 'failed' || s === 'error') return 'Markers computation failed for this metadata'
   if (s === 'unsupported') return 'Markers are not available for this metadata'
   if (s === 'analyze_forbidden') return 'FindMarkers requires analyze permission on this project'
@@ -4792,6 +4796,9 @@ function applyMarkersStatusToElement(el, state, slurmQueueHoverOverride) {
   } else if (s === 'running' || s === 'loading') {
     iconClass = 'fas fa-spinner fa-spin'
     color = '#2563eb'
+  } else if (s === 'stopped') {
+    iconClass = 'fas fa-stop-circle'
+    color = '#6b7280'
   } else if (s === 'failed' || s === 'error') {
     iconClass = 'fas fa-times-circle'
     color = '#dc2626'
@@ -5219,7 +5226,7 @@ function submitNewAnnotation(confirmed) {
 window.submitNewAnnotation = submitNewAnnotation
 window.cancelNewAnnotationConfirm = cancelNewAnnotationConfirm
 
-function loadAnnotationEvidences(force) {
+function loadAnnotationEvidences(force, opts) {
   var ev = _annotPopupData.evidences || {}
   if (!force && ev.loading) return
   if (!_annotPopupData.evidencesUrl || !_annotPopupData.metadataId) {
@@ -5244,6 +5251,7 @@ function loadAnnotationEvidences(force) {
   if (_annotPopupData.activeTab === 'evidences') renderAnnotationPanel()
 
   var url = _annotPopupData.evidencesUrl + '?annot_id=' + encodeURIComponent(_annotPopupData.metadataId) + '&cat_idx=' + encodeURIComponent(_annotPopupData.catIdx)
+  if (opts && opts.restart) url += '&restart=1'
   fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
     .then(function(r) {
       if (!r.ok) throw new Error('HTTP ' + r.status)
@@ -5285,7 +5293,74 @@ function loadAnnotationEvidences(force) {
     })
 }
 
+function stopAnnotationMarkers() {
+  var ev = _annotPopupData.evidences || {}
+  var runId = ev.runId
+  if (!runId) {
+    alert('No FindMarkers run to stop.')
+    return
+  }
+  if (!confirm('Stop FindMarkers for this metadata? Any running Docker container or SLURM job will be cancelled.')) {
+    return
+  }
+  var csrfToken = document.querySelector('meta[name="csrf-token"]')
+  var headers = { 'Accept': 'application/json' }
+  if (csrfToken) headers['X-CSRF-Token'] = csrfToken.getAttribute('content')
+
+  _annotPopupData.evidences = {
+    state: 'loading',
+    loading: true,
+    message: 'Stopping FindMarkers...',
+    runId: runId,
+    rowsUp: [],
+    rowsDown: [],
+    markersQueueBase: '',
+    markersQueueNote: '',
+    slurmQueueHover: ''
+  }
+  updateMarkersStatusInMetadataPanel(_annotPopupData.metadataId, _annotPopupData.catIdx, 'loading', null)
+  refreshAnnotPopupTitle()
+  if (_annotPopupData.activeTab === 'evidences') renderAnnotationPanel()
+
+  fetch('/runs/' + encodeURIComponent(String(runId)) + '/stop', {
+    method: 'POST',
+    headers: headers,
+    credentials: 'same-origin'
+  })
+    .then(function(r) {
+      return r.json().then(function(body) { return { ok: r.ok, body: body } })
+    })
+    .then(function(res) {
+      if (!res.ok || !res.body || res.body.status !== 'ok') {
+        var message = (res.body && res.body.message) ? res.body.message : 'Could not stop FindMarkers.'
+        _annotPopupData.evidences = {
+          state: 'error',
+          loading: false,
+          message: message,
+          runId: runId,
+          rowsUp: [],
+          rowsDown: []
+        }
+        syncMarkersStatusFromResponse(_annotPopupData.metadataId, _annotPopupData.catIdx, { state: 'error' })
+        return
+      }
+      loadAnnotationEvidences(true)
+    })
+    .catch(function(err) {
+      _annotPopupData.evidences = {
+        state: 'error',
+        loading: false,
+        message: 'Could not stop FindMarkers: ' + err.message,
+        runId: runId,
+        rowsUp: [],
+        rowsDown: []
+      }
+      syncMarkersStatusFromResponse(_annotPopupData.metadataId, _annotPopupData.catIdx, { state: 'error' })
+    })
+}
+
 window.loadAnnotationEvidences = loadAnnotationEvidences
+window.stopAnnotationMarkers = stopAnnotationMarkers
 window.peekAnnotationMarkersStatus = peekAnnotationMarkersStatus
 
 function prefetchMarkersStatusForVisibleMetadata() {
@@ -5952,8 +6027,12 @@ function renderEvidencesTab() {
   if (ev.state === 'running') {
     content += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border:1px solid #bfdbfe;border-radius:8px;color:#1e3a8a;background:#fff;">'
     content += '<div><i class="fas fa-spinner fa-spin" style="margin-right:8px;"></i>' + escapeHtml(ev.message || 'FindMarkers is running for this metadata.') + '</div>'
+    content += '<div style="display:flex;gap:6px;flex-shrink:0;">'
+    if (ev.runId) {
+      content += '<button type="button" onclick="stopAnnotationMarkers()" style="border:1px solid #fca5a5;background:#fff;color:#b91c1c;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">Stop</button>'
+    }
     content += '<button type="button" onclick="loadAnnotationEvidences()" style="border:1px solid #93c5fd;background:#fff;color:#1d4ed8;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">Refresh</button>'
-    content += '</div>'
+    content += '</div></div>'
     return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content)
   }
 
@@ -5979,8 +6058,12 @@ function renderEvidencesTab() {
       content += '<div>' + iconOnlyOpen + '<i class="fas fa-hourglass-half" style="margin-right:8px;" aria-hidden="true"></i></span>' + escapeHtml(ev.message || 'FindMarkers is queued for execution.') + '</div>'
     }
     content += '</div>'
-    content += '<button type="button" onclick="loadAnnotationEvidences()" style="flex-shrink:0;border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">Refresh</button>'
-    content += '</div>'
+    content += '<div style="display:flex;gap:6px;flex-shrink:0;">'
+    if (ev.runId) {
+      content += '<button type="button" onclick="stopAnnotationMarkers()" style="border:1px solid #fca5a5;background:#fff;color:#b91c1c;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">Stop</button>'
+    }
+    content += '<button type="button" onclick="loadAnnotationEvidences()" style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">Refresh</button>'
+    content += '</div></div>'
     return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content)
   }
 
@@ -5996,6 +6079,14 @@ function renderEvidencesTab() {
     content += '<div style="display:flex;align-items:flex-start;gap:8px;padding:12px;border:1px solid #d1d5db;border-radius:8px;color:#374151;background:#fff;">'
     content += '<i class="fas fa-info-circle" style="margin-top:2px;"></i>'
     content += '<div>' + escapeHtml(ev.message || 'FindMarkers requires analyze permission on this project.') + '</div>'
+    content += '</div>'
+    return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content)
+  }
+
+  if (ev.state === 'stopped') {
+    content += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;color:#374151;background:#fff;">'
+    content += '<div>' + escapeHtml(ev.message || 'FindMarkers was stopped for this metadata.') + '</div>'
+    content += '<button type="button" onclick="loadAnnotationEvidences(true, { restart: true })" style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">Retry</button>'
     content += '</div>'
     return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content)
   }

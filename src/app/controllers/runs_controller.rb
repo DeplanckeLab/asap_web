@@ -779,6 +779,22 @@ class RunsController < ApplicationController
     @project.update(status_id: 5)
     @project.broadcast(@step.id) if @project.respond_to?(:broadcast)
 
+    if @step&.name.to_s == 'markers'
+      begin
+        ActionCable.server.broadcast(
+          "project_#{@project.id}",
+          {
+            event: 'markers_run_status_changed',
+            project_id: @project.id,
+            run_id: @run.id,
+            annot_id: @run.marker_metadata_annot_id
+          }
+        )
+      rescue StandardError => e
+        Rails.logger.warn("[runs#stop] markers_run_status_changed: #{e.class} #{e.message}")
+      end
+    end
+
     render json: { status: 'ok', run_id: @run.id, step_id: @step.id }
   rescue => e
     Rails.logger.error("[runs#stop] Run##{@run&.id} failed: #{e.class} - #{e.message}")

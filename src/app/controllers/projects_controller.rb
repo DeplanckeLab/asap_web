@@ -6584,6 +6584,18 @@ class ProjectsController < ApplicationController
         }
       end
 
+      if status_id == 5
+        return render json: {
+          state: 'stopped',
+          run_id: marker_run.id,
+          status_id: status_id,
+          status_name: status_name,
+          message: markers_failed_user_message(marker_run, fallback: 'FindMarkers was stopped for this metadata.'),
+          rows_up: [],
+          rows_down: []
+        }
+      end
+
       if status_id == 3
         parsed = parse_marker_rows_for_category(marker_run, cat_idx, annot: annot)
         if parsed[:error]
@@ -6625,12 +6637,25 @@ class ProjectsController < ApplicationController
       return render json: marker_evidences_status_json_readonly(annot, cat_idx)
     end
 
-    run_data = find_or_start_marker_run_for_annot(annot)
+    force_restart = %w[1 true].include?(params[:restart].to_s.downcase)
+    run_data = find_or_start_marker_run_for_annot(annot, force_restart: force_restart)
     marker_run = run_data[:run]
     return render(json: { state: 'error', message: run_data[:error] || 'Unable to initialize FindMarkers run.', rows_up: [], rows_down: [] }) unless marker_run
 
     status_id = marker_run.status_id.to_i
     status_name = marker_run.status&.name.to_s
+
+    if status_id == 5 && !force_restart
+      return render json: {
+        state: 'stopped',
+        run_id: marker_run.id,
+        status_id: status_id,
+        status_name: status_name,
+        message: markers_failed_user_message(marker_run, fallback: 'FindMarkers was stopped for this metadata.'),
+        rows_up: [],
+        rows_down: []
+      }
+    end
 
     if run_data[:error].present? && (status_id == 1 || (status_id == 6 && marker_run.slurm_job_id.blank?))
       return render json: {
@@ -6735,6 +6760,18 @@ class ProjectsController < ApplicationController
         status_id: status_id,
         status_name: status_name,
         message: markers_failed_user_message(marker_run),
+        rows_up: [],
+        rows_down: []
+      }
+    end
+
+    if status_id == 5
+      return render json: {
+        state: 'stopped',
+        run_id: marker_run.id,
+        status_id: status_id,
+        status_name: status_name,
+        message: markers_failed_user_message(marker_run, fallback: 'FindMarkers was stopped for this metadata.'),
         rows_up: [],
         rows_down: []
       }
@@ -9326,6 +9363,29 @@ class ProjectsController < ApplicationController
       return
     end
 
+    # Methods that list preview_cell_fraction in predict_params scale cells to the subsample size.
+    cols = Basic.apply_preview_to_predict_nber_cols(
+      cols,
+      std_method,
+      {
+        'preview_cell_fraction' => params[:preview_cell_fraction],
+        'preview_max_cells' => params[:preview_max_cells]
+      }
+    )
+
+    raw_cols = biggest_annot.nber_cols.to_i
+    unless Basic.de_method_allowed_for_nber_cols?(std_method, raw_cols)
+      msg = Basic.de_large_dataset_method_block_message(raw_cols)
+      render json: empty_payload.merge(
+        error: msg,
+        prevent_submit: true,
+        prevent_messages: [msg],
+        time_display: '',
+        ram_display: ''
+      )
+      return
+    end
+
     version = @project.version
     asap_docker_image = Basic.get_asap_docker(version)
     unless asap_docker_image
@@ -11629,7 +11689,12 @@ class ProjectsController < ApplicationController
           description: method.description,
           link: (method.respond_to?(:link) ? method.link : '')
         }
-        @visualization_de_unavailable_methods[method.id] = true unless is_project_type_compatible
+        unavailable = !is_project_type_compatible
+        if Basic.de_large_dataset?(@project.nber_cols) &&
+           !Basic.de_method_allowed_for_nber_cols?(method, @project.nber_cols)
+          unavailable = true
+        end
+        @visualization_de_unavailable_methods[method.id] = true if unavailable
       end
     end
 
@@ -13208,13 +13273,22 @@ class ProjectsController < ApplicationController
       nil
     end
 
-  def find_or_start_marker_run_for_annot(annot)
+  def find_or_start_marker_run_for_annot(annot, force_restart: false)
     marker_run = marker_run_for_annot(annot)
     started = false
     submitted = false
     resubmitted = false
 
-    if marker_run.nil? || marker_run.status_id.to_i == 4
+    status_id = marker_run&.status_id.to_i
+    # Keep a user-stopped run as-is unless Retry explicitly requests a restart.
+    if marker_run && status_id == 5 && !force_restart
+      return { run: marker_run, started: false, submitted: false, resubmitted: false, error: nil }
+    end
+
+    # Failed (4) always gets a fresh run on Identify markers load.
+    # Stopped (5) only restarts when the user explicitly requests it (Stop must stick).
+    should_create = marker_run.nil? || status_id == 4 || (force_restart && status_id == 5)
+    if should_create
       user_id = current_user&.id || @project.user_id
       res = Basic.find_markers(Rails.logger, @project, annot, user_id)
       if res[:error].present?
@@ -13435,6 +13509,11 @@ class ProjectsController < ApplicationController
         state: 'failed',
         message: markers_failed_user_message(marker_run, fallback: 'FindMarkers failed for this category.')
       )
+    when 5
+      common.merge(
+        state: 'stopped',
+        message: markers_failed_user_message(marker_run, fallback: 'FindMarkers was stopped for this metadata.')
+      )
     else
       common.merge(
         state: 'analyze_forbidden',
@@ -13547,6 +13626,13 @@ class ProjectsController < ApplicationController
       return common.merge(
         state: 'failed',
         message: markers_failed_user_message(marker_run, fallback: 'FindMarkers failed for this category.')
+      )
+    end
+
+    if status_id == 5
+      return common.merge(
+        state: 'stopped',
+        message: markers_failed_user_message(marker_run, fallback: 'FindMarkers was stopped for this metadata.')
       )
     end
 
@@ -16764,6 +16850,19 @@ class ProjectsController < ApplicationController
             @h_unavailable_methods[std_method.id] = true
             break # No need to check other parameters for this method
           end
+        end
+      end
+
+      # Large DE matrices: only t_test_approx is allowed (scalable streaming path).
+      if @step.name.to_s == 'de'
+        de_nber_cols = @project.nber_cols.to_i
+        if Basic.de_large_dataset?(de_nber_cols)
+          @std_methods.each do |std_method|
+            next if Basic.de_method_allowed_for_nber_cols?(std_method, de_nber_cols)
+
+            @h_unavailable_methods[std_method.id] = true
+          end
+          @de_large_dataset_method_notice = Basic.de_large_dataset_method_block_message(de_nber_cols)
         end
       end
       

@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
 class ExternalCatalogCandidatesController < ApplicationController
-  before_action :authenticate_user!
-  before_action :authorize_uab
+  skip_before_action :authenticate_user!, only: %i[index show], raise: false
+  before_action :authenticate_user!, only: %i[create_project destroy]
+  before_action :authorize_admin, only: %i[destroy]
   before_action :ensure_synced_reference_data_writable!, only: %i[destroy]
   before_action :set_candidate, only: %i[show create_project destroy]
 
@@ -37,7 +38,7 @@ class ExternalCatalogCandidatesController < ApplicationController
       return
     end
 
-    @asap_projects = @candidate.asap_projects.order(id: :desc).to_a
+    @asap_projects = @candidate.asap_projects.order(id: :desc).select { |project| readable?(project) }
   end
 
   def create_project
@@ -138,7 +139,7 @@ class ExternalCatalogCandidatesController < ApplicationController
       matching = by_key[[tag, pp.key.to_s]] || []
       projects = pp.projects.select { |p| !p.being_deleted }
       matching.each do |candidate|
-        result[candidate.id] = projects
+        result[candidate.id] = projects.select { |project| readable?(project) }
       end
     end
     result

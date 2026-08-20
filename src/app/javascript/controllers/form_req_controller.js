@@ -257,6 +257,34 @@ export default class extends Controller {
     return Array.from(ids)
   }
 
+  getPreviewCellFractionForPrediction() {
+    if (!this.hasAttrsContainerTarget) {
+      return null
+    }
+    const el =
+      this.attrsContainerTarget.querySelector('#attrs_preview_cell_fraction') ||
+      this.attrsContainerTarget.querySelector('[name="attrs[preview_cell_fraction]"]')
+    if (!el) {
+      return null
+    }
+    const v = String(el.value || '').trim()
+    return v === '' ? null : v
+  }
+
+  getPreviewMaxCellsForPrediction() {
+    if (!this.hasAttrsContainerTarget) {
+      return null
+    }
+    const el =
+      this.attrsContainerTarget.querySelector('#attrs_preview_max_cells') ||
+      this.attrsContainerTarget.querySelector('[name="attrs[preview_max_cells]"]')
+    if (!el) {
+      return null
+    }
+    const v = String(el.value || '').trim()
+    return v === '' ? null : v
+  }
+
   scheduleResourcePrediction() {
     if (!this.hasMethodPredTarget) {
       return
@@ -404,6 +432,19 @@ export default class extends Controller {
 
     const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || ''
 
+    const body = {
+      annot_ids: annotIds.join(','),
+      std_method_id: methodId
+    }
+    const previewFraction = this.getPreviewCellFractionForPrediction()
+    if (previewFraction != null && previewFraction !== '') {
+      body.preview_cell_fraction = previewFraction
+    }
+    const previewMaxCells = this.getPreviewMaxCellsForPrediction()
+    if (previewMaxCells != null && previewMaxCells !== '') {
+      body.preview_max_cells = previewMaxCells
+    }
+
     fetch(url, {
       method: 'POST',
       headers: {
@@ -412,10 +453,7 @@ export default class extends Controller {
         'X-CSRF-Token': token
       },
       credentials: 'same-origin',
-      body: JSON.stringify({
-        annot_ids: annotIds.join(','),
-        std_method_id: methodId
-      })
+      body: JSON.stringify(body)
     })
       .then((response) => {
         if (!response.ok) {
@@ -833,10 +871,26 @@ export default class extends Controller {
         }
         this.syncDependencyVisibility()
         this.validateForm()
+        if (
+          input.id === 'attrs_preview_cell_fraction' ||
+          input.id === 'attrs_preview_max_cells' ||
+          input.name === 'attrs[preview_cell_fraction]' ||
+          input.name === 'attrs[preview_max_cells]'
+        ) {
+          this.scheduleResourcePrediction()
+        }
       })
       input.addEventListener('input', () => {
         this.syncDependencyVisibility()
         this.validateForm()
+        if (
+          input.id === 'attrs_preview_cell_fraction' ||
+          input.id === 'attrs_preview_max_cells' ||
+          input.name === 'attrs[preview_cell_fraction]' ||
+          input.name === 'attrs[preview_max_cells]'
+        ) {
+          this.scheduleResourcePrediction()
+        }
       })
     })
 

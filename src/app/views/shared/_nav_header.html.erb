@@ -35,6 +35,15 @@
         <div class="hidden absolute right-0 mt-2 w-64 bg-white shadow-lg rounded-lg border border-gray-200 dark:bg-gray-800 dark:border-gray-700 z-[1000] max-h-[80vh] overflow-y-auto"
              data-mobile-menu-target="menu">
           <div class="py-2">
+            <!-- Import Project -->
+            <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+               href="<%= external_catalog_candidates_path %>"
+               data-controller="nav-item"
+               data-action="click->nav-item#navigate">
+              <i class="fas fa-file-import w-4 text-center"></i>
+              Import project
+            </a>
+
             <!-- New Project -->
             <% if user_signed_in? %>
               <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -278,6 +287,15 @@
               
 
               
+
+              <a class="<%= tw_menu_item %>"
+                 href="<%= external_catalog_candidates_path %>"
+                 data-controller="nav-item"
+                 data-action="click->nav-item#navigate"
+                 title="Import a dataset from an external catalog">
+                <i class="fas fa-file-import me-1.5"></i>
+                Import project
+              </a>
 
               <% if user_signed_in? %>
                 <a class="<%= tw_menu_item %>" 

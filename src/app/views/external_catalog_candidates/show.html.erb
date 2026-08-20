@@ -4,7 +4,19 @@
     <div>
       <%= link_to "Back to list", external_catalog_candidates_path, class: "text-sm text-gray-500 hover:text-gray-800 dark:text-gray-400" %>
       <h1 class="mt-2 text-3xl font-semibold text-gray-900 dark:text-white"><%= @candidate.title.presence || @candidate.external_id %></h1>
-      <p class="mt-2 font-mono text-sm text-gray-500 dark:text-gray-400"><%= @candidate.source %> / <%= @candidate.external_id %></p>
+      <p class="mt-2 font-mono text-sm text-gray-500 dark:text-gray-400">
+        <% if @candidate.source_page_url.present? %>
+          <%= link_to @candidate.source,
+                      @candidate.source_page_url,
+                      target: "_blank",
+                      rel: "noopener",
+                      class: "text-blue-600 hover:underline dark:text-blue-400",
+                      title: "Open on #{@candidate.source}" %>
+        <% else %>
+          <%= @candidate.source %>
+        <% end %>
+        / <%= @candidate.external_id %>
+      </p>
     </div>
     <div class="flex items-start gap-2">
       <% if @candidate.can_create_project? %>
@@ -13,7 +25,7 @@
                       method: :post,
                       class: "inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900" %>
       <% end %>
-      <% if synced_reference_data_writable? && @candidate.can_mark_obsolete? %>
+      <% if admin? && synced_reference_data_writable? && @candidate.can_mark_obsolete? %>
         <%= button_to "Mark obsolete",
                       external_catalog_candidate_path(@candidate),
                       method: :delete,
@@ -135,6 +147,8 @@
           </li>
         <% end %>
       </ul>
+    <% elsif @candidate.already_in_asap? %>
+      <p class="text-sm text-gray-500 dark:text-gray-400">Already in ASAP.</p>
     <% else %>
       <p class="text-sm text-gray-500 dark:text-gray-400">Not in ASAP yet.</p>
     <% end %>

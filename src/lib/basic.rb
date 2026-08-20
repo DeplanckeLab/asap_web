@@ -8,6 +8,10 @@ module Basic
   # Manual annotations submitted from the visualization annotation popup.
   MANUAL_CLA_SOURCE_ID = 1
   DE_OUTPUT_TXT_LAYOUT_IDENTITY = 'gene_identity_from_matrix_v1'
+  # DE methods other than t_test_approx are blocked at or above this cell count.
+  DE_LARGE_DATASET_MIN_CELLS = 100_000
+  DE_LARGE_DATASET_ALLOWED_METHOD_NAMES = %w[t_test_approx].freeze
+
 
   # Suggested embedded JSON key for the cross-tool metadata catalog (location depends on file format: LOOM attrs, H5AD, RDS, etc.).
   DATA_FILE_METADATA_CATALOG_ATTR = 'metadata_catalog'
@@ -3213,13 +3217,14 @@ module Basic
         
         if find_marker_step and std_method
 
-          # Reuse only non-failed runs for identical marker requests.
-          # Failed runs must stay immutable so polling does not flip them back to queued.
+          # Reuse only active/completed runs for identical marker requests.
+          # Failed (4) and stopped (5) runs must stay immutable so polling does not
+          # flip them back to queued; a new run is created on explicit restart.
           run = Run.where({:project_id => project.id,
                             :step_id => find_marker_step.id,
                             :std_method_id => std_method.id,
                             :attrs_json => h_attrs.to_json
-                          }).where.not(status_id: 4).order(id: :desc).first
+                          }).where.not(status_id: [4, 5]).order(id: :desc).first
           if run
             # Do not overwrite command_json when reusing; set_run will build it.
             run.update(h_run.except(:command_json))
@@ -4248,6 +4253,17 @@ module Basic
           h_command['predict_params'].reject{|e| e == 'std_method_name'}.each do |e|
             h_predict_params[e] = h_attrs[e] if h_attrs[e]
           end
+        end
+
+        # Store effective cell count after preview so model training matches runtime.
+        if h_predict_params['nber_cols'] && Array(h_command['predict_params']).include?('preview_cell_fraction')
+          h_predict_params['preview_cell_fraction'] = h_run_attrs['preview_cell_fraction'] if h_run_attrs.key?('preview_cell_fraction')
+          h_predict_params['preview_max_cells'] = h_run_attrs['preview_max_cells'] if h_run_attrs.key?('preview_max_cells')
+          h_predict_params['nber_cols'] = predict_nber_cols_after_preview(
+            h_predict_params['nber_cols'],
+            preview_cell_fraction: h_run_attrs['preview_cell_fraction'],
+            preview_max_cells: h_run_attrs['preview_max_cells']
+          )
         end
       end
       return h_predict_params
@@ -6333,6 +6349,11 @@ module Basic
    #   logger.debug "H_VARS: " + h_var.to_json
    #   logger.debug "docker run --entrypoint '/bin/sh' --rm -v /data/asap2:/data/asap2 -v /srv/asap_run/srv:/srv fabdavid/asap_run:v#{h_p[:project].version_id} -c 'Rscript prediction.tool.2.R predict /data/asap2/pred_models/#{h_p[:project].version_id} #{run.std_method_id} " + "#{h_var['nber_rows']} #{h_var['nber_cols']} 2>&1'"
       if h_var['nber_rows'] and h_var['nber_cols']
+        pred_nber_cols = apply_preview_to_predict_nber_cols(
+          h_var['nber_cols'],
+          std_method,
+          h_var.merge(new_h_attrs)
+        )
         version = h_p[:project].version
         asap_docker_image = get_asap_docker(version)
         asap_docker_name = "fabdavid/asap_run:#{asap_docker_image.tag}"
@@ -6340,7 +6361,7 @@ module Basic
         vol = Basic.prediction_docker_volume_mount_arg
         models_base = Basic.prediction_models_path_for_r
         # Do not mount over /srv: prediction.tool.2.R ships in the asap_run image WORKDIR (/srv).
-        cmd = "docker run --entrypoint '/bin/sh' --rm #{vol} #{asap_docker_name} -c 'Rscript prediction.tool.2.R predict #{models_base}/#{h_p[:project].version_id} #{run.std_method_id} " + "#{h_var['nber_rows']} #{h_var['nber_cols']} 2>&1'"
+        cmd = "docker run --entrypoint '/bin/sh' --rm #{vol} #{asap_docker_name} -c 'Rscript prediction.tool.2.R predict #{models_base}/#{h_p[:project].version_id} #{run.std_method_id} " + "#{h_var['nber_rows']} #{pred_nber_cols} 2>&1'"
             logger.debug("PRED_CMD: #{cmd}")
         pred_results_json = `#{cmd}`.split("\n").first #.gsub(/^(\{.+?\})/, "\1")                                                                                                       
         h_pred_results = Basic.safe_parse_json(pred_results_json, {})
@@ -6386,6 +6407,80 @@ module Basic
 
     def predict_duration h_predict_param
       return nil
+    end
+
+    def de_large_dataset?(nber_cols)
+      nber_cols.to_i >= DE_LARGE_DATASET_MIN_CELLS
+    end
+
+    def de_method_allowed_for_nber_cols?(std_method, nber_cols)
+      return true unless std_method
+      return true unless de_step_std_method?(std_method)
+      return true unless de_large_dataset?(nber_cols)
+
+      DE_LARGE_DATASET_ALLOWED_METHOD_NAMES.include?(std_method.name.to_s)
+    end
+
+    def de_step_std_method?(std_method)
+      return false unless std_method
+
+      step = std_method.respond_to?(:step) ? std_method.step : nil
+      step ||= Step.find_by(id: std_method.step_id) if std_method.respond_to?(:step_id)
+      step&.name.to_s == 'de'
+    end
+
+    def de_large_dataset_method_block_message(nber_cols)
+      "Datasets with #{DE_LARGE_DATASET_MIN_CELLS} or more cells only support Approximate t-test " \
+        "(t_test_approx). Selected input has #{nber_cols.to_i} cells."
+    end
+
+    # Keys listed under command_json["predict_params"] for a StdMethod.
+    def std_method_predict_params(std_method)
+      return [] unless std_method
+
+      Array(Basic.safe_parse_json(std_method.command_json, {})['predict_params'])
+    end
+
+    # Effective cell count for RAM/time prediction when preview subsampling is enabled.
+    # Preview is inactive when fraction is blank/nil; then nber_cols is unchanged.
+    # Matches de_approx.v8.py: effective ~= round(n * fraction), optionally capped by preview_max_cells.
+    def predict_nber_cols_after_preview(nber_cols, preview_cell_fraction: nil, preview_max_cells: nil)
+      cols = nber_cols.to_i
+      return cols if cols <= 0
+
+      fr_raw = preview_cell_fraction
+      return cols if fr_raw.nil? || fr_raw.to_s.strip == ''
+
+      fr = fr_raw.to_f
+      return cols if fr <= 0.0 || fr > 1.0
+
+      effective = (cols * fr).round
+      max_raw = preview_max_cells
+      if !max_raw.nil? && max_raw.to_s.strip != ''
+        max_i = max_raw.to_i
+        effective = [effective, max_i].min if max_i > 0
+      end
+      [effective, 1].max
+    end
+
+    # If this method lists preview_cell_fraction in predict_params, scale nber_cols from attrs.
+    # When fraction is set and preview_max_cells is blank, use 10000 to match de_approx.v8.py default.
+    def apply_preview_to_predict_nber_cols(nber_cols, std_method, attrs = {})
+      attrs = {} if attrs.nil?
+      attrs = attrs.with_indifferent_access if attrs.respond_to?(:with_indifferent_access)
+      return nber_cols.to_i unless std_method_predict_params(std_method).include?('preview_cell_fraction')
+
+      fr = attrs['preview_cell_fraction']
+      max_cells = attrs['preview_max_cells']
+      if !fr.nil? && fr.to_s.strip != '' && (max_cells.nil? || max_cells.to_s.strip == '')
+        max_cells = 10_000
+      end
+
+      predict_nber_cols_after_preview(
+        nber_cols,
+        preview_cell_fraction: fr,
+        preview_max_cells: max_cells
+      )
     end
 
     # Body passed to sh -c for SLURM/docker execution (program, opts, args, redirects).

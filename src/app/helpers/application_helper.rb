@@ -313,16 +313,12 @@ module ApplicationHelper
         path: atlases_path,
         icon: "fas fa-atlas"
       },
-      (
-        if uab?
-          {
-            label: "External catalog",
-            description: "Candidate datasets from CELLxGENE, Bgee, HCA, GEO",
-            path: external_catalog_candidates_path,
-            icon: "fas fa-database"
-          }
-        end
-      ),
+      {
+        label: "External catalog",
+        description: "Candidate datasets from CELLxGENE, Bgee, HCA, GEO",
+        path: external_catalog_candidates_path,
+        icon: "fas fa-file-import"
+      },
       {
         label: "File formats",
         description: "Supported upload and export formats",

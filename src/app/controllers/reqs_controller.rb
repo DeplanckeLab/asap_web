@@ -91,6 +91,19 @@ class ReqsController < ApplicationController
 
     @h_data_classes = {}
     DataClass.all.map{|dc| @h_data_classes[dc.id] = dc}
+
+    if @std_method && @step&.name.to_s == 'de'
+      de_nber_cols = de_input_matrix_nber_cols_from_attrs(h_attr_values)
+      de_nber_cols = @project.nber_cols.to_i if de_nber_cols <= 0
+      unless Basic.de_method_allowed_for_nber_cols?(@std_method, de_nber_cols)
+        msg = Basic.de_large_dataset_method_block_message(de_nber_cols)
+        respond_to do |format|
+          format.html { redirect_to project_path(@project.key), alert: msg }
+          format.json { render json: { error: msg }, status: :unprocessable_entity }
+        end
+        return
+      end
+    end
     
     puts "Elapsed time 1:" + (Time.now-t).to_s
 
@@ -755,6 +768,21 @@ class ReqsController < ApplicationController
     # Never trust parameters from the scary internet, only allow the white list through.
     def req_params
       params.fetch(:req).permit(:step_id, :std_method_id) 
+    end
+
+    def de_input_matrix_nber_cols_from_attrs(h_attr_values)
+      raw = h_attr_values['input_matrix']
+      items = if raw.is_a?(Array)
+        raw
+      elsif raw.is_a?(Hash)
+        [raw]
+      else
+        []
+      end
+      annot_ids = items.filter_map { |item| item.is_a?(Hash) ? item['annot_id'] : nil }.map(&:to_i).reject(&:zero?)
+      return 0 if annot_ids.empty?
+
+      Annot.light.where(id: annot_ids).maximum(:nber_cols).to_i
     end
 
     def sanitize_cell_filtering_input_loom(project_dir)

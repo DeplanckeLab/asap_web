@@ -36,8 +36,8 @@ class ExternalCatalogCandidate < ApplicationRecord
 
     pattern = "%#{sanitize_sql_like(q.to_s.strip)}%"
     where(
-      'title ILIKE ? OR external_id ILIKE ? OR filename ILIKE ? OR series_key ILIKE ? OR collection_id ILIKE ?',
-      pattern, pattern, pattern, pattern, pattern
+      'title ILIKE ? OR external_id ILIKE ? OR filename ILIKE ? OR series_key ILIKE ? OR collection_id ILIKE ? OR dois_json ILIKE ? OR pmids_json ILIKE ? OR identifiers_json ILIKE ?',
+      pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern
     )
   }
   # Logical browse/import order: preferred source, CELLxGENE/HCA collection (or DOI/GEO

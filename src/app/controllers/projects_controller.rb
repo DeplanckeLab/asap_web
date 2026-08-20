@@ -10260,9 +10260,9 @@ class ProjectsController < ApplicationController
         end
       end
 
-      # Prefer larger absolute overlaps, then higher share of the gene set covered.
+      # Rank by decreasing share of the gene set covered, then by absolute overlap.
       results.sort_by! do |entry|
-        [-entry[:overlap_count].to_i, -entry[:overlap_pct].to_f, entry[:name].to_s.downcase]
+        [-entry[:overlap_pct].to_f, -entry[:overlap_count].to_i, entry[:name].to_s.downcase]
       end
       results.first(limit)
     end

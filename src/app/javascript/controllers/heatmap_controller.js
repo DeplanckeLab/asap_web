@@ -55,7 +55,7 @@ export default class extends Controller {
     "geneSelectionStatus", "cellSelectionStatus",
     "clearGeneSelectionBtn", "clearCellSelectionBtn",
     "geneSearchInput", "geneSearchDropdown", "geneSearchList", "geneSearchListEmpty",
-    "geneSetOverlapBtn"
+    "geneSetOverlapBtn", "toggleAllGenesBtn"
   ]
 
   connect() {
@@ -2363,6 +2363,38 @@ export default class extends Controller {
     if (this.hasClearCellSelectionBtnTarget) {
       this.clearCellSelectionBtnTarget.style.display = this.selectedCells.size > 0 ? "inline-flex" : "none"
     }
+    this.syncToggleAllGenesButton()
+  }
+
+  syncToggleAllGenesButton() {
+    if (!this.hasToggleAllGenesBtnTarget) return
+    const total = this.geneListItems.length
+    if (total <= 0) {
+      this.toggleAllGenesBtnTarget.style.display = "none"
+      return
+    }
+    const allChecked = this.geneListItems.every((item) => item.checked)
+    this.toggleAllGenesBtnTarget.style.display = "inline-flex"
+    this.toggleAllGenesBtnTarget.textContent = allChecked ? "Unselect all" : "Select all"
+    this.toggleAllGenesBtnTarget.title = allChecked
+      ? "Unselect all genes in the list"
+      : "Select all genes in the list"
+    this.toggleAllGenesBtnTarget.setAttribute(
+      "aria-label",
+      allChecked ? "Unselect all genes in the list" : "Select all genes in the list"
+    )
+  }
+
+  toggleAllGeneSelection(event) {
+    if (event) event.preventDefault()
+    if (!this.geneListItems.length) return
+    const allChecked = this.geneListItems.every((item) => item.checked)
+    const nextChecked = !allChecked
+    for (const item of this.geneListItems) {
+      item.checked = nextChecked
+    }
+    this.applyGeneListHighlightState()
+    this.renderGeneSearchList()
   }
 
   openGeneSetOverlapPopup(event) {
@@ -2459,6 +2491,7 @@ export default class extends Controller {
     const symbol = item.symbol
     const safeSymbol = this.escapeHtml(symbol)
     const expanded = !!item.expanded
+    const checked = !!item.checked
     const card = document.createElement("div")
     card.dataset.heatmapGeneItem = "true"
     card.dataset.geneSymbol = symbol
@@ -2471,17 +2504,22 @@ export default class extends Controller {
     header.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 10px;min-height:36px;box-sizing:border-box;cursor:pointer;user-select:none;"
     header.onmouseover = function () { this.style.backgroundColor = "#f9fafb" }
     header.onmouseout = function () { this.style.backgroundColor = "" }
+    const symbolStyle = checked
+      ? "flex:1;min-width:0;font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 6px;border-radius:4px;background:#fef08a;"
+      : "flex:1;min-width:0;font-size:13px;font-weight:500;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 6px;border-radius:4px;background:transparent;"
     header.innerHTML = `
       <div class="heatmap-gene-chevron" style="color:#9ca3af;display:flex;align-items:center;justify-content:center;width:14px;flex:0 0 auto;">
         <i class="fas fa-chevron-right" style="font-size:12px;transition:transform 0.2s ease-out;transform:${expanded ? "rotate(90deg)" : "none"};"></i>
       </div>
       <input type="checkbox"
-             ${item.checked ? "checked" : ""}
+             ${checked ? "checked" : ""}
              data-action="click->heatmap#onGeneListCheckboxClick change->heatmap#onGeneListCheckboxChange"
              data-gene-symbol="${safeSymbol}"
              aria-label="Highlight ${safeSymbol}"
              style="margin:0;flex:0 0 auto;cursor:pointer;" />
-      <div style="flex:1;min-width:0;font-size:13px;font-weight:500;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${safeSymbol}">
+      <div class="heatmap-gene-symbol"
+           style="${symbolStyle}"
+           title="${safeSymbol}">
         ${safeSymbol}
       </div>
       <button type="button"
@@ -2546,7 +2584,16 @@ export default class extends Controller {
     const item = this.geneListItems.find((entry) => entry.symbol === symbol)
     if (!item) return
     item.checked = !!event.currentTarget.checked
+    this.applyGeneSymbolHighlight(event.currentTarget.closest("[data-heatmap-gene-item='true']"), item.checked)
     this.applyGeneListHighlightState()
+  }
+
+  applyGeneSymbolHighlight(card, checked) {
+    if (!card) return
+    const symbolEl = card.querySelector(".heatmap-gene-symbol")
+    if (!symbolEl) return
+    symbolEl.style.background = checked ? "#fef08a" : "transparent"
+    symbolEl.style.fontWeight = checked ? "600" : "500"
   }
 
   onGeneListInfoClick(event) {
@@ -2621,7 +2668,48 @@ export default class extends Controller {
     const status = card.querySelector(".heatmap-gene-hist-status")
     if (!canvas) return
 
+    const showCompactMessage = (message) => {
+      if (caption) {
+        caption.style.display = "none"
+        caption.textContent = ""
+      }
+      canvas.style.display = "none"
+      if (status) {
+        status.style.display = "block"
+        status.style.marginTop = "0"
+        status.textContent = message
+      }
+    }
+
+    const showHistogramChrome = () => {
+      if (caption) caption.style.display = "block"
+      canvas.style.display = "block"
+      if (status) status.style.marginTop = "6px"
+    }
+
     const { values, columnCount, usedSelection } = this.expressionValuesForGene(symbol)
+
+    if (!values.length) {
+      showCompactMessage("No expression values available for this gene.")
+      return
+    }
+
+    const minEdge = this.safeMin(values)
+    const maxEdge = this.safeMax(values)
+    if (!(maxEdge > minEdge) || !Number.isFinite(minEdge) || !Number.isFinite(maxEdge)) {
+      if (Number.isFinite(minEdge) && minEdge === 0) {
+        showCompactMessage("All values are 0.")
+        return
+      }
+      showCompactMessage(
+        Number.isFinite(minEdge)
+          ? `All values are ${minEdge.toFixed(3)}.`
+          : "No finite expression values."
+      )
+      return
+    }
+
+    showHistogramChrome()
     if (caption) {
       caption.textContent = usedSelection
         ? `Expression over ${columnCount} selected heatmap column${columnCount === 1 ? "" : "s"}`
@@ -2640,36 +2728,6 @@ export default class extends Controller {
     ctx.clearRect(0, 0, width, height)
     ctx.fillStyle = "#ffffff"
     ctx.fillRect(0, 0, width, height)
-
-    if (!values.length) {
-      if (status) status.textContent = "No expression values available for this gene."
-      ctx.fillStyle = "#9ca3af"
-      ctx.font = "12px sans-serif"
-      ctx.textAlign = "center"
-      ctx.textBaseline = "middle"
-      ctx.fillText("No values", width / 2, height / 2)
-      return
-    }
-
-    const minEdge = this.safeMin(values)
-    const maxEdge = this.safeMax(values)
-    if (!(maxEdge > minEdge) || !Number.isFinite(minEdge) || !Number.isFinite(maxEdge)) {
-      if (status) {
-        status.textContent = Number.isFinite(minEdge)
-          ? `All values are ${minEdge.toFixed(3)}`
-          : "No finite expression values."
-      }
-      ctx.fillStyle = "#9ca3af"
-      ctx.font = "12px sans-serif"
-      ctx.textAlign = "center"
-      ctx.textBaseline = "middle"
-      ctx.fillText(
-        Number.isFinite(minEdge) ? `Constant: ${minEdge.toFixed(3)}` : "No values",
-        width / 2,
-        height / 2
-      )
-      return
-    }
 
     const numBins = 40
     const padL = 8
@@ -2849,6 +2907,40 @@ export default class extends Controller {
     if (this.hasGeneSearchInputTarget) this.geneSearchInputTarget.value = ""
     this.hideGeneSearchDropdown()
     if (this.hasGeneSelectionStatusTarget) this.geneSelectionStatusTarget.textContent = ""
+    this.focusGeneInHeatmap(symbol)
+    this.scrollGeneListToSymbol(symbol)
+  }
+
+  focusGeneInHeatmap(symbol) {
+    if (!this.view || !this.nDispRows || !this.origRowToDisplay) return
+    const rowIndices = this.rowIndicesForSymbol(symbol)
+    if (!rowIndices.length) return
+
+    const displayRows = []
+    for (const rowIndex of rowIndices) {
+      const displayRow = this.origRowToDisplay[rowIndex]
+      if (Number.isFinite(displayRow)) displayRows.push(displayRow)
+    }
+    if (!displayRows.length) return
+
+    const target = (Math.min(...displayRows) + Math.max(...displayRows) + 1) / 2
+    const rowSpan = Math.max(1, this.view.rowEnd - this.view.rowStart)
+    this.view.rowStart = target - rowSpan / 2
+    this.view.rowEnd = this.view.rowStart + rowSpan
+    this.clampView()
+    this.render()
+  }
+
+  scrollGeneListToSymbol(symbol) {
+    if (!this.hasGeneSearchListTarget || !symbol) return
+    const target = String(symbol)
+    const scrollIntoView = () => {
+      const cards = Array.from(this.geneSearchListTarget.querySelectorAll("[data-heatmap-gene-item='true']"))
+      const card = cards.find((el) => el.dataset.geneSymbol === target)
+      if (!card) return
+      card.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    }
+    requestAnimationFrame(scrollIntoView)
   }
 
   escapeHtml(value) {

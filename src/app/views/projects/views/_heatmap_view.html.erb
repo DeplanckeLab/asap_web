@@ -564,6 +564,16 @@
             <span style="font-size:13px; color:#6b7280;">
               <span data-heatmap-target="selectedGenesCount">0</span> genes highlighted
             </span>
+            <button type="button"
+                    data-heatmap-target="toggleAllGenesBtn"
+                    data-action="heatmap#toggleAllGeneSelection"
+                    title="Select or unselect all genes in the list"
+                    aria-label="Select or unselect all genes in the list"
+                    style="display:none; padding:3px 8px; font-size:11px; font-weight:500; color:#374151; background:#fff; border:1px solid #d1d5db; border-radius:4px; cursor:pointer; white-space:nowrap;"
+                    onmouseover="this.style.backgroundColor='#f3f4f6'"
+                    onmouseout="this.style.backgroundColor='#fff'">
+              Select all
+            </button>
           </div>
           <div data-heatmap-target="geneSearchList"
                style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; border:1px solid #e5e7eb; border-radius:6px; padding:4px; background:#f9fafb; min-height:36px;">

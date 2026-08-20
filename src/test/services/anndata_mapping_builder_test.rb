@@ -112,6 +112,18 @@ class AnndataMappingBuilderTest < ActiveSupport::TestCase
       ),
       Annot.create!(
         project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/col_attrs/X_tsne', dim: 1, nber_rows: 2, nber_cols: 50
+      ),
+      # Cell selection derived from an embedding plot: 1D obs vector, X_ prefix only.
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/col_attrs/X_tsne.sel_3', dim: 1, nber_rows: 1, nber_cols: 50,
+        data_type_id: @discrete.id,
+        list_cat_json: %w[in out].to_json,
+        categories_json: { 'in' => 10, 'out' => 40 }.to_json
+      ),
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
         name: '/col_attrs/cell_type', dim: 1, nber_rows: 1, nber_cols: 50,
         data_type_id: @discrete.id,
         list_cat_json: %w[T B myeloid].to_json,
@@ -122,7 +134,10 @@ class AnndataMappingBuilderTest < ActiveSupport::TestCase
     payload = AnndataMappingBuilder.call(project: @project, loom_filepath: @loom)
     assert_equal '/col_attrs/_umap_1_scanpy_2D', payload['obsm']['_umap_1_scanpy_2D']
     assert_equal '/col_attrs/X_umap', payload['obsm']['X_umap']
+    assert_equal '/col_attrs/X_tsne', payload['obsm']['X_tsne']
+    refute payload['obsm'].key?('X_tsne.sel_3')
     refute payload['obsm'].key?('cell_type')
+    assert_equal %w[in out], payload['categoricals']['X_tsne.sel_3']['categories']
     assert_equal %w[T B myeloid], payload['categoricals']['cell_type']['categories']
     assert_includes payload['uns_json_keys'], 'analysis_pipeline'
     assert_equal({}, payload['uns_groups'])

@@ -2462,13 +2462,13 @@ export default class extends Controller {
     const card = document.createElement("div")
     card.dataset.heatmapGeneItem = "true"
     card.dataset.geneSymbol = symbol
-    card.style.cssText = "background:#fff;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;"
+    card.style.cssText = "flex:0 0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;"
 
     const header = document.createElement("div")
     header.className = "heatmap-gene-header"
     header.dataset.action = "click->heatmap#onGeneListHeaderClick"
     header.dataset.geneSymbol = symbol
-    header.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;user-select:none;"
+    header.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 10px;min-height:36px;box-sizing:border-box;cursor:pointer;user-select:none;"
     header.onmouseover = function () { this.style.backgroundColor = "#f9fafb" }
     header.onmouseout = function () { this.style.backgroundColor = "" }
     header.innerHTML = `

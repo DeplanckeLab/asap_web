@@ -70,9 +70,16 @@ export class RendererManager {
     const xTickSpacing = this.calculateTickSpacing(xRange)
     const yTickSpacing = this.calculateTickSpacing(yRange)
     
+    const overlayScale = this.getPlotOverlayScale()
+    const tickFontSize = Math.max(8, Math.round(12 * overlayScale))
+    const titleFontSize = Math.max(9, Math.round(14 * overlayScale))
+    const tickLength = Math.max(3, Math.round(5 * overlayScale))
+    const tickLabelGap = Math.max(4, Math.round(10 * overlayScale))
+    const yTickLabelGap = Math.max(4, Math.round(7 * overlayScale))
+
     ctx.fillStyle = '#333333'
     ctx.strokeStyle = '#333333'
-    ctx.font = '12px Arial'
+    ctx.font = `${tickFontSize}px Arial`
     
     // X-axis ticks
     ctx.textAlign = 'center'
@@ -85,11 +92,11 @@ export class RendererManager {
       // Tick mark
       ctx.beginPath()
       ctx.moveTo(screenX, xAxisY)
-      ctx.lineTo(screenX, xAxisY + 5)
+      ctx.lineTo(screenX, xAxisY + tickLength)
       ctx.stroke()
       
       // Label
-      ctx.fillText(value.toFixed(1), screenX, xAxisY + 10)
+      ctx.fillText(value.toFixed(1), screenX, xAxisY + tickLabelGap)
     }
     
     // Y-axis ticks
@@ -102,26 +109,28 @@ export class RendererManager {
       
       // Tick mark
       ctx.beginPath()
-      ctx.moveTo(yAxisX - 5, screenY)
+      ctx.moveTo(yAxisX - tickLength, screenY)
       ctx.lineTo(yAxisX, screenY)
       ctx.stroke()
       
       // Label
-      ctx.fillText(value.toFixed(1), yAxisX - 7, screenY)
+      ctx.fillText(value.toFixed(1), yAxisX - yTickLabelGap, screenY)
     }
     
     // Add axis titles
     ctx.fillStyle = '#333333'
-    ctx.font = '14px Arial'
+    ctx.font = `${titleFontSize}px Arial`
     
     // X-axis title
     ctx.textAlign = 'center'
     ctx.textBaseline = 'bottom'
-    ctx.fillText('Dimension 1', width / 2, height - 15)
+    const xTitleY = height - Math.max(4, Math.round(margins.bottom * 0.25))
+    ctx.fillText('Dimension 1', width / 2, xTitleY)
     
     // Y-axis title (rotated)
     ctx.save()
-    ctx.translate(20, height / 2)
+    const yTitleX = Math.max(titleFontSize, Math.round(margins.left * 0.35))
+    ctx.translate(yTitleX, height / 2)
     ctx.rotate(-Math.PI / 2)
     ctx.textAlign = 'center'
     ctx.textBaseline = 'bottom'
@@ -469,14 +478,20 @@ export class RendererManager {
       ctx.font = `${labelFontSize}px Arial`
       const textMetrics = ctx.measureText(displayText)
       const textWidth = textMetrics.width
-      const textHeight = Math.max(labelFontSize + 2, 12)
+      const textHeight = labelFontSize + 2
+      const halfLabelWidth = textWidth / 2 + boxPadding
+      const halfLabelHeight = textHeight / 2 + boxPadding
 
       // Build candidates around centroid/manual location and pick one that minimizes overlap.
       const placementMode = this.controller.labelPlacementMode || 'avoid-collisions'
       const useCentroidPlacement = placementMode === 'centroid'
       const keepManualPlacementFixed = freezeMovedLabels && labelIsManuallyMoved
       const centroidDistanceToCenter = Math.hypot(centroidScreenX - plotCenterX, centroidScreenY - plotCenterY)
-      const maxCandidateRadius = Math.min(192, Math.max(56, 56 + centroidDistanceToCenter * 0.5))
+      const plotMinSide = Math.min(width, height)
+      const maxCandidateRadius = Math.min(
+        Math.max(40, plotMinSide * 0.45),
+        Math.max(40, 40 + centroidDistanceToCenter * 0.5)
+      )
       const candidates = (freezePlacement || useCentroidPlacement || keepManualPlacementFixed)
         ? [{ x: preferredX, y: preferredY }]
         : this.buildLabelCandidates(preferredX, preferredY, maxCandidateRadius)
@@ -485,21 +500,21 @@ export class RendererManager {
 
       for (let i = 0; i < candidates.length; i++) {
         const candidate = candidates[i]
+        const clamped = this.clampLabelCenter(
+          candidate.x,
+          candidate.y,
+          halfLabelWidth,
+          halfLabelHeight,
+          width,
+          height
+        )
         const visualBounds = {
-          x: candidate.x - textWidth / 2 - boxPadding,
-          y: candidate.y - textHeight / 2 - boxPadding,
+          x: clamped.x - halfLabelWidth,
+          y: clamped.y - halfLabelHeight,
           width: textWidth + boxPadding * 2,
           height: textHeight + boxPadding * 2
         }
-
-        // Keep labels inside viewport to avoid inaccessible drag targets.
-        const insideCanvas = (
-          visualBounds.x >= 0 &&
-          visualBounds.y >= 0 &&
-          (visualBounds.x + visualBounds.width) <= width &&
-          (visualBounds.y + visualBounds.height) <= height
-        )
-        if (!insideCanvas) continue
+        const wasClamped = (clamped.x !== candidate.x) || (clamped.y !== candidate.y)
 
         const collisionBounds = {
           x: visualBounds.x - collisionPadding,
@@ -515,14 +530,14 @@ export class RendererManager {
 
         // Penalize candidates whose leader line would cross existing label boxes.
         let lineCrossCount = 0
-        const displacement = Math.hypot(candidate.x - centroidScreenX, candidate.y - centroidScreenY)
+        const displacement = Math.hypot(clamped.x - centroidScreenX, clamped.y - centroidScreenY)
         if (displacement > 4) {
           for (let j = 0; j < placedVisualBounds.length; j++) {
             if (this.doesSegmentIntersectRect(
               centroidScreenX,
               centroidScreenY,
-              candidate.x,
-              candidate.y,
+              clamped.x,
+              clamped.y,
               placedVisualBounds[j]
             )) {
               lineCrossCount += 1
@@ -530,14 +545,16 @@ export class RendererManager {
           }
         }
 
-        const distance = Math.hypot(candidate.x - preferredX, candidate.y - preferredY)
+        const distance = Math.hypot(clamped.x - preferredX, clamped.y - preferredY)
         evaluatedCandidates.push({
-          ...candidate,
+          x: clamped.x,
+          y: clamped.y,
           visualBounds,
           collisionBounds,
           overlapArea,
           lineCrossCount,
-          distance
+          distance,
+          wasClamped
         })
       }
 
@@ -547,6 +564,7 @@ export class RendererManager {
         const candidatePool = nearCandidates.length > 0 ? nearCandidates : evaluatedCandidates
 
         const sortByQuality = (a, b) => {
+          if (a.wasClamped !== b.wasClamped) return a.wasClamped ? 1 : -1
           if (a.overlapArea !== b.overlapArea) return a.overlapArea - b.overlapArea
           if (a.lineCrossCount !== b.lineCrossCount) return a.lineCrossCount - b.lineCrossCount
           return a.distance - b.distance
@@ -554,7 +572,10 @@ export class RendererManager {
 
         const zeroOverlapZeroCross = candidatePool
           .filter(c => c.overlapArea === 0 && c.lineCrossCount === 0)
-          .sort((a, b) => a.distance - b.distance)
+          .sort((a, b) => {
+            if (a.wasClamped !== b.wasClamped) return a.wasClamped ? 1 : -1
+            return a.distance - b.distance
+          })
 
         if (zeroOverlapZeroCross.length > 0) {
           bestCandidate = zeroOverlapZeroCross[0]
@@ -563,6 +584,7 @@ export class RendererManager {
           const zeroOverlap = candidatePool
             .filter(c => c.overlapArea === 0)
             .sort((a, b) => {
+              if (a.wasClamped !== b.wasClamped) return a.wasClamped ? 1 : -1
               if (a.lineCrossCount !== b.lineCrossCount) return a.lineCrossCount - b.lineCrossCount
               return a.distance - b.distance
             })
@@ -576,7 +598,38 @@ export class RendererManager {
         }
       }
 
-      if (!bestCandidate) return
+      // Last resort on tiny mobile plots: clamp the preferred position into the canvas.
+      if (!bestCandidate) {
+        const clamped = this.clampLabelCenter(
+          preferredX,
+          preferredY,
+          halfLabelWidth,
+          halfLabelHeight,
+          width,
+          height
+        )
+        const visualBounds = {
+          x: clamped.x - halfLabelWidth,
+          y: clamped.y - halfLabelHeight,
+          width: textWidth + boxPadding * 2,
+          height: textHeight + boxPadding * 2
+        }
+        bestCandidate = {
+          x: clamped.x,
+          y: clamped.y,
+          visualBounds,
+          collisionBounds: {
+            x: visualBounds.x - collisionPadding,
+            y: visualBounds.y - collisionPadding,
+            width: visualBounds.width + collisionPadding * 2,
+            height: visualBounds.height + collisionPadding * 2
+          },
+          overlapArea: 0,
+          lineCrossCount: 0,
+          distance: Math.hypot(clamped.x - preferredX, clamped.y - preferredY),
+          wasClamped: true
+        }
+      }
 
       const screenX = bestCandidate.x
       const screenY = bestCandidate.y
@@ -746,6 +799,17 @@ export class RendererManager {
     return candidates
   }
 
+  clampLabelCenter(x, y, halfWidth, halfHeight, canvasWidth, canvasHeight) {
+    const minX = Math.min(halfWidth, canvasWidth / 2)
+    const maxX = Math.max(canvasWidth - halfWidth, canvasWidth / 2)
+    const minY = Math.min(halfHeight, canvasHeight / 2)
+    const maxY = Math.max(canvasHeight - halfHeight, canvasHeight / 2)
+    return {
+      x: Math.min(maxX, Math.max(minX, x)),
+      y: Math.min(maxY, Math.max(minY, y))
+    }
+  }
+
   computeOverlapArea(a, b) {
     const overlapX = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
     const overlapY = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))
@@ -881,11 +945,14 @@ export class RendererManager {
 
   // Utility methods for rendering
   getPlotMargins() {
+    // Fixed desktop margins eat most of the mobile locked square (~140-400px).
+    // Scale them with the overlay so axis ticks and category labels keep usable plot area.
+    const scale = this.getPlotOverlayScale()
     return {
-      left: 60,    // Space for Y-axis labels
-      right: 20,   // Right margin
-      top: 20,      // Minimal top margin
-      bottom: 60   // Space for X-axis labels and title (increased to 50)
+      left: Math.max(24, Math.round(60 * scale)),
+      right: Math.max(8, Math.round(20 * scale)),
+      top: Math.max(8, Math.round(20 * scale)),
+      bottom: Math.max(24, Math.round(60 * scale))
     }
   }
 

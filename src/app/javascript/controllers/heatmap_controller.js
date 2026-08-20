@@ -2504,9 +2504,6 @@ export default class extends Controller {
     header.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 10px;min-height:36px;box-sizing:border-box;cursor:pointer;user-select:none;"
     header.onmouseover = function () { this.style.backgroundColor = "#f9fafb" }
     header.onmouseout = function () { this.style.backgroundColor = "" }
-    const symbolStyle = checked
-      ? "flex:1;min-width:0;font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 6px;border-radius:4px;background:#fef08a;"
-      : "flex:1;min-width:0;font-size:13px;font-weight:500;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:2px 6px;border-radius:4px;background:transparent;"
     header.innerHTML = `
       <div class="heatmap-gene-chevron" style="color:#9ca3af;display:flex;align-items:center;justify-content:center;width:14px;flex:0 0 auto;">
         <i class="fas fa-chevron-right" style="font-size:12px;transition:transform 0.2s ease-out;transform:${expanded ? "rotate(90deg)" : "none"};"></i>
@@ -2518,7 +2515,7 @@ export default class extends Controller {
              aria-label="Highlight ${safeSymbol}"
              style="margin:0;flex:0 0 auto;cursor:pointer;" />
       <div class="heatmap-gene-symbol"
-           style="${symbolStyle}"
+           style="flex:1;min-width:0;font-size:13px;font-weight:500;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
            title="${safeSymbol}">
         ${safeSymbol}
       </div>
@@ -2584,16 +2581,7 @@ export default class extends Controller {
     const item = this.geneListItems.find((entry) => entry.symbol === symbol)
     if (!item) return
     item.checked = !!event.currentTarget.checked
-    this.applyGeneSymbolHighlight(event.currentTarget.closest("[data-heatmap-gene-item='true']"), item.checked)
     this.applyGeneListHighlightState()
-  }
-
-  applyGeneSymbolHighlight(card, checked) {
-    if (!card) return
-    const symbolEl = card.querySelector(".heatmap-gene-symbol")
-    if (!symbolEl) return
-    symbolEl.style.background = checked ? "#fef08a" : "transparent"
-    symbolEl.style.fontWeight = checked ? "600" : "500"
   }
 
   onGeneListInfoClick(event) {
@@ -3020,6 +3008,7 @@ export default class extends Controller {
 
     this.drawTracks(ctx)
     if (this.showLabels) this.drawLabels(ctx)
+    this.drawSelectedGeneZoomedOutMarks(ctx)
     this.drawLegend(ctx)
     this.drawTrackLegends(ctx)
     this.drawActiveSelectionRect(ctx)
@@ -3357,7 +3346,15 @@ export default class extends Controller {
       const end = Math.min(this.nDispRows, Math.ceil(v.rowEnd))
       for (let d = start; d < end; d++) {
         const y = this.yForRow(d + 0.5)
-        ctx.fillText(this.truncate(this.displayRowLabel(d), 22), this.mx + this.mw + 5, y)
+        const label = this.truncate(this.displayRowLabel(d), 22)
+        if (this.displayRowIsSelected(d)) {
+          const textW = Math.min(this.layout.rowLabelW - 8, ctx.measureText(label).width + 6)
+          const boxH = Math.min(rowH - 1, 14)
+          ctx.fillStyle = "#fef08a"
+          ctx.fillRect(this.mx + this.mw + 3, y - boxH / 2, Math.max(4, textW), boxH)
+        }
+        ctx.fillStyle = "#1f2937"
+        ctx.fillText(label, this.mx + this.mw + 5, y)
       }
       ctx.restore()
     }
@@ -3380,6 +3377,43 @@ export default class extends Controller {
       }
       ctx.restore()
     }
+  }
+
+  displayRowIsSelected(d) {
+    if (!this.selectedOrigRows?.size || !this.rowGroups) return false
+    const group = this.rowGroups[d]
+    if (!group) return false
+    for (let i = group[0]; i <= group[1]; i++) {
+      if (this.selectedOrigRows.has(i)) return true
+    }
+    return false
+  }
+
+  drawSelectedGeneZoomedOutMarks(ctx) {
+    if (!this.selectedOrigRows?.size || !this.rowGroups) return
+    const v = this.view
+    const rowH = this.mh / (v.rowEnd - v.rowStart)
+    // Labels already carry the yellow symbol highlight when zoomed in enough.
+    if (this.showLabels && rowH >= 8) return
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(this.mx, this.my, this.mw + (this.showLabels ? this.layout.rowLabelW : 0), this.mh)
+    ctx.clip()
+    ctx.fillStyle = "#111827"
+    for (let d = 0; d < this.nDispRows; d++) {
+      if (!this.displayRowIsSelected(d)) continue
+      if (d + 1 <= v.rowStart || d >= v.rowEnd) continue
+      const y0 = this.yForRow(Math.max(d, v.rowStart))
+      const y1 = this.yForRow(Math.min(d + 1, v.rowEnd))
+      const h = y1 - y0
+      if (h <= 0) continue
+      // Thin black bar across the row (at least 1px so it stays visible when many rows share the view).
+      const markH = Math.max(1, Math.min(h, 3))
+      const y = y0 + (h - markH) / 2
+      ctx.fillRect(this.mx, y, this.mw + (this.showLabels ? this.layout.rowLabelW : 0), markH)
+    }
+    ctx.restore()
   }
 
   displayRowLabel(d) {

@@ -678,6 +678,19 @@ export class GradientManager {
   }
 
   // Get color from gradient at normalized position (0-1)
+  prepareColorLookup() {
+    const controlPoints = this.controller.customGradientControlPoints || this.controller.gradientControlPoints
+    if (!controlPoints || controlPoints.length === 0) {
+      this._preparedSortedControlPoints = null
+      return
+    }
+    this._preparedSortedControlPoints = [...controlPoints].sort((a, b) => a.position - b.position)
+  }
+
+  clearPreparedColorLookup() {
+    this._preparedSortedControlPoints = null
+  }
+
   getColorFromGradient(normalizedValue) {
     // Handle invalid values — never return 0 (regl treats 0 as transparent; falsy
     // fallbacks turn it into default blue).
@@ -691,8 +704,10 @@ export class GradientManager {
       return this.controller.getMissingNumericColor()
     }
     
-    // Sort control points by position
-    const sorted = [...controlPoints].sort((a, b) => a.position - b.position)
+    // Prefer a caller-prepared sorted list (numeric color passes). Otherwise sort once here.
+    // Never copy+sort on every cell — that dominated gene coloring cost.
+    const sorted = this._preparedSortedControlPoints ||
+      [...controlPoints].sort((a, b) => a.position - b.position)
     
     // Find the two control points to interpolate between
     let leftPoint = null
@@ -739,8 +754,8 @@ export class GradientManager {
     const clampedT = Math.max(0, Math.min(1, t))
     
     if (isNaN(clampedT)) {
-      console.warn('🎨 ⚠️ getColorFromGradient: NaN in interpolation, normalizedValue:', normalizedValue, 'leftPoint:', leftPoint, 'rightPoint:', rightPoint)
-      return leftPoint.color // Fallback to left point color
+      console.warn('getColorFromGradient: NaN in interpolation, normalizedValue:', normalizedValue, 'leftPoint:', leftPoint, 'rightPoint:', rightPoint)
+      return leftPoint.color
     }
     
     return this.interpolateColor(leftPoint.color, rightPoint.color, clampedT)

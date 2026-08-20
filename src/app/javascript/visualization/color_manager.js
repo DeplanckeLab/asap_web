@@ -309,6 +309,8 @@ export class ColorManager {
       const useLog = this.controller.getEffectiveGradientScale(minVal, maxVal) === 'log'
       
       // Cache colors for all points
+      this.controller.gradientManager.prepareColorLookup()
+      try {
       for (let i = 0; i < values.length; i++) {
         const value = values[i]
         let color
@@ -326,6 +328,9 @@ export class ColorManager {
         const isSelected = this.controller.selectedCells && this.controller.selectedCells.has(i)
         this.controller.cachedColorsByCellIndex[i] = isSelected ? this.controller.getSelectionHighlightColorInt() : color
         this.controller.originalPointColors[i] = color
+      }
+      } finally {
+        this.controller.gradientManager.clearPreparedColorLookup()
       }
       
       // Cache the color range for future comparisons

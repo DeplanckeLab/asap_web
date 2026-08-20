@@ -1761,7 +1761,8 @@ export class DataManager {
       mark('categoryCounts')
       this.controller.uiManager.updateAllRangeSliderCounts()
       mark('rangeSliderCounts')
-      this.updateAllCategoryDistributions()
+      // Coalesce with any after-paint / gene-coloring schedule so histograms run once.
+      this.scheduleUpdateAllCategoryDistributions(0)
       mark('categoryDistributions')
       this.redrawAllDensityPlots()
       mark('densityPlots')
@@ -2923,8 +2924,24 @@ export class DataManager {
     }
   }
   
-  // Update category distribution bars for all visible (expanded) metadata sections
+  // Update category distribution bars for all visible (expanded) metadata sections.
+  // Multiple callers (gene coloring, filter sidebar, after-paint) often fire in the same
+  // turn; coalesce so continuous-per-category histograms only run once.
+  scheduleUpdateAllCategoryDistributions(delayMs = 32) {
+    if (this._categoryDistributionsTimer != null) {
+      clearTimeout(this._categoryDistributionsTimer)
+    }
+    this._categoryDistributionsTimer = setTimeout(() => {
+      this._categoryDistributionsTimer = null
+      this.updateAllCategoryDistributions()
+    }, delayMs)
+  }
+
   updateAllCategoryDistributions() {
+    if (this._categoryDistributionsTimer != null) {
+      clearTimeout(this._categoryDistributionsTimer)
+      this._categoryDistributionsTimer = null
+    }
     const perfEnabled = this.controller.perfLoggingEnabled?.() === true
     const t0 = perfEnabled ? performance.now() : 0
     let drawn = 0

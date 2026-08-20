@@ -7478,7 +7478,7 @@ export default class extends Controller {
     // Update category distribution bar plots after the scatter paints
     const barplotsStart = perfEnabled ? performance.now() : 0
     this.scheduleAfterFirstPaint(() => {
-      this.dataManager.updateAllCategoryDistributions()
+      this.dataManager.scheduleUpdateAllCategoryDistributions(0)
       if (perfEnabled) {
         this.logPerf('pipeline_after_updateAllCategoryDistributions', performance.now() - barplotsStart, {
           metadataId: this.currentMetadataVector?.id ?? null,
@@ -7563,14 +7563,17 @@ export default class extends Controller {
     const colorBuildStart = performance.now()
     const colorMap = new Uint32Array(this.displayOrder.length)
     
-    // Get current filtered indices to hide invisible points
+    // Prefer the existing Uint8Array mask. Building Set(n) on every color pass was
+    // a large filter-only tax and duplicated work already done by filtering.
     const filterStart = perfEnabled ? performance.now() : 0
     const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
-    const visibleSet = filteredIndices ? new Set(filteredIndices) : null
+    const visibleMask = filteredIndices
+      ? this.dataManager.ensureVisibleMask(filteredIndices)
+      : null
     if (perfEnabled) {
-      this.logPerf('coloring_visibleSet', performance.now() - filterStart, {
+      this.logPerf('coloring_visibleMask', performance.now() - filterStart, {
         filteredCount: filteredIndices ? filteredIndices.length : null,
-        builtSet: !!visibleSet
+        hasMask: !!visibleMask
       })
     } 
     // Check if we have metadata coloring active
@@ -7635,7 +7638,7 @@ export default class extends Controller {
           const pointColor = isSelected ? this.getSelectionHighlightColorInt() : metadataColor
           this.cachedColorsByCellIndex[cellIndex] = pointColor
 
-          const isVisible = !visibleSet || visibleSet.has(cellIndex)
+          const isVisible = !visibleMask || visibleMask[cellIndex] === 1
           colorMap[drawPos] = isVisible ? pointColor : 0x00000000
         }
         this.lastColoringMetadataId = coloringMetadataVector.id
@@ -7686,9 +7689,9 @@ export default class extends Controller {
           this._lastCategoryOrderApplied = this.categoryOrder
           
           // Reorder points in buffer (this will re-render and redraw overlay)
-          // Pass visibleSet so filtered cells stay hidden during reordering
+          // Pass visibleMask so filtered cells stay hidden during reordering
           const reorderStart = perfEnabled ? performance.now() : 0
-          this.reorderPointsForCategoryDisplay(visibleSet)
+          this.reorderPointsForCategoryDisplay(visibleMask)
           if (perfEnabled) {
             this.logPerf('coloring_discrete_reorder', performance.now() - reorderStart, {
               points: this.displayOrder.length,
@@ -7748,7 +7751,11 @@ export default class extends Controller {
         }
         
         // Apply colors for every cell; transparency is draw-only (never stored in color caches).
+        // Sort gradient control points once for the whole pass (getColorFromGradient used to
+        // copy+sort on every cell).
+        this.gradientManager.prepareColorLookup()
         const numericColorLoopStart = perfEnabled ? performance.now() : 0
+        try {
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
           const cellIndex = this.displayOrder[drawPos]
           const value = values[cellIndex]
@@ -7773,8 +7780,11 @@ export default class extends Controller {
           const pointColor = isSelected ? this.getSelectionHighlightColorInt() : metadataColor
           this.cachedColorsByCellIndex[cellIndex] = pointColor
 
-          const isVisible = !visibleSet || visibleSet.has(cellIndex)
+          const isVisible = !visibleMask || visibleMask[cellIndex] === 1
           colorMap[drawPos] = isVisible ? pointColor : 0x00000000
+        }
+        } finally {
+          this.gradientManager.clearPreparedColorLookup()
         }
         if (perfEnabled) {
           this.logPerf('coloring_numeric_colorLoop', performance.now() - numericColorLoopStart, {
@@ -7809,9 +7819,9 @@ export default class extends Controller {
           this._lastNumericMetadataId = coloringMetadataVector.id
           
           // Reorder points in buffer based on z-index (this will re-render and redraw overlay)
-          // Pass visibleSet so filtered cells are hidden during reordering
+          // Pass visibleMask so filtered cells are hidden during reordering
           const reorderStart = perfEnabled ? performance.now() : 0
-          this.reorderPointsForNumericDisplay(values, minVal, maxVal, visibleSet)
+          this.reorderPointsForNumericDisplay(values, minVal, maxVal, visibleMask)
           if (perfEnabled) {
             this.logPerf('coloring_numeric_reorder', performance.now() - reorderStart, {
               points: this.displayOrder.length,
@@ -7866,7 +7876,7 @@ export default class extends Controller {
       
       for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
         const cellIndex = this.displayOrder[drawPos]
-        const isVisible = !visibleSet || visibleSet.has(cellIndex)
+        const isVisible = !visibleMask || visibleMask[cellIndex] === 1
         
         this.originalPointColors[cellIndex] = defaultColor
         const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
@@ -8775,6 +8785,14 @@ export default class extends Controller {
       return this.cachedColorsByCellIndex[cellIndex]
     }
     return this.getOriginalPointColor(cellIndex, fallback)
+  }
+
+  // visibleFilter is either null (all visible), a Uint8Array mask, or a Set of indices.
+  isVisibleUnderFilter(cellIndex, visibleFilter = null) {
+    if (!visibleFilter) return true
+    if (visibleFilter instanceof Uint8Array) return visibleFilter[cellIndex] === 1
+    if (typeof visibleFilter.has === 'function') return visibleFilter.has(cellIndex)
+    return true
   }
 
   // Get effective color range (custom or data range)
@@ -12037,21 +12055,15 @@ export default class extends Controller {
       })
     }
     
-    // Update distribution bars (synchronous)
-    const barsStart = perfEnabled ? performance.now() : 0
-    this.dataManager.updateAllCategoryDistributions()
-    if (perfEnabled) {
-      this.logPerf('pipeline_geneColoring_after_second_barplots', performance.now() - barsStart, {
-        geneMetadataId
-      })
-    }
+    // Barplots are scheduled after first paint inside updateVisualizationWithMetadataVector,
+    // and again (coalesced) from filter sidebar refresh when a filter is active. Do not run
+    // updateAllCategoryDistributions synchronously here — that duplicated the expensive
+    // continuous-per-category histograms on every gene click after filtering.
     
-    // Update cell filtering after loading gene vector (same as continuous metadata)
-    // Pass shouldUpdateColors=true for gene expression to ensure colors are rendered after filtering
-    // This ensures renderer state is properly initialized and coordinates are available for filtering
-    const shouldUpdateColors = true
+    // Colors were just applied above. Filtering only needs to refresh visibility/sidebar;
+    // shouldUpdateColors is intentionally false (batching also ignores that flag today).
     const filterStart = perfEnabled ? performance.now() : 0
-    this.dataManager.updateCellFiltering(shouldUpdateColors)
+    this.dataManager.updateCellFiltering(false)
     if (perfEnabled) {
       this.logPerf('pipeline_geneColoring_after_updateCellFiltering', performance.now() - filterStart, {
         geneMetadataId
@@ -17014,12 +17026,9 @@ export default class extends Controller {
     
     // Get current filter state
     const filteredIndices = this.dataManager.getIncrementalFilteredIndices()
-    const visibleSet = filteredIndices ? new Set(filteredIndices) : null
-    // console.log('[UPDATE COLORS] Filter state in updateSelectedPointColors:', {
-      // filteredIndices: filteredIndices ? `${filteredIndices.length} cells` : 'null (all visible)',
-      // currentVisibleCells: this.currentVisibleCells ? `${this.currentVisibleCells.length} cells` : 'null (all visible)',
-      // hasFilter: !!visibleSet
-    // })
+    const visibleMask = filteredIndices
+      ? this.dataManager.ensureVisibleMask(filteredIndices)
+      : null
     
     const updateStart = performance.now()
     
@@ -17046,7 +17055,7 @@ export default class extends Controller {
       const selectionColor = this.getSelectionHighlightColorInt()
       for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
         const cellIndex = this.displayOrder[drawPos]
-        const isVisible = !visibleSet || visibleSet.has(cellIndex)
+        const isVisible = !visibleMask || visibleMask[cellIndex] === 1
         
         if (!isVisible) {
           // Hide filtered-out points in the draw buffer only — keep metadata colors in caches.
@@ -17070,7 +17079,7 @@ export default class extends Controller {
       // IMPORTANT: Respect current filter - hide filtered-out cells
       for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
         const cellIndex = this.displayOrder[drawPos]
-        const isVisible = !visibleSet || visibleSet.has(cellIndex)
+        const isVisible = !visibleMask || visibleMask[cellIndex] === 1
         
         if (!isVisible) {
           colorMap[drawPos] = 0x00000000
@@ -17613,7 +17622,8 @@ export default class extends Controller {
   
   // ReGL: Reorder display order based on category (painter's algorithm)
   // Uses displayOrder array - does NOT modify original data
-  reorderPointsForCategoryDisplay(visibleSet = null) {
+  // visibleFilter: null | Uint8Array mask | Set of visible cell indices
+  reorderPointsForCategoryDisplay(visibleFilter = null) {
     if (!this.reglRenderer || !this.currentCoordinates || !this.currentMetadataVector || !this.displayOrder) {
       // console.log('⚠️ [ReGL] Cannot reorder - missing data')
       return
@@ -17625,7 +17635,7 @@ export default class extends Controller {
         const colorMap = new Uint32Array(this.displayOrder.length)
         for (let drawPos = 0; drawPos < this.displayOrder.length; drawPos++) {
           const cellIndex = this.displayOrder[drawPos]
-          const isVisible = !visibleSet || visibleSet.has(cellIndex)
+          const isVisible = this.isVisibleUnderFilter(cellIndex, visibleFilter)
           if (!isVisible) {
             colorMap[drawPos] = 0x00000000
           } else {
@@ -17695,7 +17705,7 @@ export default class extends Controller {
       screenCoordinates[drawPos * 2] = this.interactionHandler.normalizeX(dataX, this.currentBounds)
       screenCoordinates[drawPos * 2 + 1] = this.interactionHandler.normalizeY(dataY, this.currentBounds)
       
-      const isVisible = !visibleSet || visibleSet.has(cellIndex)
+      const isVisible = this.isVisibleUnderFilter(cellIndex, visibleFilter)
       if (isVisible) {
         const baseColor = this.getOriginalPointColor(cellIndex)
         const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)
@@ -17718,7 +17728,8 @@ export default class extends Controller {
   }
   // Reorder display order based on numeric values (painter's algorithm)
   // Uses displayOrder array - does NOT modify original data
-  reorderPointsForNumericDisplay(values, minVal, maxVal, visibleSet = null) {
+  // visibleFilter: null | Uint8Array mask | Set of visible cell indices
+  reorderPointsForNumericDisplay(values, minVal, maxVal, visibleFilter = null) {
     if (!this.reglRenderer || !this.currentCoordinates || !this.currentMetadataVector || !this.displayOrder) {
       // console.log('⚠️ [ReGL] Cannot reorder - missing data')
       return
@@ -17790,7 +17801,7 @@ export default class extends Controller {
       
       // CRITICAL FIX: Check if cell is visible (filtered) before getting color
       // If filtered, use transparent. Otherwise use color from originalPointColors or default blue
-      const isVisible = !visibleSet || visibleSet.has(cellIndex)
+      const isVisible = this.isVisibleUnderFilter(cellIndex, visibleFilter)
       if (isVisible) {
         const baseColor = this.getOriginalPointColor(cellIndex)
         const isSelected = this.selectedCells && this.selectedCells.has(cellIndex)

@@ -3494,14 +3494,17 @@ export default class extends Controller {
 
   drawSelectedGeneZoomedOutMarks(ctx) {
     if (!this.selectedOrigRows?.size || !this.rowGroups) return
+    if (!this.showLabels || this.labelW <= 0) return
     const v = this.view
     const rowH = this.mh / (v.rowEnd - v.rowStart)
-    // Labels already carry the yellow symbol highlight when zoomed in enough.
-    if (this.showLabels && rowH >= 8) return
+    // Zoomed in: yellow label backgrounds already mark selected genes.
+    if (rowH >= 8) return
 
+    const markX = this.mx + this.mw
+    const markW = this.labelW
     ctx.save()
     ctx.beginPath()
-    ctx.rect(this.mx, this.my, this.mw + (this.showLabels ? this.layout.rowLabelW : 0), this.mh)
+    ctx.rect(markX, this.my, markW, this.mh)
     ctx.clip()
     ctx.fillStyle = "#111827"
     for (let d = 0; d < this.nDispRows; d++) {
@@ -3511,10 +3514,10 @@ export default class extends Controller {
       const y1 = this.yForRow(Math.min(d + 1, v.rowEnd))
       const h = y1 - y0
       if (h <= 0) continue
-      // Thin black bar across the row (at least 1px so it stays visible when many rows share the view).
+      // Thin black tick in the right label gutter only (heatmap keeps the blue wash).
       const markH = Math.max(1, Math.min(h, 3))
       const y = y0 + (h - markH) / 2
-      ctx.fillRect(this.mx, y, this.mw + (this.showLabels ? this.layout.rowLabelW : 0), markH)
+      ctx.fillRect(markX, y, markW, markH)
     }
     ctx.restore()
   }

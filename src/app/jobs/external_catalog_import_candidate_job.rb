@@ -34,13 +34,14 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       import_user_id: user.id
     )
 
-    if candidate.already_in_asap?
-      project = candidate.asap_projects.order(id: :desc).first
+    accessible = candidate.asap_projects_accessible_to(user)
+    if accessible.exists?
+      project = accessible.order(id: :desc).first
       candidate.update!(import_status: 'idle', import_error: nil)
       candidate.link_matched_project!(project, link_kind: 'provider_match') if project
       Rails.logger.info(
-        "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} already in ASAP " \
-        "project=#{project&.key} (matched, import_project_id unchanged)"
+        "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} already accessible in ASAP " \
+        "project=#{project&.key} user=#{user.id} (matched, import_project_id unchanged)"
       )
       return
     end

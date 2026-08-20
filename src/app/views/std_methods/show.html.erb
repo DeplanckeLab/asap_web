@@ -60,7 +60,12 @@
       <% if @std_method.command_program.present? %>
         <div class="px-4 py-3 flex items-start justify-between">
           <dt class="font-medium text-gray-900">Program</dt>
-          <dd class="w-3/4 text-gray-600"><%= @std_method.command_program %></dd>
+          <dd class="w-3/4 <%= @std_method.command_program_inherited? ? 'text-gray-400' : 'text-gray-900' %>">
+            <%= @std_method.command_program %>
+            <% if @std_method.command_program_inherited? %>
+              <span class="text-xs text-gray-400">(inherited from step)</span>
+            <% end %>
+          </dd>
         </div>
       <% end %>
       <% if @std_method.speed_id.present? %>

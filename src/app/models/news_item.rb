@@ -123,6 +123,7 @@ class NewsItem < ApplicationRecord
 
   before_validation :apply_default_icon, on: :create
   before_validation :set_default_published_at
+  before_validation :clear_show_on_welcome_unless_published
 
   scope :published, -> { where(published: true) }
   scope :for_welcome, -> { published.where(show_on_welcome: true) }
@@ -170,5 +171,9 @@ class NewsItem < ApplicationRecord
 
   def set_default_published_at
     self.published_at ||= Time.current
+  end
+
+  def clear_show_on_welcome_unless_published
+    self.show_on_welcome = false unless published?
   end
 end

@@ -379,6 +379,10 @@ class ExternalCatalogCandidate < ApplicationRecord
     import_status.to_s == 'failed'
   end
 
+  def scfair_validation_error?
+    import_error.to_s.match?(/scFAIR/i)
+  end
+
   def import_job_in_flight?
     self.class.import_job_in_flight?(id)
   end
@@ -413,8 +417,30 @@ class ExternalCatalogCandidate < ApplicationRecord
     released
   end
 
-  def can_create_project?
-    !obsolete? && !already_in_asap? && !(importing? && import_job_in_flight?)
+  def can_create_project?(accessible_asap_projects: nil)
+    return false if obsolete?
+    return false if importing? && import_job_in_flight?
+
+    blocking =
+      if accessible_asap_projects
+        Array(accessible_asap_projects)
+      else
+        asap_projects.to_a
+      end
+    blocking.empty?
+  end
+
+  # Projects already linked that this user can open (public, owned, or shared).
+  def asap_projects_accessible_to(user)
+    scope = asap_projects
+    return scope.none if user.blank?
+
+    ids = scope.where(public: true).pluck(:id)
+    ids.concat(scope.where(user_id: user.id).pluck(:id))
+    ids.concat(
+      scope.joins(:shares).where(shares: { user_id: user.id, view_perm: true }).pluck(:id)
+    )
+    scope.where(id: ids.uniq)
   end
 
   def test_entry?

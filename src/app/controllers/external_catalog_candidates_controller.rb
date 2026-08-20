@@ -42,10 +42,11 @@ class ExternalCatalogCandidatesController < ApplicationController
   end
 
   def create_project
-    unless @candidate.can_create_project?
+    accessible = accessible_asap_projects_for(@candidate)
+    unless @candidate.can_create_project?(accessible_asap_projects: accessible)
       redirect_back(
         fallback_location: external_catalog_candidate_path(@candidate),
-        alert: create_blocked_message
+        alert: create_blocked_message(accessible)
       )
       return
     end
@@ -82,16 +83,21 @@ class ExternalCatalogCandidatesController < ApplicationController
     @candidate = ExternalCatalogCandidate.find(params[:id])
   end
 
-  def create_blocked_message
+  def create_blocked_message(accessible = nil)
+    accessible ||= accessible_asap_projects_for(@candidate)
     if @candidate.obsolete?
       'This candidate is obsolete and no longer listed.'
     elsif @candidate.importing? && @candidate.import_job_in_flight?
       'Import already in progress for this candidate.'
-    elsif @candidate.already_in_asap?
-      'An ASAP project already exists for this dataset.'
+    elsif accessible.any?
+      'An ASAP project you can access already exists for this dataset.'
     else
       'Cannot create a project for this candidate.'
     end
+  end
+
+  def accessible_asap_projects_for(candidate)
+    candidate.asap_projects.select { |project| readable?(project) }
   end
 
   def filter_in_asap(scope, flag)

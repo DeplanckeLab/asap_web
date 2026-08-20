@@ -19,8 +19,8 @@
       </p>
     </div>
     <div class="flex items-start gap-2">
-      <% if @candidate.can_create_project? %>
-        <%= button_to "Create ASAP project",
+      <% if @candidate.can_create_project?(accessible_asap_projects: @asap_projects) %>
+        <%= button_to "Import",
                       create_project_external_catalog_candidate_path(@candidate),
                       method: :post,
                       class: "inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900" %>
@@ -131,24 +131,27 @@
       <p class="text-sm text-amber-700 dark:text-amber-300">Import in progress. Refresh this page to update status.</p>
     <% end %>
     <% if @candidate.failed? && @candidate.import_error.present? %>
-      <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-200">
-        <%= @candidate.import_error %>
-      </div>
+      <% if admin? || !@candidate.scfair_validation_error? %>
+        <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-200">
+          <%= @candidate.import_error %>
+        </div>
+      <% else %>
+        <div class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-200">
+          Import failed.
+        </div>
+      <% end %>
     <% end %>
     <% if @asap_projects.any? %>
       <ul class="space-y-2 text-sm">
         <% @asap_projects.each do |project| %>
           <li class="flex items-center gap-3">
-            <%= link_to project.key, project_path(project), class: "font-medium text-blue-600 hover:underline dark:text-blue-400" %>
+            <%= link_to (project.public_key.presence || project.key),
+                        project_path(project),
+                        class: "font-medium text-blue-600 hover:underline dark:text-blue-400" %>
             <span class="text-gray-600 dark:text-gray-300"><%= project.name.to_s.truncate(80) %></span>
-            <% if project.public? %>
-              <span class="rounded bg-emerald-100 px-2 py-0.5 text-xs text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">public</span>
-            <% end %>
           </li>
         <% end %>
       </ul>
-    <% elsif @candidate.already_in_asap? %>
-      <p class="text-sm text-gray-500 dark:text-gray-400">Already in ASAP.</p>
     <% else %>
       <p class="text-sm text-gray-500 dark:text-gray-400">Not in ASAP yet.</p>
     <% end %>

@@ -67,11 +67,16 @@
 
   <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
     <div class="flex items-center gap-2">
-      <%= form.check_box :published, class: "rounded border-gray-300 text-gray-900 focus:ring-gray-900" %>
+      <%= form.check_box :published,
+                        class: "rounded border-gray-300 text-gray-900 focus:ring-gray-900",
+                        data: { news_item_form_target: "published", action: "change->news-item-form#publishedChanged" } %>
       <%= form.label :published, "Published", class: "text-sm text-gray-700 dark:text-gray-200" %>
     </div>
     <div class="flex items-center gap-2">
-      <%= form.check_box :show_on_welcome, class: "rounded border-gray-300 text-gray-900 focus:ring-gray-900" %>
+      <%= form.check_box :show_on_welcome,
+                        class: "rounded border-gray-300 text-gray-900 focus:ring-gray-900 disabled:opacity-50",
+                        data: { news_item_form_target: "showOnWelcome" },
+                        disabled: !news_item.published? %>
       <%= form.label :show_on_welcome, "Show on welcome page", class: "text-sm text-gray-700 dark:text-gray-200" %>
     </div>
   </div>

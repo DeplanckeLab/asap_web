@@ -9,6 +9,7 @@ class StdMethod < ApplicationRecord
   has_many :runs, dependent: :nullify
 
   # Human-readable entrypoint for admin lists (script name, jar, or rails task), not the full interpreter line.
+  # Resolves like runtime merge: std_method.command_json overrides step.command_json for top-level keys.
   def command_program
     raw = raw_command_program_string
     return nil if raw.blank?
@@ -17,7 +18,23 @@ class StdMethod < ApplicationRecord
   end
 
   def raw_command_program_string
-    h = Basic.safe_parse_json(command_json, {})
+    own = own_raw_command_program_string
+    return own if own.present?
+
+    program_from_command_json(step&.command_json)
+  end
+
+  # True when program comes from step.command_json because std_method.command_json has no program key.
+  def command_program_inherited?
+    own_raw_command_program_string.blank? && raw_command_program_string.present?
+  end
+
+  def own_raw_command_program_string
+    program_from_command_json(command_json)
+  end
+
+  def program_from_command_json(json)
+    h = Basic.safe_parse_json(json, {})
     return nil unless h.is_a?(Hash)
 
     p = h['program']

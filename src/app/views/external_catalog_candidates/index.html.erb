@@ -113,8 +113,9 @@
               <% elsif asap_projects.any? %>
                 <% asap_projects.first(3).each do |project| %>
                   <div>
-                    <%= link_to project.key, project_path(project), class: "text-blue-600 hover:underline dark:text-blue-400" %>
-                    <% if project.public? %><span class="text-emerald-600">public</span><% end %>
+                    <%= link_to (project.public_key.presence || project.key),
+                                project_path(project),
+                                class: "text-blue-600 hover:underline dark:text-blue-400" %>
                   </div>
                 <% end %>
                 <% if asap_projects.size > 3 %>
@@ -122,19 +123,17 @@
                 <% end %>
               <% elsif candidate.failed? %>
                 <span class="inline-flex rounded bg-red-100 px-2 py-0.5 font-medium text-red-800 dark:bg-red-900/40 dark:text-red-200">Failed</span>
-                <% if candidate.import_error.present? %>
+                <% if candidate.import_error.present? && (admin? || !candidate.scfair_validation_error?) %>
                   <div class="mt-0.5 max-w-xs truncate text-red-500" title="<%= candidate.import_error %>"><%= candidate.import_error.to_s.truncate(80) %></div>
                 <% end %>
-              <% elsif candidate.already_in_asap? %>
-                <span class="text-gray-400">In ASAP</span>
               <% else %>
                 <span class="text-gray-400">Not in ASAP</span>
               <% end %>
             </td>
             <td class="whitespace-nowrap px-3 py-2 text-xs">
               <%= link_to "Details", external_catalog_candidate_path(candidate), class: "text-gray-600 hover:text-gray-900 dark:text-gray-300" %>
-              <% if candidate.can_create_project? %>
-                <%= button_to "Create project",
+              <% if candidate.can_create_project?(accessible_asap_projects: asap_projects) %>
+                <%= button_to "Import",
                               create_project_external_catalog_candidate_path(candidate),
                               method: :post,
                               form: { class: "inline ml-2" },

@@ -23,6 +23,7 @@
      data-heatmap-run-label-value="<%= heatmap_run_label %>"
      data-heatmap-can-analyze-value="<%= can_analyze_heatmap %>"
      data-heatmap-current-user-id-value="<%= current_user&.id.to_i %>"
+     data-heatmap-search-gene-url-value="<%= search_gene_project_path(project) %>"
      data-heatmap-data-url-value="<%= heatmap_data_project_path(project, run_id: run.id) %>">
   <style>
     .heatmap-toggle-btn .heatmap-switch {
@@ -565,7 +566,7 @@
             </span>
           </div>
           <div data-heatmap-target="geneSearchList"
-               style="max-height:120px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; border:1px solid #e5e7eb; border-radius:6px; padding:4px; background:#f9fafb; min-height:36px;">
+               style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; border:1px solid #e5e7eb; border-radius:6px; padding:4px; background:#f9fafb; min-height:36px;">
             <div data-heatmap-target="geneSearchListEmpty"
                  style="font-size:12px; color:#9ca3af; font-style:italic; padding:6px 4px;">
               Search or select genes on the heatmap

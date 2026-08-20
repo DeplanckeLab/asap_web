@@ -23,6 +23,7 @@ export default class extends Controller {
     runNum: String,
     runLabel: String,
     dataUrl: String,
+    searchGeneUrl: String,
     canAnalyze: { type: Boolean, default: false },
     currentUserId: { type: Number, default: 0 }
   }
@@ -2309,6 +2310,7 @@ export default class extends Controller {
     }
 
     this.updateSelectionPanels()
+    this.refreshExpandedGeneHistograms()
   }
 
   clearLiveSelection(event) {
@@ -2340,6 +2342,7 @@ export default class extends Controller {
     this.selectedCells.clear()
     this.selectedOrigCols.clear()
     this.updateSelectionPanels()
+    this.refreshExpandedGeneHistograms()
     this.drawOverlay()
   }
 
@@ -2410,7 +2413,7 @@ export default class extends Controller {
       }
       return existing
     }
-    const item = { symbol: resolved, checked: !!checked }
+    const item = { symbol: resolved, checked: !!checked, expanded: false }
     this.geneListItems.push(item)
     if (sync && checked) this.applyGeneListHighlightState()
     if (render) this.renderGeneSearchList()
@@ -2446,39 +2449,95 @@ export default class extends Controller {
     if (emptyEl) emptyEl.style.display = "none"
 
     for (const item of this.geneListItems) {
-      const row = document.createElement("div")
-      row.dataset.heatmapGeneItem = "true"
-      row.dataset.geneSymbol = item.symbol
-      row.style.cssText = "display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;background:#fff;border:1px solid #e5e7eb;"
-
-      const checkbox = document.createElement("input")
-      checkbox.type = "checkbox"
-      checkbox.checked = !!item.checked
-      checkbox.dataset.action = "change->heatmap#onGeneListCheckboxChange"
-      checkbox.dataset.geneSymbol = item.symbol
-      checkbox.setAttribute("aria-label", `Highlight ${item.symbol}`)
-      checkbox.style.cssText = "margin:0;flex:0 0 auto;cursor:pointer;"
-
-      const label = document.createElement("span")
-      label.textContent = item.symbol
-      label.style.cssText = "flex:1;min-width:0;font-size:12px;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-      label.title = item.symbol
-
-      const removeBtn = document.createElement("button")
-      removeBtn.type = "button"
-      removeBtn.dataset.action = "heatmap#onGeneListRemove"
-      removeBtn.dataset.geneSymbol = item.symbol
-      removeBtn.title = `Remove ${item.symbol}`
-      removeBtn.setAttribute("aria-label", `Remove ${item.symbol}`)
-      removeBtn.style.cssText = "display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;border:none;background:transparent;color:#6b7280;cursor:pointer;flex:0 0 auto;font-size:14px;line-height:1;"
-      removeBtn.textContent = "x"
-
-      row.appendChild(checkbox)
-      row.appendChild(label)
-      row.appendChild(removeBtn)
-      listEl.appendChild(row)
+      listEl.appendChild(this.buildGeneListItemElement(item))
     }
     this.updateSelectionPanels()
+    requestAnimationFrame(() => this.refreshExpandedGeneHistograms())
+  }
+
+  buildGeneListItemElement(item) {
+    const symbol = item.symbol
+    const safeSymbol = this.escapeHtml(symbol)
+    const expanded = !!item.expanded
+    const card = document.createElement("div")
+    card.dataset.heatmapGeneItem = "true"
+    card.dataset.geneSymbol = symbol
+    card.style.cssText = "background:#fff;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden;"
+
+    const header = document.createElement("div")
+    header.className = "heatmap-gene-header"
+    header.dataset.action = "click->heatmap#onGeneListHeaderClick"
+    header.dataset.geneSymbol = symbol
+    header.style.cssText = "display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;user-select:none;"
+    header.onmouseover = function () { this.style.backgroundColor = "#f9fafb" }
+    header.onmouseout = function () { this.style.backgroundColor = "" }
+    header.innerHTML = `
+      <div class="heatmap-gene-chevron" style="color:#9ca3af;display:flex;align-items:center;justify-content:center;width:14px;flex:0 0 auto;">
+        <i class="fas fa-chevron-right" style="font-size:12px;transition:transform 0.2s ease-out;transform:${expanded ? "rotate(90deg)" : "none"};"></i>
+      </div>
+      <input type="checkbox"
+             ${item.checked ? "checked" : ""}
+             data-action="click->heatmap#onGeneListCheckboxClick change->heatmap#onGeneListCheckboxChange"
+             data-gene-symbol="${safeSymbol}"
+             aria-label="Highlight ${safeSymbol}"
+             style="margin:0;flex:0 0 auto;cursor:pointer;" />
+      <div style="flex:1;min-width:0;font-size:13px;font-weight:500;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${safeSymbol}">
+        ${safeSymbol}
+      </div>
+      <button type="button"
+              class="heatmap-gene-info-btn"
+              data-action="click->heatmap#onGeneListInfoClick"
+              data-gene-symbol="${safeSymbol}"
+              title="More gene information"
+              aria-label="More information about ${safeSymbol}"
+              style="padding:4px;color:#9ca3af;background:none;border:none;border-radius:4px;cursor:pointer;flex:0 0 auto;"
+              onmouseover="this.style.color='#6b7280';this.style.backgroundColor='#f3f4f6';"
+              onmouseout="this.style.color='#9ca3af';this.style.backgroundColor='';">
+        <i class="fas fa-info-circle" style="font-size:14px;"></i>
+      </button>
+      <button type="button"
+              data-action="click->heatmap#onGeneListRemove"
+              data-gene-symbol="${safeSymbol}"
+              title="Remove ${safeSymbol}"
+              aria-label="Remove ${safeSymbol}"
+              style="background:none;border:none;color:#6b7280;cursor:pointer;padding:4px;font-size:16px;line-height:1;width:22px;height:22px;display:flex;align-items:center;justify-content:center;border-radius:4px;flex:0 0 auto;"
+              onmouseover="this.style.backgroundColor='#fee2e2';this.style.color='#dc2626';"
+              onmouseout="this.style.backgroundColor='';this.style.color='#6b7280';">
+        x
+      </button>
+    `
+
+    const body = document.createElement("div")
+    body.className = "heatmap-gene-range-section"
+    body.dataset.geneSymbol = symbol
+    body.style.cssText = `padding:10px 12px;border-top:1px solid #f3f4f6;background:#fafafa;display:${expanded ? "block" : "none"};`
+    body.innerHTML = `
+      <div class="heatmap-gene-hist-caption" style="font-size:11px;color:#6b7280;margin-bottom:6px;line-height:1.35;">
+        Expression over selected cells
+      </div>
+      <canvas class="heatmap-gene-hist-canvas"
+              data-gene-symbol="${safeSymbol}"
+              style="width:100%;height:90px;border:1px solid #e5e7eb;border-radius:4px;background:#fff;display:block;"></canvas>
+      <div class="heatmap-gene-hist-status" style="margin-top:6px;font-size:11px;color:#9ca3af;"></div>
+    `
+
+    card.appendChild(header)
+    card.appendChild(body)
+    return card
+  }
+
+  onGeneListHeaderClick(event) {
+    if (event.target.closest("button") || event.target.closest("input")) return
+    const symbol = event?.currentTarget?.dataset?.geneSymbol
+    if (!symbol) return
+    const item = this.geneListItems.find((entry) => entry.symbol === symbol)
+    if (!item) return
+    item.expanded = !item.expanded
+    this.renderGeneSearchList()
+  }
+
+  onGeneListCheckboxClick(event) {
+    event.stopPropagation()
   }
 
   onGeneListCheckboxChange(event) {
@@ -2490,13 +2549,162 @@ export default class extends Controller {
     this.applyGeneListHighlightState()
   }
 
+  onGeneListInfoClick(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const symbol = event?.currentTarget?.dataset?.geneSymbol
+    if (!symbol) return
+    const searchUrl = this.searchGeneUrlValue || document.getElementById("annotation-popup-overlay")?.dataset?.searchGeneUrl || ""
+    if (!window.openAnnotationPopupGeneModal || !searchUrl) {
+      alert("Gene details are not available on this page.")
+      return
+    }
+    window.openAnnotationPopupGeneModal("", searchUrl, symbol, "", {
+      loomFile: this.loomFile || ""
+    })
+  }
+
   onGeneListRemove(event) {
-    if (event) event.preventDefault()
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
     const symbol = event?.currentTarget?.dataset?.geneSymbol
     if (!symbol) return
     this.geneListItems = this.geneListItems.filter((entry) => entry.symbol !== symbol)
     this.applyGeneListHighlightState()
     this.renderGeneSearchList()
+  }
+
+  expressionValuesForGene(symbol) {
+    if (!this.baseMatrix || !this.nOrigCols) return { values: [], columnCount: 0, usedSelection: false }
+    const rowIndices = this.rowIndicesForSymbol(symbol)
+    if (!rowIndices.length) return { values: [], columnCount: 0, usedSelection: false }
+
+    const selectedCols = this.selectedOrigCols && this.selectedOrigCols.size
+      ? Array.from(this.selectedOrigCols).filter((c) => Number.isInteger(c) && c >= 0 && c < this.nOrigCols)
+      : null
+    const cols = selectedCols && selectedCols.length
+      ? selectedCols
+      : Array.from({ length: this.nOrigCols }, (_, i) => i)
+    const values = []
+    for (const rowIndex of rowIndices) {
+      const rowOff = rowIndex * this.nOrigCols
+      for (const col of cols) {
+        const v = this.baseMatrix[rowOff + col]
+        if (typeof v === "number" && Number.isFinite(v)) values.push(v)
+      }
+    }
+    return {
+      values,
+      columnCount: cols.length,
+      usedSelection: !!(selectedCols && selectedCols.length)
+    }
+  }
+
+  refreshExpandedGeneHistograms() {
+    if (!this.hasGeneSearchListTarget) return
+    const cards = Array.from(this.geneSearchListTarget.querySelectorAll("[data-heatmap-gene-item='true']"))
+    for (const item of this.geneListItems) {
+      if (!item.expanded) continue
+      const card = cards.find((el) => el.dataset.geneSymbol === item.symbol)
+      if (!card) continue
+      this.drawGeneListHistogram(card, item.symbol)
+    }
+  }
+
+  drawGeneListHistogram(card, symbol) {
+    const canvas = card.querySelector(".heatmap-gene-hist-canvas")
+    const caption = card.querySelector(".heatmap-gene-hist-caption")
+    const status = card.querySelector(".heatmap-gene-hist-status")
+    if (!canvas) return
+
+    const { values, columnCount, usedSelection } = this.expressionValuesForGene(symbol)
+    if (caption) {
+      caption.textContent = usedSelection
+        ? `Expression over ${columnCount} selected heatmap column${columnCount === 1 ? "" : "s"}`
+        : `Expression over all ${columnCount} heatmap column${columnCount === 1 ? "" : "s"} (no cell selection)`
+    }
+
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+    const dpr = window.devicePixelRatio || 1
+    const rect = canvas.getBoundingClientRect()
+    const width = Math.max(1, Math.floor(rect.width || canvas.clientWidth || 240))
+    const height = Math.max(1, Math.floor(rect.height || 90))
+    canvas.width = width * dpr
+    canvas.height = height * dpr
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, width, height)
+    ctx.fillStyle = "#ffffff"
+    ctx.fillRect(0, 0, width, height)
+
+    if (!values.length) {
+      if (status) status.textContent = "No expression values available for this gene."
+      ctx.fillStyle = "#9ca3af"
+      ctx.font = "12px sans-serif"
+      ctx.textAlign = "center"
+      ctx.textBaseline = "middle"
+      ctx.fillText("No values", width / 2, height / 2)
+      return
+    }
+
+    const minEdge = this.safeMin(values)
+    const maxEdge = this.safeMax(values)
+    if (!(maxEdge > minEdge) || !Number.isFinite(minEdge) || !Number.isFinite(maxEdge)) {
+      if (status) {
+        status.textContent = Number.isFinite(minEdge)
+          ? `All values are ${minEdge.toFixed(3)}`
+          : "No finite expression values."
+      }
+      ctx.fillStyle = "#9ca3af"
+      ctx.font = "12px sans-serif"
+      ctx.textAlign = "center"
+      ctx.textBaseline = "middle"
+      ctx.fillText(
+        Number.isFinite(minEdge) ? `Constant: ${minEdge.toFixed(3)}` : "No values",
+        width / 2,
+        height / 2
+      )
+      return
+    }
+
+    const numBins = 40
+    const padL = 8
+    const padR = 8
+    const padT = 8
+    const padB = 22
+    const plotW = Math.max(1, width - padL - padR)
+    const plotH = Math.max(1, height - padT - padB)
+    const { bins, maxCount } = this.buildHistogramBins(values, minEdge, maxEdge, numBins, {
+      scale: "normal",
+      ignoreZeros: false
+    })
+    const denom = maxCount > 0 ? maxCount : 1
+    const barWidth = plotW / numBins
+
+    ctx.fillStyle = "#9ca3af"
+    for (let i = 0; i < numBins; i++) {
+      const count = bins[i] || 0
+      const barH = (count / denom) * plotH
+      const x = padL + i * barWidth
+      const y = padT + plotH - barH
+      ctx.fillRect(x, y, Math.max(1, barWidth - 1), barH)
+    }
+
+    ctx.fillStyle = "#6b7280"
+    ctx.font = "10px sans-serif"
+    ctx.textBaseline = "top"
+    ctx.textAlign = "left"
+    ctx.fillText(minEdge.toFixed(2), padL, height - padB + 4)
+    ctx.textAlign = "right"
+    ctx.fillText(maxEdge.toFixed(2), width - padR, height - padB + 4)
+
+    if (status) {
+      status.textContent = `${values.length} value${values.length === 1 ? "" : "s"} · min ${minEdge.toFixed(3)} · max ${maxEdge.toFixed(3)}`
+    }
   }
 
   onGeneSearchInput(event) {

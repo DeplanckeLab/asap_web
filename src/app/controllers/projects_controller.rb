@@ -2722,7 +2722,8 @@ class ProjectsController < ApplicationController
   end
 
   # POST /projects/:id/search_gene_set_overlaps
-  # Ranks gene sets by how much of the query gene list they contain.
+  # Ranks gene sets by overlap with the query gene list.
+  # overlap_pct is the share of the gene set covered (overlap / gene_set_size).
   def search_gene_set_overlaps
     raw_genes = params[:genes]
     raw_genes = raw_genes.values if raw_genes.respond_to?(:values) && !raw_genes.is_a?(Array)
@@ -10220,7 +10221,8 @@ class ProjectsController < ApplicationController
               overlap_count: overlap_count,
               gene_set_size: set_size,
               query_gene_count: selected_count,
-              overlap_pct: ((100.0 * overlap_count) / selected_count).round(1)
+              overlap_pct: ((100.0 * overlap_count) / set_size).round(1),
+              selected_overlap_pct: ((100.0 * overlap_count) / selected_count).round(1)
             }.merge(type_data)
           end
         end
@@ -10252,13 +10254,15 @@ class ProjectsController < ApplicationController
             overlap_count: overlap_count,
             gene_set_size: set_size,
             query_gene_count: selected_count,
-            overlap_pct: ((100.0 * overlap_count) / selected_count).round(1)
+            overlap_pct: ((100.0 * overlap_count) / set_size).round(1),
+            selected_overlap_pct: ((100.0 * overlap_count) / selected_count).round(1)
           }.merge(type_data)
         end
       end
 
+      # Prefer larger absolute overlaps, then higher share of the gene set covered.
       results.sort_by! do |entry|
-        [-entry[:overlap_pct].to_f, -entry[:overlap_count].to_i, entry[:name].to_s.downcase]
+        [-entry[:overlap_count].to_i, -entry[:overlap_pct].to_f, entry[:name].to_s.downcase]
       end
       results.first(limit)
     end

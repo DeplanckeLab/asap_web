@@ -58,7 +58,7 @@ export class GeneSetOverlapPopup {
           <div>
             <h3 style="margin:0;font-size:18px;font-weight:600;color:#111827;">Gene sets overlapping selected genes</h3>
             <div data-role="gene-set-overlap-subtitle" style="margin-top:4px;font-size:12px;color:#6b7280;">
-              Ranking by share of the ${geneCount} selected gene${geneCount === 1 ? "" : "s"} found in each gene set
+              Ranking gene sets by overlap with the ${geneCount} selected gene${geneCount === 1 ? "" : "s"} (percentage is share of each gene set covered)
             </div>
           </div>
           <button type="button" data-role="gene-set-overlap-close" style="background:none;border:none;font-size:22px;color:#6b7280;cursor:pointer;line-height:1;">x</button>
@@ -137,7 +137,7 @@ export class GeneSetOverlapPopup {
     const unresolved = Number(payload.unresolved_count || 0)
     const subtitle = this.overlay?.querySelector('[data-role="gene-set-overlap-subtitle"]')
     if (subtitle) {
-      let text = `Ranking by share of the ${queryCount} resolved gene${queryCount === 1 ? "" : "s"} found in each gene set`
+      let text = `Percentage is the share of each gene set covered by the ${queryCount} resolved gene${queryCount === 1 ? "" : "s"}`
       if (unresolved > 0) text += ` (${unresolved} unresolved)`
       subtitle.textContent = text
     }
@@ -159,6 +159,7 @@ export class GeneSetOverlapPopup {
       const pct = Number(item.overlap_pct || 0)
       const overlap = Number(item.overlap_count || 0)
       const setSize = Number(item.gene_set_size || 0)
+      const queryCountForItem = Number(item.query_gene_count || queryCount || 0)
       const typeLabel = this.escapeHtml(item.type_label || "")
       const typeIcon = this.escapeHtml(item.type_icon || "fas fa-folder")
       const typeColor = this.escapeHtml(item.type_icon_color || "#6b7280")
@@ -175,8 +176,8 @@ export class GeneSetOverlapPopup {
           </div>
           <div style="flex:0 0 auto;text-align:right;">
             <div style="font-size:14px;font-weight:700;color:#0f766e;">${pct.toFixed(1)}%</div>
-            <div style="font-size:11px;color:#6b7280;">${overlap} / ${setSize} in set</div>
-            <div style="font-size:11px;color:#9ca3af;">of selected list</div>
+            <div style="font-size:11px;color:#6b7280;">${overlap} / ${setSize} of set</div>
+            <div style="font-size:11px;color:#9ca3af;">${overlap} / ${queryCountForItem} of selected</div>
           </div>
         </div>
       `

@@ -70,16 +70,9 @@ export class RendererManager {
     const xTickSpacing = this.calculateTickSpacing(xRange)
     const yTickSpacing = this.calculateTickSpacing(yRange)
     
-    const overlayScale = this.getPlotOverlayScale()
-    const tickFontSize = Math.max(8, Math.round(12 * overlayScale))
-    const titleFontSize = Math.max(9, Math.round(14 * overlayScale))
-    const tickLength = Math.max(3, Math.round(5 * overlayScale))
-    const tickLabelGap = Math.max(4, Math.round(10 * overlayScale))
-    const yTickLabelGap = Math.max(4, Math.round(7 * overlayScale))
-
     ctx.fillStyle = '#333333'
     ctx.strokeStyle = '#333333'
-    ctx.font = `${tickFontSize}px Arial`
+    ctx.font = '12px Arial'
     
     // X-axis ticks
     ctx.textAlign = 'center'
@@ -92,11 +85,11 @@ export class RendererManager {
       // Tick mark
       ctx.beginPath()
       ctx.moveTo(screenX, xAxisY)
-      ctx.lineTo(screenX, xAxisY + tickLength)
+      ctx.lineTo(screenX, xAxisY + 5)
       ctx.stroke()
       
       // Label
-      ctx.fillText(value.toFixed(1), screenX, xAxisY + tickLabelGap)
+      ctx.fillText(value.toFixed(1), screenX, xAxisY + 10)
     }
     
     // Y-axis ticks
@@ -109,28 +102,26 @@ export class RendererManager {
       
       // Tick mark
       ctx.beginPath()
-      ctx.moveTo(yAxisX - tickLength, screenY)
+      ctx.moveTo(yAxisX - 5, screenY)
       ctx.lineTo(yAxisX, screenY)
       ctx.stroke()
       
       // Label
-      ctx.fillText(value.toFixed(1), yAxisX - yTickLabelGap, screenY)
+      ctx.fillText(value.toFixed(1), yAxisX - 7, screenY)
     }
     
     // Add axis titles
     ctx.fillStyle = '#333333'
-    ctx.font = `${titleFontSize}px Arial`
+    ctx.font = '14px Arial'
     
     // X-axis title
     ctx.textAlign = 'center'
     ctx.textBaseline = 'bottom'
-    const xTitleY = height - Math.max(4, Math.round(margins.bottom * 0.25))
-    ctx.fillText('Dimension 1', width / 2, xTitleY)
+    ctx.fillText('Dimension 1', width / 2, height - 15)
     
     // Y-axis title (rotated)
     ctx.save()
-    const yTitleX = Math.max(titleFontSize, Math.round(margins.left * 0.35))
-    ctx.translate(yTitleX, height / 2)
+    ctx.translate(20, height / 2)
     ctx.rotate(-Math.PI / 2)
     ctx.textAlign = 'center'
     ctx.textBaseline = 'bottom'
@@ -444,6 +435,8 @@ export class RendererManager {
       ? this.controller.syncCurrentMetadataIdWithPanelByName()
       : String(this.controller.currentMetadataId || this.controller.currentMetadataVector?.id || '')
 
+    const labelLayout = this.getActiveLabelLayout(resolvedMetadataId, width, height, margins)
+
     sortable.forEach(([category, centroid]) => {
       const centroidScreenX = this.controller.interactionHandler.normalizeX(centroid.x, this.controller.currentBounds)
       const centroidScreenY = this.controller.interactionHandler.normalizeY(centroid.y, this.controller.currentBounds)
@@ -459,40 +452,50 @@ export class RendererManager {
 
       const existingLabel = existingLabelsByCategory.get(category)
       const persistedLock = this.controller.manualLabelLocks ? this.controller.manualLabelLocks.get(category) : null
-      const manualOffsetX = persistedLock?.manualOffsetX ?? (existingLabel ? (existingLabel.manualOffsetX ?? existingLabel.offsetX ?? 0) : 0)
-      const manualOffsetY = persistedLock?.manualOffsetY ?? (existingLabel ? (existingLabel.manualOffsetY ?? existingLabel.offsetY ?? 0) : 0)
-      const labelIsManuallyMoved = !!(persistedLock?.isManuallyMoved || (existingLabel && existingLabel.isManuallyMoved))
+      const layoutOffset = labelLayout?.positions?.[String(category)] || null
+      const scaleX = labelLayout?.scaleX || 1
+      const scaleY = labelLayout?.scaleY || 1
+      const rawManualOffsetX = persistedLock?.manualOffsetX ?? (existingLabel ? (existingLabel.manualOffsetX ?? existingLabel.offsetX ?? 0) : 0)
+      const rawManualOffsetY = persistedLock?.manualOffsetY ?? (existingLabel ? (existingLabel.manualOffsetY ?? existingLabel.offsetY ?? 0) : 0)
+      const freezePlacement = !!(this.controller.draggingLabel && this.controller.draggingLabel.category === category)
+      const labelIsManuallyMoved = !!(persistedLock?.isManuallyMoved || (existingLabel && existingLabel.isManuallyMoved) || layoutOffset?.isManuallyMoved)
       const freezeMovedLabels = this.controller.freezeMovedLabels !== false
 
-      const freezePlacement = !!(this.controller.draggingLabel && this.controller.draggingLabel.category === category)
-
-      let preferredX = centroidScreenX + manualOffsetX
-      let preferredY = centroidScreenY + manualOffsetY
-      // Keep manually moved labels fixed across re-renders, but never while actively dragging.
-      if (!freezePlacement && freezeMovedLabels && labelIsManuallyMoved) {
-        preferredX = persistedLock?.lockedX ?? existingLabel?.lockedX ?? existingLabel?.x ?? preferredX
-        preferredY = persistedLock?.lockedY ?? existingLabel?.lockedY ?? existingLabel?.y ?? preferredY
+      // Prefer live drag offsets, then checkpoint-relative offsets scaled to this plot,
+      // then manual locks. Never reuse absolute lockedX/Y from another canvas size.
+      let manualOffsetX
+      let manualOffsetY
+      if (freezePlacement) {
+        manualOffsetX = rawManualOffsetX
+        manualOffsetY = rawManualOffsetY
+      } else if (layoutOffset && Number.isFinite(Number(layoutOffset.dx)) && Number.isFinite(Number(layoutOffset.dy))) {
+        manualOffsetX = Number(layoutOffset.dx) * scaleX
+        manualOffsetY = Number(layoutOffset.dy) * scaleY
+      } else if (labelLayout) {
+        manualOffsetX = rawManualOffsetX * scaleX
+        manualOffsetY = rawManualOffsetY * scaleY
+      } else {
+        manualOffsetX = rawManualOffsetX
+        manualOffsetY = rawManualOffsetY
       }
+
+      const preferredX = centroidScreenX + manualOffsetX
+      const preferredY = centroidScreenY + manualOffsetY
 
       const displayText = this.formatCategoryLabel(category, truncateLongLabels)
       ctx.font = `${labelFontSize}px Arial`
       const textMetrics = ctx.measureText(displayText)
       const textWidth = textMetrics.width
       const textHeight = labelFontSize + 2
-      const halfLabelWidth = textWidth / 2 + boxPadding
-      const halfLabelHeight = textHeight / 2 + boxPadding
 
       // Build candidates around centroid/manual location and pick one that minimizes overlap.
       const placementMode = this.controller.labelPlacementMode || 'avoid-collisions'
       const useCentroidPlacement = placementMode === 'centroid'
       const keepManualPlacementFixed = freezeMovedLabels && labelIsManuallyMoved
+      const keepCheckpointLayout = !!(layoutOffset && !freezePlacement)
       const centroidDistanceToCenter = Math.hypot(centroidScreenX - plotCenterX, centroidScreenY - plotCenterY)
-      const plotMinSide = Math.min(width, height)
-      const maxCandidateRadius = Math.min(
-        Math.max(40, plotMinSide * 0.45),
-        Math.max(40, 40 + centroidDistanceToCenter * 0.5)
-      )
-      const candidates = (freezePlacement || useCentroidPlacement || keepManualPlacementFixed)
+      const maxCandidateRadius = Math.min(192, Math.max(56, 56 + centroidDistanceToCenter * 0.5))
+      const candidates = (freezePlacement || useCentroidPlacement || keepManualPlacementFixed || keepCheckpointLayout)
         ? [{ x: preferredX, y: preferredY }]
         : this.buildLabelCandidates(preferredX, preferredY, maxCandidateRadius)
 
@@ -500,21 +503,37 @@ export class RendererManager {
 
       for (let i = 0; i < candidates.length; i++) {
         const candidate = candidates[i]
-        const clamped = this.clampLabelCenter(
-          candidate.x,
-          candidate.y,
-          halfLabelWidth,
-          halfLabelHeight,
-          width,
-          height
-        )
-        const visualBounds = {
-          x: clamped.x - halfLabelWidth,
-          y: clamped.y - halfLabelHeight,
+        let placeX = candidate.x
+        let placeY = candidate.y
+        let visualBounds = {
+          x: placeX - textWidth / 2 - boxPadding,
+          y: placeY - textHeight / 2 - boxPadding,
           width: textWidth + boxPadding * 2,
           height: textHeight + boxPadding * 2
         }
-        const wasClamped = (clamped.x !== candidate.x) || (clamped.y !== candidate.y)
+
+        // Keep labels inside viewport to avoid inaccessible drag targets.
+        const insideCanvas = (
+          visualBounds.x >= 0 &&
+          visualBounds.y >= 0 &&
+          (visualBounds.x + visualBounds.width) <= width &&
+          (visualBounds.y + visualBounds.height) <= height
+        )
+        // Checkpoint / frozen layouts must stay near their saved relative position.
+        // Soft-clamp onto the canvas instead of dropping or re-running collision search.
+        if (!insideCanvas) {
+          if (!(keepCheckpointLayout || keepManualPlacementFixed || freezePlacement)) continue
+          const halfW = textWidth / 2 + boxPadding
+          const halfH = textHeight / 2 + boxPadding
+          placeX = Math.min(Math.max(placeX, halfW), Math.max(halfW, width - halfW))
+          placeY = Math.min(Math.max(placeY, halfH), Math.max(halfH, height - halfH))
+          visualBounds = {
+            x: placeX - halfW,
+            y: placeY - halfH,
+            width: textWidth + boxPadding * 2,
+            height: textHeight + boxPadding * 2
+          }
+        }
 
         const collisionBounds = {
           x: visualBounds.x - collisionPadding,
@@ -530,14 +549,14 @@ export class RendererManager {
 
         // Penalize candidates whose leader line would cross existing label boxes.
         let lineCrossCount = 0
-        const displacement = Math.hypot(clamped.x - centroidScreenX, clamped.y - centroidScreenY)
+        const displacement = Math.hypot(placeX - centroidScreenX, placeY - centroidScreenY)
         if (displacement > 4) {
           for (let j = 0; j < placedVisualBounds.length; j++) {
             if (this.doesSegmentIntersectRect(
               centroidScreenX,
               centroidScreenY,
-              clamped.x,
-              clamped.y,
+              placeX,
+              placeY,
               placedVisualBounds[j]
             )) {
               lineCrossCount += 1
@@ -545,16 +564,15 @@ export class RendererManager {
           }
         }
 
-        const distance = Math.hypot(clamped.x - preferredX, clamped.y - preferredY)
+        const distance = Math.hypot(placeX - preferredX, placeY - preferredY)
         evaluatedCandidates.push({
-          x: clamped.x,
-          y: clamped.y,
+          x: placeX,
+          y: placeY,
           visualBounds,
           collisionBounds,
           overlapArea,
           lineCrossCount,
-          distance,
-          wasClamped
+          distance
         })
       }
 
@@ -564,7 +582,6 @@ export class RendererManager {
         const candidatePool = nearCandidates.length > 0 ? nearCandidates : evaluatedCandidates
 
         const sortByQuality = (a, b) => {
-          if (a.wasClamped !== b.wasClamped) return a.wasClamped ? 1 : -1
           if (a.overlapArea !== b.overlapArea) return a.overlapArea - b.overlapArea
           if (a.lineCrossCount !== b.lineCrossCount) return a.lineCrossCount - b.lineCrossCount
           return a.distance - b.distance
@@ -572,10 +589,7 @@ export class RendererManager {
 
         const zeroOverlapZeroCross = candidatePool
           .filter(c => c.overlapArea === 0 && c.lineCrossCount === 0)
-          .sort((a, b) => {
-            if (a.wasClamped !== b.wasClamped) return a.wasClamped ? 1 : -1
-            return a.distance - b.distance
-          })
+          .sort((a, b) => a.distance - b.distance)
 
         if (zeroOverlapZeroCross.length > 0) {
           bestCandidate = zeroOverlapZeroCross[0]
@@ -584,7 +598,6 @@ export class RendererManager {
           const zeroOverlap = candidatePool
             .filter(c => c.overlapArea === 0)
             .sort((a, b) => {
-              if (a.wasClamped !== b.wasClamped) return a.wasClamped ? 1 : -1
               if (a.lineCrossCount !== b.lineCrossCount) return a.lineCrossCount - b.lineCrossCount
               return a.distance - b.distance
             })
@@ -598,38 +611,7 @@ export class RendererManager {
         }
       }
 
-      // Last resort on tiny mobile plots: clamp the preferred position into the canvas.
-      if (!bestCandidate) {
-        const clamped = this.clampLabelCenter(
-          preferredX,
-          preferredY,
-          halfLabelWidth,
-          halfLabelHeight,
-          width,
-          height
-        )
-        const visualBounds = {
-          x: clamped.x - halfLabelWidth,
-          y: clamped.y - halfLabelHeight,
-          width: textWidth + boxPadding * 2,
-          height: textHeight + boxPadding * 2
-        }
-        bestCandidate = {
-          x: clamped.x,
-          y: clamped.y,
-          visualBounds,
-          collisionBounds: {
-            x: visualBounds.x - collisionPadding,
-            y: visualBounds.y - collisionPadding,
-            width: visualBounds.width + collisionPadding * 2,
-            height: visualBounds.height + collisionPadding * 2
-          },
-          overlapArea: 0,
-          lineCrossCount: 0,
-          distance: Math.hypot(clamped.x - preferredX, clamped.y - preferredY),
-          wasClamped: true
-        }
-      }
+      if (!bestCandidate) return
 
       const screenX = bestCandidate.x
       const screenY = bestCandidate.y
@@ -760,6 +742,12 @@ export class RendererManager {
 
     // Update stored labels
     this.controller.canvas2DLabels = newLabels
+
+    // Keep a plot-relative layout snapshot. Rebuild when missing or for another metadata
+    // so resize/mobile can scale the same placement instead of reshuffling collisions.
+    if (newLabels.length > 0 && !this.getActiveLabelLayout(resolvedMetadataId, width, height, margins)) {
+      this.controller.checkpointLabelLayout = this.buildCheckpointLabelLayout()
+    }
     
     // If we're currently dragging a label, update the reference to point to the new label object
     if (this.controller.draggingLabel) {
@@ -799,16 +787,63 @@ export class RendererManager {
     return candidates
   }
 
-  clampLabelCenter(x, y, halfWidth, halfHeight, canvasWidth, canvasHeight) {
-    const minX = Math.min(halfWidth, canvasWidth / 2)
-    const maxX = Math.max(canvasWidth - halfWidth, canvasWidth / 2)
-    const minY = Math.min(halfHeight, canvasHeight / 2)
-    const maxY = Math.max(canvasHeight - halfHeight, canvasHeight / 2)
+  getActiveLabelLayout(metadataId, width, height, margins) {
+    const layout = this.controller.checkpointLabelLayout
+    if (!layout || typeof layout !== 'object') return null
+
+    const layoutMetadataId = String(layout.metadataId || '')
+    const currentMetadataId = String(metadataId || '')
+    if (layoutMetadataId && currentMetadataId && layoutMetadataId !== currentMetadataId) return null
+
+    const sourcePlotWidth = Number(layout.plotWidth)
+    const sourcePlotHeight = Number(layout.plotHeight)
+    if (!(sourcePlotWidth > 0) || !(sourcePlotHeight > 0)) return null
+    if (!layout.positions || typeof layout.positions !== 'object') return null
+
+    const plotWidth = Math.max(1, width - margins.left - margins.right)
+    const plotHeight = Math.max(1, height - margins.top - margins.bottom)
+
     return {
-      x: Math.min(maxX, Math.max(minX, x)),
-      y: Math.min(maxY, Math.max(minY, y))
+      positions: layout.positions,
+      scaleX: plotWidth / sourcePlotWidth,
+      scaleY: plotHeight / sourcePlotHeight
     }
   }
+
+  buildCheckpointLabelLayout() {
+    const labels = this.controller.canvas2DLabels
+    if (!Array.isArray(labels) || labels.length === 0) return null
+    if (!this.controller.overlayCanvas) return null
+
+    const width = this.controller.overlayCanvas.width
+    const height = this.controller.overlayCanvas.height
+    if (!(width > 0) || !(height > 0)) return null
+
+    const margins = this.getPlotMargins()
+    const positions = {}
+    labels.forEach((label) => {
+      if (!label || label.category == null) return
+      if (typeof label.x !== 'number' || typeof label.y !== 'number') return
+      if (typeof label.centroidScreenX !== 'number' || typeof label.centroidScreenY !== 'number') return
+      positions[String(label.category)] = {
+        dx: label.x - label.centroidScreenX,
+        dy: label.y - label.centroidScreenY,
+        isManuallyMoved: !!label.isManuallyMoved
+      }
+    })
+
+    if (Object.keys(positions).length === 0) return null
+
+    return {
+      metadataId: String(labels[0]?.metadataId || this.controller.currentMetadataId || ''),
+      canvasWidth: width,
+      canvasHeight: height,
+      plotWidth: Math.max(1, width - margins.left - margins.right),
+      plotHeight: Math.max(1, height - margins.top - margins.bottom),
+      positions
+    }
+  }
+
 
   computeOverlapArea(a, b) {
     const overlapX = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x))
@@ -820,8 +855,9 @@ export class RendererManager {
     const width = this.controller.overlayCanvas?.width || this.controller.canvas?.width || 800
     const height = this.controller.overlayCanvas?.height || this.controller.canvas?.height || 600
     const minSide = Math.min(width, height)
-    // Full size around 500px+; shrink toward ~45% on small mobile plots.
-    return Math.min(1, Math.max(0.45, minSide / 500))
+    // Full size around 500px+; shrink toward ~35% on small mobile plots so text fits
+    // without reshuffling checkpoint-relative placements.
+    return Math.min(1, Math.max(0.35, minSide / 500))
   }
 
   getAutoLabelFontSize(labelCount) {
@@ -830,7 +866,7 @@ export class RendererManager {
     else if (labelCount <= 24) size = 14
     else if (labelCount <= 45) size = 12
     const scale = this.getPlotOverlayScale()
-    return Math.max(8, Math.round(size * scale))
+    return Math.max(6, Math.round(size * scale))
   }
 
   doesSegmentIntersectRect(x1, y1, x2, y2, rect) {
@@ -945,14 +981,11 @@ export class RendererManager {
 
   // Utility methods for rendering
   getPlotMargins() {
-    // Fixed desktop margins eat most of the mobile locked square (~140-400px).
-    // Scale them with the overlay so axis ticks and category labels keep usable plot area.
-    const scale = this.getPlotOverlayScale()
     return {
-      left: Math.max(24, Math.round(60 * scale)),
-      right: Math.max(8, Math.round(20 * scale)),
-      top: Math.max(8, Math.round(20 * scale)),
-      bottom: Math.max(24, Math.round(60 * scale))
+      left: 60,    // Space for Y-axis labels
+      right: 20,   // Right margin
+      top: 20,      // Minimal top margin
+      bottom: 60   // Space for X-axis labels and title (increased to 50)
     }
   }
 

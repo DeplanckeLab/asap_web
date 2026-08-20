@@ -538,6 +538,8 @@ export default class extends Controller {
     this.truncateLongLabels = true
     this.labelPlacementMode = 'avoid-collisions'
     this.freezeMovedLabels = true
+    // Relative label offsets from the last checkpoint (scaled to the current plot size on restore).
+    this.checkpointLabelLayout = null
     // Visium tissue background image visibility (toolbar toggle; default visible)
     this.showSpatialTissueImage = true
     
@@ -9170,6 +9172,38 @@ export default class extends Controller {
       .replace(/'/g, '&#39;')
   }
 
+  normalizeCheckpointLabelLayout(value) {
+    if (!value || typeof value !== 'object') return null
+    const plotWidth = Number(value.plotWidth)
+    const plotHeight = Number(value.plotHeight)
+    if (!(plotWidth > 0) || !(plotHeight > 0)) return null
+    const positionsIn = value.positions && typeof value.positions === 'object' ? value.positions : null
+    if (!positionsIn) return null
+
+    const positions = {}
+    Object.entries(positionsIn).forEach(([category, entry]) => {
+      if (!entry || typeof entry !== 'object') return
+      const dx = Number(entry.dx)
+      const dy = Number(entry.dy)
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) return
+      positions[String(category)] = {
+        dx,
+        dy,
+        isManuallyMoved: entry.isManuallyMoved === true
+      }
+    })
+    if (Object.keys(positions).length === 0) return null
+
+    return {
+      metadataId: String(value.metadataId || ''),
+      canvasWidth: Number(value.canvasWidth) > 0 ? Number(value.canvasWidth) : null,
+      canvasHeight: Number(value.canvasHeight) > 0 ? Number(value.canvasHeight) : null,
+      plotWidth,
+      plotHeight,
+      positions
+    }
+  }
+
   buildCheckpointState() {
     const diag = this.idleDiagEnabled()
     const t0 = diag ? performance.now() : 0
@@ -9341,7 +9375,8 @@ export default class extends Controller {
         truncateLongLabels: this.truncateLongLabels !== false,
         freezeMovedLabels: this.freezeMovedLabels !== false,
         labelPlacementMode: this.labelPlacementMode,
-        manualLabelLocks: manualLabelLocks
+        manualLabelLocks: manualLabelLocks,
+        labelLayout: this.rendererManager?.buildCheckpointLabelLayout?.() || this.checkpointLabelLayout || null
       },
       customPlotWindow: customPlotWindowState,
       interaction: {
@@ -10185,6 +10220,7 @@ export default class extends Controller {
           lockedY: Number.isFinite(Number(lock.lockedY)) ? Number(lock.lockedY) : null
         })
       })
+      this.checkpointLabelLayout = this.normalizeCheckpointLabelLayout(state.display.labelLayout)
 
       const pointSizeSlider = document.getElementById('point-size-slider')
       if (pointSizeSlider && state.display.pointSize) {
@@ -15197,12 +15233,12 @@ export default class extends Controller {
         lockedY: this.draggingLabel.lockedY
       })
       
-      // console.log(`🏷️ [Drag] Moving label "${this.draggingLabel.category}" - offset: (${this.draggingLabel.offsetX}, ${this.draggingLabel.offsetY})`)
-      
       // Redraw the overlay (grid, axes, labels)
       this.rendererManager.renderGrid()
       this.rendererManager.renderAxes()
       this.rendererManager.renderCategoryLabels()
+      // Keep checkpoint-relative layout in the current canvas space after a drag.
+      this.checkpointLabelLayout = this.rendererManager.buildCheckpointLabelLayout()
       
       return
     }

@@ -1723,6 +1723,7 @@ export class UIManager {
     if (this.controller.manualLabelLocks) {
       this.controller.manualLabelLocks.clear()
     }
+    this.controller.checkpointLabelLayout = null
 
     this.refreshCategoryLabels()
   }

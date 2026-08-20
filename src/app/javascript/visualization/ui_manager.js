@@ -1443,11 +1443,45 @@ export class UIManager {
     if (!settingsWindow) return
     
     if (settingsWindow.style.display === 'none' || settingsWindow.style.display === '') {
-      settingsWindow.style.display = 'block'
+      settingsWindow.style.display = 'flex'
+      this.positionSettingsWindowInViewport(settingsWindow)
       this.initializeSettingsWindow()
     } else {
       settingsWindow.style.display = 'none'
     }
+  }
+
+  positionSettingsWindowInViewport(settingsWindow = document.getElementById('settings-window')) {
+    if (!settingsWindow) return
+
+    const margin = 12
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+    if (!(viewportWidth > 0) || !(viewportHeight > 0)) return
+
+    // Prefer right docking; clear any previous drag left that can push it off-screen.
+    if (this.controller?.isMobileVizLayout?.()) {
+      settingsWindow.style.left = 'auto'
+      settingsWindow.style.right = `${margin}px`
+      settingsWindow.style.top = `${margin}px`
+    }
+
+    const rect = settingsWindow.getBoundingClientRect()
+    let left = rect.left
+    let top = rect.top
+    const width = Math.min(rect.width, viewportWidth - margin * 2)
+    const maxTop = Math.max(margin, viewportHeight - rect.height - margin)
+
+    if (left < margin) left = margin
+    if (left + width > viewportWidth - margin) left = Math.max(margin, viewportWidth - width - margin)
+    if (top < margin) top = margin
+    if (top > maxTop) top = maxTop
+
+    if (settingsWindow.style.left !== 'auto' && settingsWindow.style.left !== '') {
+      settingsWindow.style.left = `${Math.round(left)}px`
+      settingsWindow.style.right = 'auto'
+    }
+    settingsWindow.style.top = `${Math.round(top)}px`
   }
 
   initializeSettingsWindow() {
@@ -1832,14 +1866,18 @@ export class UIManager {
     const settingsWindow = document.getElementById('settings-window')
     const header = document.getElementById('settings-header')
     if (!settingsWindow || !header) return
+    if (header.dataset.settingsDragInitialized === 'true') return
+    header.dataset.settingsDragInitialized = 'true'
     
     let isDragging = false
     let startX, startY, startLeft, startTop
     
     const startDrag = (e) => {
+      if (e.type === 'mousedown' && e.button !== 0) return
       isDragging = true
-      startX = e.clientX
-      startY = e.clientY
+      const point = e.touches?.[0] || e
+      startX = point.clientX
+      startY = point.clientY
       
       // Get the actual current position of the window using computed position
       const rect = settingsWindow.getBoundingClientRect()
@@ -1847,35 +1885,44 @@ export class UIManager {
       startTop = rect.top
       
       // Set explicit positioning to prevent jump
-      settingsWindow.style.left = startLeft + 'px'
-      settingsWindow.style.top = startTop + 'px'
+      settingsWindow.style.left = `${startLeft}px`
+      settingsWindow.style.top = `${startTop}px`
+      settingsWindow.style.right = 'auto'
       
       settingsWindow.style.cursor = 'grabbing'
-      e.preventDefault()
+      if (e.cancelable) e.preventDefault()
     }
     
     const doDrag = (e) => {
       if (!isDragging) return
+      const point = e.touches?.[0] || e
+      const deltaX = point.clientX - startX
+      const deltaY = point.clientY - startY
       
-      const deltaX = e.clientX - startX
-      const deltaY = e.clientY - startY
-      
-      settingsWindow.style.left = (startLeft + deltaX) + 'px'
-      settingsWindow.style.top = (startTop + deltaY) + 'px'
+      settingsWindow.style.left = `${startLeft + deltaX}px`
+      settingsWindow.style.top = `${startTop + deltaY}px`
+      settingsWindow.style.right = 'auto'
+      if (e.cancelable) e.preventDefault()
     }
     
     const stopDrag = () => {
+      if (!isDragging) return
       isDragging = false
       settingsWindow.style.cursor = 'move'
+      this.positionSettingsWindowInViewport(settingsWindow)
     }
     
     header.addEventListener('mousedown', startDrag)
     document.addEventListener('mousemove', doDrag)
     document.addEventListener('mouseup', stopDrag)
+    header.addEventListener('touchstart', startDrag, { passive: false })
+    document.addEventListener('touchmove', doDrag, { passive: false })
+    document.addEventListener('touchend', stopDrag)
     
     // Close button functionality
     const closeBtn = document.getElementById('close-settings-btn')
-    if (closeBtn) {
+    if (closeBtn && closeBtn.dataset.settingsCloseInitialized !== 'true') {
+      closeBtn.dataset.settingsCloseInitialized = 'true'
       closeBtn.addEventListener('click', () => {
         settingsWindow.style.display = 'none'
       })

@@ -864,6 +864,9 @@ export default class extends Controller {
     this.panStartX = 0
     this.panStartY = 0
     this.panStartBounds = null
+    this.panGestureMoved = false
+    // Touch devices rarely emit dblclick after pointerdown preventDefault; synthesize double-tap.
+    this._lastPlotTap = null
     
     // Initialize interaction system after DOM is ready
     this.setupSelectionStatesSubscription()
@@ -2547,22 +2550,22 @@ export default class extends Controller {
       : ''
 
     listContainer.innerHTML = `
-      <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #d1d5db;background:#f9fafb;column-gap:6px;position:sticky;top:0;z-index:1;">
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;">Preview</div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;">Checkpoint</div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
+      <div class="checkpoint-history-header">
+        <div class="checkpoint-history-header-cell">Preview</div>
+        <div class="checkpoint-history-header-cell">Checkpoint</div>
+        <div class="checkpoint-history-header-cell is-center">
           <span style="display:block;">Use as</span>
           <span style="display:block;">landing page</span>
         </div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
+        <div class="checkpoint-history-header-cell is-center">
           <span style="display:block;">Without</span>
           <span style="display:block;">comments</span>
         </div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
+        <div class="checkpoint-history-header-cell is-center">
           <span style="display:block;">With</span>
           <span style="display:block;">comments</span>
         </div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;">Delete</div>
+        <div class="checkpoint-history-header-cell is-center">Delete</div>
       </div>
       ${currentRowHtml}
       ${rowsHtml}
@@ -2588,18 +2591,19 @@ export default class extends Controller {
     const updatedAt = checkpoint.updated_at ? new Date(checkpoint.updated_at).toLocaleString() : ''
     const thumbHtml = this.checkpointHistoryThumbnailHtml(checkpoint)
     return `
-      <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;column-gap:6px;background:#f8fafc;">
-        <div style="display:flex;align-items:center;justify-content:flex-start;gap:4px;min-height:54px;">
+      <div class="checkpoint-history-row is-current">
+        <div class="checkpoint-history-preview">
           ${thumbHtml || ''}
         </div>
-        <div style="min-width:0;">
+        <div class="checkpoint-history-meta">
           <div title="Current auto checkpoint" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Current auto checkpoint</div>
           <div style="font-size:11px;color:#6b7280;">Auto-saved ${this.escapeHtml(updatedAt)}. Reset if the view looks wrong after data changes.</div>
         </div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div style="display:flex;align-items:center;justify-content:center;">
+        <div class="checkpoint-history-cell"></div>
+        <div class="checkpoint-history-cell"></div>
+        <div class="checkpoint-history-cell"></div>
+        <div class="checkpoint-history-cell is-center is-delete">
+          <span class="checkpoint-history-field-label">Reset</span>
           <button type="button"
                   onclick="if (window.visualizationController) window.visualizationController.resetCurrentCheckpoint()"
                   style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
@@ -2617,11 +2621,11 @@ export default class extends Controller {
     const checkpointId = this.escapeHtml(checkpoint.id)
     const thumbHtml = this.checkpointHistoryThumbnailHtml(checkpoint)
     return `
-      <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;column-gap:6px;">
-        <div style="display:flex;align-items:center;justify-content:flex-start;gap:4px;min-height:54px;">
+      <div class="checkpoint-history-row">
+        <div class="checkpoint-history-preview">
           ${thumbHtml || ''}
         </div>
-        <div style="min-width:0;">
+        <div class="checkpoint-history-meta">
           <div style="display:flex;align-items:center;gap:6px;min-width:0;">
             <div title="${this.escapeHtml(checkpoint.title || '')}" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">${this.escapeHtml(checkpoint.title || '')}</div>
             <button type="button"
@@ -2635,44 +2639,52 @@ export default class extends Controller {
           </div>
           <div style="font-size:11px;color:#6b7280;">${this.escapeHtml(createdAt)} - ${commentCount} comment${commentCount === 1 ? '' : 's'}</div>
         </div>
-        <div style="display:flex;align-items:center;justify-content:center;">
+        <div class="checkpoint-history-cell is-center is-inline">
+          <span class="checkpoint-history-field-label">Use as landing page</span>
           <input type="checkbox"
                  ${checkpoint.is_landing_page === true ? 'checked' : ''}
                  onclick="event.stopPropagation()"
                  onchange="if (window.visualizationController) window.visualizationController.toggleCheckpointLandingPage('${checkpointId}', this.checked, this)"
                  style="width:14px;height:14px;cursor:pointer;" />
         </div>
-        <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
-          <button type="button"
-                  data-checkpoint-id="${checkpointId}"
-                  onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${checkpointId}', this, false)"
-                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
-                  title="Copy direct link without comments">
-            Copy link
-          </button>
-          <button type="button"
-                  data-checkpoint-id="${checkpointId}"
-                  onclick="if (window.visualizationController) window.visualizationController.loadCheckpointById('${checkpointId}')"
-                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
-            Open
-          </button>
+        <div class="checkpoint-history-cell is-center">
+          <span class="checkpoint-history-field-label">Without comments</span>
+          <div class="checkpoint-history-btn-row">
+            <button type="button"
+                    data-checkpoint-id="${checkpointId}"
+                    onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${checkpointId}', this, false)"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
+                    title="Copy direct link without comments">
+              Copy link
+            </button>
+            <button type="button"
+                    data-checkpoint-id="${checkpointId}"
+                    onclick="if (window.visualizationController) window.visualizationController.loadCheckpointById('${checkpointId}')"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+              Open
+            </button>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
-          <button type="button"
-                  data-checkpoint-id="${checkpointId}"
-                  onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${checkpointId}', this, true)"
-                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
-                  title="Copy direct link and open comments">
-            Copy link
-          </button>
-          <button type="button"
-                  data-checkpoint-id="${checkpointId}"
-                  onclick="if (window.visualizationController) window.visualizationController.loadCheckpointWithCommentsById('${checkpointId}')"
-                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
-            Open
-          </button>
+        <div class="checkpoint-history-cell is-center">
+          <span class="checkpoint-history-field-label">With comments</span>
+          <div class="checkpoint-history-btn-row">
+            <button type="button"
+                    data-checkpoint-id="${checkpointId}"
+                    onclick="if (window.visualizationController) window.visualizationController.copyCheckpointDirectLink('${checkpointId}', this, true)"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
+                    title="Copy direct link and open comments">
+              Copy link
+            </button>
+            <button type="button"
+                    data-checkpoint-id="${checkpointId}"
+                    onclick="if (window.visualizationController) window.visualizationController.loadCheckpointWithCommentsById('${checkpointId}')"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+              Open
+            </button>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;justify-content:center;">
+        <div class="checkpoint-history-cell is-center is-delete">
+          <span class="checkpoint-history-field-label">Delete</span>
           <button type="button"
                   data-checkpoint-id="${checkpointId}"
                   onclick="if (window.visualizationController) window.visualizationController.deleteCheckpointById('${checkpointId}')"
@@ -12594,11 +12606,54 @@ export default class extends Controller {
 
   closeColoringHistoryMenu() {
     const menu = document.getElementById('current-coloring-history-menu')
-    if (menu) menu.style.display = 'none'
+    if (!menu) return
+    menu.style.display = 'none'
+    menu.style.position = ''
+    menu.style.left = ''
+    menu.style.top = ''
+    menu.style.right = ''
+    menu.style.minWidth = ''
+    menu.style.maxWidth = ''
+    menu.style.maxHeight = ''
+    menu.style.zIndex = ''
   }
 
   preventColoringHistoryMenuClose(event) {
     event.stopPropagation()
+  }
+
+  positionColoringHistoryMenu(menu, anchor) {
+    if (!menu || !anchor) return
+
+    const rect = anchor.getBoundingClientRect()
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+    const margin = 8
+    const menuWidth = Math.min(280, Math.max(180, viewportWidth - margin * 2))
+    let left = rect.left
+    let top = rect.bottom + 4
+
+    if (left + menuWidth > viewportWidth - margin) {
+      left = Math.max(margin, viewportWidth - menuWidth - margin)
+    }
+    if (left < margin) left = margin
+
+    const spaceBelow = viewportHeight - top - margin
+    const spaceAbove = rect.top - margin
+    let maxHeight = Math.min(260, Math.max(120, spaceBelow))
+    if (spaceBelow < 140 && spaceAbove > spaceBelow) {
+      maxHeight = Math.min(260, Math.max(120, spaceAbove))
+      top = Math.max(margin, rect.top - maxHeight - 4)
+    }
+
+    menu.style.position = 'fixed'
+    menu.style.left = `${Math.round(left)}px`
+    menu.style.top = `${Math.round(top)}px`
+    menu.style.right = 'auto'
+    menu.style.minWidth = `${Math.min(200, menuWidth)}px`
+    menu.style.maxWidth = `${Math.round(menuWidth)}px`
+    menu.style.maxHeight = `${Math.round(maxHeight)}px`
+    menu.style.zIndex = '12000'
   }
 
   renderColoringHistoryMenu() {
@@ -12640,6 +12695,7 @@ export default class extends Controller {
     }
 
     const menu = document.getElementById('current-coloring-history-menu')
+    const historyBtn = document.getElementById('current-coloring-history-btn')
     if (!menu) return
 
     const isOpen = menu.style.display === 'block'
@@ -12647,6 +12703,7 @@ export default class extends Controller {
     if (isOpen) return
 
     this.renderColoringHistoryMenu()
+    this.positionColoringHistoryMenu(menu, historyBtn || event?.currentTarget)
     menu.style.display = 'block'
   }
 
@@ -14301,6 +14358,10 @@ export default class extends Controller {
     this.updateMobileVizChromeHeight()
     this.updateMobilePanelSelectorState()
 
+    if (this.customPlotManager?.is2DPlotMinimized) {
+      this.customPlotManager.syncMinimized2DPlotDock()
+    }
+
     if (redraw && this.canvas && this.reglRenderer && !this.isPanning && !this.isDrawingLasso && !this.isZooming) {
       requestAnimationFrame(() => {
         this.redrawPlot()
@@ -15294,6 +15355,55 @@ export default class extends Controller {
     } else if (this.interactionMode === 'pan') {
       this.onPanMouseUp(event)
     }
+
+    this.maybeHandlePlotDoubleTap(event)
+  }
+
+  maybeHandlePlotDoubleTap(event) {
+    if (!event) return
+
+    // Desktop mice still get a native dblclick; synthesizing here would reset twice.
+    const pointerType = String(event.pointerType || '')
+    const isTouchLike = pointerType === 'touch' || pointerType === 'pen' ||
+      (pointerType === '' && this.isMobileVizLayout())
+    if (!isTouchLike) return
+
+    if (this.isClientPointOverVisualizationOntopUi(event.clientX, event.clientY)) {
+      this._lastPlotTap = null
+      return
+    }
+
+    // A real drag/pan/lasso/label move is not a tap.
+    const panMoved = this.panGestureMoved === true
+    this.panGestureMoved = false
+    if (panMoved || this.labelDragMoved) {
+      this._lastPlotTap = null
+      return
+    }
+    if (this.interactionMode === 'lasso' && Array.isArray(this.lassoPoints) && this.lassoPoints.length > 2) {
+      this._lastPlotTap = null
+      return
+    }
+
+    const now = performance.now()
+    const x = Number(event.clientX)
+    const y = Number(event.clientY)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return
+
+    const last = this._lastPlotTap
+    const maxIntervalMs = 350
+    const maxDistancePx = 28
+
+    if (last && (now - last.time) <= maxIntervalMs) {
+      const distance = Math.hypot(x - last.x, y - last.y)
+      if (distance <= maxDistancePx) {
+        this._lastPlotTap = null
+        this.onInteractionDoubleClick(event)
+        return
+      }
+    }
+
+    this._lastPlotTap = { time: now, x, y }
   }
 
   onInteractionPointerLeave() {
@@ -15725,6 +15835,7 @@ export default class extends Controller {
   onPanMouseDown(event) {
     //console.log('Pan mouse down')
     this.isPanning = true
+    this.panGestureMoved = false
     
     // Store starting position
     const canvas = this.canvas
@@ -15771,10 +15882,12 @@ export default class extends Controller {
     if (!pointer) return
     const currentX = pointer.x
     const currentY = pointer.y
-    
-    // Calculate pan delta
+
     const deltaX = currentX - this.panStartX
     const deltaY = currentY - this.panStartY
+    if (!this.panGestureMoved && (Math.abs(deltaX) > 6 || Math.abs(deltaY) > 6)) {
+      this.panGestureMoved = true
+    }
     
     // Store the mouse delta for label movement
     this.panMouseDeltaX = deltaX
@@ -15874,6 +15987,7 @@ export default class extends Controller {
     this.panOriginalBounds = null
     this.panMouseDeltaX = undefined
     this.panMouseDeltaY = undefined
+    // Keep panGestureMoved until maybeHandlePlotDoubleTap reads it on pointerup.
     
     // Show real points again after panning
     if (this.scatterContainer) {
@@ -17020,6 +17134,11 @@ export default class extends Controller {
   switchToCellsTabForLassoSelection(source) {
     const sourceText = String(source || '').toLowerCase()
     if (!sourceText.includes('lasso')) return
+
+    if (this.isMobileVizLayout()) {
+      this.openMobilePanel('cells')
+      return
+    }
 
     const cellsTab = document.getElementById('cells-tab')
     if (!cellsTab) return

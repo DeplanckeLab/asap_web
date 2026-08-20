@@ -440,6 +440,7 @@ export class CustomPlotManager {
       if (this.is2DPlotMinimized) {
         this.restore2DPlotModal()
       }
+      this.undock2DPlotModalFromMobileFooter(modal)
       modal.style.display = 'none'
     }
     this.is2DPlotMinimized = false
@@ -482,23 +483,59 @@ export class CustomPlotManager {
     }
   }
 
-  minimize2DPlotModal(event) {
-    if (event) {
-      event.preventDefault()
-      event.stopPropagation()
+  isMobileVizLayout() {
+    return this.controller?.isMobileVizLayout?.() === true
+  }
+
+  remember2DPlotModalHome(modal = document.getElementById('2d-plot-modal')) {
+    if (!modal) return
+    if (!this._2dPlotModalHome || !document.contains(this._2dPlotModalHome)) {
+      this._2dPlotModalHome = modal.parentElement
+    }
+  }
+
+  dockMinimized2DPlotToMobileFooter(modal = document.getElementById('2d-plot-modal')) {
+    if (!modal || !this.isMobileVizLayout()) return false
+
+    const dock = document.getElementById('viz-mobile-custom-plot-dock')
+    if (!dock) return false
+
+    this.remember2DPlotModalHome(modal)
+    if (modal.parentElement !== dock) {
+      dock.appendChild(modal)
     }
 
-    const modal = document.getElementById('2d-plot-modal')
-    if (!modal || this.is2DPlotMinimized) return
+    modal.classList.add('is-mobile-docked')
+    modal.style.display = 'flex'
+    modal.style.transform = 'none'
+    modal.style.left = ''
+    modal.style.top = ''
+    modal.style.right = ''
+    modal.style.bottom = ''
+    modal.style.width = ''
+    modal.style.height = '32px'
+    modal.style.minWidth = '0'
+    modal.style.minHeight = '32px'
+    modal.style.maxWidth = ''
+    modal.style.maxHeight = '32px'
+    modal.style.position = 'relative'
+    modal.style.zIndex = '5'
 
-    const rect = modal.getBoundingClientRect()
-    this.previous2DPlotWindowState = {
-      left: rect.left,
-      top: rect.top,
-      width: rect.width,
-      height: rect.height,
-      transform: modal.style.transform || 'none'
+    return true
+  }
+
+  undock2DPlotModalFromMobileFooter(modal = document.getElementById('2d-plot-modal')) {
+    if (!modal) return
+
+    modal.classList.remove('is-mobile-docked')
+    const home = this._2dPlotModalHome
+    if (home && modal.parentElement !== home) {
+      home.appendChild(modal)
     }
+  }
+
+  applyDesktopMinimized2DPlotGeometry(modal = document.getElementById('2d-plot-modal')) {
+    if (!modal) return
 
     const plotPanel = document.querySelector('.plot-container')
     const minimizedHeight = 48
@@ -522,6 +559,25 @@ export class CustomPlotManager {
     modal.style.minHeight = '48px'
     modal.style.maxWidth = '240px'
     modal.style.maxHeight = '48px'
+    modal.style.position = 'fixed'
+  }
+
+  syncMinimized2DPlotDock() {
+    if (!this.is2DPlotMinimized) return
+    const modal = document.getElementById('2d-plot-modal')
+    if (!modal || window.getComputedStyle(modal).display === 'none') return
+
+    if (this.isMobileVizLayout()) {
+      this.dockMinimized2DPlotToMobileFooter(modal)
+      return
+    }
+
+    this.undock2DPlotModalFromMobileFooter(modal)
+    this.applyDesktopMinimized2DPlotGeometry(modal)
+  }
+
+  applyMinimized2DPlotChrome(modal = document.getElementById('2d-plot-modal')) {
+    if (!modal) return
 
     const content = document.getElementById('2d-plot-content')
     if (content) {
@@ -550,9 +606,61 @@ export class CustomPlotManager {
     if (resizeRight) resizeRight.style.display = 'none'
     if (resizeBottom) resizeBottom.style.display = 'none'
     if (resizeCorner) resizeCorner.style.display = 'none'
+  }
+
+  minimize2DPlotModal(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+
+    const modal = document.getElementById('2d-plot-modal')
+    if (!modal || this.is2DPlotMinimized) return
+
+    const rect = modal.getBoundingClientRect()
+    this.previous2DPlotWindowState = {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+      transform: modal.style.transform || 'none'
+    }
+
+    this.applyMinimized2DPlotChrome(modal)
+
+    if (this.isMobileVizLayout() && this.dockMinimized2DPlotToMobileFooter(modal)) {
+      this.is2DPlotMinimized = true
+      this.update2DPlotWindowControls()
+      return
+    }
+
+    this.applyDesktopMinimized2DPlotGeometry(modal)
 
     this.is2DPlotMinimized = true
     this.update2DPlotWindowControls()
+  }
+
+  ensureMobileExpanded2DPlotModalWindowSize(modal = document.getElementById('2d-plot-modal')) {
+    if (!modal) return
+
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+    const margin = 8
+    const width = Math.max(280, Math.round(viewportWidth - margin * 2))
+    const height = Math.max(280, Math.round(viewportHeight * 0.72))
+    const left = Math.max(margin, Math.round((viewportWidth - width) / 2))
+    const top = Math.max(margin, Math.round((viewportHeight - height) / 2))
+
+    modal.style.transform = 'none'
+    modal.style.left = `${left}px`
+    modal.style.top = `${top}px`
+    modal.style.width = `${width}px`
+    modal.style.height = `${height}px`
+    modal.style.minWidth = '280px'
+    modal.style.minHeight = '280px'
+    modal.style.maxWidth = '96vw'
+    modal.style.maxHeight = '90vh'
+    modal.style.position = 'fixed'
   }
 
   restore2DPlotModal(event) {
@@ -564,18 +672,25 @@ export class CustomPlotManager {
     const modal = document.getElementById('2d-plot-modal')
     if (!modal || !this.is2DPlotMinimized) return
 
-    const previous = this.previous2DPlotWindowState
-    if (previous) {
-      modal.style.transform = 'none'
-      modal.style.left = `${Math.max(0, Math.round(previous.left))}px`
-      modal.style.top = `${Math.max(0, Math.round(previous.top))}px`
-      modal.style.width = `${Math.round(previous.width)}px`
-      modal.style.height = `${Math.round(previous.height)}px`
+    this.undock2DPlotModalFromMobileFooter(modal)
+
+    if (this.isMobileVizLayout()) {
+      this.ensureMobileExpanded2DPlotModalWindowSize(modal)
+    } else {
+      const previous = this.previous2DPlotWindowState
+      if (previous) {
+        modal.style.transform = 'none'
+        modal.style.left = `${Math.max(0, Math.round(previous.left))}px`
+        modal.style.top = `${Math.max(0, Math.round(previous.top))}px`
+        modal.style.width = `${Math.round(previous.width)}px`
+        modal.style.height = `${Math.round(previous.height)}px`
+      }
+      modal.style.minWidth = '400px'
+      modal.style.minHeight = '300px'
+      modal.style.maxWidth = '90vw'
+      modal.style.maxHeight = '90vh'
+      modal.style.position = 'fixed'
     }
-    modal.style.minWidth = '400px'
-    modal.style.minHeight = '300px'
-    modal.style.maxWidth = '90vw'
-    modal.style.maxHeight = '90vh'
 
     const content = document.getElementById('2d-plot-content')
     if (content) {
@@ -693,7 +808,9 @@ export class CustomPlotManager {
       if (this.is2DPlotMinimized) {
         this.restore2DPlotModal()
       }
-      if (Number.isFinite(targetLeft) && Number.isFinite(targetTop) && Number.isFinite(targetWidth) && Number.isFinite(targetHeight)) {
+      if (this.isMobileVizLayout()) {
+        this.ensureMobileExpanded2DPlotModalWindowSize(modal)
+      } else if (Number.isFinite(targetLeft) && Number.isFinite(targetTop) && Number.isFinite(targetWidth) && Number.isFinite(targetHeight)) {
         modal.style.transform = 'none'
         modal.style.left = `${Math.max(0, Math.round(targetLeft))}px`
         modal.style.top = `${Math.max(0, Math.round(targetTop))}px`
@@ -705,7 +822,7 @@ export class CustomPlotManager {
     }
 
     if (!this.is2DPlotMinimized) {
-      if (normalizedExpanded) {
+      if (normalizedExpanded && !this.isMobileVizLayout()) {
         modal.style.transform = 'none'
         modal.style.left = `${Math.max(0, Math.round(normalizedExpanded.left))}px`
         modal.style.top = `${Math.max(0, Math.round(normalizedExpanded.top))}px`
@@ -713,9 +830,12 @@ export class CustomPlotManager {
         modal.style.height = `${Math.round(normalizedExpanded.height)}px`
       }
       this.minimize2DPlotModal()
+    } else if (this.isMobileVizLayout()) {
+      this.dockMinimized2DPlotToMobileFooter(modal)
     }
 
-    if (Number.isFinite(targetLeft) && Number.isFinite(targetTop) && Number.isFinite(targetWidth) && Number.isFinite(targetHeight)) {
+    // Desktop checkpoints may store absolute minimized coords; on mobile keep the footer dock.
+    if (!this.isMobileVizLayout() && Number.isFinite(targetLeft) && Number.isFinite(targetTop) && Number.isFinite(targetWidth) && Number.isFinite(targetHeight)) {
       modal.style.transform = 'none'
       modal.style.left = `${Math.max(0, Math.round(targetLeft))}px`
       modal.style.top = `${Math.max(0, Math.round(targetTop))}px`
@@ -1494,6 +1614,7 @@ export class CustomPlotManager {
     }
     
     // Show modal and loading indicator
+    this.remember2DPlotModalHome(modal)
     modal.style.display = 'flex'
     this.ensureInitial2DPlotModalWindowSize(modal)
     this.update2DPlotWindowControls()
@@ -1922,6 +2043,11 @@ export class CustomPlotManager {
       } else {
         // Render scatter plot (both numerical)
         await this.renderScatterPlot2D(canvas, xVector, yVector, filteredIndices)
+      }
+
+      // On mobile keep the reduced window in the plot footer next to zoom controls.
+      if (this.isMobileVizLayout() && !this.is2DPlotMinimized) {
+        this.minimize2DPlotModal()
       }
       
     } catch (error) {

@@ -127,6 +127,277 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
     display: none;
   }
 
+  .viz-mobile-custom-plot-dock {
+    display: none;
+  }
+
+  /* Checkpoint history: desktop table, stacked cards on narrow screens */
+  .checkpoint-history-modal {
+    background: white;
+    border-radius: 10px;
+    width: min(1020px, 98vw);
+    max-width: 98vw;
+    max-height: 80vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+  }
+
+  .checkpoint-history-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid #e5e7eb;
+    flex-shrink: 0;
+  }
+
+  .checkpoint-history-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    position: relative;
+  }
+
+  .checkpoint-history-header,
+  .checkpoint-history-row {
+    display: grid;
+    grid-template-columns: 156px minmax(0, 1fr) 104px 178px 178px 68px;
+    align-items: center;
+    column-gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid #e5e7eb;
+    box-sizing: border-box;
+  }
+
+  .checkpoint-history-header {
+    border-bottom-color: #d1d5db;
+    background: #f9fafb;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  .checkpoint-history-header-cell {
+    font-size: 11px;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    line-height: 1.2;
+  }
+
+  .checkpoint-history-header-cell.is-center,
+  .checkpoint-history-cell.is-center {
+    text-align: center;
+    justify-content: center;
+  }
+
+  .checkpoint-history-field-label {
+    display: none;
+  }
+
+  .checkpoint-history-preview {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 4px;
+    min-height: 54px;
+    min-width: 0;
+  }
+
+  .checkpoint-history-meta {
+    min-width: 0;
+  }
+
+  .checkpoint-history-cell {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .checkpoint-history-btn-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+
+  .checkpoint-history-row.is-current {
+    background: #f8fafc;
+  }
+
+  /* Plot settings floating window */
+  .settings-window {
+    position: fixed;
+    top: 100px;
+    right: 20px;
+    left: auto;
+    width: 320px;
+    max-width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    background: white;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    z-index: 10000;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+    box-sizing: border-box;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  .settings-window-header {
+    padding: 12px 16px;
+    background: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
+    border-radius: 8px 8px 0 0;
+    cursor: move;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+
+  .settings-window-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px;
+    box-sizing: border-box;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .settings-window select {
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  @media (max-width: 1023px) {
+    .checkpoint-history-overlay {
+      align-items: stretch !important;
+      justify-content: stretch !important;
+      padding: 0 !important;
+    }
+
+    .checkpoint-history-modal {
+      width: 100%;
+      max-width: 100vw;
+      height: 100%;
+      max-height: 100vh;
+      border-radius: 0;
+    }
+
+    .checkpoint-history-modal-header {
+      padding: 12px 14px;
+      padding-top: max(12px, env(safe-area-inset-top));
+    }
+
+    .checkpoint-history-list {
+      padding-bottom: max(12px, env(safe-area-inset-bottom));
+    }
+
+    .checkpoint-history-header {
+      display: none;
+    }
+
+    .checkpoint-history-row {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 10px;
+      padding: 12px 14px;
+      border-bottom: 1px solid #e5e7eb;
+    }
+
+    .checkpoint-history-preview {
+      min-height: 0;
+    }
+
+    .checkpoint-history-preview .checkpoint-thumb {
+      width: 64px !important;
+      height: 48px !important;
+    }
+
+    .checkpoint-history-meta div[title] {
+      white-space: normal !important;
+    }
+
+    .checkpoint-history-field-label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      margin-bottom: 6px;
+    }
+
+    .checkpoint-history-cell {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      width: 100%;
+    }
+
+    .checkpoint-history-cell.is-center {
+      text-align: left;
+      justify-content: flex-start;
+    }
+
+    .checkpoint-history-cell.is-inline {
+      flex-direction: row;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .checkpoint-history-cell.is-inline .checkpoint-history-field-label {
+      margin-bottom: 0;
+    }
+
+    .checkpoint-history-btn-row {
+      justify-content: stretch;
+      width: 100%;
+    }
+
+    .checkpoint-history-btn-row > button {
+      flex: 1 1 0;
+      min-width: 0;
+    }
+
+    .checkpoint-history-cell.is-delete .checkpoint-history-btn-row > button,
+    .checkpoint-history-cell.is-delete > button {
+      width: 100%;
+    }
+
+    .settings-window {
+      width: min(300px, calc(100vw - 24px));
+      max-width: calc(100vw - 24px);
+      top: max(12px, env(safe-area-inset-top, 0px));
+      right: 12px;
+      left: auto;
+      max-height: calc(100vh - 24px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    }
+
+    .settings-window .settings-field-row,
+    .settings-window .settings-window-body [style*="justify-content: space-between"] {
+      flex-direction: column !important;
+      align-items: stretch !important;
+      gap: 6px;
+    }
+
+    .settings-window select {
+      width: 100% !important;
+      max-width: 100% !important;
+    }
+  }
+
   body.viz-mobile-panel-open #project-page-header {
     display: none !important;
   }
@@ -202,13 +473,15 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       width: auto !important;
       max-width: none !important;
       min-width: 0 !important;
-      overflow: hidden;
+      /* Keep visible so the history dropdown is not clipped */
+      overflow: visible;
       font-size: 10px !important;
       line-height: 1.2 !important;
     }
 
     [data-controller="visualization"] #current-coloring-indicator > div {
       align-items: flex-start !important;
+      overflow: visible;
     }
 
     [data-controller="visualization"] #current-coloring-label {
@@ -484,11 +757,14 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       gap: 8px;
     }
 
+    #viz-plot-area-wrap > #viz-plot-footer > #viz-plot-footer-start,
     #viz-plot-area-wrap > #viz-plot-footer > div:first-child {
       display: flex !important;
       align-items: center !important;
       justify-content: flex-start !important;
-      flex: 0 0 auto !important;
+      flex: 1 1 auto !important;
+      min-width: 0 !important;
+      gap: 8px !important;
       pointer-events: auto;
     }
 
@@ -497,8 +773,12 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       justify-content: flex-end !important;
       align-items: center !important;
       width: auto !important;
-      flex: 1 1 auto !important;
+      flex: 0 1 auto !important;
       min-width: 0 !important;
+      max-width: 42% !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
     }
 
     [data-controller="visualization"] #control-instructions {
@@ -510,6 +790,49 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
       align-items: center;
       gap: 6px;
       pointer-events: auto;
+      flex: 0 0 auto;
+    }
+
+    [data-controller="visualization"] .viz-mobile-custom-plot-dock {
+      display: flex !important;
+      align-items: center;
+      justify-content: flex-start;
+      flex: 1 1 auto;
+      min-width: 0;
+      max-width: 100%;
+      pointer-events: auto;
+    }
+
+    [data-controller="visualization"] .viz-mobile-custom-plot-dock #2d-plot-modal.is-mobile-docked {
+      position: relative !important;
+      left: auto !important;
+      top: auto !important;
+      right: auto !important;
+      bottom: auto !important;
+      transform: none !important;
+      width: 100% !important;
+      max-width: 220px !important;
+      min-width: 0 !important;
+      height: 32px !important;
+      min-height: 32px !important;
+      max-height: 32px !important;
+      margin: 0 !important;
+      box-shadow: none !important;
+      border-radius: 6px !important;
+      z-index: 5 !important;
+    }
+
+    [data-controller="visualization"] .viz-mobile-custom-plot-dock #2d-plot-modal.is-mobile-docked #2d-plot-title {
+      font-size: 12px !important;
+      font-weight: 600 !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      max-width: 120px !important;
+    }
+
+    [data-controller="visualization"] .viz-mobile-custom-plot-dock #2d-plot-modal.is-mobile-docked .drag-handle {
+      display: none !important;
     }
 
     [data-controller="visualization"] .viz-mobile-zoom-btn {
@@ -2410,7 +2733,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
       
       <!-- Plot Controls -->
       <div id="viz-plot-footer" style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #6b7280;">
-        <div>
+        <div id="viz-plot-footer-start" style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1 1 auto;">
           <span id="control-instructions">Click to pick a cell, click and drag to move a label, scroll to zoom</span>
           <div id="viz-mobile-zoom-controls" class="viz-mobile-zoom-controls" aria-label="Zoom controls">
             <button type="button"
@@ -2426,6 +2749,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                     aria-label="Zoom in"
                     data-action="click->visualization#zoomIn">+</button>
           </div>
+          <div id="viz-mobile-custom-plot-dock" class="viz-mobile-custom-plot-dock" aria-label="Custom plot"></div>
         </div>
         <div id="plot-info" style="display: none;">
           <span id="point-count"><%= number_with_delimiter(default_cells || 0) %> / <%= number_with_delimiter(default_cells || 0) %></span>
@@ -3088,12 +3412,10 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
 
 
 <!-- Floating Settings Window -->
-<div id="settings-window" 
-     style="position: fixed; top: 100px; right: 20px; width: 360px; background: white; border: 1px solid #d1d5db; border-radius: 8px; box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15); z-index: 10000; display: none; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+<div id="settings-window" class="settings-window" style="display: none;">
   
   <!-- Window Header -->
-  <div id="settings-header" 
-       style="padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid #e5e7eb; border-radius: 8px 8px 0 0; cursor: move; display: flex; align-items: center; justify-content: space-between;">
+  <div id="settings-header" class="settings-window-header">
     <h3 style="margin: 0; font-size: 14px; font-weight: 600; color: #374151;">Plot Settings</h3>
     <button id="close-settings-btn" 
             style="background: none; border: none; color: #6b7280; cursor: pointer; padding: 4px; border-radius: 4px; transition: background-color 0.2s;"
@@ -3104,10 +3426,10 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
   </div>
   
   <!-- Window Content -->
-  <div style="padding: 16px;">
+  <div class="settings-window-body">
     <div style="display: flex; flex-direction: column; gap: 16px;">
       <!-- Settings Tabs -->
-      <div style="display: flex; gap: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px;">
+      <div style="display: flex; gap: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; flex-wrap: wrap;">
         <button id="settings-tab-general"
                 type="button"
                 style="padding: 6px 10px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 6px; background: #eff6ff; color: #1d4ed8; cursor: pointer; font-weight: 600;">
@@ -3150,7 +3472,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
           </div>
         </div>
 
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+        <div class="settings-field-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
           <label for="discrete-palette-select" style="font-size: 13px; font-weight: 500; color: #374151;">
             Discrete color palette
           </label>
@@ -3165,7 +3487,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
         <div style="display: flex; flex-direction: column; gap: 12px;">
           
           <!-- Category Order -->
-          <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div class="settings-field-row" style="display: flex; align-items: center; justify-content: space-between;">
             <label style="font-size: 13px; font-weight: 500; color: #374151;">
               Category order
             </label>
@@ -3179,7 +3501,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
           </div>
           
           <!-- Numerical Order -->
-          <div style="display: flex; align-items: center; justify-content: space-between;">
+          <div class="settings-field-row" style="display: flex; align-items: center; justify-content: space-between;">
             <label style="font-size: 13px; font-weight: 500; color: #374151;">
               Numerical order
             </label>
@@ -3201,7 +3523,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
           <span style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 12px; line-height: 1.4;">
             Gene expression only
           </span>
-          <span style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+          <span class="settings-field-row" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
             <label for="histogram-scale-select" style="font-size: 13px; font-weight: 500;">Scale</label>
             <select id="histogram-scale-select"
                     style="width: 160px; padding: 6px 8px; font-size: 12px; border: 1px solid #d1d5db; border-radius: 4px; background-color: white; color: #374151; cursor: pointer;">
@@ -3464,11 +3786,12 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
   </div>
 </div>
 
-<div id="checkpoint-history-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); z-index: 12000; justify-content: center; align-items: center;" onclick="if (event.target === this && window.visualizationController) window.visualizationController.closeCheckpointHistory()">
-  <div style="background: white; border-radius: 10px; width: 1020px; max-width: 98vw; max-height: 80vh; overflow: hidden; display: flex; flex-direction: column;">
-    <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e5e7eb;">
+<div id="checkpoint-history-overlay" class="checkpoint-history-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.5); z-index: 12000; justify-content: center; align-items: center;" onclick="if (event.target === this && window.visualizationController) window.visualizationController.closeCheckpointHistory()">
+  <div id="checkpoint-history-modal" class="checkpoint-history-modal">
+    <div class="checkpoint-history-modal-header">
       <div style="font-size: 15px; font-weight: 600; color: #111827;">Checkpoint history</div>
       <button type="button"
+              class="checkpoint-history-close-btn"
               style="background: none; border: none; font-size: 18px; color: #6b7280; cursor: pointer;"
               onclick="if (window.visualizationController) window.visualizationController.closeCheckpointHistory()">
         <i class="fas fa-times"></i>
@@ -3478,7 +3801,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
       <i class="fas fa-spinner fa-spin" style="font-size: 14px;"></i>
       <span>Loading checkpoints...</span>
     </div>
-    <div id="checkpoint-history-list" style="flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; position: relative;"></div>
+    <div id="checkpoint-history-list" class="checkpoint-history-list"></div>
   </div>
 </div>
 

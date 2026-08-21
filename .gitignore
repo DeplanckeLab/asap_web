@@ -53,6 +53,8 @@ src/package-lock.json
 *.bak
 *.bak.*
 
+src/public/asap_poster_2026.mp4
+
 # Ignore Byebug command history file.
 #.byebug_history
 .env_asap_run

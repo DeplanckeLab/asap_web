@@ -3533,12 +3533,32 @@ export default class extends Controller {
     this.setOnlyEmbeddingGroupOpen(defaultInfo.loomFile)
   }
 
-  scheduleAutoMetadataPreload() {
+  scheduleAutoMetadataPreload(options = {}) {
     if (!this.autoPreloadMetadata) return
-    if (this._autoPreloadScheduled === true) return
 
+    const force = options.force === true
+
+    // Mid-session checkpoint while a warm pass is running: finish current work, then
+    // start another pass so remaining unloaded metadata (possibly for a new loom) continue.
+    if (force && (this._autoPreloadInProgress === true || this._preloadAllMetadataInProgress === true)) {
+      this._autoPreloadRescheduleAfterCurrent = true
+      return
+    }
+
+    if (!force && this._autoPreloadScheduled === true) return
+
+    if (force) {
+      this._autoPreloadGeneration = (this._autoPreloadGeneration || 0) + 1
+      this._autoPreloadScheduled = false
+      this._autoPreloadStarted = false
+    }
+
+    const generation = this._autoPreloadGeneration || 0
     this._autoPreloadScheduled = true
     setTimeout(async () => {
+      if (generation !== (this._autoPreloadGeneration || 0)) {
+        return
+      }
       if (this._autoPreloadStarted === true) {
         return
       }
@@ -3546,7 +3566,8 @@ export default class extends Controller {
       this._autoPreloadInProgress = true
       this._autoPreloadDone = false
       this.idleDiag('preload-start', {
-        restoredCurrentCheckpointOnEntry: this.restoredCurrentCheckpointOnEntry === true
+        restoredCurrentCheckpointOnEntry: this.restoredCurrentCheckpointOnEntry === true,
+        force
       })
       try {
         await this.checkAllMetadataStatusBeforePreload()
@@ -3563,7 +3584,8 @@ export default class extends Controller {
           loadedMetadataCount,
           hasWarmMetadataMemory,
           currentCheckpointReadyForOverwrite: this.currentCheckpointReadyForOverwrite === true,
-          autoPreloadMetadata: this.autoPreloadMetadata === true
+          autoPreloadMetadata: this.autoPreloadMetadata === true,
+          force
         })
 
         // Barplots / checkboxes only need expanded (+ already-loaded coloring/filter) vectors.
@@ -3611,6 +3633,10 @@ export default class extends Controller {
         })
       } finally {
         this._autoPreloadInProgress = false
+        if (this._autoPreloadRescheduleAfterCurrent === true) {
+          this._autoPreloadRescheduleAfterCurrent = false
+          this.scheduleAutoMetadataPreload({ force: true })
+        }
       }
     }, 200)
   }
@@ -4171,7 +4197,8 @@ export default class extends Controller {
       })
 
       await this.applyCheckpointState(checkpoint.state)
-      // Status icons are refreshed by scheduleAutoMetadataPreload (throttled).
+      // Status icons + remaining unloaded vectors are warmed by scheduleAutoMetadataPreload
+      // (entry: connect().finally; mid-session: force-reschedule in this method's finally).
       // Do not stampede IndexedDB here — that freezes the UI right after the overlay hides.
       this.checkpointDebug('loadCheckpointById:after-apply', {
         selectedEmbeddingId: this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : null,
@@ -4215,6 +4242,11 @@ export default class extends Controller {
         blockers: this.collectCheckpointUiBlockers()
       })
       this.setCheckpointViewLoading(false)
+      // Mid-session checkpoint loads must re-arm background metadata warm-up. Entry loads
+      // already schedule this from connect().finally after ensureDefaultEmbeddingAfterCheckpointEntry.
+      if (this.initialCheckpointEntryLoading !== true) {
+        this.scheduleAutoMetadataPreload({ force: true })
+      }
     }
   }
 

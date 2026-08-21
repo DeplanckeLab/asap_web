@@ -288,4 +288,44 @@ class ExternalCatalogCandidateSeriesKeyTest < ActiveSupport::TestCase
   ensure
     ExternalCatalogCandidate.where(id: [geo&.id, hca&.id, bgee&.id, cxg&.id].compact).delete_all
   end
+
+  test 'ordered_by_size sorts by n_obs then n_vars then filesize' do
+    suffix = SecureRandom.hex(3)
+    large = ExternalCatalogCandidate.create!(
+      source: 'cellxgene',
+      external_id: "large-#{suffix}",
+      provider_tag: 'CELLxGENE',
+      title: 'Large',
+      import_status: 'idle',
+      n_obs: 100_000,
+      n_vars: 20_000,
+      filesize: 10,
+      url: 'https://example.com/large'
+    )
+    small = ExternalCatalogCandidate.create!(
+      source: 'cellxgene',
+      external_id: "small-#{suffix}",
+      provider_tag: 'CELLxGENE',
+      title: 'Small',
+      import_status: 'idle',
+      n_obs: 500,
+      n_vars: 10_000,
+      filesize: 99,
+      url: 'https://example.com/small'
+    )
+    unknown = ExternalCatalogCandidate.create!(
+      source: 'geo',
+      external_id: "GSE#{suffix}",
+      provider_tag: 'GEO',
+      title: 'Unknown dims',
+      import_status: 'idle',
+      filesize: 1,
+      url: 'https://example.com/geo'
+    )
+
+    ordered = ExternalCatalogCandidate.where(id: [large.id, small.id, unknown.id]).ordered_by_size.to_a
+    assert_equal [small.id, large.id, unknown.id], ordered.map(&:id)
+  ensure
+    ExternalCatalogCandidate.where(id: [large&.id, small&.id, unknown&.id].compact).delete_all
+  end
 end

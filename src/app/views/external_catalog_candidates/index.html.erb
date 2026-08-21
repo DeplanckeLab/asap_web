@@ -55,6 +55,7 @@
           <th scope="col" class="px-3 py-2 text-left">Source</th>
           <th scope="col" class="px-3 py-2 text-left">Dataset</th>
           <th scope="col" class="px-3 py-2 text-left">Organism</th>
+          <th scope="col" class="px-3 py-2 text-left">Matrix</th>
           <th scope="col" class="px-3 py-2 text-left">Format</th>
           <th scope="col" class="px-3 py-2 text-left">Publication</th>
           <th scope="col" class="px-3 py-2 text-left">ASAP</th>
@@ -90,6 +91,19 @@
               <%= candidate.organism_label.presence || "—" %>
               <% if candidate.tax_id.to_i > 0 %>
                 <div class="text-gray-400">tax <%= candidate.tax_id %></div>
+              <% end %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-xs">
+              <% if candidate.n_obs.to_i.positive? && candidate.n_vars.to_i.positive? %>
+                <%= number_with_delimiter(candidate.n_obs) %> <%= candidate.matrix_obs_unit %>
+                <span class="text-gray-400">x</span>
+                <%= number_with_delimiter(candidate.n_vars) %> genes
+              <% elsif candidate.n_obs.to_i.positive? %>
+                <%= number_with_delimiter(candidate.n_obs) %> <%= candidate.matrix_obs_unit %>
+              <% elsif candidate.n_vars.to_i.positive? %>
+                <%= number_with_delimiter(candidate.n_vars) %> genes
+              <% else %>
+                <span class="text-gray-400">—</span>
               <% end %>
             </td>
             <td class="whitespace-nowrap px-3 py-2 text-xs">
@@ -162,7 +176,7 @@
         <% end %>
         <% if @candidates.empty? %>
           <tr>
-            <td colspan="7" class="px-3 py-10 text-center text-gray-500 dark:text-gray-400">
+            <td colspan="8" class="px-3 py-10 text-center text-gray-500 dark:text-gray-400">
               No candidates match these filters.
               <% if admin? %>
                 Sync with <code class="text-xs">rails external_catalog:sync_candidates</code>.

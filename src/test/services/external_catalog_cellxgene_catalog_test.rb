@@ -49,6 +49,8 @@ class ExternalCatalogCellxgeneCatalogTest < ActiveSupport::TestCase
     entries = catalog.each.to_a
     assert_equal 1, entries.size
     assert_equal 'd-ok', entries.first.external_id
+    assert_equal 18_011, entries.first.n_obs
+    assert_equal 30_172, entries.first.n_vars
     assert_equal 3, attempts
   end
 
@@ -135,6 +137,8 @@ class ExternalCatalogCellxgeneCatalogTest < ActiveSupport::TestCase
         {
           dataset_id: dataset_id,
           title: "Dataset #{dataset_id}",
+          cell_count: 18_011,
+          feature_count: 30_172,
           assets: [
             {
               filetype: 'h5ad',

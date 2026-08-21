@@ -95,6 +95,21 @@
           <% if @candidate.filesize.to_i > 0 %> (<%= number_to_human_size(@candidate.filesize) %>)<% end %>
         </dd>
       </div>
+      <div>
+        <dt class="text-xs uppercase tracking-wide text-gray-500">Matrix</dt>
+        <dd class="mt-1 text-gray-900 dark:text-gray-100">
+          <% if @candidate.n_obs.to_i.positive? && @candidate.n_vars.to_i.positive? %>
+            <%= number_with_delimiter(@candidate.n_obs) %> <%= @candidate.matrix_obs_unit %>
+            x <%= number_with_delimiter(@candidate.n_vars) %> genes
+          <% elsif @candidate.n_obs.to_i.positive? %>
+            <%= number_with_delimiter(@candidate.n_obs) %> <%= @candidate.matrix_obs_unit %>
+          <% elsif @candidate.n_vars.to_i.positive? %>
+            <%= number_with_delimiter(@candidate.n_vars) %> genes
+          <% else %>
+            —
+          <% end %>
+        </dd>
+      </div>
       <div class="sm:col-span-2">
         <dt class="text-xs uppercase tracking-wide text-gray-500">Source page</dt>
         <dd class="mt-1">

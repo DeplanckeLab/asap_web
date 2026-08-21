@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_18_143000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_21_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -667,6 +667,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_18_143000) do
     t.string "import_status", default: "idle", null: false
     t.integer "import_user_id"
     t.datetime "last_seen_at"
+    t.bigint "n_obs"
+    t.bigint "n_vars"
     t.boolean "obsolete", default: false, null: false
     t.string "organism_label"
     t.text "pmids_json"
@@ -683,6 +685,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_18_143000) do
     t.index ["external_catalog_collection_id"], name: "index_ext_catalog_candidates_on_collection_id"
     t.index ["import_status"], name: "index_external_catalog_candidates_on_import_status"
     t.index ["last_seen_at"], name: "index_external_catalog_candidates_on_last_seen_at"
+    t.index ["n_obs"], name: "index_external_catalog_candidates_on_n_obs"
     t.index ["obsolete"], name: "index_external_catalog_candidates_on_obsolete"
     t.index ["project_type_tag"], name: "index_external_catalog_candidates_on_project_type_tag"
     t.index ["provider_tag"], name: "index_external_catalog_candidates_on_provider_tag"

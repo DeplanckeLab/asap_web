@@ -9,6 +9,8 @@ module ExternalCatalog
     :tax_id,
     :organism_label,
     :filesize,
+    :n_obs,
+    :n_vars,
     :project_type_tag,
     :format_kind,
     :filename,

@@ -166,6 +166,8 @@ module ExternalCatalog
           tax_id: tax_id,
           organism_label: organism_label,
           filesize: (asset[:filesize] || asset['filesize']).to_i,
+          n_obs: positive_int(dataset[:cell_count] || dataset['cell_count']),
+          n_vars: positive_int(dataset[:feature_count] || dataset['feature_count']),
           project_type_tag: 'sc',
           format_kind: :h5ad,
           filename: File.basename(URI.parse(url.to_s).path.to_s),
@@ -262,6 +264,11 @@ module ExternalCatalog
         tax_id = Regexp.last_match(1).to_i
       end
       [tax_id, label.to_s.presence]
+    end
+
+    def positive_int(value)
+      n = value.to_i
+      n.positive? ? n : nil
     end
   end
 end

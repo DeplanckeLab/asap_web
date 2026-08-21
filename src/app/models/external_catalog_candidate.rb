@@ -54,6 +54,15 @@ class ExternalCatalogCandidate < ApplicationRecord
       id: :asc
     )
   }
+  # Catalog list page: smallest matrices first, then file size when dims are unknown.
+  scope :ordered_by_size, lambda {
+    order(
+      Arel.sql('n_obs ASC NULLS LAST'),
+      Arel.sql('n_vars ASC NULLS LAST'),
+      filesize: :asc,
+      id: :asc
+    )
+  }
 
   def self.import_source_order_sql
     cases = IMPORT_SOURCE_ORDER.each_with_index.map do |source, index|
@@ -469,6 +478,11 @@ class ExternalCatalogCandidate < ApplicationRecord
     parse_json_array(identifiers_json)
   end
 
+  # "cells" for single-cell, "samples" for bulk.
+  def matrix_obs_unit
+    project_type_tag.to_s == 'bulk' ? 'samples' : 'cells'
+  end
+
   def parsed_attrs
     return {} if attrs_json.blank?
 
@@ -486,6 +500,8 @@ class ExternalCatalogCandidate < ApplicationRecord
       tax_id: tax_id,
       organism_label: organism_label,
       filesize: filesize.to_i,
+      n_obs: n_obs,
+      n_vars: n_vars,
       project_type_tag: project_type_tag.presence || 'sc',
       format_kind: format_kind.presence&.to_sym,
       filename: filename,
@@ -533,6 +549,8 @@ class ExternalCatalogCandidate < ApplicationRecord
       format_kind: entry.format_kind.to_s.presence,
       filename: entry.filename,
       filesize: entry.filesize.to_i,
+      n_obs: entry.n_obs,
+      n_vars: entry.n_vars,
       url: entry.url,
       source_page_url: entry.source_page_url,
       collection_id: collection_id,

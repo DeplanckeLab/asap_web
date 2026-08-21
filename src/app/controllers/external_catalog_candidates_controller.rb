@@ -26,7 +26,7 @@ class ExternalCatalogCandidatesController < ApplicationController
     scope = filter_in_asap(scope, @in_asap)
 
     @total_count = scope.count
-    @candidates = scope.ordered_for_catalog
+    @candidates = scope.ordered_by_size
                        .offset((@page - 1) * @per_page)
                        .limit(@per_page)
                        .to_a

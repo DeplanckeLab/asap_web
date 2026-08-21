@@ -142,6 +142,9 @@ module ExternalCatalog
           Array(meta['projectDescription']).first.presence || meta['projectDescription'].to_s.presence
         end
 
+      n_obs = file['matrixCellCount'].to_i
+      n_obs = nil unless n_obs.positive?
+
       Entry.new(
         source: 'hca',
         external_id: external_id,
@@ -150,6 +153,8 @@ module ExternalCatalog
         tax_id: tax_id,
         organism_label: organism_label,
         filesize: file['size'].to_i,
+        n_obs: n_obs,
+        n_vars: nil,
         project_type_tag: 'sc',
         format_kind: fmt.to_sym,
         filename: filename,

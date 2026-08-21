@@ -22,6 +22,7 @@
      data-heatmap-run-num-value="<%= heatmap_run_num %>"
      data-heatmap-run-label-value="<%= heatmap_run_label %>"
      data-heatmap-can-analyze-value="<%= can_analyze_heatmap %>"
+     data-heatmap-can-edit-value="<%= can_edit_heatmap %>"
      data-heatmap-current-user-id-value="<%= current_user&.id.to_i %>"
      data-heatmap-search-gene-url-value="<%= search_gene_project_path(project) %>"
      data-heatmap-data-url-value="<%= heatmap_data_project_path(project, run_id: run.id) %>">
@@ -255,6 +256,213 @@
       display: none;
     }
 
+    .heatmap-mobile-zoom-controls {
+      display: none;
+    }
+
+    /* Checkpoint history: desktop table, stacked cards on narrow screens */
+    .checkpoint-history-modal {
+      background: white;
+      border-radius: 10px;
+      width: min(1020px, 98vw);
+      max-width: 98vw;
+      max-height: 80vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
+    }
+
+    .checkpoint-history-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid #e5e7eb;
+      flex-shrink: 0;
+    }
+
+    .checkpoint-history-list {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      position: relative;
+    }
+
+    .checkpoint-history-header,
+    .checkpoint-history-row {
+      display: grid;
+      grid-template-columns: 156px minmax(0, 1fr) 104px 178px 178px 68px;
+      align-items: center;
+      column-gap: 6px;
+      padding: 8px 10px;
+      border-bottom: 1px solid #e5e7eb;
+      box-sizing: border-box;
+    }
+
+    .checkpoint-history-list.is-readonly .checkpoint-history-header,
+    .checkpoint-history-list.is-readonly .checkpoint-history-row {
+      grid-template-columns: 156px minmax(0, 1fr) 178px 178px;
+    }
+
+    .checkpoint-history-header {
+      border-bottom-color: #d1d5db;
+      background: #f9fafb;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    .checkpoint-history-header-cell {
+      font-size: 11px;
+      font-weight: 600;
+      color: #6b7280;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      line-height: 1.2;
+    }
+
+    .checkpoint-history-header-cell.is-center,
+    .checkpoint-history-cell.is-center {
+      text-align: center;
+      justify-content: center;
+    }
+
+    .checkpoint-history-field-label {
+      display: none;
+    }
+
+    .checkpoint-history-preview {
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 4px;
+      min-height: 54px;
+      min-width: 0;
+    }
+
+    .checkpoint-history-meta {
+      min-width: 0;
+    }
+
+    .checkpoint-history-cell {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .checkpoint-history-btn-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+
+    .checkpoint-history-row.is-current {
+      background: #f8fafc;
+    }
+
+    @media (max-width: 1023px) {
+      .checkpoint-history-overlay {
+        align-items: stretch !important;
+        justify-content: stretch !important;
+        padding: 0 !important;
+      }
+
+      .checkpoint-history-modal {
+        width: 100%;
+        max-width: 100vw;
+        height: 100%;
+        max-height: 100vh;
+        border-radius: 0;
+      }
+
+      .checkpoint-history-modal-header {
+        padding: 12px 14px;
+        padding-top: max(12px, env(safe-area-inset-top));
+      }
+
+      .checkpoint-history-list {
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+      }
+
+      .checkpoint-history-header {
+        display: none;
+      }
+
+      .checkpoint-history-row {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        padding: 12px 14px;
+        border-bottom: 1px solid #e5e7eb;
+      }
+
+      .checkpoint-history-preview {
+        min-height: 0;
+      }
+
+      .checkpoint-history-preview .checkpoint-thumb {
+        width: 64px !important;
+        height: 48px !important;
+      }
+
+      .checkpoint-history-meta div[title] {
+        white-space: normal !important;
+      }
+
+      .checkpoint-history-field-label {
+        display: block;
+        font-size: 11px;
+        font-weight: 600;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+        margin-bottom: 6px;
+      }
+
+      .checkpoint-history-cell {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+      }
+
+      .checkpoint-history-cell.is-center {
+        text-align: left;
+        justify-content: flex-start;
+      }
+
+      .checkpoint-history-cell.is-inline {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .checkpoint-history-cell.is-inline .checkpoint-history-field-label {
+        margin-bottom: 0;
+      }
+
+      .checkpoint-history-btn-row {
+        justify-content: stretch;
+        width: 100%;
+      }
+
+      .checkpoint-history-btn-row > button {
+        flex: 1 1 0;
+        min-width: 0;
+      }
+
+      .checkpoint-history-cell.is-delete .checkpoint-history-btn-row > button,
+      .checkpoint-history-cell.is-delete > button {
+        width: 100%;
+      }
+    }
+
     .heatmap-panel-header-icon-btn {
       display: inline-flex;
       align-items: center;
@@ -438,6 +646,51 @@
       .heatmap-viewer-full .heatmap-main-panel > div:last-child {
         font-size: 11px !important;
         padding: 4px 10px !important;
+        display: flex !important;
+        align-items: center !important;
+        gap: 8px !important;
+        min-height: 40px !important;
+        box-sizing: border-box !important;
+      }
+
+      .heatmap-viewer-full .heatmap-main-panel > div:last-child [data-heatmap-target="controlInstructions"] {
+        display: none !important;
+      }
+
+      .heatmap-viewer-full .heatmap-mobile-zoom-controls {
+        display: inline-flex !important;
+        align-items: center;
+        gap: 6px;
+        pointer-events: auto;
+        flex: 0 0 auto;
+      }
+
+      .heatmap-viewer-full .heatmap-mobile-zoom-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        width: 32px;
+        height: 32px;
+        min-width: 32px;
+        min-height: 32px;
+        padding: 0;
+        margin: 0;
+        font-size: 20px;
+        font-weight: 600;
+        line-height: 1;
+        color: #374151;
+        background: #f9fafb;
+        border: 1px solid #d1d5db;
+        border-radius: 6px;
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+        user-select: none;
+      }
+
+      .heatmap-viewer-full .heatmap-mobile-zoom-btn:active {
+        background: #e5e7eb;
       }
 
       /* Active panel overlays above the plot */
@@ -659,6 +912,10 @@
             </svg>
           </button>
         </div>
+        <button type="button"
+                class="<%= heatmap_btn %>"
+                data-action="heatmap#clearLiveSelection"
+                title="Clear current gene and cell selection">Clear</button>
   <% else %>
   <div class="heatmap-toolbar" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; align-items:center; flex-shrink:0;">
     <div class="heatmap-mode-group" role="group" aria-label="Interaction mode">
@@ -867,8 +1124,20 @@
           </div>
         </div>
       </div>
-      <div style="flex-shrink:0; padding:6px 14px; font-size:12px; color:#6b7280; background:#ffffff; border-top:1px solid #e5e7eb;">
+      <div id="heatmap-plot-footer" style="flex-shrink:0; padding:6px 14px; font-size:12px; color:#6b7280; background:#ffffff; border-top:1px solid #e5e7eb; display:flex; align-items:center; gap:8px;">
         <span data-heatmap-target="controlInstructions">Drag to pan, Shift+scroll to zoom. Double-click to clear selection.</span>
+        <div class="heatmap-mobile-zoom-controls" aria-label="Zoom controls">
+          <button type="button"
+                  class="heatmap-mobile-zoom-btn"
+                  title="Zoom out"
+                  aria-label="Zoom out"
+                  data-action="click->heatmap#zoomOut">-</button>
+          <button type="button"
+                  class="heatmap-mobile-zoom-btn"
+                  title="Zoom in"
+                  aria-label="Zoom in"
+                  data-action="click->heatmap#zoomIn">+</button>
+        </div>
       </div>
     </div>
 
@@ -1529,11 +1798,12 @@
   </div>
 
   <div data-heatmap-target="checkpointHistoryOverlay"
+       class="checkpoint-history-overlay"
        data-action="click->heatmap#checkpointHistoryBackdropClick"
        style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background-color:rgba(0,0,0,0.5); z-index:12000; justify-content:center; align-items:center;">
-    <div style="background:white; border-radius:10px; width:1020px; max-width:98vw; max-height:80vh; overflow:hidden; display:flex; flex-direction:column;"
+    <div class="checkpoint-history-modal"
          data-action="click->heatmap#stopModalPropagation">
-      <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-bottom:1px solid #e5e7eb;">
+      <div class="checkpoint-history-modal-header">
         <div style="font-size:15px; font-weight:600; color:#111827;">Checkpoint history</div>
         <button type="button"
                 data-action="heatmap#closeCheckpointHistory"
@@ -1547,7 +1817,7 @@
         <i class="fas fa-spinner fa-spin" style="font-size:14px;" aria-hidden="true"></i>
         <span>Loading checkpoints...</span>
       </div>
-      <div data-heatmap-target="checkpointHistoryList" style="flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; position:relative;"></div>
+      <div data-heatmap-target="checkpointHistoryList" class="checkpoint-history-list"></div>
     </div>
   </div>
 

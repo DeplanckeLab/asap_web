@@ -172,6 +172,11 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
     box-sizing: border-box;
   }
 
+  .checkpoint-history-list.is-readonly .checkpoint-history-header,
+  .checkpoint-history-list.is-readonly .checkpoint-history-row {
+    grid-template-columns: 156px minmax(0, 1fr) 178px 178px;
+  }
+
   .checkpoint-history-header {
     border-bottom-color: #d1d5db;
     background: #f9fafb;
@@ -1104,6 +1109,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
      data-visualization-cell-id-annot-ids-by-loom-value="<%= cell_id_annot_ids_by_loom.to_json %>"
      data-visualization-entry-checkpoint-title-value="<%= h(entry_checkpoint_title) %>"
      data-visualization-current-user-id-value="<%= current_user&.id.to_i %>"
+     data-visualization-can-edit-value="<%= can_edit_project ? 'true' : 'false' %>"
      data-is-admin="<%= admin? ? 'true' : 'false' %>"
      style="display: flex; flex-direction: row; height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden;">
   

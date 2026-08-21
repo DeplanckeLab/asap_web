@@ -26,6 +26,7 @@ export default class extends Controller {
     dataUrl: String,
     searchGeneUrl: String,
     canAnalyze: { type: Boolean, default: false },
+    canEdit: { type: Boolean, default: false },
     currentUserId: { type: Number, default: 0 }
   }
 
@@ -229,6 +230,7 @@ export default class extends Controller {
 
   disconnect() {
     this.persistCurrentCheckpointBeforeTeardown("disconnect")
+    this.unbindEvents()
     this.teardownMobileHeatmapLayout()
     this.teardownPanelLayout()
     this.teardownSavedCellSetLiveUpdates()
@@ -1913,6 +1915,9 @@ export default class extends Controller {
     ov.style.top = "0px"
     ov.style.width = w + "px"
     ov.style.height = h + "px"
+    ov.style.zIndex = "2"
+    ov.style.pointerEvents = "auto"
+    ov.style.touchAction = "none"
     ov.width = Math.max(1, Math.min(maxBufferDim, Math.round(w * this.dpr)))
     ov.height = Math.max(1, Math.min(maxBufferDim, Math.round(h * this.dpr)))
 
@@ -2042,18 +2047,68 @@ export default class extends Controller {
 
   bindEvents() {
     const ov = this.overlayTarget
-    ov.addEventListener("wheel", (e) => this.onWheel(e), { passive: false })
-    ov.addEventListener("mousedown", (e) => this.onMouseDown(e))
-    window.addEventListener("mousemove", (e) => this.onMouseMove(e))
-    window.addEventListener("mouseup", () => this.onMouseUp())
-    ov.addEventListener("click", (e) => this.onClick(e))
-    ov.addEventListener("dblclick", (e) => this.onDblClick(e))
-    ov.addEventListener("mouseleave", () => this.hideTooltip())
+    if (!ov || this._heatmapPointerEventsBound) return
+    this._heatmapPointerEventsBound = true
+
+    ov.style.touchAction = "none"
+    this._activePointerId = null
+    this._lastHeatmapTap = null
+
+    this._onWheel = (e) => this.onWheel(e)
+    this._onPointerDown = (e) => this.onPointerDown(e)
+    this._onPointerMove = (e) => this.onPointerMove(e)
+    this._onPointerUp = (e) => this.onPointerUp(e)
+    this._onClick = (e) => this.onClick(e)
+    this._onDblClick = (e) => this.onDblClick(e)
+    this._onPointerLeave = () => {
+      if (!this.selecting && !this.dragging) this.hideTooltip()
+    }
+
+    ov.addEventListener("wheel", this._onWheel, { passive: false })
+    ov.addEventListener("pointerdown", this._onPointerDown)
+    window.addEventListener("pointermove", this._onPointerMove)
+    window.addEventListener("pointerup", this._onPointerUp)
+    window.addEventListener("pointercancel", this._onPointerUp)
+    ov.addEventListener("click", this._onClick)
+    ov.addEventListener("dblclick", this._onDblClick)
+    ov.addEventListener("pointerleave", this._onPointerLeave)
+  }
+
+  unbindEvents() {
+    const ov = this.overlayTarget
+    if (!this._heatmapPointerEventsBound) return
+    this._heatmapPointerEventsBound = false
+
+    if (ov && this._onWheel) ov.removeEventListener("wheel", this._onWheel)
+    if (ov && this._onPointerDown) ov.removeEventListener("pointerdown", this._onPointerDown)
+    if (this._onPointerMove) window.removeEventListener("pointermove", this._onPointerMove)
+    if (this._onPointerUp) {
+      window.removeEventListener("pointerup", this._onPointerUp)
+      window.removeEventListener("pointercancel", this._onPointerUp)
+    }
+    if (ov && this._onClick) ov.removeEventListener("click", this._onClick)
+    if (ov && this._onDblClick) ov.removeEventListener("dblclick", this._onDblClick)
+    if (ov && this._onPointerLeave) ov.removeEventListener("pointerleave", this._onPointerLeave)
+
+    this._onWheel = null
+    this._onPointerDown = null
+    this._onPointerMove = null
+    this._onPointerUp = null
+    this._onClick = null
+    this._onDblClick = null
+    this._onPointerLeave = null
+    this._activePointerId = null
   }
 
   localPoint(e) {
     const rect = this.overlayTarget.getBoundingClientRect()
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    const clientX = Number.isFinite(e.clientX)
+      ? e.clientX
+      : (e.touches && e.touches[0] ? e.touches[0].clientX : 0)
+    const clientY = Number.isFinite(e.clientY)
+      ? e.clientY
+      : (e.touches && e.touches[0] ? e.touches[0].clientY : 0)
+    return { x: clientX - rect.left, y: clientY - rect.top }
   }
 
   inMatrix(p) {
@@ -2374,7 +2429,8 @@ export default class extends Controller {
     const pageHeader = document.getElementById("heatmap-page-header")
     const toolbar = this.element.querySelector(".heatmap-toolbar")
     const selector = this.element.querySelector("#heatmap-mobile-panel-selector")
-    const footer = this.element.querySelector("#heatmap-main-panel > div:last-of-type")
+    const footer = this.element.querySelector("#heatmap-plot-footer") ||
+      this.element.querySelector("#heatmap-main-panel > div:last-of-type")
     const panelOpen = !!this.element.dataset.mobilePanel
 
     if (!panelOpen) {
@@ -2754,17 +2810,50 @@ export default class extends Controller {
     if (!this.inMatrix(p)) return
     e.preventDefault()
     const factor = e.deltaY < 0 ? 0.85 : 1.176
+    this.zoomAtPoint(p.x, p.y, factor)
+  }
+
+  zoomIn(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    this.zoomByFactor(0.85)
+  }
+
+  zoomOut(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    this.zoomByFactor(1.176)
+  }
+
+  zoomByFactor(factor) {
+    if (!(this.mw > 0) || !(this.mh > 0)) return false
+    return this.zoomAtPoint(this.mx + this.mw / 2, this.my + this.mh / 2, factor)
+  }
+
+  zoomAtPoint(x, y, factor) {
+    if (!this.view || !(this.nDispCols > 0) || !(this.nDispRows > 0)) return false
+    if (!(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(factor) && factor > 0)) return false
+
     const v = this.view
-    const cx = this.colForX(p.x)
-    const cy = this.rowForY(p.y)
+    const cx = this.colForX(x)
+    const cy = this.rowForY(y)
+    if (!(Number.isFinite(cx) && Number.isFinite(cy))) return false
 
     let colSpan = (v.colEnd - v.colStart) * factor
     let rowSpan = (v.rowEnd - v.rowStart) * factor
     colSpan = Math.min(this.nDispCols, Math.max(1, colSpan))
     rowSpan = Math.min(this.nDispRows, Math.max(1, rowSpan))
 
-    const colFrac = (cx - v.colStart) / (v.colEnd - v.colStart)
-    const rowFrac = (cy - v.rowStart) / (v.rowEnd - v.rowStart)
+    const colRange = v.colEnd - v.colStart
+    const rowRange = v.rowEnd - v.rowStart
+    if (!(colRange > 0) || !(rowRange > 0)) return false
+
+    const colFrac = (cx - v.colStart) / colRange
+    const rowFrac = (cy - v.rowStart) / rowRange
 
     v.colStart = cx - colFrac * colSpan
     v.colEnd = v.colStart + colSpan
@@ -2772,11 +2861,43 @@ export default class extends Controller {
     v.rowEnd = v.rowStart + rowSpan
     this.clampView()
     this.render()
+    return true
   }
 
-  onMouseDown(e) {
+  onPointerDown(e) {
+    if (e.pointerType === "mouse" && e.button !== 0) return
+
     const p = this.localPoint(e)
     if (!this.inMatrix(p)) return
+
+    e.preventDefault()
+    try {
+      this.overlayTarget.setPointerCapture?.(e.pointerId)
+    } catch (_err) {
+      // Some browsers reject capture if the pointer is already released.
+    }
+    this._activePointerId = e.pointerId
+
+    // Touch devices rarely emit dblclick after preventDefault; synthesize double-tap clear.
+    if (e.pointerType === "touch" || e.pointerType === "pen") {
+      const now = performance.now()
+      const last = this._lastHeatmapTap
+      if (
+        last &&
+        now - last.t < 350 &&
+        Math.hypot(p.x - last.x, p.y - last.y) < 28
+      ) {
+        this._lastHeatmapTap = null
+        this.selecting = false
+        this.selectionRect = null
+        this.dragging = false
+        this.dragStart = null
+        this.clearLiveSelection()
+        return
+      }
+      this._lastHeatmapTap = { t: now, x: p.x, y: p.y }
+    }
+
     if (this.interactionMode === "select") {
       this.selecting = true
       this.selectionRect = { x0: p.x, y0: p.y, x1: p.x, y1: p.y }
@@ -2788,7 +2909,9 @@ export default class extends Controller {
     this.dragStart = { x: p.x, y: p.y, view: { ...this.view } }
   }
 
-  onMouseMove(e) {
+  onPointerMove(e) {
+    if (this._activePointerId != null && e.pointerId !== this._activePointerId) return
+
     const p = this.localPoint(e)
 
     if (this.selecting && this.selectionRect) {
@@ -2812,6 +2935,9 @@ export default class extends Controller {
       this.render()
       return
     }
+
+    // Hover tooling is mouse-only; skip expensive hit-tests during unrelated touch moves.
+    if (e.pointerType && e.pointerType !== "mouse") return
 
     const hoveringTarget = this.hitTestEditableLegend(p)
     const hoveringLegend = !!hoveringTarget
@@ -2847,7 +2973,10 @@ export default class extends Controller {
     }
   }
 
-  onMouseUp() {
+  onPointerUp(e) {
+    if (this._activePointerId != null && e.pointerId !== this._activePointerId) return
+    this._activePointerId = null
+
     if (this.selecting && this.selectionRect) {
       this.commitSelectionRect(this.selectionRect)
       this.selecting = false
@@ -2858,6 +2987,11 @@ export default class extends Controller {
     this.dragging = false
     this.dragStart = null
   }
+
+  // Keep legacy names for any residual call sites.
+  onMouseDown(e) { this.onPointerDown(e) }
+  onMouseMove(e) { this.onPointerMove(e) }
+  onMouseUp(e) { this.onPointerUp(e || { pointerId: this._activePointerId }) }
 
   onDblClick(e) {
     const p = this.localPoint(e)
@@ -6884,6 +7018,8 @@ export default class extends Controller {
   renderCheckpointHistory() {
     if (!this.hasCheckpointHistoryListTarget) return
     const list = this.checkpointHistoryListTarget
+    const canEdit = this.canEditValue === true
+    list.classList.toggle("is-readonly", !canEdit)
     const history = this.checkpointHistory || []
     const currentAuto = this.currentAutoCheckpoint
     if (!history.length && !currentAuto) {
@@ -6898,7 +7034,7 @@ export default class extends Controller {
           </div>
           <ul style="margin:6px 0 0 18px; padding:0; font-size:12px; color:#6b7280;">
             <li>Share direct links to an exact heatmap view.</li>
-            <li>Set the project landing page to a specific view.</li>
+            ${canEdit ? "<li>Set the project landing page to a specific view.</li>" : ""}
             <li>Preserve tracks, gradients, and selections.</li>
             <li>Collaborate with comments on the same heatmap view.</li>
           </ul>
@@ -6914,22 +7050,23 @@ export default class extends Controller {
       : ""
 
     list.innerHTML = `
-      <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #d1d5db;background:#f9fafb;column-gap:6px;position:sticky;top:0;z-index:1;">
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;">Preview</div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;">Checkpoint</div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
+      <div class="checkpoint-history-header">
+        <div class="checkpoint-history-header-cell">Preview</div>
+        <div class="checkpoint-history-header-cell">Checkpoint</div>
+        ${canEdit ? `
+        <div class="checkpoint-history-header-cell is-center">
           <span style="display:block;">Use as</span>
           <span style="display:block;">landing page</span>
-        </div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
+        </div>` : ""}
+        <div class="checkpoint-history-header-cell is-center">
           <span style="display:block;">Without</span>
           <span style="display:block;">comments</span>
         </div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;line-height:1.2;">
+        <div class="checkpoint-history-header-cell is-center">
           <span style="display:block;">With</span>
           <span style="display:block;">comments</span>
         </div>
-        <div style="font-size:11px;font-weight:600;color:#6b7280;text-transform:uppercase;letter-spacing:0.02em;text-align:center;">Delete</div>
+        ${canEdit ? `<div class="checkpoint-history-header-cell is-center">Delete</div>` : ""}
       </div>
       ${currentRowHtml}
       ${rowsHtml}
@@ -6947,29 +7084,31 @@ export default class extends Controller {
   renderCurrentAutoCheckpointRow(checkpoint) {
     const updatedAt = checkpoint.updated_at ? new Date(checkpoint.updated_at).toLocaleString() : ""
     const thumbHtml = this.checkpointHistoryThumbnailHtml(checkpoint)
-    const resetBtn = this.canAnalyzeValue
-      ? `<button type="button"
+    const canEdit = this.canEditValue === true
+    const resetCell = canEdit
+      ? `<div class="checkpoint-history-cell is-center is-delete">
+          <span class="checkpoint-history-field-label">Reset</span>
+          <button type="button"
                   data-action="heatmap#resetCurrentCheckpoint"
                   style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
                   title="Clear the auto-saved view and reload the default heatmap">
             Reset
-          </button>`
+          </button>
+        </div>`
       : ""
     return `
-      <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;column-gap:6px;background:#f8fafc;">
-        <div style="display:flex;align-items:center;justify-content:flex-start;gap:4px;min-height:54px;">
+      <div class="checkpoint-history-row is-current">
+        <div class="checkpoint-history-preview">
           ${thumbHtml || ""}
         </div>
-        <div style="min-width:0;">
+        <div class="checkpoint-history-meta">
           <div title="Current auto checkpoint" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Current auto checkpoint</div>
-          <div style="font-size:11px;color:#6b7280;">Auto-saved ${this.escape(updatedAt)}. Reset if the view looks wrong after data changes.</div>
+          <div style="font-size:11px;color:#6b7280;">Auto-saved ${this.escape(updatedAt)}${canEdit ? ". Reset if the view looks wrong after data changes." : "."}</div>
         </div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div style="display:flex;align-items:center;justify-content:center;">
-          ${resetBtn}
-        </div>
+        ${canEdit ? '<div class="checkpoint-history-cell"></div>' : ""}
+        <div class="checkpoint-history-cell"></div>
+        <div class="checkpoint-history-cell"></div>
+        ${resetCell}
       </div>
     `
   }
@@ -6980,7 +7119,8 @@ export default class extends Controller {
     const commentCount = Number(checkpoint.comments_count || 0)
     const thumbHtml = this.checkpointHistoryThumbnailHtml(checkpoint)
     const escapedId = this.escape(id)
-    const renameBtn = this.canAnalyzeValue
+    const canEdit = this.canEditValue === true
+    const renameBtn = canEdit
       ? `<button type="button"
                 data-action="heatmap#editCheckpointTitleFromHistory"
                 data-heatmap-id-param="${escapedId}"
@@ -6990,70 +7130,80 @@ export default class extends Controller {
             <i class="fas fa-pen" style="font-size:10px;" aria-hidden="true"></i>
           </button>`
       : ""
-    const deleteBtn = this.canAnalyzeValue
-      ? `<button type="button"
-                data-action="heatmap#deleteCheckpointFromHistory"
-                data-heatmap-id-param="${escapedId}"
-                style="border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+    const landingCell = canEdit
+      ? `<div class="checkpoint-history-cell is-center is-inline">
+          <span class="checkpoint-history-field-label">Use as landing page</span>
+          <input type="checkbox"
+                 data-action="change->heatmap#toggleCheckpointLandingPageFromHistory"
+                 data-heatmap-id-param="${escapedId}"
+                 ${checkpoint.is_landing_page === true ? "checked" : ""}
+                 style="width:14px;height:14px;cursor:pointer;" />
+        </div>`
+      : ""
+    const deleteCell = canEdit
+      ? `<div class="checkpoint-history-cell is-center is-delete">
+          <span class="checkpoint-history-field-label">Delete</span>
+          <button type="button"
+                  data-action="heatmap#deleteCheckpointFromHistory"
+                  data-heatmap-id-param="${escapedId}"
+                  style="border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
             Delete
-          </button>`
+          </button>
+        </div>`
       : ""
 
     return `
-      <div style="display:grid;grid-template-columns:156px minmax(0,1fr) 104px 178px 178px 68px;align-items:center;padding:8px 10px;border-bottom:1px solid #e5e7eb;column-gap:6px;">
-        <div style="display:flex;align-items:center;justify-content:flex-start;gap:4px;min-height:54px;">
+      <div class="checkpoint-history-row">
+        <div class="checkpoint-history-preview">
           ${thumbHtml || ""}
         </div>
-        <div style="min-width:0;">
+        <div class="checkpoint-history-meta">
           <div style="display:flex;align-items:center;gap:6px;min-width:0;">
             <div title="${this.escape(checkpoint.title || "")}" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">${this.escape(checkpoint.title || "Untitled")}</div>
             ${renameBtn}
           </div>
           <div style="font-size:11px;color:#6b7280;">${this.escape(createdAt)} - ${commentCount} comment${commentCount === 1 ? "" : "s"}</div>
         </div>
-        <div style="display:flex;align-items:center;justify-content:center;">
-          <input type="checkbox"
-                 data-action="change->heatmap#toggleCheckpointLandingPageFromHistory"
-                 data-heatmap-id-param="${escapedId}"
-                 ${checkpoint.is_landing_page === true ? "checked" : ""}
-                 ${this.canAnalyzeValue ? "" : "disabled"}
-                 style="width:14px;height:14px;cursor:pointer;" />
+        ${landingCell}
+        <div class="checkpoint-history-cell is-center">
+          <span class="checkpoint-history-field-label">Without comments</span>
+          <div class="checkpoint-history-btn-row">
+            <button type="button"
+                    data-action="heatmap#copyCheckpointDirectLinkFromHistory"
+                    data-heatmap-id-param="${escapedId}"
+                    data-heatmap-with-comments-param="false"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
+                    title="Copy direct link without comments">
+              Copy link
+            </button>
+            <button type="button"
+                    data-action="heatmap#loadCheckpointFromHistory"
+                    data-heatmap-id-param="${escapedId}"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+              Open
+            </button>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
-          <button type="button"
-                  data-action="heatmap#copyCheckpointDirectLinkFromHistory"
-                  data-heatmap-id-param="${escapedId}"
-                  data-heatmap-with-comments-param="false"
-                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
-                  title="Copy direct link without comments">
-            Copy link
-          </button>
-          <button type="button"
-                  data-action="heatmap#loadCheckpointFromHistory"
-                  data-heatmap-id-param="${escapedId}"
-                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
-            Open
-          </button>
+        <div class="checkpoint-history-cell is-center">
+          <span class="checkpoint-history-field-label">With comments</span>
+          <div class="checkpoint-history-btn-row">
+            <button type="button"
+                    data-action="heatmap#copyCheckpointDirectLinkFromHistory"
+                    data-heatmap-id-param="${escapedId}"
+                    data-heatmap-with-comments-param="true"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
+                    title="Copy direct link and open comments">
+              Copy link
+            </button>
+            <button type="button"
+                    data-action="heatmap#loadCheckpointCommentsFromHistory"
+                    data-heatmap-id-param="${escapedId}"
+                    style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+              Open
+            </button>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
-          <button type="button"
-                  data-action="heatmap#copyCheckpointDirectLinkFromHistory"
-                  data-heatmap-id-param="${escapedId}"
-                  data-heatmap-with-comments-param="true"
-                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;"
-                  title="Copy direct link and open comments">
-            Copy link
-          </button>
-          <button type="button"
-                  data-action="heatmap#loadCheckpointCommentsFromHistory"
-                  data-heatmap-id-param="${escapedId}"
-                  style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
-            Open
-          </button>
-        </div>
-        <div style="display:flex;align-items:center;justify-content:center;">
-          ${deleteBtn}
-        </div>
+        ${deleteCell}
       </div>
     `
   }
@@ -7089,7 +7239,7 @@ export default class extends Controller {
 
   async toggleCheckpointLandingPageFromHistory(event) {
     const id = event.params.id
-    if (!id || !this.canAnalyzeValue) return
+    if (!id || !this.canEditValue) return
 
     const checkboxEl = event.currentTarget
     const isLandingPage = !!checkboxEl?.checked
@@ -7141,7 +7291,7 @@ export default class extends Controller {
 
   async deleteCheckpointFromHistory(event) {
     const id = event.params.id
-    if (!this.canAnalyzeValue) return
+    if (!this.canEditValue) return
     if (!window.confirm("Delete this checkpoint?")) return
     const response = await fetch(`${this.checkpointsUrl(id)}?${this.checkpointsQuery()}`, {
       method: "DELETE",
@@ -7166,7 +7316,7 @@ export default class extends Controller {
 
   async editCheckpointTitleFromHistory(event) {
     const id = event.params.id
-    if (!this.canAnalyzeValue) return
+    if (!this.canEditValue) return
 
     const checkpoint = this.checkpointForId(id)
     if (!checkpoint) return
@@ -7222,7 +7372,7 @@ export default class extends Controller {
   }
 
   async resetCurrentCheckpoint() {
-    if (!this.canAnalyzeValue) return
+    if (!this.canEditValue) return
     if (!window.confirm("Reset the current auto-saved heatmap view? The page will reload without that saved state.")) {
       return
     }

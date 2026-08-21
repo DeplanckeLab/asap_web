@@ -67,7 +67,8 @@ export default class extends Controller {
     projectTypeTag: String,
     cellIdAnnotIdsByLoom: Object,
     entryCheckpointTitle: String,
-    currentUserId: Number
+    currentUserId: Number,
+    canEdit: { type: Boolean, default: false }
   }
   
   // Optional targets - manually check with querySelector
@@ -2512,6 +2513,9 @@ export default class extends Controller {
     const listContainer = document.getElementById('checkpoint-history-list')
     if (!listContainer) return
 
+    const canEdit = this.canEditValue === true
+    listContainer.classList.toggle('is-readonly', !canEdit)
+
     const namedHistory = Array.isArray(this.checkpointHistory) ? this.checkpointHistory : []
     const currentAuto = this.currentAutoCheckpoint
     if (namedHistory.length === 0 && !currentAuto) {
@@ -2533,7 +2537,7 @@ export default class extends Controller {
           </div>
           <ul style="margin: 6px 0 0 18px; padding: 0; font-size: 12px; color: #6b7280;">
             <li>Share direct links to an exact visualization state.</li>
-            <li>Set the project landing page to a specific view.</li>
+            ${canEdit ? '<li>Set the project landing page to a specific view.</li>' : ''}
             <li>Preserve custom colors and plot settings.</li>
             <li>Collaborate with comments on the same plot view.</li>
           </ul>
@@ -2553,10 +2557,11 @@ export default class extends Controller {
       <div class="checkpoint-history-header">
         <div class="checkpoint-history-header-cell">Preview</div>
         <div class="checkpoint-history-header-cell">Checkpoint</div>
+        ${canEdit ? `
         <div class="checkpoint-history-header-cell is-center">
           <span style="display:block;">Use as</span>
           <span style="display:block;">landing page</span>
-        </div>
+        </div>` : ''}
         <div class="checkpoint-history-header-cell is-center">
           <span style="display:block;">Without</span>
           <span style="display:block;">comments</span>
@@ -2565,7 +2570,7 @@ export default class extends Controller {
           <span style="display:block;">With</span>
           <span style="display:block;">comments</span>
         </div>
-        <div class="checkpoint-history-header-cell is-center">Delete</div>
+        ${canEdit ? `<div class="checkpoint-history-header-cell is-center">Delete</div>` : ''}
       </div>
       ${currentRowHtml}
       ${rowsHtml}
@@ -2590,19 +2595,9 @@ export default class extends Controller {
   renderCurrentAutoCheckpointRow(checkpoint) {
     const updatedAt = checkpoint.updated_at ? new Date(checkpoint.updated_at).toLocaleString() : ''
     const thumbHtml = this.checkpointHistoryThumbnailHtml(checkpoint)
-    return `
-      <div class="checkpoint-history-row is-current">
-        <div class="checkpoint-history-preview">
-          ${thumbHtml || ''}
-        </div>
-        <div class="checkpoint-history-meta">
-          <div title="Current auto checkpoint" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Current auto checkpoint</div>
-          <div style="font-size:11px;color:#6b7280;">Auto-saved ${this.escapeHtml(updatedAt)}. Reset if the view looks wrong after data changes.</div>
-        </div>
-        <div class="checkpoint-history-cell"></div>
-        <div class="checkpoint-history-cell"></div>
-        <div class="checkpoint-history-cell"></div>
-        <div class="checkpoint-history-cell is-center is-delete">
+    const canEdit = this.canEditValue === true
+    const resetCell = canEdit
+      ? `<div class="checkpoint-history-cell is-center is-delete">
           <span class="checkpoint-history-field-label">Reset</span>
           <button type="button"
                   onclick="if (window.visualizationController) window.visualizationController.resetCurrentCheckpoint()"
@@ -2610,7 +2605,21 @@ export default class extends Controller {
                   title="Clear the auto-saved view and reload the default visualization">
             Reset
           </button>
+        </div>`
+      : ''
+    return `
+      <div class="checkpoint-history-row is-current">
+        <div class="checkpoint-history-preview">
+          ${thumbHtml || ''}
         </div>
+        <div class="checkpoint-history-meta">
+          <div title="Current auto checkpoint" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Current auto checkpoint</div>
+          <div style="font-size:11px;color:#6b7280;">Auto-saved ${this.escapeHtml(updatedAt)}${canEdit ? '. Reset if the view looks wrong after data changes.' : '.'}</div>
+        </div>
+        ${canEdit ? '<div class="checkpoint-history-cell"></div>' : ''}
+        <div class="checkpoint-history-cell"></div>
+        <div class="checkpoint-history-cell"></div>
+        ${resetCell}
       </div>
     `
   }
@@ -2620,6 +2629,38 @@ export default class extends Controller {
     const commentCount = Number(checkpoint.comments_count || 0)
     const checkpointId = this.escapeHtml(checkpoint.id)
     const thumbHtml = this.checkpointHistoryThumbnailHtml(checkpoint)
+    const canEdit = this.canEditValue === true
+    const renameBtn = canEdit
+      ? `<button type="button"
+                    data-checkpoint-id="${checkpointId}"
+                    onclick="if (window.visualizationController) window.visualizationController.editCheckpointTitleById('${checkpointId}')"
+                    style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#6b7280;background:none;border:none;cursor:pointer;padding:0;flex-shrink:0;"
+                    title="Edit checkpoint name"
+                    aria-label="Edit checkpoint name">
+              <i class="fas fa-pen" style="font-size:10px;" aria-hidden="true"></i>
+            </button>`
+      : ''
+    const landingCell = canEdit
+      ? `<div class="checkpoint-history-cell is-center is-inline">
+          <span class="checkpoint-history-field-label">Use as landing page</span>
+          <input type="checkbox"
+                 ${checkpoint.is_landing_page === true ? 'checked' : ''}
+                 onclick="event.stopPropagation()"
+                 onchange="if (window.visualizationController) window.visualizationController.toggleCheckpointLandingPage('${checkpointId}', this.checked, this)"
+                 style="width:14px;height:14px;cursor:pointer;" />
+        </div>`
+      : ''
+    const deleteCell = canEdit
+      ? `<div class="checkpoint-history-cell is-center is-delete">
+          <span class="checkpoint-history-field-label">Delete</span>
+          <button type="button"
+                  data-checkpoint-id="${checkpointId}"
+                  onclick="if (window.visualizationController) window.visualizationController.deleteCheckpointById('${checkpointId}')"
+                  style="border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
+            Delete
+          </button>
+        </div>`
+      : ''
     return `
       <div class="checkpoint-history-row">
         <div class="checkpoint-history-preview">
@@ -2628,25 +2669,11 @@ export default class extends Controller {
         <div class="checkpoint-history-meta">
           <div style="display:flex;align-items:center;gap:6px;min-width:0;">
             <div title="${this.escapeHtml(checkpoint.title || '')}" style="font-size:13px;font-weight:600;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;">${this.escapeHtml(checkpoint.title || '')}</div>
-            <button type="button"
-                    data-checkpoint-id="${checkpointId}"
-                    onclick="if (window.visualizationController) window.visualizationController.editCheckpointTitleById('${checkpointId}')"
-                    style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;color:#6b7280;background:none;border:none;cursor:pointer;padding:0;flex-shrink:0;"
-                    title="Edit checkpoint name"
-                    aria-label="Edit checkpoint name">
-              <i class="fas fa-pen" style="font-size:10px;" aria-hidden="true"></i>
-            </button>
+            ${renameBtn}
           </div>
           <div style="font-size:11px;color:#6b7280;">${this.escapeHtml(createdAt)} - ${commentCount} comment${commentCount === 1 ? '' : 's'}</div>
         </div>
-        <div class="checkpoint-history-cell is-center is-inline">
-          <span class="checkpoint-history-field-label">Use as landing page</span>
-          <input type="checkbox"
-                 ${checkpoint.is_landing_page === true ? 'checked' : ''}
-                 onclick="event.stopPropagation()"
-                 onchange="if (window.visualizationController) window.visualizationController.toggleCheckpointLandingPage('${checkpointId}', this.checked, this)"
-                 style="width:14px;height:14px;cursor:pointer;" />
-        </div>
+        ${landingCell}
         <div class="checkpoint-history-cell is-center">
           <span class="checkpoint-history-field-label">Without comments</span>
           <div class="checkpoint-history-btn-row">
@@ -2683,15 +2710,7 @@ export default class extends Controller {
             </button>
           </div>
         </div>
-        <div class="checkpoint-history-cell is-center is-delete">
-          <span class="checkpoint-history-field-label">Delete</span>
-          <button type="button"
-                  data-checkpoint-id="${checkpointId}"
-                  onclick="if (window.visualizationController) window.visualizationController.deleteCheckpointById('${checkpointId}')"
-                  style="border:1px solid #fecaca;background:#fff;color:#b91c1c;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:12px;font-weight:500;white-space:nowrap;">
-            Delete
-          </button>
-        </div>
+        ${deleteCell}
       </div>
     `
   }
@@ -3908,7 +3927,7 @@ export default class extends Controller {
   }
 
   async toggleCheckpointLandingPage(checkpointId, isLandingPage, checkboxEl = null) {
-    if (!checkpointId) return
+    if (!checkpointId || !this.canEditValue) return
 
     const projectIdentifier = this.getProjectIdentifier()
     if (!projectIdentifier) return
@@ -3946,7 +3965,7 @@ export default class extends Controller {
   }
 
   async editCheckpointTitleById(checkpointId) {
-    if (!checkpointId) return
+    if (!checkpointId || !this.canEditValue) return
 
     const checkpoint = (this.checkpointHistory || []).find((item) => String(item.id) === String(checkpointId))
     if (!checkpoint) return
@@ -3991,7 +4010,7 @@ export default class extends Controller {
   }
 
   async deleteCheckpointById(checkpointId) {
-    if (!checkpointId) return
+    if (!checkpointId || !this.canEditValue) return
     if (!window.confirm('Delete this checkpoint?')) return
 
     const projectIdentifier = this.getProjectIdentifier()
@@ -4033,6 +4052,7 @@ export default class extends Controller {
   }
 
   async resetCurrentCheckpoint() {
+    if (!this.canEditValue) return
     if (!window.confirm('Reset the current auto-saved view? The visualization will reload without that saved state.')) {
       return
     }

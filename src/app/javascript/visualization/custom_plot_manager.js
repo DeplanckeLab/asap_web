@@ -628,15 +628,22 @@ export class CustomPlotManager {
       titleRow.style.margin = '0'
       titleRow.style.minWidth = '0'
       titleRow.style.flex = '1 1 auto'
+      titleRow.style.cursor = 'pointer'
     }
-    if (title && this.isMobileVizLayout()) {
-      title.style.setProperty('font-size', '9px', 'important')
-      title.style.setProperty('font-weight', '600', 'important')
-      title.style.setProperty('line-height', '1.15', 'important')
-      title.style.setProperty('max-width', '72px', 'important')
-      title.style.setProperty('overflow', 'hidden', 'important')
-      title.style.setProperty('text-overflow', 'ellipsis', 'important')
-      title.style.setProperty('white-space', 'nowrap', 'important')
+    if (title) {
+      title.style.cursor = 'pointer'
+      if (this.isMobileVizLayout()) {
+        title.style.setProperty('font-size', '9px', 'important')
+        title.style.setProperty('font-weight', '600', 'important')
+        title.style.setProperty('line-height', '1.15', 'important')
+        title.style.setProperty('max-width', '72px', 'important')
+        title.style.setProperty('overflow', 'hidden', 'important')
+        title.style.setProperty('text-overflow', 'ellipsis', 'important')
+        title.style.setProperty('white-space', 'nowrap', 'important')
+      }
+    }
+    if (header) {
+      header.style.cursor = 'pointer'
     }
     if (controls) {
       controls.style.marginLeft = '0'
@@ -757,13 +764,16 @@ export class CustomPlotManager {
       header.style.borderRadius = '12px 12px 0 0'
       header.style.justifyContent = 'space-between'
       header.style.gap = ''
+      header.style.cursor = 'move'
     }
     if (titleRow) {
       titleRow.style.margin = ''
       titleRow.style.minWidth = ''
       titleRow.style.flex = ''
+      titleRow.style.cursor = ''
     }
     if (title) {
+      title.style.cursor = ''
       title.style.removeProperty('font-size')
       title.style.removeProperty('font-weight')
       title.style.removeProperty('line-height')
@@ -919,32 +929,50 @@ export class CustomPlotManager {
     // Add direct event listener for close button (like settings window)
     if (closeBtn) {
       closeBtn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
         this.close2DPlotModalAndClearAxes(e)
       })
     }
 
     if (minimizeBtn) {
       minimizeBtn.addEventListener('click', (e) => {
+        e.preventDefault()
+        e.stopPropagation()
         this.toggle2DPlotModalMinimize(e)
       })
     }
     this.update2DPlotWindowControls()
     
     let isDragging = false
+    let dragMoved = false
     let currentX = 0
     let currentY = 0
     let initialX = 0
     let initialY = 0
+    const dragThresholdPx = 5
+
+    const isWindowControlTarget = (target) => {
+      if (!target || typeof target.closest !== 'function') return false
+      return !!(target.closest('#close-2d-plot-modal') || target.closest('#minimize-2d-plot-modal'))
+    }
     
     const startDrag = (e) => {
       // Don't start drag if clicking on window controls.
-      if (e.target.closest('#close-2d-plot-modal') || e.target.closest('#minimize-2d-plot-modal')) {
+      if (isWindowControlTarget(e.target)) {
+        return
+      }
+
+      // Reduced window: title/header click expands (same as restore). Dragging while
+      // minimized breaks docked/fixed chrome and can make the window disappear.
+      if (this.is2DPlotMinimized) {
         return
       }
       
       if (e.button !== 0 && e.type !== 'touchstart') return // Only left mouse button
       
       isDragging = true
+      dragMoved = false
       initialX = e.type === 'mousedown' ? e.clientX : e.touches[0].clientX
       initialY = e.type === 'mousedown' ? e.clientY : e.touches[0].clientY
       
@@ -967,6 +995,9 @@ export class CustomPlotManager {
       
       const dx = x - initialX
       const dy = y - initialY
+      if (Math.abs(dx) > dragThresholdPx || Math.abs(dy) > dragThresholdPx) {
+        dragMoved = true
+      }
       
       const newX = currentX + dx
       const newY = currentY + dy
@@ -982,10 +1013,20 @@ export class CustomPlotManager {
     
     const stopDrag = () => {
       isDragging = false
+      dragMoved = false
+    }
+
+    const restoreFromMinimizedHeader = (e) => {
+      if (!this.is2DPlotMinimized) return
+      if (isWindowControlTarget(e.target)) return
+      e.preventDefault()
+      e.stopPropagation()
+      this.restore2DPlotModal(e)
     }
     
     header.addEventListener('mousedown', startDrag)
     header.addEventListener('touchstart', startDrag)
+    header.addEventListener('click', restoreFromMinimizedHeader)
     
     document.addEventListener('mousemove', drag)
     document.addEventListener('touchmove', drag)

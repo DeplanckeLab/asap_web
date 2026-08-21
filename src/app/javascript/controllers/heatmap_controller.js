@@ -1879,6 +1879,11 @@ export default class extends Controller {
   handleResize() {
     if (!this.renderer) return
     if (this.isMobileHeatmapLayout()) {
+      // Recalculate locked plot height only while panels are closed so an open
+      // overlay does not jump the canvas when chrome is hidden.
+      if (!this.element?.dataset?.mobilePanel) {
+        this._mobilePlotHeightLock = null
+      }
       this.updateMobileHeatmapChromeHeight()
     }
     const container = this.element.querySelector(".heatmap-canvas-area")
@@ -1961,10 +1966,14 @@ export default class extends Controller {
     this.rightMargin = mobile ? 0 : this.estimateRightMargin()
     this.labelW = this.showLabels ? (mobile ? Math.min(L.rowLabelW, 36) : L.rowLabelW) : 0
 
-    const labelH = this.showLabels ? (mobile ? Math.min(L.colLabelH, 40) : L.colLabelH) : 0
+    // Mobile: keep side gene labels, but do not reserve space under the matrix
+    // (that empty band sat between the heatmap and the +/- footer).
+    const labelH = (!mobile && this.showLabels) ? L.colLabelH : 0
+    const bottomPad = mobile ? 0 : L.pad
     // Right side: [matrix][gene labels][rightMargin][legend][pad]
     this.mw = Math.max(20, this.containerW - this.mx - this.labelW - this.rightMargin - this.rightLegendW - L.pad)
-    this.mh = Math.max(20, this.containerH - this.my - labelH - L.pad)
+    this.mh = Math.max(20, this.containerH - this.my - labelH - bottomPad)
+    this.colLabelH = labelH
     this.legendLeft = this.mx + this.mw + this.labelW + this.rightMargin
     this.positionAddTrackButtons()
   }
@@ -2386,7 +2395,6 @@ export default class extends Controller {
     this.element?.style?.removeProperty?.("--heatmap-mobile-panel-top")
     this.element?.style?.removeProperty?.("--heatmap-mobile-panel-region-height")
     this.element?.style?.removeProperty?.("--heatmap-mobile-plot-height")
-    this.element?.style?.removeProperty?.("--heatmap-mobile-plot-footer-height")
   }
 
   syncMobileHeatmapLayout({ redraw = true } = {}) {
@@ -2418,7 +2426,6 @@ export default class extends Controller {
       this.element?.style?.removeProperty?.("--heatmap-mobile-panel-top")
       this.element?.style?.removeProperty?.("--heatmap-mobile-panel-region-height")
       this.element?.style?.removeProperty?.("--heatmap-mobile-plot-height")
-      this.element?.style?.removeProperty?.("--heatmap-mobile-plot-footer-height")
       return
     }
 
@@ -2426,6 +2433,8 @@ export default class extends Controller {
     const pageHeader = document.getElementById("heatmap-page-header")
     const toolbar = this.element.querySelector(".heatmap-toolbar")
     const selector = this.element.querySelector("#heatmap-mobile-panel-selector")
+    const footer = this.element.querySelector("#heatmap-plot-footer") ||
+      this.element.querySelector("#heatmap-main-panel > div:last-of-type")
     const panelOpen = !!this.element.dataset.mobilePanel
 
     if (!panelOpen) {
@@ -2440,32 +2449,26 @@ export default class extends Controller {
     const headerHeight = this._mobileStableHeaderHeight || 64
     const toolbarHeight = this._mobileStableToolbarHeight || 0
     const selectorHeight = selector?.getBoundingClientRect?.().height || 0
-    // Match visualization: fixed footer band so plot docking stays stable.
-    const footerHeight = 36
+    const footerHeight = footer?.getBoundingClientRect?.().height || 36
     const stableChromeHeight = Math.ceil(headerHeight + toolbarHeight + selectorHeight + footerHeight)
 
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
-    // Keep a solid band above the docked plot for mobile panels (and avoid a
-    // tall empty strip below the heatmap).
-    const minPanelRegion = Math.max(200, Math.round(viewportHeight * 0.4))
+    const canvasArea = this.element.querySelector(".heatmap-canvas-area")
 
-    // Recalculate only while panels are closed so opening one does not jump the canvas.
-    if (!panelOpen || !this._mobilePlotHeightLock) {
-      this._mobilePlotHeightLock = Math.max(
-        160,
-        Math.round(viewportHeight - stableChromeHeight - minPanelRegion)
-      )
-    }
-
-    this.element.style.setProperty("--heatmap-mobile-plot-height", `${this._mobilePlotHeightLock}px`)
-    this.element.style.setProperty("--heatmap-mobile-plot-footer-height", `${footerHeight}px`)
-
+    // Capture the closed-layout canvas height so opening a panel does not resize it.
     if (!panelOpen) {
+      const measured = canvasArea?.clientHeight || 0
+      this._mobilePlotHeightLock = measured > 0
+        ? measured
+        : Math.max(160, Math.round(viewportHeight - stableChromeHeight))
+      this.element.style.removeProperty("--heatmap-mobile-plot-height")
       this.element.style.removeProperty("--heatmap-mobile-panel-top")
       this.element.style.removeProperty("--heatmap-mobile-panel-region-height")
       return
     }
 
+    // Clamp so the docked plot + footer stay on-screen (no page scroll) while
+    // leaving room for the panel above.
     const selectorBottom = selector?.getBoundingClientRect?.().bottom
     const panelTop = Math.ceil(
       Number.isFinite(selectorBottom) && selectorBottom > 0
@@ -2473,7 +2476,17 @@ export default class extends Controller {
         : selectorHeight
     )
     const availableBelowChrome = Math.max(180, viewportHeight - panelTop)
-    const plotReserve = (this._mobilePlotHeightLock || 200) + footerHeight
+    const minPanelRegion = Math.max(160, Math.round(viewportHeight * 0.35))
+    const maxPlotHeight = Math.max(160, availableBelowChrome - footerHeight - minPanelRegion)
+    const lockedHeight = Math.min(
+      this._mobilePlotHeightLock || maxPlotHeight,
+      maxPlotHeight
+    )
+    this._mobilePlotHeightLock = lockedHeight
+
+    this.element.style.setProperty("--heatmap-mobile-plot-height", `${lockedHeight}px`)
+
+    const plotReserve = lockedHeight + footerHeight
     const panelRegionHeight = Math.max(160, availableBelowChrome - plotReserve)
 
     this.element.style.setProperty("--heatmap-mobile-panel-top", `${panelTop}px`)
@@ -4393,9 +4406,10 @@ export default class extends Controller {
     }
 
     const colW = this.mw / (v.colEnd - v.colStart)
-    if (colW >= 7) {
+    const colLabelBand = Number.isFinite(this.colLabelH) ? this.colLabelH : this.layout.colLabelH
+    if (colW >= 7 && colLabelBand > 0) {
       ctx.save()
-      ctx.beginPath(); ctx.rect(this.mx, this.my + this.mh, this.mw, this.layout.colLabelH); ctx.clip()
+      ctx.beginPath(); ctx.rect(this.mx, this.my + this.mh, this.mw, colLabelBand); ctx.clip()
       ctx.textAlign = "right"
       ctx.textBaseline = "middle"
       const start = Math.max(0, Math.floor(v.colStart))

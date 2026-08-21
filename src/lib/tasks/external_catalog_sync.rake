@@ -143,6 +143,8 @@ namespace :external_catalog do
       format_kind: attrs['format_kind'],
       filename: attrs['filename'],
       filesize: attrs['filesize'].to_i,
+      n_obs: attrs['n_obs']&.to_i,
+      n_vars: attrs['n_vars']&.to_i,
       url: attrs['url'],
       source_page_url: attrs['source_page_url'],
       collection_id: attrs['collection_id'],
@@ -217,6 +219,9 @@ namespace :external_catalog do
     unless ActiveRecord::Base.connection.column_exists?(:external_catalog_candidates, :obsolete)
       raise 'external_catalog_candidates.obsolete missing on target. Run migrations first.'
     end
+    unless ActiveRecord::Base.connection.column_exists?(:external_catalog_candidates, :n_obs)
+      raise 'external_catalog_candidates.n_obs missing on target. Run migrations first.'
+    end
 
     source_config = source_db_config_for_external_catalog_sync!(source_app_root)
     ExternalCatalogSyncSourceBase.establish_connection(source_config)
@@ -226,6 +231,9 @@ namespace :external_catalog do
     end
     unless ExternalCatalogSyncSourceBase.connection.column_exists?(:external_catalog_candidates, :obsolete)
       raise 'external_catalog_candidates.obsolete missing on source database. Run migrations on development first.'
+    end
+    unless ExternalCatalogSyncSourceBase.connection.column_exists?(:external_catalog_candidates, :n_obs)
+      raise 'external_catalog_candidates.n_obs missing on source database. Run migrations on development first.'
     end
 
     source_rows = ExternalCatalogSyncSourceCandidate.order(:id).map do |row|

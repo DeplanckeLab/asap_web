@@ -54,10 +54,8 @@
         <tr>
           <th scope="col" class="px-3 py-2 text-left">Source</th>
           <th scope="col" class="px-3 py-2 text-left">Dataset</th>
-          <th scope="col" class="px-3 py-2 text-left">Organism</th>
           <th scope="col" class="px-3 py-2 text-left">Matrix</th>
           <th scope="col" class="px-3 py-2 text-left">Format</th>
-          <th scope="col" class="px-3 py-2 text-left">Publication</th>
           <th scope="col" class="px-3 py-2 text-left">ASAP</th>
           <th scope="col" class="px-3 py-2 text-left">Actions</th>
         </tr>
@@ -65,6 +63,11 @@
       <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-gray-800 dark:text-gray-200">
         <% @candidates.each do |candidate| %>
           <% asap_projects = @asap_projects_by_candidate_id[candidate.id] || [] %>
+          <% dois = candidate.dois %>
+          <% organism_title =
+               if candidate.tax_id.to_i > 0
+                 "NCBI Taxonomy ID #{candidate.tax_id}"
+               end %>
           <tr>
             <td class="whitespace-nowrap px-3 py-2 text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
               <% if candidate.source_page_url.present? %>
@@ -82,15 +85,26 @@
               <% end %>
             </td>
             <td class="px-3 py-2">
-              <%= link_to (candidate.title.presence || candidate.external_id).to_s.truncate(80),
-                          external_catalog_candidate_path(candidate),
-                          class: "font-medium text-blue-600 hover:underline dark:text-blue-400" %>
+              <div class="flex items-start gap-1.5">
+                <%= link_to (candidate.title.presence || candidate.external_id).to_s.truncate(80),
+                            external_catalog_candidate_path(candidate),
+                            class: "font-medium text-blue-600 hover:underline dark:text-blue-400" %>
+                <% if dois.any? %>
+                  <%= link_to "https://doi.org/#{dois.first}",
+                              target: "_blank",
+                              rel: "noopener",
+                              class: "mt-0.5 shrink-0 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400",
+                              title: (dois.size > 1 ? "#{dois.first} (+#{dois.size - 1})" : dois.first) do %>
+                    <i class="fas fa-book-open text-xs" aria-hidden="true"></i>
+                    <span class="sr-only">Publication DOI</span>
+                  <% end %>
+                <% end %>
+              </div>
               <div class="mt-0.5 font-mono text-xs text-gray-500 dark:text-gray-400"><%= candidate.external_id %></div>
-            </td>
-            <td class="whitespace-nowrap px-3 py-2 text-xs">
-              <%= candidate.organism_label.presence || "—" %>
-              <% if candidate.tax_id.to_i > 0 %>
-                <div class="text-gray-400">tax <%= candidate.tax_id %></div>
+              <% if candidate.organism_label.present? %>
+                <div class="mt-0.5 text-xs text-gray-500 dark:text-gray-400" title="<%= organism_title %>">
+                  <%= candidate.organism_label %>
+                </div>
               <% end %>
             </td>
             <td class="whitespace-nowrap px-3 py-2 text-xs">
@@ -110,15 +124,6 @@
               <%= candidate.format_kind.presence || "—" %>
               <% if candidate.filesize.to_i > 0 %>
                 <div class="text-gray-400"><%= number_to_human_size(candidate.filesize) %></div>
-              <% end %>
-            </td>
-            <td class="px-3 py-2 text-xs">
-              <% dois = candidate.dois %>
-              <% if dois.any? %>
-                <%= link_to dois.first.to_s.truncate(36), "https://doi.org/#{dois.first}", target: "_blank", rel: "noopener", class: "text-blue-600 hover:underline dark:text-blue-400" %>
-                <% if dois.size > 1 %><span class="text-gray-400">+<%= dois.size - 1 %></span><% end %>
-              <% else %>
-                <span class="text-gray-400">—</span>
               <% end %>
             </td>
             <td class="px-3 py-2 text-xs">
@@ -176,7 +181,7 @@
         <% end %>
         <% if @candidates.empty? %>
           <tr>
-            <td colspan="8" class="px-3 py-10 text-center text-gray-500 dark:text-gray-400">
+            <td colspan="6" class="px-3 py-10 text-center text-gray-500 dark:text-gray-400">
               No candidates match these filters.
               <% if admin? %>
                 Sync with <code class="text-xs">rails external_catalog:sync_candidates</code>.

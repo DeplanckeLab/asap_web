@@ -625,32 +625,33 @@
         display: inline-flex;
       }
 
+      /* Dock plot + footer at the bottom (same idea as visualization) so
+         panels can use the space above instead of leaving a gap below. */
       .heatmap-viewer-full .heatmap-canvas-area {
         position: relative !important;
-        flex: 1 1 auto !important;
-        min-height: 160px !important;
-        height: auto !important;
-        max-height: none !important;
-        width: 100% !important;
-        touch-action: none;
-      }
-
-      [data-controller="heatmap"][data-mobile-panel] .heatmap-canvas-area {
         flex: 0 0 auto !important;
+        width: 100% !important;
         height: var(--heatmap-mobile-plot-height, 200px) !important;
         max-height: var(--heatmap-mobile-plot-height, 200px) !important;
         min-height: 0 !important;
         margin-top: auto !important;
+        margin-bottom: 0 !important;
+        touch-action: none;
       }
 
+      .heatmap-viewer-full #heatmap-plot-footer,
       .heatmap-viewer-full .heatmap-main-panel > div:last-child {
         font-size: 11px !important;
-        padding: 4px 10px !important;
+        padding: 2px 10px !important;
         display: flex !important;
         align-items: center !important;
         gap: 8px !important;
-        min-height: 40px !important;
+        height: var(--heatmap-mobile-plot-footer-height, 36px) !important;
+        min-height: var(--heatmap-mobile-plot-footer-height, 36px) !important;
+        max-height: var(--heatmap-mobile-plot-footer-height, 36px) !important;
+        margin: 0 !important;
         box-sizing: border-box !important;
+        flex-shrink: 0 !important;
       }
 
       .heatmap-viewer-full .heatmap-main-panel > div:last-child [data-heatmap-target="controlInstructions"] {

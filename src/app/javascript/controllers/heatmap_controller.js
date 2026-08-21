@@ -1879,11 +1879,6 @@ export default class extends Controller {
   handleResize() {
     if (!this.renderer) return
     if (this.isMobileHeatmapLayout()) {
-      // Recalculate locked plot height only while panels are closed so an open
-      // overlay does not jump the canvas when chrome is hidden.
-      if (!this.element?.dataset?.mobilePanel) {
-        this._mobilePlotHeightLock = null
-      }
       this.updateMobileHeatmapChromeHeight()
     }
     const container = this.element.querySelector(".heatmap-canvas-area")
@@ -2391,6 +2386,7 @@ export default class extends Controller {
     this.element?.style?.removeProperty?.("--heatmap-mobile-panel-top")
     this.element?.style?.removeProperty?.("--heatmap-mobile-panel-region-height")
     this.element?.style?.removeProperty?.("--heatmap-mobile-plot-height")
+    this.element?.style?.removeProperty?.("--heatmap-mobile-plot-footer-height")
   }
 
   syncMobileHeatmapLayout({ redraw = true } = {}) {
@@ -2422,6 +2418,7 @@ export default class extends Controller {
       this.element?.style?.removeProperty?.("--heatmap-mobile-panel-top")
       this.element?.style?.removeProperty?.("--heatmap-mobile-panel-region-height")
       this.element?.style?.removeProperty?.("--heatmap-mobile-plot-height")
+      this.element?.style?.removeProperty?.("--heatmap-mobile-plot-footer-height")
       return
     }
 
@@ -2429,8 +2426,6 @@ export default class extends Controller {
     const pageHeader = document.getElementById("heatmap-page-header")
     const toolbar = this.element.querySelector(".heatmap-toolbar")
     const selector = this.element.querySelector("#heatmap-mobile-panel-selector")
-    const footer = this.element.querySelector("#heatmap-plot-footer") ||
-      this.element.querySelector("#heatmap-main-panel > div:last-of-type")
     const panelOpen = !!this.element.dataset.mobilePanel
 
     if (!panelOpen) {
@@ -2445,28 +2440,31 @@ export default class extends Controller {
     const headerHeight = this._mobileStableHeaderHeight || 64
     const toolbarHeight = this._mobileStableToolbarHeight || 0
     const selectorHeight = selector?.getBoundingClientRect?.().height || 0
-    const footerHeight = footer?.getBoundingClientRect?.().height || 28
-    const stableChromeHeight = Math.ceil(headerHeight + toolbarHeight + selectorHeight + footerHeight + 8)
+    // Match visualization: fixed footer band so plot docking stays stable.
+    const footerHeight = 36
+    const stableChromeHeight = Math.ceil(headerHeight + toolbarHeight + selectorHeight + footerHeight)
 
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
-    const canvasArea = this.element.querySelector(".heatmap-canvas-area")
+    // Keep a solid band above the docked plot for mobile panels (and avoid a
+    // tall empty strip below the heatmap).
+    const minPanelRegion = Math.max(200, Math.round(viewportHeight * 0.4))
 
-    // Capture the closed-layout canvas height so opening a panel does not resize it.
+    // Recalculate only while panels are closed so opening one does not jump the canvas.
+    if (!panelOpen || !this._mobilePlotHeightLock) {
+      this._mobilePlotHeightLock = Math.max(
+        160,
+        Math.round(viewportHeight - stableChromeHeight - minPanelRegion)
+      )
+    }
+
+    this.element.style.setProperty("--heatmap-mobile-plot-height", `${this._mobilePlotHeightLock}px`)
+    this.element.style.setProperty("--heatmap-mobile-plot-footer-height", `${footerHeight}px`)
+
     if (!panelOpen) {
-      const measured = canvasArea?.clientHeight || 0
-      this._mobilePlotHeightLock = measured > 0
-        ? measured
-        : Math.max(160, Math.round(viewportHeight - stableChromeHeight))
-      this.element.style.removeProperty("--heatmap-mobile-plot-height")
       this.element.style.removeProperty("--heatmap-mobile-panel-top")
       this.element.style.removeProperty("--heatmap-mobile-panel-region-height")
       return
     }
-
-    this.element.style.setProperty(
-      "--heatmap-mobile-plot-height",
-      `${this._mobilePlotHeightLock || Math.max(160, Math.round(viewportHeight - stableChromeHeight))}px`
-    )
 
     const selectorBottom = selector?.getBoundingClientRect?.().bottom
     const panelTop = Math.ceil(
@@ -2475,7 +2473,7 @@ export default class extends Controller {
         : selectorHeight
     )
     const availableBelowChrome = Math.max(180, viewportHeight - panelTop)
-    const plotReserve = (this._mobilePlotHeightLock || 200) + footerHeight + 4
+    const plotReserve = (this._mobilePlotHeightLock || 200) + footerHeight
     const panelRegionHeight = Math.max(160, availableBelowChrome - plotReserve)
 
     this.element.style.setProperty("--heatmap-mobile-panel-top", `${panelTop}px`)
@@ -2621,7 +2619,7 @@ export default class extends Controller {
         : (selector?.getBoundingClientRect?.().height || 40)
     )
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
-    const plotReserve = (this._mobilePlotHeightLock || 200) + 28 + 4
+    const plotReserve = (this._mobilePlotHeightLock || 200) + 36
     const panelRegionHeight = Math.max(160, viewportHeight - panelTop - plotReserve)
 
     this.element.style.setProperty("--heatmap-mobile-panel-top", `${panelTop}px`)

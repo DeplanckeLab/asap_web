@@ -33,7 +33,7 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
     )
 
     lookup = Minitest::Mock.new
-    lookup.expect(:remote_available?, true)
+    lookup.expect(:assemblies_remote_available?, true)
     lookup.expect(:assembly_name_at_release_for_organism, 'GRCh38.p14', [9606, '113'])
     lookup.expect(:genome_browser_assembly, 'GRCh38.p14', [{ tax_id: 9606, assembly_name: 'GRCh38.p14', release: '113' }])
 
@@ -58,7 +58,7 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
     )
 
     lookup = Minitest::Mock.new
-    lookup.expect(:remote_available?, true)
+    lookup.expect(:assemblies_remote_available?, true)
     lookup.expect(:assembly_name_at_release_for_organism, 'BDGP6.46', [7227, '60'])
     lookup.expect(:genome_browser_assembly, 'BDGP6.46', [{ tax_id: 7227, assembly_name: 'BDGP6.46', release: '60' }])
 
@@ -83,7 +83,7 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
     )
 
     lookup = Minitest::Mock.new
-    lookup.expect(:remote_available?, true)
+    lookup.expect(:assemblies_remote_available?, true)
     lookup.expect(:assembly_name_at_release_for_organism, 'GCA_009858895.3', [2697049, '60'])
 
     result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: lookup)
@@ -119,7 +119,7 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
     )
 
     lookup = Minitest::Mock.new
-    lookup.expect(:remote_available?, true)
+    lookup.expect(:assemblies_remote_available?, true)
     lookup.expect(:genome_browser_assembly, 'GRCm38.p6', [{ tax_id: 10090, assembly_name: 'GRCm38.p6', release: '100' }])
 
     result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: lookup)
@@ -236,7 +236,7 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
     )
 
     lookup = Minitest::Mock.new
-    lookup.expect(:remote_available?, true)
+    lookup.expect(:assemblies_remote_available?, true)
     lookup.expect(:genome_browser_assembly, 'GCA_002204515.1', [{ tax_id: 7159, assembly_name: 'AaegL5', release: '62' }])
 
     result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: lookup)
@@ -297,7 +297,7 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
     )
 
     lookup = Minitest::Mock.new
-    lookup.expect(:remote_available?, false)
+    lookup.expect(:assemblies_remote_available?, false)
 
     result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: lookup)
 

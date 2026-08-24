@@ -112,6 +112,20 @@ class ScfairEnsemblReferenceLookupTest < TestBaseWithoutFixtures
     assert_equal :ok, status
   end
 
+  test 'assemblies_for_tax_id reads from latest asap_data DB even when lookup uses older remote_db' do
+    lookup = Scfair::EnsemblReferenceLookup.new(remote_db: 'asap_data_v4')
+    skip 'ASAP assemblies unavailable' unless lookup.assemblies_remote_available?
+
+    latest_db = Asap2RemoteRecord.latest_remote_db
+    skip 'Latest assemblies DB unavailable' unless latest_db
+
+    assemblies = lookup.assemblies_for_tax_id(7159)
+    skip 'Aedes assemblies unavailable in latest DB' if assemblies.empty?
+
+    assert_equal latest_db, lookup.assemblies_remote_db
+    assert assemblies.any? { |row| row.name == 'AaegL5' }
+  end
+
   test 'insdc_accession_for_assembly maps AaegL5 to GCA accession for Aedes aegypti' do
     lookup = Scfair::EnsemblReferenceLookup.new(remote_db: 'asap_data_v8')
     skip 'ASAP assemblies unavailable' unless lookup.remote_available?

@@ -27,9 +27,10 @@ namespace :asap_data do
     puts
     puts "Done in #{elapsed.round(1)}s"
     puts "  organisms total: #{stats[:organisms_total]}"
+    puts "  organisms skipped (complete): #{stats[:organisms_skipped_complete]}"
+    puts "  assemblies pending: #{stats[:assemblies_pending]}"
     puts "  accessions updated: #{stats[:accessions_updated]}"
-    puts "  accessions already set: #{stats[:accessions_already_set]}"
-    puts "  accessions missing (no meta): #{stats[:accessions_missing]}"
+    puts "  accessions unresolved: #{stats[:accessions_unresolved]}"
     puts "  meta downloads: #{stats[:meta_downloads]}"
     puts "  skipped (no meta): #{stats[:skipped_no_meta]}"
   end

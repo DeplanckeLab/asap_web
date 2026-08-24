@@ -207,6 +207,13 @@ class EnsemblAssembliesLoaderTest < TestBaseWithoutFixtures
     end
   end
 
+  test 'release_numbers_for_assembly limits scan to assembly release window' do
+    record = Struct.new(:first_ensembl_release, :latest_ensembl_release).new(54, 60)
+    releases = [54, 55, 60, 61]
+
+    assert_equal [54, 55, 60], AsapData::EnsemblAssembliesLoader.release_numbers_for_assembly(record, releases)
+  end
+
   test 'upsert_assembly_for_organism_release skips when meta is missing' do
     with_tmp_ensembl_tree do |base_dir|
       result = AsapData::EnsemblAssembliesLoader.upsert_assembly_for_organism_release!(

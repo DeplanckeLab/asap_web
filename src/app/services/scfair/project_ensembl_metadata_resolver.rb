@@ -205,22 +205,22 @@ module Scfair
       nil
     end
 
-    def resolve_assembly(organism, release, remote_db)
-      return nil if release.blank? || remote_db.blank?
+    def resolve_assembly(organism, release, _remote_db)
+      return nil if release.blank?
 
-      lookup = @lookup_override || EnsemblReferenceLookup.new(remote_db: remote_db)
-      return nil unless lookup.remote_available?
+      lookup = @lookup_override || EnsemblReferenceLookup.new
+      return nil unless lookup.assemblies_remote_available?
 
       lookup.assembly_name_at_release_for_organism(organism.tax_id, release)
     end
 
-    def resolve_genome_browser_assembly(organism, assembly_name, release, remote_db)
+    def resolve_genome_browser_assembly(organism, assembly_name, release, _remote_db)
       name = assembly_name.to_s.strip
       return name if name.match?(/\AGCA[_\d]/i)
-      return nil if name.blank? || remote_db.blank?
+      return nil if name.blank?
 
-      lookup = @lookup_override || EnsemblReferenceLookup.new(remote_db: remote_db)
-      return nil unless lookup.remote_available?
+      lookup = @lookup_override || EnsemblReferenceLookup.new
+      return nil unless lookup.assemblies_remote_available?
 
       lookup.genome_browser_assembly(
         tax_id: organism.tax_id,

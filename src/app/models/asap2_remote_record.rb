@@ -6,6 +6,11 @@ class Asap2RemoteRecord < ApplicationRecord
       remote_shards.keys.map(&:to_s)
     end
 
+    # Highest configured asap_data_vN shard (assemblies live only in the latest DB).
+    def latest_remote_db
+      remote_versions.max_by { |name| name[/\Aasap_data_v(\d+)\z/, 1].to_i }
+    end
+
     def with_remote(version = default_remote_db, role: :writing)
       shard = normalized_shard(version)
       raise ArgumentError, "Unknown remote database #{version}" unless shard

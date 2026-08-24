@@ -32,10 +32,13 @@ module Scfair
     end
 
     def assemblies_for_tax_id(tax_id)
-      organism = remote_organism_for_tax_id(tax_id)
-      return [] unless organism
+      db = assemblies_remote_db
+      return [] unless assemblies_remote_available?
 
-      RemoteAssembly.with_remote(@remote_db) do
+      RemoteAssembly.with_remote(db) do
+        organism = prefer_reference_organism(RemoteOrganism.where(tax_id: tax_id.to_i).to_a)
+        return [] unless organism
+
         RemoteAssembly.where(organism_id: organism.id).order(:name).to_a
       end
     rescue StandardError
@@ -265,7 +268,7 @@ module Scfair
       nil
     end
 
-    # Assembly name for an organism at a given Ensembl release, using this lookup's remote DB.
+    # Assembly name for an organism at a given Ensembl release (latest assemblies DB).
     def assembly_name_at_release_for_organism(tax_id, release)
       release = parse_release_value(release)
       return nil unless release
@@ -281,7 +284,7 @@ module Scfair
 
     # INSDC accession for Ensembl genome-browser URLs (e.g. GCA_002204515.1 for AaegL5).
     def insdc_accession_for_assembly(tax_id, assembly_name, release: nil)
-      assemblies = assemblies_for_tax_id_any_version(tax_id)
+      assemblies = assemblies_for_tax_id(tax_id)
       matched = matching_assemblies(assemblies, assembly_name, release: release)
       return nil if matched.empty?
 
@@ -435,18 +438,16 @@ module Scfair
     end
 
     def assemblies_for_tax_id_any_version(tax_id)
-      RemoteOrganism.remote_versions.reverse_each do |version|
-        result = RemoteAssembly.with_remote(version) do
-          organism = prefer_reference_organism(RemoteOrganism.where(tax_id: tax_id.to_i).to_a)
-          next [] unless organism
+      assemblies_for_tax_id(tax_id)
+    end
 
-          RemoteAssembly.where(organism_id: organism.id).order(:name).to_a
-        end
-        return result if result.present?
-      end
-      []
-    rescue StandardError
-      []
+    def assemblies_remote_db
+      Asap2RemoteRecord.latest_remote_db
+    end
+
+    def assemblies_remote_available?
+      db = assemblies_remote_db
+      db.present? && RemoteOrganism.remote_versions.include?(db)
     end
   end
 end

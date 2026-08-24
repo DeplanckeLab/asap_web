@@ -10,15 +10,15 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_06_30_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_24_180000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pg_trgm"
 
   create_table "assemblies", id: :serial, force: :cascade do |t|
     t.integer "first_ensembl_release"
-    t.integer "latest_ensembl_release"
     t.text "insdc_accession"
+    t.integer "latest_ensembl_release"
     t.text "name"
     t.integer "organism_id", null: false
     t.index ["organism_id", "name"], name: "index_assemblies_on_organism_id_and_name", unique: true

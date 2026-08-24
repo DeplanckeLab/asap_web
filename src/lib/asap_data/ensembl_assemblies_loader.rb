@@ -1029,25 +1029,43 @@ module AsapData
     end
 
     # Fill assemblies.insdc_accession from Ensembl meta.txt (assembly.accession).
+    # Only scans organisms/assemblies still missing insdc_accession; stops per assembly once found.
     def backfill_insdc_accessions!(remote_db: default_remote_db, download_missing_meta: default_download_missing_meta?)
       base_dirs = all_ensembl_base_dirs
       raise ArgumentError, "Ensembl data directory not found (set ENSEMBL_DATA_DIR)" if base_dirs.empty?
 
       stats = {
         organisms_total: 0,
+        assemblies_pending: 0,
+        organisms_skipped_complete: 0,
         accessions_updated: 0,
-        accessions_already_set: 0,
-        accessions_missing: 0,
+        accessions_unresolved: 0,
         meta_downloads: 0,
         skipped_no_meta: 0
       }
 
-      core_folders_cache = {}
-      subdomain_latest_releases = load_subdomain_latest_releases(remote_db)
       organisms = load_organisms(remote_db)
+      organisms_by_id = organisms.index_by { |row| row[:id] }
       stats[:organisms_total] = organisms.size
 
-      organisms.each do |organism|
+      pending_by_organism = {}
+      RemoteAssembly.with_remote(remote_db) do
+        RemoteAssembly.where(insdc_accession: [nil, ""]).find_each do |row|
+          pending_by_organism[row.organism_id] ||= []
+          pending_by_organism[row.organism_id] << row
+        end
+      end
+      stats[:assemblies_pending] = pending_by_organism.values.sum(&:size)
+      stats[:organisms_skipped_complete] = organisms.size - pending_by_organism.size
+      return stats if stats[:assemblies_pending].zero?
+
+      core_folders_cache = {}
+      subdomain_latest_releases = load_subdomain_latest_releases(remote_db)
+
+      pending_by_organism.each do |organism_id, pending_records|
+        organism = organisms_by_id[organism_id]
+        next unless organism
+
         db_type = organism[:subdomain].to_sym
         next unless DB_TYPES.include?(db_type)
 
@@ -1059,43 +1077,66 @@ module AsapData
         )
         next if release_numbers.empty?
 
-        release_numbers.each do |release_num|
-          release_dir = resolve_release_dir(base_dirs, db_type, release_num) ||
-                        ensure_release_dir(writable_ensembl_base_dir(base_dirs), db_type, release_num)
-          core_folder = nil
-          if download_missing_meta
-            core_folders = core_folders_for_release(core_folders_cache, db_type, release_num)
-            core_folder = resolve_core_folder(organism[:ensembl_db_name], core_folders)
-          end
+        pending_records.each do |record|
+          assembly_name = record.name.to_s.strip
+          next if assembly_name.blank?
 
-          assembly_info = assembly_info_for_organism(
-            release_dir: release_dir,
-            db_name: organism[:ensembl_db_name],
-            db_type: db_type,
-            release_num: release_num,
-            core_folder: core_folder,
-            download_missing_meta: download_missing_meta,
-            stats: stats
-          )
-          assembly_name = assembly_info[:name]
-          insdc_accession = assembly_info[:insdc_accession]
-          next if assembly_name.blank? || insdc_accession.blank?
-
-          RemoteAssembly.with_remote(remote_db) do
-            record = RemoteAssembly.find_by(organism_id: organism[:id], name: assembly_name)
-            next unless record
-
-            if record.insdc_accession.to_s.strip == insdc_accession
-              stats[:accessions_already_set] += 1
-            else
-              record.update!(insdc_accession: insdc_accession)
-              stats[:accessions_updated] += 1
+          updated = false
+          release_numbers_for_assembly(record, release_numbers).reverse_each do |release_num|
+            release_dir = resolve_release_dir(base_dirs, db_type, release_num) ||
+                          ensure_release_dir(writable_ensembl_base_dir(base_dirs), db_type, release_num)
+            core_folder = nil
+            if download_missing_meta
+              core_folders = core_folders_for_release(core_folders_cache, db_type, release_num)
+              core_folder = resolve_core_folder(organism[:ensembl_db_name], core_folders)
             end
+
+            assembly_info = assembly_info_for_organism(
+              release_dir: release_dir,
+              db_name: organism[:ensembl_db_name],
+              db_type: db_type,
+              release_num: release_num,
+              core_folder: core_folder,
+              download_missing_meta: download_missing_meta,
+              stats: stats
+            )
+            next unless assembly_name_matches?(assembly_info[:name], assembly_name)
+
+            insdc_accession = assembly_info[:insdc_accession].to_s.strip
+            next if insdc_accession.blank?
+
+            RemoteAssembly.with_remote(remote_db) do
+              row = RemoteAssembly.find_by(id: record.id)
+              next unless row
+
+              row.update!(insdc_accession: insdc_accession)
+              updated = true
+            end
+            break if updated
           end
+
+          stats[:accessions_unresolved] += 1 unless updated
         end
       end
 
       stats
+    end
+
+    def release_numbers_for_assembly(assembly_record, release_numbers)
+      numbers = Array(release_numbers).map(&:to_i).reject { |num| num <= 0 }
+      return numbers if numbers.empty?
+
+      first = assembly_record.first_ensembl_release.to_i
+      latest = assembly_record.latest_ensembl_release.to_i
+      return numbers if first <= 0 && latest <= 0
+
+      numbers.select do |num|
+        (first <= 0 || num >= first) && (latest <= 0 || num <= latest)
+      end
+    end
+
+    def assembly_name_matches?(meta_name, db_name)
+      meta_name.to_s.strip == db_name.to_s.strip
     end
 
     def update_subdomain_latest_release!(db_type, release_num, remote_db: default_remote_db)

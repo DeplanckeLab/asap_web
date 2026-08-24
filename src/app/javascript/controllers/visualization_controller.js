@@ -3521,25 +3521,26 @@ export default class extends Controller {
 
     this.currentCheckpointReadyForOverwrite = false
     this.restoredCurrentCheckpointOnEntry = false
-    this._entryCheckpointOverlayDismissed = false
     this.initialCheckpointEntryLoading = true
     this.setCheckpointViewLoading(true, 'Loading checkpoint', this.entryCheckpointTitleForLoading())
     try {
       await this.fetchCheckpointHistory()
-      this.finishInitialCheckpointEntryLoading()
 
       const params = new URLSearchParams(window.location.search)
       const checkpointIdFromUrl = params.get('checkpoint_id')
       const shouldOpenCommentsFromUrl = ['1', 'true', 'yes'].includes(String(params.get('open_checkpoint_comments') || '').toLowerCase())
       if (checkpointIdFromUrl) {
-        await this.loadCheckpointById(checkpointIdFromUrl, { entryApply: true })
+        const urlTitle = this.resolveCheckpointTitleFromHistory(checkpointIdFromUrl) ||
+          this.entryCheckpointTitleForLoading()
+        this.setCheckpointViewLoading(true, 'Loading checkpoint', urlTitle)
+        await this.loadCheckpointById(checkpointIdFromUrl)
         if (shouldOpenCommentsFromUrl) {
           await this.openCheckpointComments()
         }
         return
       }
 
-      const loadedCurrentCheckpoint = await this.loadCurrentCheckpointOnEntry({ entryApply: true })
+      const loadedCurrentCheckpoint = await this.loadCurrentCheckpointOnEntry()
       if (loadedCurrentCheckpoint) {
         this.restoredCurrentCheckpointOnEntry = true
         this._checkpointEntryAppliedVisualizationState = true
@@ -3548,7 +3549,12 @@ export default class extends Controller {
 
       const landingCheckpoint = (this.checkpointHistory || []).find((checkpoint) => checkpoint.is_landing_page === true)
       if (landingCheckpoint?.id) {
-        await this.loadCheckpointById(String(landingCheckpoint.id), { entryApply: true })
+        this.setCheckpointViewLoading(
+          true,
+          'Loading checkpoint',
+          this.checkpointDisplayTitle(landingCheckpoint)
+        )
+        await this.loadCheckpointById(String(landingCheckpoint.id))
       }
     } catch (error) {
       console.error('[CheckpointEntry] loadInitialCheckpointOnEntry failed:', error)
@@ -3892,16 +3898,13 @@ export default class extends Controller {
     })
   }
 
-  async loadCurrentCheckpointOnEntry(options = {}) {
+  async loadCurrentCheckpointOnEntry() {
     const projectIdentifier = this.getProjectIdentifier()
     if (!projectIdentifier) return false
 
     this.currentCheckpointLoadInProgress = true
     this.isApplyingCheckpointState = true
-    const entryApply = options.entryApply === true
-    if (!entryApply) {
-      this.setCheckpointViewLoading(true, 'Loading checkpoint')
-    }
+    this.setCheckpointViewLoading(true, 'Loading checkpoint')
     try {
       const sessionEntry = this.readCurrentVisualizationStateEntryFromSession()
       const sessionState = sessionEntry?.state || null
@@ -3974,7 +3977,7 @@ export default class extends Controller {
         return true
       }
 
-      await this.applyCheckpointState(stateToApply, options)
+      await this.applyCheckpointState(stateToApply)
       return true
     } catch (error) {
       this.checkpointDebug('loadCurrentCheckpointOnEntry:error', {
@@ -3984,9 +3987,7 @@ export default class extends Controller {
     } finally {
       this.syncAllCategoryCheckboxUiFromSelections('loadCurrentCheckpointOnEntry:finally')
       this.isApplyingCheckpointState = false
-      if (options.entryApply !== true) {
-        this.setCheckpointViewLoading(false)
-      }
+      this.setCheckpointViewLoading(false)
       this.currentCheckpointLoadInProgress = false
     }
   }
@@ -4220,7 +4221,7 @@ export default class extends Controller {
     await this.openCheckpointComments()
   }
 
-  async loadCheckpointById(checkpointId, options = {}) {
+  async loadCheckpointById(checkpointId) {
     if (!checkpointId) return
 
     const projectIdentifier = this.getProjectIdentifier()
@@ -4228,13 +4229,10 @@ export default class extends Controller {
     this.lastLoadedCheckpointPersistedStateBaseline = null
     let checkpoint = null
     let persistedBaselineForComments = null
-    const entryApply = options.entryApply === true
     try {
       const knownTitle = this.resolveCheckpointTitleFromHistory(checkpointId) ||
         this.entryCheckpointTitleForLoading()
-      if (!entryApply) {
-        this.setCheckpointViewLoading(true, 'Loading checkpoint', knownTitle)
-      }
+      this.setCheckpointViewLoading(true, 'Loading checkpoint', knownTitle)
 
       const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(checkpointId)}`, {
         method: 'GET',
@@ -4253,9 +4251,7 @@ export default class extends Controller {
       if (!checkpoint || !checkpoint.state) return
 
       const loadedTitle = this.checkpointDisplayTitle(checkpoint) || knownTitle
-      if (!entryApply) {
-        this.setCheckpointViewLoading(true, 'Loading checkpoint', loadedTitle)
-      }
+      this.setCheckpointViewLoading(true, 'Loading checkpoint', loadedTitle)
 
       persistedBaselineForComments = JSON.parse(JSON.stringify(checkpoint.state))
 
@@ -4289,7 +4285,7 @@ export default class extends Controller {
         blockers: this.collectCheckpointUiBlockers()
       })
 
-      await this.applyCheckpointState(checkpoint.state, options)
+      await this.applyCheckpointState(checkpoint.state)
       // Status icons + remaining unloaded vectors are warmed by scheduleAutoMetadataPreload
       // (entry: connect().finally; mid-session: force-reschedule in this method's finally).
       // Do not stampede IndexedDB here — that freezes the UI right after the overlay hides.
@@ -4334,10 +4330,10 @@ export default class extends Controller {
         checkpointId: String(checkpoint.id || checkpointId),
         blockers: this.collectCheckpointUiBlockers()
       })
-      this.setCheckpointViewLoading(false, null, undefined, { force: entryApply })
+      this.setCheckpointViewLoading(false)
       // Mid-session checkpoint loads must re-arm background metadata warm-up. Entry loads
       // already schedule this from connect().finally after ensureDefaultEmbeddingAfterCheckpointEntry.
-      if (!entryApply) {
+      if (this.initialCheckpointEntryLoading !== true) {
         this.scheduleAutoMetadataPreload({ force: true })
       }
     }
@@ -10105,14 +10101,8 @@ export default class extends Controller {
     }
   }
 
-  async applyCheckpointState(state, options = {}) {
+  async applyCheckpointState(state) {
     if (!state || typeof state !== 'object') return
-    const entryApply = options.entryApply === true
-    const dismissEntryLoadingOverlay = () => {
-      if (!entryApply || this._entryCheckpointOverlayDismissed === true) return
-      this._entryCheckpointOverlayDismissed = true
-      this.finishInitialCheckpointEntryLoading()
-    }
 
     // Ensure checkpoint restore never reuses a stale cell-inspector instance.
     this.hideSimpleTooltip()
@@ -10169,8 +10159,6 @@ export default class extends Controller {
     })
     // Start filter vector loads immediately; await before fold restore (runs in parallel with embedding).
     const filterVectorsPromise = this.ensureFilterMetadataVectorsLoaded()
-
-    dismissEntryLoadingOverlay()
 
     const checkpointEmbeddingId = state.embedding?.id || state.visualizationEmbedding?.id
     const checkpointEmbeddingLoomFile = state.embedding?.loomFile || state.visualizationEmbedding?.loomFile || state.loomFile || null

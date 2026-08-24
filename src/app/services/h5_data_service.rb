@@ -6,6 +6,9 @@ require 'pathname'
 
 class H5DataService
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
+  # Reserved in ASAP-owned selection columns only (not imported metadata).
+  FILTERED_OUT_SELECTION_CODE = -1
+  FILTERED_OUT_SELECTION_LABEL = '__filtered_out__'
 
   # Serialize writers for a loom. h5py "r+" takes an exclusive HDF5 lock; concurrent
   # opens raise BlockingIOError. Same pattern as Basic.ensure_markers_original_gene_attr.
@@ -1103,9 +1106,10 @@ class H5DataService
     end
   end
 
-  # Write a 0/1 int32 cell-selection column. selected_indices_file is JSON:
-  # {"selected_indices":[...]} with 0-based column indexes. Replaces the dataset
-  # if it already exists (failed Java writes can leave the path without an annot).
+  # Write an int32 cell-selection column. selected_indices_file is JSON:
+  # {"selected_indices":[...], "filtered_out_indices":[...]} with 0-based column indexes.
+  # Codes: 1 = selected, 0 = visible unselected (complement), -1 = filtered out at selection time.
+  # Replaces the dataset if it already exists (failed Java writes can leave the path without an annot).
   # Metadata JSON is written to a sidecar file so HDF5/JVM stdout cannot swallow it.
   def self.write_cell_selection!(h5_file, metadata_path, selected_indices_file, already_locked: false)
     field = strip_leading_slash(metadata_path)
@@ -1134,6 +1138,20 @@ class H5DataService
           print('ERROR')
           sys.exit(1)
 
+      def parse_indices(raw_list, field_name):
+          if raw_list is None:
+              return []
+          if not isinstance(raw_list, list):
+              fail(field_name + ' must be a list')
+          out = []
+          for raw in raw_list:
+              try:
+                  idx = int(raw)
+              except (TypeError, ValueError):
+                  fail(field_name + ' must contain integers')
+              out.append(idx)
+          return out
+
       with open(selected_path, 'r', encoding='utf-8') as fh:
           payload = json.load(fh)
       if not isinstance(payload, dict):
@@ -1141,6 +1159,8 @@ class H5DataService
       raw_indices = payload.get('selected_indices')
       if not isinstance(raw_indices, list) or len(raw_indices) == 0:
           fail('selected_indices must be a non-empty list')
+      selected_indices = parse_indices(raw_indices, 'selected_indices')
+      filtered_out_indices = parse_indices(payload.get('filtered_out_indices'), 'filtered_out_indices')
 
       with h5py.File(loom_path, 'r+') as f:
           if 'col_attrs/_StableID' not in f:
@@ -1149,31 +1169,36 @@ class H5DataService
           if n_cells <= 0:
               fail('Loom /col_attrs/_StableID is empty')
           mask = np.zeros(n_cells, dtype=np.int32)
-          for raw in raw_indices:
-              try:
-                  idx = int(raw)
-              except (TypeError, ValueError):
-                  fail('selected_indices must contain integers')
+          for idx in filtered_out_indices:
+              if idx < 0 or idx >= n_cells:
+                  fail('Filtered-out cell index ' + str(idx) + ' is out of range (n=' + str(n_cells) + ')')
+              mask[idx] = -1
+          for idx in selected_indices:
               if idx < 0 or idx >= n_cells:
                   fail('Cell index ' + str(idx) + ' is out of range (n=' + str(n_cells) + ')')
               mask[idx] = 1
-          n_selected = int(mask.sum())
+          n_selected = int(np.sum(mask == 1))
+          n_filtered_out = int(np.sum(mask == -1))
+          n_unselected = int(np.sum(mask == 0))
           if n_selected == 0:
               fail('No valid selected cell indices')
           if field in f:
               del f[field]
           f.create_dataset(field, data=mask, dtype='int32')
 
+      categories = {
+          '0': n_unselected,
+          '1': n_selected
+      }
+      if n_filtered_out > 0:
+          categories['-1'] = n_filtered_out
       meta = {
           'name': '/' + field,
           'on': 'CELL',
           'type': 'DISCRETE',
           'nber_cols': n_cells,
           'nber_rows': 1,
-          'categories': {
-              '0': n_cells - n_selected,
-              '1': n_selected
-          }
+          'categories': categories
       }
       with open(out_path, 'w', encoding='utf-8') as fh:
           json.dump(meta, fh)

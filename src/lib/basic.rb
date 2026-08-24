@@ -6171,6 +6171,14 @@ module Basic
         end
       end
 
+      # DE viz filter universe: attrs store a project-relative path; CLI needs an absolute path.
+      if h_var['cell_universe_file'].present?
+        cu_path = Pathname.new(h_var['cell_universe_file'].to_s)
+        unless cu_path.absolute?
+          h_var['cell_universe_file'] = (project_dir + cu_path).to_s
+        end
+      end
+
       if p['global_gene_set_item_id'].present? && p['global_gene_set_item_id'].to_s.strip != ''
         h_var['global_gene_set_db_conn'] = Basic.asap_data_db_url(h_p[:h_env])
       end

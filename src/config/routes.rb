@@ -99,6 +99,7 @@ Rails.application.routes.draw do
       get :consensus_annotation_support
       post :save_metadata_from_selection
       post :save_batch_compose_metadata
+      post :stage_de_cell_universe
       post :delete_selection
       post :rename_selection
       post :rename_gene_set_collection

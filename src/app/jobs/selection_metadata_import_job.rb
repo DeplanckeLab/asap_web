@@ -55,10 +55,21 @@ class SelectionMetadataImportJob < ApplicationJob
     new_annot = Basic.load_annot(run, meta, loom_file, h_data_types, h_data_classes, Rails.logger)
     raise StandardError, 'Selection metadata annotation not created' unless new_annot
 
+    filtered_out_count = selection_category_count(meta, H5DataService::FILTERED_OUT_SELECTION_CODE)
+    alias_names = { '0' => unselected_name, '1' => selected_name }
+    alias_user_ids = { '0' => run.user_id, '1' => run.user_id }
+    cat_labels = [['0', unselected_name], ['1', selected_name]]
+    if filtered_out_count > 0
+      filtered_out_label = H5DataService::FILTERED_OUT_SELECTION_LABEL
+      alias_names['-1'] = filtered_out_label
+      alias_user_ids['-1'] = run.user_id
+      cat_labels << ['-1', filtered_out_label]
+    end
+
     new_annot.update(
       cat_aliases_json: {
-        user_ids: { '0' => run.user_id, '1' => run.user_id },
-        names: { '0' => unselected_name, '1' => selected_name }
+        user_ids: alias_user_ids,
+        names: alias_names
       }.to_json,
       attrs_json: {
         selection_source: attrs['selection_source'],
@@ -69,7 +80,7 @@ class SelectionMetadataImportJob < ApplicationJob
       }.compact.to_json
     )
 
-    [['0', unselected_name], ['1', selected_name]].each do |cat, label|
+    cat_labels.each do |cat, label|
       cla = Cla.where(project_id: project.id, annot_id: new_annot.id, cat: cat, name: label, user_id: run.user_id).first
       next if cla
       Cla.create(project_id: project.id, annot_id: new_annot.id, cat: cat, name: label, user_id: run.user_id)
@@ -96,6 +107,15 @@ class SelectionMetadataImportJob < ApplicationJob
   end
 
   private
+
+  def selection_category_count(meta, code)
+    categories = meta.is_a?(Hash) ? meta['categories'] : nil
+    return 0 unless categories.is_a?(Hash)
+
+    raw = categories[code.to_s]
+    raw = categories[code] if raw.nil?
+    raw.to_i
+  end
 
   def broadcast_selection_states_changed(project, loom_file:, status:, run_id:)
     return unless project&.id

@@ -486,17 +486,20 @@ task :parse, [:project_key] => [:environment] do |t, args|
         end
       end
 
-       h_types = {
-        'MEX' => "H5_10x",
-        'H5_10X' => 'H5_10x'
-      }
-      # Legacy Java parser reads LOOM, not RDS; v8 parse.v8.py has a native RDS handler.
-      h_types['RDS'] = 'LOOM' if version.id < 8
-      
+      # Java ASAP.jar type aliases. v8 parse.v8.py has native MEX/RDS handlers and
+      # must not remap them (MEX->H5_10x caused h5py to open .mtx text as HDF5).
+      if version.id < 8
+        h_types = {
+          'MEX' => 'H5_10x',
+          'H5_10X' => 'H5_10x',
+          'RDS' => 'LOOM'
+        }
+        file_type = h_types[file_type] || file_type
+      end
+
       # Ensure H5AD selection is always explicit for Java parsing.
       # Java H5AD parser crashes with a NullPointerException if selection is missing.
-       group_names = []
-       file_type = (h_types[file_type]) ? h_types[file_type] : file_type
+      group_names = []
 
       # ASAP.jar has no -type MTX. Real MTX must become H5 via convert_other_formats
       # (then file_type is MEX -> H5_10x). If preparsing said MTX but conversion did not
@@ -662,23 +665,29 @@ task :parse, [:project_key] => [:environment] do |t, args|
                {'opt' => '-h', 'value' => db_conn}
               ]
       
-      # Add -type option - use detected_format if file_type is not set
-      # Map common format names to Java command format names
+      # Add -type option - use detected_format if file_type is not set.
+      # For v<8, Java aliases were already applied to file_type above.
       file_type_value = if file_type.present?
-                          (h_types[file_type]) ? h_types[file_type] : file_type
+                          file_type
                         else
                           # Default to RAW_TEXT if nothing is available
                           logger.warn("[ParseRake] No file_type found, defaulting to RAW_TEXT")
                           "RAW_TEXT"
                         end
-      
+
       # -type is mandatory according to Java command, so always include it
       opts.push({'opt' => "-type", 'value' => file_type_value})
       puts "toto"
       
       if version.id >= 8
 
-        if file_type.to_s.upcase == 'MTX' && fu
+        # parse.v8.py accepts MEX (not MTX); preparsing may still report either label.
+        if file_type.to_s.upcase == 'MTX'
+          file_type = 'MEX'
+          logger.info("[ParseRake] Normalized MTX to MEX for v8 parse.v8.py")
+        end
+
+        if file_type.to_s.upcase == 'MEX' && fu
             staging_dir = fu.global_upload_dir.to_s
             preparsing_output_file = fu_upload_dir + "output.json"
             if File.exist?(preparsing_output_file)
@@ -698,7 +707,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
                 next unless prep_p.downcase.end_with?('.mtx') && File.file?(prep_p)
 
                 filepath = Pathname.new(prep_p)
-                logger.info("[ParseRake] Using preparsed MTX matrix path #{filepath} for v8 parsing")
+                logger.info("[ParseRake] Using preparsed MEX matrix path #{filepath} for v8 parsing")
                 break
               end
             end
@@ -717,7 +726,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
               end
               if matrix_candidate.present? && File.file?(matrix_candidate)
                 filepath = Pathname.new(matrix_candidate)
-                logger.info("[ParseRake] MTX project input is a directory; using matrix file #{filepath}")
+                logger.info("[ParseRake] MEX project input is a directory; using matrix file #{filepath}")
               end
             end
 
@@ -737,15 +746,15 @@ task :parse, [:project_key] => [:environment] do |t, args|
                 end
                 if matrix_candidate.present? && File.file?(matrix_candidate)
                   filepath = Pathname.new(matrix_candidate)
-                  logger.info("[ParseRake] MTX matrix resolved from Fu bundle directory #{filepath}")
+                  logger.info("[ParseRake] MEX matrix resolved from Fu bundle directory #{filepath}")
                 end
               end
             end
 
             mtx_final = filepath.to_s
             unless mtx_final.downcase.end_with?('.mtx') && File.file?(mtx_final)
-              logger.error("[ParseRake] v8 MTX: could not resolve a .mtx file; last candidate was #{filepath.inspect}")
-              raise "v8 MTX parsing requires a readable path to a .mtx file; resolved input was #{filepath.inspect}"
+              logger.error("[ParseRake] v8 MEX: could not resolve a .mtx file; last candidate was #{filepath.inspect}")
+              raise "v8 MEX parsing requires a readable path to a .mtx file; resolved input was #{filepath.inspect}"
             end
         end
 

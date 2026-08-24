@@ -17653,6 +17653,30 @@ export default class extends Controller {
     return Array.from({ length: this.currentCoordinates.length }, (_, index) => index)
   }
 
+  // Cells outside the filter universe at save time become category -1 (__filtered_out__).
+  getFilteredOutIndicesForSelectionSave(selectedIndices = []) {
+    const n = Array.isArray(this.currentCoordinates) ? this.currentCoordinates.length : 0
+    if (n <= 0) return []
+
+    const filteredIndices = this.dataManager?.getIncrementalFilteredIndices?.()
+    if (!filteredIndices) return []
+    if (filteredIndices.length >= n) return []
+
+    const visibleSet = new Set(filteredIndices)
+    const selectedSet = new Set(
+      (Array.isArray(selectedIndices) ? selectedIndices : [])
+        .map((idx) => Number(idx))
+        .filter((idx) => Number.isInteger(idx))
+    )
+    const filteredOut = []
+    for (let i = 0; i < n; i++) {
+      if (visibleSet.has(i)) continue
+      if (selectedSet.has(i)) continue
+      filteredOut.push(i)
+    }
+    return filteredOut
+  }
+
   // Tab switching for selections panel
   switchSelectionTab(event) {
     const tab = event?.currentTarget?.dataset?.tab
@@ -18354,6 +18378,7 @@ export default class extends Controller {
     const selectedIndices = (Array.isArray(selectedIndicesOverride) ? selectedIndicesOverride : this.getEffectiveSelectionIndices())
       .map((idx) => Number(idx))
       .filter((idx) => Number.isInteger(idx))
+    const filteredOutIndices = this.getFilteredOutIndicesForSelectionSave(selectedIndices)
     const selectionSource = this.resolveSelectionSource(options)
     let composeSteps = Array.isArray(options?.composeSteps) ? options.composeSteps : null
     if (selectionSource === 'compose' && (!Array.isArray(composeSteps) || composeSteps.length === 0)) {
@@ -18399,6 +18424,9 @@ export default class extends Controller {
         embedding_metadata_id: embeddingMetadataId,
         loom_file: this.getCurrentLoomFileForRequest(),
         list_cols: selectedIndices
+      }
+      if (filteredOutIndices.length > 0) {
+        requestBody.filtered_out_indices = filteredOutIndices
       }
       if (composeSteps && composeSteps.length > 0) {
         requestBody.compose_steps = composeSteps
@@ -18738,11 +18766,12 @@ export default class extends Controller {
         type: 'categorical',
         metadata_id: metadataId,
         name: metadataName,
-        summary_mode: String(entry.summaryMode || 'selected'),
+        mode: String(entry.mode || (entry.summaryMode === 'unselected' ? 'exclude' : 'include')),
+        values: Array.isArray(entry.values)
+          ? entry.values.map((value) => String(value))
+          : (Array.isArray(entry.summaryValues) ? entry.summaryValues.map((value) => String(value)) : []),
         selected_count: Number(entry.selectedCount || 0),
         total_count: Number(entry.totalCount || 0),
-        summary_values: Array.isArray(entry.summaryValues) ? entry.summaryValues.map((value) => String(value)).slice(0, 50) : [],
-        hidden_value_count: Number(entry.hiddenValueCount || 0),
         selection_ref_id: selectionRefId,
         selection_ref_name: selectionRefName
       }
@@ -20614,7 +20643,7 @@ export default class extends Controller {
       annot_id: groupsAnnotId,
       run_id: groupsRunId
     }]
-    // Cell-selection metadata stores binary values as "1" (selected) and "0" (not selected).
+    // Cell-selection metadata: 1 = selected, 0 = complement, -1 = filtered out at selection time.
     attrs.group_ref = '1'
     delete attrs.group_pairs
 
@@ -20638,6 +20667,68 @@ export default class extends Controller {
     delete attrs.groups2
     delete attrs.group_comp_from_other_metadata
     delete attrs.second_group_from_other_metadata
+  }
+
+  // Build filtered_in.bin or filtered_out.bin (whichever is smaller) for the current viz filter
+  // universe and stage it on the server before DE submit.
+  async stageDeCellUniverseForSubmit() {
+    const nCells = Array.isArray(this.currentCoordinates) ? this.currentCoordinates.length : 0
+    if (nCells <= 0) return null
+
+    const filteredIndices = this.dataManager?.getIncrementalFilteredIndices?.()
+    if (!Array.isArray(filteredIndices) || filteredIndices.length >= nCells) {
+      return null
+    }
+
+    const visibleCount = filteredIndices.length
+    const outCount = nCells - visibleCount
+    if (outCount <= 0) return null
+
+    const mode = visibleCount <= outCount ? 'in' : 'out'
+    let indices
+    if (mode === 'in') {
+      indices = filteredIndices
+    } else {
+      const visibleSet = new Set(filteredIndices)
+      indices = []
+      for (let i = 0; i < nCells; i++) {
+        if (!visibleSet.has(i)) indices.push(i)
+      }
+    }
+
+    const buffer = new ArrayBuffer(indices.length * 4)
+    const view = new Uint32Array(buffer)
+    for (let i = 0; i < indices.length; i++) {
+      view[i] = indices[i] >>> 0
+    }
+
+    const projectIdentifier = this.getProjectIdentifier()
+    if (!projectIdentifier) {
+      throw new Error('Missing project identifier for DE cell universe staging.')
+    }
+
+    const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/stage_de_cell_universe`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Accept': 'application/json',
+        'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '',
+        'X-Cell-Universe-Mode': mode,
+        'X-Cell-Universe-N-Cells': String(nCells)
+      },
+      credentials: 'same-origin',
+      body: buffer
+    })
+    const payload = await response.json().catch(() => ({}))
+    if (!response.ok || payload.status !== 'ok') {
+      throw new Error(payload.message || `Failed to stage DE cell universe (HTTP ${response.status})`)
+    }
+    return {
+      cell_universe_file: String(payload.cell_universe_file || ''),
+      cell_universe_mode: String(payload.cell_universe_mode || mode),
+      cell_universe_n_cells: Number(payload.cell_universe_n_cells || nCells),
+      cell_universe_n_indices: Number(payload.cell_universe_n_indices || indices.length)
+    }
   }
 
   showDeSelectionStatus(message, tone = 'info') {
@@ -20752,6 +20843,26 @@ export default class extends Controller {
       alert(error.message || 'Could not prepare DE grouping.')
       return
     }
+
+    const filterComponents = this.buildSelectionFilterComponentsForSave('lasso')
+    if (Array.isArray(filterComponents) && filterComponents.length > 0) {
+      attrs.filter_components = filterComponents
+    }
+
+    try {
+      const universe = await this.stageDeCellUniverseForSubmit()
+      if (universe) {
+        attrs.cell_universe_file = universe.cell_universe_file
+        attrs.cell_universe_mode = universe.cell_universe_mode
+        attrs.cell_universe_n_cells = universe.cell_universe_n_cells
+        attrs.cell_universe_n_indices = universe.cell_universe_n_indices
+      }
+    } catch (error) {
+      this.showDeSelectionStatus(error.message || 'Could not stage DE cell universe.', 'error')
+      alert(error.message || 'Could not stage DE cell universe.')
+      return
+    }
+
     if (window.DE_SUBMIT_DEBUG === true) {
       console.log('[DESubmit] request', { stepId, methodId, attrs })
     }
@@ -20948,17 +21059,23 @@ export default class extends Controller {
         `
       }
 
-      const summaryMode = String(component.summary_mode || 'selected')
+      const modeRaw = String(component.mode || component.summary_mode || 'include')
+      const mode = (modeRaw === 'exclude' || modeRaw === 'unselected') ? 'exclude' : 'include'
+      const modeLabel = mode === 'exclude' ? 'excluded' : 'included'
       const selectedCount = Number(component.selected_count || 0)
       const totalCount = Number(component.total_count || 0)
-      const hiddenCount = Number(component.hidden_value_count || 0)
-      const values = Array.isArray(component.summary_values) ? component.summary_values.map((value) => String(value)) : []
-      const valuesLabel = values.length > 0 ? values.join(', ') : 'No values listed'
+      const values = Array.isArray(component.values)
+        ? component.values.map((value) => String(value))
+        : (Array.isArray(component.summary_values) ? component.summary_values.map((value) => String(value)) : [])
+      const previewLimit = 20
+      const previewValues = values.slice(0, previewLimit)
+      const hiddenCount = Math.max(values.length - previewValues.length, 0)
+      const valuesLabel = previewValues.length > 0 ? previewValues.join(', ') : 'No values listed'
       const hiddenText = hiddenCount > 0 ? ` + ${hiddenCount.toLocaleString()} more` : ''
       return `
         <div style="padding:8px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;">
           <div style="font-size:12px;font-weight:600;color:${headerColor};">${this.escapeHtml(headerName)} <span style="color:#6b7280;font-weight:500;">(categorical)</span></div>
-          <div style="font-size:12px;color:#374151;margin-top:2px;">${this.escapeHtml(summaryMode)} values: ${this.escapeHtml(valuesLabel)}${this.escapeHtml(hiddenText)}</div>
+          <div style="font-size:12px;color:#374151;margin-top:2px;">${this.escapeHtml(modeLabel)} values (${values.length.toLocaleString()}): ${this.escapeHtml(valuesLabel)}${this.escapeHtml(hiddenText)}</div>
           <div style="font-size:11px;color:#6b7280;">Selected categories: ${selectedCount.toLocaleString()} / ${totalCount.toLocaleString()}</div>
         </div>
       `
@@ -21679,6 +21796,8 @@ export default class extends Controller {
     const value = String(rawValue).trim()
     if (value.length === 0) return true
     if (value === '0') return true
+    if (value === '-1') return true
+    if (value === '__filtered_out__') return true
     if (value === String(unselectedName).trim()) return true
     return false
   }
@@ -23171,7 +23290,7 @@ export default class extends Controller {
       metadataItem.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' })
     }
 
-    const selectorsToToggle = new Set([unselectedName || 'Not selected', '0'])
+    const selectorsToToggle = new Set([unselectedName || 'Not selected', '0', '__filtered_out__', '-1'])
 
     selectorsToToggle.forEach((categoryValue) => {
       const escaped = this.escapeAttributeSelectorValue(String(categoryValue))
@@ -29075,10 +29194,15 @@ export default class extends Controller {
     return { globalMin, globalMax }
   }
 
-  // All cells in the current embedding form the universe for selection vs complement.
+  // Visible cells (current filter universe) form the universe for selection vs complement.
+  // Filtered-out cells are excluded here and become category -1 when the selection is saved.
   getSelectionDistributionUniverseIndices() {
     if (!this.currentCoordinates || this.currentCoordinates.length === 0) {
       return []
+    }
+    const filteredIndices = this.dataManager?.getIncrementalFilteredIndices?.()
+    if (Array.isArray(filteredIndices) && filteredIndices.length < this.currentCoordinates.length) {
+      return filteredIndices.slice()
     }
     return Array.from({ length: this.currentCoordinates.length }, (_, index) => index)
   }

@@ -93,7 +93,7 @@ class SelectionMetadataImportJobTest < ActiveSupport::TestCase
       'type' => 'DISCRETE',
       'nber_cols' => 4,
       'nber_rows' => 1,
-      'categories' => { '0' => 2, '1' => 2 }
+      'categories' => { '-1' => 1, '0' => 1, '1' => 2 }
     }
 
     empty_clas = Object.new
@@ -101,11 +101,12 @@ class SelectionMetadataImportJobTest < ActiveSupport::TestCase
       nil
     end
 
+    annot = @annot
     with_replaced_singleton(H5DataService, :write_cell_selection!, lambda { |*args, **|
       written.replace(args)
       meta
     }) do
-      with_replaced_singleton(Basic, :load_annot, lambda { |*| @annot }) do
+      with_replaced_singleton(Basic, :load_annot, lambda { |*| annot }) do
         with_replaced_singleton(Basic, :upd_project_step, lambda { |*| }) do
           with_replaced_singleton(Cla, :where, lambda { |*_args, **_kwargs| empty_clas }) do
             with_replaced_singleton(Cla, :create, lambda { |*_args, **_kwargs| Cla.new }) do
@@ -117,10 +118,16 @@ class SelectionMetadataImportJobTest < ActiveSupport::TestCase
     end
 
     @run.reload
-    assert_equal 3, @run.status_id
+    assert_equal 3, @run.status_id, @run.error.to_s
     assert_equal 3, written.length
     assert_match(/output\.loom\z/, written[0].to_s)
     assert_equal '/col_attrs/X_umap.sel_1', written[1]
+
+    annot.reload
+    aliases = Basic.safe_parse_json(annot.cat_aliases_json, {})
+    assert_equal 'T cells', aliases.dig('names', '1')
+    assert_equal 'Not selected', aliases.dig('names', '0')
+    assert_equal H5DataService::FILTERED_OUT_SELECTION_LABEL, aliases.dig('names', '-1')
   end
 
   test 'perform records a failed status when the write raises' do

@@ -11,14 +11,14 @@ class H5DataServiceCellSelectionTest < ActiveSupport::TestCase
       loom_path = File.join(dir, 'output.loom')
       File.write(loom_path, 'loom')
       selected_path = File.join(dir, 'selected_cells.json')
-      File.write(selected_path, { selected_indices: [1, 3] }.to_json)
+      File.write(selected_path, { selected_indices: [1, 3], filtered_out_indices: [0] }.to_json)
       meta = {
         'name' => '/col_attrs/X_umap.sel_1',
         'on' => 'CELL',
         'type' => 'DISCRETE',
         'nber_cols' => 5,
         'nber_rows' => 1,
-        'categories' => { '0' => 3, '1' => 2 }
+        'categories' => { '-1' => 1, '0' => 2, '1' => 2 }
       }
 
       original_lock = H5DataService.method(:run_with_optional_loom_write_lock)
@@ -26,8 +26,10 @@ class H5DataServiceCellSelectionTest < ActiveSupport::TestCase
       H5DataService.define_singleton_method(:run_with_optional_loom_write_lock) do |_path, already_locked: false, &block|
         block.call
       end
+      script_seen = nil
       H5DataService.define_singleton_method(:docker_exec_h5_write_python3!) do |*_argv, stdin_data:|
         out_path = _argv[3]
+        script_seen = stdin_data
         File.write(out_path, meta.to_json)
         ['OK', '', OpenStruct.new(success?: true)]
       end
@@ -35,6 +37,9 @@ class H5DataServiceCellSelectionTest < ActiveSupport::TestCase
       result = H5DataService.write_cell_selection!(loom_path, '/col_attrs/X_umap.sel_1', selected_path)
       assert_equal '/col_attrs/X_umap.sel_1', result['name']
       assert_equal 2, result['categories']['1']
+      assert_equal 1, result['categories']['-1']
+      assert_includes script_seen, 'filtered_out_indices'
+      assert_includes script_seen, "mask[idx] = -1"
     ensure
       H5DataService.define_singleton_method(:run_with_optional_loom_write_lock, original_lock)
       H5DataService.define_singleton_method(:docker_exec_h5_write_python3!, original_exec)

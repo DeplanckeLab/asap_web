@@ -306,6 +306,11 @@ class ReqsController < ApplicationController
         end
       end
 
+      # Move staged viz filter universe binaries into the DE run directory.
+      if @step.name.to_s == 'de'
+        attach_de_cell_universe_files!(list_of_runs2, project_dir, step_dir)
+      end
+
       list_of_h_p = []
 
       puts "Elapsed time 9:" + (Time.now-t).to_s
@@ -783,6 +788,40 @@ class ReqsController < ApplicationController
       return 0 if annot_ids.empty?
 
       Annot.light.where(id: annot_ids).maximum(:nber_cols).to_i
+    end
+
+    # Move staged filtered_in.bin / filtered_out.bin from tmp into the DE run dir and
+    # rewrite attrs to the project-relative run path.
+    def attach_de_cell_universe_files!(list_of_runs2, project_dir, step_dir)
+      list_of_runs2.each_index do |run_i|
+        run = list_of_runs2[run_i][0]
+        h_run_attrs = Basic.safe_parse_json(run.attrs_json, {})
+        staged_rel = h_run_attrs['cell_universe_file'].to_s
+        next if staged_rel.blank?
+
+        mode = h_run_attrs['cell_universe_mode'].to_s.strip.downcase == 'out' ? 'out' : 'in'
+        staged_abs = project_dir + staged_rel
+        unless File.file?(staged_abs)
+          raise "DE cell universe file not found: #{staged_rel}"
+        end
+
+        output_dir = (@step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
+        FileUtils.mkdir_p(output_dir)
+        dest_name = mode == 'out' ? 'filtered_out.bin' : 'filtered_in.bin'
+        dest_abs = output_dir + dest_name
+        FileUtils.mv(staged_abs.to_s, dest_abs.to_s)
+
+        run_rel = if @step.multiple_runs == true
+                    File.join(@step.name, run.id.to_s, dest_name)
+                  else
+                    File.join(@step.name, dest_name)
+                  end
+        h_run_attrs['cell_universe_file'] = run_rel
+        h_run_attrs['cell_universe_mode'] = mode
+        list_of_runs2[run_i][0].attrs_json = h_run_attrs.to_json
+        list_of_runs2[run_i][0].save!
+        list_of_runs2[run_i][1] = h_run_attrs if list_of_runs2[run_i][1].is_a?(Hash)
+      end
     end
 
     def sanitize_cell_filtering_input_loom(project_dir)

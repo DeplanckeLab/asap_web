@@ -6206,6 +6206,8 @@ export default class extends Controller {
     const value = String(rawValue).trim()
     if (value.length === 0) return true
     if (value === "0") return true
+    if (value === "-1") return true
+    if (value === "__filtered_out__") return true
     if (value === String(unselectedName || "Not selected").trim()) return true
     return false
   }

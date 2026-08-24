@@ -29,7 +29,9 @@ module DeTTestApproxV8StdMethods
       { 'opt' => '--group-2', 'param_key' => 'group_comp', 'null_value' => 'null' },
       { 'opt' => '--is-count', 'param_key' => 'is_count_table', 'value' => '#{input_matrix_is_count_table}' },
       { 'opt' => '--preview-cell-fraction', 'param_key' => 'preview_cell_fraction', 'omit_when_null' => true },
-      { 'opt' => '--preview-max-cells', 'param_key' => 'preview_max_cells', 'omit_when_null' => true }
+      { 'opt' => '--preview-max-cells', 'param_key' => 'preview_max_cells', 'omit_when_null' => true },
+      { 'opt' => '--cell-universe-file', 'param_key' => 'cell_universe_file', 'omit_when_null' => true },
+      { 'opt' => '--cell-universe-mode', 'param_key' => 'cell_universe_mode', 'omit_when_null' => true }
     ],
     'predict_params' => %w[nber_cols nber_rows std_method_name preview_cell_fraction preview_max_cells]
   }.freeze

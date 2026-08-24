@@ -17,11 +17,11 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access annotations].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public transfer_ownership cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_overlaps search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public transfer_ownership cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_overlaps search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata stage_de_cell_universe delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
   before_action :authorize_project_read_access, only: %i[show clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_overlaps search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection collection_owned_project_autocomplete collection_add_project transfer_ownership]
-  before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection save_batch_compose_metadata]
+  before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection save_batch_compose_metadata stage_de_cell_universe]
   before_action :authorize_project_owner_access, only: %i[export_consensus_annotation preview_consensus_annotation]
   GENE_DETAILS_CACHE_ATTRS = %w[id ensembl_id name description biotype function_description alt_names obsolete_alt_names].freeze
   GENE_DETAILS_CACHE_TTL = 24.hours
@@ -3819,6 +3819,9 @@ class ProjectsController < ApplicationController
       render json: { status: 'error', message: 'No cells selected' }, status: :unprocessable_entity
       return
     end
+    selected_set = list_cols.to_set
+    filtered_out_cols = Array(params[:filtered_out_indices]).map { |v| Integer(v) rescue nil }.compact.uniq
+    filtered_out_cols.reject! { |idx| selected_set.include?(idx) }
 
     embedding_metadata_id = params[:embedding_metadata_id].to_i
     embedding_annot = Annot.find_by(id: embedding_metadata_id, project_id: @project.id)
@@ -3882,8 +3885,10 @@ class ProjectsController < ApplicationController
     run_dir = project_dir + 'metadata' + run.id.to_s
     FileUtils.mkdir_p(run_dir)
     selected_cells_file = run_dir + 'selected_cells.json'
+    selection_payload = { selected_indices: list_cols }
+    selection_payload[:filtered_out_indices] = filtered_out_cols if filtered_out_cols.any?
     File.open(selected_cells_file, 'w') do |f|
-      f.write({ selected_indices: list_cols }.to_json)
+      f.write(selection_payload.to_json)
     end
 
     cmd = {
@@ -3950,6 +3955,55 @@ class ProjectsController < ApplicationController
     render json: {
       status: 'ok',
       item: response_item
+    }
+  end
+
+  # POST /projects/:id/stage_de_cell_universe
+  # Body: raw little-endian uint32 indices (filtered_in or filtered_out, whichever is smaller).
+  # Headers: X-Cell-Universe-Mode: in|out, X-Cell-Universe-N-Cells: <n>
+  def stage_de_cell_universe
+    unless analyzable?(@project)
+      render json: { status: 'error', message: 'Not authorized' }, status: :forbidden
+      return
+    end
+
+    mode = request.headers['X-Cell-Universe-Mode'].to_s.strip.downcase
+    mode = mode == 'out' ? 'out' : 'in'
+    n_cells = request.headers['X-Cell-Universe-N-Cells'].to_i
+    if n_cells <= 0
+      render json: { status: 'error', message: 'X-Cell-Universe-N-Cells must be a positive integer' }, status: :unprocessable_entity
+      return
+    end
+
+    raw = request.raw_post.to_s
+    if raw.bytesize == 0 || (raw.bytesize % 4) != 0
+      render json: { status: 'error', message: 'Body must be a non-empty little-endian uint32 index list' }, status: :unprocessable_entity
+      return
+    end
+
+    n_indices = raw.bytesize / 4
+    max_allowed = (n_cells + 1) / 2
+    if n_indices > max_allowed
+      render json: {
+        status: 'error',
+        message: "Index list is larger than half the cells (#{n_indices} > #{max_allowed}); use the complementary polarity"
+      }, status: :unprocessable_entity
+      return
+    end
+
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    basename = mode == 'out' ? 'filtered_out.bin' : 'filtered_in.bin'
+    relative_path = File.join('tmp', 'de_cell_universe', "#{SecureRandom.uuid}_#{basename}")
+    absolute_path = project_dir + relative_path
+    FileUtils.mkdir_p(absolute_path.dirname)
+    File.binwrite(absolute_path, raw)
+
+    render json: {
+      status: 'ok',
+      cell_universe_file: relative_path,
+      cell_universe_mode: mode,
+      cell_universe_n_cells: n_cells,
+      cell_universe_n_indices: n_indices
     }
   end
 
@@ -13595,11 +13649,17 @@ class ProjectsController < ApplicationController
             selection_ref_name: selection_ref_name.to_s
           }
         else
+          mode = (entry_hash['mode'] || entry_hash[:mode]).to_s
           summary_mode = (entry_hash['summary_mode'] || entry_hash[:summary_mode]).to_s
+          if mode.blank?
+            mode = summary_mode == 'unselected' ? 'exclude' : 'include'
+          end
+          mode = mode == 'exclude' ? 'exclude' : 'include'
+
+          values = entry_hash['values'] || entry_hash[:values]
+          values = entry_hash['summary_values'] || entry_hash[:summary_values] if values.nil?
           selected_count = (entry_hash['selected_count'] || entry_hash[:selected_count]).to_i
           total_count = (entry_hash['total_count'] || entry_hash[:total_count]).to_i
-          summary_values = entry_hash['summary_values'] || entry_hash[:summary_values]
-          hidden_value_count = (entry_hash['hidden_value_count'] || entry_hash[:hidden_value_count]).to_i
           selection_ref_id = entry_hash['selection_ref_id'] || entry_hash[:selection_ref_id]
           selection_ref_name = entry_hash['selection_ref_name'] || entry_hash[:selection_ref_name]
 
@@ -13607,11 +13667,10 @@ class ProjectsController < ApplicationController
             type: 'categorical',
             metadata_id: metadata_id,
             name: name,
-            summary_mode: summary_mode,
+            mode: mode,
+            values: Array(values).map(&:to_s),
             selected_count: selected_count,
             total_count: total_count,
-            summary_values: Array(summary_values).map(&:to_s).first(50),
-            hidden_value_count: hidden_value_count,
             selection_ref_id: selection_ref_id.to_s,
             selection_ref_name: selection_ref_name.to_s
           }

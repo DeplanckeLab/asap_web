@@ -2413,38 +2413,38 @@ export class DataManager {
     
     discrete.forEach(metadataId => {
       const selections = this.controller.selectedCategories?.[metadataId]
-      const selectedValues = selections ? Array.from(selections) : []
+      const selectedValues = selections ? Array.from(selections).map((value) => String(value)) : []
       const allCategories = this.getDiscreteCategoryUniverse(metadataId)
       let totalCategories = Array.isArray(allCategories) && allCategories.length > 0
         ? allCategories.length
         : this.getDiscreteCategoryUniverseSize(metadataId)
       
-      let summaryMode = 'selected'
-      let summaryCount = selectedValues.length
-      let summaryList = selectedValues
-      
-      if (totalCategories !== null) {
-        const unselectedCount = totalCategories - selectedValues.length
-        if (unselectedCount < selectedValues.length) {
-          summaryMode = 'unselected'
-          summaryCount = unselectedCount
-          if (allCategories) {
-            const selectedSet = new Set(selectedValues)
-            summaryList = allCategories.filter(cat => !selectedSet.has(cat))
-          } else {
-            summaryList = []
-          }
+      // Persist the smaller side (include selected vs exclude unselected), never truncate values.
+      let mode = 'include'
+      let modeValues = selectedValues
+      if (Array.isArray(allCategories) && allCategories.length > 0) {
+        const selectedSet = new Set(selectedValues)
+        const unselectedValues = allCategories
+          .map((cat) => String(cat))
+          .filter((cat) => !selectedSet.has(cat))
+        if (unselectedValues.length < selectedValues.length) {
+          mode = 'exclude'
+          modeValues = unselectedValues
         }
       }
 
+      // Compact preview for on-screen filter chips only (not for persistence).
+      const summaryList = modeValues
       const item = {
         metadataId,
         type: 'categorical',
         name: resolveName(metadataId),
         selectedCount: selectedValues.length,
         totalCount: totalCategories,
-        summaryMode,
-        summaryCount,
+        mode,
+        values: modeValues,
+        summaryMode: mode === 'exclude' ? 'unselected' : 'selected',
+        summaryCount: modeValues.length,
         summaryValues: summaryList ? summaryList.slice(0, 6) : [],
         hiddenValueCount: summaryList ? Math.max(summaryList.length - 6, 0) : 0,
         isEmptySelection: selectedValues.length === 0,

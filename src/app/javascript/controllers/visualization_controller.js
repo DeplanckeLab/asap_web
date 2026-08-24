@@ -18,6 +18,7 @@ import {
   queryDeSecondMetadataFormBlock,
   queryDeSecondMetadataHidden
 } from "visualization/de_second_metadata_attrs"
+import { DE_COMPLEMENTARY_GROUP_VALUE } from "visualization/de_group_complementary"
 import { resetInputDataWidgetToEmptyPlaceholder } from "lib/reset_input_data_widget_placeholder"
 import { formatNumberWithDelimiter } from "lib/number_format"
 import { dataUrlToJpegThumbnail, isCheckpointThumbnailDataUrl, canvasToJpegThumbnailDataUrl } from "lib/checkpoint_thumbnail"
@@ -19573,18 +19574,22 @@ export default class extends Controller {
   }
 
   openDeSelectionModal() {
-    const loomFile = this.getCurrentLoomFileForRequest()
-    const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
-    const canRunNewDe = items.length >= 1
+    const canRunNewDe = this.canRunDeFromVisualization()
 
     this.prepareDeSelectionModal({ canRunNewDe })
     this.switchDeModalTab(canRunNewDe ? 'run' : 'results')
   }
 
-  prepareDeSelectionModal({ canRunNewDe } = {}) {
+  canRunDeFromVisualization() {
     const loomFile = this.getCurrentLoomFileForRequest()
-    const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
-    const canRun = canRunNewDe !== undefined ? !!canRunNewDe : items.length >= 1
+    const savedCount = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile).length
+    if (savedCount >= 1) return true
+    const categoryCount = this.collectComposeCategoryOperandOptions().length
+    return categoryCount >= 1
+  }
+
+  prepareDeSelectionModal({ canRunNewDe } = {}) {
+    const canRun = canRunNewDe !== undefined ? !!canRunNewDe : this.canRunDeFromVisualization()
 
     window.visualizationController = this
     const overlay = document.getElementById('de-selection-overlay')
@@ -19598,13 +19603,14 @@ export default class extends Controller {
       runButton.style.cursor = canRun ? 'pointer' : 'not-allowed'
       runButton.title = canRun
         ? 'Run differential expression'
-        : `Requires at least 1 saved ${this.getColSetLabel({ plural: false })}`
+        : 'Requires a saved cell set or a categorical metadata category'
     }
     this.showDeRunFeedback('')
 
     this.populateDeSelectionEmbeddings()
     this.populateDeSelectionOperands()
     this.populateDeSelectionMethods()
+    this.updateDeFilterUniverseWarning()
     this.updateDeSelectionPreview()
     this.setDeModalRunTabEnabled(canRun)
     return true
@@ -19618,7 +19624,7 @@ export default class extends Controller {
     runTab.style.cursor = enabled ? 'pointer' : 'not-allowed'
     runTab.title = enabled
       ? 'Run differential expression'
-      : `Requires at least 1 saved ${this.getColSetLabel({ plural: false })}`
+      : 'Requires a saved cell set or a categorical metadata category'
     if (!enabled) {
       runTab.onclick = (event) => {
         event.preventDefault()
@@ -19635,8 +19641,7 @@ export default class extends Controller {
     if (!annotId && !runId) return
 
     const loomFile = this.getCurrentLoomFileForRequest()
-    const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
-    if (!this.prepareDeSelectionModal({ canRunNewDe: items.length >= 1 })) return
+    if (!this.prepareDeSelectionModal({ canRunNewDe: this.canRunDeFromVisualization() })) return
 
     this.switchDeModalTab('results', { reloadResults: false })
     await this.loadDeVizResults()
@@ -20099,13 +20104,16 @@ export default class extends Controller {
     const loomFile = this.getCurrentLoomFileForRequest()
     const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
     this.ensureSavedCellSetSelectionOrder(items)
-    const options = items.map((item) => ({
+
+    const savedOptions = items.map((item) => ({
       value: `saved:${item.id}`,
       label: this.composeSelectionOptionLabel(item)
     }))
-    const optionMarkup = options.map((opt) => `<option value="${this.escapeHtml(opt.value)}">${this.escapeHtml(opt.label)}</option>`).join('')
-    operandASelect.innerHTML = optionMarkup
-    operandBSelect.innerHTML = optionMarkup
+    const categoryOptions = this.collectComposeCategoryOperandOptions()
+    const options = [...savedOptions, ...categoryOptions]
+    const optionMarkup = this.buildComposeOperandSelectMarkup([], savedOptions, categoryOptions)
+    operandASelect.innerHTML = optionMarkup || '<option value="">No groups available</option>'
+    operandBSelect.innerHTML = optionMarkup || '<option value="">No groups available</option>'
 
     const validValues = new Set(options.map((opt) => opt.value))
     const checkedValuesInOrder = (this.savedCellSetSelectionOrder || [])
@@ -20119,17 +20127,20 @@ export default class extends Controller {
       secondValue = fallbackDistinct ? fallbackDistinct.value : firstValue
     }
 
-    operandASelect.value = firstValue
-    operandBSelect.value = secondValue
+    if (validValues.has(firstValue)) operandASelect.value = firstValue
+    if (validValues.has(secondValue)) operandBSelect.value = secondValue
 
     const canCompareGroups = options.length >= 2
     const modeRow = document.getElementById('de-selection-mode-row')
     const complementaryRadio = document.getElementById('de-selection-mode-complementary')
     const groupRadio = document.getElementById('de-selection-mode-group')
-    if (modeRow) modeRow.style.display = canCompareGroups ? 'block' : 'none'
+    if (modeRow) modeRow.style.display = options.length >= 1 ? 'block' : 'none'
     if (!canCompareGroups) {
       if (complementaryRadio) complementaryRadio.checked = true
       if (groupRadio) groupRadio.checked = false
+      if (groupRadio) groupRadio.disabled = true
+    } else if (groupRadio) {
+      groupRadio.disabled = false
     }
     this.syncDeSelectionModeUi()
   }
@@ -20149,8 +20160,6 @@ export default class extends Controller {
     const mode = this.getDeSelectionMode()
     const isGroupMode = mode === 'group'
     const colPlural = this.getColLabel({ plural: true })
-    const colSet = this.getColSetLabel({ plural: false })
-    const colSetCap = this.getColSetLabel({ plural: false, capitalize: true })
     const operandALabel = document.getElementById('de-selection-operand-a-label')
     const operandBWrap = document.getElementById('de-selection-operand-b-wrap')
     const operandBSelect = document.getElementById('de-selection-operand-b')
@@ -20159,7 +20168,7 @@ export default class extends Controller {
     let complementaryDisplay = document.getElementById('de-selection-complementary-display')
 
     if (operandALabel) {
-      operandALabel.textContent = `${colSetCap} A (reference)`
+      operandALabel.textContent = 'Reference group'
     }
 
     if (!complementaryDisplay && operandBWrap) {
@@ -20180,13 +20189,38 @@ export default class extends Controller {
       complementaryDisplay.style.display = isGroupMode ? 'none' : ''
     }
     if (operandBLabel) {
-      operandBLabel.textContent = isGroupMode ? `${colSetCap} B (compared)` : 'Compared to'
+      operandBLabel.textContent = isGroupMode ? 'Compared group' : 'Compared to'
     }
     if (hint) {
       hint.textContent = isGroupMode
-        ? `DE compares selected ${colPlural} in ${colSet} A against selected ${colPlural} in ${colSet} B.`
-        : `DE compares selected ${colPlural} in ${colSet} A against all other ${colPlural}.`
+        ? 'DE compares the reference group against the compared group (same or different categorical metadata).'
+        : `DE compares the reference group against all other ${colPlural} (complementary).`
     }
+  }
+
+  updateDeFilterUniverseWarning() {
+    const banner = document.getElementById('de-selection-filter-warning')
+    if (!banner) return
+
+    const nCells = Array.isArray(this.currentCoordinates) ? this.currentCoordinates.length : 0
+    const filteredIndices = this.dataManager?.getIncrementalFilteredIndices?.()
+    const hasFilter = nCells > 0 &&
+      Array.isArray(filteredIndices) &&
+      filteredIndices.length > 0 &&
+      filteredIndices.length < nCells
+
+    if (!hasFilter) {
+      banner.style.display = 'none'
+      banner.textContent = ''
+      return
+    }
+
+    const visible = filteredIndices.length
+    const excluded = nCells - visible
+    banner.style.display = 'block'
+    banner.textContent =
+      `Active filters: DE will use the ${visible.toLocaleString()} currently visible cells as the cell universe ` +
+      `(${excluded.toLocaleString()} filtered-out cells excluded).`
   }
 
   populateDeSelectionEmbeddings() {
@@ -20532,11 +20566,9 @@ export default class extends Controller {
 
     const mode = this.getDeSelectionMode()
     const colPlural = this.getColLabel({ plural: true })
-    const colSet = this.getColSetLabel({ plural: false })
-    const colSetCap = this.getColSetLabel({ plural: false, capitalize: true })
     const colSets = this.getColSetLabel({ plural: true })
     if (!operandASelect.value || (mode === 'group' && (!operandBSelect || !operandBSelect.value))) {
-      preview.innerHTML = `<div style="grid-column: 1 / -1; font-size: 12px; color: #6b7280; padding: 8px;">Select ${colSet}(s) to preview.</div>`
+      preview.innerHTML = '<div style="grid-column: 1 / -1; font-size: 12px; color: #6b7280; padding: 8px;">Select group(s) to preview.</div>'
       return
     }
 
@@ -20551,26 +20583,45 @@ export default class extends Controller {
         ? coordinates.length
         : operandA.cellSet.size
 
+      const filteredIndices = this.dataManager?.getIncrementalFilteredIndices?.()
+      const universeSet = (
+        Array.isArray(filteredIndices) &&
+        filteredIndices.length > 0 &&
+        filteredIndices.length < totalCells
+      ) ? new Set(filteredIndices) : null
+      const inUniverse = (index) => !universeSet || universeSet.has(index)
+
       let comparedLabel = `All other ${colPlural}`
       let comparedSet = new Set()
+      const referenceSet = new Set()
+      operandA.cellSet.forEach((index) => {
+        if (inUniverse(index)) referenceSet.add(index)
+      })
+
       if (mode === 'group') {
         const operandB = await this.resolveComposeOperandSelection(operandBSelect.value)
         if (!operandB) return
         comparedLabel = operandB.label
-        comparedSet = operandB.cellSet
+        operandB.cellSet.forEach((index) => {
+          if (inUniverse(index)) comparedSet.add(index)
+        })
+      } else if (universeSet) {
+        universeSet.forEach((index) => {
+          if (!referenceSet.has(index)) comparedSet.add(index)
+        })
       } else {
         for (let index = 0; index < totalCells; index++) {
-          if (!operandA.cellSet.has(index)) comparedSet.add(index)
+          if (!referenceSet.has(index)) comparedSet.add(index)
         }
       }
 
-      const comparedTitle = mode === 'group' ? `${colSetCap} B` : 'Complementary'
+      const comparedTitle = mode === 'group' ? 'Compared group' : 'Complementary'
       preview.innerHTML = [
-        this.renderComposeSelectionPreviewCard(`${colSetCap} A`, operandA.label, operandA.cellSet.size, totalCells, '#2563eb', 'de-preview-canvas-a'),
+        this.renderComposeSelectionPreviewCard('Reference group', operandA.label, referenceSet.size, totalCells, '#2563eb', 'de-preview-canvas-a'),
         this.renderComposeSelectionPreviewCard(comparedTitle, comparedLabel, comparedSet.size, totalCells, '#d97706', 'de-preview-canvas-b')
       ].join('')
 
-      this.drawComposeSelectionScatterPreview('de-preview-canvas-a', coordinates, operandA.cellSet, '#2563eb')
+      this.drawComposeSelectionScatterPreview('de-preview-canvas-a', coordinates, referenceSet, '#2563eb')
       this.drawComposeSelectionScatterPreview('de-preview-canvas-b', coordinates, comparedSet, '#d97706')
     } catch (error) {
       console.error('Could not render DE preview:', error)
@@ -20585,14 +20636,56 @@ export default class extends Controller {
     if (!operandASelect) return { itemA: null, itemB: null, mode: 'complementary' }
 
     const mode = this.getDeSelectionMode()
-    const selectedAId = String(operandASelect.value || '').replace('saved:', '')
-    const itemA = (this.savedSelections || []).find((entry) => String(entry.id) === selectedAId) || null
+    const itemA = this.resolveDeOperandForSubmit(operandASelect.value)
     let itemB = null
     if (mode === 'group' && operandBSelect) {
-      const selectedBId = String(operandBSelect.value || '').replace('saved:', '')
-      itemB = (this.savedSelections || []).find((entry) => String(entry.id) === selectedBId) || null
+      itemB = this.resolveDeOperandForSubmit(operandBSelect.value)
     }
     return { itemA, itemB, mode }
+  }
+
+  resolveDeOperandForSubmit(operandValue) {
+    const value = String(operandValue || '')
+    if (!value) return null
+
+    if (value.startsWith('cat:')) {
+      const meta = this.getComposeCategoryOperandMeta(value)
+      if (!meta) return null
+      const runId = Number(meta.runId)
+      const metadataId = Number(meta.metadataId)
+      if (!Number.isInteger(metadataId) || metadataId <= 0) return null
+      if (!Number.isInteger(runId) || runId <= 0) {
+        throw new Error(`Missing run id for metadata category ${meta.metadataName || metadataId}. Reload the visualization and try again.`)
+      }
+      return {
+        kind: 'category',
+        key: value,
+        id: value,
+        metadataId,
+        runId,
+        categoryName: String(meta.categoryName || ''),
+        label: this.composeCategoryOperandLabel(meta.metadataName, meta.categoryName)
+      }
+    }
+
+    if (!value.startsWith('saved:')) return null
+    const selectionId = value.replace('saved:', '')
+    const item = (this.savedSelections || []).find((entry) => String(entry.id) === selectionId)
+    if (!item) return null
+    const metadataId = Number(item.metadataId)
+    const runId = Number(item.runId)
+    if (!Number.isInteger(metadataId) || metadataId <= 0 || !Number.isInteger(runId) || runId <= 0) {
+      return null
+    }
+    return {
+      kind: 'saved',
+      key: value,
+      id: item.id,
+      metadataId,
+      runId,
+      categoryName: '1',
+      label: this.composeSelectionOptionLabel(item)
+    }
   }
 
   collectDeModalAttributes() {
@@ -20638,35 +20731,57 @@ export default class extends Controller {
   applyDeSelectedGroupsToAttrs(attrs, itemA, itemB = null, mode = 'complementary') {
     const groupsAnnotId = Number(itemA?.metadataId)
     const groupsRunId = Number(itemA?.runId)
-    const colSet = this.getColSetLabel({ plural: false })
     if (!Number.isInteger(groupsAnnotId) || groupsAnnotId <= 0 || !Number.isInteger(groupsRunId) || groupsRunId <= 0) {
-      throw new Error(`Missing group annotation for selected ${colSet}.`)
+      throw new Error('Missing group annotation for the reference group.')
     }
+    const refCategory = String(itemA.categoryName || '').trim()
+    if (!refCategory) {
+      throw new Error('Missing category for the reference group.')
+    }
+
     attrs.groups = [{
       annot_id: groupsAnnotId,
       run_id: groupsRunId
     }]
-    // Cell-selection metadata: 1 = selected, 0 = complement, -1 = filtered out at selection time.
-    attrs.group_ref = '1'
+    attrs.group_ref = refCategory
     delete attrs.group_pairs
 
     if (mode === 'group') {
       const groups2AnnotId = Number(itemB?.metadataId)
       const groups2RunId = Number(itemB?.runId)
+      const compCategory = String(itemB?.categoryName || '').trim()
       if (!Number.isInteger(groups2AnnotId) || groups2AnnotId <= 0 || !Number.isInteger(groups2RunId) || groups2RunId <= 0) {
-        throw new Error(`Missing group annotation for compared ${colSet}.`)
+        throw new Error('Missing group annotation for the compared group.')
       }
-      attrs.groups2 = [{
-        annot_id: groups2AnnotId,
-        run_id: groups2RunId
-      }]
-      attrs.group_comp = '1'
-      attrs.group_comp_from_other_metadata = true
-      attrs.second_group_from_other_metadata = true
+      if (!compCategory) {
+        throw new Error('Missing category for the compared group.')
+      }
+      if (String(itemA.key) === String(itemB.key)) {
+        throw new Error('Please select two different groups.')
+      }
+
+      attrs.group_comp = compCategory
+      if (String(groupsAnnotId) === String(groups2AnnotId)) {
+        delete attrs.groups2
+        delete attrs.group_comp_from_other_metadata
+        delete attrs.second_group_from_other_metadata
+      } else {
+        attrs.groups2 = [{
+          annot_id: groups2AnnotId,
+          run_id: groups2RunId
+        }]
+        attrs.group_comp_from_other_metadata = true
+        attrs.second_group_from_other_metadata = true
+      }
       return
     }
 
-    attrs.group_comp = '0'
+    // Complementary: binary cell-set annots use category "0"; categorical metadata omits group-2.
+    if (itemA.kind === 'saved') {
+      attrs.group_comp = '0'
+    } else {
+      attrs.group_comp = DE_COMPLEMENTARY_GROUP_VALUE
+    }
     delete attrs.groups2
     delete attrs.group_comp_from_other_metadata
     delete attrs.second_group_from_other_metadata
@@ -20806,29 +20921,39 @@ export default class extends Controller {
     const methodId = String(methodSelect.value || '').trim()
     const stepId = Number(this.deStepIdValue)
     const projectIdentifier = this.getProjectIdentifier()
-    const { itemA, itemB, mode } = this.getDeSelectedOperandItems()
 
     if (!methodId || !Number.isInteger(stepId) || stepId <= 0 || !projectIdentifier) {
       this.showDeSelectionStatus('Could not submit DE run: missing method or project context.', 'error')
       alert('Could not submit DE run: missing method or project context.')
       return
     }
-    if (!itemA) {
-      this.showDeSelectionStatus(`Please select a ${this.getColSetLabel({ plural: false })}.`, 'error')
-      alert(`Please select a ${this.getColSetLabel({ plural: false })}.`)
+
+    let itemA = null
+    let itemB = null
+    let mode = 'complementary'
+    try {
+      ;({ itemA, itemB, mode } = this.getDeSelectedOperandItems())
+      if (!itemA) {
+        this.showDeSelectionStatus('Please select a reference group.', 'error')
+        alert('Please select a reference group.')
+        return
+      }
+      if (mode === 'group') {
+        if (!itemB) {
+          this.showDeSelectionStatus('Please select a compared group.', 'error')
+          alert('Please select a compared group.')
+          return
+        }
+        if (String(itemA.key) === String(itemB.key)) {
+          this.showDeSelectionStatus('Please select two different groups.', 'error')
+          alert('Please select two different groups.')
+          return
+        }
+      }
+    } catch (error) {
+      this.showDeSelectionStatus(error.message || 'Could not prepare DE groups.', 'error')
+      alert(error.message || 'Could not prepare DE groups.')
       return
-    }
-    if (mode === 'group') {
-      if (!itemB) {
-        this.showDeSelectionStatus(`Please select a compared ${this.getColSetLabel({ plural: false })}.`, 'error')
-        alert(`Please select a compared ${this.getColSetLabel({ plural: false })}.`)
-        return
-      }
-      if (String(itemA.id) === String(itemB.id)) {
-        this.showDeSelectionStatus(`Please select two different ${this.getColSetLabel({ plural: true })}.`, 'error')
-        alert(`Please select two different ${this.getColSetLabel({ plural: true })}.`)
-        return
-      }
     }
 
     const attrs = this.collectDeModalAttributes()
@@ -21341,12 +21466,16 @@ export default class extends Controller {
       if (seen.has(value)) return
       seen.add(value)
 
+      const itemEl = document.querySelector(`[data-metadata-item="${CSS.escape ? CSS.escape(metadataId) : metadataId}"]`)
+      const runId = Number(itemEl?.dataset?.runId || btn.dataset.runId || 0)
+
       const meta = {
         key: value,
         metadataId,
         catIdx,
         metadataName,
-        categoryName
+        categoryName,
+        runId: Number.isInteger(runId) && runId > 0 ? runId : null
       }
       this.composeCategoryOperandMeta.set(value, meta)
       options.push({
@@ -21406,12 +21535,15 @@ export default class extends Controller {
     ).trim()
     const categoryName = String(btn.dataset.catName || '').trim()
     if (!categoryName) return null
+    const itemEl = document.querySelector(`[data-metadata-item="${CSS.escape ? CSS.escape(String(parsed.metadataId)) : String(parsed.metadataId)}"]`)
+    const runId = Number(itemEl?.dataset?.runId || btn.dataset.runId || 0)
     const meta = {
       key,
       metadataId: parsed.metadataId,
       catIdx: parsed.catIdx,
       metadataName,
-      categoryName
+      categoryName,
+      runId: Number.isInteger(runId) && runId > 0 ? runId : null
     }
     this.composeCategoryOperandMeta.set(key, meta)
     return meta

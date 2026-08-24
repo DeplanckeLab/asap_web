@@ -1179,7 +1179,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
             <% categorical_metadata_items = (@h_metadata[@default_loom_file]['cell']['DISCRETE'] || []).select { |metadata| metadata.data_type&.name == 'DISCRETE' } %>
             <% categorical_metadata_items.each_with_index do |metadata, idx| %>
               <% is_last_categorical_item = (idx == categorical_metadata_items.length - 1) %>
-              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: <%= is_last_categorical_item ? '20px' : '8px' %>;" data-metadata-item="<%= metadata.id %>" data-categories-count="<%= metadata.nber_cats || 0 %>"<%= ' data-guided-tour="visualization-sample-metadata-controls"'.html_safe if viz_tour_sample_on_categorical && idx == 0 %>>
+              <div style="border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: <%= is_last_categorical_item ? '20px' : '8px' %>;" data-metadata-item="<%= metadata.id %>" data-run-id="<%= metadata.run_id.presence || metadata.ori_run_id %>" data-categories-count="<%= metadata.nber_cats || 0 %>"<%= ' data-guided-tour="visualization-sample-metadata-controls"'.html_safe if viz_tour_sample_on_categorical && idx == 0 %>>
                 <div style="display: flex; align-items: center; padding: 8px; cursor: pointer; transition: background-color 0.2s;" 
                      onmouseover="this.style.backgroundColor='#f9fafb'" 
                      onmouseout="this.style.backgroundColor=''"

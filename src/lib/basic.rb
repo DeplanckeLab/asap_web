@@ -5271,7 +5271,7 @@ module Basic
     end
 
     STALE_STEP_OUTPUT_FILES = %w[
-      output.json output.log exec.out exec.err output.plot.json exec_run_details.log
+      output.json output.log exec.out exec.err slurm.out slurm.err output.plot.json exec_run_details.log
     ].freeze
 
     def run_output_dir(run)

@@ -28,6 +28,10 @@
     <%# Tab: Run DE %>
     <div id="de-modal-panel-run" style="display: flex; flex-direction: column; overflow: hidden; flex: 1; min-height: 0;">
       <div style="padding: 16px; overflow-y: auto; min-height: 0; flex: 1;">
+        <div id="de-selection-filter-warning"
+             style="display: none; margin-bottom: 12px; padding: 8px 10px; border-radius: 6px; font-size: 12px; background: #fffbeb; color: #92400e; border: 1px solid #fcd34d;">
+        </div>
+
         <div style="margin-bottom: 12px;">
           <label style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Embedding for preview</label>
           <select id="de-selection-embedding"
@@ -60,20 +64,20 @@
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; margin-bottom: 14px;">
           <div>
-            <label id="de-selection-operand-a-label" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;"><%= col_label(@project, plural: false).to_s.capitalize %> set A (reference)</label>
+            <label id="de-selection-operand-a-label" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Reference group</label>
             <select id="de-selection-operand-a"
                     onchange="if (window.visualizationController) window.visualizationController.updateDeSelectionPreview()"
                     style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
           </div>
           <div id="de-selection-operand-b-wrap">
-            <label id="de-selection-operand-b-label" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;"><%= col_label(@project, plural: false).to_s.capitalize %> set B</label>
+            <label id="de-selection-operand-b-label" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Compared group</label>
             <select id="de-selection-operand-b"
                     onchange="if (window.visualizationController) window.visualizationController.updateDeSelectionPreview()"
                     style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
           </div>
         </div>
         <div id="de-selection-mode-hint" style="margin: -8px 0 14px; font-size: 11px; color: #6b7280;">
-          DE compares selected <%= col_label(@project, plural: true) %> in <%= col_label(@project, plural: false) %> set A against all other <%= col_label(@project, plural: true) %>.
+          DE compares the reference group against all other <%= col_label(@project, plural: true) %> (complementary).
         </div>
 
         <div id="de-selection-preview" style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px;"></div>

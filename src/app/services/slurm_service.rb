@@ -63,8 +63,11 @@ class SlurmService
     FileUtils.mkdir_p(output_dir) unless File.exist?(output_dir)
     
     job_name = "asap_run_#{run_id}"
-    output_file = output_dir + "exec.out"
-    error_file = output_dir + "exec.err"
+    # Tool stdout/stderr go to exec.out / exec.err via the command's 1> / 2> redirects.
+    # SBATCH must use different files: pointing both at exec.* truncates or races those
+    # redirects, so displayed_error JSON never reaches the UI.
+    slurm_output_file = output_dir + "slurm.out"
+    slurm_error_file = output_dir + "slurm.err"
     script_file = output_dir + "slurm_#{run_id}.sh"
     
     # Ensure SLURM account exists for fair-share scheduling
@@ -76,8 +79,8 @@ class SlurmService
       cores: cores,
       memory_mb: memory_mb,
       time_limit: time_limit,
-      output_file: output_file,
-      error_file: error_file,
+      output_file: slurm_output_file,
+      error_file: slurm_error_file,
       run_id: run_id,
       user_id: user_id,
       workdir: output_dir.to_s  # Use output directory as working directory on host
@@ -88,8 +91,8 @@ class SlurmService
     
     @logger.info("[SlurmService] Submitting job for Run##{run_id}: #{job_name}")
     @logger.info("[SlurmService] Script path for Run##{run_id}: #{script_file}")
-    @logger.info("[SlurmService] Output path for Run##{run_id}: #{output_file}")
-    @logger.info("[SlurmService] Error path for Run##{run_id}: #{error_file}")
+    @logger.info("[SlurmService] SLURM stdout path for Run##{run_id}: #{slurm_output_file}")
+    @logger.info("[SlurmService] SLURM stderr path for Run##{run_id}: #{slurm_error_file}")
     @logger.info("[SlurmService] Command for Run##{run_id}: #{command}")
     @logger.info("[SlurmService] Script content for Run##{run_id}:\n#{script_content}")
     
@@ -156,37 +159,49 @@ class SlurmService
         step_dir = project_dir + step.name
         output_dir = (step.multiple_runs == true) ? (step_dir + run.id.to_s) : step_dir
         
-        output_file = output_dir + "exec.out"
-        error_file = output_dir + "exec.err"
-        @logger.info("[SlurmService#get_job_status] fallback run=#{run.id} output_dir=#{output_dir} exec_out_exists=#{File.exist?(output_file)} exec_err_exists=#{File.exist?(error_file)}")
-        
-        # If output files exist and are recent (modified within last hour), job likely completed
-        if File.exist?(output_file) && File.mtime(output_file) > 1.hour.ago
-          # Check error file for exit code or error messages
-          if File.exist?(error_file)
-            error_content = File.read(error_file)
-            # Check for common error patterns
-            if error_content.include?('NameError') || 
+        exec_out = output_dir + "exec.out"
+        exec_err = output_dir + "exec.err"
+        slurm_out = output_dir + "slurm.out"
+        @logger.info("[SlurmService#get_job_status] fallback run=#{run.id} output_dir=#{output_dir} exec_out_exists=#{File.exist?(exec_out)} exec_err_exists=#{File.exist?(exec_err)} slurm_out_exists=#{File.exist?(slurm_out)}")
+
+        recent = lambda do |path|
+          File.exist?(path) && File.mtime(path) > 1.hour.ago
+        end
+
+        if recent.call(exec_out) || recent.call(exec_err) || recent.call(slurm_out) || recent.call(output_dir + 'output.json')
+          if recent.call(exec_err)
+            error_content = File.read(exec_err)
+            if error_content.include?('NameError') ||
                error_content.include?('NoMethodError') ||
                error_content.include?('Errno::ENOENT') ||
                error_content.include?('No such file') ||
-               error_content.include?('Error:') || 
+               error_content.include?('Error:') ||
                error_content.include?('aborted!') ||
                error_content.match(/exit code:?\s*[1-9]/i)
               return :failed
             end
           end
-          
-          # Check if output.json exists (indicates successful completion for parsing)
+
+          if recent.call(exec_out)
+            begin
+              exec_json = JSON.parse(File.read(exec_out))
+              return :failed if exec_json.is_a?(Hash) && exec_json['displayed_error'].present?
+            rescue JSON::ParserError
+              # Not JSON; continue
+            end
+          end
+
           output_json = output_dir + 'output.json'
           if File.exist?(output_json)
             return :completed
-          elsif File.exist?(output_file)
-            # Output file exists but no output.json - check if it contains completion message
-            output_content = File.read(output_file)
-            if output_content.include?('Job completed') || output_content.include?('Exit code: 0')
+          end
+
+          # Wrapper completion lines live in slurm.out (not exec.out).
+          if recent.call(slurm_out)
+            slurm_content = File.read(slurm_out)
+            if slurm_content.include?('Job completed') || slurm_content.include?('Exit code: 0')
               return :completed
-            elsif output_content.include?('Exit code:') && !output_content.match(/Exit code:\s*0/)
+            elsif slurm_content.include?('Exit code:') && !slurm_content.match(/Exit code:\s*0/)
               return :failed
             end
           end
@@ -595,6 +610,8 @@ class SlurmService
       "docker exec #{compose}-website-1 bash -c '#{escaped_command}'"
     end
     
+    # options[:output_file] / :error_file must be slurm.out / slurm.err (wrapper logs).
+    # Tool output uses exec.out / exec.err via 1> / 2> inside the command; do not share paths.
     <<~SCRIPT
       #!/bin/bash
       #SBATCH --job-name=#{options[:job_name]}

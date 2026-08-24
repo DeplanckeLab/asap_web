@@ -20174,7 +20174,7 @@ export default class extends Controller {
     const runId = this.escapeHtml(String(entry.run_id || ''))
 
     const upBadge = upCount > 0
-      ? `<span role="button" tabindex="0"
+      ? `<span role="button" tabindex="0" class="de-viz-gene-count-badge"
             data-run-id="${runId}" data-annot-id="${annotId}" data-direction="up"
             data-run-num="${runNum}" data-method="${method}" data-ref-group="${refGroup}"
             data-compared-group="${compared}"
@@ -20184,10 +20184,10 @@ export default class extends Controller {
             style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#dcfce7;color:#166534;cursor:pointer;">
             ${upCount} genes
           </span>`
-      : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#f3f4f6;color:#9ca3af;">0 genes</span>`
+      : `<span class="de-viz-gene-count-badge" style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#f3f4f6;color:#9ca3af;">0 genes</span>`
 
     const downBadge = downCount > 0
-      ? `<span role="button" tabindex="0"
+      ? `<span role="button" tabindex="0" class="de-viz-gene-count-badge"
             data-run-id="${runId}" data-annot-id="${annotId}" data-direction="down"
             data-run-num="${runNum}" data-method="${method}" data-ref-group="${refGroup}"
             data-compared-group="${compared}"
@@ -20197,7 +20197,7 @@ export default class extends Controller {
             style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#fee2e2;color:#991b1b;cursor:pointer;">
             ${downCount} genes
           </span>`
-      : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#f3f4f6;color:#9ca3af;">0 genes</span>`
+      : `<span class="de-viz-gene-count-badge" style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#f3f4f6;color:#9ca3af;">0 genes</span>`
 
     return `
       <div style="display:flex;flex-direction:column;gap:8px;">
@@ -20553,7 +20553,24 @@ export default class extends Controller {
 
   scheduleDeVizFilter() {
     if (this._deVizFilterTimer) clearTimeout(this._deVizFilterTimer)
+    this._setDeVizGeneCountBadgesLoading()
     this._deVizFilterTimer = setTimeout(() => { this.runDeVizFilter() }, 400)
+  }
+
+  _setDeVizGeneCountBadgesLoading() {
+    const root = document.getElementById('de-viz-selected-result') || document.getElementById('de-viz-results-area')
+    if (!root) return
+    root.querySelectorAll('.de-viz-gene-count-badge').forEach((badge) => {
+      badge.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>'
+      badge.style.background = '#f3f4f6'
+      badge.style.color = '#6b7280'
+      badge.style.cursor = 'default'
+      badge.removeAttribute('role')
+      badge.removeAttribute('tabindex')
+      badge.removeAttribute('onclick')
+      badge.removeAttribute('onkeydown')
+      badge.removeAttribute('data-gene-list-url')
+    })
   }
 
   runDeVizFilter() {
@@ -20564,6 +20581,7 @@ export default class extends Controller {
     const fc  = (document.getElementById('de-viz-fc-cutoff')  || {}).value || '2'
     const spinner = document.getElementById('de-viz-filter-spinner')
     if (spinner) spinner.style.display = 'inline'
+    this._setDeVizGeneCountBadgesLoading()
     const geneListState = this._deVizGeneListState
     const url = this._deVizBaseUrl() + '/viz_de_results?fdr_cutoff=' + encodeURIComponent(fdr) + '&fc_cutoff=' + encodeURIComponent(fc)
 

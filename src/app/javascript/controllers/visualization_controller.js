@@ -19996,38 +19996,62 @@ export default class extends Controller {
     return Array.from(new Set(values.map((v) => String(v == null ? '' : v)))).filter((v) => v.length > 0).sort((a, b) => a.localeCompare(b))
   }
 
-  _fillDeVizSelect(selectEl, options, selectedValue) {
-    if (!selectEl) return
-    const selected = selectedValue == null ? '' : String(selectedValue)
-    selectEl.innerHTML = options.map((opt) => {
-      const value = this.escapeHtml(String(opt.value))
-      const label = this.escapeHtml(String(opt.label))
-      const isSelected = String(opt.value) === selected ? ' selected' : ''
-      return `<option value="${value}"${isSelected}>${label}</option>`
-    }).join('')
-    if (selected && options.some((opt) => String(opt.value) === selected)) {
-      selectEl.value = selected
-    } else if (options.length > 0) {
-      selectEl.value = String(options[0].value)
+  _deVizAllValue() {
+    return '__all__'
+  }
+
+  _isDeVizAll(value) {
+    return String(value == null ? '' : value) === this._deVizAllValue()
+  }
+
+  _deVizCatalogFilterValues() {
+    return {
+      reference: String((document.getElementById('de-viz-sel-reference') || {}).value || ''),
+      compared: String((document.getElementById('de-viz-sel-compared') || {}).value || ''),
+      methodId: String((document.getElementById('de-viz-sel-method') || {}).value || ''),
+      paramsKey: String((document.getElementById('de-viz-sel-params') || {}).value || '')
     }
   }
 
-  getSelectedDeVizCatalogEntry() {
+  _filterDeVizCatalog(catalog, { reference, compared, methodId, paramsKey } = {}, { skipParams = false } = {}) {
+    return (Array.isArray(catalog) ? catalog : []).filter((entry) => {
+      if (!this._isDeVizAll(reference) && String(entry.reference_group) !== String(reference)) return false
+      if (!this._isDeVizAll(compared) && String(entry.compared_group) !== String(compared)) return false
+      if (!this._isDeVizAll(methodId) && String(entry.method_id || '') !== String(methodId)) return false
+      if (!skipParams && !this._isDeVizAll(paramsKey) && String(entry.params_key) !== String(paramsKey)) return false
+      return true
+    })
+  }
+
+  _fillDeVizSelect(selectEl, options, selectedValue) {
+    if (!selectEl) return
+    const allValue = this._deVizAllValue()
+    const opts = [{ value: allValue, label: 'All' }, ...(Array.isArray(options) ? options : [])]
+    const selected = selectedValue == null ? '' : String(selectedValue)
+    const preferAll = selected === '' || this._isDeVizAll(selected)
+    selectEl.innerHTML = opts.map((opt) => {
+      const value = this.escapeHtml(String(opt.value))
+      const label = this.escapeHtml(String(opt.label))
+      const isSelected = preferAll
+        ? String(opt.value) === allValue
+        : String(opt.value) === selected
+      return `<option value="${value}"${isSelected ? ' selected' : ''}>${label}</option>`
+    }).join('')
+    if (!preferAll && opts.some((opt) => String(opt.value) === selected)) {
+      selectEl.value = selected
+    } else {
+      selectEl.value = allValue
+    }
+  }
+
+  getMatchingDeVizCatalogEntries() {
     const catalog = Array.isArray(this._deVizCatalog) ? this._deVizCatalog : []
-    const paramsSelect = document.getElementById('de-viz-sel-params')
-    const paramsKey = paramsSelect ? String(paramsSelect.value || '') : ''
-    if (!paramsKey) return null
+    return this._filterDeVizCatalog(catalog, this._deVizCatalogFilterValues())
+  }
 
-    const reference = String((document.getElementById('de-viz-sel-reference') || {}).value || '')
-    const compared = String((document.getElementById('de-viz-sel-compared') || {}).value || '')
-    const methodId = String((document.getElementById('de-viz-sel-method') || {}).value || '')
-
-    return catalog.find((entry) =>
-      String(entry.params_key) === paramsKey &&
-      String(entry.reference_group) === reference &&
-      String(entry.compared_group) === compared &&
-      String(entry.method_id || '') === methodId
-    ) || catalog.find((entry) => String(entry.params_key) === paramsKey) || null
+  getSelectedDeVizCatalogEntry() {
+    const matches = this.getMatchingDeVizCatalogEntries()
+    return matches.length === 1 ? matches[0] : null
   }
 
   refreshDeVizCatalogSelectors({ preferSelection = false } = {}) {
@@ -20038,6 +20062,7 @@ export default class extends Controller {
     const paramsSelect = document.getElementById('de-viz-sel-params')
     if (!refSelect || !comparedSelect || !methodSelect || !paramsSelect) return
 
+    const allValue = this._deVizAllValue()
     const prev = preferSelection && this._deVizCatalogSelection ? this._deVizCatalogSelection : {
       reference: refSelect.value,
       compared: comparedSelect.value,
@@ -20053,9 +20078,8 @@ export default class extends Controller {
     )
     const reference = String(refSelect.value || '')
 
-    const comparedOptions = this._uniqueSorted(
-      catalog.filter((e) => String(e.reference_group) === reference).map((e) => e.compared_group)
-    )
+    const comparedPool = this._filterDeVizCatalog(catalog, { reference }, { skipParams: true })
+    const comparedOptions = this._uniqueSorted(comparedPool.map((e) => e.compared_group))
     this._fillDeVizSelect(
       comparedSelect,
       comparedOptions.map((value) => ({ value, label: value })),
@@ -20063,11 +20087,9 @@ export default class extends Controller {
     )
     const compared = String(comparedSelect.value || '')
 
-    const methodEntries = catalog.filter((e) =>
-      String(e.reference_group) === reference && String(e.compared_group) === compared
-    )
+    const methodPool = this._filterDeVizCatalog(catalog, { reference, compared }, { skipParams: true })
     const methodMap = new Map()
-    methodEntries.forEach((e) => {
+    methodPool.forEach((e) => {
       const id = String(e.method_id || '')
       if (!methodMap.has(id)) methodMap.set(id, e.method_label || 'N/A')
     })
@@ -20077,56 +20099,68 @@ export default class extends Controller {
     this._fillDeVizSelect(methodSelect, methodOptions, prev.methodId)
     const methodId = String(methodSelect.value || '')
 
-    const paramEntries = catalog.filter((e) =>
-      String(e.reference_group) === reference &&
-      String(e.compared_group) === compared &&
-      String(e.method_id || '') === methodId
-    )
-    const paramsOptions = paramEntries.map((e) => ({
-      value: e.params_key,
-      label: e.params_label
-    }))
+    const paramPool = this._filterDeVizCatalog(catalog, { reference, compared, methodId }, { skipParams: true })
+    const seenParams = new Set()
+    const paramsOptions = []
+    paramPool.forEach((e) => {
+      const key = String(e.params_key || '')
+      if (!key || seenParams.has(key)) return
+      seenParams.add(key)
+      paramsOptions.push({ value: e.params_key, label: e.params_label })
+    })
     this._fillDeVizSelect(paramsSelect, paramsOptions, prev.paramsKey)
 
     this._deVizCatalogSelection = {
-      reference: String(refSelect.value || ''),
-      compared: String(comparedSelect.value || ''),
-      methodId: String(methodSelect.value || ''),
-      paramsKey: String(paramsSelect.value || '')
+      reference: String(refSelect.value || allValue),
+      compared: String(comparedSelect.value || allValue),
+      methodId: String(methodSelect.value || allValue),
+      paramsKey: String(paramsSelect.value || allValue)
     }
     this.renderSelectedDeVizResult()
   }
 
   onDeVizCatalogSelectorChanged(level) {
+    const allValue = this._deVizAllValue()
     // Cascade clearing happens by rebuilding dependent selects from current values.
     if (level === 'reference') {
       const comparedSelect = document.getElementById('de-viz-sel-compared')
       const methodSelect = document.getElementById('de-viz-sel-method')
       const paramsSelect = document.getElementById('de-viz-sel-params')
-      if (comparedSelect) comparedSelect.value = ''
-      if (methodSelect) methodSelect.value = ''
-      if (paramsSelect) paramsSelect.value = ''
+      if (comparedSelect) comparedSelect.value = allValue
+      if (methodSelect) methodSelect.value = allValue
+      if (paramsSelect) paramsSelect.value = allValue
     } else if (level === 'compared') {
       const methodSelect = document.getElementById('de-viz-sel-method')
       const paramsSelect = document.getElementById('de-viz-sel-params')
-      if (methodSelect) methodSelect.value = ''
-      if (paramsSelect) paramsSelect.value = ''
+      if (methodSelect) methodSelect.value = allValue
+      if (paramsSelect) paramsSelect.value = allValue
     } else if (level === 'method') {
       const paramsSelect = document.getElementById('de-viz-sel-params')
-      if (paramsSelect) paramsSelect.value = ''
+      if (paramsSelect) paramsSelect.value = allValue
     }
     this.refreshDeVizCatalogSelectors({ preferSelection: false })
   }
 
-  renderSelectedDeVizResult() {
-    const panel = document.getElementById('de-viz-selected-result')
-    if (!panel) return
-    const entry = this.getSelectedDeVizCatalogEntry()
-    if (!entry) {
-      panel.innerHTML = '<div style="font-size:12px;color:#6b7280;">Select a DE contrast above to view results.</div>'
-      return
+  resetDeVizCatalogSelectors() {
+    const allValue = this._deVizAllValue()
+    this._deVizCatalogSelection = {
+      reference: allValue,
+      compared: allValue,
+      methodId: allValue,
+      paramsKey: allValue
     }
+    const refSelect = document.getElementById('de-viz-sel-reference')
+    const comparedSelect = document.getElementById('de-viz-sel-compared')
+    const methodSelect = document.getElementById('de-viz-sel-method')
+    const paramsSelect = document.getElementById('de-viz-sel-params')
+    if (refSelect) refSelect.value = allValue
+    if (comparedSelect) comparedSelect.value = allValue
+    if (methodSelect) methodSelect.value = allValue
+    if (paramsSelect) paramsSelect.value = allValue
+    this.refreshDeVizCatalogSelectors({ preferSelection: true })
+  }
 
+  _renderDeVizResultCard(entry) {
     const upCount = Number(entry.up_count || 0)
     const downCount = Number(entry.down_count || 0)
     const method = this.escapeHtml(entry.method_label || 'N/A')
@@ -20163,7 +20197,7 @@ export default class extends Controller {
           </span>`
       : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#f3f4f6;color:#9ca3af;">0 genes</span>`
 
-    panel.innerHTML = `
+    return `
       <div style="display:flex;flex-direction:column;gap:8px;">
         <div style="font-size:13px;font-weight:600;color:#111827;">DE #${runNum} — ${method}</div>
         <div style="font-size:12px;color:#374151;">
@@ -20194,6 +20228,33 @@ export default class extends Controller {
           </button>
         </div>
       </div>
+    `
+  }
+
+  renderSelectedDeVizResult() {
+    const panel = document.getElementById('de-viz-selected-result')
+    if (!panel) return
+    const matches = this.getMatchingDeVizCatalogEntries()
+    if (matches.length === 0) {
+      panel.innerHTML = '<div style="font-size:12px;color:#6b7280;">No DE contrasts match the current filters.</div>'
+      return
+    }
+
+    if (matches.length === 1) {
+      panel.innerHTML = this._renderDeVizResultCard(matches[0])
+      return
+    }
+
+    const cards = matches.map((entry, index) => {
+      const borderTop = index === 0 ? '' : 'border-top:1px solid #e5e7eb;padding-top:12px;margin-top:12px;'
+      return `<div style="${borderTop}">${this._renderDeVizResultCard(entry)}</div>`
+    }).join('')
+
+    panel.innerHTML = `
+      <div style="font-size:12px;color:#6b7280;margin-bottom:10px;">
+        ${matches.length} matching contrasts — narrow filters to focus on one.
+      </div>
+      ${cards}
     `
   }
 

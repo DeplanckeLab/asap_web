@@ -11,6 +11,14 @@
 <% else %>
   <div id="de-viz-results-browser"
        data-catalog="<%= ERB::Util.html_escape(catalog.to_json) %>">
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 8px;">
+      <button type="button"
+              onclick="if (window.visualizationController) window.visualizationController.resetDeVizCatalogSelectors()"
+              style="padding: 4px 10px; font-size: 12px; font-weight: 500; color: #374151; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; cursor: pointer;">
+        Reset filters to All
+      </button>
+    </div>
+
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
       <div>
         <label for="de-viz-sel-reference" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Reference group</label>

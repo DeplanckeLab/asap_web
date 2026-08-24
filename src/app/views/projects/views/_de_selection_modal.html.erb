@@ -30,8 +30,10 @@
       <button id="de-modal-tab-results"
               type="button"
               onclick="if (window.visualizationController) window.visualizationController.switchDeModalTab('results')"
-              style="padding: 10px 16px; font-size: 13px; font-weight: 500; border: none; border-bottom: 2px solid transparent; background: none; color: #6b7280; cursor: pointer; margin-bottom: -1px;">
+              style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; font-size: 13px; font-weight: 500; border: none; border-bottom: 2px solid transparent; background: none; color: #6b7280; cursor: pointer; margin-bottom: -1px;">
         Existing DE results
+        <span id="de-modal-tab-results-count"
+              style="display: none; min-width: 18px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 16px; background: #e5e7eb; color: #374151;"></span>
       </button>
     </div>
 

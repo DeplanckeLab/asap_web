@@ -19586,6 +19586,8 @@ export default class extends Controller {
 
     this.prepareDeSelectionModal({ canRunNewDe })
     this.switchDeModalTab(canRunNewDe ? 'run' : 'results')
+    // Prefetch results so the tab badge is available even when starting on Run DE.
+    if (canRunNewDe) this.loadDeVizResults()
   }
 
   canRunDeFromVisualization() {
@@ -20261,9 +20263,25 @@ export default class extends Controller {
   initDeVizResultsBrowser({ restoreSelection = true } = {}) {
     if (!document.getElementById('de-viz-results-browser')) {
       this._deVizCatalog = []
+      this._updateDeVizResultsTabBadge(0)
       return
     }
     this.refreshDeVizCatalogSelectors({ preferSelection: restoreSelection })
+    this._updateDeVizResultsTabBadge()
+  }
+
+  _updateDeVizResultsTabBadge(countOverride) {
+    const badge = document.getElementById('de-modal-tab-results-count')
+    if (!badge) return
+    let count = countOverride
+    if (count == null) {
+      const catalog = Array.isArray(this._deVizCatalog) ? this._deVizCatalog : []
+      count = new Set(catalog.map((entry) => String(entry.run_id || '')).filter((id) => id.length > 0)).size
+    }
+    const n = Number(count) || 0
+    badge.textContent = String(n)
+    badge.style.display = 'inline-block'
+    badge.title = n === 1 ? '1 successful DE run' : `${n} successful DE runs`
   }
 
   loadDeVizResults() {
@@ -20284,8 +20302,9 @@ export default class extends Controller {
       area.innerHTML = html
       this.initDeVizResultsBrowser({ restoreSelection: true })
     })
-    .catch(function() {
+    .catch(() => {
       area.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:12px;">Failed to load DE results.</div>'
+      this._updateDeVizResultsTabBadge(0)
     })
   }
 

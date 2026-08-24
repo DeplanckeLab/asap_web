@@ -20616,13 +20616,14 @@ export default class extends Controller {
       }
 
       const comparedTitle = mode === 'group' ? 'Compared group' : 'Complementary'
+      const denominator = universeSet ? universeSet.size : totalCells
       preview.innerHTML = [
-        this.renderComposeSelectionPreviewCard('Reference group', operandA.label, referenceSet.size, totalCells, '#2563eb', 'de-preview-canvas-a'),
-        this.renderComposeSelectionPreviewCard(comparedTitle, comparedLabel, comparedSet.size, totalCells, '#d97706', 'de-preview-canvas-b')
+        this.renderComposeSelectionPreviewCard('Reference group', operandA.label, referenceSet.size, denominator, '#2563eb', 'de-preview-canvas-a'),
+        this.renderComposeSelectionPreviewCard(comparedTitle, comparedLabel, comparedSet.size, denominator, '#d97706', 'de-preview-canvas-b')
       ].join('')
 
-      this.drawComposeSelectionScatterPreview('de-preview-canvas-a', coordinates, referenceSet, '#2563eb')
-      this.drawComposeSelectionScatterPreview('de-preview-canvas-b', coordinates, comparedSet, '#d97706')
+      this.drawComposeSelectionScatterPreview('de-preview-canvas-a', coordinates, referenceSet, '#2563eb', universeSet)
+      this.drawComposeSelectionScatterPreview('de-preview-canvas-b', coordinates, comparedSet, '#d97706', universeSet)
     } catch (error) {
       console.error('Could not render DE preview:', error)
       const detail = error && error.message ? ` ${error.message}` : ''
@@ -21987,7 +21988,7 @@ export default class extends Controller {
     `
   }
 
-  drawComposeSelectionScatterPreview(canvasId, coordinates, selectedSet, selectedColor) {
+  drawComposeSelectionScatterPreview(canvasId, coordinates, selectedSet, selectedColor, universeSet = null) {
     const canvas = document.getElementById(canvasId)
     if (!canvas || !Array.isArray(coordinates) || coordinates.length === 0) return
     const ctx = canvas.getContext('2d')
@@ -21996,7 +21997,22 @@ export default class extends Controller {
     const width = canvas.width
     const height = canvas.height
     const padding = 8
-    const bounds = this.dataManager.calculateBounds(coordinates)
+
+    // When a cell-universe filter is active, only plot cells inside it (background + bounds).
+    const restrictToUniverse = universeSet instanceof Set && universeSet.size > 0
+    let backgroundIndices = null
+    let boundsCoordinates = coordinates
+    if (restrictToUniverse) {
+      backgroundIndices = Array.from(universeSet)
+      boundsCoordinates = []
+      for (let i = 0; i < backgroundIndices.length; i++) {
+        const point = coordinates[backgroundIndices[i]]
+        if (point) boundsCoordinates.push(point)
+      }
+      if (boundsCoordinates.length === 0) return
+    }
+
+    const bounds = this.dataManager.calculateBounds(boundsCoordinates)
     const xRange = Math.max((bounds.maxX - bounds.minX), Number.EPSILON)
     const yRange = Math.max((bounds.maxY - bounds.minY), Number.EPSILON)
 
@@ -22008,13 +22024,21 @@ export default class extends Controller {
     ctx.fillRect(0, 0, width, height)
 
     const maxBackgroundPoints = 6000
-    const step = Math.max(1, Math.floor(coordinates.length / maxBackgroundPoints))
-
     ctx.fillStyle = 'rgba(148, 163, 184, 0.45)'
-    for (let i = 0; i < coordinates.length; i += step) {
-      const point = coordinates[i]
-      if (!point) continue
-      ctx.fillRect(mapX(point[0]), mapY(point[1]), 1.4, 1.4)
+    if (backgroundIndices) {
+      const step = Math.max(1, Math.floor(backgroundIndices.length / maxBackgroundPoints))
+      for (let i = 0; i < backgroundIndices.length; i += step) {
+        const point = coordinates[backgroundIndices[i]]
+        if (!point) continue
+        ctx.fillRect(mapX(point[0]), mapY(point[1]), 1.4, 1.4)
+      }
+    } else {
+      const step = Math.max(1, Math.floor(coordinates.length / maxBackgroundPoints))
+      for (let i = 0; i < coordinates.length; i += step) {
+        const point = coordinates[i]
+        if (!point) continue
+        ctx.fillRect(mapX(point[0]), mapY(point[1]), 1.4, 1.4)
+      }
     }
 
     const selectedIndices = Array.from(selectedSet || [])
@@ -22025,6 +22049,7 @@ export default class extends Controller {
     ctx.fillStyle = selectedColor
     for (let i = 0; i < selectedIndices.length; i += selectedStep) {
       const index = selectedIndices[i]
+      if (restrictToUniverse && !universeSet.has(index)) continue
       const point = coordinates[index]
       if (!point) continue
       ctx.fillRect(mapX(point[0]), mapY(point[1]), 1.8, 1.8)

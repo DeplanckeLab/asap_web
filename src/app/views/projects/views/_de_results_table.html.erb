@@ -159,16 +159,24 @@
           <td class="px-3 py-2 text-gray-600 text-xs" data-sort-value="<%= ref_sort %>"><%= ref_cell %></td>
           <td class="px-3 py-2" data-sort-value="<%= up_count %>">
             <span id="de-up-badge-<%= badge_key %>"
-                  class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= up_display_count > 0 ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-500' %>"
+                  class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= up_count >= 0 && up_display_count > 0 ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-gray-100 text-gray-500' %>"
                   onclick="loadFormInRightPanel('<%= gl_up %>')">
-              <%= up_display_count %> genes
+              <% if up_count >= 0 %>
+                <%= up_display_count %> genes
+              <% else %>
+                <i class="fas fa-spinner fa-spin" aria-hidden="true"></i>
+              <% end %>
             </span>
           </td>
           <td class="px-3 py-2" data-sort-value="<%= down_count %>">
             <span id="de-down-badge-<%= badge_key %>"
-                  class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= down_display_count > 0 ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-gray-100 text-gray-500' %>"
+                  class="cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= down_count >= 0 && down_display_count > 0 ? 'bg-red-100 text-red-800 hover:bg-red-200' : 'bg-gray-100 text-gray-500' %>"
                   onclick="loadFormInRightPanel('<%= gl_down %>')">
-              <%= down_display_count %> genes
+              <% if down_count >= 0 %>
+                <%= down_display_count %> genes
+              <% else %>
+                <i class="fas fa-spinner fa-spin" aria-hidden="true"></i>
+              <% end %>
             </span>
           </td>
         </tr>

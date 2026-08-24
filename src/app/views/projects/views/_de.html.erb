@@ -353,6 +353,41 @@
     }, 350);
   }
 
+  function setDeGeneCountBadgesLoading() {
+    var badges = document.querySelectorAll('[id^="de-up-badge-"], [id^="de-down-badge-"]');
+    badges.forEach(function(badge) {
+      badge.innerHTML = '<i class="fas fa-spinner fa-spin" aria-hidden="true"></i>';
+      badge.classList.remove(
+        'bg-green-100', 'text-green-800', 'hover:bg-green-200',
+        'bg-red-100', 'text-red-800', 'hover:bg-red-200'
+      );
+      badge.classList.add('bg-gray-100', 'text-gray-500');
+      if (badge.parentElement) badge.parentElement.setAttribute('data-sort-value', '-1');
+    });
+  }
+
+  function updateDeGeneCountBadge(badge, count, direction) {
+    if (!badge) return;
+    var n = parseInt(count, 10);
+    if (isNaN(n)) n = 0;
+    badge.textContent = n + ' genes';
+    if (badge.parentElement) badge.parentElement.setAttribute('data-sort-value', String(n));
+    badge.classList.remove(
+      'bg-green-100', 'text-green-800', 'hover:bg-green-200',
+      'bg-red-100', 'text-red-800', 'hover:bg-red-200',
+      'bg-gray-100', 'text-gray-500'
+    );
+    if (n > 0) {
+      if (direction === 'up') {
+        badge.classList.add('bg-green-100', 'text-green-800', 'hover:bg-green-200');
+      } else {
+        badge.classList.add('bg-red-100', 'text-red-800', 'hover:bg-red-200');
+      }
+    } else {
+      badge.classList.add('bg-gray-100', 'text-gray-500');
+    }
+  }
+
   function runDeFilterNow() {
     if (deFilterTimer) {
       clearTimeout(deFilterTimer);
@@ -372,6 +407,7 @@
     formData.append('filter[fdr_cutoff]', fdrInput.value);
     formData.append('filter[fc_cutoff]', fcInput.value);
     if (spinner) spinner.classList.remove('hidden');
+    setDeGeneCountBadgesLoading();
 
     fetch(url, {
       method: 'POST',
@@ -392,30 +428,8 @@
         var up = (stats[runId] && stats[runId].up != null) ? parseInt(stats[runId].up, 10) : 0;
         var down = (stats[runId] && stats[runId].down != null) ? parseInt(stats[runId].down, 10) : 0;
         var badgeKey = runId.replace(/_/g, '-');
-
-        var upBadge = document.getElementById('de-up-badge-' + badgeKey);
-        if (upBadge) {
-          upBadge.textContent = up + ' genes';
-          if (upBadge.parentElement) upBadge.parentElement.setAttribute('data-sort-value', String(up));
-          upBadge.classList.remove('bg-green-100', 'text-green-800', 'hover:bg-green-200', 'bg-gray-100', 'text-gray-500');
-          if (up > 0) {
-            upBadge.classList.add('bg-green-100', 'text-green-800', 'hover:bg-green-200');
-          } else {
-            upBadge.classList.add('bg-gray-100', 'text-gray-500');
-          }
-        }
-
-        var downBadge = document.getElementById('de-down-badge-' + badgeKey);
-        if (downBadge) {
-          downBadge.textContent = down + ' genes';
-          if (downBadge.parentElement) downBadge.parentElement.setAttribute('data-sort-value', String(down));
-          downBadge.classList.remove('bg-red-100', 'text-red-800', 'hover:bg-red-200', 'bg-gray-100', 'text-gray-500');
-          if (down > 0) {
-            downBadge.classList.add('bg-red-100', 'text-red-800', 'hover:bg-red-200');
-          } else {
-            downBadge.classList.add('bg-gray-100', 'text-gray-500');
-          }
-        }
+        updateDeGeneCountBadge(document.getElementById('de-up-badge-' + badgeKey), up, 'up');
+        updateDeGeneCountBadge(document.getElementById('de-down-badge-' + badgeKey), down, 'down');
       });
     })
     .catch(function(error) {

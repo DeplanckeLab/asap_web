@@ -634,7 +634,26 @@ export class GeneSetCollectionsController {
     if (!geneManager || typeof geneManager.replaceGenesFromGeneSet !== 'function') {
       throw new Error('Gene panel is not available')
     }
-    await geneManager.replaceGenesFromGeneSet(payload.genes || [])
+
+    const genes = Array.isArray(payload.genes) ? payload.genes : []
+    const maxGenes = Number(geneManager.maxGenePanelGenes) > 0
+      ? Number(geneManager.maxGenePanelGenes)
+      : 1000
+    if (genes.length > maxGenes) {
+      throw new Error(
+        `This gene set has ${genes.length} genes in the dataset. You can add at most ${maxGenes} genes to the gene panel at once.`
+      )
+    }
+
+    if (typeof geneManager.isGenePanelContentUnsaved === 'function' && geneManager.isGenePanelContentUnsaved()) {
+      const ok = window.confirm(
+        'The current genes in the gene panel will be removed. Continue?\n\n' +
+        '(No confirmation is needed when the gene panel is empty or its genes were already saved as a gene set.)'
+      )
+      if (!ok) return
+    }
+
+    await geneManager.replaceGenesFromGeneSet(genes, { markSaved: true })
   }
 
   async fetchGeneSetItemGenes(itemId) {

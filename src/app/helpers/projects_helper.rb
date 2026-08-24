@@ -8,6 +8,135 @@ module ProjectsHelper
     end
   end
 
+  # Catalog entries for visualization "Existing DE results" cascading selectors.
+  # Each entry is one contrast (run + optional DE matrix annot).
+  def de_viz_results_catalog(runs:, h_stats: {}, h_std_methods: {})
+    completed = Array(runs).select { |r| r.status_id == 3 }
+    rows = Basic.de_table_rows_for_runs(completed)
+    return [] if rows.empty?
+
+    rows.map do |row|
+      run = row[:run]
+      h_attrs = Basic.safe_parse_json(run.attrs_json, {})
+      std_method = run.std_method_id && h_std_methods ? h_std_methods[run.std_method_id] : nil
+      method_label = std_method ? (std_method.label.presence || std_method.name.presence || 'N/A') : 'N/A'
+      stats_key = row[:stats_key].to_s
+      badge_key = stats_key.tr('_', '-')
+
+      reference_group = de_viz_reference_group_label(row, h_attrs)
+      compared_group = de_viz_compared_group_label(h_attrs)
+      params_label, params_key = de_viz_params_summary(run, h_attrs)
+
+      up_count = (h_stats && h_stats[stats_key]) ? h_stats[stats_key]['up'].to_i : 0
+      down_count = (h_stats && h_stats[stats_key]) ? h_stats[stats_key]['down'].to_i : 0
+      annot_id = row[:annot]&.id
+
+      {
+        id: stats_key,
+        run_id: run.id,
+        run_num: run.num || run.id,
+        annot_id: annot_id,
+        stats_key: stats_key,
+        badge_key: badge_key,
+        method_id: run.std_method_id,
+        method_label: method_label,
+        reference_group: reference_group,
+        compared_group: compared_group,
+        params_label: params_label,
+        params_key: params_key,
+        up_count: up_count,
+        down_count: down_count,
+        gene_list_up_url: annot_id ? get_de_gene_list_run_path(run, type: 'up', de_annot_id: annot_id, from: 'viz') : get_de_gene_list_run_path(run, type: 'up', from: 'viz'),
+        gene_list_down_url: annot_id ? get_de_gene_list_run_path(run, type: 'down', de_annot_id: annot_id, from: 'viz') : get_de_gene_list_run_path(run, type: 'down', from: 'viz')
+      }
+    end
+  end
+
+  def de_viz_reference_group_label(row, h_attrs)
+    row[:reference_group].presence ||
+      h_attrs['group_ref'].to_s.strip.presence ||
+      (row[:contrast_index].nil? ? '-' : "index #{row[:contrast_index]}")
+  end
+
+  def de_viz_compared_group_label(h_attrs)
+    raw = h_attrs['group_comp']
+    if ActiveModel::Type::Boolean.new.cast(h_attrs['all_against_compl']) ||
+       Basic.de_group_comp_is_complementary?(raw) ||
+       raw.nil? ||
+       raw.to_s.strip.empty? ||
+       raw.to_s.strip.casecmp('null').zero?
+      'Complementary'
+    else
+      raw.to_s.strip.presence || '-'
+    end
+  end
+
+  def de_viz_attr_dataset_path(value)
+    entry = value.is_a?(Array) ? value.first : value
+    return nil unless entry.is_a?(Hash)
+
+    clean_metadata_path(entry['output_dataset'].presence || entry[:output_dataset])
+  end
+
+  def de_viz_universe_summary(h_attrs)
+    restricted =
+      ActiveModel::Type::Boolean.new.cast(h_attrs['restrict_cell_universe']) ||
+      h_attrs['cell_universe_file'].to_s.strip.present? ||
+      Array(h_attrs['universe_groups_sel']).any?
+
+    return 'Universe: all cells' unless restricted
+
+    meta = de_viz_attr_dataset_path(h_attrs['universe_groups'])
+    cats = Array(h_attrs['universe_groups_sel']).map(&:to_s).map(&:strip).reject(&:blank?)
+    n_cells = h_attrs['cell_universe_n_cells']
+    mode = h_attrs['cell_universe_mode'].to_s.strip.presence || 'in'
+
+    detail =
+      if meta.present? && cats.any?
+        "#{meta} #{mode} [#{cats.join(', ')}]"
+      elsif meta.present?
+        meta.to_s
+      elsif h_attrs['cell_universe_file'].to_s.strip.present?
+        'custom selection'
+      else
+        'restricted'
+      end
+
+    n_cells.present? ? "Universe: #{detail} (#{n_cells} cells)" : "Universe: #{detail}"
+  end
+
+  def de_viz_params_summary(run, h_attrs)
+    parts = []
+    groups_path = de_viz_attr_dataset_path(h_attrs['groups'])
+    parts << "Groups: #{groups_path}" if groups_path.present?
+
+    groups2_path = de_viz_attr_dataset_path(h_attrs['groups2'])
+    parts << "Compared metadata: #{groups2_path}" if groups2_path.present?
+
+    parts << de_viz_universe_summary(h_attrs)
+
+    matrix_path = de_viz_attr_dataset_path(h_attrs['input_matrix'])
+    parts << "Matrix: #{matrix_path}" if matrix_path.present?
+
+    run_tag = "##{run.num || run.id}"
+    parts << run_tag
+
+    label = parts.join(' | ')
+    key = [
+      groups_path,
+      groups2_path,
+      h_attrs['restrict_cell_universe'],
+      de_viz_attr_dataset_path(h_attrs['universe_groups']),
+      Array(h_attrs['universe_groups_sel']).join(','),
+      h_attrs['cell_universe_file'],
+      h_attrs['cell_universe_n_cells'],
+      matrix_path,
+      run.id
+    ].map(&:to_s).join('|')
+
+    [label, key]
+  end
+
   def formatted_organism_name(project)
     return 'Unknown organism' unless project
 

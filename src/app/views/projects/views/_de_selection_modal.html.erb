@@ -1,7 +1,17 @@
-<div id="de-selection-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.45); z-index: 12110; justify-content: center; align-items: center;" onclick="if (event.target === this && window.visualizationController) window.visualizationController.closeDeSelectionModal()">
-  <div style="width: 960px; max-width: 95vw; max-height: 90vh; background: #fff; border-radius: 10px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); display: flex; flex-direction: column; overflow: hidden;">
-    <div style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #e5e7eb; background: #f9fafb;">
-      <div style="font-size: 16px; font-weight: 600; color: #111827;">Differential expression</div>
+<div id="de-selection-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: transparent; z-index: 12110; pointer-events: none;">
+  <div id="de-selection-modal"
+       style="position: absolute; width: 960px; height: 720px; min-width: 480px; min-height: 360px; max-width: 95vw; max-height: 90vh; background: #fff; border: 1px solid #d1d5db; border-radius: 10px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); display: flex; flex-direction: column; overflow: hidden; pointer-events: auto;">
+    <div id="de-selection-header"
+         onmousedown="if (window.visualizationController) window.visualizationController.startDeSelectionDrag(event)"
+         style="display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #e5e7eb; background: #f9fafb; cursor: move; user-select: none; flex-shrink: 0;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span id="de-selection-drag-handle"
+              title="Drag window"
+              style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; cursor: move; color: #9ca3af; border-radius: 4px;">
+          <i class="fas fa-grip-vertical" style="font-size: 12px;"></i>
+        </span>
+        <div style="font-size: 16px; font-weight: 600; color: #111827;">Differential expression</div>
+      </div>
       <button type="button"
               style="background: none; border: none; color: #6b7280; cursor: pointer; font-size: 18px; line-height: 1;"
               onclick="if (window.visualizationController) window.visualizationController.closeDeSelectionModal()">
@@ -141,5 +151,18 @@
         </button>
       </div>
     </div>
+
+    <div id="de-selection-resize-right"
+         title="Resize"
+         onmousedown="if (window.visualizationController) window.visualizationController.startDeSelectionResize(event, 'right')"
+         style="position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; z-index: 2;"></div>
+    <div id="de-selection-resize-bottom"
+         title="Resize"
+         onmousedown="if (window.visualizationController) window.visualizationController.startDeSelectionResize(event, 'bottom')"
+         style="position: absolute; bottom: 0; left: 0; width: 100%; height: 6px; cursor: row-resize; z-index: 2;"></div>
+    <div id="de-selection-resize-corner"
+         title="Resize"
+         onmousedown="if (window.visualizationController) window.visualizationController.startDeSelectionResize(event, 'corner')"
+         style="position: absolute; bottom: 0; right: 0; width: 16px; height: 16px; cursor: nwse-resize; z-index: 3;"></div>
   </div>
 </div>

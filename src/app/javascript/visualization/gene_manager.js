@@ -4,8 +4,11 @@ import { GeneSetOverlapPopup } from "visualization/gene_set_overlap_popup"
 
 // GeneManager - Handles gene autocomplete and expression visualization
 export class GeneManager {
+  static MAX_GENE_PANEL_GENES = 1000
+
   constructor(controller) {
     this.controller = controller
+    this.maxGenePanelGenes = GeneManager.MAX_GENE_PANEL_GENES
     this.autocompleteData = null
     this.aliasesByEnsembl = {}
     this.featureNamesByStable = {}
@@ -14,6 +17,7 @@ export class GeneManager {
     this.selectedGene = null
     this.projectIdentifier = null
     this.geneTags = [] // Array of {symbol, ensemblId, stableId, query}
+    this.genePanelSavedKey = '' // geneListHistoryKey fingerprint when panel contents were last saved/loaded from a gene set
     this.notFoundQueries = [] // Queries that didn't match
     this.geneListHistory = [] // Up to 10 previous gene-list snapshots (newest first)
     this._geneListHistoryBatchDepth = 0
@@ -960,7 +964,7 @@ export class GeneManager {
     }
   }
 
-  async replaceGenesFromGeneSet(geneEntries) {
+  async replaceGenesFromGeneSet(geneEntries, options = {}) {
     const normalizedGenes = Array.isArray(geneEntries)
       ? geneEntries
         .map((entry) => {
@@ -983,6 +987,13 @@ export class GeneManager {
         .filter((gene) => !!gene)
       : []
 
+    const maxGenes = Number(this.maxGenePanelGenes) > 0 ? Number(this.maxGenePanelGenes) : GeneManager.MAX_GENE_PANEL_GENES
+    if (normalizedGenes.length > maxGenes) {
+      throw new Error(
+        `This selection has ${normalizedGenes.length} genes. You can add at most ${maxGenes} genes to the gene panel at once.`
+      )
+    }
+
     this.beginGeneListHistoryBatch()
     try {
       const nextGeneStableIds = normalizedGenes.map((gene) => String(gene.stableId))
@@ -991,6 +1002,9 @@ export class GeneManager {
       this.notFoundQueries = []
       this.updateGeneCountBadge()
       await this.processAllGenes()
+      if (options.markSaved) {
+        this.markGenePanelContentSaved(normalizedGenes)
+      }
     } finally {
       this.endGeneListHistoryBatch()
     }
@@ -1005,6 +1019,16 @@ export class GeneManager {
       .map((gene) => String(gene?.stableId || '').trim())
       .filter((id) => id.length > 0)
       .join('|')
+  }
+
+  markGenePanelContentSaved(genes = null) {
+    this.genePanelSavedKey = this.geneListHistoryKey(genes == null ? this.geneTags : genes)
+  }
+
+  isGenePanelContentUnsaved() {
+    const tags = Array.isArray(this.geneTags) ? this.geneTags : []
+    if (tags.length === 0) return false
+    return this.geneListHistoryKey(tags) !== String(this.genePanelSavedKey || '')
   }
 
   geneListHistoryLabel(genes) {
@@ -1736,6 +1760,7 @@ export class GeneManager {
 
       this.geneTags = []
       this.notFoundQueries = []
+      this.genePanelSavedKey = ''
       this.clearGeneMetadataStateForStableIds(stableIdsToClear)
       this.syncGeneExpressionFilterStateForGenes([])
       this.updateGeneCountBadge()
@@ -4425,6 +4450,7 @@ export class GeneManager {
         } else if (collectionsController && typeof collectionsController.upsertCollectionFromPayload === 'function') {
           collectionsController.upsertCollectionFromPayload(payload.collection)
         }
+        this.markGenePanelContentSaved()
       } catch (error) {
         if (pendingState && typeof collectionsController?.failPendingGeneSetSave === 'function') {
           collectionsController.failPendingGeneSetSave(pendingState)

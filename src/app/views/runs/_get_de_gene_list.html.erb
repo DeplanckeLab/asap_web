@@ -55,11 +55,30 @@
     </div>
   <% end %>
 
-  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+  <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; flex-wrap: wrap;">
     <input type="text" id="de-genelist-search" placeholder="Filter by any value"
            style="width: 220px; padding: 5px 8px; border: 1px solid #d1d5db; border-radius: 5px; font-size: 12px;"
-           oninput="(function(input){var q=input.value.toLowerCase();var c=document.getElementById('de-genelist-container');if(!c)return;var rows=c.querySelectorAll('tbody tr');var count=0;rows.forEach(function(r){var txt=r.textContent.toLowerCase();var show=!q||txt.indexOf(q)!==-1;r.style.display=show?'':'none';if(show)count++;});var info=document.getElementById('de-genelist-count');if(info)info.textContent=count+' / '+rows.length+' genes';})(this)">
+           oninput="(function(input){var q=input.value.toLowerCase();var c=document.getElementById('de-genelist-container');if(!c)return;var rows=c.querySelectorAll('tbody tr');var count=0;rows.forEach(function(r){var txt=r.textContent.toLowerCase();var show=!q||txt.indexOf(q)!==-1;r.style.display=show?'':'none';if(show)count++;});var info=document.getElementById('de-genelist-count');if(info)info.textContent=count+' / '+rows.length+' genes';if(window.visualizationController)window.visualizationController.onDeVizGeneCheckboxChanged();})(this)">
     <span id="de-genelist-count" style="font-size: 11px; color: #6b7280;"></span>
+    <span style="flex: 1 1 auto;"></span>
+    <button type="button"
+            onclick="if(window.visualizationController) window.visualizationController.toggleDeVizGeneListSelectAll(true)"
+            style="padding: 4px 8px; font-size: 11px; font-weight: 500; background: #fff; color: #374151; border: 1px solid #d1d5db; border-radius: 5px; cursor: pointer; white-space: nowrap;">
+      Select all
+    </button>
+    <button type="button"
+            onclick="if(window.visualizationController) window.visualizationController.toggleDeVizGeneListSelectAll(false)"
+            style="padding: 4px 8px; font-size: 11px; font-weight: 500; background: #fff; color: #374151; border: 1px solid #d1d5db; border-radius: 5px; cursor: pointer; white-space: nowrap;">
+      Deselect all
+    </button>
+    <button type="button"
+            id="de-viz-add-genes-to-panel-btn"
+            onclick="if(window.visualizationController) window.visualizationController.addSelectedDeVizGenesToGenePanel()"
+            style="padding: 4px 8px; font-size: 11px; font-weight: 600; background: #2563eb; color: #fff; border: 1px solid #2563eb; border-radius: 5px; cursor: pointer; white-space: nowrap;"
+            title="Replace the visualization gene panel with the selected genes (max 1000)">
+      Add selected to gene panel
+    </button>
+    <span id="de-viz-gene-selected-count" style="font-size: 11px; color: #6b7280;">0 selected</span>
   </div>
 
   <%= render 'runs/de_gene_list_table', compact: true %>
@@ -150,14 +169,29 @@ window.downloadDeGeneList = function(fmt) {
   var c = document.getElementById('de-genelist-container');
   if (!c) return;
   var headers = [];
-  c.querySelectorAll('thead th').forEach(function(th) {
+  var headerCells = c.querySelectorAll('thead th[data-col]');
+  if (headerCells.length === 0) headerCells = c.querySelectorAll('thead th');
+  headerCells.forEach(function(th) {
     headers.push(th.textContent.replace(/\s*[\u25B2\u25BC]\s*$/, '').trim());
   });
+  var colIndexes = [];
+  if (c.querySelector('thead th[data-col]')) {
+    headerCells.forEach(function(th) {
+      colIndexes.push(parseInt(th.getAttribute('data-col'), 10));
+    });
+  }
   var rows = [];
   c.querySelectorAll('tbody tr').forEach(function(tr) {
     if (tr.style.display === 'none') return;
     var row = [];
-    tr.querySelectorAll('td').forEach(function(td) { row.push(td.textContent.trim()); });
+    if (colIndexes.length > 0) {
+      colIndexes.forEach(function(colIdx) {
+        var td = tr.cells[colIdx];
+        row.push(td ? td.textContent.trim() : '');
+      });
+    } else {
+      tr.querySelectorAll('td').forEach(function(td) { row.push(td.textContent.trim()); });
+    }
     rows.push(row);
   });
   var content, filename, mime;

@@ -1,119 +1,48 @@
 <% completed_runs = @runs&.select { |r| r.status_id == 3 } || [] %>
-<% de_rows = Basic.de_table_rows_for_runs(completed_runs) %>
-
-<% if de_rows.empty? %>
-  <div style="color: #9ca3af; font-size: 13px; text-align: center; padding: 24px 0;">No completed DE runs found.</div>
-<% else %>
-
 <% unless @h_std_methods %>
   <% asap_docker_image = Basic.get_asap_docker(@project.version) %>
   <% @h_std_methods = {} %>
   <% StdMethod.where(docker_image_id: asap_docker_image.id).each { |s| @h_std_methods[s.id] = s } if asap_docker_image %>
 <% end %>
+<% catalog = de_viz_results_catalog(runs: completed_runs, h_stats: @h_stats || {}, h_std_methods: @h_std_methods) %>
 
-<div style="overflow-x: auto;">
-  <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
-    <thead>
-      <tr style="background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
-        <th style="padding: 8px 10px; text-align: left; font-weight: 600; color: #6b7280; white-space: nowrap;">#</th>
-        <th style="padding: 8px 10px; text-align: left; font-weight: 600; color: #6b7280; white-space: nowrap;">Method</th>
-        <th style="padding: 8px 10px; text-align: left; font-weight: 600; color: #6b7280;">Reference group</th>
-        <th style="padding: 8px 10px; text-align: left; font-weight: 600; color: #6b7280; white-space: nowrap;">Up-regulated</th>
-        <th style="padding: 8px 10px; text-align: left; font-weight: 600; color: #6b7280; white-space: nowrap;">Down-regulated</th>
-        <th style="padding: 8px 10px; text-align: left; font-weight: 600; color: #6b7280; white-space: nowrap;">Export gene set</th>
-      </tr>
-    </thead>
-    <tbody>
-      <% de_rows.each do |row| %>
-        <% run = row[:run] %>
-        <% stats_key = row[:stats_key].to_s %>
-        <% badge_key = stats_key.tr('_', '-') %>
-        <% ref_cell = row[:reference_group].presence || (row[:contrast_index].nil? ? '-' : "index #{row[:contrast_index]}") %>
-        <% std_method = @h_std_methods && run.std_method_id ? @h_std_methods[run.std_method_id] : nil %>
-        <% method_label = std_method ? (std_method.label.presence || std_method.name.presence || 'N/A') : 'N/A' %>
-        <% up_count = (@h_stats && @h_stats[stats_key]) ? @h_stats[stats_key]['up'].to_i : -1 %>
-        <% down_count = (@h_stats && @h_stats[stats_key]) ? @h_stats[stats_key]['down'].to_i : -1 %>
-        <% up_display = up_count >= 0 ? up_count : 0 %>
-        <% down_display = down_count >= 0 ? down_count : 0 %>
-        <% annot_id_param = row[:annot] ? row[:annot].id.to_s : '' %>
-        <% gl_up = row[:annot] ? get_de_gene_list_run_path(run, type: 'up', de_annot_id: row[:annot].id, from: 'viz') : get_de_gene_list_run_path(run, type: 'up', from: 'viz') %>
-        <% gl_down = row[:annot] ? get_de_gene_list_run_path(run, type: 'down', de_annot_id: row[:annot].id, from: 'viz') : get_de_gene_list_run_path(run, type: 'down', from: 'viz') %>
-        <tr style="border-bottom: 1px solid #f3f4f6;">
-          <td style="padding: 8px 10px; color: #111827; font-weight: 600;">#<%= run.num || run.id %></td>
-          <td style="padding: 8px 10px; color: #374151;"><%= method_label %></td>
-          <td style="padding: 8px 10px; color: #6b7280; font-size: 11px;"><%= ref_cell %></td>
-          <td style="padding: 8px 10px;">
-            <span id="de-viz-up-badge-<%= badge_key %>"
-                  <% if up_display > 0 %>
-                  role="button"
-                  tabindex="0"
-                  data-run-id="<%= run.id %>"
-                  data-annot-id="<%= annot_id_param %>"
-                  data-direction="up"
-                  data-run-num="<%= run.num || run.id %>"
-                  data-method="<%= CGI.escapeHTML(method_label.to_s) %>"
-                  data-ref-group="<%= CGI.escapeHTML(ref_cell.to_s) %>"
-                  data-gene-list-url="<%= gl_up %>"
-                  onclick="if(window.visualizationController) window.visualizationController.openDeVizGeneList(this)"
-                  onkeydown="if((event.key==='Enter'||event.key===' ') && window.visualizationController){event.preventDefault();window.visualizationController.openDeVizGeneList(this)}"
-                  <% end %>
-                  style="display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; <%= up_display > 0 ? 'background:#dcfce7;color:#166534;cursor:pointer;' : 'background:#f3f4f6;color:#9ca3af;' %>">
-              <%= up_display %> genes
-            </span>
-          </td>
-          <td style="padding: 8px 10px;">
-            <span id="de-viz-down-badge-<%= badge_key %>"
-                  <% if down_display > 0 %>
-                  role="button"
-                  tabindex="0"
-                  data-run-id="<%= run.id %>"
-                  data-annot-id="<%= annot_id_param %>"
-                  data-direction="down"
-                  data-run-num="<%= run.num || run.id %>"
-                  data-method="<%= CGI.escapeHTML(method_label.to_s) %>"
-                  data-ref-group="<%= CGI.escapeHTML(ref_cell.to_s) %>"
-                  data-gene-list-url="<%= gl_down %>"
-                  onclick="if(window.visualizationController) window.visualizationController.openDeVizGeneList(this)"
-                  onkeydown="if((event.key==='Enter'||event.key===' ') && window.visualizationController){event.preventDefault();window.visualizationController.openDeVizGeneList(this)}"
-                  <% end %>
-                  style="display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; <%= down_display > 0 ? 'background:#fee2e2;color:#991b1b;cursor:pointer;' : 'background:#f3f4f6;color:#9ca3af;' %>">
-              <%= down_display %> genes
-            </span>
-          </td>
-          <td style="padding: 8px 10px;">
-            <div style="display: flex; gap: 4px; flex-wrap: wrap;">
-              <button type="button"
-                      class="de-viz-export-btn"
-                      data-run-id="<%= run.id %>"
-                      data-annot-id="<%= annot_id_param %>"
-                      data-direction="up"
-                      data-badge-key="<%= badge_key %>"
-                      data-ref-group="<%= CGI.escapeHTML(ref_cell.to_s) %>"
-                      data-method="<%= CGI.escapeHTML(method_label.to_s) %>"
-                      data-run-num="<%= run.num || run.id %>"
-                      onclick="if(window.visualizationController) window.visualizationController.openDeVizExportDialog(this)"
-                      style="padding: 3px 8px; font-size: 11px; font-weight: 500; background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; border-radius: 4px; cursor: pointer; white-space: nowrap;">
-                Save up as gene set
-              </button>
-              <button type="button"
-                      class="de-viz-export-btn"
-                      data-run-id="<%= run.id %>"
-                      data-annot-id="<%= annot_id_param %>"
-                      data-direction="down"
-                      data-badge-key="<%= badge_key %>"
-                      data-ref-group="<%= CGI.escapeHTML(ref_cell.to_s) %>"
-                      data-method="<%= CGI.escapeHTML(method_label.to_s) %>"
-                      data-run-num="<%= run.num || run.id %>"
-                      onclick="if(window.visualizationController) window.visualizationController.openDeVizExportDialog(this)"
-                      style="padding: 3px 8px; font-size: 11px; font-weight: 500; background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; border-radius: 4px; cursor: pointer; white-space: nowrap;">
-                Save down as gene set
-              </button>
-            </div>
-          </td>
-        </tr>
-      <% end %>
-    </tbody>
-  </table>
-</div>
+<% if catalog.empty? %>
+  <div style="color: #9ca3af; font-size: 13px; text-align: center; padding: 24px 0;">No completed DE runs found.</div>
+<% else %>
+  <div id="de-viz-results-browser"
+       data-catalog="<%= ERB::Util.html_escape(catalog.to_json) %>">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+      <div>
+        <label for="de-viz-sel-reference" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Reference group</label>
+        <select id="de-viz-sel-reference"
+                onchange="if (window.visualizationController) window.visualizationController.onDeVizCatalogSelectorChanged('reference')"
+                style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+      </div>
+      <div>
+        <label for="de-viz-sel-compared" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Compared group</label>
+        <select id="de-viz-sel-compared"
+                onchange="if (window.visualizationController) window.visualizationController.onDeVizCatalogSelectorChanged('compared')"
+                style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+      </div>
+    </div>
 
+    <div style="margin-bottom: 10px;">
+      <label for="de-viz-sel-method" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Method</label>
+      <select id="de-viz-sel-method"
+              onchange="if (window.visualizationController) window.visualizationController.onDeVizCatalogSelectorChanged('method')"
+              style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+    </div>
+
+    <div style="margin-bottom: 12px;">
+      <label for="de-viz-sel-params" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Parameters (including cell universe)</label>
+      <select id="de-viz-sel-params"
+              onchange="if (window.visualizationController) window.visualizationController.onDeVizCatalogSelectorChanged('params')"
+              style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+    </div>
+
+    <div id="de-viz-selected-result"
+         style="border: 1px solid #e5e7eb; border-radius: 8px; background: #f9fafb; padding: 12px;">
+      <div style="font-size: 12px; color: #6b7280;">Select a DE contrast above to view results.</div>
+    </div>
+  </div>
 <% end %>

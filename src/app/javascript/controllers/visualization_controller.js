@@ -62,6 +62,7 @@ export default class extends Controller {
     deStepId: Number,
     deMethods: Array,
     deUnavailableMethods: Object,
+    deDefaultMethodId: Number,
     geneCount: Number,
     rowLabel: String,
     colLabel: String,
@@ -1043,6 +1044,8 @@ export default class extends Controller {
   disconnect() {
     this.hideViewLimitedTooltip()
     this.stopCheckpointCommentsDrag()
+    this.stopDeSelectionDrag()
+    this.stopDeSelectionResize()
     this.stopModuleScorePopupDrag()
     this.clearAllModuleScorePopups({ cancelComputing: true })
     console.info('[CheckpointPersist] disconnect; relying on prior beforeunload/turbo:before-cache save')
@@ -19599,7 +19602,8 @@ export default class extends Controller {
     window.visualizationController = this
     const overlay = document.getElementById('de-selection-overlay')
     if (!overlay) return false
-    overlay.style.display = 'flex'
+    overlay.style.display = 'block'
+    this.ensureDeSelectionModalPositioned()
     const runButton = document.getElementById('de-selection-run-btn')
     if (runButton) {
       runButton.onclick = (event) => this.submitDeSelectionRun(event)
@@ -19618,6 +19622,186 @@ export default class extends Controller {
     this.updateDeSelectionPreview()
     this.setDeModalRunTabEnabled(canRun)
     return true
+  }
+
+  ensureDeSelectionModalPositioned() {
+    const overlay = document.getElementById('de-selection-overlay')
+    const modal = document.getElementById('de-selection-modal')
+    if (!overlay || !modal) return
+    if (modal.dataset.dragPositioned === 'true') return
+
+    // Force layout so width/height are available before centering.
+    modal.style.position = 'absolute'
+    modal.style.visibility = 'hidden'
+    modal.style.display = 'flex'
+    const overlayRect = overlay.getBoundingClientRect()
+    const maxWidth = Math.max(480, overlayRect.width - 16)
+    const maxHeight = Math.max(360, overlayRect.height - 16)
+    let width = Math.min(960, maxWidth)
+    let height = Math.min(720, maxHeight)
+    modal.style.width = `${width}px`
+    modal.style.height = `${height}px`
+    modal.style.maxWidth = 'none'
+    modal.style.maxHeight = 'none'
+    const left = Math.max(8, (overlayRect.width - width) / 2)
+    const top = Math.max(8, (overlayRect.height - height) / 2)
+    modal.style.left = `${left}px`
+    modal.style.top = `${top}px`
+    modal.style.margin = '0'
+    modal.style.visibility = ''
+    modal.dataset.dragPositioned = 'true'
+  }
+
+  startDeSelectionDrag(event) {
+    const interactiveTarget = event.target instanceof Element
+      ? event.target.closest('button, input, textarea, select, option, a, label')
+      : null
+    if (interactiveTarget) return
+    if (event.target instanceof Element && event.target.closest('[id^="de-selection-resize-"]')) return
+    event.preventDefault()
+    event.stopPropagation()
+    const overlay = document.getElementById('de-selection-overlay')
+    const modal = document.getElementById('de-selection-modal')
+    if (!overlay || !modal) return
+    this.ensureDeSelectionModalPositioned()
+    const modalRect = modal.getBoundingClientRect()
+    const overlayRect = overlay.getBoundingClientRect()
+    this._deSelectionDrag = {
+      offsetX: event.clientX - modalRect.left,
+      offsetY: event.clientY - modalRect.top,
+      overlayWidth: overlayRect.width,
+      overlayHeight: overlayRect.height
+    }
+    if (!this.boundDeSelectionDragMove) {
+      this.boundDeSelectionDragMove = this.handleDeSelectionDragMove.bind(this)
+    }
+    if (!this.boundDeSelectionDragStop) {
+      this.boundDeSelectionDragStop = this.stopDeSelectionDrag.bind(this)
+    }
+    document.addEventListener('mousemove', this.boundDeSelectionDragMove)
+    document.addEventListener('mouseup', this.boundDeSelectionDragStop)
+  }
+
+  handleDeSelectionDragMove(event) {
+    if (!this._deSelectionDrag) return
+    const overlay = document.getElementById('de-selection-overlay')
+    const modal = document.getElementById('de-selection-modal')
+    if (!overlay || !modal) return
+    const drag = this._deSelectionDrag
+    const overlayRect = overlay.getBoundingClientRect()
+    const modalRect = modal.getBoundingClientRect()
+    const maxLeft = Math.max(8, drag.overlayWidth - modalRect.width - 8)
+    const maxTop = Math.max(8, drag.overlayHeight - modalRect.height - 8)
+    const nextLeft = Math.min(maxLeft, Math.max(8, event.clientX - drag.offsetX - overlayRect.left))
+    const nextTop = Math.min(maxTop, Math.max(8, event.clientY - drag.offsetY - overlayRect.top))
+    modal.style.left = `${nextLeft}px`
+    modal.style.top = `${nextTop}px`
+  }
+
+  stopDeSelectionDrag() {
+    this._deSelectionDrag = null
+    if (this.boundDeSelectionDragMove) {
+      document.removeEventListener('mousemove', this.boundDeSelectionDragMove)
+    }
+    if (this.boundDeSelectionDragStop) {
+      document.removeEventListener('mouseup', this.boundDeSelectionDragStop)
+    }
+  }
+
+  startDeSelectionResize(event, type) {
+    if (event.button != null && event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    const overlay = document.getElementById('de-selection-overlay')
+    const modal = document.getElementById('de-selection-modal')
+    if (!overlay || !modal) return
+    this.ensureDeSelectionModalPositioned()
+    this.stopDeSelectionDrag()
+    const modalRect = modal.getBoundingClientRect()
+    const overlayRect = overlay.getBoundingClientRect()
+    modal.style.left = `${modalRect.left - overlayRect.left}px`
+    modal.style.top = `${modalRect.top - overlayRect.top}px`
+    modal.style.width = `${modalRect.width}px`
+    modal.style.height = `${modalRect.height}px`
+    modal.style.maxWidth = 'none'
+    modal.style.maxHeight = 'none'
+    this._deSelectionResize = {
+      type: type || 'corner',
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: modalRect.width,
+      startHeight: modalRect.height,
+      startLeft: modalRect.left - overlayRect.left,
+      startTop: modalRect.top - overlayRect.top,
+      overlayWidth: overlayRect.width,
+      overlayHeight: overlayRect.height
+    }
+    if (!this.boundDeSelectionResizeMove) {
+      this.boundDeSelectionResizeMove = this.handleDeSelectionResizeMove.bind(this)
+    }
+    if (!this.boundDeSelectionResizeStop) {
+      this.boundDeSelectionResizeStop = this.stopDeSelectionResize.bind(this)
+    }
+    document.addEventListener('mousemove', this.boundDeSelectionResizeMove)
+    document.addEventListener('mouseup', this.boundDeSelectionResizeStop)
+  }
+
+  handleDeSelectionResizeMove(event) {
+    if (!this._deSelectionResize) return
+    const modal = document.getElementById('de-selection-modal')
+    if (!modal) return
+    const state = this._deSelectionResize
+    const deltaX = event.clientX - state.startX
+    const deltaY = event.clientY - state.startY
+    const minWidth = 480
+    const minHeight = 360
+    const maxWidth = Math.max(minWidth, state.overlayWidth - 16)
+    const maxHeight = Math.max(minHeight, state.overlayHeight - 16)
+
+    let width = state.startWidth
+    let height = state.startHeight
+    if (state.type === 'right' || state.type === 'corner') {
+      width = state.startWidth + deltaX
+    }
+    if (state.type === 'bottom' || state.type === 'corner') {
+      height = state.startHeight + deltaY
+    }
+
+    width = Math.max(minWidth, Math.min(width, maxWidth))
+    height = Math.max(minHeight, Math.min(height, maxHeight))
+
+    let left = state.startLeft
+    let top = state.startTop
+    if (left + width > state.overlayWidth - 8) {
+      left = Math.max(8, state.overlayWidth - width - 8)
+    }
+    if (top + height > state.overlayHeight - 8) {
+      top = Math.max(8, state.overlayHeight - height - 8)
+    }
+
+    modal.style.width = `${width}px`
+    modal.style.height = `${height}px`
+    modal.style.left = `${left}px`
+    modal.style.top = `${top}px`
+  }
+
+  stopDeSelectionResize() {
+    this._deSelectionResize = null
+    if (this.boundDeSelectionResizeMove) {
+      document.removeEventListener('mousemove', this.boundDeSelectionResizeMove)
+    }
+    if (this.boundDeSelectionResizeStop) {
+      document.removeEventListener('mouseup', this.boundDeSelectionResizeStop)
+    }
+  }
+
+  closeDeSelectionModal() {
+    this.stopDeSelectionDrag()
+    this.stopDeSelectionResize()
+    const overlay = document.getElementById('de-selection-overlay')
+    if (!overlay) return
+    overlay.style.display = 'none'
+    this._deVizGeneListState = null
   }
 
   setDeModalRunTabEnabled(enabled) {
@@ -19653,6 +19837,51 @@ export default class extends Controller {
   }
 
   selectDeVizResultFromSearch({ annotId, runId }) {
+    const browser = document.getElementById('de-viz-results-browser')
+    if (browser && Array.isArray(this._deVizCatalog) && this._deVizCatalog.length > 0) {
+      const annotIdStr = String(annotId || '').trim()
+      const runIdStr = String(runId || '').trim()
+      let entry = null
+      if (annotIdStr) {
+        entry = this._deVizCatalog.find((item) => String(item.annot_id || '') === annotIdStr) || null
+      }
+      if (!entry && runIdStr) {
+        entry = this._deVizCatalog.find((item) => String(item.run_id || '') === runIdStr) || null
+      }
+      if (entry) {
+        this._deVizCatalogSelection = {
+          reference: entry.reference_group,
+          compared: entry.compared_group,
+          methodId: String(entry.method_id || ''),
+          paramsKey: entry.params_key
+        }
+        this.refreshDeVizCatalogSelectors({ preferSelection: true })
+        const selected = this.getSelectedDeVizCatalogEntry()
+        if (selected) {
+          const fakeEl = {
+            getAttribute: (name) => {
+              const map = {
+                'data-gene-list-url': selected.gene_list_up_url || selected.gene_list_down_url || '',
+                'data-run-id': String(selected.run_id || ''),
+                'data-annot-id': String(selected.annot_id || ''),
+                'data-direction': selected.gene_list_up_url ? 'up' : 'down',
+                'data-run-num': String(selected.run_num || ''),
+                'data-method': selected.method_label || '',
+                'data-ref-group': selected.reference_group || '',
+                'data-compared-group': selected.compared_group || ''
+              }
+              return map[name] || ''
+            }
+          }
+          if (fakeEl.getAttribute('data-gene-list-url')) {
+            this.openDeVizGeneList(fakeEl)
+          }
+        }
+        return
+      }
+    }
+
+    // Legacy table fallback (if old markup is present).
     const area = document.getElementById('de-viz-results-area')
     if (!area) return
 
@@ -19664,16 +19893,16 @@ export default class extends Controller {
     const geneListBadges = Array.from(area.querySelectorAll('[data-gene-list-url]'))
     let badge = null
     if (annotId) {
-      badge = geneListBadges.find((el) => String(el.getAttribute('data-annot-id') || '').trim() === annotId && el.getAttribute('data-direction') === 'up') ||
-        geneListBadges.find((el) => String(el.getAttribute('data-annot-id') || '').trim() === annotId && el.getAttribute('data-direction') === 'down') ||
-        geneListBadges.find((el) => String(el.getAttribute('data-annot-id') || '').trim() === annotId) ||
+      badge = geneListBadges.find((el) => String(el.getAttribute('data-annot-id') || '').trim() === String(annotId) && el.getAttribute('data-direction') === 'up') ||
+        geneListBadges.find((el) => String(el.getAttribute('data-annot-id') || '').trim() === String(annotId) && el.getAttribute('data-direction') === 'down') ||
+        geneListBadges.find((el) => String(el.getAttribute('data-annot-id') || '').trim() === String(annotId)) ||
         null
     }
     if (!badge && runId) {
-      const runBadges = geneListBadges.filter((el) => String(el.getAttribute('data-run-id') || '').trim() === runId)
+      const runBadges = geneListBadges.filter((el) => String(el.getAttribute('data-run-id') || '').trim() === String(runId))
       badge = runBadges.find((el) => {
         const elAnnotId = String(el.getAttribute('data-annot-id') || '').trim()
-        return !elAnnotId || elAnnotId === annotId
+        return !elAnnotId || elAnnotId === String(annotId || '')
       }) || runBadges.find((el) => el.getAttribute('data-direction') === 'up') || runBadges[0] || null
     }
 
@@ -19704,13 +19933,6 @@ export default class extends Controller {
     if (badge && badge.getAttribute('data-gene-list-url')) {
       this.openDeVizGeneList(badge)
     }
-  }
-
-  closeDeSelectionModal() {
-    const overlay = document.getElementById('de-selection-overlay')
-    if (!overlay) return
-    overlay.style.display = 'none'
-    this._deVizGeneListState = null
   }
 
   switchDeModalTab(tab, { reloadResults = true } = {}) {
@@ -19753,6 +19975,236 @@ export default class extends Controller {
     }
   }
 
+  _parseDeVizCatalogFromDom() {
+    const browser = document.getElementById('de-viz-results-browser')
+    if (!browser) {
+      this._deVizCatalog = []
+      return []
+    }
+    let catalog = []
+    try {
+      catalog = JSON.parse(browser.getAttribute('data-catalog') || '[]')
+    } catch (e) {
+      catalog = []
+    }
+    if (!Array.isArray(catalog)) catalog = []
+    this._deVizCatalog = catalog
+    return catalog
+  }
+
+  _uniqueSorted(values) {
+    return Array.from(new Set(values.map((v) => String(v == null ? '' : v)))).filter((v) => v.length > 0).sort((a, b) => a.localeCompare(b))
+  }
+
+  _fillDeVizSelect(selectEl, options, selectedValue) {
+    if (!selectEl) return
+    const selected = selectedValue == null ? '' : String(selectedValue)
+    selectEl.innerHTML = options.map((opt) => {
+      const value = this.escapeHtml(String(opt.value))
+      const label = this.escapeHtml(String(opt.label))
+      const isSelected = String(opt.value) === selected ? ' selected' : ''
+      return `<option value="${value}"${isSelected}>${label}</option>`
+    }).join('')
+    if (selected && options.some((opt) => String(opt.value) === selected)) {
+      selectEl.value = selected
+    } else if (options.length > 0) {
+      selectEl.value = String(options[0].value)
+    }
+  }
+
+  getSelectedDeVizCatalogEntry() {
+    const catalog = Array.isArray(this._deVizCatalog) ? this._deVizCatalog : []
+    const paramsSelect = document.getElementById('de-viz-sel-params')
+    const paramsKey = paramsSelect ? String(paramsSelect.value || '') : ''
+    if (!paramsKey) return null
+
+    const reference = String((document.getElementById('de-viz-sel-reference') || {}).value || '')
+    const compared = String((document.getElementById('de-viz-sel-compared') || {}).value || '')
+    const methodId = String((document.getElementById('de-viz-sel-method') || {}).value || '')
+
+    return catalog.find((entry) =>
+      String(entry.params_key) === paramsKey &&
+      String(entry.reference_group) === reference &&
+      String(entry.compared_group) === compared &&
+      String(entry.method_id || '') === methodId
+    ) || catalog.find((entry) => String(entry.params_key) === paramsKey) || null
+  }
+
+  refreshDeVizCatalogSelectors({ preferSelection = false } = {}) {
+    const catalog = this._parseDeVizCatalogFromDom()
+    const refSelect = document.getElementById('de-viz-sel-reference')
+    const comparedSelect = document.getElementById('de-viz-sel-compared')
+    const methodSelect = document.getElementById('de-viz-sel-method')
+    const paramsSelect = document.getElementById('de-viz-sel-params')
+    if (!refSelect || !comparedSelect || !methodSelect || !paramsSelect) return
+
+    const prev = preferSelection && this._deVizCatalogSelection ? this._deVizCatalogSelection : {
+      reference: refSelect.value,
+      compared: comparedSelect.value,
+      methodId: methodSelect.value,
+      paramsKey: paramsSelect.value
+    }
+
+    const references = this._uniqueSorted(catalog.map((e) => e.reference_group))
+    this._fillDeVizSelect(
+      refSelect,
+      references.map((value) => ({ value, label: value })),
+      prev.reference
+    )
+    const reference = String(refSelect.value || '')
+
+    const comparedOptions = this._uniqueSorted(
+      catalog.filter((e) => String(e.reference_group) === reference).map((e) => e.compared_group)
+    )
+    this._fillDeVizSelect(
+      comparedSelect,
+      comparedOptions.map((value) => ({ value, label: value })),
+      prev.compared
+    )
+    const compared = String(comparedSelect.value || '')
+
+    const methodEntries = catalog.filter((e) =>
+      String(e.reference_group) === reference && String(e.compared_group) === compared
+    )
+    const methodMap = new Map()
+    methodEntries.forEach((e) => {
+      const id = String(e.method_id || '')
+      if (!methodMap.has(id)) methodMap.set(id, e.method_label || 'N/A')
+    })
+    const methodOptions = Array.from(methodMap.entries())
+      .map(([value, label]) => ({ value, label }))
+      .sort((a, b) => String(a.label).localeCompare(String(b.label)))
+    this._fillDeVizSelect(methodSelect, methodOptions, prev.methodId)
+    const methodId = String(methodSelect.value || '')
+
+    const paramEntries = catalog.filter((e) =>
+      String(e.reference_group) === reference &&
+      String(e.compared_group) === compared &&
+      String(e.method_id || '') === methodId
+    )
+    const paramsOptions = paramEntries.map((e) => ({
+      value: e.params_key,
+      label: e.params_label
+    }))
+    this._fillDeVizSelect(paramsSelect, paramsOptions, prev.paramsKey)
+
+    this._deVizCatalogSelection = {
+      reference: String(refSelect.value || ''),
+      compared: String(comparedSelect.value || ''),
+      methodId: String(methodSelect.value || ''),
+      paramsKey: String(paramsSelect.value || '')
+    }
+    this.renderSelectedDeVizResult()
+  }
+
+  onDeVizCatalogSelectorChanged(level) {
+    // Cascade clearing happens by rebuilding dependent selects from current values.
+    if (level === 'reference') {
+      const comparedSelect = document.getElementById('de-viz-sel-compared')
+      const methodSelect = document.getElementById('de-viz-sel-method')
+      const paramsSelect = document.getElementById('de-viz-sel-params')
+      if (comparedSelect) comparedSelect.value = ''
+      if (methodSelect) methodSelect.value = ''
+      if (paramsSelect) paramsSelect.value = ''
+    } else if (level === 'compared') {
+      const methodSelect = document.getElementById('de-viz-sel-method')
+      const paramsSelect = document.getElementById('de-viz-sel-params')
+      if (methodSelect) methodSelect.value = ''
+      if (paramsSelect) paramsSelect.value = ''
+    } else if (level === 'method') {
+      const paramsSelect = document.getElementById('de-viz-sel-params')
+      if (paramsSelect) paramsSelect.value = ''
+    }
+    this.refreshDeVizCatalogSelectors({ preferSelection: false })
+  }
+
+  renderSelectedDeVizResult() {
+    const panel = document.getElementById('de-viz-selected-result')
+    if (!panel) return
+    const entry = this.getSelectedDeVizCatalogEntry()
+    if (!entry) {
+      panel.innerHTML = '<div style="font-size:12px;color:#6b7280;">Select a DE contrast above to view results.</div>'
+      return
+    }
+
+    const upCount = Number(entry.up_count || 0)
+    const downCount = Number(entry.down_count || 0)
+    const method = this.escapeHtml(entry.method_label || 'N/A')
+    const refGroup = this.escapeHtml(entry.reference_group || '-')
+    const compared = this.escapeHtml(entry.compared_group || '-')
+    const params = this.escapeHtml(entry.params_label || '')
+    const runNum = this.escapeHtml(String(entry.run_num || entry.run_id || ''))
+    const annotId = this.escapeHtml(String(entry.annot_id || ''))
+    const runId = this.escapeHtml(String(entry.run_id || ''))
+
+    const upBadge = upCount > 0
+      ? `<span role="button" tabindex="0"
+            data-run-id="${runId}" data-annot-id="${annotId}" data-direction="up"
+            data-run-num="${runNum}" data-method="${method}" data-ref-group="${refGroup}"
+            data-compared-group="${compared}"
+            data-gene-list-url="${this.escapeHtml(entry.gene_list_up_url || '')}"
+            onclick="if(window.visualizationController) window.visualizationController.openDeVizGeneList(this)"
+            onkeydown="if((event.key==='Enter'||event.key===' ') && window.visualizationController){event.preventDefault();window.visualizationController.openDeVizGeneList(this)}"
+            style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#dcfce7;color:#166534;cursor:pointer;">
+            ${upCount} genes
+          </span>`
+      : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#f3f4f6;color:#9ca3af;">0 genes</span>`
+
+    const downBadge = downCount > 0
+      ? `<span role="button" tabindex="0"
+            data-run-id="${runId}" data-annot-id="${annotId}" data-direction="down"
+            data-run-num="${runNum}" data-method="${method}" data-ref-group="${refGroup}"
+            data-compared-group="${compared}"
+            data-gene-list-url="${this.escapeHtml(entry.gene_list_down_url || '')}"
+            onclick="if(window.visualizationController) window.visualizationController.openDeVizGeneList(this)"
+            onkeydown="if((event.key==='Enter'||event.key===' ') && window.visualizationController){event.preventDefault();window.visualizationController.openDeVizGeneList(this)}"
+            style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#fee2e2;color:#991b1b;cursor:pointer;">
+            ${downCount} genes
+          </span>`
+      : `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;background:#f3f4f6;color:#9ca3af;">0 genes</span>`
+
+    panel.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="font-size:13px;font-weight:600;color:#111827;">DE #${runNum} — ${method}</div>
+        <div style="font-size:12px;color:#374151;">
+          <div><span style="color:#6b7280;">Reference:</span> ${refGroup}</div>
+          <div><span style="color:#6b7280;">Compared:</span> ${compared}</div>
+          <div style="margin-top:4px;color:#4b5563;">${params}</div>
+        </div>
+        <div style="display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+          <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:12px;color:#6b7280;">Up-regulated</span>${upBadge}</div>
+          <div style="display:flex;align-items:center;gap:8px;"><span style="font-size:12px;color:#6b7280;">Down-regulated</span>${downBadge}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+          <button type="button" class="de-viz-export-btn"
+                  data-run-id="${runId}" data-annot-id="${annotId}" data-direction="up"
+                  data-run-num="${runNum}" data-method="${method}" data-ref-group="${refGroup}"
+                  data-compared-group="${compared}"
+                  onclick="if(window.visualizationController) window.visualizationController.openDeVizExportDialog(this)"
+                  style="padding:3px 8px;font-size:11px;font-weight:500;background:#dcfce7;color:#166534;border:1px solid #bbf7d0;border-radius:4px;cursor:pointer;">
+            Save up as gene set
+          </button>
+          <button type="button" class="de-viz-export-btn"
+                  data-run-id="${runId}" data-annot-id="${annotId}" data-direction="down"
+                  data-run-num="${runNum}" data-method="${method}" data-ref-group="${refGroup}"
+                  data-compared-group="${compared}"
+                  onclick="if(window.visualizationController) window.visualizationController.openDeVizExportDialog(this)"
+                  style="padding:3px 8px;font-size:11px;font-weight:500;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:4px;cursor:pointer;">
+            Save down as gene set
+          </button>
+        </div>
+      </div>
+    `
+  }
+
+  initDeVizResultsBrowser({ restoreSelection = true } = {}) {
+    if (!document.getElementById('de-viz-results-browser')) {
+      this._deVizCatalog = []
+      return
+    }
+    this.refreshDeVizCatalogSelectors({ preferSelection: restoreSelection })
+  }
+
   loadDeVizResults() {
     this._deVizGeneListState = null
     const area = document.getElementById('de-viz-results-area')
@@ -19767,7 +20219,10 @@ export default class extends Controller {
       credentials: 'same-origin'
     })
     .then(function(r) { return r.text() })
-    .then(function(html) { area.innerHTML = html })
+    .then((html) => {
+      area.innerHTML = html
+      this.initDeVizResultsBrowser({ restoreSelection: true })
+    })
     .catch(function() {
       area.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:12px;">Failed to load DE results.</div>'
     })
@@ -19789,7 +20244,8 @@ export default class extends Controller {
       direction: el.getAttribute('data-direction') || '',
       runNum: el.getAttribute('data-run-num') || '',
       method: el.getAttribute('data-method') || '',
-      refGroup: el.getAttribute('data-ref-group') || ''
+      refGroup: el.getAttribute('data-ref-group') || '',
+      comparedGroup: el.getAttribute('data-compared-group') || ''
     }
     this._loadDeVizGeneListHtml()
   }
@@ -19812,12 +20268,207 @@ export default class extends Controller {
       if (exportBtn) {
         if (state.method) exportBtn.setAttribute('data-method', state.method)
         if (state.refGroup) exportBtn.setAttribute('data-ref-group', state.refGroup)
+        if (state.comparedGroup) exportBtn.setAttribute('data-compared-group', state.comparedGroup)
         if (state.runNum) exportBtn.setAttribute('data-run-num', state.runNum)
       }
+      this.onDeVizGeneCheckboxChanged()
     })
     .catch(function() {
       area.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:12px;">Failed to load gene list.</div>'
     })
+  }
+
+  getMaxGenePanelGenes() {
+    const fromManager = Number(this.geneManager?.maxGenePanelGenes)
+    if (Number.isFinite(fromManager) && fromManager > 0) return fromManager
+    return 1000
+  }
+
+  getDeVizGeneCheckboxes({ visibleOnly = false } = {}) {
+    const container = document.getElementById('de-genelist-container')
+    if (!container) return []
+    return Array.from(container.querySelectorAll('input.de-viz-gene-checkbox')).filter((cb) => {
+      if (!visibleOnly) return true
+      const row = cb.closest('tr')
+      return !row || row.style.display !== 'none'
+    })
+  }
+
+  onDeVizGeneCheckboxChanged() {
+    const maxGenes = this.getMaxGenePanelGenes()
+    const all = this.getDeVizGeneCheckboxes()
+    const visible = this.getDeVizGeneCheckboxes({ visibleOnly: true })
+    const selected = all.filter((cb) => cb.checked)
+    const countEl = document.getElementById('de-viz-gene-selected-count')
+    if (countEl) {
+      countEl.textContent = `${selected.length} selected`
+      if (selected.length > maxGenes) {
+        countEl.style.color = '#b91c1c'
+        countEl.textContent = `${selected.length} selected (max ${maxGenes})`
+      } else {
+        countEl.style.color = '#6b7280'
+      }
+    }
+    const header = document.getElementById('de-viz-gene-select-all-header')
+    if (header) {
+      const visibleSelected = visible.filter((cb) => cb.checked).length
+      header.checked = visible.length > 0 && visibleSelected === visible.length
+      header.indeterminate = visibleSelected > 0 && visibleSelected < visible.length
+    }
+    const addBtn = document.getElementById('de-viz-add-genes-to-panel-btn')
+    if (addBtn) {
+      const tooMany = selected.length > maxGenes
+      const none = selected.length === 0
+      addBtn.disabled = none || tooMany
+      addBtn.style.opacity = (none || tooMany) ? '0.5' : '1'
+      addBtn.style.cursor = (none || tooMany) ? 'not-allowed' : 'pointer'
+      addBtn.title = tooMany
+        ? `Select at most ${maxGenes} genes to add to the gene panel`
+        : (none ? 'Select genes to add to the gene panel' : `Replace the visualization gene panel with the selected genes (max ${maxGenes})`)
+    }
+  }
+
+  toggleDeVizGeneListSelectAll(checked) {
+    const maxGenes = this.getMaxGenePanelGenes()
+    const visible = this.getDeVizGeneCheckboxes({ visibleOnly: true })
+    if (checked) {
+      // Cap select-all at the gene-panel limit.
+      let remaining = maxGenes
+      const already = this.getDeVizGeneCheckboxes().filter((cb) => cb.checked && visible.indexOf(cb) < 0).length
+      remaining = Math.max(0, maxGenes - already)
+      visible.forEach((cb) => {
+        if (remaining > 0) {
+          cb.checked = true
+          remaining -= 1
+        } else {
+          cb.checked = false
+        }
+      })
+      if (visible.length > maxGenes) {
+        alert(`Select all is limited to ${maxGenes} genes for the gene panel.`)
+      }
+    } else {
+      this.getDeVizGeneCheckboxes().forEach((cb) => { cb.checked = false })
+    }
+    this.onDeVizGeneCheckboxChanged()
+  }
+
+  collectSelectedDeVizGeneEntries() {
+    const selected = this.getDeVizGeneCheckboxes().filter((cb) => cb.checked)
+    const seen = new Set()
+    const entries = []
+    selected.forEach((cb) => {
+      const ensemblId = String(cb.getAttribute('data-ensembl-id') || '').trim()
+      const symbol = String(cb.getAttribute('data-gene-symbol') || '').trim()
+      const key = `${ensemblId}|${symbol}`.toLowerCase()
+      if (!ensemblId && !symbol) return
+      if (seen.has(key)) return
+      seen.add(key)
+      entries.push({ ensemblId, symbol })
+    })
+    return entries
+  }
+
+  resolveDeVizGeneToPanelEntry(entry) {
+    const gm = this.geneManager
+    if (!gm || !entry) return null
+    const ensemblId = String(entry.ensemblId || '').trim()
+    const symbol = String(entry.symbol || '').trim()
+    const toPayload = (parsed) => {
+      if (!parsed || !parsed.stableId) return null
+      const resolved = typeof gm.resolveGeneIdentity === 'function'
+        ? gm.resolveGeneIdentity(parsed)
+        : parsed
+      const stableId = String(resolved.stableId || parsed.stableId || '').trim()
+      if (!stableId) return null
+      return {
+        stable_id: stableId,
+        stableId,
+        symbol: resolved.symbol || parsed.symbol || symbol || `Gene ${stableId}`,
+        ensembl_id: resolved.ensemblId || parsed.ensemblId || ensemblId || '',
+        ensemblId: resolved.ensemblId || parsed.ensemblId || ensemblId || '',
+        name: resolved.symbol || parsed.symbol || symbol || `Gene ${stableId}`
+      }
+    }
+
+    const tryQueries = [ensemblId, symbol].filter((q) => q.length > 0)
+    for (const q of tryQueries) {
+      if (typeof gm.findGeneInAutocomplete === 'function') {
+        const match = gm.findGeneInAutocomplete(q)
+        const out = toPayload(match)
+        if (out) return out
+      }
+    }
+
+    // Fallback: scan autocomplete by ensembl / symbol.
+    const data = gm.autocompleteData
+    if (Array.isArray(data) && data.length > 0 && typeof gm.parseAutocompleteEntry === 'function') {
+      const ensLow = ensemblId.toLowerCase()
+      const symLow = symbol.toLowerCase()
+      for (const raw of data) {
+        const parsed = gm.parseAutocompleteEntry(raw)
+        if (!parsed) continue
+        if (ensLow && String(parsed.ensemblId || '').toLowerCase() === ensLow) {
+          const out = toPayload(parsed)
+          if (out) return out
+        }
+        if (symLow && String(parsed.symbol || '').toLowerCase() === symLow) {
+          const out = toPayload(parsed)
+          if (out) return out
+        }
+      }
+    }
+    return null
+  }
+
+  async addSelectedDeVizGenesToGenePanel() {
+    const gm = this.geneManager
+    if (!gm || typeof gm.replaceGenesFromGeneSet !== 'function') {
+      alert('Gene panel is not available.')
+      return
+    }
+
+    const selected = this.collectSelectedDeVizGeneEntries()
+    if (selected.length === 0) {
+      alert('Select at least one gene.')
+      return
+    }
+    const maxGenes = this.getMaxGenePanelGenes()
+    if (selected.length > maxGenes) {
+      alert(`You can add at most ${maxGenes} genes to the gene panel at once.`)
+      return
+    }
+
+    if (typeof gm.isGenePanelContentUnsaved === 'function' && gm.isGenePanelContentUnsaved()) {
+      const ok = window.confirm(
+        'The current genes in the gene panel will be removed. Continue?\n\n' +
+        '(No confirmation is needed when the gene panel is empty or its genes were already saved as a gene set.)'
+      )
+      if (!ok) return
+    }
+
+    const resolved = []
+    const failed = []
+    selected.forEach((entry) => {
+      const payload = this.resolveDeVizGeneToPanelEntry(entry)
+      if (payload) resolved.push(payload)
+      else failed.push(entry.symbol || entry.ensemblId || 'unknown')
+    })
+
+    if (resolved.length === 0) {
+      alert('Could not resolve any selected genes in the project index.')
+      return
+    }
+
+    try {
+      await gm.replaceGenesFromGeneSet(resolved)
+      if (failed.length > 0) {
+        const preview = failed.slice(0, 10).join(', ') + (failed.length > 10 ? ', ...' : '')
+        alert(`Added ${resolved.length} gene(s) to the gene panel. Could not resolve: ${preview}`)
+      }
+    } catch (error) {
+      alert(error?.message || 'Failed to update the gene panel.')
+    }
   }
 
   scheduleDeVizFilter() {
@@ -19860,7 +20511,10 @@ export default class extends Controller {
       credentials: 'same-origin'
     })
     .then(function(r) { return r.text() })
-    .then(function(html) { area.innerHTML = html })
+    .then((html) => {
+      area.innerHTML = html
+      this.initDeVizResultsBrowser({ restoreSelection: true })
+    })
     .catch(function() {
       area.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:12px;">Failed to load DE results.</div>'
     })
@@ -19875,6 +20529,7 @@ export default class extends Controller {
     const runNum    = btn.getAttribute('data-run-num') || state.runNum || ''
     const method    = (btn.getAttribute('data-method') || state.method || '').trim()
     const refGroup  = (btn.getAttribute('data-ref-group') || state.refGroup || '').trim()
+    const comparedGroup = (btn.getAttribute('data-compared-group') || state.comparedGroup || '').trim()
     const fdr = (document.getElementById('de-viz-fdr-cutoff') || {}).value || '0.05'
     const fc  = (document.getElementById('de-viz-fc-cutoff')  || {}).value || '2'
 
@@ -19884,6 +20539,7 @@ export default class extends Controller {
       runNum ? '#' + runNum : '',
       method && method !== 'N/A' ? method : '',
       refGroup && refGroup !== '-' ? refGroup : '',
+      comparedGroup && comparedGroup !== '-' ? ('vs ' + comparedGroup) : '',
       'FDR<=' + fdr,
       '|FC|>=' + fc,
       dirLabel
@@ -20266,6 +20922,7 @@ export default class extends Controller {
 
     const methods = Array.isArray(this.deMethodsValue) ? this.deMethodsValue : []
     const unavailable = this.deUnavailableMethodsValue || {}
+    const isUnavailable = (method) => !!(unavailable[String(method.id)] || unavailable[method.id])
 
     if (methods.length === 0) {
       methodSelect.innerHTML = '<option value="">No DE methods available</option>'
@@ -20278,16 +20935,22 @@ export default class extends Controller {
 
     methodSelect.innerHTML = methods.map((method) => {
       const methodId = String(method.id)
-      const label = unavailable[methodId] || unavailable[method.id]
+      const label = isUnavailable(method)
         ? `${method.label} (not available)`
         : method.label
-      const disabled = (unavailable[methodId] || unavailable[method.id]) ? 'disabled' : ''
+      const disabled = isUnavailable(method) ? 'disabled' : ''
       return `<option value="${this.escapeHtml(methodId)}" ${disabled}>${this.escapeHtml(label)}</option>`
     }).join('')
 
-    const firstAvailable = methods.find((method) => !(unavailable[String(method.id)] || unavailable[method.id]))
-    if (firstAvailable) {
-      methodSelect.value = String(firstAvailable.id)
+    // Prefer the step default when it is listed and available; otherwise first available method.
+    const defaultMethodId = this.hasDeDefaultMethodIdValue ? Number(this.deDefaultMethodIdValue) : 0
+    const defaultMethod = defaultMethodId > 0
+      ? methods.find((method) => Number(method.id) === defaultMethodId && !isUnavailable(method))
+      : null
+    const firstAvailable = methods.find((method) => !isUnavailable(method))
+    const selected = defaultMethod || firstAvailable
+    if (selected) {
+      methodSelect.value = String(selected.id)
     }
     this.onDeSelectionMethodChanged()
   }

@@ -1101,6 +1101,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
      data-visualization-de-step-id-value="<%= @visualization_de_step_id || 0 %>"
      data-visualization-de-methods-value="<%= (@visualization_de_methods || []).to_json %>"
      data-visualization-de-unavailable-methods-value="<%= (@visualization_de_unavailable_methods || {}).to_json %>"
+     data-visualization-de-default-method-id-value="<%= @visualization_de_default_method_id.to_i %>"
      data-visualization-gene-count-value="<%= @project&.gene_count || 0 %>"
      data-visualization-row-label-value="<%= row_label(@project) %>"
      data-visualization-col-label-value="<%= col_label(@project) %>"

@@ -12083,6 +12083,7 @@ class ProjectsController < ApplicationController
       @visualization_de_step_id = nil
       @visualization_de_methods = []
       @visualization_de_unavailable_methods = {}
+      @visualization_de_default_method_id = nil
 
       asap_docker_image = Basic.get_asap_docker(@project.version)
       return unless asap_docker_image
@@ -12091,14 +12092,20 @@ class ProjectsController < ApplicationController
       return unless de_step
 
       @visualization_de_step_id = de_step.id
-      project_type_tag = @project.project_type&.tag
+      step_attrs = Basic.safe_parse_json(de_step.attrs_json, {})
       std_methods = StdMethod.where(docker_image_id: asap_docker_image.id, obsolete: false, step_id: de_step.id).order(:name).to_a
+      h_obj_attrs_by_std_method = {}
+      h_std_methods_by_name = {}
 
-      std_methods.each do |method|
-        method_obj_attrs = Basic.safe_parse_json(method.obj_attrs_json, {})
-        project_types = Array(method_obj_attrs['project_types'])
-        is_project_type_compatible = project_types.empty? || (project_type_tag.present? && project_types.include?(project_type_tag))
+      # Match analysis form: only list methods compatible with this project type.
+      compatible_methods = std_methods.select do |method|
+        obj_attrs = Basic.safe_parse_json(method.obj_attrs_json, {})
+        h_obj_attrs_by_std_method[method.id] = obj_attrs
+        h_std_methods_by_name[method.name] = method
+        Basic.std_method_project_type_compatible?(@project, std_method: method, obj_attrs: obj_attrs)
+      end
 
+      compatible_methods.each do |method|
         @visualization_de_methods << {
           id: method.id,
           label: method.label.presence || method.name,
@@ -12107,13 +12114,22 @@ class ProjectsController < ApplicationController
           description: method.description,
           link: (method.respond_to?(:link) ? method.link : '')
         }
-        unavailable = !is_project_type_compatible
         if Basic.de_large_dataset?(@project.nber_cols) &&
            !Basic.de_method_allowed_for_nber_cols?(method, @project.nber_cols)
-          unavailable = true
+          @visualization_de_unavailable_methods[method.id] = true
         end
-        @visualization_de_unavailable_methods[method.id] = true if unavailable
       end
+
+      available_methods = compatible_methods.reject { |m| @visualization_de_unavailable_methods[m.id] }
+      default_method = Basic.resolve_default_std_method(
+        project: @project,
+        default_method_names: step_attrs['default_std_method'],
+        std_methods_by_name: h_std_methods_by_name,
+        h_obj_attrs_by_std_method: h_obj_attrs_by_std_method,
+        available_methods: available_methods
+      )
+      default_method ||= available_methods.first || compatible_methods.first
+      @visualization_de_default_method_id = default_method&.id
     end
 
     def load_analysis_context

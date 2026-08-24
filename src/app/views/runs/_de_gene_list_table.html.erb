@@ -6,16 +6,28 @@
 <% sort_onclick = "(function(th){var c=document.getElementById('de-genelist-container');if(!c)return;var tbody=c.querySelector('tbody');if(!tbody)return;var col=parseInt(th.dataset.col);var num=th.dataset.numeric==='true';var rows=Array.from(tbody.querySelectorAll('tr'));var cur=th.dataset.sortDir||'none';var asc=(cur!=='asc');th.dataset.sortDir=asc?'asc':'desc';c.querySelectorAll('th[data-col]').forEach(function(h){if(h!==th){h.dataset.sortDir='none';var si=h.querySelector('.sort-indicator');if(si)si.textContent='';}});var si=th.querySelector('.sort-indicator');if(si)si.textContent=asc?' \\u25B2':' \\u25BC';rows.sort(function(a,b){var ac=a.cells[col],bc=b.cells[col];var av=ac?(ac.getAttribute('data-sort-value')||ac.textContent.trim()):'';var bv=bc?(bc.getAttribute('data-sort-value')||bc.textContent.trim()):'';if(num){var an=parseFloat(av);if(isNaN(an))an=0;var bn=parseFloat(bv);if(isNaN(bn))bn=0;return asc?an-bn:bn-an;}return asc?av.localeCompare(bv):bv.localeCompare(av);});rows.forEach(function(r){tbody.appendChild(r);});})(this)" %>
 
 <div id="de-genelist-container" class="<%= compact ? '' : 'flex-1 overflow-y-auto' %>"
-     style="<%= compact ? 'flex: 1; overflow: auto; min-height: 0; border: 1px solid #e5e7eb; border-radius: 6px;' : '' %>">
+     style="<%= compact ? 'flex: 1; overflow: auto; min-height: 0; border: 1px solid #e5e7eb; border-radius: 6px;' : '' %>"
+     <% if compact %>data-de-viz-gene-select="1"<% end %>>
   <table class="<%= compact ? '' : 'min-w-full divide-y divide-gray-200 text-sm' %>"
          style="<%= compact ? 'width: 100%; border-collapse: collapse; font-size: 12px;' : '' %>">
     <thead class="<%= compact ? '' : 'bg-gray-50 sticky top-0' %>"
            style="<%= compact ? 'background: #f9fafb; position: sticky; top: 0; z-index: 1;' : '' %>">
       <tr>
+        <% if compact %>
+          <th style="padding: 6px 8px; text-align: center; font-size: 11px; font-weight: 600; color: #6b7280; white-space: nowrap; border-bottom: 1px solid #e5e7eb; width: 28px;"
+              title="Select genes to add to the gene panel">
+            <input type="checkbox"
+                   id="de-viz-gene-select-all-header"
+                   aria-label="Select all genes"
+                   onclick="if(window.visualizationController){event.stopPropagation();window.visualizationController.toggleDeVizGeneListSelectAll(this.checked)}"
+                   style="cursor: pointer;">
+          </th>
+        <% end %>
         <% @fields.each_with_index do |f, idx| %>
+          <% col_idx = compact ? idx + 1 : idx %>
           <th class="<%= compact ? '' : 'px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase whitespace-nowrap cursor-pointer hover:text-gray-700 select-none' %>"
               style="<%= compact ? 'padding: 6px 8px; text-align: left; font-size: 11px; font-weight: 600; color: #6b7280; white-space: nowrap; cursor: pointer; user-select: none; border-bottom: 1px solid #e5e7eb;' : '' %>"
-              data-col="<%= idx %>"
+              data-col="<%= col_idx %>"
               data-numeric="<%= numeric_fields.include?(f) %>"
               onclick="<%= sort_onclick %>">
             <%= f %> <span class="sort-indicator"></span>
@@ -25,8 +37,26 @@
     </thead>
     <tbody class="<%= compact ? '' : 'bg-white divide-y divide-gray-200' %>">
       <% @data.each do |e| %>
+        <% ensembl_id = e[1].to_s %>
+        <% gene_name = e[2].presence || ensembl_id %>
         <tr class="<%= compact ? '' : 'hover:bg-gray-50' %>"
-            style="<%= compact ? 'border-bottom: 1px solid #f3f4f6;' : '' %>">
+            style="<%= compact ? 'border-bottom: 1px solid #f3f4f6;' : '' %>"
+            <% if compact %>
+              data-ensembl-id="<%= ensembl_id %>"
+              data-gene-symbol="<%= gene_name %>"
+            <% end %>>
+          <% if compact %>
+            <td style="padding: 5px 8px; text-align: center; white-space: nowrap;"
+                onclick="event.stopPropagation()">
+              <input type="checkbox"
+                     class="de-viz-gene-checkbox"
+                     data-ensembl-id="<%= ensembl_id %>"
+                     data-gene-symbol="<%= gene_name %>"
+                     aria-label="Select <%= gene_name %>"
+                     onchange="if(window.visualizationController) window.visualizationController.onDeVizGeneCheckboxChanged()"
+                     style="cursor: pointer;">
+            </td>
+          <% end %>
           <% @fields.each_index do |i| %>
             <% cell_value = e[i] %>
             <% is_numeric_field = numeric_fields.include?(@fields[i]) && @fields[i] != 'Gene index' %>
@@ -38,8 +68,6 @@
               <% if @fields[i] == 'EnsemblID' && e[i].present? %>
                 <span class="text-blue-600 cursor-pointer hover:underline gene-link" data-ensembl-id="<%= e[i] %>"><%= e[i] %></span>
               <% elsif @fields[i] == 'Gene name' %>
-                <% gene_name = e[i].presence || e[1] %>
-                <% ensembl_id = e[1].to_s %>
                 <span class="gene-badge cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= gene_badge_cls %>"
                       data-ensembl-id="<%= ensembl_id %>"
                       <% if gene_name.present? && gene_name != ensembl_id %>data-gene-symbol="<%= gene_name %>"<% end %>

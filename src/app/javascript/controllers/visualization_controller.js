@@ -378,11 +378,13 @@ export default class extends Controller {
     // Auxiliary/modal visualization controllers do not own the embedding dropdown.
     if (this.hasMetadataSelectTarget) {
       window.visualizationController = this
-      // Block the UI immediately on entry. For large datasets, connect/history
-      // work can take a while before the checkpoint itself starts loading, and
-      // edits made during that window would be overwritten by the restore.
-      this.initialCheckpointEntryLoading = true
-      this.setCheckpointViewLoading(true, 'Loading checkpoint', this.entryCheckpointTitleForLoading())
+      // Block the UI immediately on first entry only. Reconnects must not re-arm this
+      // overlay: loadInitialCheckpointOnEntry() no-ops when already handled and would
+      // otherwise leave "Loading checkpoint" visible forever.
+      if (this.initialEntryCheckpointHandled !== true) {
+        this.initialCheckpointEntryLoading = true
+        this.setCheckpointViewLoading(true, 'Loading checkpoint', this.entryCheckpointTitleForLoading())
+      }
     }
 
     if (!this.boundDeSelectionRunClick) {
@@ -434,8 +436,7 @@ export default class extends Controller {
         // console.log(`🚀 [CONNECT] Reconnection detected with renderer state - skipping initializeCanvas() to preserve state`)
         // Don't call initializeCanvas() if renderer already has state and modules are initialized
         // This prevents destroying the renderer during Stimulus reconnection
-        this.initialCheckpointEntryLoading = false
-        this.setCheckpointViewLoading(false)
+        this.finishInitialCheckpointEntryLoading()
         this.setupSelectionStatesSubscription()
         this.startSelectionStatusPolling()
         this.scheduleSelectionStatesRefresh(100)
@@ -959,6 +960,7 @@ export default class extends Controller {
     }, 1500)
 
     this.loadInitialCheckpointOnEntry().finally(() => {
+      this.finishInitialCheckpointEntryLoading()
       this.ensureDefaultEmbeddingAfterCheckpointEntry()
       this.scheduleAutoMetadataPreload()
     })
@@ -2831,6 +2833,15 @@ export default class extends Controller {
     loadingOverlay.style.display = isLoading ? 'flex' : 'none'
   }
 
+  finishInitialCheckpointEntryLoading() {
+    if (this.initialCheckpointEntryLoading !== true) return
+    this.initialCheckpointEntryLoading = false
+    this.setCheckpointViewLoading(false)
+    if (this.currentCheckpointReadyForOverwrite !== true) {
+      this.currentCheckpointReadyForOverwrite = true
+    }
+  }
+
   checkpointDisplayTitle(checkpointOrTitle) {
     const raw = (typeof checkpointOrTitle === 'string' || typeof checkpointOrTitle === 'number')
       ? checkpointOrTitle
@@ -3485,7 +3496,10 @@ export default class extends Controller {
 
   async loadInitialCheckpointOnEntry() {
     if (!this.hasMetadataSelectTarget) return
-    if (this.initialEntryCheckpointHandled === true) return
+    if (this.initialEntryCheckpointHandled === true) {
+      this.finishInitialCheckpointEntryLoading()
+      return
+    }
     this.initialEntryCheckpointHandled = true
 
     this.currentCheckpointReadyForOverwrite = false
@@ -3526,9 +3540,7 @@ export default class extends Controller {
         await this.loadCheckpointById(String(landingCheckpoint.id))
       }
     } finally {
-      this.initialCheckpointEntryLoading = false
-      this.setCheckpointViewLoading(false)
-      this.currentCheckpointReadyForOverwrite = true
+      this.finishInitialCheckpointEntryLoading()
     }
   }
 

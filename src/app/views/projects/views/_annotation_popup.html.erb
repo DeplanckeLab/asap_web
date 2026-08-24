@@ -149,7 +149,7 @@
   __CONTENT__
 </template>
 
-<div id="annotation-popup-gene-modal-overlay" class="hidden fixed inset-0 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5); z-index: 12300;">
+<div id="annotation-popup-gene-modal-overlay" class="hidden fixed inset-0 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5); z-index: 13000;">
   <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 overflow-hidden" style="max-height: 80vh;">
     <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200" style="background: linear-gradient(to right, #f0fdf4, #ecfdf5);">
       <h3 class="text-lg font-semibold text-gray-900" id="annotation-popup-gene-modal-title">Gene details</h3>
@@ -261,6 +261,12 @@
     loadWrap.appendChild(subLine)
     body.appendChild(loadWrap)
     overlay.classList.remove('hidden')
+    overlay.style.display = 'flex'
+    overlay.style.alignItems = 'center'
+    overlay.style.justifyContent = 'center'
+    if (!overlay.style.zIndex || parseInt(overlay.style.zIndex, 10) < 12300) {
+      overlay.style.zIndex = '12300'
+    }
     var csrfMeta = document.querySelector('meta[name="csrf-token"]')
     var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : ''
     var url = searchUrl + (searchUrl.indexOf('?') >= 0 ? '&' : '?') + parts.join('&') + '&_ts=' + Date.now()
@@ -447,7 +453,9 @@
 
   window.closeAnnotationPopupGeneModal = function() {
     var overlay = document.getElementById('annotation-popup-gene-modal-overlay')
-    if (overlay) overlay.classList.add('hidden')
+    if (!overlay) return
+    overlay.classList.add('hidden')
+    overlay.style.display = 'none'
   }
 
   function annotEvidenceSortGeneKey(row) {

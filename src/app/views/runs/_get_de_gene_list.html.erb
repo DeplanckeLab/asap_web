@@ -141,11 +141,14 @@
   container.addEventListener('click', function(e) {
     var badge = e.target.closest('.gene-badge');
     var link = e.target.closest('.gene-link');
-    var el = badge || link;
-    if (!el) return;
+    if (link) {
+      // Ensembl ID is a real target=_blank link to Ensembl.
+      return;
+    }
+    if (!badge) return;
     if (window.openAnnotationPopupGeneModal) {
-      var ens = el.getAttribute('data-ensembl-id') || '';
-      var sym = el.getAttribute('data-gene-symbol') || '';
+      var ens = badge.getAttribute('data-ensembl-id') || '';
+      var sym = badge.getAttribute('data-gene-symbol') || '';
       if (ens || sym) {
         window.openAnnotationPopupGeneModal(ens, searchGeneUrl, sym, '');
       }

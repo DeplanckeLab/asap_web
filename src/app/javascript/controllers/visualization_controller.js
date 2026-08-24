@@ -20351,11 +20351,64 @@ export default class extends Controller {
         if (state.comparedGroup) exportBtn.setAttribute('data-compared-group', state.comparedGroup)
         if (state.runNum) exportBtn.setAttribute('data-run-num', state.runNum)
       }
+      this.bindDeVizGeneListGeneClicks(area)
       this.onDeVizGeneCheckboxChanged()
     })
     .catch(function() {
       area.innerHTML = '<div style="color:#ef4444;font-size:13px;padding:12px;">Failed to load gene list.</div>'
     })
+  }
+
+  bindDeVizGeneListGeneClicks(root) {
+    const container = (root && root.querySelector)
+      ? (root.querySelector('#de-genelist-container') || root)
+      : document.getElementById('de-genelist-container')
+    if (!container || container.dataset.deVizGeneClickBound === '1') return
+    container.dataset.deVizGeneClickBound = '1'
+    container.addEventListener('click', (event) => {
+      const link = event.target?.closest?.('.gene-link')
+      if (link && container.contains(link)) {
+        // Native target=_blank link opens Ensembl; do not open the gene details modal.
+        event.stopPropagation()
+        return
+      }
+      const badge = event.target?.closest?.('.gene-badge')
+      if (!badge || !container.contains(badge)) return
+      event.preventDefault()
+      event.stopPropagation()
+      this.openDeVizGeneDetails(badge)
+    })
+  }
+
+  openDeVizGeneDetails(el) {
+    if (!el) return
+    const ens = (el.getAttribute('data-ensembl-id') || '').trim()
+    const sym = (el.getAttribute('data-gene-symbol') || '').trim()
+    if (!ens && !sym) return
+
+    const annotOverlay = document.getElementById('annotation-popup-overlay')
+    const searchUrl = (annotOverlay && annotOverlay.dataset.searchGeneUrl) || this._deVizSearchGeneUrl()
+    if (!searchUrl || typeof window.openAnnotationPopupGeneModal !== 'function') return
+
+    window.openAnnotationPopupGeneModal(ens, searchUrl, sym, '', {})
+    this._ensureGeneDetailsModalAboveDeWindow()
+  }
+
+  _deVizSearchGeneUrl() {
+    const pid = this.getProjectIdentifier()
+    if (!pid) return ''
+    return `/projects/${encodeURIComponent(pid)}/search_gene`
+  }
+
+  _ensureGeneDetailsModalAboveDeWindow() {
+    const geneOverlay = document.getElementById('annotation-popup-gene-modal-overlay')
+    if (!geneOverlay) return
+    geneOverlay.classList.remove('hidden')
+    geneOverlay.style.display = 'flex'
+    geneOverlay.style.zIndex = '13000'
+    if (geneOverlay.parentElement !== document.body) {
+      document.body.appendChild(geneOverlay)
+    }
   }
 
   getMaxGenePanelGenes() {

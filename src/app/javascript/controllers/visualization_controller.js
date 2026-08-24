@@ -356,6 +356,11 @@ export default class extends Controller {
       this.boundDeSelectionRunClick = (event) => {
         const target = event.target?.closest?.('#de-selection-run-btn')
         if (!target) return
+        if (target.disabled || this.dePreviewSubmitReady === false) {
+          event.preventDefault()
+          event.stopPropagation()
+          return
+        }
         this.submitDeSelectionRun(event)
       }
       document.addEventListener('click', this.boundDeSelectionRunClick, true)
@@ -19598,13 +19603,12 @@ export default class extends Controller {
     const runButton = document.getElementById('de-selection-run-btn')
     if (runButton) {
       runButton.onclick = (event) => this.submitDeSelectionRun(event)
-      runButton.disabled = !canRun
-      runButton.style.opacity = canRun ? '1' : '0.45'
-      runButton.style.cursor = canRun ? 'pointer' : 'not-allowed'
-      runButton.title = canRun
-        ? 'Run differential expression'
-        : 'Requires a saved cell set or a categorical metadata category'
     }
+    // Always start disabled; updateDeSelectionPreview enables only when both groups have >= 3 usable cells.
+    this.setDeSelectionRunEnabled(false, canRun
+      ? 'Select groups with at least 3 cells each to run DE'
+      : 'Requires a saved cell set or a categorical metadata category')
+    this.dePreviewSubmitReady = false
     this.showDeRunFeedback('')
 
     this.populateDeSelectionEmbeddings()
@@ -20337,6 +20341,11 @@ export default class extends Controller {
       this.filterOutDeUnsupportedInstructions(attrsContainer)
       this.finalizeDeParameterPanel(attrsContainer)
       this.initializeDeAttributeListeners(attrsContainer)
+      // Prefill after Stimulus connects the input-data-selector.
+      requestAnimationFrame(() => {
+        this.prefillDeInputMatrixFromEmbedding(attrsContainer)
+        this.bindDeInputMatrixChangeListener(attrsContainer)
+      })
     } catch (error) {
       attrsContainer.innerHTML = `<div style="font-size:12px;color:#991b1b;">Failed to load DE parameters: ${this.escapeHtml(error.message)}</div>`
     }
@@ -20344,8 +20353,8 @@ export default class extends Controller {
 
   removeDeInputFields(container) {
     if (!container) return
+    // Keep input_matrix (dataset selector). Remove group/universe fields handled by the viz DE UI.
     const selectors = [
-      '[data-attr-widget="input_data"]',
       '[data-attr-name="groups"]',
       '[data-attr-name="groups2"]',
       '[data-attr-name="all_against_compl"]',
@@ -20362,6 +20371,49 @@ export default class extends Controller {
     ]
     selectors.forEach((selector) => {
       container.querySelectorAll(selector).forEach((el) => el.remove())
+    })
+
+    container.querySelectorAll('[data-attr-widget="input_data"]').forEach((el) => {
+      const name = String(el.getAttribute('data-attr-name') || '')
+      if (name === 'input_matrix') return
+      el.remove()
+    })
+
+    // Drop the Clustering/selection card (groups UI lives in the viz DE modal) and
+    // give remaining cards in that row full width.
+    container.querySelectorAll('.attr-layout-col, .attr-layout-row > div').forEach((section) => {
+      const title = String(section.querySelector('h4, h3')?.textContent || '').trim().toLowerCase()
+      const isClusteringCard = /clustering\s*\/\s*selection|clustering/.test(title) && !title.includes('other')
+      const isEmpty = section.querySelectorAll('[data-attr-name]').length === 0
+      if (isClusteringCard || isEmpty) {
+        section.remove()
+      }
+    })
+
+    container.querySelectorAll('.attr-layout-row').forEach((row) => {
+      const cols = Array.from(row.querySelectorAll(':scope > .attr-layout-col'))
+      cols.forEach((col) => {
+        col.classList.remove(
+          'attr-layout-col-half',
+          'attr-layout-col-third',
+          'attr-layout-col-two-thirds',
+          'attr-layout-col-quarter'
+        )
+        col.classList.add('attr-layout-col-full')
+      })
+      if (cols.length === 0 && row.querySelectorAll('[data-attr-name]').length === 0) {
+        const block = row.closest('.space-y-4')
+        row.remove()
+        if (block && block.querySelectorAll('[data-attr-name]').length === 0) {
+          block.remove()
+        }
+      }
+    })
+
+    container.querySelectorAll('.attr-layout-host > .space-y-4').forEach((block) => {
+      if (block.querySelectorAll('[data-attr-name]').length === 0) {
+        block.remove()
+      }
     })
   }
 
@@ -20567,14 +20619,19 @@ export default class extends Controller {
     const mode = this.getDeSelectionMode()
     const colPlural = this.getColLabel({ plural: true })
     const colSets = this.getColSetLabel({ plural: true })
+    const minCells = 3
     if (!operandASelect.value || (mode === 'group' && (!operandBSelect || !operandBSelect.value))) {
       preview.innerHTML = '<div style="grid-column: 1 / -1; font-size: 12px; color: #6b7280; padding: 8px;">Select group(s) to preview.</div>'
+      this.setDeSelectionRunEnabled(false, 'Select groups with at least 3 cells each to run DE')
       return
     }
 
     try {
       const operandA = await this.resolveComposeOperandSelection(operandASelect.value)
-      if (!operandA) return
+      if (!operandA) {
+        this.setDeSelectionRunEnabled(false, 'Select a valid reference group')
+        return
+      }
 
       const embeddingId = this.getSelectedDePreviewEmbeddingId()
       const loomFile = this.getCurrentLoomFileForRequest()
@@ -20583,52 +20640,255 @@ export default class extends Controller {
         ? coordinates.length
         : operandA.cellSet.size
 
-      const filteredIndices = this.dataManager?.getIncrementalFilteredIndices?.()
-      const universeSet = (
-        Array.isArray(filteredIndices) &&
-        filteredIndices.length > 0 &&
-        filteredIndices.length < totalCells
-      ) ? new Set(filteredIndices) : null
-      const inUniverse = (index) => !universeSet || universeSet.has(index)
+      const universeSet = this.getDePreviewUniverseSet(totalCells)
+      const groupA = operandA.cellSet
 
       let comparedLabel = `All other ${colPlural}`
-      let comparedSet = new Set()
-      const referenceSet = new Set()
-      operandA.cellSet.forEach((index) => {
-        if (inUniverse(index)) referenceSet.add(index)
-      })
+      let groupB = new Set()
+      let comparedTitle = 'Complementary'
 
       if (mode === 'group') {
         const operandB = await this.resolveComposeOperandSelection(operandBSelect.value)
-        if (!operandB) return
+        if (!operandB) {
+          this.setDeSelectionRunEnabled(false, 'Select a valid compared group')
+          return
+        }
         comparedLabel = operandB.label
-        operandB.cellSet.forEach((index) => {
-          if (inUniverse(index)) comparedSet.add(index)
-        })
+        comparedTitle = 'Compared group'
+        groupB = operandB.cellSet
       } else if (universeSet) {
         universeSet.forEach((index) => {
-          if (!referenceSet.has(index)) comparedSet.add(index)
+          if (!groupA.has(index)) groupB.add(index)
         })
       } else {
         for (let index = 0; index < totalCells; index++) {
-          if (!referenceSet.has(index)) comparedSet.add(index)
+          if (!groupA.has(index)) groupB.add(index)
         }
       }
 
-      const comparedTitle = mode === 'group' ? 'Compared group' : 'Complementary'
-      const denominator = universeSet ? universeSet.size : totalCells
+      const partitionA = this.partitionDePreviewGroup(groupA, groupB, universeSet, mode === 'group')
+      const partitionB = this.partitionDePreviewGroup(groupB, groupA, universeSet, mode === 'group')
+      const overlapCount = partitionA.overlap.size
+      const universeSize = universeSet ? universeSet.size : totalCells
+      const sizeA = partitionA.exclusive.size
+      const sizeB = partitionB.exclusive.size
+
+      const notes = []
+      if (overlapCount > 0 && mode === 'group') {
+        notes.push(
+          `<div style="grid-column: 1 / -1; font-size: 12px; color: #92400e; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 8px 10px;">` +
+          `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:#92400e;margin-right:6px;vertical-align:middle;"></span>` +
+          `${overlapCount.toLocaleString()} ${this.escapeHtml(colPlural)} overlapping between the 2 groups will be ignored.` +
+          `</div>`
+        )
+      }
+
+      const tooSmallMessages = []
+      if (sizeA < minCells) {
+        tooSmallMessages.push(`Reference group has ${sizeA.toLocaleString()} usable ${colPlural} (minimum ${minCells}).`)
+      }
+      if (sizeB < minCells) {
+        tooSmallMessages.push(
+          `${mode === 'group' ? 'Compared group' : 'Complementary'} has ${sizeB.toLocaleString()} usable ${colPlural} (minimum ${minCells}).`
+        )
+      }
+      if (tooSmallMessages.length > 0) {
+        notes.push(
+          `<div style="grid-column: 1 / -1; font-size: 12px; color: #991b1b; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 8px 10px;">` +
+          `${tooSmallMessages.map((msg) => this.escapeHtml(msg)).join(' ')}` +
+          `</div>`
+        )
+      }
+
       preview.innerHTML = [
-        this.renderComposeSelectionPreviewCard('Reference group', operandA.label, referenceSet.size, denominator, '#2563eb', 'de-preview-canvas-a'),
-        this.renderComposeSelectionPreviewCard(comparedTitle, comparedLabel, comparedSet.size, denominator, '#d97706', 'de-preview-canvas-b')
+        ...notes,
+        this.renderDeSelectionPreviewCard({
+          title: 'Reference group',
+          subtitle: operandA.label,
+          usedCount: sizeA,
+          universeSize,
+          outOfFilterCount: partitionA.outOfUniverse.size,
+          overlapCount: mode === 'group' ? overlapCount : 0,
+          color: '#2563eb',
+          canvasId: 'de-preview-canvas-a'
+        }),
+        this.renderDeSelectionPreviewCard({
+          title: comparedTitle,
+          subtitle: comparedLabel,
+          usedCount: sizeB,
+          universeSize,
+          outOfFilterCount: partitionB.outOfUniverse.size,
+          overlapCount: mode === 'group' ? overlapCount : 0,
+          color: '#d97706',
+          canvasId: 'de-preview-canvas-b'
+        })
       ].join('')
 
-      this.drawComposeSelectionScatterPreview('de-preview-canvas-a', coordinates, referenceSet, '#2563eb', universeSet)
-      this.drawComposeSelectionScatterPreview('de-preview-canvas-b', coordinates, comparedSet, '#d97706', universeSet)
+      this.drawDeSelectionGroupScatterPreview(
+        'de-preview-canvas-a',
+        coordinates,
+        partitionA,
+        '#2563eb'
+      )
+      this.drawDeSelectionGroupScatterPreview(
+        'de-preview-canvas-b',
+        coordinates,
+        partitionB,
+        '#d97706'
+      )
+
+      const submitOk = sizeA >= minCells && sizeB >= minCells
+      this.dePreviewGroupSizes = { sizeA, sizeB, minCells }
+      this.dePreviewSubmitReady = submitOk
+      if (submitOk) {
+        this.refreshDeSubmitEnabledFromCurrentPreview()
+      } else {
+        this.setDeSelectionRunEnabled(
+          false,
+          tooSmallMessages[0] || `Each group needs at least ${minCells} usable ${colPlural}`
+        )
+      }
     } catch (error) {
       console.error('Could not render DE preview:', error)
       const detail = error && error.message ? ` ${error.message}` : ''
       preview.innerHTML = `<div style="grid-column: 1 / -1; font-size: 12px; color: #991b1b; padding: 8px;">Could not render DE preview for selected ${colSets}.${this.escapeHtml(detail)}</div>`
+      this.dePreviewSubmitReady = false
+      this.setDeSelectionRunEnabled(false, error?.message || 'Could not validate DE groups')
     }
+  }
+
+  setDeSelectionRunEnabled(enabled, title = '') {
+    const runButton = document.getElementById('de-selection-run-btn')
+    if (!runButton) return
+    const on = !!enabled
+    runButton.disabled = !on
+    runButton.style.opacity = on ? '1' : '0.45'
+    runButton.style.cursor = on ? 'pointer' : 'not-allowed'
+    if (title) runButton.title = title
+  }
+
+  getDePreviewUniverseSet(totalCells) {
+    const nCells = Number(totalCells) > 0
+      ? Number(totalCells)
+      : (Array.isArray(this.currentCoordinates) ? this.currentCoordinates.length : 0)
+    if (nCells <= 0) return null
+
+    let filteredIndices = this.dataManager?.getIncrementalFilteredIndices?.()
+    if (!Array.isArray(filteredIndices) && Array.isArray(this.currentVisibleCells)) {
+      filteredIndices = this.currentVisibleCells
+    }
+    if (!Array.isArray(filteredIndices) || filteredIndices.length === 0 || filteredIndices.length >= nCells) {
+      return null
+    }
+    return new Set(filteredIndices)
+  }
+
+  partitionDePreviewGroup(groupSet, otherGroupSet, universeSet, trackOverlap) {
+    const exclusive = new Set()
+    const overlap = new Set()
+    const outOfUniverse = new Set()
+    const hasUniverse = universeSet instanceof Set && universeSet.size > 0
+
+    ;(groupSet || new Set()).forEach((index) => {
+      if (hasUniverse && !universeSet.has(index)) {
+        outOfUniverse.add(index)
+        return
+      }
+      if (trackOverlap && otherGroupSet && otherGroupSet.has(index)) {
+        overlap.add(index)
+        return
+      }
+      exclusive.add(index)
+    })
+
+    return { exclusive, overlap, outOfUniverse }
+  }
+
+  renderDeSelectionPreviewCard({
+    title,
+    subtitle,
+    usedCount,
+    universeSize,
+    outOfFilterCount,
+    overlapCount,
+    color,
+    canvasId
+  }) {
+    const colPlural = this.getColLabel({ plural: true })
+    const notes = []
+    if (Number(outOfFilterCount) > 0) {
+      notes.push(
+        `<div style="margin-top: 6px; font-size: 11px; color: #b91c1c; line-height: 1.35;">` +
+        `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#dc2626;margin-right:5px;vertical-align:middle;"></span>` +
+        `${Number(outOfFilterCount).toLocaleString()} ${this.escapeHtml(colPlural)} are not in the filtered dataset.` +
+        `</div>`
+      )
+    }
+    if (Number(overlapCount) > 0) {
+      notes.push(
+        `<div style="margin-top: 4px; font-size: 11px; color: #92400e; line-height: 1.35;">` +
+        `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#92400e;margin-right:5px;vertical-align:middle;"></span>` +
+        `${Number(overlapCount).toLocaleString()} overlapping ${this.escapeHtml(colPlural)} shown in brown.` +
+        `</div>`
+      )
+    }
+    return `
+      <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; background: #fff;">
+        <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">${this.escapeHtml(title)}</div>
+        <div style="font-size: 13px; font-weight: 600; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this.escapeHtml(subtitle)}">${this.escapeHtml(subtitle)}</div>
+        <div style="margin-top: 8px; border: 1px solid #e5e7eb; border-radius: 6px; background: #f9fafb; padding: 6px;">
+          <canvas id="${this.escapeHtml(canvasId)}" width="250" height="140" style="display:block;width:100%;height:140px;background:#ffffff;border-radius:4px;"></canvas>
+          <div style="margin-top: 6px; font-size: 12px; color: #374151;"><span style="font-weight: 600; color: ${color};">${Number(usedCount).toLocaleString()}</span> / ${Number(universeSize).toLocaleString()} ${this.escapeHtml(colPlural)} used in DE</div>
+          ${notes.join('')}
+        </div>
+      </div>
+    `
+  }
+
+  drawDeSelectionGroupScatterPreview(canvasId, coordinates, partition, selectedColor) {
+    const canvas = document.getElementById(canvasId)
+    if (!canvas || !Array.isArray(coordinates) || coordinates.length === 0) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    const width = canvas.width
+    const height = canvas.height
+    const padding = 8
+    const bounds = this.dataManager.calculateBounds(coordinates)
+    const xRange = Math.max((bounds.maxX - bounds.minX), Number.EPSILON)
+    const yRange = Math.max((bounds.maxY - bounds.minY), Number.EPSILON)
+    const mapX = (x) => padding + ((x - bounds.minX) / xRange) * (width - 2 * padding)
+    const mapY = (y) => height - padding - ((y - bounds.minY) / yRange) * (height - 2 * padding)
+
+    ctx.clearRect(0, 0, width, height)
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, width, height)
+
+    const maxBackgroundPoints = 6000
+    const bgStep = Math.max(1, Math.floor(coordinates.length / maxBackgroundPoints))
+    ctx.fillStyle = 'rgba(148, 163, 184, 0.35)'
+    for (let i = 0; i < coordinates.length; i += bgStep) {
+      const point = coordinates[i]
+      if (!point) continue
+      ctx.fillRect(mapX(point[0]), mapY(point[1]), 1.3, 1.3)
+    }
+
+    const paintSet = (indexSet, fillStyle, size, maxPoints) => {
+      const indices = Array.from(indexSet || [])
+      if (indices.length === 0) return
+      const step = Math.max(1, Math.floor(indices.length / maxPoints))
+      ctx.fillStyle = fillStyle
+      for (let i = 0; i < indices.length; i += step) {
+        const point = coordinates[indices[i]]
+        if (!point) continue
+        ctx.fillRect(mapX(point[0]), mapY(point[1]), size, size)
+      }
+    }
+
+    // Out of filter (red), then group cells used in DE (group color), then overlap (brown) on top.
+    paintSet(partition.outOfUniverse, '#dc2626', 1.9, 5000)
+    paintSet(partition.exclusive, selectedColor, 1.9, 5000)
+    paintSet(partition.overlap, '#92400e', 2.1, 5000)
   }
 
   getDeSelectedOperandItems() {
@@ -20687,6 +20947,107 @@ export default class extends Controller {
       categoryName: '1',
       label: this.composeSelectionOptionLabel(item)
     }
+  }
+
+  prefillDeInputMatrixFromEmbedding(container) {
+    if (!container) return
+    const widget = container.querySelector('[data-attr-name="input_matrix"] .input_data_widget, [data-attr-name="input_matrix"] [data-controller~="input-data-selector"]')
+    const wrap = container.querySelector('[data-attr-name="input_matrix"]')
+    if (!wrap) return
+
+    const hidden = wrap.querySelector('#attrs_input_matrix, [name="attrs[input_matrix]"], [data-input-data-selector-target="hiddenField"]')
+    if (!hidden) return
+    if (String(hidden.value || '').trim().length > 0) return
+
+    const matrix = this.resolveDeInputMatrixFromCurrentEmbedding()
+    const wanted = Array.isArray(matrix) ? matrix[0] : null
+    if (!wanted) return
+
+    const options = wrap.querySelectorAll('[data-input-data-selector-target="option"]')
+    let matched = null
+    options.forEach((optionInput) => {
+      if (matched) return
+      try {
+        const optionValue = JSON.parse(optionInput.value)
+        if (Number(optionValue.annot_id) === Number(wanted.annot_id) &&
+            Number(optionValue.run_id) === Number(wanted.run_id)) {
+          matched = optionInput
+        }
+      } catch (_error) {
+        // ignore invalid option payloads
+      }
+    })
+
+    const controllerEl = widget || wrap.querySelector('[data-controller~="input-data-selector"]')
+    const controller = controllerEl && this.application
+      ? this.application.getControllerForElementAndIdentifier(controllerEl, 'input-data-selector')
+      : null
+
+    if (matched && controller && typeof controller.selectSingleOption === 'function') {
+      controller.selectSingleOption(matched)
+      return
+    }
+
+    if (matched) {
+      matched.checked = true
+    }
+    const isArray = controllerEl?.dataset?.inputDataSelectorIsArrayValue === 'true'
+    hidden.value = isArray ? JSON.stringify([wanted]) : JSON.stringify(wanted)
+    if (controller && typeof controller.restoreSelectionFromHiddenField === 'function') {
+      controller.restoreSelectionFromHiddenField()
+      if (typeof controller.updateSelectedItems === 'function') controller.updateSelectedItems()
+    }
+  }
+
+  bindDeInputMatrixChangeListener(container) {
+    if (!container) return
+    const wrap = container.querySelector('[data-attr-name="input_matrix"]')
+    if (!wrap || wrap.dataset.deMatrixBound === '1') return
+    wrap.dataset.deMatrixBound = '1'
+    wrap.addEventListener('change', () => {
+      this.refreshDeSubmitEnabledFromCurrentPreview()
+    })
+  }
+
+  refreshDeSubmitEnabledFromCurrentPreview() {
+    const sizes = this.dePreviewGroupSizes || {}
+    const minCells = Number(sizes.minCells) || 3
+    const sizeA = Number(sizes.sizeA)
+    const sizeB = Number(sizes.sizeB)
+    const groupsOk = Number.isFinite(sizeA) && Number.isFinite(sizeB) && sizeA >= minCells && sizeB >= minCells
+    const matrixOk = !!this.readDeInputMatrixFromModal() || !!this.resolveDeInputMatrixFromCurrentEmbedding()
+    const submitOk = groupsOk && matrixOk
+    this.dePreviewSubmitReady = submitOk
+    this.setDeSelectionRunEnabled(
+      submitOk,
+      submitOk
+        ? 'Run differential expression'
+        : (!matrixOk
+          ? 'Select an input matrix dataset'
+          : `Each group needs at least ${minCells} usable cells`)
+    )
+  }
+
+  readDeInputMatrixFromModal() {
+    const container = document.getElementById('de-selection-attrs')
+    if (!container) return null
+    const hidden = container.querySelector('#attrs_input_matrix, [name="attrs[input_matrix]"]')
+    if (!hidden || !String(hidden.value || '').trim()) return null
+    try {
+      const parsed = JSON.parse(hidden.value)
+      const item = Array.isArray(parsed) ? parsed[0] : parsed
+      if (!item || typeof item !== 'object') return null
+      const annotId = Number(item.annot_id)
+      const runId = Number(item.run_id)
+      if (!Number.isInteger(annotId) || annotId <= 0 || !Number.isInteger(runId) || runId <= 0) return null
+      return [{ annot_id: annotId, run_id: runId }]
+    } catch (_error) {
+      return null
+    }
+  }
+
+  resolveDeInputMatrixForSubmit() {
+    return this.readDeInputMatrixFromModal() || this.resolveDeInputMatrixFromCurrentEmbedding()
   }
 
   collectDeModalAttributes() {
@@ -20919,6 +21280,14 @@ export default class extends Controller {
     const methodSelect = document.getElementById('de-selection-method')
     if (!runButton || !methodSelect) return
 
+    if (runButton.disabled || this.dePreviewSubmitReady === false) {
+      const sizes = this.dePreviewGroupSizes || {}
+      const minCells = Number(sizes.minCells) || 3
+      const msg = `Each group needs at least ${minCells} usable cells before running DE.`
+      this.showDeSelectionStatus(msg, 'error')
+      return
+    }
+
     const methodId = String(methodSelect.value || '').trim()
     const stepId = Number(this.deStepIdValue)
     const projectIdentifier = this.getProjectIdentifier()
@@ -20958,10 +21327,10 @@ export default class extends Controller {
     }
 
     const attrs = this.collectDeModalAttributes()
-    const inputMatrix = this.resolveDeInputMatrixFromCurrentEmbedding()
+    const inputMatrix = this.resolveDeInputMatrixForSubmit()
     if (!inputMatrix) {
-      this.showDeSelectionStatus('Could not submit DE run: missing input matrix for current embedding.', 'error')
-      alert('Could not submit DE run: missing input matrix for current embedding.')
+      this.showDeSelectionStatus('Could not submit DE run: select an input matrix dataset.', 'error')
+      alert('Could not submit DE run: select an input matrix dataset.')
       return
     }
     attrs.input_matrix = inputMatrix
@@ -21988,7 +22357,7 @@ export default class extends Controller {
     `
   }
 
-  drawComposeSelectionScatterPreview(canvasId, coordinates, selectedSet, selectedColor, universeSet = null) {
+  drawComposeSelectionScatterPreview(canvasId, coordinates, selectedSet, selectedColor) {
     const canvas = document.getElementById(canvasId)
     if (!canvas || !Array.isArray(coordinates) || coordinates.length === 0) return
     const ctx = canvas.getContext('2d')
@@ -21997,22 +22366,7 @@ export default class extends Controller {
     const width = canvas.width
     const height = canvas.height
     const padding = 8
-
-    // When a cell-universe filter is active, only plot cells inside it (background + bounds).
-    const restrictToUniverse = universeSet instanceof Set && universeSet.size > 0
-    let backgroundIndices = null
-    let boundsCoordinates = coordinates
-    if (restrictToUniverse) {
-      backgroundIndices = Array.from(universeSet)
-      boundsCoordinates = []
-      for (let i = 0; i < backgroundIndices.length; i++) {
-        const point = coordinates[backgroundIndices[i]]
-        if (point) boundsCoordinates.push(point)
-      }
-      if (boundsCoordinates.length === 0) return
-    }
-
-    const bounds = this.dataManager.calculateBounds(boundsCoordinates)
+    const bounds = this.dataManager.calculateBounds(coordinates)
     const xRange = Math.max((bounds.maxX - bounds.minX), Number.EPSILON)
     const yRange = Math.max((bounds.maxY - bounds.minY), Number.EPSILON)
 
@@ -22024,21 +22378,13 @@ export default class extends Controller {
     ctx.fillRect(0, 0, width, height)
 
     const maxBackgroundPoints = 6000
+    const step = Math.max(1, Math.floor(coordinates.length / maxBackgroundPoints))
+
     ctx.fillStyle = 'rgba(148, 163, 184, 0.45)'
-    if (backgroundIndices) {
-      const step = Math.max(1, Math.floor(backgroundIndices.length / maxBackgroundPoints))
-      for (let i = 0; i < backgroundIndices.length; i += step) {
-        const point = coordinates[backgroundIndices[i]]
-        if (!point) continue
-        ctx.fillRect(mapX(point[0]), mapY(point[1]), 1.4, 1.4)
-      }
-    } else {
-      const step = Math.max(1, Math.floor(coordinates.length / maxBackgroundPoints))
-      for (let i = 0; i < coordinates.length; i += step) {
-        const point = coordinates[i]
-        if (!point) continue
-        ctx.fillRect(mapX(point[0]), mapY(point[1]), 1.4, 1.4)
-      }
+    for (let i = 0; i < coordinates.length; i += step) {
+      const point = coordinates[i]
+      if (!point) continue
+      ctx.fillRect(mapX(point[0]), mapY(point[1]), 1.4, 1.4)
     }
 
     const selectedIndices = Array.from(selectedSet || [])
@@ -22049,7 +22395,6 @@ export default class extends Controller {
     ctx.fillStyle = selectedColor
     for (let i = 0; i < selectedIndices.length; i += selectedStep) {
       const index = selectedIndices[i]
-      if (restrictToUniverse && !universeSet.has(index)) continue
       const point = coordinates[index]
       if (!point) continue
       ctx.fillRect(mapX(point[0]), mapY(point[1]), 1.8, 1.8)

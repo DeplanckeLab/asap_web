@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_21_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_24_141500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1204,6 +1204,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_21_120000) do
     t.boolean "being_validated", default: false, null: false
     t.integer "cloned_project_id"
     t.datetime "created_at", precision: nil
+    t.string "creator_ip"
     t.text "de_filter_json"
     t.integer "delayed_job_id"
     t.text "description"

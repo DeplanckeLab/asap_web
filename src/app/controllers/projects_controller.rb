@@ -884,6 +884,9 @@ class ProjectsController < ApplicationController
     @project.status_id ||= 1
     @project.sandbox = current_user ? false : true
     @project.modified_at = Time.now
+    if @project.sandbox?
+      @project.creator_ip = request_creator_ip
+    end
     assign_project_origin_on_create!(@project)
     enforce_locked_project_type_on_create!(@project)
     
@@ -9734,7 +9737,7 @@ class ProjectsController < ApplicationController
           failed: run_counts[:failed]
         }
       }
-      payload[:user_email] = project.user&.email.presence if admin?
+      payload[:user_email] = helpers.search_project_admin_user_label(project) if admin?
       payload
     end
 
@@ -9816,6 +9819,10 @@ class ProjectsController < ApplicationController
         end
       origin_id = ProjectOrigin.id_for(name)
       project.project_origin_id = origin_id if origin_id.present?
+    end
+
+    def request_creator_ip
+      request.headers['X-Real-IP'].to_s.strip.presence || get_real_ip.to_s.strip.presence
     end
 
     def enforce_locked_project_type_on_create!(project)

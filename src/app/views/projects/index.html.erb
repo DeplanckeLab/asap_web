@@ -365,8 +365,9 @@
                   </td>
                   <% if admin? %>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500" onclick="window.location='<%= project_path(project) %>'"
-                        data-search-projects-refresh-field="user_email">
-                      <%= project.user&.email.presence || '-' %>
+                        data-search-projects-refresh-field="user_email"
+                        title="<%= project.sandbox? && project.creator_ip.present? ? 'Guest creator X-Real-IP' : 'Owner email' %>">
+                      <%= search_project_admin_user_label(project) %>
                     </td>
                   <% end %>
                   <td class="px-6 py-4 whitespace-nowrap text-sm" onclick="window.location='<%= project_path(project) %>'">

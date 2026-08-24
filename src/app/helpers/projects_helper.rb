@@ -1,4 +1,13 @@
 module ProjectsHelper
+  # Admin search-projects User column: guest sandboxes show creator X-Real-IP when known.
+  def search_project_admin_user_label(project)
+    if project&.sandbox? && project.creator_ip.present?
+      project.creator_ip
+    else
+      project&.user&.email.presence || '-'
+    end
+  end
+
   def formatted_organism_name(project)
     return 'Unknown organism' unless project
 

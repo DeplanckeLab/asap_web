@@ -66,12 +66,16 @@
                 style="<%= compact ? 'padding: 5px 8px; color: #374151; white-space: nowrap;' : '' %>"
                 <% if sort_value.present? %>data-sort-value="<%= sort_value %>" title="<%= sort_value %>"<% end %>>
               <% if @fields[i] == 'EnsemblID' && e[i].present? %>
-                <% ensembl_href_id = e[i].to_s.strip.sub(/\.\d+\z/, '') %>
-                <a class="text-blue-600 cursor-pointer hover:underline gene-link"
-                   href="https://www.ensembl.org/Gene/Summary?g=<%= ERB::Util.url_encode(ensembl_href_id) %>"
-                   target="_blank"
-                   rel="noopener noreferrer"
-                   data-ensembl-id="<%= e[i] %>"><%= e[i] %></a>
+                <% ensembl_url = ensembl_gene_browser_url(e[i], assembly: @ensembl_assembly, project: @project) %>
+                <% if ensembl_url.present? %>
+                  <a class="text-blue-600 cursor-pointer hover:underline gene-link"
+                     href="<%= ensembl_url %>"
+                     target="_blank"
+                     rel="noopener noreferrer"
+                     data-ensembl-id="<%= e[i] %>"><%= e[i] %></a>
+                <% else %>
+                  <span data-ensembl-id="<%= e[i] %>"><%= e[i] %></span>
+                <% end %>
               <% elsif @fields[i] == 'Gene name' %>
                 <span class="gene-badge cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= gene_badge_cls %>"
                       data-ensembl-id="<%= ensembl_id %>"

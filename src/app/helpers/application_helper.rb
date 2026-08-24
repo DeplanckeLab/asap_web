@@ -145,7 +145,40 @@ module ApplicationHelper
     url = identifier_type.url_mask.gsub(/\#\{id\}/, identifier.to_s)
     link_to identifier, url, target: '_blank', class: 'badge badge-light'
   end
-  
+
+  # Ensembl genome-browser gene URL: requires assembly (from Annot / parsing).
+  # url_mask: https://www.ensembl.org/genome-browser/#{assembly}?focus=gene:#{id}
+  def ensembl_gene_browser_url(ensembl_id, assembly: nil, project: nil)
+    asm = assembly.to_s.strip.presence
+    asm ||= project_ensembl_assembly(project) if project
+    Scfair::EnsemblGeneUrl.build(ensembl_id: ensembl_id, assembly: asm)
+  end
+
+  def project_ensembl_assembly(project)
+    return nil unless project
+
+    Scfair::ProjectEnsemblMetadataResolver.call(project)&.dig(:ensembl_assembly)
+  rescue StandardError
+    nil
+  end
+
+  def ensembl_gene_browser_link(ensembl_id, assembly: nil, project: nil, html_options: {})
+    label = ensembl_id.to_s
+    url = ensembl_gene_browser_url(ensembl_id, assembly: assembly, project: project)
+    return content_tag(:span, label) if url.blank?
+
+    link_to(
+      label,
+      url,
+      {
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        class: 'text-blue-600 cursor-pointer hover:underline gene-link',
+        data: { ensembl_id: ensembl_id }
+      }.deep_merge(html_options)
+    )
+  end
+
   def display_reference(article)
     return "Unknown reference" unless article
     

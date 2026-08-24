@@ -417,6 +417,7 @@ class ProjectsController < ApplicationController
             end
           end
 
+          @ensembl_assembly = Scfair::ProjectEnsemblMetadataResolver.call(@project)&.dig(:ensembl_assembly)
           @sub_view_html = render_to_string(partial: 'runs/get_de_gene_list', layout: false)
           Rails.logger.info("[show] gene_list sub_view rendered for run #{gl_run.id}, type=#{params[:type]}, genes=#{@nber_genes}")
         rescue => e
@@ -10055,18 +10056,17 @@ class ProjectsController < ApplicationController
       # No feature_name → omit the row (do not resolve release alone).
       return nil if feature_name.blank?
 
-      if release.blank?
-        meta = Scfair::ProjectEnsemblMetadataResolver.call(@project)
-        release = meta&.dig(:ensembl_release)
-      end
+      meta = Scfair::ProjectEnsemblMetadataResolver.call(@project)
+      release = release.presence || meta&.dig(:ensembl_release)
+      assembly = meta&.dig(:ensembl_assembly)
 
       release_i = release.to_i
       return nil unless release_i.positive?
 
       {
         ensembl_release: release_i,
-        ensembl_assembly: nil,
-        ensembl_database: nil,
+        ensembl_assembly: assembly,
+        ensembl_database: meta&.dig(:ensembl_database),
         feature_name: feature_name,
         source: :loom
       }
@@ -12328,6 +12328,7 @@ class ProjectsController < ApplicationController
             end
           end
 
+          @ensembl_assembly = Scfair::ProjectEnsemblMetadataResolver.call(@project)&.dig(:ensembl_assembly)
           @sub_view_html = render_to_string(partial: 'runs/get_de_gene_list', layout: false)
         rescue => e
           Rails.logger.error("[show] Error preparing gene_list sub_view: #{e.class} - #{e.message}")

@@ -2,8 +2,14 @@
 <div class="space-y-3">
   <div class="flex items-center gap-2">
     <span class="text-sm text-gray-500 w-36">Ensembl ID</span>
-    <a href="http://www.ensembl.org/Gene/Summary?g=<%= @gene.ensembl_id %>" target="_blank"
-       class="text-blue-600 hover:underline font-medium"><%= @gene.ensembl_id %></a>
+    <% ensembl_assembly = (@ensembl_release_feature.is_a?(Hash) && @ensembl_release_feature[:ensembl_assembly].presence) || @ensembl_assembly %>
+    <% ensembl_url = ensembl_gene_browser_url(@gene.ensembl_id, assembly: ensembl_assembly, project: @project) %>
+    <% if ensembl_url.present? %>
+      <a href="<%= ensembl_url %>" target="_blank" rel="noopener noreferrer"
+         class="text-blue-600 hover:underline font-medium"><%= @gene.ensembl_id %></a>
+    <% else %>
+      <span class="font-medium text-gray-900"><%= @gene.ensembl_id %></span>
+    <% end %>
   </div>
   <div class="flex items-center gap-2">
     <span class="text-sm text-gray-500 w-36">Gene symbol</span>

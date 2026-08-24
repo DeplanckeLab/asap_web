@@ -124,6 +124,83 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
     FileUtils.remove_entry(dir) if dir && Dir.exist?(dir)
   end
 
+  test 'prefers ensembl_assembly from Annot list_cat_json over parsing and remote lookup' do
+    organism = OrganismStub.new(
+      tax_id: 10090,
+      ensembl_subdomain_id: 1,
+      ensembl_subdomain: SubdomainStub.new(name: 'vertebrates')
+    )
+    dir = Dir.mktmpdir('scfair-ensembl-annot')
+    FileUtils.mkdir_p(File.join(dir, 'parsing'))
+    File.write(
+      File.join(dir, 'parsing', 'output.json'),
+      {
+        messages: [
+          "Estimated Ensembl release 100 (earliest release consistent with the most gene IDs: 10/10 genes co-exist there), assembly 'GRCm38.p6'."
+        ]
+      }.to_json
+    )
+
+    annot = Struct.new(:id, :name, :filepath, :list_cat_json, :categories_json, keyword_init: true).new(
+      id: 1,
+      name: '/attrs/ensembl_assembly',
+      filepath: 'parsing/output.loom',
+      list_cat_json: ['GCA_002204515.1'].to_json,
+      categories_json: nil
+    )
+    project = build_project(
+      organism: organism,
+      tool_versions: { 'ensembl_vertebrate' => '116' },
+      storage_dir: dir
+    )
+    project.define_singleton_method(:annots) { [annot] }
+
+    result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: Object.new)
+
+    assert_equal 'GCA_002204515.1', result[:ensembl_assembly]
+    assert_equal :annot, result[:source]
+  ensure
+    FileUtils.remove_entry(dir) if dir && Dir.exist?(dir)
+  end
+
+  test 'reads ensembl_assembly from parsing output.json metadata categories' do
+    organism = OrganismStub.new(
+      tax_id: 10090,
+      ensembl_subdomain_id: 1,
+      ensembl_subdomain: SubdomainStub.new(name: 'vertebrates')
+    )
+    dir = Dir.mktmpdir('scfair-ensembl-meta')
+    FileUtils.mkdir_p(File.join(dir, 'parsing'))
+    File.write(
+      File.join(dir, 'parsing', 'output.json'),
+      {
+        metadata: [
+          {
+            name: '/attrs/ensembl_assembly',
+            categories: { 'GCA_002204515.1' => 1 }
+          },
+          {
+            name: '/attrs/ensembl_release',
+            categories: { '60' => 1 }
+          }
+        ]
+      }.to_json
+    )
+    project = build_project(
+      organism: organism,
+      tool_versions: { 'ensembl_vertebrate' => '116' },
+      storage_dir: dir
+    )
+
+    result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: Object.new)
+
+    assert_equal '60', result[:ensembl_release]
+    assert_equal 'GCA_002204515.1', result[:ensembl_assembly]
+    assert_equal :parsing, result[:source]
+  ensure
+    FileUtils.remove_entry(dir) if dir && Dir.exist?(dir)
+  end
+
   test 'returns nil when project has no organism or version' do
     project = ProjectStub.new(organism: nil, version_for_catalog: nil)
     assert_nil Scfair::ProjectEnsemblMetadataResolver.call(project)

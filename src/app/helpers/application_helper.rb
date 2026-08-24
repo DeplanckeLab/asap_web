@@ -146,20 +146,30 @@ module ApplicationHelper
     link_to identifier, url, target: '_blank', class: 'badge badge-light'
   end
 
-  # Ensembl genome-browser gene URL: requires assembly (from Annot / parsing).
-  # url_mask: https://www.ensembl.org/genome-browser/#{assembly}?focus=gene:#{id}
+  # Ensembl genome-browser gene URL uses INSDC accession (GCA_...), not assembly.name (AaegL5).
   def ensembl_gene_browser_url(ensembl_id, assembly: nil, project: nil)
     asm = assembly.to_s.strip.presence
-    asm ||= project_ensembl_assembly(project) if project
+    unless asm
+      meta = project_ensembl_metadata(project)
+      asm = meta&.dig(:ensembl_genome_browser_assembly)
+    end
     Scfair::EnsemblGeneUrl.build(ensembl_id: ensembl_id, assembly: asm)
   end
 
-  def project_ensembl_assembly(project)
+  def project_ensembl_metadata(project)
     return nil unless project
 
-    Scfair::ProjectEnsemblMetadataResolver.call(project)&.dig(:ensembl_assembly)
+    Scfair::ProjectEnsemblMetadataResolver.call(project)
   rescue StandardError
     nil
+  end
+
+  def project_ensembl_assembly(project)
+    project_ensembl_metadata(project)&.dig(:ensembl_assembly)
+  end
+
+  def project_ensembl_genome_browser_assembly(project)
+    project_ensembl_metadata(project)&.dig(:ensembl_genome_browser_assembly)
   end
 
   def ensembl_gene_browser_link(ensembl_id, assembly: nil, project: nil, html_options: {})

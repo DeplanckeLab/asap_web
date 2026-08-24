@@ -35,12 +35,14 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
     lookup = Minitest::Mock.new
     lookup.expect(:remote_available?, true)
     lookup.expect(:assembly_name_at_release_for_organism, 'GRCh38.p14', [9606, '113'])
+    lookup.expect(:genome_browser_assembly, 'GRCh38.p14', [{ tax_id: 9606, assembly_name: 'GRCh38.p14', release: '113' }])
 
     result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: lookup)
 
     assert_equal '113', result[:ensembl_release]
     assert_equal 'Ensembl', result[:ensembl_database]
     assert_equal 'GRCh38.p14', result[:ensembl_assembly]
+    assert_equal 'GRCh38.p14', result[:ensembl_genome_browser_assembly]
     lookup.verify
   end
 
@@ -58,12 +60,14 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
     lookup = Minitest::Mock.new
     lookup.expect(:remote_available?, true)
     lookup.expect(:assembly_name_at_release_for_organism, 'BDGP6.46', [7227, '60'])
+    lookup.expect(:genome_browser_assembly, 'BDGP6.46', [{ tax_id: 7227, assembly_name: 'BDGP6.46', release: '60' }])
 
     result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: lookup)
 
     assert_equal '60', result[:ensembl_release]
     assert_equal 'EnsemblMetazoa', result[:ensembl_database]
     assert_equal 'BDGP6.46', result[:ensembl_assembly]
+    assert_equal 'BDGP6.46', result[:ensembl_genome_browser_assembly]
     lookup.verify
   end
 
@@ -87,6 +91,7 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
     assert_equal '60', result[:ensembl_release]
     assert_equal 'EnsemblCOVID-19', result[:ensembl_database]
     assert_equal 'GCA_009858895.3', result[:ensembl_assembly]
+    assert_equal 'GCA_009858895.3', result[:ensembl_genome_browser_assembly]
     lookup.verify
   end
 
@@ -113,11 +118,15 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
       storage_dir: dir
     )
 
-    # Parsing supplies release+assembly; remote lookup must not be required.
-    result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: Object.new)
+    lookup = Minitest::Mock.new
+    lookup.expect(:remote_available?, true)
+    lookup.expect(:genome_browser_assembly, 'GRCm38.p6', [{ tax_id: 10090, assembly_name: 'GRCm38.p6', release: '100' }])
+
+    result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: lookup)
 
     assert_equal '100', result[:ensembl_release]
     assert_equal 'GRCm38.p6', result[:ensembl_assembly]
+    assert_equal 'GRCm38.p6', result[:ensembl_genome_browser_assembly]
     assert_equal 'Ensembl', result[:ensembl_database]
     assert_equal :parsing, result[:source]
   ensure
@@ -158,6 +167,7 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
     result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: Object.new)
 
     assert_equal 'GCA_002204515.1', result[:ensembl_assembly]
+    assert_equal 'GCA_002204515.1', result[:ensembl_genome_browser_assembly]
     assert_equal :annot, result[:source]
   ensure
     FileUtils.remove_entry(dir) if dir && Dir.exist?(dir)
@@ -196,7 +206,76 @@ class ScfairProjectEnsemblMetadataResolverTest < TestBaseWithoutFixtures
 
     assert_equal '60', result[:ensembl_release]
     assert_equal 'GCA_002204515.1', result[:ensembl_assembly]
+    assert_equal 'GCA_002204515.1', result[:ensembl_genome_browser_assembly]
     assert_equal :parsing, result[:source]
+  ensure
+    FileUtils.remove_entry(dir) if dir && Dir.exist?(dir)
+  end
+
+  test 'resolves genome browser assembly from INSDC accession when loom stores assembly name' do
+    organism = OrganismStub.new(
+      tax_id: 7159,
+      ensembl_subdomain_id: 2,
+      ensembl_subdomain: SubdomainStub.new(name: 'metazoa')
+    )
+    dir = Dir.mktmpdir('scfair-ensembl-aedes')
+    FileUtils.mkdir_p(File.join(dir, 'parsing'))
+    File.write(
+      File.join(dir, 'parsing', 'output.json'),
+      {
+        metadata: [
+          { name: '/attrs/ensembl_assembly', categories: { 'AaegL5' => 1 } },
+          { name: '/attrs/ensembl_release', categories: { '62' => 1 } }
+        ]
+      }.to_json
+    )
+    project = build_project(
+      organism: organism,
+      tool_versions: { 'ensembl_genomes' => '62' },
+      storage_dir: dir
+    )
+
+    lookup = Minitest::Mock.new
+    lookup.expect(:remote_available?, true)
+    lookup.expect(:genome_browser_assembly, 'GCA_002204515.1', [{ tax_id: 7159, assembly_name: 'AaegL5', release: '62' }])
+
+    result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: lookup)
+
+    assert_equal '62', result[:ensembl_release]
+    assert_equal 'AaegL5', result[:ensembl_assembly]
+    assert_equal 'GCA_002204515.1', result[:ensembl_genome_browser_assembly]
+    lookup.verify
+  ensure
+    FileUtils.remove_entry(dir) if dir && Dir.exist?(dir)
+  end
+
+  test 'uses GCA accession directly as genome browser assembly when already stored in loom' do
+    organism = OrganismStub.new(
+      tax_id: 7159,
+      ensembl_subdomain_id: 2,
+      ensembl_subdomain: SubdomainStub.new(name: 'metazoa')
+    )
+    dir = Dir.mktmpdir('scfair-ensembl-gca')
+    FileUtils.mkdir_p(File.join(dir, 'parsing'))
+    File.write(
+      File.join(dir, 'parsing', 'output.json'),
+      {
+        metadata: [
+          { name: '/attrs/ensembl_assembly', categories: { 'GCA_002204515.1' => 1 } },
+          { name: '/attrs/ensembl_release', categories: { '62' => 1 } }
+        ]
+      }.to_json
+    )
+    project = build_project(
+      organism: organism,
+      tool_versions: { 'ensembl_genomes' => '62' },
+      storage_dir: dir
+    )
+
+    result = Scfair::ProjectEnsemblMetadataResolver.call(project, lookup: Object.new)
+
+    assert_equal 'GCA_002204515.1', result[:ensembl_assembly]
+    assert_equal 'GCA_002204515.1', result[:ensembl_genome_browser_assembly]
   ensure
     FileUtils.remove_entry(dir) if dir && Dir.exist?(dir)
   end

@@ -18,6 +18,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_06_30_140000) do
   create_table "assemblies", id: :serial, force: :cascade do |t|
     t.integer "first_ensembl_release"
     t.integer "latest_ensembl_release"
+    t.text "insdc_accession"
     t.text "name"
     t.integer "organism_id", null: false
     t.index ["organism_id", "name"], name: "index_assemblies_on_organism_id_and_name", unique: true

@@ -10,7 +10,7 @@ module AsapData
 
     DB_TYPES = %i[vertebrates bacteria fungi metazoa plants protists].freeze
     DEFAULT_ENSEMBL_DATA_DIR = "/mnt/asap_data/ensembl"
-    META_KEYS = %w[assembly.name assembly.default].freeze
+    META_KEYS = %w[assembly.name assembly.default assembly.accession].freeze
     DEFAULT_RELEASE_FROM = {
       vertebrates: 54,
       bacteria: 5,
@@ -89,7 +89,7 @@ module AsapData
             core_folder = resolve_core_folder(organism[:ensembl_db_name], core_folders)
           end
 
-          assembly_name = assembly_name_for_organism(
+          assembly_info = assembly_info_for_organism(
             release_dir: release_dir,
             db_name: organism[:ensembl_db_name],
             db_type: db_type,
@@ -98,6 +98,8 @@ module AsapData
             download_missing_meta: download_missing_meta,
             stats: stats
           )
+          assembly_name = assembly_info[:name]
+          insdc_accession = assembly_info[:insdc_accession]
           next if assembly_name.blank?
 
           stats[:assembly_names_found] += 1
@@ -106,7 +108,8 @@ module AsapData
             organism[:id],
             assembly_name,
             release_num,
-            remote_db: remote_db
+            remote_db: remote_db,
+            insdc_accession: insdc_accession
           )
           stats[:assemblies_created] += 1 if created
           stats[:assemblies_updated] += 1 if updated
@@ -524,7 +527,7 @@ module AsapData
       cache[cache_key] ||= fetch_core_folder_names(db_type, release_num, only_db_names: wanted)
     end
 
-    def assembly_name_for_organism(release_dir:, db_name:, db_type:, release_num:, core_folder:, download_missing_meta:, stats:)
+    def assembly_info_for_organism(release_dir:, db_name:, db_type:, release_num:, core_folder:, download_missing_meta:, stats:)
       meta_path = ensure_meta_txt(
         release_dir: release_dir,
         db_name: db_name,
@@ -534,8 +537,10 @@ module AsapData
         download_missing_meta: download_missing_meta,
         stats: stats
       )
-      assembly_name = parse_assembly_name(meta_path) if valid_meta_file?(meta_path)
-      return assembly_name if assembly_name.present?
+      if valid_meta_file?(meta_path)
+        info = parse_assembly_meta(meta_path)
+        return info if info[:name].present?
+      end
 
       coord_path = ensure_coord_system_txt(
         release_dir: release_dir,
@@ -546,7 +551,20 @@ module AsapData
         download_missing_meta: download_missing_meta,
         stats: stats
       )
-      parse_assembly_name_from_coord_system(coord_path)
+      name = parse_assembly_name_from_coord_system(coord_path)
+      { name: name, insdc_accession: nil }
+    end
+
+    def assembly_name_for_organism(release_dir:, db_name:, db_type:, release_num:, core_folder:, download_missing_meta:, stats:)
+      assembly_info_for_organism(
+        release_dir: release_dir,
+        db_name: db_name,
+        db_type: db_type,
+        release_num: release_num,
+        core_folder: core_folder,
+        download_missing_meta: download_missing_meta,
+        stats: stats
+      )[:name]
     end
 
     def ensure_meta_txt(release_dir:, db_name:, db_type:, release_num:, core_folder:, download_missing_meta:, stats:)
@@ -801,7 +819,7 @@ module AsapData
       raise "bunzip2 failed for #{path}: #{stderr.strip}"
     end
 
-    def parse_assembly_name(meta_path)
+    def parse_assembly_meta(meta_path)
       values = {}
       File.foreach(meta_path) do |line|
         line = normalize_ensembl_line(line)
@@ -817,7 +835,14 @@ module AsapData
         values[key] = value
       end
 
-      values["assembly.name"].presence || values["assembly.default"].presence
+      {
+        name: values["assembly.name"].presence || values["assembly.default"].presence,
+        insdc_accession: values["assembly.accession"].presence
+      }
+    end
+
+    def parse_assembly_name(meta_path)
+      parse_assembly_meta(meta_path)[:name]
     end
 
     def normalize_ensembl_line(line)
@@ -968,7 +993,7 @@ module AsapData
       download_missing_meta: default_download_missing_meta?
     )
       stats = { meta_downloads: 0, skipped_no_meta: 0 }
-      assembly_name = assembly_name_for_organism(
+      assembly_info = assembly_info_for_organism(
         release_dir: Pathname(release_dir),
         db_name: ensembl_db_name,
         db_type: db_type,
@@ -977,6 +1002,7 @@ module AsapData
         download_missing_meta: download_missing_meta,
         stats: stats
       )
+      assembly_name = assembly_info[:name]
       if assembly_name.blank?
         return { status: :skipped, reason: :no_meta }
       end
@@ -987,17 +1013,89 @@ module AsapData
         organism_id,
         assembly_name,
         release_num,
-        remote_db: remote_db
+        remote_db: remote_db,
+        insdc_accession: assembly_info[:insdc_accession]
       )
       record = assemblies_by_key[assembly_cache_key(organism_id, assembly_name)]
       {
         status: :ok,
         assembly_name: assembly_name,
+        insdc_accession: record&.insdc_accession,
         created: created,
         updated: updated,
         first_ensembl_release: record&.first_ensembl_release,
         latest_ensembl_release: record&.latest_ensembl_release
       }
+    end
+
+    # Fill assemblies.insdc_accession from Ensembl meta.txt (assembly.accession).
+    def backfill_insdc_accessions!(remote_db: default_remote_db, download_missing_meta: default_download_missing_meta?)
+      base_dirs = all_ensembl_base_dirs
+      raise ArgumentError, "Ensembl data directory not found (set ENSEMBL_DATA_DIR)" if base_dirs.empty?
+
+      stats = {
+        organisms_total: 0,
+        accessions_updated: 0,
+        accessions_already_set: 0,
+        accessions_missing: 0,
+        meta_downloads: 0,
+        skipped_no_meta: 0
+      }
+
+      core_folders_cache = {}
+      subdomain_latest_releases = load_subdomain_latest_releases(remote_db)
+      organisms = load_organisms(remote_db)
+      stats[:organisms_total] = organisms.size
+
+      organisms.each do |organism|
+        db_type = organism[:subdomain].to_sym
+        next unless DB_TYPES.include?(db_type)
+
+        release_numbers = release_numbers_for_scan(
+          organism,
+          base_dirs,
+          subdomain_latest_releases[organism[:subdomain]],
+          download_missing: download_missing_meta
+        )
+        next if release_numbers.empty?
+
+        release_numbers.each do |release_num|
+          release_dir = resolve_release_dir(base_dirs, db_type, release_num) ||
+                        ensure_release_dir(writable_ensembl_base_dir(base_dirs), db_type, release_num)
+          core_folder = nil
+          if download_missing_meta
+            core_folders = core_folders_for_release(core_folders_cache, db_type, release_num)
+            core_folder = resolve_core_folder(organism[:ensembl_db_name], core_folders)
+          end
+
+          assembly_info = assembly_info_for_organism(
+            release_dir: release_dir,
+            db_name: organism[:ensembl_db_name],
+            db_type: db_type,
+            release_num: release_num,
+            core_folder: core_folder,
+            download_missing_meta: download_missing_meta,
+            stats: stats
+          )
+          assembly_name = assembly_info[:name]
+          insdc_accession = assembly_info[:insdc_accession]
+          next if assembly_name.blank? || insdc_accession.blank?
+
+          RemoteAssembly.with_remote(remote_db) do
+            record = RemoteAssembly.find_by(organism_id: organism[:id], name: assembly_name)
+            next unless record
+
+            if record.insdc_accession.to_s.strip == insdc_accession
+              stats[:accessions_already_set] += 1
+            else
+              record.update!(insdc_accession: insdc_accession)
+              stats[:accessions_updated] += 1
+            end
+          end
+        end
+      end
+
+      stats
     end
 
     def update_subdomain_latest_release!(db_type, release_num, remote_db: default_remote_db)
@@ -1022,19 +1120,23 @@ module AsapData
       end
     end
 
-    def upsert_assembly!(assemblies_by_key, organism_id, name, release_num, remote_db:)
+    def upsert_assembly!(assemblies_by_key, organism_id, name, release_num, remote_db:, insdc_accession: nil)
       RemoteAssembly.with_remote(remote_db) do
         key = assembly_cache_key(organism_id, name)
         existing = assemblies_by_key[key] || RemoteAssembly.find_by(organism_id: organism_id, name: name)
         assemblies_by_key[key] = existing if existing
+        accession = insdc_accession.to_s.strip.presence
         if existing
           new_first = [existing.first_ensembl_release, release_num].compact.min
           new_latest = [existing.latest_ensembl_release, release_num].compact.max
-          if new_first != existing.first_ensembl_release || new_latest != existing.latest_ensembl_release
-            existing.update!(
-              first_ensembl_release: new_first,
-              latest_ensembl_release: new_latest
-            )
+          updates = {}
+          updates[:first_ensembl_release] = new_first if new_first != existing.first_ensembl_release
+          updates[:latest_ensembl_release] = new_latest if new_latest != existing.latest_ensembl_release
+          if accession.present? && existing.insdc_accession.to_s.strip != accession
+            updates[:insdc_accession] = accession
+          end
+          if updates.any?
+            existing.update!(updates)
             return [false, true]
           end
           [false, false]
@@ -1042,6 +1144,7 @@ module AsapData
           record = RemoteAssembly.create!(
             organism_id: organism_id,
             name: name,
+            insdc_accession: accession,
             first_ensembl_release: release_num,
             latest_ensembl_release: release_num
           )

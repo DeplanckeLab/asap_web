@@ -112,6 +112,16 @@ class ScfairEnsemblReferenceLookupTest < TestBaseWithoutFixtures
     assert_equal :ok, status
   end
 
+  test 'insdc_accession_for_assembly maps AaegL5 to GCA accession for Aedes aegypti' do
+    lookup = Scfair::EnsemblReferenceLookup.new(remote_db: 'asap_data_v8')
+    skip 'ASAP assemblies unavailable' unless lookup.remote_available?
+
+    accession = lookup.insdc_accession_for_assembly(7159, 'AaegL5', release: 62)
+    skip 'AaegL5 assembly or INSDC accession not populated yet' if accession.blank?
+
+    assert_equal 'GCA_002204515.1', accession
+  end
+
   test 'gene_statuses_at_release batches mouse gene lookups' do
     lookup = Scfair::EnsemblReferenceLookup.new(remote_db: 'asap_data_v8')
     skip 'ASAP reference genes unavailable' unless lookup.remote_available?

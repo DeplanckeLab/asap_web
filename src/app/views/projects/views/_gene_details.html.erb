@@ -3,7 +3,8 @@
   <div class="flex items-center gap-2">
     <span class="text-sm text-gray-500 w-36">Ensembl ID</span>
     <% ensembl_assembly = (@ensembl_release_feature.is_a?(Hash) && @ensembl_release_feature[:ensembl_assembly].presence) || @ensembl_assembly %>
-    <% ensembl_url = ensembl_gene_browser_url(@gene.ensembl_id, assembly: ensembl_assembly, project: @project) %>
+    <% ensembl_browser_assembly = (@ensembl_release_feature.is_a?(Hash) && @ensembl_release_feature[:ensembl_genome_browser_assembly].presence) || @ensembl_genome_browser_assembly %>
+    <% ensembl_url = ensembl_gene_browser_url(@gene.ensembl_id, assembly: ensembl_browser_assembly, project: @project) %>
     <% if ensembl_url.present? %>
       <a href="<%= ensembl_url %>" target="_blank" rel="noopener noreferrer"
          class="text-blue-600 hover:underline font-medium"><%= @gene.ensembl_id %></a>

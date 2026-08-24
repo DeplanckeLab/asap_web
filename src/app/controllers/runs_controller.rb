@@ -137,7 +137,9 @@ class RunsController < ApplicationController
     end
     #end
     #    @data.reverse! if params[:type] == 'up'
-    @ensembl_assembly = Scfair::ProjectEnsemblMetadataResolver.call(@project)&.dig(:ensembl_assembly)
+    @ensembl_meta = Scfair::ProjectEnsemblMetadataResolver.call(@project)
+    @ensembl_assembly = @ensembl_meta&.dig(:ensembl_assembly)
+    @ensembl_genome_browser_assembly = @ensembl_meta&.dig(:ensembl_genome_browser_assembly)
     if !params[:download]
       render :partial => 'get_de_gene_list'
     else

@@ -189,6 +189,24 @@ class EnsemblAssembliesLoaderTest < TestBaseWithoutFixtures
     end
   end
 
+  test 'parse_assembly_meta reads assembly.name and assembly.accession' do
+    Dir.mktmpdir do |tmpdir|
+      meta_path = Pathname.new(tmpdir) + "meta.txt"
+      File.write(
+        meta_path,
+        [
+          "1\t1\tassembly.name\tAaegL5",
+          "1\t1\tassembly.accession\tGCA_002204515.1"
+        ].join("\n") + "\n"
+      )
+
+      info = AsapData::EnsemblAssembliesLoader.parse_assembly_meta(meta_path)
+
+      assert_equal "AaegL5", info[:name]
+      assert_equal "GCA_002204515.1", info[:insdc_accession]
+    end
+  end
+
   test 'upsert_assembly_for_organism_release skips when meta is missing' do
     with_tmp_ensembl_tree do |base_dir|
       result = AsapData::EnsemblAssembliesLoader.upsert_assembly_for_organism_release!(

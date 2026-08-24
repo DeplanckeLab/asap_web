@@ -36,11 +36,18 @@ module Scfair
       assembly = annots[:ensembl_assembly].presence ||
                  parsing[:ensembl_assembly].presence ||
                  resolve_assembly(organism, release, remote_db)
+      genome_browser_assembly = resolve_genome_browser_assembly(
+        organism,
+        assembly,
+        release,
+        remote_db
+      )
 
       result = {}
       result[:ensembl_release] = release.to_s if release.present?
       result[:ensembl_database] = database if database.present?
       result[:ensembl_assembly] = assembly if assembly.present?
+      result[:ensembl_genome_browser_assembly] = genome_browser_assembly if genome_browser_assembly.present?
       if annots[:ensembl_assembly].present? || annots[:ensembl_release].present?
         result[:source] = :annot
       elsif parsing[:ensembl_release].present? || parsing[:ensembl_assembly].present?
@@ -205,6 +212,21 @@ module Scfair
       return nil unless lookup.remote_available?
 
       lookup.assembly_name_at_release_for_organism(organism.tax_id, release)
+    end
+
+    def resolve_genome_browser_assembly(organism, assembly_name, release, remote_db)
+      name = assembly_name.to_s.strip
+      return name if name.match?(/\AGCA[_\d]/i)
+      return nil if name.blank? || remote_db.blank?
+
+      lookup = @lookup_override || EnsemblReferenceLookup.new(remote_db: remote_db)
+      return nil unless lookup.remote_available?
+
+      lookup.genome_browser_assembly(
+        tax_id: organism.tax_id,
+        assembly_name: name,
+        release: release
+      )
     end
   end
 end

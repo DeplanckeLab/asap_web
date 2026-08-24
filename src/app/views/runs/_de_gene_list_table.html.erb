@@ -66,7 +66,7 @@
                 style="<%= compact ? 'padding: 5px 8px; color: #374151; white-space: nowrap;' : '' %>"
                 <% if sort_value.present? %>data-sort-value="<%= sort_value %>" title="<%= sort_value %>"<% end %>>
               <% if @fields[i] == 'EnsemblID' && e[i].present? %>
-                <% ensembl_url = ensembl_gene_browser_url(e[i], assembly: @ensembl_assembly, project: @project) %>
+                <% ensembl_url = ensembl_gene_browser_url(e[i], assembly: @ensembl_genome_browser_assembly, project: @project) %>
                 <% if ensembl_url.present? %>
                   <a class="text-blue-600 cursor-pointer hover:underline gene-link"
                      href="<%= ensembl_url %>"

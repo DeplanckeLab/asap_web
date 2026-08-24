@@ -417,7 +417,9 @@ class ProjectsController < ApplicationController
             end
           end
 
-          @ensembl_assembly = Scfair::ProjectEnsemblMetadataResolver.call(@project)&.dig(:ensembl_assembly)
+          @ensembl_meta = Scfair::ProjectEnsemblMetadataResolver.call(@project)
+          @ensembl_assembly = @ensembl_meta&.dig(:ensembl_assembly)
+          @ensembl_genome_browser_assembly = @ensembl_meta&.dig(:ensembl_genome_browser_assembly)
           @sub_view_html = render_to_string(partial: 'runs/get_de_gene_list', layout: false)
           Rails.logger.info("[show] gene_list sub_view rendered for run #{gl_run.id}, type=#{params[:type]}, genes=#{@nber_genes}")
         rescue => e
@@ -10066,6 +10068,7 @@ class ProjectsController < ApplicationController
       {
         ensembl_release: release_i,
         ensembl_assembly: assembly,
+        ensembl_genome_browser_assembly: meta&.dig(:ensembl_genome_browser_assembly),
         ensembl_database: meta&.dig(:ensembl_database),
         feature_name: feature_name,
         source: :loom
@@ -12328,7 +12331,9 @@ class ProjectsController < ApplicationController
             end
           end
 
-          @ensembl_assembly = Scfair::ProjectEnsemblMetadataResolver.call(@project)&.dig(:ensembl_assembly)
+          @ensembl_meta = Scfair::ProjectEnsemblMetadataResolver.call(@project)
+          @ensembl_assembly = @ensembl_meta&.dig(:ensembl_assembly)
+          @ensembl_genome_browser_assembly = @ensembl_meta&.dig(:ensembl_genome_browser_assembly)
           @sub_view_html = render_to_string(partial: 'runs/get_de_gene_list', layout: false)
         rescue => e
           Rails.logger.error("[show] Error preparing gene_list sub_view: #{e.class} - #{e.message}")

@@ -279,6 +279,30 @@ module Scfair
       nil
     end
 
+    # INSDC accession for Ensembl genome-browser URLs (e.g. GCA_002204515.1 for AaegL5).
+    def insdc_accession_for_assembly(tax_id, assembly_name, release: nil)
+      assemblies = assemblies_for_tax_id_any_version(tax_id)
+      matched = matching_assemblies(assemblies, assembly_name, release: release)
+      return nil if matched.empty?
+
+      record = matched.find { |assembly| assembly.insdc_accession.to_s.strip.present? } || matched.first
+      accession = record.insdc_accession.to_s.strip.presence
+      return accession if accession.present?
+
+      name = record.name.to_s.strip
+      return name if name.match?(/\AGCA[_\d]/i)
+
+      nil
+    rescue StandardError
+      nil
+    end
+
+    def genome_browser_assembly(tax_id:, assembly_name:, release: nil)
+      insdc_accession_for_assembly(tax_id, assembly_name, release: release)
+    rescue StandardError
+      nil
+    end
+
     def release_gene_name(feature_reference:, ensembl_id:, release:)
       return nil if release.blank?
       return nil unless remote_available?

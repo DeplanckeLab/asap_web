@@ -344,6 +344,19 @@ module Scfair
       nil
     end
 
+    def assemblies_for_tax_id_any_version(tax_id)
+      assemblies_for_tax_id(tax_id)
+    end
+
+    def assemblies_remote_db
+      Asap2RemoteRecord.latest_remote_db
+    end
+
+    def assemblies_remote_available?
+      db = assemblies_remote_db
+      db.present? && RemoteOrganism.remote_versions.include?(db)
+    end
+
     private
 
     def default_remote_db
@@ -435,19 +448,6 @@ module Scfair
           AsapData::EnsemblAssembliesLoader.organism_present_in_release?(release_dir, organism.ensembl_db_name)
       end
       organism_releases.last
-    end
-
-    def assemblies_for_tax_id_any_version(tax_id)
-      assemblies_for_tax_id(tax_id)
-    end
-
-    def assemblies_remote_db
-      Asap2RemoteRecord.latest_remote_db
-    end
-
-    def assemblies_remote_available?
-      db = assemblies_remote_db
-      db.present? && RemoteOrganism.remote_versions.include?(db)
     end
   end
 end

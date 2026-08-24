@@ -1446,6 +1446,9 @@ export class UIManager {
       settingsWindow.style.display = 'flex'
       this.positionSettingsWindowInViewport(settingsWindow)
       this.initializeSettingsWindow()
+      if (typeof this.controller?.bringVisualizationOntopUiToFront === 'function') {
+        this.controller.bringVisualizationOntopUiToFront(settingsWindow)
+      }
     } else {
       settingsWindow.style.display = 'none'
     }

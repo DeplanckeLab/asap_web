@@ -1,3 +1,5 @@
+import { GeneManager } from "visualization/gene_manager"
+
 export class GeneSetCollectionsController {
   constructor(controller, options = {}) {
     this.controller = controller
@@ -636,12 +638,15 @@ export class GeneSetCollectionsController {
     }
 
     const genes = Array.isArray(payload.genes) ? payload.genes : []
-    const maxGenes = Number(geneManager.maxGenePanelGenes) > 0
-      ? Number(geneManager.maxGenePanelGenes)
-      : 1000
+    const maxGenes = typeof geneManager.getMaxGenePanelGenes === 'function'
+      ? geneManager.getMaxGenePanelGenes()
+      : (Number(geneManager.maxGenePanelGenes) > 0 ? Number(geneManager.maxGenePanelGenes) : 1000)
     if (genes.length > maxGenes) {
       throw new Error(
-        `This gene set has ${genes.length} genes in the dataset. You can add at most ${maxGenes} genes to the gene panel at once.`
+        GeneManager.genePanelLimitMessage(
+          `This gene set has ${genes.length} genes in the dataset. You can add at most ${maxGenes} genes to the gene panel at once.`,
+          maxGenes
+        )
       )
     }
 
@@ -967,6 +972,10 @@ export class GeneSetCollectionsController {
     this.positionGeneSetGenesPopover(anchorEl, popover)
 
     const onDocumentPointerDown = (event) => {
+      const sharedGeneModal = document.getElementById('annotation-popup-gene-modal-overlay')
+      if (sharedGeneModal && sharedGeneModal.contains(event.target)) {
+        return
+      }
       if (this.geneDetailsModal?.overlay && this.geneDetailsModal.overlay.contains(event.target)) {
         return
       }
@@ -1027,25 +1036,23 @@ export class GeneSetCollectionsController {
       return this.geneDetailsModal
     }
 
-    const overlay = document.createElement('div')
-    overlay.style.display = 'none'
-    overlay.style.position = 'fixed'
-    overlay.style.top = '0'
-    overlay.style.left = '0'
-    overlay.style.right = '0'
-    overlay.style.bottom = '0'
-    overlay.style.zIndex = '7000'
-    overlay.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'
-    overlay.style.alignItems = 'center'
-    overlay.style.justifyContent = 'center'
-
     const modal = document.createElement('div')
+    modal.style.display = 'none'
+    modal.style.position = 'fixed'
+    modal.style.top = '80px'
+    modal.style.left = '50%'
+    modal.style.transform = 'translateX(-50%)'
+    modal.style.width = 'min(680px, calc(100vw - 32px))'
+    modal.style.height = 'min(560px, 80vh)'
+    modal.style.minWidth = '420px'
+    modal.style.minHeight = '280px'
+    modal.style.maxWidth = '90vw'
+    modal.style.maxHeight = '90vh'
+    modal.style.zIndex = '7000'
     modal.style.background = '#ffffff'
+    modal.style.border = '1px solid #d1d5db'
     modal.style.borderRadius = '10px'
     modal.style.boxShadow = '0 18px 35px rgba(15, 23, 42, 0.3)'
-    modal.style.width = 'min(680px, calc(100vw - 32px))'
-    modal.style.maxHeight = '80vh'
-    modal.style.display = 'flex'
     modal.style.flexDirection = 'column'
     modal.style.overflow = 'hidden'
 
@@ -1056,6 +1063,9 @@ export class GeneSetCollectionsController {
     header.style.padding = '12px 16px'
     header.style.borderBottom = '1px solid #e5e7eb'
     header.style.background = 'linear-gradient(to right, #eff6ff, #eef2ff)'
+    header.style.cursor = 'move'
+    header.style.userSelect = 'none'
+    header.style.flexShrink = '0'
 
     const title = document.createElement('h3')
     title.style.margin = '0'
@@ -1082,6 +1092,8 @@ export class GeneSetCollectionsController {
     const body = document.createElement('div')
     body.style.padding = '16px'
     body.style.overflowY = 'auto'
+    body.style.flex = '1'
+    body.style.minHeight = '0'
     body.style.fontSize = '13px'
     body.style.color = '#374151'
     body.innerHTML = '<div style="color:#6b7280;">Loading...</div>'
@@ -1090,35 +1102,85 @@ export class GeneSetCollectionsController {
     header.appendChild(closeBtn)
     modal.appendChild(header)
     modal.appendChild(body)
-    overlay.appendChild(modal)
-    document.body.appendChild(overlay)
+    document.body.appendChild(modal)
 
     const close = () => {
-      overlay.style.display = 'none'
+      modal.style.display = 'none'
     }
     closeBtn.addEventListener('click', (event) => {
       event.preventDefault()
       event.stopPropagation()
       close()
     })
-    overlay.addEventListener('click', (event) => {
-      if (event.target === overlay) close()
-    })
 
-    this.geneDetailsModal = { overlay, title, body }
+    this.bindGeneDetailsModalWindow(modal, header)
+
+    this.geneDetailsModal = { overlay: modal, title, body }
     return this.geneDetailsModal
   }
 
-  async openGeneDetailsModal(gene) {
-    const modal = this.ensureGeneDetailsModal()
-    if (!modal) return
+  bindGeneDetailsModalWindow(modal, header) {
+    if (!modal || !header || modal.dataset.windowBound === 'true') return
+    modal.dataset.windowBound = 'true'
 
+    let isDragging = false
+    let dragOffsetX = 0
+    let dragOffsetY = 0
+
+    header.addEventListener('mousedown', (event) => {
+      if (event.target.closest('button')) return
+      isDragging = true
+      const rect = modal.getBoundingClientRect()
+      modal.style.transform = 'none'
+      modal.style.left = `${rect.left}px`
+      modal.style.top = `${rect.top}px`
+      dragOffsetX = event.clientX - rect.left
+      dragOffsetY = event.clientY - rect.top
+      event.preventDefault()
+    })
+
+    const onMouseMove = (event) => {
+      if (!isDragging) return
+      const maxX = Math.max(0, window.innerWidth - 80)
+      const maxY = Math.max(0, window.innerHeight - 40)
+      const nextX = Math.max(0, Math.min(event.clientX - dragOffsetX, maxX))
+      const nextY = Math.max(0, Math.min(event.clientY - dragOffsetY, maxY))
+      modal.style.left = `${nextX}px`
+      modal.style.top = `${nextY}px`
+    }
+
+    const onMouseUp = () => {
+      isDragging = false
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+  }
+
+  async openGeneDetailsModal(gene) {
     const ensemblId = String(gene?.ensembl_id || gene?.ensemblId || '').trim()
     const geneSymbol = String(gene?.symbol || gene?.name || '').trim()
     const geneId = String(gene?.gene_id || gene?.geneId || '').trim()
+
+    const annotOverlay = document.getElementById('annotation-popup-overlay')
+    const searchUrl = annotOverlay?.dataset?.searchGeneUrl ||
+      (this.projectIdentifier ? `/projects/${encodeURIComponent(this.projectIdentifier)}/search_gene` : '')
+
+    if (searchUrl && typeof window.openAnnotationPopupGeneModal === 'function') {
+      window.openAnnotationPopupGeneModal(ensemblId, searchUrl, geneSymbol, geneId, {})
+      if (typeof this.controller?._ensureGeneDetailsModalAboveDeWindow === 'function') {
+        this.controller._ensureGeneDetailsModalAboveDeWindow()
+      }
+      return
+    }
+
+    const modal = this.ensureGeneDetailsModal()
+    if (!modal) return
+
     const geneLabel = geneSymbol || ensemblId || geneId || 'Gene'
 
     modal.overlay.style.display = 'flex'
+    modal.overlay.style.flexDirection = 'column'
     modal.title.textContent = geneLabel
     modal.body.innerHTML = '<div style="color:#6b7280;">Loading...</div>'
 

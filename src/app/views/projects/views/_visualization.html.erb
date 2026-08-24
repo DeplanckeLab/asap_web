@@ -5383,6 +5383,9 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
   panel.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af; font-size: 14px;"><i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Loading...</div>'
 
   overlay.style.display = 'flex'
+  if (typeof window.bringVisualizationPopupToFront === 'function') {
+    window.bringVisualizationPopupToFront(overlay)
+  }
   dialog.style.left = ''
   dialog.style.top = ''
   dialog.style.position = ''

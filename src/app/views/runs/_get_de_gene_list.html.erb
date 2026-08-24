@@ -138,6 +138,8 @@
   var container = document.getElementById('de-genelist-container');
   var searchGeneUrl = '<%= search_gene_project_path(@project) %>';
   if (!container) return;
+  // DE visualization view binds gene-badge clicks in visualization_controller.js.
+  if (container.dataset.deVizGeneSelect === '1') return;
   container.addEventListener('click', function(e) {
     var badge = e.target.closest('.gene-badge');
     var link = e.target.closest('.gene-link');

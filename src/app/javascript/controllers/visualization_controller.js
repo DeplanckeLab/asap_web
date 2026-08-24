@@ -49,6 +49,8 @@ const VISUALIZATION_ONTOP_UI_ROOT_SELECTOR = [
   '.guided-tour-overlay'
 ].join(',')
 
+const VISUALIZATION_ONTOP_UI_BASE_Z = 12000
+
 // console.log('Visualization controller file loaded - VERSION 3.0 WITH REGL + CATEGORY LABELS')
 
 export default class extends Controller {
@@ -319,6 +321,36 @@ export default class extends Controller {
     return true
   }
 
+  bringVisualizationOntopUiToFront(root) {
+    if (!root) return
+    if (!this._visualizationOntopUiZCounter || this._visualizationOntopUiZCounter < VISUALIZATION_ONTOP_UI_BASE_Z) {
+      this._visualizationOntopUiZCounter = VISUALIZATION_ONTOP_UI_BASE_Z
+    }
+    this._visualizationOntopUiZCounter += 1
+    root.style.zIndex = String(this._visualizationOntopUiZCounter)
+  }
+
+  bringVisualizationOntopUiToFrontById(elementId) {
+    if (!elementId) return
+    this.bringVisualizationOntopUiToFront(document.getElementById(elementId))
+  }
+
+  handleVisualizationOntopUiPointerDown(event) {
+    const target = event.target
+    if (!(target instanceof Element)) return
+
+    const moduleScorePopup = target.closest('[data-module-score-popup-id]')
+    if (moduleScorePopup?.dataset?.moduleScorePopupId) {
+      this.bringModuleScorePopupToFront(moduleScorePopup.dataset.moduleScorePopupId)
+      return
+    }
+
+    const root = target.closest(VISUALIZATION_ONTOP_UI_ROOT_SELECTOR)
+    if (root && this.isOntopVisualizationUiRootActive(root)) {
+      this.bringVisualizationOntopUiToFront(root)
+    }
+  }
+
   isClientPointOverVisualizationOntopUi(clientX, clientY) {
     if (typeof clientX !== 'number' || typeof clientY !== 'number') return false
     if (typeof document.elementsFromPoint !== 'function') return false
@@ -365,6 +397,18 @@ export default class extends Controller {
         this.submitDeSelectionRun(event)
       }
       document.addEventListener('click', this.boundDeSelectionRunClick, true)
+    }
+    if (!this.boundVisualizationOntopUiPointerDown) {
+      this.boundVisualizationOntopUiPointerDown = (event) => {
+        this.handleVisualizationOntopUiPointerDown(event)
+      }
+      document.addEventListener('mousedown', this.boundVisualizationOntopUiPointerDown, true)
+    }
+    if (this.hasMetadataSelectTarget) {
+      window.bringVisualizationPopupToFront = (elementOrId) => {
+        const root = typeof elementOrId === 'string' ? document.getElementById(elementOrId) : elementOrId
+        if (root) this.bringVisualizationOntopUiToFront(root)
+      }
     }
     // console.log(`🚀 Visualization controller connected - Instance ID: ${this.instanceId}`)
     // console.trace(`🚀 Visualization controller connect() call stack:`)
@@ -1070,6 +1114,13 @@ export default class extends Controller {
     if (this.boundDeSelectionRunClick) {
       document.removeEventListener('click', this.boundDeSelectionRunClick, true)
       this.boundDeSelectionRunClick = null
+    }
+    if (this.boundVisualizationOntopUiPointerDown) {
+      document.removeEventListener('mousedown', this.boundVisualizationOntopUiPointerDown, true)
+      this.boundVisualizationOntopUiPointerDown = null
+    }
+    if (window.visualizationController === this && window.bringVisualizationPopupToFront) {
+      delete window.bringVisualizationPopupToFront
     }
     
     // Remove window resize listener
@@ -2853,11 +2904,9 @@ export default class extends Controller {
   }
 
   bringModuleScorePopupToFront(popupId) {
-    if (!this._moduleScorePopupZCounter) this._moduleScorePopupZCounter = 12501
-    this._moduleScorePopupZCounter += 1
     const entry = this.getModuleScorePopupEntries().get(popupId)
     if (entry?.element) {
-      entry.element.style.zIndex = String(this._moduleScorePopupZCounter)
+      this.bringVisualizationOntopUiToFront(entry.element)
     }
   }
 
@@ -19606,6 +19655,7 @@ export default class extends Controller {
     if (!overlay) return false
     overlay.style.display = 'block'
     this.ensureDeSelectionModalPositioned()
+    this.bringVisualizationOntopUiToFront(overlay)
     const runButton = document.getElementById('de-selection-run-btn')
     if (runButton) {
       runButton.onclick = (event) => this.submitDeSelectionRun(event)
@@ -20401,14 +20451,15 @@ export default class extends Controller {
   }
 
   _ensureGeneDetailsModalAboveDeWindow() {
-    const geneOverlay = document.getElementById('annotation-popup-gene-modal-overlay')
-    if (!geneOverlay) return
-    geneOverlay.classList.remove('hidden')
-    geneOverlay.style.display = 'flex'
-    geneOverlay.style.zIndex = '13000'
-    if (geneOverlay.parentElement !== document.body) {
-      document.body.appendChild(geneOverlay)
+    const geneModal = document.getElementById('annotation-popup-gene-modal-overlay')
+    if (!geneModal) return
+    geneModal.classList.remove('hidden')
+    geneModal.style.display = 'flex'
+    geneModal.style.flexDirection = 'column'
+    if (geneModal.parentElement !== document.body) {
+      document.body.appendChild(geneModal)
     }
+    this.bringVisualizationOntopUiToFront(geneModal)
   }
 
   getMaxGenePanelGenes() {
@@ -20456,7 +20507,7 @@ export default class extends Controller {
       addBtn.style.opacity = (none || tooMany) ? '0.5' : '1'
       addBtn.style.cursor = (none || tooMany) ? 'not-allowed' : 'pointer'
       addBtn.title = tooMany
-        ? `Select at most ${maxGenes} genes to add to the gene panel`
+        ? GeneManager.genePanelLimitMessage(`Select at most ${maxGenes} genes to add to the gene panel`, maxGenes)
         : (none ? 'Select genes to add to the gene panel' : `Replace the visualization gene panel with the selected genes (max ${maxGenes})`)
     }
   }
@@ -20478,7 +20529,10 @@ export default class extends Controller {
         }
       })
       if (visible.length > maxGenes) {
-        alert(`Select all is limited to ${maxGenes} genes for the gene panel.`)
+        alert(GeneManager.genePanelLimitMessage(
+          `Select all is limited to ${maxGenes} genes for the gene panel.`,
+          maxGenes
+        ))
       }
     } else {
       this.getDeVizGeneCheckboxes().forEach((cb) => { cb.checked = false })
@@ -20568,7 +20622,10 @@ export default class extends Controller {
     }
     const maxGenes = this.getMaxGenePanelGenes()
     if (selected.length > maxGenes) {
-      alert(`You can add at most ${maxGenes} genes to the gene panel at once.`)
+      alert(GeneManager.genePanelLimitMessage(
+        `You can add at most ${maxGenes} genes to the gene panel at once.`,
+        maxGenes
+      ))
       return
     }
 

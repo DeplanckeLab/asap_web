@@ -1721,6 +1721,9 @@ export class CustomPlotManager {
     this.remember2DPlotModalHome(modal)
     modal.style.display = 'flex'
     this.ensureInitial2DPlotModalWindowSize(modal)
+    if (typeof this.controller?.bringVisualizationOntopUiToFront === 'function') {
+      this.controller.bringVisualizationOntopUiToFront(modal)
+    }
     this.update2DPlotWindowControls()
     const loadingDiv = document.getElementById('2d-plot-loading')
     const canvas = document.getElementById('2d-plot-canvas')

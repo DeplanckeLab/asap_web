@@ -6,6 +6,14 @@ import { GeneSetOverlapPopup } from "visualization/gene_set_overlap_popup"
 export class GeneManager {
   static MAX_GENE_PANEL_GENES = 1000
 
+  static genePanelLimitHint(maxGenes = GeneManager.MAX_GENE_PANEL_GENES) {
+    return `To create a gene set with more than ${maxGenes} genes, go to the Gene sets panel and click the + button.`
+  }
+
+  static genePanelLimitMessage(baseMessage, maxGenes = GeneManager.MAX_GENE_PANEL_GENES) {
+    return `${baseMessage} ${GeneManager.genePanelLimitHint(maxGenes)}`
+  }
+
   constructor(controller) {
     this.controller = controller
     this.maxGenePanelGenes = GeneManager.MAX_GENE_PANEL_GENES
@@ -41,6 +49,54 @@ export class GeneManager {
     // Expose globally for diagnostics and inline handlers
     window.geneManager = this
     this.init()
+  }
+
+  getMaxGenePanelGenes() {
+    const max = Number(this.maxGenePanelGenes)
+    if (Number.isFinite(max) && max > 0) return max
+    return GeneManager.MAX_GENE_PANEL_GENES
+  }
+
+  showGenePanelLimitStatus(message) {
+    const statusDiv = document.getElementById('gene-input-status')
+    const statusTextDiv = document.getElementById('gene-input-status-text')
+    const hint = GeneManager.genePanelLimitHint(this.getMaxGenePanelGenes())
+    const fullMessage = `${message} ${hint}`
+    if (!statusDiv || !statusTextDiv) {
+      alert(fullMessage)
+      return
+    }
+
+    const closeId = 'close-gene-input-status-' + Date.now()
+    statusDiv.dataset.statusType = 'limit'
+    statusDiv.dataset.statusLocked = 'true'
+    statusDiv.style.display = 'block'
+    statusDiv.style.backgroundColor = '#fef2f2'
+    statusDiv.style.borderColor = '#fecaca'
+    statusTextDiv.style.color = '#b91c1c'
+    statusTextDiv.innerHTML = `
+      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
+        <div>
+          <div>${message}</div>
+          <div style="margin-top: 6px; font-size: 12px; color: #7f1d1d;">${hint}</div>
+        </div>
+        <button type="button" id="${closeId}" style="border: 1px solid #fca5a5; background: white; color: #b91c1c; border-radius: 4px; width: 22px; height: 22px; line-height: 18px; cursor: pointer; padding: 0; flex-shrink: 0;">x</button>
+      </div>
+    `
+
+    setTimeout(() => {
+      const closeBtn = document.getElementById(closeId)
+      if (!closeBtn) return
+      closeBtn.addEventListener('click', () => {
+        delete statusDiv.dataset.statusType
+        delete statusDiv.dataset.statusLocked
+        statusDiv.style.display = 'none'
+        statusDiv.style.backgroundColor = '#f0f9ff'
+        statusDiv.style.borderColor = '#bae6fd'
+        statusTextDiv.style.color = '#0369a1'
+        statusTextDiv.innerHTML = ''
+      })
+    }, 0)
   }
 
   // Base metadata key (without layer/annotId)
@@ -478,9 +534,16 @@ export class GeneManager {
           this.beginGeneListHistoryBatch()
           try {
             for (const part of parts) {
+              if (this.geneTags.length >= this.getMaxGenePanelGenes()) {
+                this.showGenePanelLimitStatus(
+                  `The gene panel is limited to ${this.getMaxGenePanelGenes()} genes. Remove some genes before adding more.`
+                )
+                break
+              }
               const trimmed = part.trim()
               if (trimmed) {
-                this.processGeneInput(trimmed)
+                const result = this.processGeneInput(trimmed)
+                if (result?.limitReached) break
               }
             }
           } finally {
@@ -502,9 +565,20 @@ export class GeneManager {
         // Enter key: process current input if not empty
         if (e.key === 'Enter' && input.value.trim()) {
           e.preventDefault()
+          if (this.geneTags.length >= this.getMaxGenePanelGenes()) {
+            this.showGenePanelLimitStatus(
+              `The gene panel already has ${this.getMaxGenePanelGenes()} genes. Remove some genes before adding more.`
+            )
+            return
+          }
           this.beginGeneListHistoryBatch()
           try {
-            this.processGeneInput(input.value.trim())
+            const result = this.processGeneInput(input.value.trim())
+            if (result?.limitReached) {
+              this.showGenePanelLimitStatus(
+                `The gene panel already has ${this.getMaxGenePanelGenes()} genes. Remove some genes before adding more.`
+              )
+            }
           } finally {
             this.endGeneListHistoryBatch()
           }
@@ -536,6 +610,14 @@ export class GeneManager {
         const pastedText = (e.clipboardData || window.clipboardData)?.getData('text') || ''
         const genes = this.parseBulkGeneInput(pastedText)
         input.value = ''
+
+        const maxGenes = this.getMaxGenePanelGenes()
+        if (genes.length > maxGenes) {
+          this.showGenePanelLimitStatus(
+            `You pasted ${genes.length} genes. You can add at most ${maxGenes} genes to the gene panel at once.`
+          )
+          return
+        }
 
         // Process pasted genes directly without showing autocomplete suggestions.
         this.processBulkGeneInput(genes)
@@ -987,10 +1069,13 @@ export class GeneManager {
         .filter((gene) => !!gene)
       : []
 
-    const maxGenes = Number(this.maxGenePanelGenes) > 0 ? Number(this.maxGenePanelGenes) : GeneManager.MAX_GENE_PANEL_GENES
+    const maxGenes = this.getMaxGenePanelGenes()
     if (normalizedGenes.length > maxGenes) {
       throw new Error(
-        `This selection has ${normalizedGenes.length} genes. You can add at most ${maxGenes} genes to the gene panel at once.`
+        GeneManager.genePanelLimitMessage(
+          `This selection has ${normalizedGenes.length} genes. You can add at most ${maxGenes} genes to the gene panel at once.`,
+          maxGenes
+        )
       )
     }
 
@@ -1583,6 +1668,14 @@ export class GeneManager {
     // Add to tags if not already present
     const existingIndex = this.geneTags.findIndex(g => String(g.stableId) === String(gene.stableId))
     if (existingIndex === -1) {
+      const maxGenes = this.getMaxGenePanelGenes()
+      if (this.geneTags.length >= maxGenes) {
+        this.showGenePanelLimitStatus(
+          `The gene panel already has ${maxGenes} genes. Remove some genes before adding more.`
+        )
+        return
+      }
+
       this.beginGeneListHistoryBatch()
       try {
         this.geneTags.push(gene)
@@ -1798,6 +1891,11 @@ export class GeneManager {
       // Check if already in tags
       const existingIndex = this.geneTags.findIndex(g => String(g.stableId) === String(matched.stableId))
       if (existingIndex === -1) {
+        const maxGenes = this.getMaxGenePanelGenes()
+        if (this.geneTags.length >= maxGenes) {
+          return { found: false, limitReached: true, query: query.trim() }
+        }
+
         this.beginGeneListHistoryBatch()
         try {
           this.geneTags.push(matched)
@@ -1829,15 +1927,37 @@ export class GeneManager {
   processBulkGeneInput(genes) {
     if (!genes || genes.length === 0) return
 
+    const maxGenes = this.getMaxGenePanelGenes()
+    if (genes.length > maxGenes) {
+      this.showGenePanelLimitStatus(
+        `You pasted ${genes.length} genes. You can add at most ${maxGenes} genes to the gene panel at once.`
+      )
+      return
+    }
+
+    const remainingSlots = maxGenes - this.geneTags.length
+    if (remainingSlots <= 0) {
+      this.showGenePanelLimitStatus(
+        `The gene panel already has ${maxGenes} genes. Remove some genes before adding more.`
+      )
+      return
+    }
+
     // Clear previous not found list
     this.notFoundQueries = []
     const foundCount = { count: 0, duplicates: 0 }
     const notFoundGenes = []
+    let limitReached = false
 
     // Process each gene
     this.beginGeneListHistoryBatch()
     try {
       for (const gene of genes) {
+        if (this.geneTags.length >= maxGenes) {
+          limitReached = true
+          break
+        }
+
         const result = this.processGeneInput(gene, true)
         if (result) {
           if (result.found) {
@@ -1846,6 +1966,9 @@ export class GeneManager {
             } else {
               foundCount.count++
             }
+          } else if (result.limitReached) {
+            limitReached = true
+            break
           } else {
             notFoundGenes.push(result.query)
           }
@@ -1860,6 +1983,12 @@ export class GeneManager {
 
     // Show status message
     this.showInputStatus(foundCount.count, notFoundGenes.length, foundCount.duplicates)
+
+    if (limitReached) {
+      this.showGenePanelLimitStatus(
+        `The gene panel is limited to ${maxGenes} genes. Some pasted genes were not added.`
+      )
+    }
 
     // Trigger processing of all genes
     this.processAllGenes()
@@ -2461,6 +2590,14 @@ export class GeneManager {
     }
 
     const geneQueries = this.parseBulkGeneInput(inputText)
+    const maxGenes = this.getMaxGenePanelGenes()
+    if (geneQueries.length > maxGenes) {
+      alert(GeneManager.genePanelLimitMessage(
+        `You entered ${geneQueries.length} genes. You can add at most ${maxGenes} genes to the gene panel at once.`,
+        maxGenes
+      ))
+      return
+    }
     // console.log('GeneManager: Processing', geneQueries.length, 'genes:', geneQueries)
 
     // Match genes

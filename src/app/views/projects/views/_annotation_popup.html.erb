@@ -149,18 +149,22 @@
   __CONTENT__
 </template>
 
-<div id="annotation-popup-gene-modal-overlay" class="hidden fixed inset-0 flex items-center justify-center" style="background-color: rgba(0,0,0,0.5); z-index: 13000;">
-  <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full mx-4 overflow-hidden" style="max-height: 80vh;">
-    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200" style="background: linear-gradient(to right, #f0fdf4, #ecfdf5);">
-      <h3 class="text-lg font-semibold text-gray-900" id="annotation-popup-gene-modal-title">Gene details</h3>
-      <button type="button" onclick="closeAnnotationPopupGeneModal()" style="background: none; border: none; cursor: pointer; color: #6b7280; padding: 4px; border-radius: 4px; transition: color 0.2s;" onmouseover="this.style.color='#111827'" onmouseout="this.style.color='#6b7280'">
-        <i class="fas fa-times" style="font-size: 18px;"></i>
-      </button>
+<div id="annotation-popup-gene-modal-overlay" class="hidden" style="display: none; position: fixed; top: 80px; left: 50%; transform: translateX(-50%); width: min(760px, calc(100vw - 32px)); height: min(560px, 80vh); min-width: 420px; min-height: 280px; max-width: 90vw; max-height: 90vh; background: white; border: 1px solid #d1d5db; border-radius: 12px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04); z-index: 13000; overflow: hidden; flex-direction: column;">
+  <div id="annotation-popup-gene-modal-header" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; background: linear-gradient(to right, #f0fdf4, #ecfdf5); cursor: move; user-select: none; flex-shrink: 0; border-radius: 12px 12px 0 0;">
+    <div style="display: flex; align-items: center; gap: 10px; min-width: 0;">
+      <i class="fas fa-grip-vertical" style="cursor: move; font-size: 14px; color: #9ca3af; flex-shrink: 0;"></i>
+      <h3 style="margin: 0; font-size: 18px; font-weight: 600; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" id="annotation-popup-gene-modal-title">Gene details</h3>
     </div>
-    <div class="px-6 py-5 overflow-auto" style="max-height: calc(80vh - 60px);" id="annotation-popup-gene-modal-body">
-      <div class="text-gray-500 text-sm">Loading...</div>
-    </div>
+    <button type="button" onclick="closeAnnotationPopupGeneModal()" style="background: none; border: none; cursor: pointer; color: #6b7280; padding: 4px; border-radius: 4px; transition: color 0.2s; flex-shrink: 0;" onmouseover="this.style.color='#111827'" onmouseout="this.style.color='#6b7280'">
+      <i class="fas fa-times" style="font-size: 18px;"></i>
+    </button>
   </div>
+  <div class="px-6 py-5 overflow-auto" style="flex: 1; min-height: 0;" id="annotation-popup-gene-modal-body">
+    <div class="text-gray-500 text-sm">Loading...</div>
+  </div>
+  <div id="annotation-popup-gene-modal-resize-right" style="position: absolute; top: 0; right: 0; width: 4px; height: 100%; cursor: col-resize; z-index: 1; background-color: transparent;" onmouseover="this.style.backgroundColor='#3b82f6'" onmouseout="this.style.backgroundColor='transparent'"></div>
+  <div id="annotation-popup-gene-modal-resize-bottom" style="position: absolute; bottom: 0; left: 0; width: 100%; height: 4px; cursor: row-resize; z-index: 1; background-color: transparent;" onmouseover="this.style.backgroundColor='#3b82f6'" onmouseout="this.style.backgroundColor='transparent'"></div>
+  <div id="annotation-popup-gene-modal-resize-corner" style="position: absolute; bottom: 0; right: 0; width: 12px; height: 12px; cursor: nwse-resize; z-index: 1; background-color: transparent;" onmouseover="this.style.backgroundColor='#3b82f6'" onmouseout="this.style.backgroundColor='transparent'"></div>
 </div>
 
 <script>
@@ -210,10 +214,10 @@
   }
 
   window.openAnnotationPopupGeneModal = function(ensemblId, searchUrl, geneSymbol, remoteGeneId, extras) {
-    var overlay = document.getElementById('annotation-popup-gene-modal-overlay')
+    var modal = document.getElementById('annotation-popup-gene-modal-overlay')
     var body = document.getElementById('annotation-popup-gene-modal-body')
     var title = document.getElementById('annotation-popup-gene-modal-title')
-    if (!overlay || !body || !title) return
+    if (!modal || !body || !title) return
     extras = extras || {}
     var ens = ensemblId != null ? String(ensemblId).trim() : ''
     var sym = geneSymbol != null ? String(geneSymbol).trim() : ''
@@ -223,16 +227,16 @@
     var loomFile = extras.loomFile != null ? String(extras.loomFile).trim() : ''
     var ensemblRelease = extras.ensemblRelease != null ? String(extras.ensemblRelease).trim() : ''
     var ensemblRe = /\b((?:ENS[A-Z]{0,4}G|MGP_[A-Za-z0-9]+_G)\d+)(?:\.\d+)?\b/i
-    if (!ensemblRe.test(ens)) {
+    if (ensemblRe.test(ens)) {
+      ens = ens.match(ensemblRe)[1]
+    } else if (ens) {
+      // Keep non-Ensembl-style IDs (e.g. AAEL004591) for backend lookup.
+    } else {
       var fromSym = sym.match(ensemblRe)
       if (fromSym) {
         ens = fromSym[1]
         sym = sym.replace(fromSym[0], ' ').replace(/\s+/g, ' ').trim()
-      } else {
-        ens = ''
       }
-    } else {
-      ens = ens.match(ensemblRe)[1]
     }
     if (sym.indexOf('[') >= 0) {
       sym = sym.replace(/\[.*?\]/g, ' ').replace(/\s+/g, ' ').trim()
@@ -260,12 +264,17 @@
     loadWrap.appendChild(headLine)
     loadWrap.appendChild(subLine)
     body.appendChild(loadWrap)
-    overlay.classList.remove('hidden')
-    overlay.style.display = 'flex'
-    overlay.style.alignItems = 'center'
-    overlay.style.justifyContent = 'center'
-    if (!overlay.style.zIndex || parseInt(overlay.style.zIndex, 10) < 12300) {
-      overlay.style.zIndex = '12300'
+    if (modal.parentElement !== document.body) {
+      document.body.appendChild(modal)
+    }
+    modal.classList.remove('hidden')
+    modal.style.display = 'flex'
+    modal.style.flexDirection = 'column'
+    if (!modal.dataset.positioned && typeof window.centerAnnotationPopupGeneModal === 'function') {
+      window.centerAnnotationPopupGeneModal()
+    }
+    if (typeof window.bringVisualizationPopupToFront === 'function') {
+      window.bringVisualizationPopupToFront(modal)
     }
     var csrfMeta = document.querySelector('meta[name="csrf-token"]')
     var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : ''
@@ -281,6 +290,10 @@
           ms: Math.round(t1 - t0),
           html_bytes: result.html ? result.html.length : 0
         })
+        if (!result.ok) {
+          body.innerHTML = '<div class="text-red-600 text-sm">Failed to load gene details (HTTP ' + result.status + ').</div>'
+          return
+        }
         body.innerHTML = result.html
         var afterMemberships = function() {
           var t3 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()
@@ -452,10 +465,25 @@
   }
 
   window.closeAnnotationPopupGeneModal = function() {
-    var overlay = document.getElementById('annotation-popup-gene-modal-overlay')
-    if (!overlay) return
-    overlay.classList.add('hidden')
-    overlay.style.display = 'none'
+    var modal = document.getElementById('annotation-popup-gene-modal-overlay')
+    if (!modal) return
+    modal.classList.add('hidden')
+    modal.style.display = 'none'
+  }
+
+  window.centerAnnotationPopupGeneModal = function() {
+    var modal = document.getElementById('annotation-popup-gene-modal-overlay')
+    if (!modal) return
+    modal.style.display = 'flex'
+    modal.style.flexDirection = 'column'
+    var width = modal.offsetWidth || 760
+    var height = modal.offsetHeight || 560
+    var left = Math.max(16, Math.round((window.innerWidth - width) / 2))
+    var top = Math.max(16, Math.round((window.innerHeight - height) / 2))
+    modal.style.left = left + 'px'
+    modal.style.top = top + 'px'
+    modal.style.transform = 'none'
+    modal.dataset.positioned = 'true'
   }
 
   function annotEvidenceSortGeneKey(row) {
@@ -735,8 +763,7 @@
   function initAnnotationPopupGeneUi() {
     var panel = document.getElementById('annot-popup-panel')
     var popupOverlay = document.getElementById('annotation-popup-overlay')
-    var geneOverlay = document.getElementById('annotation-popup-gene-modal-overlay')
-    if (!panel || !popupOverlay || !geneOverlay) return
+    if (!panel || !popupOverlay) return
     var searchUrl = popupOverlay.getAttribute('data-search-gene-url')
     panel.addEventListener('click', function(e) {
       var badge = e.target.closest('.annot-popup-gene-badge')
@@ -748,10 +775,125 @@
         window.openAnnotationPopupGeneModal(ens || '', searchUrl, sym || '', rid || '')
       }
     })
-    geneOverlay.addEventListener('click', function(e) {
-      if (e.target === geneOverlay) window.closeAnnotationPopupGeneModal()
-    })
   }
+
+  ;(function setupAnnotationPopupGeneModalWindow() {
+    var modal = document.getElementById('annotation-popup-gene-modal-overlay')
+    var header = document.getElementById('annotation-popup-gene-modal-header')
+    var resizeRight = document.getElementById('annotation-popup-gene-modal-resize-right')
+    var resizeBottom = document.getElementById('annotation-popup-gene-modal-resize-bottom')
+    var resizeCorner = document.getElementById('annotation-popup-gene-modal-resize-corner')
+    if (!modal || !header) return
+
+    var isDragging = false
+    var dragOffsetX = 0
+    var dragOffsetY = 0
+
+    header.addEventListener('mousedown', function(e) {
+      if (e.target.closest('button')) return
+      isDragging = true
+      var rect = modal.getBoundingClientRect()
+      modal.style.transform = 'none'
+      modal.style.left = rect.left + 'px'
+      modal.style.top = rect.top + 'px'
+      dragOffsetX = e.clientX - rect.left
+      dragOffsetY = e.clientY - rect.top
+      modal.dataset.positioned = 'true'
+      e.preventDefault()
+    })
+
+    document.addEventListener('mousemove', function(e) {
+      if (!isDragging) return
+      var maxX = Math.max(0, window.innerWidth - 80)
+      var maxY = Math.max(0, window.innerHeight - 40)
+      var nx = Math.max(0, Math.min(e.clientX - dragOffsetX, maxX))
+      var ny = Math.max(0, Math.min(e.clientY - dragOffsetY, maxY))
+      modal.style.left = nx + 'px'
+      modal.style.top = ny + 'px'
+    })
+
+    document.addEventListener('mouseup', function() {
+      isDragging = false
+    })
+
+    var isResizing = false
+    var resizeType = null
+    var startX = 0
+    var startY = 0
+    var startWidth = 0
+    var startHeight = 0
+    var startLeft = 0
+    var startTop = 0
+
+    function startResize(e, type) {
+      if (e.button !== 0) return
+      isResizing = true
+      resizeType = type
+      startX = e.clientX
+      startY = e.clientY
+      var rect = modal.getBoundingClientRect()
+      startWidth = rect.width
+      startHeight = rect.height
+      startLeft = rect.left
+      startTop = rect.top
+      modal.style.transform = 'none'
+      modal.style.left = startLeft + 'px'
+      modal.style.top = startTop + 'px'
+      modal.dataset.positioned = 'true'
+      e.preventDefault()
+      e.stopPropagation()
+    }
+
+    function doResize(e) {
+      if (!isResizing) return
+      e.preventDefault()
+      var deltaX = e.clientX - startX
+      var deltaY = e.clientY - startY
+      var newWidth = startWidth
+      var newHeight = startHeight
+      var newLeft = startLeft
+      var newTop = startTop
+      if (resizeType === 'right' || resizeType === 'corner') {
+        newWidth = startWidth + deltaX
+      }
+      if (resizeType === 'bottom' || resizeType === 'corner') {
+        newHeight = startHeight + deltaY
+      }
+      var minWidth = 420
+      var minHeight = 280
+      var maxWidth = window.innerWidth - 20
+      var maxHeight = window.innerHeight - 20
+      newWidth = Math.max(minWidth, Math.min(newWidth, maxWidth))
+      newHeight = Math.max(minHeight, Math.min(newHeight, maxHeight))
+      if (newLeft + newWidth > window.innerWidth) {
+        newLeft = Math.max(0, window.innerWidth - newWidth)
+      }
+      if (newTop + newHeight > window.innerHeight) {
+        newTop = Math.max(0, window.innerHeight - newHeight)
+      }
+      modal.style.width = Math.round(newWidth) + 'px'
+      modal.style.height = Math.round(newHeight) + 'px'
+      modal.style.left = Math.round(newLeft) + 'px'
+      modal.style.top = Math.round(newTop) + 'px'
+    }
+
+    function stopResize() {
+      isResizing = false
+      resizeType = null
+    }
+
+    if (resizeRight) {
+      resizeRight.addEventListener('mousedown', function(e) { startResize(e, 'right') })
+    }
+    if (resizeBottom) {
+      resizeBottom.addEventListener('mousedown', function(e) { startResize(e, 'bottom') })
+    }
+    if (resizeCorner) {
+      resizeCorner.addEventListener('mousedown', function(e) { startResize(e, 'corner') })
+    }
+    document.addEventListener('mousemove', doResize)
+    document.addEventListener('mouseup', stopResize)
+  })()
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initAnnotationPopupGeneUi)

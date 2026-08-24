@@ -1109,6 +1109,10 @@ class Project < ApplicationRecord
   # Called lazily when needed for display (show, step_results, refresh_steps_panel)
   # Only creates ProjectStep records for steps that match the project's project type
   def ensure_project_steps
+    # Clone job owns project_steps until being_cloned clears; creating stubs here races
+    # with ProjectCloneService#copy_project_steps on (project_id, step_id).
+    return if being_cloned
+
     asap_docker_image = Basic.get_asap_docker(version)
     return unless asap_docker_image
     

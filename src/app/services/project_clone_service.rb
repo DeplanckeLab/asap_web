@@ -393,8 +393,13 @@ class ProjectCloneService
 
   def copy_project_steps
     source_project.project_steps.order(:updated_at).each do |ps|
-      new_ps = ps.dup
-      new_ps.project_id = new_project.id
+      new_ps = ProjectStep.find_or_initialize_by(project_id: new_project.id, step_id: ps.step_id)
+      new_ps.assign_attributes(
+        status_id: ps.status_id,
+        job_id: ps.job_id,
+        error_message: ps.error_message,
+        nber_runs_json: ps.nber_runs_json
+      )
       new_ps.save!
     end
   end

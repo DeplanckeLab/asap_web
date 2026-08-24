@@ -11,6 +11,11 @@ module Basic
   # DE methods other than t_test_approx are blocked at or above this cell count.
   DE_LARGE_DATASET_MIN_CELLS = 100_000
   DE_LARGE_DATASET_ALLOWED_METHOD_NAMES = %w[t_test_approx].freeze
+  # Compared-group UI sentinel for one group vs rest; mapped to blank before CLI (null group-2).
+  DE_COMPLEMENTARY_GROUP_VALUE = '__asap_complementary__'
+  DE_CELL_UNIVERSE_RESTRICT_ATTR = 'restrict_cell_universe'
+  DE_CELL_UNIVERSE_METADATA_ATTR = 'universe_groups'
+  DE_CELL_UNIVERSE_CATEGORIES_ATTR = 'universe_groups_sel'
 
 
   # Suggested embedded JSON key for the cross-tool metadata catalog (location depends on file format: LOOM attrs, H5AD, RDS, etc.).
@@ -1561,6 +1566,8 @@ module Basic
     # skip the entry entirely. Do not combine with a truthy checkbox value on the command line.
     # omit_when_all_against_compl skips when attrs["all_against_compl"] is true (same mechanism,
     # useful when the value can be non-empty but the flag must still drop the cli flag).
+    # omit_when_param_blank: "<param_key>" skips this entry when that attr is blank / complementary
+    # (e.g. omit --group-dataset-2 when group_comp is empty for one-group vs rest).
     #
     # Example (differential expression / de.v8.py style opts):
     #   { "opt": "--group1", "param_key": "group_ref", "use_group_category_index": true,
@@ -1633,6 +1640,14 @@ module Basic
       if command_json_boolean_truthy?(entry['omit_when_null'])
         v = value_after_template_expand
         return true if v.nil? || v.to_s.strip == ''
+      end
+
+      omit_pk = entry['omit_when_param_blank'].to_s.strip
+      if omit_pk.present?
+        other = h_var[omit_pk]
+        other = p[omit_pk] if (other.nil? || other.to_s.strip == '') && p.is_a?(Hash)
+        return true if de_group_comp_is_complementary?(other) && omit_pk == 'group_comp'
+        return true if other.nil? || other.to_s.strip == '' || other.to_s.strip.downcase == 'null'
       end
 
       if command_json_boolean_truthy?(entry['valueless_flag'])
@@ -2727,6 +2742,172 @@ module Basic
       Annot.find_by(id: aid, project_id: project.id)
     end
 
+    # Compared-group UI sentinel / blank => one group vs rest (CLI null group-2).
+    def de_group_comp_is_complementary?(raw)
+      v = raw.nil? ? '' : raw.to_s.strip
+      v.empty? || v == DE_COMPLEMENTARY_GROUP_VALUE
+    end
+
+    def normalize_de_group_comp_complementary!(h)
+      return h unless h.is_a?(Hash)
+
+      raw = h['group_comp']
+      if raw.to_s.strip == DE_COMPLEMENTARY_GROUP_VALUE
+        h['group_comp'] = ''
+      end
+      h
+    end
+
+    # Inject DE form attrs for optional metadata-based cell universe (analysis form + layout).
+    def ensure_de_cell_universe_attrs_and_layout!(step, h_attrs, attr_layout)
+      return unless step&.name.to_s == 'de'
+      return unless h_attrs.is_a?(Hash)
+      return unless h_attrs['groups'].is_a?(Hash)
+
+      attr_layout = [] unless attr_layout.is_a?(Array)
+
+      unless h_attrs['restrict_cell_universe'].is_a?(Hash)
+        h_attrs['restrict_cell_universe'] = {
+          'label' => 'Restrict cell universe',
+          'widget' => 'checkbox',
+          'default' => false,
+          'description' => 'Limit DE to cells matching selected categorical metadata categories.'
+        }
+      end
+
+      unless h_attrs['universe_groups'].is_a?(Hash)
+        universe_groups = Basic.safe_parse_json(h_attrs['groups'].to_json, {})
+        universe_groups['label'] = 'Universe metadata'
+        universe_groups['placeholder'] = 'Select metadata that defines the cell universe'
+        universe_groups['description'] =
+          'Discrete metadata column used to include cells in the DE cell universe.'
+        universe_groups['default'] = nil
+        universe_groups['min_nber_items'] = 1
+        universe_groups['max_nber_items'] = 1
+        universe_groups['requires'] = ['input_matrix']
+        universe_groups['requires_message'] = 'Input matrix should be filled first'
+        universe_groups['constraints'] = (universe_groups['constraints'] || {}).merge(
+          'visible_if' => { 'restrict_cell_universe' => true },
+          'required_if' => { 'restrict_cell_universe' => true }
+        )
+        h_attrs['universe_groups'] = universe_groups
+      end
+
+      unless h_attrs['universe_groups_sel'].is_a?(Hash)
+        h_attrs['universe_groups_sel'] = {
+          'label' => 'Universe categories',
+          'description' =>
+            'Include only cells belonging to one or more of these categories. Required when restrict cell universe is on.',
+          'widget' => 'select',
+          'multiple' => true,
+          'requires' => ['universe_groups'],
+          'requires_message' => 'Universe metadata should be filled first',
+          'not_null' => false,
+          'null_name' => 'Select one or more categories',
+          'list' => [],
+          'default' => [],
+          'constraints' => {
+            'visible_if' => { 'restrict_cell_universe' => true },
+            'required_if' => { 'restrict_cell_universe' => true }
+          }
+        }
+      end
+
+      # Placement is owned by StdMethod.attr_layout_json only (do not mutate layout here).
+    end
+
+    # When restrict_cell_universe is off, drop metadata/category attrs so they are not persisted.
+    # When on, build filtered_in.bin / filtered_out.bin from selected categories (same path as viz).
+    # Raises if viz already staged cell_universe_file (no silent merge).
+    def apply_de_metadata_cell_universe_attrs!(project:, project_dir:, h_run_attrs:, logger: nil)
+      return h_run_attrs unless h_run_attrs.is_a?(Hash)
+
+      restrict = command_json_boolean_truthy?(h_run_attrs[DE_CELL_UNIVERSE_RESTRICT_ATTR])
+      unless restrict
+        h_run_attrs.delete(DE_CELL_UNIVERSE_METADATA_ATTR)
+        h_run_attrs.delete(DE_CELL_UNIVERSE_CATEGORIES_ATTR)
+        h_run_attrs.delete(DE_CELL_UNIVERSE_RESTRICT_ATTR)
+        return h_run_attrs
+      end
+
+      if h_run_attrs['cell_universe_file'].to_s.strip.present?
+        raise StandardError,
+              'Cannot combine visualization cell universe with metadata cell universe. ' \
+              'Clear the viz filter universe or turn off Restrict cell universe.'
+      end
+
+      annot = annot_from_de_input_data_selection(
+        h_run_attrs[DE_CELL_UNIVERSE_METADATA_ATTR],
+        {},
+        project
+      )
+      raise StandardError, 'Restrict cell universe requires Universe metadata' unless annot
+
+      categories = Array(h_run_attrs[DE_CELL_UNIVERSE_CATEGORIES_ATTR])
+        .map { |c| c.to_s.strip }
+        .reject(&:blank?)
+        .uniq
+      if categories.empty?
+        raise StandardError, 'Restrict cell universe requires at least one Universe category'
+      end
+
+      user_data_dir = ENV['USER_DATA_DIR'].presence || Rails.root.join('storage', 'user_data').to_s
+      project_dir = Pathname.new(project_dir.presence || (Pathname.new(user_data_dir) + project.user_id.to_s + project.key))
+      loom_path = project_dir + annot.filepath.to_s
+      unless File.exist?(loom_path.to_s)
+        raise StandardError, "Universe metadata loom not found: #{annot.filepath}"
+      end
+
+      values = H5DataService.get_metadata_vector(loom_path.to_s, annot.name)
+      unless values.is_a?(Array) && values.any?
+        raise StandardError, "Universe metadata vector is empty for annot #{annot.id} (#{annot.name.inspect})"
+      end
+
+      selected = categories.to_set
+      in_indices = []
+      values.each_with_index do |value, idx|
+        cat = (value.nil? || value.to_s.empty?) ? 'NA' : value.to_s
+        in_indices << idx if selected.include?(cat)
+      end
+
+      if in_indices.empty?
+        raise StandardError,
+              "No cells match Universe categories #{categories.inspect} on annot #{annot.name.inspect}"
+      end
+
+      n_cells = values.size
+      if in_indices.size >= n_cells
+        logger&.info('[de_cell_universe] metadata selection covers all cells; skipping universe file')
+        h_run_attrs.delete('cell_universe_file')
+        h_run_attrs.delete('cell_universe_mode')
+        h_run_attrs.delete('cell_universe_n_cells')
+        h_run_attrs.delete('cell_universe_n_indices')
+        return h_run_attrs
+      end
+
+      out_indices = []
+      in_set = in_indices.to_set
+      n_cells.times { |i| out_indices << i unless in_set.include?(i) }
+
+      mode = in_indices.size <= out_indices.size ? 'in' : 'out'
+      indices = mode == 'in' ? in_indices : out_indices
+      basename = mode == 'out' ? 'filtered_out.bin' : 'filtered_in.bin'
+      relative_path = File.join('tmp', 'de_cell_universe', "#{SecureRandom.uuid}_#{basename}")
+      absolute_path = project_dir + relative_path
+      FileUtils.mkdir_p(absolute_path.dirname)
+      File.binwrite(absolute_path, indices.pack('V*'))
+
+      h_run_attrs['cell_universe_file'] = relative_path
+      h_run_attrs['cell_universe_mode'] = mode
+      h_run_attrs['cell_universe_n_cells'] = n_cells
+      h_run_attrs['cell_universe_n_indices'] = indices.size
+      logger&.info(
+        "[de_cell_universe] staged metadata universe mode=#{mode} n_cells=#{n_cells} " \
+        "n_indices=#{indices.size} annot=#{annot.id} categories=#{categories.inspect}"
+      )
+      h_run_attrs
+    end
+
     # DE form toggles (see de_second_metadata_attrs.js): compared categories come from attrs["groups2"].
     def de_second_metadata_column_enabled_for_de?(h_var, p)
       %w[second_group_from_other_metadata group_comp_from_other_metadata].any? do |k|
@@ -2797,6 +2978,13 @@ module Basic
         raw_preflight = h_var[pk] || p[pk]
         if all_against_compl && %w[group_ref group_comp].include?(pk.to_s) && (raw_preflight.nil? || raw_preflight.to_s.strip.empty?)
           logger.debug("[set_run] skipping #{mode_name} for #{pk} (all_against_complementary)")
+          next
+        end
+        # Single-group vs complementary: blank / UI sentinel group_comp => omit group-2 (Mode B).
+        if pk.to_s == 'group_comp' && de_group_comp_is_complementary?(raw_preflight)
+          logger.debug("[set_run] skipping #{mode_name} for group_comp (complementary / rest)")
+          h_var['group_comp'] = ''
+          p['group_comp'] = '' if p.is_a?(Hash)
           next
         end
 
@@ -5992,14 +6180,20 @@ module Basic
               # Optional multi-select (e.g. covariates): [] must stay [], not [[]]. Absent key / nil => no items.
               list_datasets = if p[k].is_a?(Array)
                 p[k]
-              elsif p[k].nil?
+              elsif p[k].nil? || (p[k].is_a?(String) && p[k].strip.empty?)
+                # Blank string (e.g. unused DE groups2) must not become [""]: String#[] looks up
+                # substrings, so ""['run_id'] is nil and linked_run.id raises NoMethodError.
                 []
               else
                 logger.debug("ATTR4:" + p[k].to_json)
                 [p[k]]
               end
             else
-              list_datasets = [p[k]]
+              list_datasets = if p[k].nil? || (p[k].is_a?(String) && p[k].strip.empty?)
+                []
+              else
+                [p[k]]
+              end
             end
             
             tmp_var = [] 
@@ -6011,6 +6205,9 @@ module Basic
 
             list_datasets.each do |dt|
               logger.debug("DATASET_ITEM: #{dt.to_json}")
+              unless dt.is_a?(Hash)
+                raise ::RuntimeError, "Dataset attr #{k.inspect} entry must be a Hash, got #{dt.class}"
+              end
               linked_annot = nil
               if dt['annot_id']
                 linked_annot = h_annots[dt['annot_id']]
@@ -6025,6 +6222,10 @@ module Basic
               end
               
               linked_run = Run.where(:id => dt['run_id']).first
+              if !linked_run
+                h_res[:error] = "Linked run was not found for attr #{k.inspect} (run_id=#{dt['run_id'].inspect})!"
+                next
+              end
               h_parent_runs[linked_run.id] = linked_run
 
               # pca_seurat command_json arg 3 (norm_matrix_dataset): resolve from normalization
@@ -6056,11 +6257,7 @@ module Basic
                 end
               end
 
-              h_linked_run_outputs = nil
-              if !linked_run
-                h_res[:error] = 'Linked run was not found!'
-              else
-                h_linked_run_outputs = JSON.parse(linked_run.output_json)
+              h_linked_run_outputs = JSON.parse(linked_run.output_json)
              #   if h_linked_run_outputs['annot']
                 output_key = ['output_filename', 'output_dataset'].map{|e| dt[e]}.compact.join(":")
                 if h_linked_run_outputs[dt['output_attr_name']]
@@ -6129,7 +6326,6 @@ module Basic
                 #                end
                 
                 run_parents.push(h_parent)
-              end
             end
             attr_for_k = h_p[:h_attrs][k.to_s] || {}
             use_annot_id_in_h_var = command_json_boolean_truthy?(attr_for_k['set_h_var_to_annot_id'])
@@ -6170,6 +6366,9 @@ module Basic
           h_var[k] = p[k]
         end
       end
+
+      normalize_de_group_comp_complementary!(h_var)
+      normalize_de_group_comp_complementary!(p) if p.is_a?(Hash)
 
       # DE viz filter universe: attrs store a project-relative path; CLI needs an absolute path.
       if h_var['cell_universe_file'].present?

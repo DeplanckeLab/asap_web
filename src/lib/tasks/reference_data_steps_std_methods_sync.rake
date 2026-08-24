@@ -208,7 +208,7 @@ namespace :reference_data do
         source_cfg,
         max_version_id: max_version_id,
         exclude_hidden: false,
-        exclude_obsolete: true
+        exclude_obsolete: false
       )
     end
 
@@ -233,7 +233,7 @@ namespace :reference_data do
         source_cfg,
         max_version_id: max_version_id,
         exclude_hidden: false,
-        exclude_obsolete: true
+        exclude_obsolete: false
       )
       build_temp_snapshot_from_rows!(rows, label: "production_legacy")
     end
@@ -405,7 +405,7 @@ namespace :reference_data do
          "ComplianceSchema sync by id (create/update; no deletes). " \
          "Also runs external_catalog:sync_from_dev unless SKIP_EXTERNAL_CATALOG=1 " \
          "(marks missing catalog entries obsolete; deletes blank-URL test entries only). " \
-         "Hidden steps included; obsolete std_methods excluded. " \
+         "Hidden steps and obsolete std_methods included (so obsolete flags propagate). " \
          "If new DockerBuild rows are created, rebuilds compose asap_run from the highest new tag Dockerfile. " \
          "Set DEV_POSTGRES_DB (and DEV_DB_HOST/DEV_DB_PORT). DRY_RUN=1, VERBOSE=1, SKIP_COMPOSE=1, SKIP_EXTERNAL_CATALOG=1"
     task sync_from_dev: :environment do
@@ -421,7 +421,7 @@ namespace :reference_data do
       generated_snapshot = build_temp_snapshot_from_source_db_for_reference_sync!(
         max_version_id: max_version_id,
         exclude_hidden: false,
-        exclude_obsolete: true
+        exclude_obsolete: false
       )
       if generated_snapshot.nil?
         puts "Usage:"
@@ -432,7 +432,7 @@ namespace :reference_data do
       end
 
       puts "Applying development Step/StdMethod/Version/DockerImage/DockerBuild/NewsItem/CellOntology/OntologyTermType/UploadType/ProjectType/ComplianceSchema " \
-           "(id < #{max_version_id}, including hidden steps) to production"
+           "(id < #{max_version_id}, including hidden steps and obsolete std_methods) to production"
       puts "  dry_run=#{dry}  match_by=id"
 
       summary = ReferenceDataStepsStdMethodsSync.new(
@@ -453,7 +453,7 @@ namespace :reference_data do
     end
 
     desc "Compare Step and StdMethod with version_id < MAX_VERSION_ID (default 8) between source DB (dev) and current DB. " \
-         "Includes hidden steps; obsolete std_methods excluded. Set SOURCE_DATABASE_URL or DEV_POSTGRES_DB. VERBOSE=1, OUT=report.json"
+         "Includes hidden steps and obsolete std_methods. Set SOURCE_DATABASE_URL or DEV_POSTGRES_DB. VERBOSE=1, OUT=report.json"
     task compare_legacy_versions: :environment do
       max_version_id = ENV.fetch("MAX_VERSION_ID", "8").to_i
       verbose = ENV["VERBOSE"].to_s.strip == "1"
@@ -491,7 +491,7 @@ namespace :reference_data do
     end
 
     desc "Apply Step and StdMethod with version_id < MAX_VERSION_ID from production to the current DB (development). " \
-         "Includes hidden steps; obsolete std_methods excluded. Set PROD_POSTGRES_DB or SOURCE_DATABASE_URL. DRY_RUN=1, VERBOSE=1"
+         "Includes hidden steps and obsolete std_methods. Set PROD_POSTGRES_DB or SOURCE_DATABASE_URL. DRY_RUN=1, VERBOSE=1"
     task sync_legacy_versions_to_dev: :environment do
       if Rails.env.production?
         puts "This task writes to the current database. Run with RAILS_ENV=development so the target is development."
@@ -514,7 +514,7 @@ namespace :reference_data do
         exit 1
       end
 
-      puts "Applying production Step/StdMethod (version_id < #{max_version_id}, including hidden steps) to #{Rails.env} database"
+      puts "Applying production Step/StdMethod (version_id < #{max_version_id}, including hidden steps and obsolete std_methods) to #{Rails.env} database"
       ReferenceDataStepsStdMethodsSync.new(
         snapshot_path: generated_snapshot.path,
         dry_run: dry,

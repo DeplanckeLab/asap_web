@@ -88,7 +88,7 @@
         <% end %>
         <button type="button"
                 class="px-3 py-1.5 bg-gray-600 hover:bg-gray-700 text-white rounded-md font-medium text-sm transition-colors cursor-pointer"
-                onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, format: :html) %>')">
+                onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, view: 'de_filter', format: :html) %>')">
           <i class="fas fa-arrow-left sm:mr-1"></i><span class="hidden sm:inline"> Back to DE results</span>
         </button>
       </div>

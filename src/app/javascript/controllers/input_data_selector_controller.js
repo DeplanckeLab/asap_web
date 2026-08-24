@@ -1,5 +1,10 @@
 import { Controller } from "@hotwired/stimulus"
 import { queryDeSecondMetadataHidden } from "visualization/de_second_metadata_attrs"
+import {
+  DE_COMPLEMENTARY_GROUP_LABEL,
+  DE_COMPLEMENTARY_GROUP_VALUE,
+  isDeComplementaryGroupValue
+} from "visualization/de_group_complementary"
 
 export default class extends Controller {
   static targets = [
@@ -1150,7 +1155,8 @@ export default class extends Controller {
     this._deGroupRefSelect = null
   }
 
-  deFillCategorySelect(select, categoryNames, categories, keepValue, placeholderText) {
+  deFillCategorySelect(select, categoryNames, categories, keepValue, placeholderText, options = {}) {
+    const includeComplementary = !!(options && options.includeComplementary)
     select.innerHTML = ""
     if (!categoryNames || categoryNames.length === 0) {
       const emptyOption = document.createElement("option")
@@ -1159,6 +1165,13 @@ export default class extends Controller {
       select.appendChild(emptyOption)
       select.value = ""
       return
+    }
+
+    if (includeComplementary) {
+      const complementaryOption = document.createElement("option")
+      complementaryOption.value = DE_COMPLEMENTARY_GROUP_VALUE
+      complementaryOption.textContent = DE_COMPLEMENTARY_GROUP_LABEL
+      select.appendChild(complementaryOption)
     }
 
     categoryNames.forEach((name) => {
@@ -1171,7 +1184,9 @@ export default class extends Controller {
       select.appendChild(option)
     })
 
-    if (keepValue && categoryNames.includes(keepValue)) {
+    if (includeComplementary && isDeComplementaryGroupValue(keepValue)) {
+      select.value = DE_COMPLEMENTARY_GROUP_VALUE
+    } else if (keepValue && categoryNames.includes(keepValue)) {
       select.value = keepValue
     } else {
       select.value = categoryNames[0]
@@ -1290,12 +1305,15 @@ export default class extends Controller {
     const refreshComparedSelect = () => {
       const selectedRef = refSelect.value
       const comparedNames = categoryNames.filter((name) => name !== selectedRef)
+      // Prefer the live selection so choosing Complementary survives ref changes.
+      const keepComp = compSelect.value || previousComp
       this.deFillCategorySelect(
         compSelect,
         comparedNames,
         categories,
-        previousComp,
-        "Select a compared group"
+        keepComp,
+        "Select a compared group",
+        { includeComplementary: true }
       )
       compSelect.dispatchEvent(new Event("change", { bubbles: true }))
     }

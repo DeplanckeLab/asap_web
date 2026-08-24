@@ -9368,6 +9368,7 @@ class ProjectsController < ApplicationController
     # Get attribute layout from std_method
     @attr_layout = Basic.safe_parse_json(@std_method.attr_layout_json, [])
     ensure_de_second_metadata_attrs_and_layout!(@step, @h_attrs, @attr_layout)
+    Basic.ensure_de_cell_universe_attrs_and_layout!(@step, @h_attrs, @attr_layout)
     
     # If no layout, create a simple default layout
     if @attr_layout.empty? && @h_attrs.any?

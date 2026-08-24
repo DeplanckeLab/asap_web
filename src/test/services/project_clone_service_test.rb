@@ -152,4 +152,61 @@ class ProjectCloneServiceTest < TestBaseWithoutFixtures
     end
     spat&.update!(admin_report_only: true)
   end
+
+  test "complete! overwrites project_steps created concurrently during clone" do
+    user = register_for_test_cleanup(User.create!(email: "clone_ps_#{SecureRandom.hex(4)}@example.com", password: "password123"))
+    source = create_test_project!(
+      name: "Source project steps",
+      key: "sps#{SecureRandom.hex(3)}",
+      user_id: user.id,
+      version_id: 8
+    )
+    step = Step.find_by!(name: "parsing", version_id: 8)
+    register_for_test_cleanup(
+      ProjectStep.create!(
+        project_id: source.id,
+        step_id: step.id,
+        status_id: 3,
+        nber_runs_json: '{"3":1}'
+      )
+    )
+
+    source_dir = Pathname.new(ENV["USER_DATA_DIR"]) + user.id.to_s + source.key
+    FileUtils.mkdir_p(source_dir)
+
+    service = ProjectCloneService.new(source, user: user, session: {})
+    clone = service.start!
+    assert clone, "Expected clone start to succeed: #{service.errors.inspect}"
+    register_for_test_cleanup(clone)
+
+    # Mimic show#ensure_project_steps racing after reset_partial_clone! cleared steps.
+    service.send(:reset_partial_clone!)
+    ProjectStep.create!(
+      project_id: clone.id,
+      step_id: step.id,
+      status_id: 1,
+      nber_runs_json: '{}'
+    )
+
+    service.send(:copy_project_steps)
+
+    cloned_ps = ProjectStep.find_by!(project_id: clone.id, step_id: step.id)
+    assert_equal 3, cloned_ps.status_id
+    assert_equal '{"3":1}', cloned_ps.nber_runs_json
+  end
+
+  test "ensure_project_steps does nothing while being_cloned" do
+    user = register_for_test_cleanup(User.create!(email: "clone_ens_#{SecureRandom.hex(4)}@example.com", password: "password123"))
+    project = create_test_project!(
+      name: "Being cloned",
+      key: "bcl#{SecureRandom.hex(3)}",
+      user_id: user.id,
+      version_id: 8,
+      being_cloned: true
+    )
+
+    assert_no_difference -> { ProjectStep.where(project_id: project.id).count } do
+      project.ensure_project_steps
+    end
+  end
 end

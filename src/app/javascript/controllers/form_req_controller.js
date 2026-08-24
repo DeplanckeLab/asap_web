@@ -915,6 +915,13 @@ export default class extends Controller {
         this.scheduleResourcePrediction()
       })
     })
+
+    this.attrsContainerTarget.querySelectorAll('[data-multi-category-filter="true"]').forEach((multiFilter) => {
+      multiFilter.addEventListener('change', () => {
+        this.syncDependencyVisibility()
+        this.validateForm()
+      })
+    })
     
     // Initial validation
     this.syncDeGroupVisibility()
@@ -974,6 +981,10 @@ export default class extends Controller {
       const hiddenField = container.querySelector(`#attrs_${attrName}`)
       return !!(hiddenField && String(hiddenField.value) === 'true')
     }
+    const multiFilter = container.querySelector('[data-multi-category-filter="true"]')
+    if (multiFilter) {
+      return this.multiCategorySelectedValues(multiFilter).length > 0
+    }
     const input = container.querySelector(`#attrs_${attrName}, input[name="attrs[${attrName}]"], select[name="attrs[${attrName}]"], textarea[name="attrs[${attrName}]"]`)
     if (!input) {
       return false
@@ -982,6 +993,27 @@ export default class extends Controller {
       return input.checked
     }
     return String(input.value || '').trim() !== ''
+  }
+
+  multiCategorySelectedValues(multiFilterEl) {
+    if (!multiFilterEl) {
+      return []
+    }
+    const checked = Array.from(multiFilterEl.querySelectorAll('input[type="checkbox"]:checked'))
+      .map((input) => String(input.value || '').trim())
+      .filter((v) => v !== '')
+    if (checked.length > 0) {
+      return checked
+    }
+    try {
+      const parsed = JSON.parse(multiFilterEl.dataset.selectedValues || '[]')
+      if (Array.isArray(parsed)) {
+        return parsed.map((v) => String(v).trim()).filter((v) => v !== '')
+      }
+    } catch (_e) {
+      /* ignore */
+    }
+    return []
   }
 
   unmetRequiredAttrs(container) {
@@ -1577,15 +1609,21 @@ export default class extends Controller {
           isEmpty = !value || value === 'false'
         }
       } else {
-        // For other widgets (text, select), check the input/select element
-        const input = container.querySelector(`#attrs_${attrName}, input[name="attrs[${attrName}]"], select[name="attrs[${attrName}]"], textarea[name="attrs[${attrName}]"]`)
-        if (input) {
-          if (input.type === 'checkbox') {
-            value = input.checked ? input.value : null
-            isEmpty = !input.checked
-          } else {
-            value = input.value
-            isEmpty = !value || value.trim() === ''
+        const multiFilter = container.querySelector('[data-multi-category-filter="true"]')
+        if (multiFilter) {
+          value = this.multiCategorySelectedValues(multiFilter)
+          isEmpty = !Array.isArray(value) || value.length === 0
+        } else {
+          // For other widgets (text, select), check the input/select element
+          const input = container.querySelector(`#attrs_${attrName}, input[name="attrs[${attrName}]"], select[name="attrs[${attrName}]"], textarea[name="attrs[${attrName}]"]`)
+          if (input) {
+            if (input.type === 'checkbox') {
+              value = input.checked ? input.value : null
+              isEmpty = !input.checked
+            } else {
+              value = input.value
+              isEmpty = !value || value.trim() === ''
+            }
           }
         }
       }
@@ -1959,6 +1997,17 @@ export default class extends Controller {
               attrs[attrName] = input.value || ''
             }
           }
+        }
+      })
+
+      // Multi-category filters may only store selection on the host dataset when empty.
+      this.attrsContainerTarget.querySelectorAll('[data-multi-category-filter="true"]').forEach((multiFilter) => {
+        const attrName = multiFilter.id?.replace(/^attrs_/, '')
+        if (!attrName) {
+          return
+        }
+        if (!Object.prototype.hasOwnProperty.call(attrs, attrName)) {
+          attrs[attrName] = this.multiCategorySelectedValues(multiFilter)
         }
       })
     }

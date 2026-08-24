@@ -8,7 +8,8 @@ require "set"
 #
 # Matching follows ReferenceDataStepsStdMethodsSync with legacy scope: Step and
 # StdMethod by primary key +id+.
-# Obsolete std_methods are excluded by default. Hidden steps are included when +include_hidden+ is true.
+# Obsolete std_methods are included so obsolete flag drift is visible.
+# Hidden steps are included when +include_hidden+ is true.
 # Foreign keys are remapped on the source side.
 class ReferenceDataStepsStdMethodsCompare
   CompareError = Class.new(StandardError)
@@ -39,7 +40,7 @@ class ReferenceDataStepsStdMethodsCompare
     steps_in = filter_legacy_version!(@source_steps)
     steps_in = filter_not_hidden_steps!(steps_in) unless @include_hidden
     methods_in = filter_std_methods_for_steps!(
-      filter_not_obsolete!(filter_legacy_version!(@source_std_methods)),
+      filter_legacy_version!(@source_std_methods),
       steps_in
     )
 
@@ -89,10 +90,6 @@ class ReferenceDataStepsStdMethodsCompare
     end
   end
 
-  def filter_not_obsolete!(rows)
-    rows.reject { |row| row["obsolete"] == true }
-  end
-
   def filter_not_hidden_steps!(rows)
     rows.reject { |row| row["hidden"] == true }
   end
@@ -115,7 +112,7 @@ class ReferenceDataStepsStdMethodsCompare
   end
 
   def version_filter_label
-    scope = "version_id < #{@max_version_id}, match by id, obsolete std_methods excluded"
+    scope = "version_id < #{@max_version_id}, match by id, obsolete std_methods included"
     @include_hidden ? "#{scope}, hidden steps included" : "#{scope}, hidden steps excluded"
   end
 
@@ -128,7 +125,7 @@ class ReferenceDataStepsStdMethodsCompare
   end
 
   def target_std_methods_scope
-    StdMethod.where("version_id < ? AND COALESCE(obsolete, false) = ?", @max_version_id, false)
+    StdMethod.where("version_id < ?", @max_version_id)
   end
 
   def active_steps_scope
@@ -136,7 +133,7 @@ class ReferenceDataStepsStdMethodsCompare
   end
 
   def active_std_methods_scope
-    target_std_methods_scope
+    StdMethod.where("version_id < ? AND COALESCE(obsolete, false) = ?", @max_version_id, false)
   end
 
   def index_by_id!(rows, label)

@@ -17,7 +17,7 @@
 #   SKIP_COMPOSE=1   skip compose dockerfile edit and asap_run rebuild
 #   SKIP_PUSH=1      skip docker push
 #   FORCE=1          overwrite existing local image tags without prompting;
-#                    also skips the DockerBuild replace prompt when replace is allowed
+#                    also skips the DockerBuild replace prompt (including non-operator usage)
 #   ALLOW_REPLACE    set automatically by this script after replace confirmation
 
 set -euo pipefail
@@ -158,9 +158,9 @@ confirm_overwrite_existing_images() {
 }
 
 # Ask before rebuilding when a DockerBuild row already exists for this patch tag (vX.Y).
-# Replace overwrites that row's fingerprint in place (row kept). Allowed only when every
-# existing row was unused, or only used by operators / ADMIN_EMAILS. Guest or other-user
-# usage rejects immediately (no prompt).
+# Replace overwrites that row's fingerprint in place (row kept). Always reports per-user
+# run counts (sandbox / anonymous counted as user "guest"). Guest or non-operator usage
+# is warned, then can be bypassed after confirmation (or FORCE=1).
 confirm_replace_existing_docker_build() {
   if [[ "${SKIP_REGISTER:-0}" == "1" ]]; then
     return 0
@@ -178,9 +178,11 @@ confirm_replace_existing_docker_build() {
          puts 'NONE'
        else
          blocked = 0
+         usage = Hash.new(0)
          builds.each do |b|
            blockers = b.replace_blockers
            refs = b.reference_count
+           b.usage_by_user.each { |user, n| usage[user] += n }
            if blockers.any?
              blocked += 1
              puts ['BLOCK', b.id, b.digest, refs, blockers.join(' | ')].join(\"\\t\")
@@ -188,10 +190,13 @@ confirm_replace_existing_docker_build() {
              puts ['ROW', b.id, b.digest, refs].join(\"\\t\")
            end
          end
+         usage.sort_by { |user, _n| user }.each do |user, n|
+           puts ['USER', user, n].join(\"\\t\")
+         end
          puts(blocked.positive? ? 'BLOCKED' : 'REPLACEABLE')
        end" 2>/dev/null
   )"
-  report="$(printf '%s\n' "${report}" | tr -d '\r' | grep -E '^(NONE|ROW|BLOCK|BLOCKED|REPLACEABLE)' || true)"
+  report="$(printf '%s\n' "${report}" | tr -d '\r' | grep -E '^(NONE|ROW|BLOCK|USER|BLOCKED|REPLACEABLE)' || true)"
 
   if [[ -z "${report}" ]]; then
     echo "Failed to query DockerBuild rows for ${PATCH_TAG} in development DB."
@@ -209,17 +214,27 @@ confirm_replace_existing_docker_build() {
   printf '%s\n' "${report}" | grep -E '^(ROW|BLOCK)' | while IFS=$'\t' read -r kind build_id digest refs rest; do
     if [[ "${kind}" == "BLOCK" ]]; then
       echo "  id=${build_id}  digest=${digest}  refs=${refs}"
-      echo "    blocked by: ${rest}"
+      echo "    non-operator usage: ${rest}"
     else
       echo "  id=${build_id}  digest=${digest}  refs=${refs}"
     fi
   done
+
+  echo "  Runs by user:"
+  local have_user=0
+  while IFS=$'\t' read -r _kind user count; do
+    have_user=1
+    echo "    ${user}: ${count}"
+  done < <(printf '%s\n' "${report}" | grep -E '^USER' || true)
+  if [[ "${have_user}" -eq 0 ]]; then
+    echo "    (none)"
+  fi
   echo ""
 
   if [[ "${status}" == "BLOCKED" ]]; then
-    echo "Replace refused: ${PATCH_TAG} was used by guest users or users other than operators/admins."
-    echo "Use a new patch version."
-    exit 1
+    echo "Warning: ${PATCH_TAG} was used by guest or users other than operators/admins."
+    echo "Confirming will overwrite the fingerprint anyway (provenance stays on this row)."
+    echo ""
   fi
 
   if [[ "${FORCE:-0}" == "1" ]]; then
@@ -228,7 +243,14 @@ confirm_replace_existing_docker_build() {
     return 0
   fi
 
-  if confirm_yes "Replace this ${PATCH_TAG} by this new build (overwrite fingerprint on existing row)?"; then
+  local prompt
+  if [[ "${status}" == "BLOCKED" ]]; then
+    prompt="Bypass and replace this ${PATCH_TAG} by this new build (overwrite fingerprint on existing row)?"
+  else
+    prompt="Replace this ${PATCH_TAG} by this new build (overwrite fingerprint on existing row)?"
+  fi
+
+  if confirm_yes "${prompt}"; then
     ALLOW_REPLACE=1
     return 0
   fi

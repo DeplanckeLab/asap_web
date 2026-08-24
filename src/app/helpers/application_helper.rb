@@ -746,9 +746,18 @@ module ApplicationHelper
       cache[:items][value.to_i].presence || value.to_s
     when 'geneset_sel'
       value.to_s
+    when 'group_comp'
+      de_compared_group_is_complementary?(value) ? 'Complementary' : value.to_s
     else
       value.to_s
     end
+  end
+
+  def de_compared_group_is_complementary?(value)
+    return true if Basic.de_group_comp_is_complementary?(value)
+
+    v = value.nil? ? '' : value.to_s.strip
+    v.casecmp('null').zero?
   end
 
   def module_score_global_gene_set_badge_labels(h_attrs)
@@ -943,6 +952,18 @@ module ApplicationHelper
         "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border #{palette[:container]} cursor-pointer' #{info_attrs}>" \
           "<span class='font-semibold #{palette[:key]}'>#{key_txt}:</span>" \
           "<span class='#{palette[:value]} italic'>none</span>" \
+          "</span>"
+      ).html_safe
+    end
+
+    if key.to_s == 'group_comp' && de_compared_group_is_complementary?(value)
+      palette = param_badge_palette(key)
+      key_txt = ERB::Util.html_escape(form_param_label(key, h_method_attrs))
+      info_attrs = param_info_badge_html_attrs(key, 'Complementary', h_method_attrs)
+      return (
+        "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border #{palette[:container]} cursor-pointer' #{info_attrs}>" \
+          "<span class='font-semibold #{palette[:key]}'>#{key_txt}:</span>" \
+          "<span class='#{palette[:value]} italic'>Complementary</span>" \
           "</span>"
       ).html_safe
     end

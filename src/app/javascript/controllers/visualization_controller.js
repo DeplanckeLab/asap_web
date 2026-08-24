@@ -20321,6 +20321,9 @@ export default class extends Controller {
       '[data-attr-name="group_comp"]',
       '[data-attr-name="group_comp_from_other_metadata"]',
       '[data-attr-name="second_group_from_other_metadata"]',
+      '[data-attr-name="restrict_cell_universe"]',
+      '[data-attr-name="universe_groups"]',
+      '[data-attr-name="universe_groups_sel"]',
       '[data-attr-name="or_text"]'
     ]
     selectors.forEach((selector) => {

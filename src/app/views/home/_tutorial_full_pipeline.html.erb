@@ -200,7 +200,7 @@ Therefore UMAP slowly becomes the method of choice for visualizing RNA-seq datas
 
 <p>
 Now, let's look a bit more into the available plotting/visualization options.<br/>
-You can switch between the "Dashboard" and "Plot" view by clicking the blue button on the top bar.<br/>
+You can switch between the "List of runs" and "Plot" view by clicking the blue button on the top bar.<br/>
 You can also click the bottom right blue button "Controls" to modify the point size/color/transparency. In this view, you can also color the plot according to metadata or clustering results.<br /> 
 The plot is fully interactive, so you can zoom in, move, or hover on the cells to see their names/clusters.<br />
 You can also click on the greyed icons on the top left to recenter the plot, or perform a rectangular/lasso selection.<br />
@@ -260,17 +260,17 @@ Seurat recommends using the wilcoxon test, so this is the one we will use in thi
 
 <p class='alert alert-info'>
 <i class='fas fa-info-circle'></i> <b>Of note</b><br />
-We realize that when the dataset has a lot of clusters, this view can be filled with DE results, which is not very user-friendly. The "DE table" and "Markers" view is currently a good alternative for visualizing the results in a better way, but we are investigating other possible views.
+We realize that when the dataset has a lot of clusters, this view can be filled with DE results, which is not very user-friendly. The "DE results" and "Markers" view is currently a good alternative for visualizing the results in a better way, but we are investigating other possible views.
 </p>
 
 <p>
-When the DE is computed, you can switch view using the blue button on the top bar. From the "Dashboard" to the "DE table" view.<br/>
-The "DE table" view shows the number of up- and down-regulated genes for every cluster (the up-regulated genes being the main marker genes). You can click on the green/red numbers to see the list of DE genes for every run.<br />
+When the DE is computed, you can switch view using the blue button on the top bar. From the "List of runs" to the "DE results" view.<br/>
+The "DE results" view shows the number of up- and down-regulated genes for every cluster (the up-regulated genes being the main marker genes). You can click on the green/red numbers to see the list of DE genes for every run.<br />
 </p>
 <%= image_tag 'tuto_2_019.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 
 <p>
-Here you see the list of DE genes, filtered according to a default FDR5% threshold (that you can change in the DE table view). Then, after applying the FDR filtering, we sort the DE genes by decreasing abs(Fold Change) order. The top ones being the most interesting DE genes.<br/>
+Here you see the list of DE genes, filtered according to a default FDR5% threshold (that you can change in the DE results view). Then, after applying the FDR filtering, we sort the DE genes by decreasing abs(Fold Change) order. The top ones being the most interesting DE genes.<br/>
 In addition, we also implemented a "Markers" view that lists the top 10 up- down- regulated genes for every cluster. This helps to have a quick view of the most interesting marker for every cell cluster/cell type.<br/>
 </p>
 <%= image_tag 'tuto_2_020.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
@@ -303,7 +303,7 @@ Now, I'll run a FET on the results from the Differential Expression step. In par
 <%= image_tag 'tuto_2_021.png', {class:"tuto-image", alt: 'Full pipeline tutorial screenshot'} %>
 
 <p>
-Again, the results of the FET are listed in a "Dashboard" view, or in an "Enrichment table" view.<br/>
+Again, the results of the FET are listed in a "List of runs" view, or in an "Enrichment table" view.<br/>
 </p>
 
 

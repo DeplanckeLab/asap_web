@@ -6,8 +6,8 @@ namespace :docker_builds do
        "IMAGE_REF=fabdavid/asap_run:v8 (major catalog tag). " \
        "Optional PATCH_TAG=v8.3 forces the DockerBuild.tag when set. " \
        "A new digest for an existing PATCH_TAG overwrites that row's fingerprint in place " \
-       "(row kept) when unused or only used by operators/admins and ALLOW_REPLACE=1. " \
-       "Guest or other-user usage refuses replace (bump the patch version)."
+       "(row kept) when ALLOW_REPLACE=1. Without ALLOW_REPLACE, guest/other-user usage raises; " \
+       "build_asap_run.sh reports per-user run counts (guest included) then can confirm bypass."
   task register: :environment do
     image_ref = ENV["IMAGE_REF"].to_s.strip
     if image_ref.empty?

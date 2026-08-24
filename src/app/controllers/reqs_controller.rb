@@ -66,6 +66,7 @@ class ReqsController < ApplicationController
     ## create runs
     # {"input_matrix":{"run_id":"13","output_attr_name":"output_matrix"},"fit_model":"log"}
     h_attr_values = JSON.parse(@req.attrs_json)
+    Basic.normalize_de_group_comp_complementary!(h_attr_values)
     all_against_compl = Basic.command_json_boolean_truthy?(h_attr_values['all_against_compl'])
     # When all-against-complementary is enabled, combinatorial runs require group_pairs.
     # Rebuild them from selected group categories when the UI payload omits them.
@@ -120,6 +121,7 @@ class ReqsController < ApplicationController
       h_res = Basic.get_std_method_attrs(@std_method, @step)
       @h_attrs = h_res[:h_attrs]
       @h_global_params = h_res[:h_global_params]
+      Basic.ensure_de_cell_universe_attrs_and_layout!(@step, @h_attrs, [])
       
 #      @h_global_params = JSON.parse(@step.method_attrs_json)
 #      
@@ -177,8 +179,9 @@ class ReqsController < ApplicationController
           h_run_attrs['group_ref'] = gp[0]
           h_run_attrs['group_comp'] = gp[1]
           h_run_attrs['group_pairs'] = nil
-          list_of_runs[run_i][0].attrs_json = h_run_attrs.to_json
         end
+        Basic.normalize_de_group_comp_complementary!(h_run_attrs)
+        list_of_runs[run_i][0].attrs_json = h_run_attrs.to_json
         list_of_runs[run_i][1] = h_run_attrs
       end
       puts "Elapsed time 5:" + (Time.now-t).to_s
@@ -306,8 +309,20 @@ class ReqsController < ApplicationController
         end
       end
 
-      # Move staged viz filter universe binaries into the DE run directory.
+      # Build metadata-based cell universe (filtered_in/out.bin) then move staged binaries into the run dir.
       if @step.name.to_s == 'de'
+        list_of_runs2.each_index do |run_i|
+          h_run_attrs = Basic.safe_parse_json(list_of_runs2[run_i][0].attrs_json, {})
+          Basic.apply_de_metadata_cell_universe_attrs!(
+            project: @project,
+            project_dir: project_dir,
+            h_run_attrs: h_run_attrs,
+            logger: logger
+          )
+          list_of_runs2[run_i][0].attrs_json = h_run_attrs.to_json
+          list_of_runs2[run_i][0].save!
+          list_of_runs2[run_i][1] = h_run_attrs if list_of_runs2[run_i][1].is_a?(Hash)
+        end
         attach_de_cell_universe_files!(list_of_runs2, project_dir, step_dir)
       end
 
@@ -417,6 +432,8 @@ class ReqsController < ApplicationController
           @h_attrs[k][k2] = h_global_params[k][k2]
         end
       end
+
+      Basic.ensure_de_cell_universe_attrs_and_layout!(@step, @h_attrs, [])
 
       #      ### apply write_in_file
       #      @h_attrs.each_key do |k|

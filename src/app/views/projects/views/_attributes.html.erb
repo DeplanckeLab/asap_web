@@ -370,13 +370,17 @@
                          data-selected-values="<%= h(selected_multi.to_json) %>"
                          class="rounded-md border border-gray-300 bg-white">
                       <div class="px-3 py-2 border-b border-gray-200 text-xs text-gray-500">
-                        <%= attr['null_name'].presence || 'All categories' %> when none selected. Click to select one or more.
+                        <%= attr['null_name'].presence || 'Select one or more categories' %>
                       </div>
                       <div data-role="category-options" class="max-h-48 overflow-auto p-2 space-y-1">
                         <div class="px-2 py-1 text-sm text-gray-500">Select metadata first</div>
                       </div>
                     </div>
-                    <p class="mt-1 text-xs text-gray-500">Optionally restrict columns to one or more categories of the chosen metadata. Leave none selected to keep all cells.</p>
+                    <% if attr['description'].present? %>
+                      <p class="mt-1 text-xs text-gray-500"><%= attr['description'] %></p>
+                    <% else %>
+                      <p class="mt-1 text-xs text-gray-500">Optionally restrict columns to one or more categories of the chosen metadata. Leave none selected to keep all cells.</p>
+                    <% end %>
                   <% else %>
                     <% l.unshift([attr['null_name'] || "None", '']) unless attr['not_null'] %>
                     <%= select_tag form_attr_name,

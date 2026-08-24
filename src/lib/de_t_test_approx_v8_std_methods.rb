@@ -25,7 +25,7 @@ module DeTTestApproxV8StdMethods
       { 'opt' => '--write-volcano', 'param_key' => 'write_volcano' },
       { 'opt' => '--group-dataset', 'param_key' => 'groups_dataset' },
       { 'opt' => '--group', 'param_key' => 'group_ref', 'null_value' => 'null' },
-      { 'opt' => '--group-dataset-2', 'param_key' => 'groups_dataset' },
+      { 'opt' => '--group-dataset-2', 'param_key' => 'groups_dataset', 'omit_when_param_blank' => 'group_comp' },
       { 'opt' => '--group-2', 'param_key' => 'group_comp', 'null_value' => 'null' },
       { 'opt' => '--is-count', 'param_key' => 'is_count_table', 'value' => '#{input_matrix_is_count_table}' },
       { 'opt' => '--preview-cell-fraction', 'param_key' => 'preview_cell_fraction', 'omit_when_null' => true },

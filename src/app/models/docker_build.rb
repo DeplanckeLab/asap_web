@@ -5,7 +5,8 @@ require 'env_helpers'
 # One immutable image build (RepoDigest), usually a patch tag like v8.1 under a major
 # docker_images row (v8). Runs reference this for exact provenance.
 # Replacing a patch tag overwrites that row's digest (fingerprint) in place; the row is
-# not deleted. That is allowed only for operator/admin-only usage after confirmation.
+# not deleted. That requires ALLOW_REPLACE=1 after the build script reports per-user usage
+# (guest counted as a user) and the operator confirms.
 class DockerBuild < ApplicationRecord
   belongs_to :docker_image
   has_many :runs, dependent: :nullify
@@ -13,6 +14,8 @@ class DockerBuild < ApplicationRecord
   validates :tag, presence: true
   validates :digest, presence: true, uniqueness: true
   validates :digest, format: { with: /\Asha256:[a-f0-9]{64}\z/i }
+
+  GUEST_USAGE_LABEL = 'guest'
 
   # Operators who may consciously overwrite a patch-tag fingerprint.
   # Admin emails also come from ADMIN_EMAILS.
@@ -35,8 +38,18 @@ class DockerBuild < ApplicationRecord
       ActiveRun.where(docker_build_id: id).count
   end
 
-  # Reasons this build must not be replaced (guest or non-operator users).
-  # Empty => fingerprint overwrite is allowed after explicit confirmation.
+  # Provenance row counts keyed by user email, with sandbox / anonymous as GUEST_USAGE_LABEL.
+  def usage_by_user
+    counts = Hash.new(0)
+    each_provenance_row do |_kind, row|
+      counts[usage_label_for(row)] += 1
+    end
+    counts
+  end
+
+  # Reasons this build has non-operator usage (guest or other users).
+  # Empty => only unused or operator/admin usage. Replace still needs confirmation;
+  # non-empty can be bypassed after the build script reports usage and ALLOW_REPLACE=1.
   def replace_blockers
     blockers = []
     each_provenance_row do |kind, row|
@@ -74,7 +87,7 @@ class DockerBuild < ApplicationRecord
 
   # Register a patch-tagged build (vX.Y).
   # If the tag already exists, overwrite that row's digest in place (row kept) when
-  # replaceable and ALLOW_REPLACE=1. Guest / other-user usage blocks replace.
+  # ALLOW_REPLACE=1. Without it, guest / other-user usage raises; with it, bypass is allowed.
   def self.register_for_patch_tag!(docker_image:, patch_tag:, digest:, allow_replace: false)
     allow_replace = allow_replace || ENV['ALLOW_REPLACE'].to_s == '1'
     existing_by_digest = find_by(digest: digest)
@@ -100,8 +113,8 @@ class DockerBuild < ApplicationRecord
       return build
     end
 
-    ensure_replaceable!(same_tag, patch_tag)
     unless allow_replace
+      ensure_replaceable!(same_tag, patch_tag)
       ids = same_tag.map(&:id).join(',')
       raise "Cannot replace DockerBuild tag=#{patch_tag} (ids=#{ids}): confirmation required. " \
             "Re-run via build_asap_run.sh and accept the replace prompt, or set ALLOW_REPLACE=1."
@@ -144,10 +157,12 @@ class DockerBuild < ApplicationRecord
     return if blocked.empty?
 
     details = blocked.map do |b|
-      "id=#{b.id} blockers=#{b.replace_blockers.join(', ')}"
+      usage = b.usage_by_user.sort_by { |user, _n| user }.map { |user, n| "#{user}=#{n}" }.join(', ')
+      "id=#{b.id} usage=[#{usage}] blockers=#{b.replace_blockers.join(', ')}"
     end.join('; ')
     raise "Cannot replace DockerBuild tag=#{patch_tag}: used by guest or non-operator users " \
-          "(#{details}). Use a new patch version."
+          "(#{details}). Re-run via build_asap_run.sh, review the per-user run counts, and " \
+          "confirm replace (ALLOW_REPLACE=1), or use a new patch version."
   end
   private_class_method :ensure_replaceable!
 
@@ -157,6 +172,16 @@ class DockerBuild < ApplicationRecord
     ActiveRun.where(docker_build_id: id).find_each { |row| yield 'active_run', row }
   end
   private :each_provenance_row
+
+  def usage_label_for(row)
+    project = Project.find_by(id: row.project_id)
+    return GUEST_USAGE_LABEL if project&.sandbox?
+    return GUEST_USAGE_LABEL if row.user_id.nil?
+
+    email = User.find_by(id: row.user_id)&.email.to_s.strip.downcase
+    email.presence || GUEST_USAGE_LABEL
+  end
+  private :usage_label_for
 
   # Resolve/create the build for the image ref that will actually run (e.g. fabdavid/asap_run:v8).
   # Digest is the live RepoDigest; tag prefers a local vX.Y patch tag when present.

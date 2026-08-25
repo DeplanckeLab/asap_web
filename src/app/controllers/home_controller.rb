@@ -90,16 +90,6 @@ class HomeController < ApplicationController
       base = ENV.fetch('SERVER_URL').chomp('/')
       render plain: <<~ROBOTS, content_type: 'text/plain'
         User-agent: *
-        Allow: /sitemap.xml
-        Disallow: /
-
-        User-agent: GPTBot
-        User-agent: PerplexityBot
-        User-agent: ClaudeBot
-        User-agent: Googlebot
-        User-agent: Google-InspectionTool
-        User-agent: Bingbot
-        User-agent: Applebot
         Allow: /
         Disallow: /annots/*/download
 

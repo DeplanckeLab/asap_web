@@ -25,7 +25,7 @@ class HomeControllerTest < ActionDispatch::IntegrationTest
     assert_no_match(/Googlebot/, response.body)
   end
 
-  test "robots.txt allows the sitemap and named crawlers on production" do
+  test "robots.txt allows all crawlers on production except annot downloads" do
     ENV['HOST'] = 'asap.epfl.ch'
     ENV['ASAP_INSTANCE_NAME'] = 'asap'
 
@@ -35,15 +35,13 @@ class HomeControllerTest < ActionDispatch::IntegrationTest
     assert_equal "text/plain", response.media_type
 
     body = response.body
-    assert_match(/^User-agent: \*$/, body)
-    assert_match(/^Allow: \/sitemap\.xml$/, body)
-    assert_match(/^Disallow: \/$/, body)
-    assert_match(/^User-agent: Googlebot$/, body)
-    assert_match(/^User-agent: Google-InspectionTool$/, body)
-    assert_match(/^User-agent: ClaudeBot$/, body)
-    assert_match(/^Allow: \/$/, body)
-    assert_match(%r{^Disallow: /annots/\*/download$}, body)
-    assert_includes body, "Sitemap: #{ENV.fetch('SERVER_URL').chomp('/')}/sitemap.xml"
+    assert_equal <<~ROBOTS, body
+      User-agent: *
+      Allow: /
+      Disallow: /annots/*/download
+
+      Sitemap: #{ENV.fetch('SERVER_URL').chomp('/')}/sitemap.xml
+    ROBOTS
   end
 
   test "sitemap.xml is publicly available" do

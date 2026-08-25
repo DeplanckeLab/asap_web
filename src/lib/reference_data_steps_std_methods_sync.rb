@@ -4,15 +4,15 @@ require "json"
 require "set"
 
 # Applies Step, StdMethod, Version, DockerImage, DockerBuild, NewsItem,
-# CellOntology, OntologyTermType, UploadType, ProjectType, and ComplianceSchema
-# rows from a JSON snapshot produced by
+# CellOntology, OntologyTermType, UploadType, ProjectType, ComplianceSchema,
+# Status, ToolType, and Tool rows from a JSON snapshot produced by
 # ReferenceDataCompare / bin/rake reference_data:export, or built in-memory by
 # the rake tasks.
 #
 # Preferred entry point: +reference_data:steps_std_methods:sync_from_dev+, which
 # sets +max_version_id+ and matches Step, StdMethod, Version, NewsItem,
-# CellOntology, OntologyTermType, UploadType, ProjectType, and ComplianceSchema
-# by primary key id (required when the same
+# CellOntology, OntologyTermType, UploadType, ProjectType, ComplianceSchema,
+# Status, ToolType, and Tool by primary key id (required when the same
 # step name exists across pipeline versions).
 #
 # OBSOLETE: calling without +max_version_id+ (rake +reference_data:steps_std_methods:sync+)
@@ -37,6 +37,10 @@ require "set"
 # ProjectType rows are applied by id when present (create / update only; no deletes — Project.project_type_id FKs).
 # ComplianceSchema rows are applied by id when present (create / update only; no
 # deletes — ComplianceValidation / ComplianceMapping FKs).
+# Status rows are applied by id when present (create / update only; no deletes — Run/Project status_id FKs).
+# ToolType is applied before Tool (create / update only; no deletes — Tool.tool_type_id FKs).
+# Tool rows are applied by id when present (create / update only; no deletes).
+# AnnotationStatus is intentionally not synced: it is per-project runtime data.
 class ReferenceDataStepsStdMethodsSync
   SyncError = Class.new(StandardError)
 
@@ -49,7 +53,7 @@ class ReferenceDataStepsStdMethodsSync
       attr_layout_json attrs_json command_json obj_attrs_json output_json
     ],
     "Version" => %w[env_json tools_json docker_json],
-    "DockerImage" => %w[tools_json]
+    "DockerImage" => %w[tools_json tool_versions_json metadata_json]
   }.freeze
 
   TIMESTAMP_COLUMNS = %w[created_at updated_at activated_at published_at started_at ended_at].freeze
@@ -81,6 +85,9 @@ class ReferenceDataStepsStdMethodsSync
     upload_types_in = fetch_optional_records_if_present!("UploadType")
     project_types_in = fetch_optional_records_if_present!("ProjectType")
     compliance_schemas_in = fetch_optional_records_if_present!("ComplianceSchema")
+    statuses_in = fetch_optional_records_if_present!("Status")
+    tool_types_in = fetch_optional_records_if_present!("ToolType")
+    tools_in = fetch_optional_records_if_present!("Tool")
 
     docker_by_src_id = index_optional_model!("DockerImage")
     version_by_src_id = index_optional_model!("Version")
@@ -124,6 +131,15 @@ class ReferenceDataStepsStdMethodsSync
       compliance_schemas_created: 0,
       compliance_schemas_updated: 0,
       compliance_schemas_unchanged: 0,
+      statuses_created: 0,
+      statuses_updated: 0,
+      statuses_unchanged: 0,
+      tool_types_created: 0,
+      tool_types_updated: 0,
+      tool_types_unchanged: 0,
+      tools_created: 0,
+      tools_updated: 0,
+      tools_unchanged: 0,
       steps_created: 0,
       steps_updated: 0,
       steps_unchanged: 0,
@@ -147,6 +163,9 @@ class ReferenceDataStepsStdMethodsSync
       apply_upload_types!(upload_types_in, summary)
       apply_project_types!(project_types_in, summary)
       apply_compliance_schemas!(compliance_schemas_in, summary)
+      apply_statuses!(statuses_in, summary)
+      apply_tool_types!(tool_types_in, summary)
+      apply_tools!(tools_in, summary)
       apply_steps!(steps_in, docker_remap, version_remap, summary)
       apply_std_methods!(
         steps_in,
@@ -173,6 +192,9 @@ class ReferenceDataStepsStdMethodsSync
       upload_types_in,
       project_types_in,
       compliance_schemas_in,
+      statuses_in,
+      tool_types_in,
+      tools_in,
       methods_in
     )
     summary
@@ -504,6 +526,24 @@ class ReferenceDataStepsStdMethodsSync
   def prepare_compliance_schema_row(row)
     attrs = row.except("id")
     target_columns = ComplianceSchema.column_names.to_set
+    attrs.select { |column, _value| target_columns.include?(column) }
+  end
+
+  def prepare_status_row(row)
+    attrs = row.except("id")
+    target_columns = Status.column_names.to_set
+    attrs.select { |column, _value| target_columns.include?(column) }
+  end
+
+  def prepare_tool_type_row(row)
+    attrs = row.except("id")
+    target_columns = ToolType.column_names.to_set
+    attrs.select { |column, _value| target_columns.include?(column) }
+  end
+
+  def prepare_tool_row(row)
+    attrs = row.except("id")
+    target_columns = Tool.column_names.to_set
     attrs.select { |column, _value| target_columns.include?(column) }
   end
 
@@ -952,6 +992,142 @@ class ReferenceDataStepsStdMethodsSync
     reset_pk_sequence!("compliance_schemas")
   end
 
+  def apply_statuses!(statuses_in, summary)
+    return if statuses_in.nil?
+
+    unless ActiveRecord::Base.connection.table_exists?(:statuses)
+      raise SyncError,
+            "statuses table is missing on the target database. " \
+            "Run migrations before syncing Status rows."
+    end
+
+    statuses_in.sort_by { |row| row["id"].to_i }.each do |src|
+      src_id = src["id"]
+      raise SyncError, "Status row without id: #{src.inspect}" if src_id.nil?
+
+      prepared = prepare_status_row(src)
+      name = prepared["name"].to_s
+      label = "id=#{src_id} name=#{name.inspect}"
+      record = Status.find_by(id: src_id)
+
+      if record.nil?
+        log_change(:create, "Status #{label}")
+        summary[:statuses_created] += 1
+        next if @dry_run
+
+        Status.create!(prepared.merge("id" => src_id))
+        next
+      end
+
+      if record_attributes_match?(record, prepared)
+        summary[:statuses_unchanged] += 1
+        next
+      end
+
+      log_change(:update, "Status #{label} (target id=#{record.id})")
+      log_verbose_diff!(record, prepared)
+      summary[:statuses_updated] += 1
+      next if @dry_run
+
+      record.update!(prepared)
+    end
+
+    return if @dry_run || statuses_in.empty?
+
+    reset_pk_sequence!("statuses")
+  end
+
+  def apply_tool_types!(tool_types_in, summary)
+    return if tool_types_in.nil?
+
+    unless ActiveRecord::Base.connection.table_exists?(:tool_types)
+      raise SyncError,
+            "tool_types table is missing on the target database. " \
+            "Run migrations before syncing ToolType rows."
+    end
+
+    tool_types_in.sort_by { |row| row["id"].to_i }.each do |src|
+      src_id = src["id"]
+      raise SyncError, "ToolType row without id: #{src.inspect}" if src_id.nil?
+
+      prepared = prepare_tool_type_row(src)
+      name = prepared["name"].to_s
+      label = "id=#{src_id} name=#{name.inspect}"
+      record = ToolType.find_by(id: src_id)
+
+      if record.nil?
+        log_change(:create, "ToolType #{label}")
+        summary[:tool_types_created] += 1
+        next if @dry_run
+
+        ToolType.create!(prepared.merge("id" => src_id))
+        next
+      end
+
+      if record_attributes_match?(record, prepared)
+        summary[:tool_types_unchanged] += 1
+        next
+      end
+
+      log_change(:update, "ToolType #{label} (target id=#{record.id})")
+      log_verbose_diff!(record, prepared)
+      summary[:tool_types_updated] += 1
+      next if @dry_run
+
+      record.update!(prepared)
+    end
+
+    return if @dry_run || tool_types_in.empty?
+
+    reset_pk_sequence!("tool_types")
+  end
+
+  def apply_tools!(tools_in, summary)
+    return if tools_in.nil?
+
+    unless ActiveRecord::Base.connection.table_exists?(:tools)
+      raise SyncError,
+            "tools table is missing on the target database. " \
+            "Run migrations before syncing Tool rows."
+    end
+
+    tools_in.sort_by { |row| row["id"].to_i }.each do |src|
+      src_id = src["id"]
+      raise SyncError, "Tool row without id: #{src.inspect}" if src_id.nil?
+
+      prepared = prepare_tool_row(src)
+      name = prepared["name"].to_s
+      package = prepared["package"].to_s
+      label = "id=#{src_id} name=#{name.inspect} package=#{package.inspect}"
+      record = Tool.find_by(id: src_id)
+
+      if record.nil?
+        log_change(:create, "Tool #{label}")
+        summary[:tools_created] += 1
+        next if @dry_run
+
+        Tool.create!(prepared.merge("id" => src_id))
+        next
+      end
+
+      if record_attributes_match?(record, prepared)
+        summary[:tools_unchanged] += 1
+        next
+      end
+
+      log_change(:update, "Tool #{label} (target id=#{record.id})")
+      log_verbose_diff!(record, prepared)
+      summary[:tools_updated] += 1
+      next if @dry_run
+
+      record.update!(prepared)
+    end
+
+    return if @dry_run || tools_in.empty?
+
+    reset_pk_sequence!("tools")
+  end
+
   def reset_pk_sequence!(table_name)
     quoted_table_name = ActiveRecord::Base.connection.quote(table_name)
     sql = <<~SQL.squish
@@ -1336,6 +1512,9 @@ class ReferenceDataStepsStdMethodsSync
     upload_types_in = nil,
     project_types_in = nil,
     compliance_schemas_in = nil,
+    statuses_in = nil,
+    tool_types_in = nil,
+    tools_in = nil,
     methods_in = []
   )
     rows = []
@@ -1365,6 +1544,15 @@ class ReferenceDataStepsStdMethodsSync
     end
     if compliance_schemas_in
       rows << summary_count_row("compliance_schemas", summary, snapshot: compliance_schemas_in.size)
+    end
+    if statuses_in
+      rows << summary_count_row("statuses", summary, snapshot: statuses_in.size)
+    end
+    if tool_types_in
+      rows << summary_count_row("tool_types", summary, snapshot: tool_types_in.size)
+    end
+    if tools_in
+      rows << summary_count_row("tools", summary, snapshot: tools_in.size)
     end
     rows << summary_count_row("steps", summary, snapshot: steps_in.size)
     rows << summary_count_row("std_methods", summary, snapshot: methods_in.size)

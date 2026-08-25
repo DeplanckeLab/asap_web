@@ -1,6 +1,7 @@
 class ToolsController < ApplicationController
   before_action :set_tool, only: [:show, :edit, :update, :destroy]
   before_action :ensure_admin!, except: [:index, :show]
+  before_action :ensure_synced_reference_data_writable!, except: [:index, :show]
 
   def index
     @tools = Tool.includes(:tool_type).order(:name)

@@ -60,6 +60,18 @@ namespace :reference_data do
       self.table_name = "compliance_schemas"
     end
 
+    class SourceStatus < SourceReferenceBase
+      self.table_name = "statuses"
+    end
+
+    class SourceToolType < SourceReferenceBase
+      self.table_name = "tool_types"
+    end
+
+    class SourceTool < SourceReferenceBase
+      self.table_name = "tools"
+    end
+
     def dev_db_config_for_reference_sync
       database_url = ENV["SOURCE_DATABASE_URL"].to_s.strip
       return { url: database_url } if database_url.present?
@@ -156,6 +168,18 @@ namespace :reference_data do
         if SourceReferenceBase.connection.table_exists?(:compliance_schemas)
           SourceComplianceSchema.order(:id).map(&:attributes)
         end
+      statuses =
+        if SourceReferenceBase.connection.table_exists?(:statuses)
+          SourceStatus.order(:id).map(&:attributes)
+        end
+      tool_types =
+        if SourceReferenceBase.connection.table_exists?(:tool_types)
+          SourceToolType.order(:id).map(&:attributes)
+        end
+      tools =
+        if SourceReferenceBase.connection.table_exists?(:tools)
+          SourceTool.order(:id).map(&:attributes)
+        end
       payload_rows = {
         steps: step_rows,
         std_methods: std_method_rows,
@@ -170,6 +194,9 @@ namespace :reference_data do
       payload_rows[:upload_types] = upload_types unless upload_types.nil?
       payload_rows[:project_types] = project_types unless project_types.nil?
       payload_rows[:compliance_schemas] = compliance_schemas unless compliance_schemas.nil?
+      payload_rows[:statuses] = statuses unless statuses.nil?
+      payload_rows[:tool_types] = tool_types unless tool_types.nil?
+      payload_rows[:tools] = tools unless tools.nil?
       payload_rows
     ensure
       SourceReferenceBase.remove_connection
@@ -193,6 +220,9 @@ namespace :reference_data do
       payload["records"]["UploadType"] = rows[:upload_types] if rows.key?(:upload_types)
       payload["records"]["ProjectType"] = rows[:project_types] if rows.key?(:project_types)
       payload["records"]["ComplianceSchema"] = rows[:compliance_schemas] if rows.key?(:compliance_schemas)
+      payload["records"]["Status"] = rows[:statuses] if rows.key?(:statuses)
+      payload["records"]["ToolType"] = rows[:tool_types] if rows.key?(:tool_types)
+      payload["records"]["Tool"] = rows[:tools] if rows.key?(:tools)
 
       tmp = Tempfile.new(["reference_data_steps_std_methods", ".json"])
       tmp.write(JSON.pretty_generate(payload))
@@ -403,6 +433,9 @@ namespace :reference_data do
          "UploadType sync by id (create/update; no deletes). " \
          "ProjectType sync by id (create/update; no deletes). " \
          "ComplianceSchema sync by id (create/update; no deletes). " \
+         "Status sync by id (create/update; no deletes). " \
+         "ToolType sync by id (create/update; no deletes). " \
+         "Tool sync by id (create/update; no deletes). " \
          "Also runs external_catalog:sync_from_dev unless SKIP_EXTERNAL_CATALOG=1 " \
          "(marks missing catalog entries obsolete; deletes blank-URL test entries only). " \
          "Hidden steps and obsolete std_methods included (so obsolete flags propagate). " \
@@ -431,7 +464,7 @@ namespace :reference_data do
         exit 1
       end
 
-      puts "Applying development Step/StdMethod/Version/DockerImage/DockerBuild/NewsItem/CellOntology/OntologyTermType/UploadType/ProjectType/ComplianceSchema " \
+      puts "Applying development Step/StdMethod/Version/DockerImage/DockerBuild/NewsItem/CellOntology/OntologyTermType/UploadType/ProjectType/ComplianceSchema/Status/ToolType/Tool " \
            "(id < #{max_version_id}, including hidden steps and obsolete std_methods) to production"
       puts "  dry_run=#{dry}  match_by=id"
 

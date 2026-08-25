@@ -34,7 +34,10 @@
   <div>
     <%= form.label :tool_versions_json, "Tool versions (JSON)", class: "block text-sm font-medium text-gray-700" %>
     <div class="mt-1">
-      <%= form.text_area :tool_versions_json, rows: 6, class: "w-full font-mono text-xs rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
+      <%= form.text_area :tool_versions_json,
+                         value: (docker_image.tool_versions_json.presence || docker_image.tools_json),
+                         rows: 6,
+                         class: "w-full font-mono text-xs rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900" %>
     </div>
     <p class="mt-1 text-xs text-gray-500">Example: { "scanpy": "1.9.3", "seurat": "4.3.0" }</p>
   </div>

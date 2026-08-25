@@ -1,5 +1,6 @@
 class StatusesController < ApplicationController
   before_action :authorize_admin
+  before_action :ensure_synced_reference_data_writable!, except: [:index, :show]
   before_action :set_status, only: [:show, :edit, :update, :destroy]
 
   # GET /statuses

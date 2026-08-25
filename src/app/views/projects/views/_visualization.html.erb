@@ -5247,6 +5247,7 @@ function onAnnotPopupCategorySelectChange(sel) {
   var nextIdx = parseInt(opt.getAttribute('data-cat-idx'), 10)
   if (!Number.isFinite(nextIdx)) return
   if (String(nextIdx) === String(_annotPopupData.catIdx)) return
+  _annotPopupData.preferredActiveTab = _annotPopupData.activeTab || null
   openAnnotationPopup(
     mid,
     nextIdx,
@@ -5449,6 +5450,9 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
   var vizRoot = document.querySelector('[data-controller="visualization"]')
   if (vizRoot && vizRoot.dataset.visualizationAnnotationToolAvailableValue === 'false') return
 
+  var preferredTab = _annotPopupData.preferredActiveTab || null
+  _annotPopupData.preferredActiveTab = null
+
   _annotPopupData.catName = catName
   _annotPopupData.catIdx = catIdx
   _annotPopupData.metadataId = metadataId
@@ -5458,7 +5462,7 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
   _annotPopupData.evidencesUrl = evidencesUrl || ''
   _annotPopupData.clas = []
   _annotPopupData.titleAnnotHint = null
-  _annotPopupData.activeTab = 'existing'
+  _annotPopupData.activeTab = preferredTab || 'existing'
   _annotPopupData.evidencesSubTab = 'up'
   _annotPopupData.evidencesSort = { up: { col: 1, asc: false }, down: { col: 1, asc: true } }
   _annotPopupData.evidencesSelectedOrder = []
@@ -5514,8 +5518,9 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
       return r.json()
     })
     .then(function(data) {
+      if (String(_annotPopupData.metadataId) !== String(metadataId) || String(_annotPopupData.catIdx) !== String(catIdx)) return
       _annotPopupData.clas = data.clas || []
-      _annotPopupData.activeTab = _annotPopupData.clas.length > 0 ? 'existing' : 'new'
+      _annotPopupData.activeTab = preferredTab || (_annotPopupData.clas.length > 0 ? 'existing' : 'new')
       _annotPopupData.uiReady = true
       if (data.bookmark_status && typeof window.applyAnnotBookmarkButtonStatus === 'function') {
         var selector = '.category-annot-btn[data-metadata-id="' + String(metadataId) + '"][data-cat-idx="' + String(catIdx) + '"]'
@@ -5530,6 +5535,7 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
       renderAnnotationPanel()
     })
     .catch(function(err) {
+      if (String(_annotPopupData.metadataId) !== String(metadataId) || String(_annotPopupData.catIdx) !== String(catIdx)) return
       _annotPopupData.uiReady = true
       refreshAnnotPopupTitle()
       panel.innerHTML = '<div style="padding: 20px; color: #ef4444;">Error loading annotations: ' + err.message + '</div>'

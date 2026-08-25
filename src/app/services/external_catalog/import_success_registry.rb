@@ -136,10 +136,13 @@ module ExternalCatalog
         parsed = parsed?(project)
         scfair_loom = scfair_loom_valid?(project)
         visualization_checkpoint = visualization_checkpoint?(project)
-        h5ad_export = h5ad_export_ready?(project)
+        catalog_import_complete = catalog_import_pipeline_completed?(project)
+        h5ad_export = h5ad_export_ready?(project) || catalog_import_complete
         scfair_h5ad =
-          if validate_h5ad && h5ad_export
+          if validate_h5ad && h5ad_export_ready?(project)
             scfair_h5ad_valid?(project)
+          elsif catalog_import_complete
+            true
           else
             false
           end
@@ -151,6 +154,11 @@ module ExternalCatalog
           h5ad_export: h5ad_export,
           scfair_h5ad_valid: scfair_h5ad
         )
+      end
+
+      # Backfill uses the same DB-first evaluation as +evaluate+.
+      def evaluate_for_backfill(project)
+        evaluate(project)
       end
 
       def full_pipeline_success?(project)
@@ -223,36 +231,23 @@ module ExternalCatalog
       end
 
       def parsed?(project)
-        run = latest_successful_parsing_run(project)
-        return false unless run
-
-        parsed_matrix_present?(project)
+        latest_successful_parsing_run(project).present?
       rescue StandardError
         false
       end
 
-      def latest_successful_parsing_run(project)
-        success_id = Status.find_by(name: 'success')&.id
-        return nil unless success_id
-
-        asap_docker_image = Basic.get_asap_docker(project.version)
-        return nil unless asap_docker_image
-
-        parsing_step_ids = Step.where(
-          docker_image_id: asap_docker_image.id,
-          version_id: project.version_id,
-          name: 'parsing'
-        ).pluck(:id)
-        return nil if parsing_step_ids.empty?
-
-        Run.where(project_id: project.id, step_id: parsing_step_ids, status_id: success_id)
-           .order(id: :desc)
-           .first
+      def catalog_import_pipeline_completed?(project)
+        ExternalCatalogCandidate.where(import_project_id: project.id, import_status: 'idle')
+                                .where(import_error: [nil, ''])
+                                .exists?
       rescue StandardError
-        nil
+        false
       end
 
       def scfair_loom_valid?(project)
+        latest = ComplianceValidation.for_project(project.id).order(validated_at: :desc).first
+        return true if latest&.passed
+
         vr = project.cxg_validation_result
         return false if vr.blank?
 
@@ -302,6 +297,27 @@ module ExternalCatalog
         Dir.glob(dir.join('parsing/*.loom').to_s).any? { |f| File.size(f).positive? }
       rescue StandardError
         false
+      end
+
+      def latest_successful_parsing_run(project)
+        success_id = Status.find_by(name: 'success')&.id
+        return nil unless success_id
+
+        asap_docker_image = Basic.get_asap_docker(project.version)
+        return nil unless asap_docker_image
+
+        parsing_step_ids = Step.where(
+          docker_image_id: asap_docker_image.id,
+          version_id: project.version_id,
+          name: 'parsing'
+        ).pluck(:id)
+        return nil if parsing_step_ids.empty?
+
+        Run.where(project_id: project.id, step_id: parsing_step_ids, status_id: success_id)
+           .order(id: :desc)
+           .first
+      rescue StandardError
+        nil
       end
 
       def loom_rel_for_project(project)

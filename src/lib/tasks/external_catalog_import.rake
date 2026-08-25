@@ -453,7 +453,9 @@ namespace :external_catalog do
     puts "project_collections total: #{ProjectCollection.count}"
   end
 
-  desc 'Backfill DATA_DIR/external_catalog_import_success.tsv from catalog-linked ASAP projects (SOURCE=cellxgene|all, VALIDATE_H5AD=1 to run h5ad scFAIR checks). DRY_RUN=1 to preview.'
+  desc 'Backfill DATA_DIR/external_catalog_import_success.tsv from catalog-linked ASAP projects (SOURCE=cellxgene|all). ' \
+       'Uses DB signals: parsing run, compliance_validations.passed, visualization checkpoints; ' \
+       'h5ad stages inferred when the catalog import completed successfully. DRY_RUN=1 to preview.'
   task backfill_import_success_registry: :environment do
     source = ENV.fetch('SOURCE', 'cellxgene').to_s.strip.downcase
     dry_run = external_catalog_bool('DRY_RUN')
@@ -473,11 +475,14 @@ namespace :external_catalog do
     ok = 0
     bad = 0
     projects.find_each do |project|
-      row = ExternalCatalog::ImportSuccessRegistry.evaluate(project)
+      row = ExternalCatalog::ImportSuccessRegistry.evaluate_for_backfill(project)
       ok += 1 if row.full_success?
       bad += 1 unless row.full_success?
       if dry_run
-        puts "  #{project.key}\t#{row.to_h.values.join("\t")}"
+        values = row.to_h
+        puts "  #{project.key}\t#{values[:import_full_success]}\t#{values[:parsed]}\t" \
+             "#{values[:scfair_loom_valid]}\t#{values[:visualization_checkpoint]}\t" \
+             "#{values[:h5ad_export]}\t#{values[:scfair_h5ad_valid]}"
       else
         ExternalCatalog::ImportSuccessRegistry.record!(project_key: project.key, status: row)
       end

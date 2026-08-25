@@ -636,6 +636,7 @@ class SlurmJobMonitorJob < ApplicationJob
       # Check if annotations were created
       annot_count_after = Annot.where(run_id: run.id).count
       Rails.logger.info("[SlurmJobMonitorJob] After finish_run, Run##{run.id} has #{annot_count_after} annotations")
+      refresh_annotation_statuses_after_markers!(run)
       maybe_continue_project_publication!(run)
     else
       Rails.logger.warn("[SlurmJobMonitorJob] No valid results found for Run##{run.id}, marking as failed")
@@ -765,6 +766,16 @@ class SlurmJobMonitorJob < ApplicationJob
       sleep 2
     end
     false
+  end
+
+  def refresh_annotation_statuses_after_markers!(run)
+    return unless run&.step&.name == 'markers'
+
+    AnnotationStatusService.refresh_for_markers_run!(run)
+  rescue StandardError => e
+    Rails.logger.warn(
+      "[SlurmJobMonitorJob] annotation status refresh failed for Run##{run&.id}: #{e.class} #{e.message}"
+    )
   end
 end
 

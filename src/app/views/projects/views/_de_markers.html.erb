@@ -211,8 +211,48 @@
       annotation_metadata_id: annot&.id,
       annotation_metadata_name: (annot&.display_name.presence || annot&.name).to_s,
       annotation_cat_idx: cat_idx,
-      annotation_cat_name: cat_name
+      annotation_cat_name: cat_name,
+      annotation_bookmark_status: 'none'
     }
+  end
+
+  # Resolve bookmark colors from persisted AnnotationStatus rows.
+  annot_ids_for_status = markers_data.filter_map { |md| md[:annotation_metadata_id] }.uniq
+  if annotation_tool_available && annot_ids_for_status.any?
+    status_by_key = AnnotationStatus.index_by_annot_cat(annot_ids_for_status)
+    missing_pairs = []
+    markers_data.each do |md|
+      mid = md[:annotation_metadata_id]
+      next unless mid
+
+      cat_idx = md[:annotation_cat_idx].to_i
+      row = status_by_key[[mid, cat_idx]]
+      if row
+        md[:annotation_bookmark_status] = row.status.presence || 'none'
+      else
+        # Markers table rows imply FindMarkers already ran for that cluster.
+        md[:annotation_bookmark_status] = 'markers_ready'
+        missing_pairs << [mid, cat_idx]
+      end
+    end
+
+    # Lazily upsert missing rows so subsequent loads hit the table.
+    missing_pairs.uniq.each do |mid, cat_idx|
+      annot = Annot.find_by(id: mid)
+      next unless annot
+
+      begin
+        row = AnnotationStatusService.refresh!(annot: annot, cat_idx: cat_idx)
+        markers_data.each do |md|
+          next unless md[:annotation_metadata_id].to_i == mid.to_i
+          next unless md[:annotation_cat_idx].to_i == cat_idx.to_i
+
+          md[:annotation_bookmark_status] = row.status
+        end
+      rescue StandardError => e
+        Rails.logger.warn("[de_markers] annotation status refresh failed annot=#{mid} cat=#{cat_idx}: #{e.class} #{e.message}")
+      end
+    end
   end
 %>
 
@@ -306,22 +346,40 @@
           </td>
           <% if annotation_tool_available %>
           <td class="px-3 py-2 whitespace-nowrap">
-            <% has_metadata = md[:annotation_metadata_id].present? %>
+            <% bookmark_status = md[:annotation_bookmark_status].presence || 'none' %>
+            <% bookmark_color =
+                 case bookmark_status
+                 when 'consensus' then '#16a34a'
+                 when 'annotated' then '#2563eb'
+                 when 'markers_ready' then '#f59e0b'
+                 when 'loading' then '#9ca3af'
+                 else '#d1d5db'
+                 end %>
+            <% bookmark_tip =
+                 case bookmark_status
+                 when 'consensus' then 'Consensus annotation available — click to view'
+                 when 'annotated' then 'Has annotations — click to view'
+                 when 'markers_ready' then 'Markers available — no annotation yet'
+                 when 'loading' then 'Loading annotation status...'
+                 else 'No annotations yet'
+                 end %>
+            <% bookmark_icon_class = bookmark_status == 'loading' ? 'fas fa-spinner fa-spin' : 'fas fa-bookmark' %>
             <button class="category-annot-btn"
                     data-metadata-id="<%= md[:annotation_metadata_id] %>"
                     data-metadata-name="<%= h(md[:annotation_metadata_name].to_s) %>"
                     data-cat-idx="<%= md[:annotation_cat_idx] %>"
                     data-cat-name="<%= md[:annotation_cat_name] %>"
                     data-category-color="<%= md_cat_color %>"
-                    data-category-has-annots="<%= has_metadata ? 'true' : 'false' %>"
+                    data-annot-bookmark-status="<%= bookmark_status %>"
+                    data-category-has-annots="<%= %w[annotated consensus].include?(bookmark_status) ? 'true' : 'false' %>"
                     data-annot-info-url="<%= get_annot_info_project_path(@project) %>"
                     data-annot-evidences-url="<%= get_annot_evidences_project_path(@project) %>"
-                    style="padding: 2px 4px; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; color: <%= has_metadata ? '#16a34a' : '#d1d5db' %>; flex-shrink: 0;"
+                    style="padding: 2px 4px; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; color: <%= bookmark_color %>; flex-shrink: 0;"
                     onmouseover="this.style.backgroundColor='#f3f4f6'"
                     onmouseout="this.style.backgroundColor=''"
-                    title="<%= has_metadata ? 'View annotations' : 'No annotations yet' %>"
+                    title="<%= bookmark_tip %>"
                     onclick="event.stopPropagation(); if (this.dataset.metadataId && typeof openAnnotationPopup === 'function') { openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx, 10), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl, this.dataset.metadataName, undefined, this.dataset.categoryHasAnnots === 'true', this.dataset.categoryColor); }">
-              <i class="fas fa-bookmark" style="font-size: 11px;"></i>
+              <i class="<%= bookmark_icon_class %>" style="font-size: 11px; color: <%= bookmark_color %>;"></i>
             </button>
           </td>
           <% end %>
@@ -721,22 +779,43 @@ if (typeof openAnnotationPopup !== 'function') {
       .catch(function() { syncMarkersStatusFromResponse(metadataId, catIdx, { state: 'error' }); });
   }
 
-  function annotationCategoryLeadingIconMarkup(hasAnnotations) {
-    var has = !!hasAnnotations;
+  function annotationCategoryLeadingIconMarkup(statusOrHasAnnotations) {
+    var status;
+    if (statusOrHasAnnotations === true) status = 'annotated';
+    else if (statusOrHasAnnotations === false) status = 'none';
+    else status = statusOrHasAnnotations;
+    if (typeof window.annotBookmarkIconMarkup === 'function') {
+      return window.annotBookmarkIconMarkup(status);
+    }
+    var has = !!statusOrHasAnnotations && statusOrHasAnnotations !== 'none' && statusOrHasAnnotations !== 'loading';
     var color = has ? '#16a34a' : '#d1d5db';
     var tip = has ? 'View annotations' : 'No annotations yet';
     return '<span style="display:inline-flex;align-items:center;justify-content:center;margin-right:8px;flex-shrink:0;" title="' + escapeAttr(tip) + '" aria-label="' + escapeAttr(tip) + '">' +
       '<i class="fas fa-bookmark" style="font-size:11px;color:' + color + ';"></i></span>';
   }
 
+  function currentAnnotPopupMarkersCompleted() {
+    // Markers analysis rows exist only after FindMarkers completed for that cluster.
+    return true;
+  }
+
+  function effectiveAnnotTitleBookmarkStatus() {
+    if (!_annotPopupData.uiReady) return 'loading';
+    var markersCompleted = currentAnnotPopupMarkersCompleted();
+    if (typeof window.resolveAnnotBookmarkStatus === 'function') {
+      return window.resolveAnnotBookmarkStatus({
+        clas: _annotPopupData.clas || [],
+        markersCompleted: markersCompleted
+      });
+    }
+    var has = (_annotPopupData.clas && _annotPopupData.clas.length > 0);
+    if (has) return 'annotated';
+    return markersCompleted ? 'markers_ready' : 'none';
+  }
+
   function effectiveAnnotTitleHasAnnotations() {
-    if (_annotPopupData.uiReady) {
-      return (_annotPopupData.clas && _annotPopupData.clas.length > 0);
-    }
-    if (_annotPopupData.titleAnnotHint === true || _annotPopupData.titleAnnotHint === false) {
-      return _annotPopupData.titleAnnotHint;
-    }
-    return false;
+    var st = effectiveAnnotTitleBookmarkStatus();
+    return st === 'annotated' || st === 'consensus';
   }
 
   function markersStateLeadingIconMarkup(state, loading, slurmQueueHover) {
@@ -782,31 +861,80 @@ if (typeof openAnnotationPopup !== 'function') {
       '<span style="width:10px;height:10px;border-radius:9999px;background-color:' + c + ';border:1px solid rgba(15,23,42,0.15);"></span></span>';
   }
 
+  function buildAnnotPopupCategoryOptionsHtml(metadataId, selectedCatIdx) {
+    var mid = String(metadataId);
+    var html = '';
+    document.querySelectorAll('.category-annot-btn[data-metadata-id="' + mid + '"]').forEach(function(btn) {
+      var idx = btn.getAttribute('data-cat-idx');
+      if (idx == null || idx === '') return;
+      var name = btn.getAttribute('data-cat-name') || ('Category ' + idx);
+      var selected = String(idx) === String(selectedCatIdx) ? ' selected' : '';
+      html += '<option value="' + escapeAttr(idx) + '"' + selected +
+        ' data-cat-idx="' + escapeAttr(idx) + '"' +
+        ' data-cat-name="' + escapeAttr(name) + '"' +
+        ' data-display-cat-idx="' + escapeAttr(btn.getAttribute('data-display-cat-idx') || '') + '"' +
+        ' data-category-color="' + escapeAttr(btn.getAttribute('data-category-color') || '') + '"' +
+        ' data-category-has-annots="' + escapeAttr(btn.getAttribute('data-category-has-annots') || 'false') + '"' +
+        ' data-annot-info-url="' + escapeAttr(btn.getAttribute('data-annot-info-url') || '') + '"' +
+        ' data-annot-evidences-url="' + escapeAttr(btn.getAttribute('data-annot-evidences-url') || '') + '"' +
+        ' data-metadata-name="' + escapeAttr(btn.getAttribute('data-metadata-name') || '') + '"' +
+        '>' + escapeHtml(name) + '</option>';
+    });
+    return html;
+  }
+
+  function onAnnotPopupCategorySelectChange(sel) {
+    if (!sel || !sel.options || sel.selectedIndex < 0) return;
+    var opt = sel.options[sel.selectedIndex];
+    if (!opt) return;
+    var mid = _annotPopupData.metadataId;
+    if (mid == null) return;
+    var nextIdx = parseInt(opt.getAttribute('data-cat-idx'), 10);
+    if (!Number.isFinite(nextIdx)) return;
+    if (String(nextIdx) === String(_annotPopupData.catIdx)) return;
+    openAnnotationPopup(
+      mid,
+      nextIdx,
+      opt.getAttribute('data-cat-name') || '',
+      opt.getAttribute('data-annot-info-url') || _annotPopupData.annotInfoUrl || '',
+      opt.getAttribute('data-annot-evidences-url') || _annotPopupData.evidencesUrl || '',
+      opt.getAttribute('data-metadata-name') || _annotPopupData.metadataName || '',
+      parseInt(opt.getAttribute('data-display-cat-idx'), 10),
+      opt.getAttribute('data-category-has-annots') === 'true',
+      opt.getAttribute('data-category-color') || ''
+    );
+  }
+  window.onAnnotPopupCategorySelectChange = onAnnotPopupCategorySelectChange;
+
   function buildAnnotPopupTitleHtml(catName, metadataName, hasAnnotations, categoryColor) {
-    var prefix = annotationCategoryLeadingIconMarkup(hasAnnotations);
+    var status = (typeof hasAnnotations === 'string')
+      ? hasAnnotations
+      : (hasAnnotations === true ? 'annotated' : (hasAnnotations === false ? 'none' : effectiveAnnotTitleBookmarkStatus()));
+    var prefix = annotationCategoryLeadingIconMarkup(status);
     var colorDot = annotPopupCategoryColorDotMarkup(categoryColor);
     var sep = '<span style="color:#64748b;font-weight:500;display:inline-block;padding:0 0.45em;flex-shrink:0;">/</span>';
     var metaTrim = (metadataName != null && String(metadataName).trim() !== '') ? String(metadataName).trim() : '';
     var catStr = String(catName || '');
-    function textTwoPart(left, right) {
-      return '<span style="display:inline-flex;align-items:baseline;flex-wrap:wrap;min-width:0;max-width:100%;">' +
-        '<span style="min-width:0;word-break:break-word;">' + escapeHtml(left) + '</span>' +
-        sep +
-        '<span style="min-width:0;word-break:break-word;">' + escapeHtml(right) + '</span>' +
-        '</span>';
+    var optionsHtml = (_annotPopupData.metadataId != null)
+      ? buildAnnotPopupCategoryOptionsHtml(_annotPopupData.metadataId, _annotPopupData.catIdx)
+      : '';
+    var catHtml;
+    if (optionsHtml) {
+      catHtml = '<select id="annot-popup-category-select" aria-label="Category"' +
+        ' onmousedown="event.stopPropagation()"' +
+        ' onclick="event.stopPropagation()"' +
+        ' onchange="if(window.onAnnotPopupCategorySelectChange)window.onAnnotPopupCategorySelectChange(this)">' +
+        optionsHtml + '</select>';
+    } else {
+      catHtml = '<span style="min-width:0;word-break:break-word;">' + escapeHtml(catStr) + '</span>';
     }
     var textHtml;
     if (metaTrim) {
-      textHtml = textTwoPart(metaTrim, catStr);
+      textHtml = '<span style="display:inline-flex;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%;gap:0;">' +
+        '<span style="min-width:0;word-break:break-word;">' + escapeHtml(metaTrim) + '</span>' +
+        sep + catHtml + '</span>';
     } else {
-      var slashIdx = catStr.indexOf('/');
-      if (slashIdx > 0 && slashIdx < catStr.length - 1) {
-        var left = catStr.slice(0, slashIdx).trim();
-        var right = catStr.slice(slashIdx + 1).trim();
-        textHtml = (left !== '' && right !== '') ? textTwoPart(left, right) : ('<span style="min-width:0;word-break:break-word;max-width:100%;">' + escapeHtml(catStr) + '</span>');
-      } else {
-        textHtml = '<span style="min-width:0;word-break:break-word;max-width:100%;">' + escapeHtml(catStr) + '</span>';
-      }
+      textHtml = catHtml;
     }
     return '<span style="display:flex;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%;">' + prefix + colorDot + textHtml + '</span>';
   }
@@ -814,9 +942,31 @@ if (typeof openAnnotationPopup !== 'function') {
   function refreshAnnotPopupTitle() {
     var titleEl = document.getElementById('annot-popup-title');
     if (!titleEl || _annotPopupData.metadataId == null) return;
-    titleEl.innerHTML = buildAnnotPopupTitleHtml(_annotPopupData.catName, _annotPopupData.metadataName, effectiveAnnotTitleHasAnnotations(), _annotPopupData.categoryColor || '');
+    titleEl.innerHTML = buildAnnotPopupTitleHtml(
+      _annotPopupData.catName,
+      _annotPopupData.metadataName,
+      effectiveAnnotTitleBookmarkStatus(),
+      _annotPopupData.categoryColor || ''
+    );
   }
   window.refreshAnnotPopupTitle = refreshAnnotPopupTitle;
+
+  function updateCategoryRowAnnotationSummary(metadataId, catIdx, clas) {
+    if (metadataId == null || catIdx == null) return;
+    var list = Array.isArray(clas) ? clas : [];
+    var status = (typeof window.resolveAnnotBookmarkStatus === 'function')
+      ? window.resolveAnnotBookmarkStatus({ clas: list, markersCompleted: true })
+      : (list.length > 0 ? 'annotated' : 'markers_ready');
+    var selector = '.category-annot-btn[data-metadata-id="' + String(metadataId) + '"][data-cat-idx="' + String(catIdx) + '"]';
+    document.querySelectorAll(selector).forEach(function(btn) {
+      if (typeof window.applyAnnotBookmarkButtonStatus === 'function') {
+        window.applyAnnotBookmarkButtonStatus(btn, status);
+      }
+    });
+    if (String(metadataId) === String(_annotPopupData.metadataId) && String(catIdx) === String(_annotPopupData.catIdx)) {
+      refreshAnnotPopupTitle();
+    }
+  }
 
   function identifyMarkersTabLeadingIconHtml() {
     var ev = _annotPopupData.evidences || {};
@@ -836,10 +986,11 @@ if (typeof openAnnotationPopup !== 'function') {
     _annotPopupData.catIdx = catIdx;
     _annotPopupData.metadataId = metadataId;
     _annotPopupData.metadataName = metadataName != null ? String(metadataName) : '';
+    _annotPopupData.annotInfoUrl = baseUrl || '';
     _annotPopupData.categoryColor = categoryColor != null && String(categoryColor).trim() !== '' ? String(categoryColor).trim() : '';
     _annotPopupData.evidencesUrl = evidencesUrl || '';
     _annotPopupData.clas = [];
-    _annotPopupData.titleAnnotHint = (categoryHasAnnots === true) ? true : (categoryHasAnnots === false ? false : null);
+    _annotPopupData.titleAnnotHint = null;
     _annotPopupData.activeTab = 'existing';
     _annotPopupData.evidencesSubTab = 'up';
     _annotPopupData.evidencesSort = { up: { col: 1, asc: false }, down: { col: 1, asc: true } };
@@ -858,16 +1009,21 @@ if (typeof openAnnotationPopup !== 'function') {
       markersQueueNote: '',
       slurmQueueHover: ''
     };
-    titleEl.innerHTML = buildAnnotPopupTitleHtml(catName, metadataName, effectiveAnnotTitleHasAnnotations(), _annotPopupData.categoryColor);
+    titleEl.innerHTML = buildAnnotPopupTitleHtml(catName, metadataName, 'loading', _annotPopupData.categoryColor);
     peekAnnotationMarkersStatus(metadataId, catIdx, evidencesUrl || '');
 
     panel.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af; font-size: 14px;"><i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Loading...</div>';
-    overlay.style.display = 'flex';
-    dialog.style.left = '';
-    dialog.style.top = '';
-    dialog.style.position = '';
-    dialog.style.margin = '';
-    dialog.style.transform = '';
+    overlay.style.display = 'block';
+    if (dialog.dataset.positioned !== 'true') {
+      var dw = dialog.offsetWidth || 720;
+      var dh = dialog.offsetHeight || 500;
+      dialog.style.position = 'fixed';
+      dialog.style.margin = '0';
+      dialog.style.transform = 'none';
+      dialog.style.left = Math.max(16, Math.round((window.innerWidth - dw) / 2)) + 'px';
+      dialog.style.top = Math.max(40, Math.round((window.innerHeight - dh) / 2)) + 'px';
+      dialog.dataset.positioned = 'true';
+    }
 
     var url = baseUrl + '?annot_id=' + encodeURIComponent(metadataId) + '&cat_idx=' + encodeURIComponent(catIdx) + '&cat_name=' + encodeURIComponent(catName);
     fetch(url, { headers: { 'Accept': 'application/json' }, credentials: 'same-origin' })
@@ -879,6 +1035,14 @@ if (typeof openAnnotationPopup !== 'function') {
         _annotPopupData.clas = data.clas || [];
         _annotPopupData.activeTab = 'existing';
         _annotPopupData.uiReady = true;
+        if (data.bookmark_status && typeof window.applyAnnotBookmarkButtonStatus === 'function') {
+          var selector = '.category-annot-btn[data-metadata-id="' + String(metadataId) + '"][data-cat-idx="' + String(catIdx) + '"]';
+          document.querySelectorAll(selector).forEach(function(btn) {
+            window.applyAnnotBookmarkButtonStatus(btn, data.bookmark_status);
+          });
+        } else {
+          updateCategoryRowAnnotationSummary(metadataId, catIdx, _annotPopupData.clas);
+        }
         refreshAnnotPopupTitle();
         renderAnnotationPanel();
       })
@@ -894,6 +1058,8 @@ if (typeof openAnnotationPopup !== 'function') {
     if (tip) tip.style.display = 'none';
     var overlay = document.getElementById('annotation-popup-overlay');
     if (overlay) overlay.style.display = 'none';
+    var dialog = document.getElementById('annotation-popup-dialog');
+    if (dialog) delete dialog.dataset.positioned;
     window._annotPopupData.activeTab = 'existing';
   };
 
@@ -1035,7 +1201,7 @@ if (typeof openAnnotationPopup !== 'function') {
   }
 
   function renderEvidenceBoxplotTab() {
-    var addGenesVizBtnHtml = '<button type="button" style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;" title="Adds genes selected for Plot in Identify markers to the main visualization gene panel" onclick="if(window.addAnnotEvidenceGenesToVisualizationBulk)window.addAnnotEvidenceGenesToVisualizationBulk()">Add genes to visualization</button>';
+    var addGenesVizBtnHtml = '<button type="button" style="border:1px solid #2563eb;background:#2563eb;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;" title="Replace the visualization gene panel with genes selected for Plot (max 1000)" onclick="if(window.addAnnotEvidenceGenesToGenePanel)window.addAnnotEvidenceGenesToGenePanel()">Add selected to gene panel</button>';
     var n = (typeof window.annotEvidenceSelectedCount === 'function') ? window.annotEvidenceSelectedCount() : 0;
     if (typeof window.annotEvidenceBoxplotSupported === 'function' && !window.annotEvidenceBoxplotSupported()) {
       var html = '<div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:10px;">Split violin plots</div>';
@@ -1069,6 +1235,18 @@ if (typeof openAnnotationPopup !== 'function') {
     html += '<option value="max"' + (sortBy === 'max' ? ' selected' : '') + '>Max</option>';
     html += '</select></div>';
     html += '<div id="annot-evidence-boxplot-root"></div>';
+    return html;
+  }
+
+  function renderEvidenceMarkersToolbarHtml() {
+    var n = (typeof window.annotEvidenceSelectedCount === 'function') ? window.annotEvidenceSelectedCount() : 0;
+    var html = '';
+    html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">';
+    html += '<button type="button" onclick="if(window.toggleAnnotEvidenceSelectAll)window.toggleAnnotEvidenceSelectAll(true)" style="padding:4px 8px;font-size:11px;font-weight:500;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer;white-space:nowrap;">Select all</button>';
+    html += '<button type="button" onclick="if(window.toggleAnnotEvidenceSelectAll)window.toggleAnnotEvidenceSelectAll(false)" style="padding:4px 8px;font-size:11px;font-weight:500;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer;white-space:nowrap;">Deselect all</button>';
+    html += '<button type="button" onclick="if(window.addAnnotEvidenceGenesToGenePanel)window.addAnnotEvidenceGenesToGenePanel()" style="padding:4px 8px;font-size:11px;font-weight:600;background:#2563eb;color:#fff;border:1px solid #2563eb;border-radius:5px;cursor:pointer;white-space:nowrap;" title="Replace the visualization gene panel with the selected genes (max 1000). Expression loads for the first 10; others stay pending until color or expand.">Add selected to gene panel</button>';
+    html += '<span id="annot-evidence-selected-count" style="font-size:11px;color:#6b7280;">' + n + ' selected</span>';
+    html += '</div>';
     return html;
   }
 
@@ -1149,6 +1327,7 @@ if (typeof openAnnotationPopup !== 'function') {
         content += '<button type="button" onclick="setEvidencesSubTab(\'up\')" style="' + evidSubNavStyle('up') + '">Up-regulated genes (' + upRows.length + ')</button>';
         content += '<button type="button" onclick="setEvidencesSubTab(\'down\')" style="' + evidSubNavStyle('down') + '">Down-regulated genes (' + downRows.length + ')</button>';
         content += '</div>';
+        content += renderEvidenceMarkersToolbarHtml();
         if (sub === 'up') {
           content += renderEvidenceGeneTableBlock(upRows, 'up', 'No up-regulated genes for this category at the current thresholds.');
         } else {

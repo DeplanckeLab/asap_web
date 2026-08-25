@@ -270,8 +270,10 @@ class ProjectsController < ApplicationController
         categorical_metadata.concat(discrete) if discrete.present?
       end
       build_best_cla_category_map(categorical_metadata)
+      load_annotation_statuses!(categorical_metadata)
     else
       @best_clas_by_metadata_category = {}
+      @annotation_statuses_by_key = {}
     end
     
     # Check if we have embeddings for visualization
@@ -6236,12 +6238,23 @@ class ProjectsController < ApplicationController
       }
     end
 
+    bookmark_status = nil
+    begin
+      bookmark_row = AnnotationStatusService.refresh!(annot: annot, cat_idx: cat_idx)
+      bookmark_status = bookmark_row&.status
+    rescue StandardError => e
+      Rails.logger.warn("[get_annot_info] bookmark status refresh failed: #{e.class} #{e.message}")
+      existing = AnnotationStatus.find_by(annot_id: annot.id, cat_idx: cat_idx)
+      bookmark_status = existing&.status
+    end
+
     render json: {
       annot_id: annot.id,
       cat_idx: cat_idx,
       cat_name: cat_name,
       project_id: @project.id,
-      clas: cla_data
+      clas: cla_data,
+      bookmark_status: bookmark_status
     }
   end
 
@@ -6535,12 +6548,21 @@ class ProjectsController < ApplicationController
     annot.update!(cat_info_json: h_cat_info.to_json)
     cell_set.update!(nber_clas: refreshed_clas.size, cla_id: selected_cla&.id)
 
+    bookmark_status = nil
+    begin
+      bookmark_row = AnnotationStatusService.refresh!(annot: annot, cat_idx: cat_idx)
+      bookmark_status = bookmark_row&.status
+    rescue StandardError => e
+      Rails.logger.warn("[create_cla] bookmark status refresh failed: #{e.class} #{e.message}")
+    end
+
     render json: {
       status: 'ok',
       cla_id: cla.id,
       num: cla.num,
       cat_idx: cat_idx,
-      annot_id: annot.id
+      annot_id: annot.id,
+      bookmark_status: bookmark_status
     }, status: :created
   end
 
@@ -11011,8 +11033,10 @@ class ProjectsController < ApplicationController
       end
       if @project.single_cell?
         timed_step.call('build_best_cla_category_map') { build_best_cla_category_map(categorical_metadata) }
+        timed_step.call('load_annotation_statuses') { load_annotation_statuses!(categorical_metadata) }
       else
         @best_clas_by_metadata_category = {}
+        @annotation_statuses_by_key = {}
       end
 
       @initial_selection_items = []
@@ -15602,6 +15626,17 @@ class ProjectsController < ApplicationController
       else
         Version.where(activated: true).where("id > 3").order(id: :desc)
       end
+    end
+
+    def load_annotation_statuses!(categorical_metadata)
+      @annotation_statuses_by_key = {}
+      return if categorical_metadata.blank?
+
+      annot_ids = categorical_metadata.map(&:id).uniq
+      return if annot_ids.empty?
+
+      @annotation_statuses_by_key =
+        AnnotationStatus.index_by_annot_cat(annot_ids)
     end
 
     def build_best_cla_category_map(categorical_metadata)

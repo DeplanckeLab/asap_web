@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_24_141500) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_25_140000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -59,6 +59,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_24_141500) do
     t.datetime "updated_at", precision: nil
     t.index ["annot_id"], name: "idx_annot_cell_sets_annot_id"
     t.index ["cell_set_id"], name: "cell_set_id_annot_cell_sets"
+  end
+
+  create_table "annotation_statuses", force: :cascade do |t|
+    t.integer "annot_id", null: false
+    t.integer "best_cla_id"
+    t.integer "cat_idx", null: false
+    t.integer "cell_set_id"
+    t.datetime "computed_at"
+    t.datetime "created_at", null: false
+    t.integer "markers_run_id"
+    t.integer "project_id", null: false
+    t.string "status", default: "none", null: false
+    t.datetime "updated_at", null: false
+    t.index ["annot_id", "cat_idx"], name: "idx_annotation_statuses_annot_cat", unique: true
+    t.index ["cell_set_id"], name: "idx_annotation_statuses_cell_set"
+    t.index ["project_id", "annot_id"], name: "idx_annotation_statuses_project_annot"
+    t.index ["status"], name: "idx_annotation_statuses_status"
   end
 
   create_table "annots", id: :serial, force: :cascade do |t|
@@ -1799,6 +1816,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_24_141500) do
   add_foreign_key "annot_cell_sets", "annots", name: "annot_cell_sets_annot_id_fkey"
   add_foreign_key "annot_cell_sets", "cell_sets", name: "annot_cell_sets_cell_set_id_fkey"
   add_foreign_key "annot_cell_sets", "projects", name: "annot_cell_sets_project_id_fkey"
+  add_foreign_key "annotation_statuses", "annots", on_delete: :cascade
+  add_foreign_key "annotation_statuses", "cell_sets", on_delete: :nullify
+  add_foreign_key "annotation_statuses", "clas", column: "best_cla_id", on_delete: :nullify
+  add_foreign_key "annotation_statuses", "projects", on_delete: :cascade
+  add_foreign_key "annotation_statuses", "runs", column: "markers_run_id", on_delete: :nullify
   add_foreign_key "annots", "attr_outputs", name: "annots_attr_output_id_fkey"
   add_foreign_key "annots", "data_transformations"
   add_foreign_key "annots", "data_types", name: "annots_data_type_id_fkey"

@@ -3008,8 +3008,14 @@ export default class extends Controller {
 
     popup.innerHTML = `
       <div data-module-score-drag-handle="true"
-           style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 10px 8px 14px;cursor:move;user-select:none;border-bottom:1px solid #f3f4f6;background:#fafafa;">
-        <span style="font-size:13px;font-weight:600;color:#111827;">ModuleScore</span>
+           style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 10px 8px 12px;cursor:move;user-select:none;border-bottom:1px solid #f3f4f6;background:#fafafa;">
+        <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+          <span title="Drag window"
+                style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;cursor:move;color:#9ca3af;border-radius:4px;flex-shrink:0;">
+            <i class="fas fa-grip-vertical" style="font-size:12px;"></i>
+          </span>
+          <span style="font-size:13px;font-weight:600;color:#111827;">ModuleScore</span>
+        </div>
         <button type="button"
                 data-module-score-close
                 title="Close"
@@ -12132,6 +12138,8 @@ export default class extends Controller {
         if (isVisible && bgColor.includes('rgb(220, 38, 38)')) {
           // Error state (red background)
           alert(`Expression data failed to load: ${title.replace('Error: ', '')}`)
+        } else if (isVisible && (title.startsWith('Pending') || title.includes('Pending'))) {
+          alert('Expression data is not loaded yet for this gene. Try coloring or expanding again.')
         } else if (isVisible && bgColor.includes('rgb(156, 163, 175)')) {
           // Loading state (gray background)
           alert('Expression data is still loading. Please wait a moment and try again.')

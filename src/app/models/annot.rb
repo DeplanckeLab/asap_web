@@ -16,6 +16,7 @@ class Annot < ApplicationRecord
   belongs_to :original_run, class_name: 'Run', foreign_key: 'ori_run_id', optional: true
   belongs_to :sim_step, class_name: 'Step', foreign_key: 'sim_step_id', optional: true
   has_many :annot_cell_sets, dependent: :destroy
+  has_many :annotation_statuses, dependent: :destroy
   has_many :cell_sets, through: :annot_cell_sets
   has_many :clas, class_name: 'Cla', dependent: :destroy
 

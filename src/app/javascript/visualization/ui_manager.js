@@ -614,7 +614,7 @@ export class UIManager {
   }
 
   // Update gene status icon based on loading state
-  // States: 'not-loaded', 'downloading', 'in-db', 'in-memory', 'error'
+  // States: 'pending', 'not-loaded', 'downloading', 'in-db', 'in-memory', 'error'
   updateGeneStatusIcon(geneId, state, errorMessage = null) {
     const statusIcon = document.querySelector(`.gene-status-icon[data-gene-id="${geneId}"]`)
     if (!statusIcon) return
@@ -626,6 +626,14 @@ export class UIManager {
     statusIcon.style.display = 'flex'
     
     switch (state) {
+      case 'pending':
+        // Gray circle with clock — listed but not fetched yet
+        statusIcon.style.backgroundColor = '#9ca3af'
+        icon.className = 'fas fa-clock'
+        icon.style.color = 'white'
+        statusIcon.title = 'Pending — expand or color to load expression'
+        break
+
       case 'not-loaded':
         // Gray circle with animated spinner
         statusIcon.style.backgroundColor = '#9ca3af'

@@ -23,20 +23,33 @@
     box-sizing: border-box;
   }
   #annotation-popup-overlay #annotation-popup-dialog {
+    position: absolute;
     width: 720px;
     height: 500px;
     min-width: 420px;
     min-height: 280px;
     max-width: 96vw;
     max-height: 92vh;
-    resize: both;
     overflow: hidden;
     box-sizing: border-box;
     background-color: #fff;
+    border: 1px solid #d1d5db;
     border-radius: 12px;
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
     display: flex;
     flex-direction: column;
+    pointer-events: auto;
+  }
+  #annotation-popup-overlay #annot-popup-category-select {
+    max-width: min(280px, 40vw);
+    padding: 4px 8px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #111827;
+    background: #fff;
+    cursor: pointer;
   }
   #annotation-popup-overlay #annot-popup-panel {
     flex: 1;
@@ -82,16 +95,26 @@
     color: #4b5563;
   }
 </style>
-<!-- Annotation Popup Overlay -->
-<div id="annotation-popup-overlay" data-annotable="<%= annotable?(@project) %>" data-current-project-id="<%= @project.id %>" data-create-cla-url="<%= create_cla_project_path(@project) %>" data-search-gene-url="<%= search_gene_project_path(@project) %>" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0,0,0,0.15); z-index: 10000; align-items: center; justify-content: center;" onclick="if(event.target === this) closeAnnotationPopup()">
+<!-- Annotation Popup Overlay (non-modal: plot stays interactive) -->
+<div id="annotation-popup-overlay" data-annotable="<%= annotable?(@project) %>" data-current-project-id="<%= @project.id %>" data-create-cla-url="<%= create_cla_project_path(@project) %>" data-search-gene-url="<%= search_gene_project_path(@project) %>" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: transparent; z-index: 10000; pointer-events: none;">
   <div id="annotation-popup-dialog">
-    <div id="annotation-popup-header" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid #e5e7eb; background-color: #f9fafb; cursor: grab; user-select: none; border-radius: 12px 12px 0 0; flex-shrink: 0;">
-      <div id="annot-popup-title" style="font-size: 15px; font-weight: 600; color: #111827; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0;">Annotations</div>
-      <button onclick="closeAnnotationPopup()" style="background: none; border: none; cursor: pointer; color: #6b7280; padding: 4px; border-radius: 4px; transition: color 0.2s;" onmouseover="this.style.color='#111827'" onmouseout="this.style.color='#6b7280'">
+    <div id="annotation-popup-header" style="display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid #e5e7eb; background-color: #f9fafb; cursor: move; user-select: none; border-radius: 12px 12px 0 0; flex-shrink: 0;">
+      <div style="display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1;">
+        <span id="annotation-popup-drag-handle"
+              title="Drag window"
+              style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; cursor: move; color: #9ca3af; border-radius: 4px; flex-shrink: 0;">
+          <i class="fas fa-grip-vertical" style="font-size: 12px;"></i>
+        </span>
+        <div id="annot-popup-title" style="font-size: 15px; font-weight: 600; color: #111827; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0;">Annotations</div>
+      </div>
+      <button type="button" onclick="closeAnnotationPopup()" style="background: none; border: none; cursor: pointer; color: #6b7280; padding: 4px; border-radius: 4px; transition: color 0.2s; flex-shrink: 0;" onmouseover="this.style.color='#111827'" onmouseout="this.style.color='#6b7280'">
         <i class="fas fa-times" style="font-size: 18px;"></i>
       </button>
     </div>
     <div id="annot-popup-panel"></div>
+    <div id="annotation-popup-resize-right" title="Resize" style="position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; z-index: 2;"></div>
+    <div id="annotation-popup-resize-bottom" title="Resize" style="position: absolute; bottom: 0; left: 0; width: 100%; height: 6px; cursor: row-resize; z-index: 2;"></div>
+    <div id="annotation-popup-resize-corner" title="Resize" style="position: absolute; bottom: 0; right: 0; width: 16px; height: 16px; cursor: nwse-resize; z-index: 3;"></div>
   </div>
 </div>
 
@@ -176,6 +199,116 @@
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;')
+  }
+
+  // Annotation bookmark status (category-annot-btn + popup title prefix).
+  // FindMarkers run state stays on the separate check/spinner icon.
+  //
+  // loading      — status not known yet (spinner)
+  // none         — no annotations yet
+  // markers_ready — FindMarkers done for this metadata, still no annotation
+  // annotated    — at least one CLA exists
+  // consensus    — best CLA has real agreement (not only the creator auto-agree)
+  var ANNOT_BOOKMARK_STATUS = {
+    loading: {
+      color: '#9ca3af',
+      tip: 'Loading annotation status...',
+      iconClass: 'fas fa-spinner fa-spin'
+    },
+    none: {
+      color: '#d1d5db',
+      tip: 'No annotations yet',
+      iconClass: 'fas fa-bookmark'
+    },
+    markers_ready: {
+      color: '#f59e0b',
+      tip: 'Markers available — no annotation yet',
+      iconClass: 'fas fa-bookmark'
+    },
+    annotated: {
+      color: '#2563eb',
+      tip: 'Has annotations — click to view',
+      iconClass: 'fas fa-bookmark'
+    },
+    consensus: {
+      color: '#16a34a',
+      tip: 'Consensus annotation available — click to view',
+      iconClass: 'fas fa-bookmark'
+    }
+  }
+  window.ANNOT_BOOKMARK_STATUS = ANNOT_BOOKMARK_STATUS
+
+  window.normalizeAnnotBookmarkStatus = function(status) {
+    var s = String(status || '').trim()
+    if (ANNOT_BOOKMARK_STATUS[s]) return s
+    return 'none'
+  }
+
+  window.annotBookmarkStatusMeta = function(status) {
+    return ANNOT_BOOKMARK_STATUS[window.normalizeAnnotBookmarkStatus(status)]
+  }
+
+  window.isAnnotBookmarkConsensusCla = function(cla) {
+    if (!cla) return false
+    var agree = Number(cla.nber_agree)
+    var disagree = Number(cla.nber_disagree)
+    if (!Number.isFinite(agree)) agree = 0
+    if (!Number.isFinite(disagree)) disagree = 0
+    var score = agree - disagree
+    if (cla.score != null && Number.isFinite(Number(cla.score))) {
+      score = Number(cla.score)
+    }
+    // Creator auto-agree starts at 1; require broader agreement for "consensus".
+    return agree >= 2 && score > 0
+  }
+
+  window.resolveAnnotBookmarkStatus = function(opts) {
+    opts = opts || {}
+    if (opts.loading) return 'loading'
+    var clas = Array.isArray(opts.clas) ? opts.clas : null
+    if (clas) {
+      if (clas.length === 0) {
+        return opts.markersCompleted ? 'markers_ready' : 'none'
+      }
+      var best = clas[0]
+      var i
+      for (i = 1; i < clas.length; i++) {
+        var a = Number(clas[i].nber_agree) || 0
+        var d = Number(clas[i].nber_disagree) || 0
+        var ba = Number(best.nber_agree) || 0
+        var bd = Number(best.nber_disagree) || 0
+        if ((a - d) > (ba - bd)) best = clas[i]
+      }
+      return window.isAnnotBookmarkConsensusCla(best) ? 'consensus' : 'annotated'
+    }
+    if (opts.hasConsensus) return 'consensus'
+    if (opts.hasAnnotations) return 'annotated'
+    if (opts.markersCompleted) return 'markers_ready'
+    if (opts.status) return window.normalizeAnnotBookmarkStatus(opts.status)
+    return 'none'
+  }
+
+  window.annotBookmarkIconMarkup = function(status) {
+    var meta = window.annotBookmarkStatusMeta(status)
+    return '<span style="display:inline-flex;align-items:center;justify-content:center;margin-right:8px;flex-shrink:0;" title="' +
+      escAttr(meta.tip) + '" aria-label="' + escAttr(meta.tip) + '">' +
+      '<i class="' + meta.iconClass + '" style="font-size:11px;color:' + meta.color + ';"></i></span>'
+  }
+
+  window.applyAnnotBookmarkButtonStatus = function(btn, status) {
+    if (!btn) return
+    var st = window.normalizeAnnotBookmarkStatus(status)
+    var meta = window.annotBookmarkStatusMeta(st)
+    btn.dataset.annotBookmarkStatus = st
+    btn.dataset.categoryHasAnnots = (st === 'annotated' || st === 'consensus') ? 'true' : 'false'
+    btn.style.color = meta.color
+    btn.title = meta.tip
+    var icon = btn.querySelector('i')
+    if (icon) {
+      icon.className = meta.iconClass
+      icon.style.fontSize = '11px'
+      icon.style.color = meta.color
+    }
   }
 
   window.claGeneBadgesRowHtml = function(genes, kind) {
@@ -584,9 +717,31 @@
     }
     var upd = window._annotPopupUpdateBoxplotTabLabel
     if (typeof upd === 'function') upd()
+    if (typeof window.updateAnnotEvidenceSelectedCountLabel === 'function') {
+      window.updateAnnotEvidenceSelectedCountLabel()
+    }
     if (apd.activeTab === 'evidence_boxplot' && typeof window.scheduleAnnotEvidenceBoxplotRender === 'function') {
       window.scheduleAnnotEvidenceBoxplotRender()
     }
+  }
+
+  window.updateAnnotEvidenceSelectedCountLabel = function() {
+    var el = document.getElementById('annot-evidence-selected-count')
+    if (!el) return
+    var n = window.annotEvidenceSelectedCount()
+    el.textContent = n + ' selected'
+  }
+
+  window.toggleAnnotEvidenceSelectAll = function(selectAll) {
+    var table = document.querySelector('#annot-popup-panel .annot-evidence-sortable-table')
+    if (!table) return
+    var boxes = table.querySelectorAll('input.annot-marker-plot-cb')
+    boxes.forEach(function(cb) {
+      var want = !!selectAll
+      if (cb.checked === want) return
+      cb.checked = want
+      window.annotEvidenceCheckboxChange(cb)
+    })
   }
 
   window.addAnnotEvidenceGeneToVisualizationFromBtn = function(btn) {
@@ -618,10 +773,10 @@
     gm.selectGene(payload)
   }
 
-  window.addAnnotEvidenceGenesToVisualizationBulk = function() {
+  window.addAnnotEvidenceGenesToGenePanel = async function() {
     var apd = window.annotEvidenceEnsureSelectionStore()
     if (!apd || !apd.evidencesSelectedOrder || apd.evidencesSelectedOrder.length === 0) {
-      alert('Select genes for Plot in the Identify markers tab first.')
+      alert('Select at least one gene (Plot checkbox).')
       return
     }
     var vc = window.visualizationController
@@ -630,27 +785,64 @@
       alert('Gene visualization is not available on this page.')
       return
     }
-    if (!gm || typeof gm.selectGene !== 'function') {
-      alert('Gene manager is not available.')
+    if (!gm || typeof gm.replaceGenesFromGeneSet !== 'function') {
+      alert('Gene panel is not available.')
       return
     }
+
+    var maxGenes = (typeof vc.getMaxGenePanelGenes === 'function')
+      ? vc.getMaxGenePanelGenes()
+      : ((typeof gm.getMaxGenePanelGenes === 'function') ? gm.getMaxGenePanelGenes() : 1000)
+    if (apd.evidencesSelectedOrder.length > maxGenes) {
+      var limitMsg = (gm.constructor && typeof gm.constructor.genePanelLimitMessage === 'function')
+        ? gm.constructor.genePanelLimitMessage(
+          'You can add at most ' + maxGenes + ' genes to the gene panel at once.',
+          maxGenes
+        )
+        : ('You can add at most ' + maxGenes + ' genes to the gene panel at once.')
+      alert(limitMsg)
+      return
+    }
+
+    if (typeof gm.isGenePanelContentUnsaved === 'function' && gm.isGenePanelContentUnsaved()) {
+      var ok = window.confirm(
+        'The current genes in the gene panel will be removed. Continue?\n\n' +
+        '(No confirmation is needed when the gene panel is empty or its genes were already saved as a gene set.)'
+      )
+      if (!ok) return
+    }
+
+    var resolved = []
     var failed = []
     apd.evidencesSelectedOrder.forEach(function(key) {
       var r = apd.evidencesSelectedRows[key]
       if (!r) return
       var row = { gene_id: r.gene_id, gene: r.gene }
       var payload = vc.resolveAnnotEvidenceRowToGeneSelectPayload(row)
-      if (payload) {
-        gm.selectGene(payload)
-      } else {
-        failed.push((r.gene && String(r.gene).trim()) || (r.gene_id && String(r.gene_id)) || key)
-      }
+      if (payload) resolved.push(payload)
+      else failed.push((r.gene && String(r.gene).trim()) || (r.gene_id && String(r.gene_id)) || key)
     })
-    if (failed.length > 0) {
-      var msg = failed.slice(0, 10).join(', ')
-      if (failed.length > 10) msg += ', ...'
-      alert('Could not resolve some genes in the project index: ' + msg)
+
+    if (resolved.length === 0) {
+      alert('Could not resolve any selected genes in the project index.')
+      return
     }
+
+    try {
+      await gm.replaceGenesFromGeneSet(resolved)
+      if (failed.length > 0) {
+        var preview = failed.slice(0, 10).join(', ')
+        if (failed.length > 10) preview += ', ...'
+        alert('Added ' + resolved.length + ' gene(s) to the gene panel. Could not resolve: ' + preview)
+      }
+    } catch (error) {
+      alert((error && error.message) || 'Failed to update the gene panel.')
+    }
+  }
+
+  // Violin tab bulk action — same deferred gene-panel replace as Identify markers
+  window.addAnnotEvidenceGenesToVisualizationBulk = function() {
+    return window.addAnnotEvidenceGenesToGenePanel()
   }
 
   window.annotEvidenceBoxplotSupported = function() {
@@ -776,6 +968,123 @@
       }
     })
   }
+
+  ;(function setupAnnotationPopupDialogWindow() {
+    var dialog = document.getElementById('annotation-popup-dialog')
+    var header = document.getElementById('annotation-popup-header')
+    var resizeRight = document.getElementById('annotation-popup-resize-right')
+    var resizeBottom = document.getElementById('annotation-popup-resize-bottom')
+    var resizeCorner = document.getElementById('annotation-popup-resize-corner')
+    if (!dialog || !header) return
+
+    var isDragging = false
+    var dragOffsetX = 0
+    var dragOffsetY = 0
+
+    header.addEventListener('mousedown', function(e) {
+      if (e.target.closest('button, select, option, input, textarea, a, label')) return
+      if (e.target.closest('[id^="annotation-popup-resize-"]')) return
+      isDragging = true
+      var rect = dialog.getBoundingClientRect()
+      dialog.style.position = 'fixed'
+      dialog.style.margin = '0'
+      dialog.style.transform = 'none'
+      dialog.style.left = rect.left + 'px'
+      dialog.style.top = rect.top + 'px'
+      dialog.dataset.positioned = 'true'
+      dragOffsetX = e.clientX - rect.left
+      dragOffsetY = e.clientY - rect.top
+      e.preventDefault()
+    })
+
+    document.addEventListener('mousemove', function(e) {
+      if (!isDragging) return
+      var maxX = Math.max(0, window.innerWidth - 100)
+      var maxY = Math.max(0, window.innerHeight - 50)
+      var nx = Math.max(0, Math.min(e.clientX - dragOffsetX, maxX))
+      var ny = Math.max(0, Math.min(e.clientY - dragOffsetY, maxY))
+      dialog.style.left = nx + 'px'
+      dialog.style.top = ny + 'px'
+    })
+
+    document.addEventListener('mouseup', function() {
+      isDragging = false
+    })
+
+    var isResizing = false
+    var resizeType = null
+    var startX = 0
+    var startY = 0
+    var startWidth = 0
+    var startHeight = 0
+    var startLeft = 0
+    var startTop = 0
+
+    function startResize(e, type) {
+      if (e.button !== 0) return
+      isResizing = true
+      resizeType = type
+      startX = e.clientX
+      startY = e.clientY
+      var rect = dialog.getBoundingClientRect()
+      startWidth = rect.width
+      startHeight = rect.height
+      startLeft = rect.left
+      startTop = rect.top
+      dialog.style.position = 'fixed'
+      dialog.style.margin = '0'
+      dialog.style.transform = 'none'
+      dialog.style.left = startLeft + 'px'
+      dialog.style.top = startTop + 'px'
+      dialog.dataset.positioned = 'true'
+      e.preventDefault()
+      e.stopPropagation()
+    }
+
+    function doResize(e) {
+      if (!isResizing) return
+      e.preventDefault()
+      var deltaX = e.clientX - startX
+      var deltaY = e.clientY - startY
+      var newWidth = startWidth
+      var newHeight = startHeight
+      if (resizeType === 'right' || resizeType === 'corner') {
+        newWidth = startWidth + deltaX
+      }
+      if (resizeType === 'bottom' || resizeType === 'corner') {
+        newHeight = startHeight + deltaY
+      }
+      var minWidth = 420
+      var minHeight = 280
+      var maxWidth = window.innerWidth - 20
+      var maxHeight = window.innerHeight - 20
+      newWidth = Math.max(minWidth, Math.min(newWidth, maxWidth))
+      newHeight = Math.max(minHeight, Math.min(newHeight, maxHeight))
+      var newLeft = startLeft
+      var newTop = startTop
+      if (newLeft + newWidth > window.innerWidth) {
+        newLeft = Math.max(0, window.innerWidth - newWidth)
+      }
+      if (newTop + newHeight > window.innerHeight) {
+        newTop = Math.max(0, window.innerHeight - newHeight)
+      }
+      dialog.style.width = Math.round(newWidth) + 'px'
+      dialog.style.height = Math.round(newHeight) + 'px'
+      dialog.style.left = Math.round(newLeft) + 'px'
+      dialog.style.top = Math.round(newTop) + 'px'
+    }
+
+    function stopResize() {
+      isResizing = false
+      resizeType = null
+    }
+
+    if (resizeRight) resizeRight.addEventListener('mousedown', function(e) { startResize(e, 'right') })
+    if (resizeBottom) resizeBottom.addEventListener('mousedown', function(e) { startResize(e, 'bottom') })
+    if (resizeCorner) resizeCorner.addEventListener('mousedown', function(e) { startResize(e, 'corner') })
+    document.addEventListener('mousemove', doResize)
+    document.addEventListener('mouseup', stopResize)
+  })()
 
   ;(function setupAnnotationPopupGeneModalWindow() {
     var modal = document.getElementById('annotation-popup-gene-modal-overlay')

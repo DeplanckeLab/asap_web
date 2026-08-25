@@ -34,6 +34,7 @@ class Project < ApplicationRecord
   has_many :annots, -> { light }, dependent: :destroy
   has_many :annots_light, -> { light }, class_name: 'Annot', foreign_key: :project_id, inverse_of: :project
   has_many :annot_cell_sets, inverse_of: :project
+  has_many :annotation_statuses, dependent: :destroy, inverse_of: :project
   has_many :ot_projects, dependent: :destroy
   has_many :ott_projects, dependent: :destroy
   has_many :compliance_mappings, dependent: :destroy

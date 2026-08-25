@@ -5,6 +5,9 @@ import { GeneSetOverlapPopup } from "visualization/gene_set_overlap_popup"
 // GeneManager - Handles gene autocomplete and expression visualization
 export class GeneManager {
   static MAX_GENE_PANEL_GENES = 1000
+  // When many genes are added at once (gene sets, DE, paste), only fetch expression
+  // for this many immediately; the rest stay pending until color or expand.
+  static EAGER_GENE_EXPRESSION_LOAD_LIMIT = 10
 
   static genePanelLimitHint(maxGenes = GeneManager.MAX_GENE_PANEL_GENES) {
     return `To create a gene set with more than ${maxGenes} genes, go to the Gene sets panel and click the + button.`
@@ -202,8 +205,21 @@ export class GeneManager {
       })
     }
 
+    // Do not reload the full panel on matrix change — that overwhelms the server
+    // when hundreds of genes are listed. Eager-load a small prefix; keep actively
+    // used / expanded genes; leave the rest pending until color or expand.
+    const eagerLimit = GeneManager.EAGER_GENE_EXPRESSION_LOAD_LIMIT
     if (Array.isArray(this.geneTags)) {
-      this.geneTags.forEach(gene => addGeneDescriptor(gene.stableId, gene.symbol, gene.ensemblId, gene.query))
+      this.geneTags.slice(0, eagerLimit).forEach((gene) => {
+        addGeneDescriptor(gene.stableId, gene.symbol, gene.ensemblId, gene.query)
+      })
+      this.geneTags.forEach((gene) => {
+        const geneDiv = document.querySelector(`[data-gene-item="${gene.stableId}"]`)
+        const rangeSection = geneDiv?.querySelector('.gene-range-section')
+        if (rangeSection && rangeSection.style.display !== 'none' && rangeSection.style.display !== '') {
+          addGeneDescriptor(gene.stableId, gene.symbol, gene.ensemblId, gene.query)
+        }
+      })
     }
 
     const collectFromButton = (buttonInfo) => {
@@ -222,6 +238,15 @@ export class GeneManager {
       const parts = currentVectorId.split('_')
       if (parts.length >= 2) {
         addGeneDescriptor(parts[1])
+      }
+    }
+
+    if (Array.isArray(this.geneTags) && this.controller?.uiManager) {
+      for (const gene of this.geneTags) {
+        const geneId = String(gene.stableId)
+        if (!genesToReload.has(geneId)) {
+          this.controller.uiManager.updateGeneStatusIcon(geneId, 'pending')
+        }
       }
     }
 
@@ -2146,13 +2171,23 @@ export class GeneManager {
       console.trace('❌ [GENE ADD] Renderer instance change during processAllGenes')
     }
 
-    // Display all genes and load their expression data
+    // Display all genes in the panel; only eagerly fetch expression for a prefix.
+    // Remaining genes stay pending until the user colors or expands them.
     for (const gene of this.geneTags) {
       this.displayBulkGene(gene, resultsDiv)
     }
 
-    // Load expression data for all genes
-    for (const gene of this.geneTags) {
+    const eagerLimit = GeneManager.EAGER_GENE_EXPRESSION_LOAD_LIMIT
+    const eagerGenes = this.geneTags.slice(0, eagerLimit)
+    const deferredGenes = this.geneTags.slice(eagerLimit)
+
+    for (const gene of deferredGenes) {
+      if (this.controller?.uiManager) {
+        this.controller.uiManager.updateGeneStatusIcon(String(gene.stableId), 'pending')
+      }
+    }
+
+    for (const gene of eagerGenes) {
       await this.loadGeneExpressionData(gene, resultsDiv)
     }
     
@@ -3401,7 +3436,7 @@ export class GeneManager {
     }
   }
 
-  toggleGeneExpansion(geneId) {
+  async toggleGeneExpansion(geneId) {
     const geneDiv = document.querySelector(`[data-gene-item="${geneId}"]`)
     if (!geneDiv) return
     
@@ -3436,12 +3471,26 @@ export class GeneManager {
         geneFilterStateIcon.style.display = 'flex'
       }
       
-      // Initialize range slider if expression data is loaded
-      // Wait a bit for the expansion animation to complete so canvas has proper dimensions
+      // Initialize range slider once expression data is available.
+      // Deferred (pending) genes load on expand.
       const geneIdNum = parseInt(geneId)
-      const expressionData = this.geneExpressionData[geneId] || 
+      let expressionData = this.geneExpressionData[geneId] || 
                              this.geneExpressionData[geneIdNum] || 
                              this.geneExpressionData[geneIdStr]
+      if (!(expressionData && expressionData.values)) {
+        const gene = (this.geneTags || []).find((g) =>
+          String(g.stableId) === geneIdStr ||
+          String(g.stableId) === String(geneIdNum) ||
+          g.stableId === geneIdNum
+        )
+        if (gene) {
+          const resultsDiv = document.getElementById('gene-expression-results')
+          await this.loadGeneExpressionData(gene, resultsDiv)
+          expressionData = this.geneExpressionData[geneId] ||
+                           this.geneExpressionData[geneIdNum] ||
+                           this.geneExpressionData[geneIdStr]
+        }
+      }
       if (expressionData && expressionData.values) {
         // Wait for animation to complete (300ms animation + small buffer)
         setTimeout(() => {
@@ -3458,9 +3507,6 @@ export class GeneManager {
             this.updateGeneCategoryBoxplot(geneId)
           }, 100)
         }, 350)
-      } else {
-        // Data not loaded yet, it will initialize when loaded
-        // console.log(`GeneManager: Expression data not yet loaded for gene ${geneId}, will initialize when ready`)
       }
     } else {
       chevron.style.transform = 'rotate(0deg)'

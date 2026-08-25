@@ -1396,6 +1396,34 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                               <div class="metadata-category-best" title="<%= best_annotation_name %>"><%= best_annotation_name %></div>
                               <div class="metadata-category-count"><%= count %></div>
                               <% has_annots = best_cla.present? %>
+                              <% bookmark_row = (@annotation_statuses_by_key || {})[[metadata.id, canonical_cat_idx.to_i]] %>
+                              <% bookmark_status =
+                                   if bookmark_row&.status.present?
+                                     bookmark_row.status
+                                   elsif best_cla.present? && best_cla[:score].to_i >= 2
+                                     'consensus'
+                                   elsif has_annots
+                                     'annotated'
+                                   else
+                                     'none'
+                                   end %>
+                              <% bookmark_color =
+                                   case bookmark_status
+                                   when 'consensus' then '#16a34a'
+                                   when 'annotated' then '#2563eb'
+                                   when 'markers_ready' then '#f59e0b'
+                                   when 'loading' then '#9ca3af'
+                                   else '#d1d5db'
+                                   end %>
+                              <% bookmark_tip =
+                                   case bookmark_status
+                                   when 'consensus' then 'Consensus annotation available — click to view'
+                                   when 'annotated' then 'Has annotations — click to view'
+                                   when 'markers_ready' then 'Markers available — no annotation yet'
+                                   when 'loading' then 'Loading annotation status...'
+                                   else 'No annotations yet'
+                                   end %>
+                              <% bookmark_icon_class = bookmark_status == 'loading' ? 'fas fa-spinner fa-spin' : 'fas fa-bookmark' %>
                               <button class="category-annot-btn"
                                       data-metadata-id="<%= metadata.id %>"
                                       data-metadata-name="<%= h((metadata.display_name.presence || metadata.name).to_s) %>"
@@ -1403,15 +1431,16 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                                       data-display-cat-idx="<%= index %>"
                                       data-cat-name="<%= category %>"
                                       data-category-color="<%= category_color %>"
-                                      data-category-has-annots="<%= has_annots ? 'true' : 'false' %>"
+                                      data-annot-bookmark-status="<%= bookmark_status %>"
+                                      data-category-has-annots="<%= %w[annotated consensus].include?(bookmark_status) ? 'true' : 'false' %>"
                                       data-annot-info-url="<%= get_annot_info_project_path(@project) %>"
                                       data-annot-evidences-url="<%= get_annot_evidences_project_path(@project) %>"
-                                      style="padding: 2px 0; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; color: <%= has_annots ? '#16a34a' : '#d1d5db' %>; flex-shrink: 0;"
+                                      style="padding: 2px 0; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; color: <%= bookmark_color %>; flex-shrink: 0;"
                                       onmouseover="this.style.backgroundColor='#f3f4f6'"
                                       onmouseout="this.style.backgroundColor=''"
-                                      title="<%= has_annots ? 'View annotations' : 'No annotations yet' %>"
+                                      title="<%= bookmark_tip %>"
                                       onclick="event.stopPropagation(); openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx, 10), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl, this.dataset.metadataName, parseInt(this.dataset.displayCatIdx, 10), this.dataset.categoryHasAnnots === 'true', this.dataset.categoryColor)">
-                                <i class="fas fa-bookmark" style="font-size: 11px;"></i>
+                                <i class="<%= bookmark_icon_class %>" style="font-size: 11px; color: <%= bookmark_color %>;"></i>
                               </button>
                             </div>
                             <!-- Category Distribution Canvas and Download Button -->
@@ -1474,6 +1503,34 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                               <div class="metadata-category-best" title="<%= best_annotation_name_arr %>"><%= best_annotation_name_arr %></div>
                               <div class="metadata-category-count">Category <%= index + 1 %></div>
                               <% has_annots_arr = best_cla.present? %>
+                              <% bookmark_row_arr = (@annotation_statuses_by_key || {})[[metadata.id, canonical_cat_idx.to_i]] %>
+                              <% bookmark_status_arr =
+                                   if bookmark_row_arr&.status.present?
+                                     bookmark_row_arr.status
+                                   elsif best_cla.present? && best_cla[:score].to_i >= 2
+                                     'consensus'
+                                   elsif has_annots_arr
+                                     'annotated'
+                                   else
+                                     'none'
+                                   end %>
+                              <% bookmark_color_arr =
+                                   case bookmark_status_arr
+                                   when 'consensus' then '#16a34a'
+                                   when 'annotated' then '#2563eb'
+                                   when 'markers_ready' then '#f59e0b'
+                                   when 'loading' then '#9ca3af'
+                                   else '#d1d5db'
+                                   end %>
+                              <% bookmark_tip_arr =
+                                   case bookmark_status_arr
+                                   when 'consensus' then 'Consensus annotation available — click to view'
+                                   when 'annotated' then 'Has annotations — click to view'
+                                   when 'markers_ready' then 'Markers available — no annotation yet'
+                                   when 'loading' then 'Loading annotation status...'
+                                   else 'No annotations yet'
+                                   end %>
+                              <% bookmark_icon_class_arr = bookmark_status_arr == 'loading' ? 'fas fa-spinner fa-spin' : 'fas fa-bookmark' %>
                               <button class="category-annot-btn"
                                       data-metadata-id="<%= metadata.id %>"
                                       data-metadata-name="<%= h((metadata.display_name.presence || metadata.name).to_s) %>"
@@ -1481,15 +1538,16 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                                       data-display-cat-idx="<%= category_index %>"
                                       data-cat-name="<%= category %>"
                                       data-category-color="<%= category_color %>"
-                                      data-category-has-annots="<%= has_annots_arr ? 'true' : 'false' %>"
+                                      data-annot-bookmark-status="<%= bookmark_status_arr %>"
+                                      data-category-has-annots="<%= %w[annotated consensus].include?(bookmark_status_arr) ? 'true' : 'false' %>"
                                       data-annot-info-url="<%= get_annot_info_project_path(@project) %>"
                                       data-annot-evidences-url="<%= get_annot_evidences_project_path(@project) %>"
-                                      style="padding: 2px 0; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; color: <%= has_annots_arr ? '#16a34a' : '#d1d5db' %>; flex-shrink: 0;"
+                                      style="padding: 2px 0; background: none; border: none; border-radius: 4px; cursor: pointer; transition: all 0.2s; color: <%= bookmark_color_arr %>; flex-shrink: 0;"
                                       onmouseover="this.style.backgroundColor='#f3f4f6'"
                                       onmouseout="this.style.backgroundColor=''"
-                                      title="<%= has_annots_arr ? 'View annotations' : 'No annotations yet' %>"
+                                      title="<%= bookmark_tip_arr %>"
                                       onclick="event.stopPropagation(); openAnnotationPopup(this.dataset.metadataId, parseInt(this.dataset.catIdx, 10), this.dataset.catName, this.dataset.annotInfoUrl, this.dataset.annotEvidencesUrl, this.dataset.metadataName, parseInt(this.dataset.displayCatIdx, 10), this.dataset.categoryHasAnnots === 'true', this.dataset.categoryColor)">
-                                <i class="fas fa-bookmark" style="font-size: 11px;"></i>
+                                <i class="<%= bookmark_icon_class_arr %>" style="font-size: 11px; color: <%= bookmark_color_arr %>;"></i>
                               </button>
                             </div>
                             <!-- Category Distribution Canvas and Download Button -->
@@ -4969,36 +5027,7 @@ function handleSubmitMetadata(btn) {
   })
 }
 
-// --- Annotation Popup + Draggable ---
-
-(function() {
-  var isDragging = false, dragOffsetX = 0, dragOffsetY = 0, dragDialog = null
-  document.addEventListener('mousedown', function(e) {
-    var header = e.target.closest('#annotation-popup-header')
-    if (!header) return
-    if (e.target.closest('button')) return
-    dragDialog = document.getElementById('annotation-popup-dialog')
-    if (!dragDialog) return
-    isDragging = true
-    var rect = dragDialog.getBoundingClientRect()
-    dragDialog.style.position = 'fixed'
-    dragDialog.style.margin = '0'
-    dragDialog.style.left = rect.left + 'px'
-    dragDialog.style.top = rect.top + 'px'
-    dragDialog.style.transform = 'none'
-    dragOffsetX = e.clientX - rect.left
-    dragOffsetY = e.clientY - rect.top
-    e.preventDefault()
-  })
-  document.addEventListener('mousemove', function(e) {
-    if (!isDragging || !dragDialog) return
-    var nx = Math.max(0, Math.min(e.clientX - dragOffsetX, window.innerWidth - 100))
-    var ny = Math.max(0, Math.min(e.clientY - dragOffsetY, window.innerHeight - 50))
-    dragDialog.style.left = nx + 'px'
-    dragDialog.style.top = ny + 'px'
-  })
-  document.addEventListener('mouseup', function() { isDragging = false; dragDialog = null })
-})()
+// --- Annotation Popup (drag/resize owned by _annotation_popup.html.erb) ---
 
 var _annotPopupData = {
   catName: '',
@@ -5101,23 +5130,46 @@ function templateHtml(templateId) {
   return tpl ? tpl.innerHTML : ''
 }
 
-// Same bookmark as category rows (fa-bookmark, green when this category has annotations).
-function annotationCategoryLeadingIconMarkup(hasAnnotations) {
-  var has = !!hasAnnotations
+// Same bookmark as category rows. Status: loading / none / markers_ready / annotated / consensus.
+function annotationCategoryLeadingIconMarkup(statusOrHasAnnotations) {
+  var status
+  if (statusOrHasAnnotations === true) status = 'annotated'
+  else if (statusOrHasAnnotations === false) status = 'none'
+  else status = statusOrHasAnnotations
+  if (typeof window.annotBookmarkIconMarkup === 'function') {
+    return window.annotBookmarkIconMarkup(status)
+  }
+  var has = !!statusOrHasAnnotations && statusOrHasAnnotations !== 'none' && statusOrHasAnnotations !== 'loading'
   var color = has ? '#16a34a' : '#d1d5db'
   var tip = has ? 'View annotations' : 'No annotations yet'
   return '<span style="display:inline-flex;align-items:center;justify-content:center;margin-right:8px;flex-shrink:0;" title="' + escapeAttr(tip) + '" aria-label="' + escapeAttr(tip) + '">' +
     '<i class="fas fa-bookmark" style="font-size:11px;color:' + color + ';"></i></span>'
 }
 
+function currentAnnotPopupMarkersCompleted() {
+  var mid = _annotPopupData.metadataId
+  if (mid == null) return false
+  var st = (window._annotMarkersStatus && window._annotMarkersStatus[String(mid)]) || ''
+  return st === 'completed'
+}
+
+function effectiveAnnotTitleBookmarkStatus() {
+  if (!_annotPopupData.uiReady) return 'loading'
+  var markersCompleted = currentAnnotPopupMarkersCompleted()
+  if (typeof window.resolveAnnotBookmarkStatus === 'function') {
+    return window.resolveAnnotBookmarkStatus({
+      clas: _annotPopupData.clas || [],
+      markersCompleted: markersCompleted
+    })
+  }
+  var has = (_annotPopupData.clas && _annotPopupData.clas.length > 0)
+  if (has) return 'annotated'
+  return markersCompleted ? 'markers_ready' : 'none'
+}
+
 function effectiveAnnotTitleHasAnnotations() {
-  if (_annotPopupData.uiReady) {
-    return (_annotPopupData.clas && _annotPopupData.clas.length > 0)
-  }
-  if (_annotPopupData.titleAnnotHint === true || _annotPopupData.titleAnnotHint === false) {
-    return _annotPopupData.titleAnnotHint
-  }
-  return false
+  var st = effectiveAnnotTitleBookmarkStatus()
+  return st === 'annotated' || st === 'consensus'
 }
 
 // Leading icon for Identify markers tab (FindMarkers / Slurm state).
@@ -5164,33 +5216,82 @@ function annotPopupCategoryColorDotMarkup(hex) {
     '<span style="width:10px;height:10px;border-radius:9999px;background-color:' + c + ';border:1px solid rgba(15,23,42,0.15);"></span></span>'
 }
 
+function buildAnnotPopupCategoryOptionsHtml(metadataId, selectedCatIdx) {
+  var mid = String(metadataId)
+  var html = ''
+  document.querySelectorAll('.category-annot-btn[data-metadata-id="' + mid + '"]').forEach(function(btn) {
+    var idx = btn.getAttribute('data-cat-idx')
+    if (idx == null || idx === '') return
+    var name = btn.getAttribute('data-cat-name') || ('Category ' + idx)
+    var selected = String(idx) === String(selectedCatIdx) ? ' selected' : ''
+    html += '<option value="' + escapeAttr(idx) + '"' + selected +
+      ' data-cat-idx="' + escapeAttr(idx) + '"' +
+      ' data-cat-name="' + escapeAttr(name) + '"' +
+      ' data-display-cat-idx="' + escapeAttr(btn.getAttribute('data-display-cat-idx') || '') + '"' +
+      ' data-category-color="' + escapeAttr(btn.getAttribute('data-category-color') || '') + '"' +
+      ' data-category-has-annots="' + escapeAttr(btn.getAttribute('data-category-has-annots') || 'false') + '"' +
+      ' data-annot-info-url="' + escapeAttr(btn.getAttribute('data-annot-info-url') || '') + '"' +
+      ' data-annot-evidences-url="' + escapeAttr(btn.getAttribute('data-annot-evidences-url') || '') + '"' +
+      ' data-metadata-name="' + escapeAttr(btn.getAttribute('data-metadata-name') || '') + '"' +
+      '>' + escapeHtml(name) + '</option>'
+  })
+  return html
+}
+
+function onAnnotPopupCategorySelectChange(sel) {
+  if (!sel || !sel.options || sel.selectedIndex < 0) return
+  var opt = sel.options[sel.selectedIndex]
+  if (!opt) return
+  var mid = _annotPopupData.metadataId
+  if (mid == null) return
+  var nextIdx = parseInt(opt.getAttribute('data-cat-idx'), 10)
+  if (!Number.isFinite(nextIdx)) return
+  if (String(nextIdx) === String(_annotPopupData.catIdx)) return
+  openAnnotationPopup(
+    mid,
+    nextIdx,
+    opt.getAttribute('data-cat-name') || '',
+    opt.getAttribute('data-annot-info-url') || _annotPopupData.annotInfoUrl || '',
+    opt.getAttribute('data-annot-evidences-url') || _annotPopupData.evidencesUrl || '',
+    opt.getAttribute('data-metadata-name') || _annotPopupData.metadataName || '',
+    parseInt(opt.getAttribute('data-display-cat-idx'), 10),
+    opt.getAttribute('data-category-has-annots') === 'true',
+    opt.getAttribute('data-category-color') || ''
+  )
+}
+window.onAnnotPopupCategorySelectChange = onAnnotPopupCategorySelectChange
+
 function buildAnnotPopupTitleHtml(catName, metadataName, hasAnnotations, categoryColor) {
-  var prefix = annotationCategoryLeadingIconMarkup(hasAnnotations)
+  var status = arguments.length >= 3 && typeof hasAnnotations === 'string'
+    ? hasAnnotations
+    : (hasAnnotations === true ? 'annotated' : (hasAnnotations === false ? 'none' : effectiveAnnotTitleBookmarkStatus()))
+  var prefix = annotationCategoryLeadingIconMarkup(status)
   var colorDot = annotPopupCategoryColorDotMarkup(categoryColor)
   var sep = '<span style="color:#64748b;font-weight:500;display:inline-block;padding:0 0.45em;flex-shrink:0;">/</span>'
   var metaTrim = (metadataName != null && String(metadataName).trim() !== '') ? String(metadataName).trim() : ''
   var catStr = String(catName || '')
+  var optionsHtml = (_annotPopupData.metadataId != null)
+    ? buildAnnotPopupCategoryOptionsHtml(_annotPopupData.metadataId, _annotPopupData.catIdx)
+    : ''
 
-  function textTwoPart(left, right) {
-    return '<span style="display:inline-flex;align-items:baseline;flex-wrap:wrap;min-width:0;max-width:100%;">' +
-      '<span style="min-width:0;word-break:break-word;">' + escapeHtml(left) + '</span>' +
-      sep +
-      '<span style="min-width:0;word-break:break-word;">' + escapeHtml(right) + '</span>' +
-      '</span>'
+  var catHtml
+  if (optionsHtml) {
+    catHtml = '<select id="annot-popup-category-select" aria-label="Category"' +
+      ' onmousedown="event.stopPropagation()"' +
+      ' onclick="event.stopPropagation()"' +
+      ' onchange="if(window.onAnnotPopupCategorySelectChange)window.onAnnotPopupCategorySelectChange(this)">' +
+      optionsHtml + '</select>'
+  } else {
+    catHtml = '<span style="min-width:0;word-break:break-word;">' + escapeHtml(catStr) + '</span>'
   }
 
   var textHtml
   if (metaTrim) {
-    textHtml = textTwoPart(metaTrim, catStr)
+    textHtml = '<span style="display:inline-flex;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%;gap:0;">' +
+      '<span style="min-width:0;word-break:break-word;">' + escapeHtml(metaTrim) + '</span>' +
+      sep + catHtml + '</span>'
   } else {
-    var slashIdx = catStr.indexOf('/')
-    if (slashIdx > 0 && slashIdx < catStr.length - 1) {
-      var left = catStr.slice(0, slashIdx).trim()
-      var right = catStr.slice(slashIdx + 1).trim()
-      textHtml = (left !== '' && right !== '') ? textTwoPart(left, right) : ('<span style="min-width:0;word-break:break-word;max-width:100%;">' + escapeHtml(catStr) + '</span>')
-    } else {
-      textHtml = '<span style="min-width:0;word-break:break-word;max-width:100%;">' + escapeHtml(catStr) + '</span>'
-    }
+    textHtml = catHtml
   }
   return '<span style="display:flex;align-items:center;flex-wrap:wrap;min-width:0;max-width:100%;">' + prefix + colorDot + textHtml + '</span>'
 }
@@ -5198,7 +5299,12 @@ function buildAnnotPopupTitleHtml(catName, metadataName, hasAnnotations, categor
 function refreshAnnotPopupTitle() {
   var titleEl = document.getElementById('annot-popup-title')
   if (!titleEl || _annotPopupData.metadataId == null) return
-  titleEl.innerHTML = buildAnnotPopupTitleHtml(_annotPopupData.catName, _annotPopupData.metadataName, effectiveAnnotTitleHasAnnotations(), _annotPopupData.categoryColor || '')
+  titleEl.innerHTML = buildAnnotPopupTitleHtml(
+    _annotPopupData.catName,
+    _annotPopupData.metadataName,
+    effectiveAnnotTitleBookmarkStatus(),
+    _annotPopupData.categoryColor || ''
+  )
 }
 window.refreshAnnotPopupTitle = refreshAnnotPopupTitle
 
@@ -5286,6 +5392,9 @@ function syncMarkersStatusFromResponse(metadataId, catIdx, data) {
     delete window._annotSlurmQueueHover[String(metadataId)]
   }
   updateMarkersStatusInMetadataPanel(metadataId, catIdx, state, hoverForRow)
+  if (typeof syncAnnotBookmarkButtonsForMarkersStatus === 'function') {
+    syncAnnotBookmarkButtonsForMarkersStatus(metadataId, state)
+  }
   var mid = _annotPopupData.metadataId
   if (mid != null && String(mid) === String(metadataId)) {
     _annotPopupData.evidences = _annotPopupData.evidences || {}
@@ -5348,7 +5457,7 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
   _annotPopupData.categoryColor = categoryColor != null && String(categoryColor).trim() !== '' ? String(categoryColor).trim() : ''
   _annotPopupData.evidencesUrl = evidencesUrl || ''
   _annotPopupData.clas = []
-  _annotPopupData.titleAnnotHint = (categoryHasAnnots === true) ? true : (categoryHasAnnots === false ? false : null)
+  _annotPopupData.titleAnnotHint = null
   _annotPopupData.activeTab = 'existing'
   _annotPopupData.evidencesSubTab = 'up'
   _annotPopupData.evidencesSort = { up: { col: 1, asc: false }, down: { col: 1, asc: true } }
@@ -5367,7 +5476,7 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
     markersQueueNote: '',
     slurmQueueHover: ''
   }
-  titleEl.innerHTML = buildAnnotPopupTitleHtml(catName, metadataName, effectiveAnnotTitleHasAnnotations(), _annotPopupData.categoryColor)
+  titleEl.innerHTML = buildAnnotPopupTitleHtml(catName, metadataName, 'loading', _annotPopupData.categoryColor)
   peekAnnotationMarkersStatus(metadataId, catIdx, evidencesUrl || '')
   _annotPopupData.newForm = {
     annotationTypeId: defaultAnnotTypeId(),
@@ -5382,15 +5491,20 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
   }
   panel.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af; font-size: 14px;"><i class="fas fa-spinner fa-spin" style="margin-right: 8px;"></i> Loading...</div>'
 
-  overlay.style.display = 'flex'
+  overlay.style.display = 'block'
   if (typeof window.bringVisualizationPopupToFront === 'function') {
     window.bringVisualizationPopupToFront(overlay)
   }
-  dialog.style.left = ''
-  dialog.style.top = ''
-  dialog.style.position = ''
-  dialog.style.margin = ''
-  dialog.style.transform = ''
+  if (dialog.dataset.positioned !== 'true') {
+    var dw = dialog.offsetWidth || 720
+    var dh = dialog.offsetHeight || 500
+    dialog.style.position = 'fixed'
+    dialog.style.margin = '0'
+    dialog.style.transform = 'none'
+    dialog.style.left = Math.max(16, Math.round((window.innerWidth - dw) / 2)) + 'px'
+    dialog.style.top = Math.max(40, Math.round((window.innerHeight - dh) / 2)) + 'px'
+    dialog.dataset.positioned = 'true'
+  }
 
   var url = baseUrl + '?annot_id=' + metadataId + '&cat_idx=' + catIdx + '&cat_name=' + encodeURIComponent(catName)
 
@@ -5403,6 +5517,15 @@ function openAnnotationPopup(metadataId, catIdx, catName, baseUrl, evidencesUrl,
       _annotPopupData.clas = data.clas || []
       _annotPopupData.activeTab = _annotPopupData.clas.length > 0 ? 'existing' : 'new'
       _annotPopupData.uiReady = true
+      if (data.bookmark_status && typeof window.applyAnnotBookmarkButtonStatus === 'function') {
+        var selector = '.category-annot-btn[data-metadata-id="' + String(metadataId) + '"][data-cat-idx="' + String(catIdx) + '"]'
+        document.querySelectorAll(selector).forEach(function(btn) {
+          window.applyAnnotBookmarkButtonStatus(btn, data.bookmark_status)
+        })
+        _annotPopupData.titleAnnotHint = (data.bookmark_status === 'annotated' || data.bookmark_status === 'consensus')
+      } else {
+        updateCategoryRowAnnotationSummary(metadataId, catIdx, _annotPopupData.clas)
+      }
       refreshAnnotPopupTitle()
       renderAnnotationPanel()
     })
@@ -5419,7 +5542,10 @@ function closeAnnotationPopup() {
   if (_annotPopupData.uiReady) {
     updateCategoryRowAnnotationSummary(_annotPopupData.metadataId, _annotPopupData.catIdx, _annotPopupData.clas || [])
   }
-  document.getElementById('annotation-popup-overlay').style.display = 'none'
+  var overlay = document.getElementById('annotation-popup-overlay')
+  if (overlay) overlay.style.display = 'none'
+  var dialog = document.getElementById('annotation-popup-dialog')
+  if (dialog) delete dialog.dataset.positioned
   _annotPopupData.activeTab = 'existing'
 }
 
@@ -5465,13 +5591,21 @@ function updateCategoryRowAnnotationSummary(metadataId, catIdx, clas) {
   if (metadataId == null || catIdx == null) return
   var list = Array.isArray(clas) ? clas : []
   var best = pickBestClaFromList(list)
+  var markersCompleted = ((window._annotMarkersStatus && window._annotMarkersStatus[String(metadataId)]) || '') === 'completed'
+  var status = (typeof window.resolveAnnotBookmarkStatus === 'function')
+    ? window.resolveAnnotBookmarkStatus({ clas: list, markersCompleted: markersCompleted })
+    : (list.length > 0 ? 'annotated' : (markersCompleted ? 'markers_ready' : 'none'))
   var has = list.length > 0
   var label = has ? bestAnnotationLabelFromCla(best) : '-'
   var selector = '.category-annot-btn[data-metadata-id="' + String(metadataId) + '"][data-cat-idx="' + String(catIdx) + '"]'
   document.querySelectorAll(selector).forEach(function(btn) {
-    btn.dataset.categoryHasAnnots = has ? 'true' : 'false'
-    btn.style.color = has ? '#16a34a' : '#d1d5db'
-    btn.title = has ? 'View annotations' : 'No annotations yet'
+    if (typeof window.applyAnnotBookmarkButtonStatus === 'function') {
+      window.applyAnnotBookmarkButtonStatus(btn, status)
+    } else {
+      btn.dataset.categoryHasAnnots = has ? 'true' : 'false'
+      btn.style.color = has ? '#16a34a' : '#d1d5db'
+      btn.title = has ? 'View annotations' : 'No annotations yet'
+    }
     var row = btn.closest('.metadata-category-row')
     if (!row) return
     var bestEl = row.querySelector('.metadata-category-best')
@@ -5482,6 +5616,23 @@ function updateCategoryRowAnnotationSummary(metadataId, catIdx, clas) {
   })
   if (String(metadataId) === String(_annotPopupData.metadataId) && String(catIdx) === String(_annotPopupData.catIdx)) {
     _annotPopupData.titleAnnotHint = has
+    refreshAnnotPopupTitle()
+  }
+}
+
+function syncAnnotBookmarkButtonsForMarkersStatus(metadataId, markersState) {
+  if (metadataId == null) return
+  if (String(markersState || '') !== 'completed') return
+  var selector = '.category-annot-btn[data-metadata-id="' + String(metadataId) + '"]'
+  document.querySelectorAll(selector).forEach(function(btn) {
+    var current = btn.dataset.annotBookmarkStatus || (btn.dataset.categoryHasAnnots === 'true' ? 'annotated' : 'none')
+    if (current === 'none' || current === 'loading') {
+      if (typeof window.applyAnnotBookmarkButtonStatus === 'function') {
+        window.applyAnnotBookmarkButtonStatus(btn, 'markers_ready')
+      }
+    }
+  })
+  if (String(metadataId) === String(_annotPopupData.metadataId) && _annotPopupData.uiReady) {
     refreshAnnotPopupTitle()
   }
 }
@@ -6363,7 +6514,7 @@ function evidenceGeneBadgeCellHtml(row, tone) {
 }
 
 function renderEvidenceBoxplotTab() {
-  var addGenesVizBtnHtml = '<button type="button" style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;" title="Adds genes selected for Plot in Identify markers to the main visualization gene panel" onclick="if(window.addAnnotEvidenceGenesToVisualizationBulk)window.addAnnotEvidenceGenesToVisualizationBulk()">Add genes to visualization</button>'
+  var addGenesVizBtnHtml = '<button type="button" style="border:1px solid #2563eb;background:#2563eb;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;" title="Replace the visualization gene panel with genes selected for Plot (max 1000)" onclick="if(window.addAnnotEvidenceGenesToGenePanel)window.addAnnotEvidenceGenesToGenePanel()">Add selected to gene panel</button>'
   var n = (typeof window.annotEvidenceSelectedCount === 'function') ? window.annotEvidenceSelectedCount() : 0
   if (typeof window.annotEvidenceBoxplotSupported === 'function' && !window.annotEvidenceBoxplotSupported()) {
     var html = '<div style="font-size:13px;font-weight:600;color:#111827;margin-bottom:10px;">Split violin plots</div>'
@@ -6397,6 +6548,18 @@ function renderEvidenceBoxplotTab() {
   html += '<option value="max"' + (sortBy === 'max' ? ' selected' : '') + '>Max</option>'
   html += '</select></div>'
   html += '<div id="annot-evidence-boxplot-root"></div>'
+  return html
+}
+
+function renderEvidenceMarkersToolbarHtml() {
+  var n = (typeof window.annotEvidenceSelectedCount === 'function') ? window.annotEvidenceSelectedCount() : 0
+  var html = ''
+  html += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;">'
+  html += '<button type="button" onclick="if(window.toggleAnnotEvidenceSelectAll)window.toggleAnnotEvidenceSelectAll(true)" style="padding:4px 8px;font-size:11px;font-weight:500;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer;white-space:nowrap;">Select all</button>'
+  html += '<button type="button" onclick="if(window.toggleAnnotEvidenceSelectAll)window.toggleAnnotEvidenceSelectAll(false)" style="padding:4px 8px;font-size:11px;font-weight:500;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:5px;cursor:pointer;white-space:nowrap;">Deselect all</button>'
+  html += '<button type="button" onclick="if(window.addAnnotEvidenceGenesToGenePanel)window.addAnnotEvidenceGenesToGenePanel()" style="padding:4px 8px;font-size:11px;font-weight:600;background:#2563eb;color:#fff;border:1px solid #2563eb;border-radius:5px;cursor:pointer;white-space:nowrap;" title="Replace the visualization gene panel with the selected genes (max 1000). Expression loads for the first 10; others stay pending until color or expand.">Add selected to gene panel</button>'
+  html += '<span id="annot-evidence-selected-count" style="font-size:11px;color:#6b7280;">' + n + ' selected</span>'
+  html += '</div>'
   return html
 }
 
@@ -6555,6 +6718,7 @@ function renderEvidencesTab() {
       content += '<button type="button" onclick="setEvidencesSubTab(\'up\')" style="' + evidSubNavStyle('up') + '">Up-regulated genes (' + upRows.length + ')</button>'
       content += '<button type="button" onclick="setEvidencesSubTab(\'down\')" style="' + evidSubNavStyle('down') + '">Down-regulated genes (' + downRows.length + ')</button>'
       content += '</div>'
+      content += renderEvidenceMarkersToolbarHtml()
       if (sub === 'up') {
         content += renderEvidenceGeneTableBlock(upRows, 'up', 'No up-regulated genes for this category at the current thresholds.')
       } else {

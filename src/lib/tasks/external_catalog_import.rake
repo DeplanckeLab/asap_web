@@ -471,6 +471,9 @@ namespace :external_catalog do
     project_ids = scope.flat_map { |c| c.asap_projects.pluck(:id) }.uniq
     projects = Project.where(id: project_ids).where(being_deleted: [false, nil]).order(:key)
     puts "Projects to evaluate: #{projects.count}"
+    if dry_run
+      puts ExternalCatalog::ImportSuccessRegistry::COLUMNS.join("\t")
+    end
 
     ok = 0
     bad = 0

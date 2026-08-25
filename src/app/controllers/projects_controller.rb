@@ -10729,7 +10729,8 @@ class ProjectsController < ApplicationController
 
     def handle_project_unauthorized_access
       respond_to do |format|
-        format.html { redirect_to unauthorized_path }
+        # 403 on the requested URL (not a 200/soft-404 via /unauthorized redirect).
+        format.html { render 'shared/unauthorized', status: :forbidden }
         format.json { render json: { error: 'Not authorized' }, status: :forbidden }
         format.any { render plain: 'Not authorized', status: :forbidden }
       end

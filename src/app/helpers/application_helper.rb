@@ -1589,7 +1589,8 @@ module ApplicationHelper
   end
 
   def seo_canonical_url
-    "#{seo_site_base_url}#{request.fullpath}"
+    # Path only: query variants (?view=, ?page=, filters) must not self-canonicalize.
+    "#{seo_site_base_url}#{request.path}"
   end
 
   def seo_og_image_url

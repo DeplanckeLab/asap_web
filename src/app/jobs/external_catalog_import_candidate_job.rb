@@ -37,12 +37,15 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       import_user_id: user.id
     )
 
+    importer = nil
+
     unless guest_import
       accessible = candidate.asap_projects_accessible_to(user)
       if accessible.exists?
         project = accessible.order(id: :desc).first
         candidate.update!(import_status: 'idle', import_error: nil)
         candidate.link_matched_project!(project, link_kind: 'provider_match') if project
+        ExternalCatalog::ImportSuccessRegistry.record_import_attempt!(project: project) if project
         Rails.logger.info(
           "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} already accessible in ASAP " \
           "project=#{project&.key} user=#{user.id} (matched, import_project_id unchanged)"
@@ -103,6 +106,7 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
         link_kind: created ? 'import' : 'content_match'
       )
     end
+    ExternalCatalog::ImportSuccessRegistry.record_import_attempt!(project: result, importer: importer)
     Rails.logger.info(
       "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} " \
       "outcome=#{importer.last_import_outcome} project=#{result.id} key=#{result.key} " \
@@ -113,6 +117,7 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
     if project && !guest_import
       candidate.update!(import_status: 'idle', import_error: nil)
       candidate.link_matched_project!(project, link_kind: 'provider_match')
+      ExternalCatalog::ImportSuccessRegistry.record_import_attempt!(project: project)
     else
       candidate&.update!(import_status: 'failed', import_error: e.message.to_s.truncate(2000))
     end
@@ -123,6 +128,8 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
     )
     Rails.logger.error(e.backtrace.first(20).join("\n")) if e.backtrace
     candidate&.update!(import_status: 'failed', import_error: "#{e.class}: #{e.message}".truncate(2000))
+    failed_project = candidate&.import_project.presence || candidate&.asap_projects&.order(id: :desc)&.first
+    ExternalCatalog::ImportSuccessRegistry.record_import_attempt!(project: failed_project, importer: importer) if failed_project
   ensure
     ExternalCatalog::ImportRateLimit.release_inflight!(session_key: sandbox_key) if sandbox_key.present?
   end

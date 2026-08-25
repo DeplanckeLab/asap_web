@@ -8,7 +8,7 @@ class HomeController < ApplicationController
   before_action :authenticate_user!, only: [:rate, :rate_submit]
 
   def unauthorized
-    render 'shared/unauthorized'
+    render 'shared/unauthorized', status: :forbidden
   end
 
   def welcome

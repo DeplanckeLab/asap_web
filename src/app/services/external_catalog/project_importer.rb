@@ -69,6 +69,7 @@ module ExternalCatalog
       @archiver = archiver
       @sandbox = ActiveModel::Type::Boolean.new.cast(sandbox)
       @sandbox_key = sandbox_key.to_s.strip.presence
+      @last_pipeline_status = ExternalCatalog::ImportSuccessRegistry.empty_status
       raise Error, 'sandbox_key required for sandbox import' if @sandbox && @sandbox_key.blank?
 
       @formats_by_name = FileFormat.all.index_by(&:name)
@@ -127,6 +128,7 @@ module ExternalCatalog
       end
 
       @last_import_outcome = nil
+      reset_pipeline_status!
       fu = download_and_preparse!(entry, organism)
       sel_name, dims, file_type = choose_matrix_selection!(fu, organism)
       parsing_attrs = build_parsing_attrs(entry, sel_name, dims, file_type)
@@ -152,6 +154,7 @@ module ExternalCatalog
       # parse_files has already been queued inside create_project!; notify so the UI can open analysis.
       on_project_ready&.call(project, :created)
       wait_for_parse!(project)
+      mark_pipeline!(parsed: true)
       attach_reference_metadata!(project, entry)
       project.reload
       umap_result = SpatialUmapEnsureService.call(
@@ -177,10 +180,14 @@ module ExternalCatalog
       if project.project_type&.sc_like?
         Basic.refresh_analysis_pipeline_for_project(@logger, project)
         validate_loom_or_raise!(project)
+        mark_pipeline!(scfair_loom_valid: true)
         export_h5ad_chunked_or_raise!(project)
+        mark_pipeline!(h5ad_export: true)
         validate_h5ad_or_raise!(project)
+        mark_pipeline!(scfair_h5ad_valid: true)
       else
         Basic.ensure_h5ad_exports_for_project(@logger, project, project.user_id)
+        mark_pipeline!(h5ad_export: h5ad_export_ready?(project))
       end
       finalize_project_visibility!(project)
       archive_project!(project) unless @skip_archive
@@ -193,9 +200,17 @@ module ExternalCatalog
       project
     end
 
-    attr_reader :last_import_outcome
+    attr_reader :last_import_outcome, :last_pipeline_status
 
     private
+
+    def reset_pipeline_status!
+      @last_pipeline_status = ExternalCatalog::ImportSuccessRegistry.empty_status
+    end
+
+    def mark_pipeline!(**attrs)
+      @last_pipeline_status = @last_pipeline_status.merge(attrs)
+    end
 
     def find_live_project_by_content_and_preparsing(sha, fingerprint)
       return nil if sha.blank? || fingerprint.blank?
@@ -1023,6 +1038,7 @@ module ExternalCatalog
       end
 
       create_landing_visualization_checkpoint!(project)
+      mark_pipeline!(visualization_checkpoint: true) if landing_visualization_checkpoint?(project)
 
       if @skip_publish
         @logger.info("[ExternalCatalog] skip public project=#{project.key}: SKIP_PUBLISH")
@@ -1098,7 +1114,34 @@ module ExternalCatalog
           "color=#{coloring.id}(#{coloring.name}) labels=on " \
           "labelFont=#{label_font}:#{label_size}"
         )
+        true
       end
+    end
+
+    def landing_visualization_checkpoint?(project)
+      project.checkpoints.visualization.where(is_landing_page: true).exists?
+    end
+
+    def h5ad_export_ready?(project)
+      loom_rel = LOOM_REL
+      loom_abs = project_loom_path(project)
+      return false if loom_abs.blank?
+
+      project_dir = Basic.project_user_dir(project)
+      loom_pn = Pathname.new(loom_abs)
+      loom_rel =
+        if loom_pn.to_s.start_with?(project_dir.to_s)
+          loom_pn.relative_path_from(project_dir).to_s
+        else
+          LOOM_REL
+        end
+      Basic.h5ad_export_status(
+        project,
+        loom_rel,
+        run: Basic.latest_h5ad_export_run(project, loom_rel)
+      ) == 'ready'
+    rescue StandardError
+      false
     end
 
     def visualization_embedding_annots(project)

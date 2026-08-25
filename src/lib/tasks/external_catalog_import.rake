@@ -106,6 +106,18 @@ namespace :external_catalog do
     end
   end
 
+  def external_catalog_record_import_success!(project:, importer: nil, status: nil)
+    return unless project&.key.present?
+
+    ExternalCatalog::ImportSuccessRegistry.record_import_attempt!(
+      project: project,
+      importer: importer,
+      status: status
+    )
+  rescue StandardError => e
+    warn "[external_catalog] import success registry: #{e.class} #{e.message}"
+  end
+
   def external_catalog_mark_candidate!(
     candidate,
     status:,
@@ -151,6 +163,7 @@ namespace :external_catalog do
               set_import_project: false,
               link_kind: 'provider_match'
             )
+            external_catalog_record_import_success!(project: project)
           end
           results[:skipped] << { entry: entry, reason: "already imported project=#{project&.key}" }
           next
@@ -174,6 +187,7 @@ namespace :external_catalog do
               set_import_project: created,
               link_kind: created ? 'import' : 'content_match'
             )
+            external_catalog_record_import_success!(project: project, importer: importer)
           end
           results[:ok] << { entry: entry, project: project, outcome: importer.last_import_outcome }
         else
@@ -197,6 +211,7 @@ namespace :external_catalog do
               set_import_project: false,
               link_kind: 'provider_match'
             )
+            external_catalog_record_import_success!(project: project)
           end
           results[:skipped] << { entry: entry, reason: e.message }
         else
@@ -204,12 +219,16 @@ namespace :external_catalog do
           results[:skipped] << { entry: entry, reason: e.message }
         end
       rescue StandardError => e
+        failed_project = candidate.import_project.presence || candidate.asap_projects.order(id: :desc).first
         external_catalog_mark_candidate!(
           candidate,
           status: 'failed',
           error: "#{e.class}: #{e.message}".truncate(2000),
           user: user
         ) unless dry_run
+        unless dry_run
+          external_catalog_record_import_success!(project: failed_project, importer: importer) if failed_project
+        end
         results[:failed] << { entry: entry, error: e }
         raise if external_catalog_bool('STRICT')
       end
@@ -237,7 +256,9 @@ namespace :external_catalog do
        'SC projects: refresh analysis_pipeline, hard-fail scFAIR loom/h5ad validation on errors ' \
        '(and on warnings unless ALLOW_SCFAIR_WARNINGS=1), sync chunked h5ad export, then publish/archive. ' \
        'SKIP_ARCHIVE=1 (default). SKIP_PUBLISH=1 still creates the landing checkpoint but does not make the project public. ' \
-       'CHUNK_CELLS overrides chunked h5ad cell batch size (default 2048).'
+       'CHUNK_CELLS overrides chunked h5ad cell batch size (default 2048). ' \
+       'Writes DATA_DIR/external_catalog_import_success.tsv with per-stage import flags ' \
+       '(parsed, scfair_loom_valid, visualization_checkpoint, h5ad_export, scfair_h5ad_valid).'
   task import: :environment do
     source = ENV.fetch('SOURCE', 'all').to_s.strip.downcase
     count = external_catalog_count
@@ -289,6 +310,9 @@ namespace :external_catalog do
     importer = external_catalog_build_importer(user: user)
     results = external_catalog_import_candidates!(candidates, user: user, importer: importer)
     external_catalog_print_results(results)
+    registry_path = ExternalCatalog::ImportSuccessRegistry.default_path
+    registry_count = ExternalCatalog::ImportSuccessRegistry.read_all(path: registry_path).size
+    puts "Import success registry: #{registry_path} (#{registry_count} project(s))"
     abort('external_catalog:import had failures') if results[:failed].any?
   end
 
@@ -427,5 +451,43 @@ namespace :external_catalog do
     puts "Assigned project_collections: #{assigned_collections}"
     puts "external_catalog_candidate_projects total: #{ExternalCatalogCandidateProject.count}"
     puts "project_collections total: #{ProjectCollection.count}"
+  end
+
+  desc 'Backfill DATA_DIR/external_catalog_import_success.tsv from catalog-linked ASAP projects (SOURCE=cellxgene|all, VALIDATE_H5AD=1 to run h5ad scFAIR checks). DRY_RUN=1 to preview.'
+  task backfill_import_success_registry: :environment do
+    source = ENV.fetch('SOURCE', 'cellxgene').to_s.strip.downcase
+    dry_run = external_catalog_bool('DRY_RUN')
+    puts "external_catalog:backfill_import_success_registry SOURCE=#{source} DRY_RUN=#{dry_run}"
+
+    scope = ExternalCatalogCandidate.current
+    if source != 'all'
+      raise "Unknown SOURCE=#{source}" unless ExternalCatalogCandidate::SOURCES.include?(source)
+
+      scope = scope.for_source(source)
+    end
+
+    project_ids = scope.flat_map { |c| c.asap_projects.pluck(:id) }.uniq
+    projects = Project.where(id: project_ids).where(being_deleted: [false, nil]).order(:key)
+    puts "Projects to evaluate: #{projects.count}"
+
+    ok = 0
+    bad = 0
+    projects.find_each do |project|
+      row = ExternalCatalog::ImportSuccessRegistry.evaluate(project)
+      ok += 1 if row.full_success?
+      bad += 1 unless row.full_success?
+      if dry_run
+        puts "  #{project.key}\t#{row.to_h.values.join("\t")}"
+      else
+        ExternalCatalog::ImportSuccessRegistry.record!(project_key: project.key, status: row)
+      end
+    end
+
+    path = ExternalCatalog::ImportSuccessRegistry.default_path
+    if dry_run
+      puts "Would write #{projects.count} row(s) to #{path} (import_full_success=1: #{ok}, 0: #{bad})"
+    else
+      puts "Registry updated: #{path} (#{ExternalCatalog::ImportSuccessRegistry.read_all(path: path).size} row(s), 1=#{ok}, 0=#{bad})"
+    end
   end
 end

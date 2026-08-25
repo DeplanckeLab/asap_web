@@ -53,6 +53,14 @@ class HomeControllerTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "#{ENV.fetch('SERVER_URL').chomp('/')}/"
   end
 
+  test "unauthorized page returns 403 with noindex" do
+    get unauthorized_path
+
+    assert_response :forbidden
+    assert_match(/noindex/, response.body)
+    assert_match(/Cannot access this page/, response.body)
+  end
+
   private
 
   def set_or_delete_env(key, value)

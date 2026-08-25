@@ -1,4 +1,7 @@
 <%= tag.meta name: "description", content: seo_meta_description %>
+<% if content_for?(:meta_robots) %>
+<%= tag.meta name: "robots", content: content_for(:meta_robots) %>
+<% end %>
 <link rel="canonical" href="<%= seo_canonical_url %>">
 <%= tag.meta property: "og:type", content: "website" %>
 <%= tag.meta property: "og:site_name", content: "ASAP" %>

@@ -63,6 +63,9 @@ src/public/asap_poster_2026.mp4
 /docs/fail2ban*.md
 /ops/fail2ban/
 
+# Host crontab examples (instance paths); keep on the server, do not share via git.
+/scripts/cron/
+
 # Local ops snapshot (not committed). Tracked sources of truth are *.example templates.
 /private/
 

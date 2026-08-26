@@ -250,7 +250,7 @@ namespace :external_catalog do
   end
 
   desc 'Import from external_catalog_candidates (COUNT/N/LIMIT, IMPORT_USER_EMAIL|IMPORT_USER_ID, SOURCE, PROJECT_TYPE, ONLY_NEW=1). ' \
-       'Without SOURCE (or SOURCE=all), candidates are taken in order CELLxGENE, Bgee, EBI SC Atlas, HCA, HuBMAP, Broad SCP, GEO. ' \
+       'Without SOURCE (or SOURCE=all), candidates are taken in order CELLxGENE, Bgee, EBI SC Atlas, HCA, HuBMAP, Broad SCP, Allen ABC, MATKP, GEO. ' \
        'COUNT may include extra rows to finish the last collection so a batch cannot split it. ' \
        'Duplicate file content (SHA-256) links the provider onto the existing ASAP project instead of creating another. ' \
        'SC projects: refresh analysis_pipeline, hard-fail scFAIR loom/h5ad validation on errors ' \
@@ -316,9 +316,9 @@ namespace :external_catalog do
     abort('external_catalog:import had failures') if results[:failed].any?
   end
 
-  desc 'Test import: one candidate each from CELLxGENE, Bgee, EBI SC Atlas, HCA, HuBMAP, Broad SCP, GEO (IMPORT_USER_EMAIL required)'
+  desc 'Test import: one candidate each from CELLxGENE, Bgee, EBI SC Atlas, HCA, HuBMAP, Broad SCP, Allen ABC, MATKP, GEO (IMPORT_USER_EMAIL required)'
   task test: :environment do
-    puts 'external_catalog:test — one candidate each from CELLxGENE, Bgee, EBI SC Atlas, HCA, HuBMAP, Broad SCP, GEO'
+    puts 'external_catalog:test — one candidate each from CELLxGENE, Bgee, EBI SC Atlas, HCA, HuBMAP, Broad SCP, Allen ABC, MATKP, GEO'
     user = external_catalog_resolve_user!
     importer = external_catalog_build_importer(user: user)
     ExternalCatalogCandidate.release_stale_importing! unless external_catalog_bool('DRY_RUN')
@@ -330,6 +330,8 @@ namespace :external_catalog do
     candidates << external_catalog_pick_test_candidate('hca', label: 'HCA', max_bytes: 150_000_000)
     candidates << external_catalog_pick_test_candidate('hubmap', label: 'HuBMAP', max_bytes: 150_000_000)
     candidates << external_catalog_pick_test_candidate('broad_scp', label: 'Broad SCP', max_bytes: 150_000_000)
+    candidates << external_catalog_pick_test_candidate('allen_abc', label: 'Allen ABC', max_bytes: 150_000_000)
+    candidates << external_catalog_pick_test_candidate('matkp', label: 'MATKP', max_bytes: 150_000_000)
     candidates << external_catalog_pick_test_candidate('geo', label: 'GEO')
 
     results = external_catalog_import_candidates!(candidates, user: user, importer: importer)
@@ -372,22 +374,26 @@ namespace :external_catalog do
     puts 'Project names for GEO: "GSE12345: series title"'
   end
 
-  desc 'Sync candidate list for UAB UI (SOURCE=all|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|geo ' \
+  desc 'Sync candidate list for UAB UI (SOURCE=all|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|allen_abc|matkp|geo ' \
        'LIMIT=N GEO_MODE=all|sc|bulk GEO_SKIP_SEEN_AFTER=ISO8601 — skip GEO FTP for candidates ' \
-       'already last_seen_at >= cutoff, for resume after a partial sync)'
+       'already last_seen_at >= cutoff, for resume after a partial sync; ' \
+       'GEO_ONLY_BULK_SAMPLES=N — only catalog GEO bulk series with exactly N samples)'
   task sync_candidates: :environment do
     source = ENV.fetch('SOURCE', 'all').to_s.strip.downcase
     limit = ENV['LIMIT'].presence&.to_i
     geo_mode = ENV.fetch('GEO_MODE', 'all').to_s
     skip_seen_after = ENV['GEO_SKIP_SEEN_AFTER'].presence
+    geo_only_bulk_samples = ENV['GEO_ONLY_BULK_SAMPLES'].presence&.to_i
     puts "external_catalog:sync_candidates SOURCE=#{source} LIMIT=#{limit.inspect} " \
-         "GEO_MODE=#{geo_mode} GEO_SKIP_SEEN_AFTER=#{skip_seen_after.inspect}"
+         "GEO_MODE=#{geo_mode} GEO_SKIP_SEEN_AFTER=#{skip_seen_after.inspect} " \
+         "GEO_ONLY_BULK_SAMPLES=#{geo_only_bulk_samples.inspect}"
 
     totals = ExternalCatalog::CandidateSync.new.call(
       source: source,
       limit: limit,
       geo_mode: geo_mode,
-      skip_seen_after: skip_seen_after
+      skip_seen_after: skip_seen_after,
+      geo_only_bulk_samples: geo_only_bulk_samples
     )
     puts "Upserted: #{totals[:upserted]}"
     puts "Marked obsolete: #{totals[:marked_obsolete]}"
@@ -512,7 +518,7 @@ namespace :external_catalog do
   end
 
   desc 'Enqueue standalone scFAIR validation for SC external catalog candidates (loom/h5ad URLs). ' \
-       'SOURCE=all|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|geo COUNT/N/LIMIT MAX_FILESIZE SKIP_EXISTING=1 ' \
+       'SOURCE=all|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|allen_abc|matkp|geo COUNT/N/LIMIT MAX_FILESIZE SKIP_EXISTING=1 ' \
        'CANDIDATE_IDS=1,2 SCHEMA_ID IMPORT_USER_EMAIL|IMPORT_USER_ID DRY_RUN=1. Runs in background via Solid Queue.'
   task validate_scfair_standalone: :environment do
     source = ENV.fetch('SOURCE', 'all')

@@ -243,7 +243,7 @@ class ExternalCatalogCandidateSeriesKeyTest < ActiveSupport::TestCase
     ExternalCatalogCandidate.where(id: [a&.id, b&.id, c&.id].compact).delete_all
   end
 
-  test 'ordered_for_catalog prefers CELLxGENE then Bgee then EBI SC then HCA then HuBMAP then Broad SCP then GEO' do
+  test 'ordered_for_catalog prefers CELLxGENE then Bgee then EBI SC then HCA then HuBMAP then Broad SCP then Allen ABC then MATKP then GEO' do
     suffix = SecureRandom.hex(3)
     geo = ExternalCatalogCandidate.create!(
       source: 'geo',
@@ -253,6 +253,24 @@ class ExternalCatalogCandidateSeriesKeyTest < ActiveSupport::TestCase
       import_status: 'idle',
       tax_id: 9606,
       url: 'https://example.com/geo'
+    )
+    matkp = ExternalCatalogCandidate.create!(
+      source: 'matkp',
+      external_id: "matkp-#{suffix}",
+      provider_tag: 'MATKP',
+      title: 'Matkp eighth',
+      import_status: 'idle',
+      tax_id: 9606,
+      url: 'https://example.com/matkp'
+    )
+    allen = ExternalCatalogCandidate.create!(
+      source: 'allen_abc',
+      external_id: "allen-#{suffix}",
+      provider_tag: 'ALLEN_ABC',
+      title: 'Allen seventh',
+      import_status: 'idle',
+      tax_id: 9606,
+      url: 'https://example.com/allen'
     )
     broad = ExternalCatalogCandidate.create!(
       source: 'broad_scp',
@@ -310,13 +328,14 @@ class ExternalCatalogCandidateSeriesKeyTest < ActiveSupport::TestCase
     )
 
     ordered = ExternalCatalogCandidate.where(
-      id: [geo.id, broad.id, hubmap.id, hca.id, ebi.id, bgee.id, cxg.id]
+      id: [geo.id, matkp.id, allen.id, broad.id, hubmap.id, hca.id, ebi.id, bgee.id, cxg.id]
     ).ordered_for_catalog.to_a
-    assert_equal %w[cellxgene bgee ebi_sc hca hubmap broad_scp geo], ordered.map(&:source)
+    assert_equal %w[cellxgene bgee ebi_sc hca hubmap broad_scp allen_abc matkp geo],
+                 ordered.map(&:source)
     assert_equal ExternalCatalogCandidate::IMPORT_SOURCE_ORDER, ExternalCatalog::CandidateSync::SOURCES
   ensure
     ExternalCatalogCandidate.where(
-      id: [geo&.id, broad&.id, hubmap&.id, hca&.id, ebi&.id, bgee&.id, cxg&.id].compact
+      id: [geo&.id, matkp&.id, allen&.id, broad&.id, hubmap&.id, hca&.id, ebi&.id, bgee&.id, cxg&.id].compact
     ).delete_all
   end
 
@@ -358,5 +377,53 @@ class ExternalCatalogCandidateSeriesKeyTest < ActiveSupport::TestCase
     assert_equal [small.id, large.id, unknown.id], ordered.map(&:id)
   ensure
     ExternalCatalogCandidate.where(id: [large&.id, small&.id, unknown&.id].compact).delete_all
+  end
+
+  test 'for_n_obs_between filters by cell or sample count and omits unknown' do
+    suffix = SecureRandom.hex(3)
+    tiny = ExternalCatalogCandidate.create!(
+      source: 'cellxgene',
+      external_id: "tiny-#{suffix}",
+      provider_tag: 'CELLxGENE',
+      title: 'Tiny',
+      import_status: 'idle',
+      n_obs: 100,
+      url: 'https://example.com/tiny'
+    )
+    mid = ExternalCatalogCandidate.create!(
+      source: 'cellxgene',
+      external_id: "mid-#{suffix}",
+      provider_tag: 'CELLxGENE',
+      title: 'Mid',
+      import_status: 'idle',
+      n_obs: 5_000,
+      url: 'https://example.com/mid'
+    )
+    huge = ExternalCatalogCandidate.create!(
+      source: 'cellxgene',
+      external_id: "huge-#{suffix}",
+      provider_tag: 'CELLxGENE',
+      title: 'Huge',
+      import_status: 'idle',
+      n_obs: 200_000,
+      url: 'https://example.com/huge'
+    )
+    unknown = ExternalCatalogCandidate.create!(
+      source: 'geo',
+      external_id: "GSE#{suffix}",
+      provider_tag: 'GEO',
+      title: 'Unknown',
+      import_status: 'idle',
+      url: 'https://example.com/unknown'
+    )
+
+    ids = [tiny.id, mid.id, huge.id, unknown.id]
+    filtered = ExternalCatalogCandidate.where(id: ids).for_n_obs_between(500, 50_000).pluck(:id)
+    assert_equal [mid.id], filtered
+
+    only_min = ExternalCatalogCandidate.where(id: ids).for_n_obs_between(5_000, nil).pluck(:id).sort
+    assert_equal [huge.id, mid.id].sort, only_min
+  ensure
+    ExternalCatalogCandidate.where(id: [tiny&.id, mid&.id, huge&.id, unknown&.id].compact).delete_all
   end
 end

@@ -31,6 +31,8 @@ module ExternalCatalog
       when 'hca' then 'Human Cell Atlas'
       when 'hubmap' then 'HuBMAP'
       when 'broad_scp' then 'Broad Single Cell Portal'
+      when 'allen_abc' then 'Allen Brain Cell Atlas'
+      when 'matkp' then 'MATKP'
       when 'geo' then 'GEO'
       else
         raise ArgumentError, "Unknown catalog source: #{source.inspect}"
@@ -45,17 +47,20 @@ module ExternalCatalog
       when 'hca' then 'HCA'
       when 'hubmap' then 'HUBMAP'
       when 'broad_scp' then 'BROAD_SCP'
+      when 'allen_abc' then 'ALLEN_ABC'
+      when 'matkp' then 'MATKP'
       when 'geo' then 'GEO'
       else
         raise ArgumentError, "Unknown catalog source: #{source.inspect}"
       end
     end
 
-    # ASAP Project#name. GEO / EBI SC / Broad SCP / HuBMAP always include the accession in the title.
+    # ASAP Project#name. GEO / EBI SC / Broad SCP / HuBMAP / Allen ABC / MATKP
+    # always include the accession in the title.
     def project_name(max_length: 200)
       base_title = title.to_s.strip
       name =
-        if %w[geo ebi_sc broad_scp hubmap].include?(source.to_s)
+        if %w[geo ebi_sc broad_scp hubmap allen_abc matkp].include?(source.to_s)
           acc = external_id.to_s.strip
           raise ArgumentError, "#{source} entry missing external_id (accession)" if acc.blank?
 

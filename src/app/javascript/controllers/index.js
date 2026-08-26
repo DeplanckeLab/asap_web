@@ -212,6 +212,12 @@ console.log('Clone overlay controller registered')
 import CatalogImportController from "controllers/catalog_import_controller"
 application.register("catalog-import", CatalogImportController)
 
+import CatalogNObsRangeController from "controllers/catalog_n_obs_range_controller"
+application.register("catalog-n-obs-range", CatalogNObsRangeController)
+
+import CatalogFiltersController from "controllers/catalog_filters_controller"
+application.register("catalog-filters", CatalogFiltersController)
+
 import CloneStatusController from "controllers/clone_status_controller"
 application.register("clone-status", CloneStatusController)
 

@@ -16,6 +16,8 @@ class ExternalCatalogCandidatesController < ApplicationController
     @project_type = params[:project_type].to_s.presence
     @in_asap = params[:in_asap].to_s.presence
     @q = params[:q].to_s.strip.presence
+    @n_obs_bounds = ExternalCatalogCandidate.n_obs_bounds
+    @min_n_obs, @max_n_obs = parse_n_obs_range_params
     @page = [params[:page].to_i, 1].max
     @per_page = PER_PAGE
 
@@ -24,6 +26,7 @@ class ExternalCatalogCandidatesController < ApplicationController
     scope = scope.for_project_type(@project_type) if @project_type.present?
     scope = scope.search_q(@q) if @q.present?
     scope = filter_in_asap(scope, @in_asap)
+    scope = filter_n_obs(scope)
 
     @total_count = scope.count
     @candidates = scope.ordered_by_size
@@ -251,6 +254,29 @@ class ExternalCatalogCandidatesController < ApplicationController
     else
       scope
     end
+  end
+
+  def parse_n_obs_range_params
+    return [nil, nil] unless @n_obs_bounds
+
+    bound_min = @n_obs_bounds[:min]
+    bound_max = @n_obs_bounds[:max]
+    min_raw = params[:min_n_obs].presence
+    max_raw = params[:max_n_obs].presence
+    return [bound_min, bound_max] if min_raw.blank? && max_raw.blank?
+
+    min_v = min_raw.present? ? [[min_raw.to_i, bound_min].max, bound_max].min : bound_min
+    max_v = max_raw.present? ? [[max_raw.to_i, bound_min].max, bound_max].min : bound_max
+    min_v, max_v = max_v, min_v if min_v > max_v
+    [min_v, max_v]
+  end
+
+  # Apply range only when the user narrowed it; full span keeps unknown n_obs rows.
+  def filter_n_obs(scope)
+    return scope unless @n_obs_bounds && @min_n_obs && @max_n_obs
+    return scope if @min_n_obs <= @n_obs_bounds[:min] && @max_n_obs >= @n_obs_bounds[:max]
+
+    scope.for_n_obs_between(@min_n_obs, @max_n_obs)
   end
 
   def asap_candidate_ids

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 class ExternalCatalogCandidate < ApplicationRecord
-  SOURCES = %w[cellxgene bgee ebi_sc hca hubmap broad_scp geo].freeze
+  SOURCES = %w[cellxgene bgee ebi_sc hca hubmap broad_scp allen_abc matkp geo].freeze
   # Prefer better-annotated sources first when SOURCE=all (importer + catalog UI).
-  IMPORT_SOURCE_ORDER = %w[cellxgene bgee ebi_sc hca hubmap broad_scp geo].freeze
+  IMPORT_SOURCE_ORDER = %w[cellxgene bgee ebi_sc hca hubmap broad_scp allen_abc matkp geo].freeze
   IMPORT_STATUSES = %w[idle importing failed].freeze
   SERIES_IDENTIFIER_KINDS = %w[geo_series array_express bioproject ega_study].freeze
   COLLECTION_URL_RE = %r{/collections/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})}i
@@ -40,6 +40,20 @@ class ExternalCatalogCandidate < ApplicationRecord
       pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern
     )
   }
+  # Filter by observation count (cells for sc, samples for bulk). Omits unknown n_obs.
+  scope :for_n_obs_between, lambda { |min_n_obs, max_n_obs|
+    scope = all
+    scope = scope.where('n_obs >= ?', min_n_obs.to_i) if min_n_obs.present?
+    scope = scope.where('n_obs <= ?', max_n_obs.to_i) if max_n_obs.present?
+    scope
+  }
+
+  def self.n_obs_bounds
+    row = current.where.not(n_obs: nil).pick(Arel.sql('MIN(n_obs), MAX(n_obs)'))
+    return nil if row.blank? || row[0].nil? || row[1].nil?
+
+    { min: row[0].to_i, max: row[1].to_i }
+  end
   # Logical browse/import order: preferred source, CELLxGENE/HCA collection (or DOI/GEO
   # series when there is no collection), title, then organism.
   # Collection members stay together even when some rows have a DOI series_key and
@@ -155,6 +169,16 @@ class ExternalCatalogCandidate < ApplicationRecord
     if source.to_s == 'hubmap'
       acc = external_id.to_s.strip
       return "hubmap:#{acc}" if acc.present?
+    end
+
+    if source.to_s == 'allen_abc'
+      acc = external_id.to_s.strip
+      return "allen_abc:#{acc}" if acc.present?
+    end
+
+    if source.to_s == 'matkp'
+      acc = external_id.to_s.strip
+      return "matkp:#{acc}" if acc.present?
     end
 
     Array(identifiers).each do |raw|

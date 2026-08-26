@@ -17,11 +17,24 @@
         <h1 class="text-3xl font-bold text-gray-900 mb-2">Search projects</h1>
         <p class="text-gray-600">Search and explore ASAP projects</p>
       </div>
-      <% if user_signed_in? %>
-        <%= link_to "New Project", new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 whitespace-nowrap", data: { guided_tour: "projects-new-project-link" } %>
-      <% else %>
-        <%= render "shared/guest_sandbox_cta", variant: :compact %>
-      <% end %>
+      <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
+        <%= link_to external_catalog_candidates_path,
+            class: "inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 whitespace-nowrap",
+            title: "Import a dataset from an external catalog" do %>
+          <i class="fas fa-file-import mr-2"></i>
+          Import
+        <% end %>
+        <% if user_signed_in? %>
+          <%= link_to new_project_path,
+              class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 whitespace-nowrap",
+              data: { guided_tour: "projects-new-project-link" } do %>
+            <i class="fas fa-plus mr-2"></i>
+            New Project
+          <% end %>
+        <% else %>
+          <%= render "shared/guest_sandbox_cta", variant: :compact %>
+        <% end %>
+      </div>
     </div>
 
     <!-- Search Form -->
@@ -549,7 +562,10 @@
         </p>
         <div class="mt-6">
           <% if user_signed_in? %>
-            <%= link_to "New Project", new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" %>
+            <%= link_to new_project_path, class: "inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" do %>
+              <i class="fas fa-plus mr-2"></i>
+              New Project
+            <% end %>
           <% else %>
             <div class="inline-flex justify-center">
               <%= render "shared/guest_sandbox_cta", variant: :compact, align: :center %>

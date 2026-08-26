@@ -44,6 +44,15 @@
               Import project
             </a>
 
+            <!-- scFAIR validator -->
+            <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
+               href="<%= compliance_file_check_path %>"
+               data-controller="nav-item"
+               data-action="click->nav-item#navigate">
+              <%= image_tag "scfair.svg", class: "h-4 w-4 object-contain", alt: "" %>
+              scFAIR validator
+            </a>
+
             <!-- New Project -->
             <% if user_signed_in? %>
               <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
@@ -295,6 +304,15 @@
                  title="Import a dataset from an external catalog">
                 <i class="fas fa-file-import me-1.5"></i>
                 Import project
+              </a>
+
+              <a class="<%= tw_menu_item %>"
+                 href="<%= compliance_file_check_path %>"
+                 data-controller="nav-item"
+                 data-action="click->nav-item#navigate"
+                 title="Validate a file against the scFAIR schema">
+                <%= image_tag "scfair.svg", class: "h-4 w-4 me-1.5 object-contain inline-block", alt: "" %>
+                scFAIR validator
               </a>
 
               <% if user_signed_in? %>

@@ -14,7 +14,8 @@ module ExternalCatalog
     # Returns { upserted:, marked_obsolete:, deleted_test:, by_source: { ... } }
     # +skip_seen_after+: for GEO, skip FTP/upsert for candidates already last_seen_at >= cutoff
     # (resume after a partial sync). Those ids still count as seen for prune.
-    def call(source: 'all', limit: nil, geo_mode: 'all', skip_seen_after: nil)
+    # +geo_only_bulk_samples+: when set, GEO only catalogs bulk series with exactly this many samples.
+    def call(source: 'all', limit: nil, geo_mode: 'all', skip_seen_after: nil, geo_only_bulk_samples: nil)
       sources =
         case source.to_s.strip.downcase
         when 'all' then SOURCES
@@ -31,7 +32,13 @@ module ExternalCatalog
         failed: []
       }
       sources.each do |src|
-        result = sync_source(src, limit: limit, geo_mode: geo_mode, skip_seen_after: skip_seen_after)
+        result = sync_source(
+          src,
+          limit: limit,
+          geo_mode: geo_mode,
+          skip_seen_after: skip_seen_after,
+          geo_only_bulk_samples: geo_only_bulk_samples
+        )
         totals[:upserted] += result[:upserted]
         totals[:marked_obsolete] += result[:marked_obsolete]
         totals[:deleted_test] += result[:deleted_test]
@@ -45,14 +52,20 @@ module ExternalCatalog
 
     private
 
-    def sync_source(source, limit:, geo_mode:, skip_seen_after:)
+    def sync_source(source, limit:, geo_mode:, skip_seen_after:, geo_only_bulk_samples:)
       upserted = 0
       skip_accessions = geo_skip_accessions(source, skip_seen_after)
       # Preload so prune keeps rows we intentionally skip (already synced this run).
       seen_external_ids = skip_accessions.to_a
       enumeration_error = nil
       begin
-        each_entry(source, limit: limit, geo_mode: geo_mode, skip_accessions: skip_accessions) do |entry|
+        each_entry(
+          source,
+          limit: limit,
+          geo_mode: geo_mode,
+          skip_accessions: skip_accessions,
+          only_bulk_samples: geo_only_bulk_samples
+        ) do |entry|
           ExternalCatalogCandidate.upsert_from_entry!(entry)
           seen_external_ids << entry.external_id.to_s
           upserted += 1
@@ -77,7 +90,8 @@ module ExternalCatalog
       marked_obsolete = 0
       deleted_test = 0
       # Partial or failed walks must not mark unseen rows as obsolete.
-      if limit.blank? && enumeration_error.nil?
+      # Targeted bulk-sample re-adds must not prune the rest of the GEO catalog.
+      if limit.blank? && enumeration_error.nil? && geo_only_bulk_samples.blank?
         prune = prune_missing_for_source!(source, seen_external_ids)
         marked_obsolete = prune[:marked_obsolete]
         deleted_test = prune[:deleted_test]
@@ -130,7 +144,7 @@ module ExternalCatalog
       { marked_obsolete: marked_obsolete, deleted_test: deleted_test }
     end
 
-    def each_entry(source, limit:, geo_mode:, skip_accessions: nil)
+    def each_entry(source, limit:, geo_mode:, skip_accessions: nil, only_bulk_samples: nil)
       case source
       when 'cellxgene'
         CellxgeneCatalog.new(logger: @logger).each(limit: limit) { |e| yield e }
@@ -144,11 +158,16 @@ module ExternalCatalog
         HubmapCatalog.new(logger: @logger).each(limit: limit) { |e| yield e }
       when 'broad_scp'
         BroadScpCatalog.new(logger: @logger).each(limit: limit) { |e| yield e }
+      when 'allen_abc'
+        AllenAbcCatalog.new(logger: @logger).each(limit: limit) { |e| yield e }
+      when 'matkp'
+        MatkpCatalog.new(logger: @logger).each(limit: limit) { |e| yield e }
       when 'geo'
         GeoCatalog.new(logger: @logger).each(
           limit: limit,
           mode: geo_mode,
-          skip_accessions: skip_accessions
+          skip_accessions: skip_accessions,
+          only_bulk_samples: only_bulk_samples
         ) { |e| yield e }
       end
     end

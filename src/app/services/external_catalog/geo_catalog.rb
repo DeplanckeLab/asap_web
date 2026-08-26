@@ -11,23 +11,44 @@ module ExternalCatalog
   class GeoCatalog
     EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils'.freeze
     FTP_HTTPS = 'https://ftp.ncbi.nlm.nih.gov'.freeze
+    # Without an API key NCBI allows ~3 req/s; with a key ~10 req/s.
+    EUTILS_MIN_INTERVAL_SEC = 0.34
+    EUTILS_MIN_INTERVAL_WITH_KEY_SEC = 0.11
+    EUTILS_ATTEMPTS = 8
+    EUTILS_RETRYABLE_STATUS = [429, 500, 502, 503, 504].freeze
+    # Empty / README-only GEO RAW.tar stubs are typically one 10 KiB tar block group.
+    MIN_BULK_ARCHIVE_BYTES = 32_768
+    MIN_BULK_SAMPLES = 2
 
     SC_HINT = /
       single[- ]?cell|scRNA|snRNA|single[- ]?nucleus|10x\s*genomics|
       drop-?seq|smart-?seq|sci-RNA|CITE-seq|scATAC
     /xi.freeze
 
-    def initialize(logger: Rails.logger, email: ENV['NCBI_EMAIL'])
+    def initialize(logger: Rails.logger, email: ENV['NCBI_EMAIL'], api_key: ENV['NCBI_API_KEY'])
       @logger = logger
-      @email = email
+      @email = email.to_s.strip.presence
+      @api_key = api_key.to_s.strip.presence
+      @eutils_min_interval =
+        @api_key.present? ? EUTILS_MIN_INTERVAL_WITH_KEY_SEC : EUTILS_MIN_INTERVAL_SEC
+      @last_eutils_at = nil
     end
 
     # Yields ExternalCatalog::Entry. +mode+: 'all' | 'sc' | 'bulk'
     # +skip_accessions+: GSE ids to skip before FTP listing (resume after a partial sync).
-    def each(limit: nil, mode: 'all', skip_accessions: nil)
-      return enum_for(:each, limit: limit, mode: mode, skip_accessions: skip_accessions) unless block_given?
+    # +only_bulk_samples+: when set, only catalog bulk series with exactly this sample count
+    # (fast re-add path; still walks eutils but skips FTP for other sizes).
+    def each(limit: nil, mode: 'all', skip_accessions: nil, only_bulk_samples: nil)
+      return enum_for(
+        :each,
+        limit: limit,
+        mode: mode,
+        skip_accessions: skip_accessions,
+        only_bulk_samples: only_bulk_samples
+      ) unless block_given?
 
       skip = skip_accessions.present? ? skip_accessions.to_set : nil
+      only_samples = only_bulk_samples.present? ? only_bulk_samples.to_i : nil
       yielded = 0
       skipped = 0
       retstart = 0
@@ -48,7 +69,7 @@ module ExternalCatalog
             next
           end
 
-          entry = entry_from_summary(summary, mode: mode)
+          entry = entry_from_summary(summary, mode: mode, only_bulk_samples: only_samples)
           next unless entry
 
           yield entry
@@ -57,11 +78,10 @@ module ExternalCatalog
 
         retstart += ids.size
         break if ids.size < page
-        sleep 0.34
       end
       @logger.info(
         "[ExternalCatalog::GeoCatalog] finished yielded=#{yielded} skipped_seen=#{skipped} " \
-        "retstart=#{retstart}"
+        "retstart=#{retstart} only_bulk_samples=#{only_samples.inspect}"
       )
       yielded
     end
@@ -117,26 +137,65 @@ module ExternalCatalog
         retmode: 'json',
         sort: 'relevance'
       }
-      params[:email] = @email if @email.present?
-      response = HTTParty.get("#{EUTILS}/esearch.fcgi", query: params, timeout: 60)
-      raise "GEO esearch failed: HTTP #{response.code}" unless response.success?
-
-      body = JSON.parse(response.body)
+      body = eutils_get_json('esearch.fcgi', params, label: "esearch retstart=#{retstart}")
       Array(body.dig('esearchresult', 'idlist'))
     end
 
     def esummary(ids)
       params = { db: 'gds', id: ids.join(','), retmode: 'json' }
-      params[:email] = @email if @email.present?
-      response = HTTParty.get("#{EUTILS}/esummary.fcgi", query: params, timeout: 60)
-      raise "GEO esummary failed: HTTP #{response.code}" unless response.success?
-
-      body = JSON.parse(response.body)
+      body = eutils_get_json('esummary.fcgi', params, label: "esummary n=#{ids.size}")
       result = body['result'] || {}
       Array(result['uids']).filter_map { |uid| result[uid] }
     end
 
-    def entry_from_summary(summary, mode:)
+    def eutils_get_json(path, params, label:)
+      query = params.dup
+      query[:email] = @email if @email.present?
+      query[:api_key] = @api_key if @api_key.present?
+      query[:tool] = 'asap_external_catalog'
+
+      last_error = nil
+      EUTILS_ATTEMPTS.times do |attempt|
+        throttle_eutils!
+        response = perform_eutils_get("#{EUTILS}/#{path}", query: query)
+        if response.success?
+          return JSON.parse(response.body)
+        end
+
+        last_error = "HTTP #{response.code}"
+        unless EUTILS_RETRYABLE_STATUS.include?(response.code.to_i)
+          raise "GEO #{label} failed: #{last_error}"
+        end
+
+        next_attempt = attempt + 2
+        next unless next_attempt <= EUTILS_ATTEMPTS
+
+        sleep_sec = [2**attempt, 60].min
+        @logger.warn(
+          "[ExternalCatalog::GeoCatalog] retry #{next_attempt}/#{EUTILS_ATTEMPTS} " \
+          "for #{label} after #{last_error} sleep=#{sleep_sec}s"
+        )
+        sleep sleep_sec
+      end
+
+      raise "GEO #{label} failed after #{EUTILS_ATTEMPTS} attempts: #{last_error}"
+    end
+
+    def perform_eutils_get(url, query:)
+      HTTParty.get(url, query: query, timeout: 60)
+    end
+
+    def throttle_eutils!
+      return if @last_eutils_at.nil?
+
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - @last_eutils_at
+      remaining = @eutils_min_interval - elapsed
+      sleep remaining if remaining.positive?
+    ensure
+      @last_eutils_at = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    end
+
+    def entry_from_summary(summary, mode:, only_bulk_samples: nil)
       accession = summary['accession'].to_s
       return nil unless accession.start_with?('GSE')
 
@@ -149,6 +208,14 @@ module ExternalCatalog
       return nil if mode.to_s == 'sc' && !sc
       return nil if mode.to_s == 'bulk' && sc
 
+      # Single-sample GEO series are not useful ASAP bulk projects (often ENCODE stubs).
+      n_obs = nil
+      unless sc
+        n_obs = positive_int(summary['n_samples'])
+        return nil if n_obs.nil? || n_obs < MIN_BULK_SAMPLES
+        return nil if only_bulk_samples.present? && n_obs != only_bulk_samples.to_i
+      end
+
       files = list_geo_files(ftp, accession)
       if sc
         picked = FormatPriority.pick_geo_sc_file(files.map { |f| f[:name] })
@@ -157,7 +224,6 @@ module ExternalCatalog
         name, kind = picked
         meta = files.find { |f| f[:name] == name }
         project_type = 'sc'
-        n_obs = nil
       else
         picked = FormatPriority.pick_geo_bulk_file(files.map { |f| f[:name] })
         return nil unless picked
@@ -165,14 +231,15 @@ module ExternalCatalog
         name, kind = picked
         meta = files.find { |f| f[:name] == name }
         project_type = 'bulk'
-        # GEO esummary n_samples is the series sample count (bulk matrix columns).
-        n_obs = positive_int(summary['n_samples'])
       end
 
       tax_id = extract_tax_id(summary)
       dois, pmids, identifiers = geo_reference_fields(summary, accession)
       filesize = meta[:filesize].to_i
       filesize = remote_filesize(meta[:url]) if filesize <= 0
+      # Tiny RAW.tar usually contains only a README, not a matrix.
+      return nil if !sc && kind == :archive_table && filesize < MIN_BULK_ARCHIVE_BYTES
+
       Entry.new(
         source: 'geo',
         external_id: accession,

@@ -300,6 +300,10 @@ module ExternalCatalog
           'https://www.ebi.ac.uk/gxa/sc/experiments/#{id}'
         when 'broad_scp'
           'https://singlecell.broadinstitute.org/single_cell/study/#{id}'
+        when 'hubmap'
+          'https://portal.hubmapconsortium.org/browse/dataset/#{id}'
+        when 'matkp'
+          'https://matkp.org/datasets.html?dataset=#{id}'
         end
 
       if desired_mask.present? && provider.url_mask != desired_mask
@@ -415,9 +419,63 @@ module ExternalCatalog
       elsif entry.source.to_s == 'geo' && entry.format_kind.to_s == 'counts_table'
         normalize_counts_table_fu!(fu, entry, organism)
         fu.reload
+      elsif entry.source.to_s == 'matkp' && entry.format_kind.to_s == 'zip'
+        extract_matkp_norm_counts_fu!(fu, entry, organism)
+        fu.reload
+        unless %w[preparsed completed uploaded].include?(fu.status.to_s)
+          raise Error, "MATKP norm_counts re-preparse failed for Fu##{fu.id} status=#{fu.status}"
+        end
       end
 
       fu
+    end
+
+    # MATKP download_public ZIPs contain norm_counts.tsv.gz (+ metadata). ASAP needs the TSV.
+    def extract_matkp_norm_counts_fu!(fu, entry, organism)
+      upload_dir = fu.upload_dir
+      matrix_name = 'norm_counts.tsv.gz'
+      extracted = upload_dir.join(matrix_name)
+
+      unless File.exist?(extracted)
+        found = Dir.glob(upload_dir.join('**', matrix_name)).find { |p| File.file?(p) }
+        if found
+          FileUtils.mv(found, extracted) unless File.expand_path(found) == extracted.to_s
+        else
+          zip_path = [
+            upload_dir.join(fu.upload_file_name),
+            *Dir.glob(upload_dir.join('*.zip'))
+          ].find { |p| p && File.file?(p) && p.to_s.downcase.end_with?('.zip') }
+          raise Error, "Missing MATKP zip for Fu##{fu.id}" unless zip_path
+
+          require 'zip'
+          Zip::File.open(zip_path) do |zip_file|
+            entry_zip = zip_file.find_entry(matrix_name) ||
+                        zip_file.entries.find { |e| File.basename(e.name) == matrix_name }
+            unless entry_zip
+              raise SkipEntry, "MATKP zip missing #{matrix_name} for #{entry.external_id}"
+            end
+
+            entry_zip.extract(extracted) { true }
+          end
+          File.delete(zip_path) if File.exist?(zip_path)
+        end
+      end
+
+      raise Error, "Missing #{matrix_name} after MATKP extract for Fu##{fu.id}" unless File.exist?(extracted)
+
+      fu.update!(
+        upload_file_name: matrix_name,
+        upload_file_size: File.size(extracted),
+        name: matrix_name,
+        status: 'preparsing'
+      )
+      FuPreparsingService.new(
+        fu,
+        organism_id: organism.id,
+        version_id: @version.id,
+        delimiter: "\t"
+      ).call
+      fu.update!(status: 'preparsed')
     end
 
     def text_delimiter_for(entry)

@@ -69,6 +69,18 @@
     <div class="rounded-md bg-red-100 px-4 py-3 text-sm text-red-700 dark:bg-red-900/30 dark:text-red-200"><%= alert %></div>
   <% end %>
 
+  <% if @candidate.source.to_s == 'broad_scp' %>
+    <div class="rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-900/60 dark:text-gray-300">
+      Broad Single Cell Portal import: public studies only, no active download embargo, research use only
+      (not for medical, clinical, or diagnostic decisions). See the
+      <%= link_to "SCP Terms of Service",
+                  ExternalCatalog::BroadScpCatalog::TERMS_OF_SERVICE_URL,
+                  target: "_blank",
+                  rel: "noopener",
+                  class: "text-blue-600 hover:underline dark:text-blue-400" %>.
+    </div>
+  <% end %>
+
   <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 space-y-4">
     <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Dataset</h2>
     <dl class="grid grid-cols-1 gap-3 sm:grid-cols-2 text-sm">

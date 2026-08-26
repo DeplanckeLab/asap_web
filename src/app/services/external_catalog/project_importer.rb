@@ -281,7 +281,7 @@ module ExternalCatalog
     def ensure_provider!(entry)
       provider = Provider.find_or_create_by!(tag: entry.provider_tag) do |p|
         p.name = entry.provider_name
-        p.description = "Imported from #{entry.provider_name} catalog"
+        p.description = provider_description_for(entry)
       end
 
       desired_mask =
@@ -312,7 +312,27 @@ module ExternalCatalog
       if provider.name != entry.provider_name
         provider.update!(name: entry.provider_name)
       end
+      desired_description = provider_description_for(entry)
+      if desired_description.present? && provider.description != desired_description
+        provider.update!(description: desired_description)
+      end
       provider
+    end
+
+    def provider_description_for(entry)
+      if entry.source.to_s == 'broad_scp'
+        ExternalCatalog::BroadScpCatalog::PROVIDER_DESCRIPTION
+      else
+        "Imported from #{entry.provider_name} catalog"
+      end
+    end
+
+    def project_import_description(entry)
+      if entry.source.to_s == 'broad_scp'
+        ExternalCatalog::BroadScpCatalog.project_description_for(entry)
+      else
+        "Imported from #{entry.provider_name} (#{entry.external_id})"
+      end
     end
 
     def already_imported?(provider, external_id)
@@ -378,7 +398,17 @@ module ExternalCatalog
 
     def download_and_preparse!(entry, organism)
       if entry.source.to_s == 'broad_scp'
-        ExternalCatalog::BroadScpCatalog.authorization_header_for!(entry.url)
+        begin
+          ExternalCatalog::BroadScpCatalog.assert_redistributable!(
+            entry.external_id,
+            download_url: entry.url,
+            logger: @logger
+          )
+        rescue ExternalCatalog::BroadScpCatalog::NotRedistributable => e
+          raise SkipEntry, e.message
+        rescue ExternalCatalog::BroadScpCatalog::MissingAccessToken => e
+          raise Error, e.message
+        end
       end
 
       original_name = entry.filename.presence ||
@@ -713,7 +743,7 @@ module ExternalCatalog
         user_id: @user.id,
         key: @sandbox ? @sandbox_key : Project.generate_unique_key,
         name: entry.project_name,
-        description: "Imported from #{entry.provider_name} (#{entry.external_id})",
+        description: project_import_description(entry),
         organism_id: organism.id,
         project_type_id: ptype.id,
         version_id: @version.id,

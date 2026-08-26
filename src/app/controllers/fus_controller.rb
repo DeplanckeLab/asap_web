@@ -52,8 +52,8 @@ class FusController < ApplicationController
              status: 'uploading',
              name: filename,
              upload_type: upload_type,
-             admin_run: compliance_upload ? admin? : false,
-             creator_ip: compliance_upload ? request_creator_ip : nil
+             admin_run: false,
+             creator_ip: nil
            )
          end
     
@@ -61,8 +61,15 @@ class FusController < ApplicationController
       render json: { error: 'Upload record not found' }, status: :bad_request
       return
     end
-    
-    fu.save! if fu.new_record?
+
+    # Stamp on every compliance chunk (including resume): validation may reuse a Fu
+    # created before creator_ip existed, or from a prior session without X-Real-IP.
+    if compliance_upload
+      fu.admin_run = admin?
+      fu.creator_ip = request_creator_ip
+    end
+
+    fu.save! if fu.new_record? || fu.changed?
     
     # Upload directory is project-local when Fu is attached to a project
     # (e.g. parsing reset flow), otherwise global fus staging.
@@ -173,6 +180,10 @@ class FusController < ApplicationController
       if is_complete && content_digest
         update_attrs[:content_sha256] = content_digest.hexdigest
         InputFileSha256.clear_state!(fu.id)
+      end
+      if compliance_upload
+        update_attrs[:creator_ip] = request_creator_ip
+        update_attrs[:admin_run] = admin?
       end
       
       # Update Fu record

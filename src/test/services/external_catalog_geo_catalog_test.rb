@@ -59,4 +59,33 @@ class ExternalCatalogGeoCatalogTest < ActiveSupport::TestCase
     assert_equal 18, entry.n_obs
     assert_equal 1_234_567, entry.filesize
   end
+
+  test 'each skips accessions in skip_accessions before FTP listing' do
+    listed = []
+    @catalog.define_singleton_method(:esearch_ids) { |**_| %w[1] }
+    @catalog.define_singleton_method(:esummary) do |_ids|
+      [{
+        'accession' => 'GSE888001',
+        'title' => 'Bulk RNA-seq',
+        'ftplink' => 'ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE888nnn/GSE888001/',
+        'gdstype' => 'Expression profiling by high throughput sequencing',
+        'n_samples' => 4,
+        'taxon' => 'Homo sapiens',
+        'taxid' => '9606'
+      }]
+    end
+    @catalog.define_singleton_method(:list_geo_files) do |_ftp, accession|
+      listed << accession
+      [{ name: 'GSE888001_counts.txt.gz', url: 'https://example.com/c.txt.gz', filesize: 10 }]
+    end
+
+    yielded = []
+    @catalog.each(mode: 'bulk', skip_accessions: ['GSE888001']) { |e| yielded << e }
+    assert_empty yielded
+    assert_empty listed
+
+    @catalog.each(mode: 'bulk', skip_accessions: []) { |e| yielded << e }
+    assert_equal 1, yielded.size
+    assert_equal ['GSE888001'], listed
+  end
 end

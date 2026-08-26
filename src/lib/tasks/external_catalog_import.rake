@@ -372,14 +372,23 @@ namespace :external_catalog do
     puts 'Project names for GEO: "GSE12345: series title"'
   end
 
-  desc 'Sync candidate list for UAB UI (SOURCE=all|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|geo LIMIT=N GEO_MODE=all|sc|bulk)'
+  desc 'Sync candidate list for UAB UI (SOURCE=all|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|geo ' \
+       'LIMIT=N GEO_MODE=all|sc|bulk GEO_SKIP_SEEN_AFTER=ISO8601 — skip GEO FTP for candidates ' \
+       'already last_seen_at >= cutoff, for resume after a partial sync)'
   task sync_candidates: :environment do
     source = ENV.fetch('SOURCE', 'all').to_s.strip.downcase
     limit = ENV['LIMIT'].presence&.to_i
     geo_mode = ENV.fetch('GEO_MODE', 'all').to_s
-    puts "external_catalog:sync_candidates SOURCE=#{source} LIMIT=#{limit.inspect} GEO_MODE=#{geo_mode}"
+    skip_seen_after = ENV['GEO_SKIP_SEEN_AFTER'].presence
+    puts "external_catalog:sync_candidates SOURCE=#{source} LIMIT=#{limit.inspect} " \
+         "GEO_MODE=#{geo_mode} GEO_SKIP_SEEN_AFTER=#{skip_seen_after.inspect}"
 
-    totals = ExternalCatalog::CandidateSync.new.call(source: source, limit: limit, geo_mode: geo_mode)
+    totals = ExternalCatalog::CandidateSync.new.call(
+      source: source,
+      limit: limit,
+      geo_mode: geo_mode,
+      skip_seen_after: skip_seen_after
+    )
     puts "Upserted: #{totals[:upserted]}"
     puts "Marked obsolete: #{totals[:marked_obsolete]}"
     puts "Deleted test entries (blank URL): #{totals[:deleted_test]}"

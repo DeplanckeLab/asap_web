@@ -23,10 +23,13 @@ module ExternalCatalog
     end
 
     # Yields ExternalCatalog::Entry. +mode+: 'all' | 'sc' | 'bulk'
-    def each(limit: nil, mode: 'all')
-      return enum_for(:each, limit: limit, mode: mode) unless block_given?
+    # +skip_accessions+: GSE ids to skip before FTP listing (resume after a partial sync).
+    def each(limit: nil, mode: 'all', skip_accessions: nil)
+      return enum_for(:each, limit: limit, mode: mode, skip_accessions: skip_accessions) unless block_given?
 
+      skip = skip_accessions.present? ? skip_accessions.to_set : nil
       yielded = 0
+      skipped = 0
       retstart = 0
       page = 100
       loop do
@@ -39,6 +42,12 @@ module ExternalCatalog
         summaries.each do |summary|
           break if limit.present? && yielded >= limit.to_i
 
+          accession = summary['accession'].to_s
+          if skip&.include?(accession)
+            skipped += 1
+            next
+          end
+
           entry = entry_from_summary(summary, mode: mode)
           next unless entry
 
@@ -50,6 +59,10 @@ module ExternalCatalog
         break if ids.size < page
         sleep 0.34
       end
+      @logger.info(
+        "[ExternalCatalog::GeoCatalog] finished yielded=#{yielded} skipped_seen=#{skipped} " \
+        "retstart=#{retstart}"
+      )
       yielded
     end
 

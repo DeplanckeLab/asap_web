@@ -7,6 +7,17 @@ class HomeController < ApplicationController
   skip_before_action :authenticate_user!, raise: false
   before_action :authenticate_user!, only: [:rate, :rate_submit]
 
+  ADMIN_ONLY_OPENAPI_PATHS = [
+    '/projects/{project_key}/data_file_metadata_catalog'
+  ].freeze
+
+  ADMIN_ONLY_OPENAPI_SCHEMAS = %w[
+    DataFileMetadataCatalog
+    DataFileCatalogProject
+    DataFileCatalogRun
+    DataFileCatalogMetadata
+  ].freeze
+
   def unauthorized
     render 'shared/unauthorized', status: :forbidden
   end
@@ -108,6 +119,7 @@ class HomeController < ApplicationController
     spec_path = Rails.root.join('public', 'swagger', 'openapi.yaml')
     spec = YAML.safe_load_file(spec_path, aliases: true)
     spec['servers'] = [{ 'url' => ENV.fetch('OPENAPI_SERVER_URL') }]
+    filter_openapi_paths_for_current_user!(spec)
 
     render plain: spec.to_yaml, content_type: 'application/yaml'
   end
@@ -332,6 +344,16 @@ class HomeController < ApplicationController
   end
 
   private
+
+  def filter_openapi_paths_for_current_user!(spec)
+    return if admin?
+
+    ADMIN_ONLY_OPENAPI_PATHS.each { |path| spec['paths']&.delete(path) }
+    schemas = spec.dig('components', 'schemas')
+    return unless schemas
+
+    ADMIN_ONLY_OPENAPI_SCHEMAS.each { |name| schemas.delete(name) }
+  end
 
   def orcid_client_id
     Rails.application.credentials.dig(:orcid, :client_id).to_s.presence ||

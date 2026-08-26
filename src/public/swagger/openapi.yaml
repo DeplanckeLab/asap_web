@@ -180,6 +180,7 @@ paths:
         The catalog is intended for embedding in the file (location is format-specific) or exchange between tools.
         Payload is normalized as `list_of_projects`, `list_of_runs`, and `list_of_metadata`,
         where each metadata entry references pipeline runs through `pipeline_run_idx`.
+        Admin-only: omitted from the OpenAPI document for non-admin users.
       operationId: getDataFileMetadataCatalogApi
       tags:
         - Projects
@@ -206,6 +207,8 @@ paths:
                 $ref: '#/components/schemas/DataFileMetadataCatalog'
         '400':
           description: Missing `data_file` query parameter.
+        '403':
+          description: Caller is not an admin.
         '404':
           description: Project or data file not found.
 components:

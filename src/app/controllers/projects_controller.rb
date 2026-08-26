@@ -6052,7 +6052,12 @@ class ProjectsController < ApplicationController
 
   # GET /projects/:id/data_file_metadata_catalog?data_file=parsing/output.loom
   # GET /api/projects/:id/data_file_metadata_catalog?data_file=parsing/output.h5ad
+  # Admin-only: cross-tool metadata catalog for embedding / exchange (not general project API).
   def data_file_metadata_catalog
+    unless admin?
+      return render json: { error: 'Not authorized' }, status: :forbidden
+    end
+
     data_file = params[:data_file].presence || params[:filepath].presence
     if data_file.blank?
       return render json: { error: 'data_file parameter is required' }, status: :bad_request

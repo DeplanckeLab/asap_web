@@ -7,6 +7,8 @@ require 'open3'
 class UrlDownloadService
   PID_FILENAME = 'download.pid'
   HEARTBEAT_SEC = 15
+  # HuBMAP assets CDN rejects requests with no / default curl User-Agent (HTTP 403).
+  USER_AGENT = 'ASAP-external-catalog (https://asap.epfl.ch)'.freeze
 
   class Error < StandardError; end
 
@@ -67,9 +69,12 @@ class UrlDownloadService
       '--retry', '5',
       '--retry-delay', '2',
       '-C', '-',
-      '-o', @dest_path,
-      @url
+      '-o', @dest_path
     ]
+    cmd += ['-A', USER_AGENT]
+    auth = authorization_header
+    cmd += ['-H', "Authorization: #{auth}"] if auth
+    cmd << @url
 
     Open3.popen3(*cmd) do |stdin, _stdout, stderr, wait_thr|
       stdin.close
@@ -83,6 +88,12 @@ class UrlDownloadService
     end
   ensure
     FileUtils.rm_f(pid_path) unless self.class.live_pid(pid_path)
+  end
+
+  def authorization_header
+    ExternalCatalog::BroadScpCatalog.authorization_header_for!(@url)
+  rescue ExternalCatalog::BroadScpCatalog::MissingAccessToken => e
+    raise Error, e.message
   end
 
   def heartbeat_until(wait_thr)
@@ -120,9 +131,11 @@ class UrlDownloadService
   end
 
   def fetch_remote_size
-    output, _err, status = Open3.capture3(
-      'curl', '-sIL', '--connect-timeout', '20', @url
-    )
+    cmd = ['curl', '-sIL', '--connect-timeout', '20', '-A', USER_AGENT]
+    auth = authorization_header
+    cmd += ['-H', "Authorization: #{auth}"] if auth
+    cmd << @url
+    output, _err, status = Open3.capture3(*cmd)
     return nil unless status.success?
 
     header_line = output.to_s.lines.reverse.find { |line| line =~ /^content-length:\s*\d+/i }

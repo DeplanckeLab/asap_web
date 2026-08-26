@@ -30,7 +30,9 @@ class StandaloneComplianceCheckRecorderTest < TestBaseWithoutFixtures
         schema_id: 'scfair_7_1_0',
         user_id: user.id,
         source_url: 'https://example.com/sample.h5ad',
-        fu_id: nil
+        fu_id: nil,
+        admin_run: true,
+        creator_ip: '203.0.113.10'
       )
     )
 
@@ -41,6 +43,8 @@ class StandaloneComplianceCheckRecorderTest < TestBaseWithoutFixtures
     assert_equal 'scfair_7_1_0', record.schema_id
     assert_equal false, record.passed
     assert_equal 'completed', record.status
+    assert_equal true, record.admin_run
+    assert_equal '203.0.113.10', record.creator_ip
     assert_in_delta validated_at, record.checked_at, 1
     assert record.result_json.key?('errors')
     assert record.result_json.key?('summary')
@@ -55,7 +59,9 @@ class StandaloneComplianceCheckRecorderTest < TestBaseWithoutFixtures
         error_message: 'boom',
         filename: 'broken.loom',
         schema_id: 'scfair_7_1_0',
-        format: 'loom'
+        format: 'loom',
+        admin_run: false,
+        creator_ip: '198.51.100.7'
       )
     )
 
@@ -63,6 +69,8 @@ class StandaloneComplianceCheckRecorderTest < TestBaseWithoutFixtures
     assert_equal 'failed', record.status
     assert_equal 'broken.loom', record.filename
     assert_equal 'loom', record.format
+    assert_equal false, record.admin_run
+    assert_equal '198.51.100.7', record.creator_ip
     assert_equal 'boom', record.result_json['error']
   end
 end

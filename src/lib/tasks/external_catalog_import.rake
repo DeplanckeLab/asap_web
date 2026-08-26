@@ -250,7 +250,7 @@ namespace :external_catalog do
   end
 
   desc 'Import from external_catalog_candidates (COUNT/N/LIMIT, IMPORT_USER_EMAIL|IMPORT_USER_ID, SOURCE, PROJECT_TYPE, ONLY_NEW=1). ' \
-       'Without SOURCE (or SOURCE=all), candidates are taken in order CELLxGENE, Bgee, HCA, GEO. ' \
+       'Without SOURCE (or SOURCE=all), candidates are taken in order CELLxGENE, Bgee, EBI SC Atlas, HCA, HuBMAP, Broad SCP, GEO. ' \
        'COUNT may include extra rows to finish the last collection so a batch cannot split it. ' \
        'Duplicate file content (SHA-256) links the provider onto the existing ASAP project instead of creating another. ' \
        'SC projects: refresh analysis_pipeline, hard-fail scFAIR loom/h5ad validation on errors ' \
@@ -316,9 +316,9 @@ namespace :external_catalog do
     abort('external_catalog:import had failures') if results[:failed].any?
   end
 
-  desc 'Test import: one candidate each from CELLxGENE, Bgee, HCA, GEO (IMPORT_USER_EMAIL required)'
+  desc 'Test import: one candidate each from CELLxGENE, Bgee, EBI SC Atlas, HCA, HuBMAP, Broad SCP, GEO (IMPORT_USER_EMAIL required)'
   task test: :environment do
-    puts 'external_catalog:test — one candidate each from CELLxGENE, Bgee, HCA, GEO'
+    puts 'external_catalog:test — one candidate each from CELLxGENE, Bgee, EBI SC Atlas, HCA, HuBMAP, Broad SCP, GEO'
     user = external_catalog_resolve_user!
     importer = external_catalog_build_importer(user: user)
     ExternalCatalogCandidate.release_stale_importing! unless external_catalog_bool('DRY_RUN')
@@ -326,7 +326,10 @@ namespace :external_catalog do
     candidates = []
     candidates << external_catalog_pick_test_candidate('cellxgene', label: 'CELLxGENE')
     candidates << external_catalog_pick_test_candidate('bgee', label: 'Bgee')
+    candidates << external_catalog_pick_test_candidate('ebi_sc', label: 'EBI SC Atlas', max_bytes: 150_000_000)
     candidates << external_catalog_pick_test_candidate('hca', label: 'HCA', max_bytes: 150_000_000)
+    candidates << external_catalog_pick_test_candidate('hubmap', label: 'HuBMAP', max_bytes: 150_000_000)
+    candidates << external_catalog_pick_test_candidate('broad_scp', label: 'Broad SCP', max_bytes: 150_000_000)
     candidates << external_catalog_pick_test_candidate('geo', label: 'GEO')
 
     results = external_catalog_import_candidates!(candidates, user: user, importer: importer)
@@ -369,7 +372,7 @@ namespace :external_catalog do
     puts 'Project names for GEO: "GSE12345: series title"'
   end
 
-  desc 'Sync candidate list for UAB UI (SOURCE=all|cellxgene|bgee|hca|geo LIMIT=N GEO_MODE=all|sc|bulk)'
+  desc 'Sync candidate list for UAB UI (SOURCE=all|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|geo LIMIT=N GEO_MODE=all|sc|bulk)'
   task sync_candidates: :environment do
     source = ENV.fetch('SOURCE', 'all').to_s.strip.downcase
     limit = ENV['LIMIT'].presence&.to_i
@@ -497,5 +500,44 @@ namespace :external_catalog do
     else
       puts "Registry updated: #{path} (#{ExternalCatalog::ImportSuccessRegistry.read_all(path: path).size} row(s), 1=#{ok}, 0=#{bad})"
     end
+  end
+
+  desc 'Enqueue standalone scFAIR validation for SC external catalog candidates (loom/h5ad URLs). ' \
+       'SOURCE=all|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|geo COUNT/N/LIMIT MAX_FILESIZE SKIP_EXISTING=1 ' \
+       'CANDIDATE_IDS=1,2 SCHEMA_ID IMPORT_USER_EMAIL|IMPORT_USER_ID DRY_RUN=1. Runs in background via Solid Queue.'
+  task validate_scfair_standalone: :environment do
+    source = ENV.fetch('SOURCE', 'all')
+    count = external_catalog_count
+    dry_run = external_catalog_bool('DRY_RUN')
+    skip_existing = external_catalog_bool('SKIP_EXISTING', default: true)
+    max_filesize = ENV['MAX_FILESIZE'].presence&.to_i
+    schema_id = ENV['SCHEMA_ID'].presence
+    candidate_ids = ENV['CANDIDATE_IDS'].to_s.split(',').map(&:strip).reject(&:blank?)
+    user =
+      if ENV['IMPORT_USER_EMAIL'].present? || ENV['IMPORT_USER_ID'].present?
+        external_catalog_resolve_user!
+      end
+
+    puts "external_catalog:validate_scfair_standalone SOURCE=#{source} LIMIT=#{count.inspect} " \
+         "SKIP_EXISTING=#{skip_existing} DRY_RUN=#{dry_run} SCHEMA_ID=#{schema_id || 'default'} " \
+         "USER=#{user&.email || 'none'} MAX_FILESIZE=#{max_filesize.inspect} " \
+         "CANDIDATE_IDS=#{candidate_ids.presence || 'all'}"
+
+    result = ExternalCatalog::StandaloneScfairBatchValidator.new(
+      source: source,
+      limit: count,
+      schema_id: schema_id,
+      user: user,
+      dry_run: dry_run,
+      skip_existing: skip_existing,
+      max_filesize: max_filesize,
+      candidate_ids: candidate_ids
+    ).call
+
+    verb = dry_run ? 'Would enqueue' : 'Enqueued'
+    puts "#{verb} #{result.queued} validation(s) from #{result.candidates} candidate(s); " \
+         "skipped_existing=#{result.skipped_existing} " \
+         "skipped_unsupported=#{result.skipped_unsupported} " \
+         "skipped_blank_url=#{result.skipped_blank_url}"
   end
 end

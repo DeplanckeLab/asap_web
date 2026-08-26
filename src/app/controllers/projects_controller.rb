@@ -9846,10 +9846,6 @@ class ProjectsController < ApplicationController
       project.project_origin_id = origin_id if origin_id.present?
     end
 
-    def request_creator_ip
-      request.headers['X-Real-IP'].to_s.strip.presence || get_real_ip.to_s.strip.presence
-    end
-
     def enforce_locked_project_type_on_create!(project)
       return unless project.from_scfair_validation? || params[:integrate].to_s == '1'
 

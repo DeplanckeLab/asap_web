@@ -115,8 +115,14 @@ module ExternalCatalog
         CellxgeneCatalog.new(logger: @logger).each(limit: limit) { |e| yield e }
       when 'bgee'
         BgeeCatalog.new(logger: @logger).each(limit: limit) { |e| yield e }
+      when 'ebi_sc'
+        EbiScCatalog.new(logger: @logger).each(limit: limit) { |e| yield e }
       when 'hca'
         HcaCatalog.new(logger: @logger).each(limit: limit) { |e| yield e }
+      when 'hubmap'
+        HubmapCatalog.new(logger: @logger).each(limit: limit) { |e| yield e }
+      when 'broad_scp'
+        BroadScpCatalog.new(logger: @logger).each(limit: limit) { |e| yield e }
       when 'geo'
         GeoCatalog.new(logger: @logger).each(limit: limit, mode: geo_mode) { |e| yield e }
       end

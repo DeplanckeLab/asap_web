@@ -39,7 +39,9 @@ class IsolatedComplianceValidationJobTest < TestBaseWithoutFixtures
         status: 'validating',
         upload_type: upload_type_id,
         user_id: user.id,
-        url: 'https://example.com/demo.loom'
+        url: 'https://example.com/demo.loom',
+        admin_run: true,
+        creator_ip: '203.0.113.50'
       )
     )
 
@@ -70,6 +72,8 @@ class IsolatedComplianceValidationJobTest < TestBaseWithoutFixtures
     assert_equal 'loom', record.format
     assert_equal true, record.passed
     assert_equal 'completed', record.status
+    assert_equal true, record.admin_run
+    assert_equal '203.0.113.50', record.creator_ip
     assert_equal 'validated', fu.reload.status
   ensure
     FileUtils.rm_f(path) if path

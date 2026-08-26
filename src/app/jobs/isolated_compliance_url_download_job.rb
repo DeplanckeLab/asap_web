@@ -77,7 +77,9 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
     dir
   end
 
-  def download_remote_file!(task_id, url)
+  def download_remote_file!(task_id, url, redirect_limit: 5)
+    raise ArgumentError, 'Too many redirects while downloading' if redirect_limit < 0
+
     uri = URI.parse(url.to_s.strip)
     raise ArgumentError, 'Only HTTP/HTTPS URLs are supported' unless uri.is_a?(URI::HTTP)
 
@@ -88,7 +90,22 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
 
     Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https') do |http|
       request = Net::HTTP::Get.new(uri.request_uri)
+      begin
+        auth = ExternalCatalog::BroadScpCatalog.authorization_header_for!(url)
+        request['Authorization'] = auth if auth
+      rescue ExternalCatalog::BroadScpCatalog::MissingAccessToken => e
+        raise ArgumentError, e.message
+      end
+
       http.request(request) do |response|
+        # Broad SCP download endpoints 302 to a short-lived GCS signed URL.
+        if response.is_a?(Net::HTTPRedirection)
+          location = response['location'].to_s
+          raise ArgumentError, "Download failed (HTTP #{response.code}) without Location" if location.blank?
+
+          return download_remote_file!(task_id, location, redirect_limit: redirect_limit - 1)
+        end
+
         raise ArgumentError, "Download failed (HTTP #{response.code})" unless response.code.to_i.between?(200, 299)
 
         total = response['Content-Length'].to_i
@@ -161,5 +178,27 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
     }
     payload[:error_code] = error_code if error_code.present?
     write_and_broadcast(task_id, payload)
+    record_download_failure(fu, message)
+  end
+
+  def record_download_failure(fu, message)
+    return unless fu
+
+    StandaloneComplianceCheckRecorder.record_failed!(
+      task_id: fu.compliance_task_id,
+      error_message: message,
+      filename: fu.name.presence || fu.upload_file_name,
+      schema_id: fu.compliance_schema_id,
+      user_id: fu.user_id,
+      source_url: fu.url.presence,
+      fu_id: fu.id,
+      admin_run: ActiveModel::Type::Boolean.new.cast(fu.admin_run),
+      creator_ip: fu.creator_ip
+    )
+  rescue StandardError => e
+    Rails.logger.error(
+      "[IsolatedComplianceUrlDownloadJob] Could not record failed download: " \
+      "#{e.class}: #{e.message}"
+    )
   end
 end

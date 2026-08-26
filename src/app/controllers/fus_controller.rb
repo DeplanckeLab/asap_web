@@ -51,7 +51,9 @@ class FusController < ApplicationController
              upload_file_size: file_size,
              status: 'uploading',
              name: filename,
-             upload_type: upload_type
+             upload_type: upload_type,
+             admin_run: compliance_upload ? admin? : false,
+             creator_ip: compliance_upload ? request_creator_ip : nil
            )
          end
     

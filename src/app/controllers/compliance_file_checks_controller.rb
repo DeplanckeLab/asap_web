@@ -46,7 +46,9 @@ class ComplianceFileChecksController < ApplicationController
       project_key: current_user ? nil : session[:sandbox],
       url: uri.to_s,
       compliance_schema_id: schema_id,
-      compliance_task_id: task_id
+      compliance_task_id: task_id,
+      admin_run: admin?,
+      creator_ip: request_creator_ip
     )
 
     initial = {

@@ -64,6 +64,7 @@ namespace :storage do
 
   desc 'List or delete leftover USER_DATA_DIR/<user_id>/<project_key>/ trees (and sibling .tgz) ' \
        'that have no matching Project row. Dry-run by default; set DELETE=1 to remove. ' \
+       'Cron example: DELETE=1 bundle exec rake storage:remove_orphan_project_dirs. ' \
        'Usage: rake storage:remove_orphan_project_dirs [USERS_DIR=...] [DELETE=1] [LIMIT_USERS=] [TOP=100]'
   task remove_orphan_project_dirs: :environment do
     users_dir = ENV['USERS_DIR'].presence || ENV.fetch('USER_DATA_DIR') do

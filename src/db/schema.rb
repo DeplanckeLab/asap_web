@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_25_150000) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_26_123000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -762,10 +762,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_25_150000) do
   end
 
   create_table "fus", id: :integer, default: -> { "nextval('courses_id_seq'::regclass)" }, force: :cascade do |t|
+    t.boolean "admin_run", default: false, null: false
     t.string "compliance_schema_id"
     t.string "compliance_task_id"
     t.string "content_sha256", limit: 64
     t.datetime "created_at", precision: nil
+    t.string "creator_ip"
     t.text "name"
     t.integer "preparsing_version_id"
     t.integer "project_id"
@@ -1561,8 +1563,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_25_150000) do
   end
 
   create_table "standalone_compliance_checks", force: :cascade do |t|
+    t.boolean "admin_run", default: false, null: false
     t.datetime "checked_at", null: false
     t.datetime "created_at", null: false
+    t.string "creator_ip"
     t.string "filename"
     t.string "format"
     t.integer "fu_id"
@@ -1574,6 +1578,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_25_150000) do
     t.string "task_id"
     t.datetime "updated_at", null: false
     t.integer "user_id"
+    t.index ["admin_run"], name: "index_standalone_compliance_checks_on_admin_run"
     t.index ["checked_at"], name: "index_standalone_compliance_checks_on_checked_at"
     t.index ["fu_id"], name: "index_standalone_compliance_checks_on_fu_id"
     t.index ["passed"], name: "index_standalone_compliance_checks_on_passed"

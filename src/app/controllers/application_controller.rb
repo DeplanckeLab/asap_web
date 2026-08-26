@@ -185,6 +185,11 @@ class ApplicationController < ActionController::Base
     real_ip
   end
 
+  # Prefer nginx X-Real-IP; fall back to Rack remote_ip (same as project.creator_ip).
+  def request_creator_ip
+    request.headers['X-Real-IP'].to_s.strip.presence || get_real_ip.to_s.strip.presence
+  end
+
   # Same signal as ActionController::AllowBrowser (useragent gem): known crawlers/preview bots.
   def request_user_agent_indicates_bot?
     ua = request.user_agent

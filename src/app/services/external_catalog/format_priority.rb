@@ -19,9 +19,10 @@ module ExternalCatalog
     GEO_SC_PRIORITY = %i[loom h5ad rds mtx].freeze
 
     # GEO bulk expression matrices (first match wins per GSE).
-    # Prefer deposited count/TPM tables over series_matrix: HT-seq series_matrix
-    # files often contain only SOFT metadata with an empty expression table.
-    GEO_BULK_PRIORITY = %i[counts_table series_matrix archive_table].freeze
+    # HT-seq series_matrix files are SOFT metadata with an empty expression table
+    # (importer SkipEntry); do not catalog them. Prefer deposited count/TPM tables,
+    # then packaged archives.
+    GEO_BULK_PRIORITY = %i[counts_table archive_table].freeze
 
     module_function
 
@@ -70,9 +71,6 @@ module ExternalCatalog
 
       counts = names.find { |n| geo_bulk_counts_table?(n) }
       return [counts, :counts_table] if counts
-
-      series = names.find { |n| geo_bulk_series_matrix?(n) }
-      return [series, :series_matrix] if series
 
       archive = names.find { |n| geo_bulk_archive?(n) }
       return [archive, :archive_table] if archive

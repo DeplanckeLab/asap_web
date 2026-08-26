@@ -6,7 +6,8 @@ require 'json'
 
 module ExternalCatalog
   # GEO Series (GSE) catalog. Picks one matrix file per series:
-  # SC: loom > h5ad > RDS > MTX; bulk: series_matrix > counts table > archive.
+  # SC: loom > h5ad > RDS > MTX; bulk: counts table > archive
+  # (HT-seq series_matrix is metadata-only and is not cataloged).
   class GeoCatalog
     EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils'.freeze
     FTP_HTTPS = 'https://ftp.ncbi.nlm.nih.gov'.freeze
@@ -143,6 +144,7 @@ module ExternalCatalog
         name, kind = picked
         meta = files.find { |f| f[:name] == name }
         project_type = 'sc'
+        n_obs = nil
       else
         picked = FormatPriority.pick_geo_bulk_file(files.map { |f| f[:name] })
         return nil unless picked
@@ -150,10 +152,14 @@ module ExternalCatalog
         name, kind = picked
         meta = files.find { |f| f[:name] == name }
         project_type = 'bulk'
+        # GEO esummary n_samples is the series sample count (bulk matrix columns).
+        n_obs = positive_int(summary['n_samples'])
       end
 
       tax_id = extract_tax_id(summary)
       dois, pmids, identifiers = geo_reference_fields(summary, accession)
+      filesize = meta[:filesize].to_i
+      filesize = remote_filesize(meta[:url]) if filesize <= 0
       Entry.new(
         source: 'geo',
         external_id: accession,
@@ -161,7 +167,8 @@ module ExternalCatalog
         url: meta[:url],
         tax_id: tax_id,
         organism_label: summary['taxon'].to_s.presence,
-        filesize: 0,
+        filesize: filesize,
+        n_obs: n_obs,
         project_type_tag: project_type,
         format_kind: kind,
         filename: name,
@@ -213,21 +220,11 @@ module ExternalCatalog
       https_base = https_base.sub(%r{\Aftp://}, 'https://')
       https_base += '/' unless https_base.end_with?('/')
 
-      names = []
-      %w[suppl/ matrix/].each do |subdir|
-        names.concat(list_directory("#{https_base}#{subdir}"))
-      rescue StandardError => e
-        @logger.debug("[ExternalCatalog::GeoCatalog] list #{accession} #{subdir}: #{e.message}")
-      end
-
-      # Always consider canonical series_matrix path even if matrix/ listing failed.
-      series_name = "#{accession}_series_matrix.txt.gz"
-      series_url = "#{https_base}matrix/#{series_name}"
-      unless names.any? { |n| n[:name] == series_name }
-        names << { name: series_name, url: series_url } if remote_exists?(series_url)
-      end
-
-      names
+      # Suppl only: HT-seq matrix/ holds series_matrix SOFT stubs, not usable counts.
+      list_directory("#{https_base}suppl/")
+    rescue StandardError => e
+      @logger.debug("[ExternalCatalog::GeoCatalog] list #{accession} suppl/: #{e.message}")
+      []
     end
 
     def list_directory(url)
@@ -241,15 +238,24 @@ module ExternalCatalog
         next if name == '../' || name == './'
 
         base = url.end_with?('/') ? url : "#{url}/"
-        { name: File.basename(name), url: "#{base}#{name}" }
+        { name: File.basename(name), url: "#{base}#{name}", filesize: 0 }
       end
     end
 
-    def remote_exists?(url)
+    def remote_filesize(url)
+      return 0 if url.blank?
+
       response = HTTParty.head(url, timeout: 30)
-      response.success?
+      return 0 unless response.success?
+
+      response.headers['content-length'].to_i
     rescue StandardError
-      false
+      0
+    end
+
+    def positive_int(value)
+      n = value.to_i
+      n.positive? ? n : nil
     end
   end
 end

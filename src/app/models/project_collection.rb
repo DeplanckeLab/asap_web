@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
 class ProjectCollection < ApplicationRecord
-  SOURCES = %w[cellxgene manual geo hca bgee].freeze
+  SOURCES = %w[cellxgene manual geo hca bgee broad_scp].freeze
   SOURCE_LABELS = {
     'cellxgene' => 'CELLxGENE',
     'hca' => 'HCA',
     'geo' => 'GEO',
     'bgee' => 'Bgee',
+    'broad_scp' => 'Broad SCP',
     'manual' => 'Manual'
   }.freeze
 

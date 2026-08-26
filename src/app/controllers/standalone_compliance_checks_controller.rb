@@ -8,10 +8,15 @@ class StandaloneComplianceChecksController < ApplicationController
   before_action :set_standalone_compliance_check, only: :show
 
   def index
-    @standalone_compliance_checks = StandaloneComplianceCheck.includes(:user).recent
-    @total_count = StandaloneComplianceCheck.count
-    @passed_count = StandaloneComplianceCheck.passed.count
-    @failed_status_count = StandaloneComplianceCheck.where(status: 'failed').count
+    @origin_filter = StandaloneComplianceCheck.origin_filter(params[:origin])
+    scope = StandaloneComplianceCheck.for_origin_filter(@origin_filter).includes(:user).recent
+    @standalone_compliance_checks = scope
+    @total_count = scope.count
+    @passed_count = scope.passed.count
+    @failed_status_count = scope.where(status: 'failed').count
+    @all_count = StandaloneComplianceCheck.count
+    @admin_count = StandaloneComplianceCheck.admin_runs.count
+    @user_count = StandaloneComplianceCheck.user_runs.count
   end
 
   def show

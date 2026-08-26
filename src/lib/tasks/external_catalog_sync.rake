@@ -13,6 +13,10 @@ namespace :external_catalog do
     self.table_name = 'external_catalog_candidates'
   end
 
+  class ExternalCatalogSyncSourceProvider < ExternalCatalogSyncSourceBase
+    self.table_name = 'providers'
+  end
+
   def source_app_root_for_external_catalog_sync
     Pathname.new(ENV.fetch('SOURCE_APP_ROOT', '/srv/asap2_test'))
   end
@@ -203,9 +207,11 @@ namespace :external_catalog do
     { marked_obsolete: marked_obsolete, deleted_test: deleted_test }
   end
 
-  desc 'Sync external_catalog_candidates from another ASAP instance (dev -> production). ' \
-       'Never deletes real entries: marks missing ones obsolete (test entries with blank URL may be deleted). ' \
-       'Preserves import_* on existing target rows. DRY_RUN=1. ' \
+  desc 'Sync Providers (resource origins) and external_catalog_candidates from another ASAP instance ' \
+       '(dev -> production). Providers matched by tag (create/update; no deletes). ' \
+       'Never deletes real candidate entries: marks missing ones obsolete ' \
+       '(test entries with blank URL may be deleted). ' \
+       'Preserves import_* on existing target candidate rows. DRY_RUN=1. ' \
        'Set DEV_POSTGRES_DB or SOURCE_DATABASE_URL / SOURCE_APP_ROOT.'
   task :sync_from_dev, [:source_app_root] => :environment do |_task, args|
     source_app_root = Pathname.new(
@@ -215,6 +221,9 @@ namespace :external_catalog do
 
     unless ActiveRecord::Base.connection.table_exists?(:external_catalog_candidates)
       raise 'external_catalog_candidates table missing on target. Run migrations first.'
+    end
+    unless ActiveRecord::Base.connection.table_exists?(:providers)
+      raise 'providers table missing on target. Run migrations first.'
     end
     unless ActiveRecord::Base.connection.column_exists?(:external_catalog_candidates, :obsolete)
       raise 'external_catalog_candidates.obsolete missing on target. Run migrations first.'
@@ -229,6 +238,9 @@ namespace :external_catalog do
     unless ExternalCatalogSyncSourceBase.connection.table_exists?(:external_catalog_candidates)
       raise 'external_catalog_candidates table missing on source database.'
     end
+    unless ExternalCatalogSyncSourceBase.connection.table_exists?(:providers)
+      raise 'providers table missing on source database.'
+    end
     unless ExternalCatalogSyncSourceBase.connection.column_exists?(:external_catalog_candidates, :obsolete)
       raise 'external_catalog_candidates.obsolete missing on source database. Run migrations on development first.'
     end
@@ -236,6 +248,9 @@ namespace :external_catalog do
       raise 'external_catalog_candidates.n_obs missing on source database. Run migrations on development first.'
     end
 
+    provider_rows = ExternalCatalogSyncSourceProvider.order(:id).map do |row|
+      ExternalCatalog::ProviderDevSync.prepare_row(row.attributes)
+    end
     source_rows = ExternalCatalogSyncSourceCandidate.order(:id).map do |row|
       prepare_external_catalog_candidate_row(row.attributes)
     end
@@ -243,11 +258,18 @@ namespace :external_catalog do
     source_obsolete = source_rows.count { |row| row[:obsolete] }
 
     puts "[external_catalog:sync_from_dev] source_app_root=#{source_app_root} " \
-         "source_candidates=#{source_rows.size} source_obsolete=#{source_obsolete} dry_run=#{dry_run}"
+         "source_providers=#{provider_rows.size} source_candidates=#{source_rows.size} " \
+         "source_obsolete=#{source_obsolete} dry_run=#{dry_run}"
 
+    providers_created = 0
+    providers_updated = 0
     created = 0
     updated = 0
     if dry_run
+      provider_rows.each do |row|
+        puts "  - provider tag=#{row[:tag].inspect} name=#{row[:name].to_s[0, 60].inspect} " \
+             "url_mask=#{row[:url_mask].to_s[0, 80].inspect}"
+      end
       by_source = source_rows.group_by { |r| r[:source] }.transform_values(&:size)
       puts "  by_source=#{by_source.inspect}"
       source_rows.first(5).each do |row|
@@ -262,6 +284,14 @@ namespace :external_catalog do
     end
 
     ActiveRecord::Base.transaction do
+      provider_rows.each do |row|
+        case ExternalCatalog::ProviderDevSync.apply_row!(row)
+        when :created then providers_created += 1
+        when :updated then providers_updated += 1
+        end
+      end
+      reset_pk_sequence_for_external_catalog_sync!('providers')
+
       source_rows.each do |row|
         case apply_external_catalog_source_row!(row)
         when :created then created += 1
@@ -272,7 +302,8 @@ namespace :external_catalog do
       reset_pk_sequence_for_external_catalog_sync!('external_catalog_candidates')
 
       puts "[external_catalog:sync_from_dev] sync completed successfully " \
-           "created=#{created} updated=#{updated} " \
+           "providers_created=#{providers_created} providers_updated=#{providers_updated} " \
+           "candidates_created=#{created} candidates_updated=#{updated} " \
            "marked_obsolete=#{prune_stats[:marked_obsolete]} deleted_test=#{prune_stats[:deleted_test]} " \
            "active=#{ExternalCatalogCandidate.current.count} " \
            "obsolete=#{ExternalCatalogCandidate.obsolete_only.count}"

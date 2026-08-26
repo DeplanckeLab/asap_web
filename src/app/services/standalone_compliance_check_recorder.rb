@@ -7,7 +7,7 @@ class StandaloneComplianceCheckRecorder
   OMIT_RESULT_KEYS = %w[field_values checks_catalog].freeze
 
   class << self
-    def record_completed!(task_id:, result:, filename:, schema_id:, user_id: nil, source_url: nil, fu_id: nil)
+    def record_completed!(task_id:, result:, filename:, schema_id:, user_id: nil, source_url: nil, fu_id: nil, admin_run: false, creator_ip: nil)
       StandaloneComplianceCheck.create!(
         task_id: task_id,
         filename: filename,
@@ -15,6 +15,8 @@ class StandaloneComplianceCheckRecorder
         user_id: user_id,
         source_url: source_url,
         fu_id: fu_id,
+        admin_run: ActiveModel::Type::Boolean.new.cast(admin_run),
+        creator_ip: creator_ip.to_s.strip.presence,
         format: result.fetch(:format) { result.fetch('format') },
         passed: ActiveModel::Type::Boolean.new.cast(result.fetch(:valid) { result.fetch('valid') }),
         status: 'completed',
@@ -23,7 +25,7 @@ class StandaloneComplianceCheckRecorder
       )
     end
 
-    def record_failed!(task_id:, error_message:, filename: nil, schema_id: nil, user_id: nil, source_url: nil, fu_id: nil, format: nil)
+    def record_failed!(task_id:, error_message:, filename: nil, schema_id: nil, user_id: nil, source_url: nil, fu_id: nil, format: nil, admin_run: false, creator_ip: nil)
       StandaloneComplianceCheck.create!(
         task_id: task_id,
         filename: filename,
@@ -31,6 +33,8 @@ class StandaloneComplianceCheckRecorder
         user_id: user_id,
         source_url: source_url,
         fu_id: fu_id,
+        admin_run: ActiveModel::Type::Boolean.new.cast(admin_run),
+        creator_ip: creator_ip.to_s.strip.presence,
         format: format,
         passed: false,
         status: 'failed',

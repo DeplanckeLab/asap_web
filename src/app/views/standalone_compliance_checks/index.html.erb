@@ -7,8 +7,30 @@
     </p>
   </div>
 
+  <%= form_with url: standalone_compliance_checks_path, method: :get, local: true, class: "rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900" do %>
+    <div class="flex flex-wrap items-end gap-3">
+      <div>
+        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Origin</label>
+        <%= select_tag :origin,
+                       options_for_select(
+                         [
+                           ["User only (guest + non-admin)", "user"],
+                           ["Admin only", "admin"],
+                           ["All results", "all"]
+                         ],
+                         @origin_filter
+                       ),
+                       class: "rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100",
+                       onchange: "this.form.requestSubmit()" %>
+      </div>
+      <span class="text-xs text-gray-500 dark:text-gray-400 pb-2">
+        <%= @user_count %> user · <%= @admin_count %> admin · <%= @all_count %> all
+      </span>
+    </div>
+  <% end %>
+
   <p class="text-sm text-gray-600 dark:text-gray-300">
-    <%= @total_count %> total
+    <%= @total_count %> shown
     · <%= @passed_count %> passed
     · <%= @failed_status_count %> job failures
   </p>
@@ -33,8 +55,11 @@
             <td class="whitespace-nowrap px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
               <%= display_timestamp(check, :checked_at) %>
             </td>
-            <td class="whitespace-nowrap px-3 py-2">
-              <%= check.user&.email.presence || 'Anonymous' %>
+            <td class="whitespace-nowrap px-3 py-2" title="<%= standalone_compliance_check_user_title(check) %>">
+              <%= standalone_compliance_check_user_label(check) %>
+              <% if check.admin_run? %>
+                <span class="ml-1 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300">admin</span>
+              <% end %>
             </td>
             <td class="px-3 py-2 max-w-xs truncate" title="<%= check.filename %>">
               <%= check.filename.presence || '—' %>
@@ -78,7 +103,7 @@
 
   <% if @standalone_compliance_checks.empty? %>
     <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
-      No standalone compliance checks have been recorded yet.
+      No standalone compliance checks match this filter.
     </div>
   <% end %>
 </div>

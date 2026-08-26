@@ -13,7 +13,10 @@
       </h1>
       <p class="mt-2 text-gray-600 dark:text-gray-300">
         Checked <%= display_timestamp(check, :checked_at) %>
-        · <%= check.user&.email.presence || 'Anonymous' %>
+        · <span title="<%= standalone_compliance_check_user_title(check) %>"><%= standalone_compliance_check_user_label(check) %></span>
+        <% if check.admin_run? %>
+          · admin run
+        <% end %>
         <% if check.format.present? %>
           · <%= check.format.upcase %>
         <% end %>

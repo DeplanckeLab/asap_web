@@ -243,7 +243,7 @@ class ExternalCatalogCandidateSeriesKeyTest < ActiveSupport::TestCase
     ExternalCatalogCandidate.where(id: [a&.id, b&.id, c&.id].compact).delete_all
   end
 
-  test 'ordered_for_catalog prefers CELLxGENE then Bgee then HCA then GEO' do
+  test 'ordered_for_catalog prefers CELLxGENE then Bgee then EBI SC then HCA then HuBMAP then Broad SCP then GEO' do
     suffix = SecureRandom.hex(3)
     geo = ExternalCatalogCandidate.create!(
       source: 'geo',
@@ -254,14 +254,41 @@ class ExternalCatalogCandidateSeriesKeyTest < ActiveSupport::TestCase
       tax_id: 9606,
       url: 'https://example.com/geo'
     )
+    broad = ExternalCatalogCandidate.create!(
+      source: 'broad_scp',
+      external_id: "SCP#{suffix}",
+      provider_tag: 'BROAD_SCP',
+      title: 'Broad sixth',
+      import_status: 'idle',
+      tax_id: 9606,
+      url: 'https://example.com/broad'
+    )
+    hubmap = ExternalCatalogCandidate.create!(
+      source: 'hubmap',
+      external_id: "HBM#{suffix}",
+      provider_tag: 'HUBMAP',
+      title: 'Hubmap fifth',
+      import_status: 'idle',
+      tax_id: 9606,
+      url: 'https://example.com/hubmap'
+    )
     hca = ExternalCatalogCandidate.create!(
       source: 'hca',
       external_id: "hca-#{suffix}",
       provider_tag: 'HCA',
-      title: 'Hca third',
+      title: 'Hca fourth',
       import_status: 'idle',
       tax_id: 9606,
       url: 'https://example.com/hca'
+    )
+    ebi = ExternalCatalogCandidate.create!(
+      source: 'ebi_sc',
+      external_id: "E-CURD-#{suffix}",
+      provider_tag: 'EBI_SC',
+      title: 'EBI third',
+      import_status: 'idle',
+      tax_id: 9606,
+      url: 'https://example.com/ebi'
     )
     bgee = ExternalCatalogCandidate.create!(
       source: 'bgee',
@@ -282,11 +309,15 @@ class ExternalCatalogCandidateSeriesKeyTest < ActiveSupport::TestCase
       url: 'https://example.com/cxg'
     )
 
-    ordered = ExternalCatalogCandidate.where(id: [geo.id, hca.id, bgee.id, cxg.id]).ordered_for_catalog.to_a
-    assert_equal %w[cellxgene bgee hca geo], ordered.map(&:source)
+    ordered = ExternalCatalogCandidate.where(
+      id: [geo.id, broad.id, hubmap.id, hca.id, ebi.id, bgee.id, cxg.id]
+    ).ordered_for_catalog.to_a
+    assert_equal %w[cellxgene bgee ebi_sc hca hubmap broad_scp geo], ordered.map(&:source)
     assert_equal ExternalCatalogCandidate::IMPORT_SOURCE_ORDER, ExternalCatalog::CandidateSync::SOURCES
   ensure
-    ExternalCatalogCandidate.where(id: [geo&.id, hca&.id, bgee&.id, cxg&.id].compact).delete_all
+    ExternalCatalogCandidate.where(
+      id: [geo&.id, broad&.id, hubmap&.id, hca&.id, ebi&.id, bgee&.id, cxg&.id].compact
+    ).delete_all
   end
 
   test 'ordered_by_size sorts by n_obs then n_vars then filesize' do

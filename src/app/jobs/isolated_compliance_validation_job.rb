@@ -40,7 +40,9 @@ class IsolatedComplianceValidationJob < ApplicationJob
       schema_id: schema_id,
       user_id: meta[:user_id],
       source_url: meta[:source_url],
-      fu_id: fu_id
+      fu_id: fu_id,
+      admin_run: meta[:admin_run],
+      creator_ip: meta[:creator_ip]
     )
     recorded = true
 
@@ -79,13 +81,15 @@ class IsolatedComplianceValidationJob < ApplicationJob
 
   def metadata_from_fu(fu_id, original_filename)
     filename = original_filename.to_s.presence
-    return { filename: filename, user_id: nil, source_url: nil } if fu_id.blank?
+    return { filename: filename, user_id: nil, source_url: nil, admin_run: false, creator_ip: nil } if fu_id.blank?
 
     fu = Fu.find(fu_id)
     {
       filename: fu.name.presence || fu.upload_file_name.presence || filename,
       user_id: fu.user_id,
-      source_url: fu.url.presence
+      source_url: fu.url.presence,
+      admin_run: ActiveModel::Type::Boolean.new.cast(fu.admin_run),
+      creator_ip: fu.creator_ip.to_s.strip.presence
     }
   end
 
@@ -99,7 +103,9 @@ class IsolatedComplianceValidationJob < ApplicationJob
       schema_id: schema_id,
       user_id: fu&.user_id,
       source_url: fu&.url.presence,
-      fu_id: fu_id
+      fu_id: fu_id,
+      admin_run: fu ? ActiveModel::Type::Boolean.new.cast(fu.admin_run) : false,
+      creator_ip: fu&.creator_ip
     )
   rescue StandardError => record_error
     Rails.logger.error(

@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 class ExternalCatalogCandidate < ApplicationRecord
-  SOURCES = %w[cellxgene bgee hca geo].freeze
+  SOURCES = %w[cellxgene bgee ebi_sc hca hubmap broad_scp geo].freeze
   # Prefer better-annotated sources first when SOURCE=all (importer + catalog UI).
-  IMPORT_SOURCE_ORDER = %w[cellxgene bgee hca geo].freeze
+  IMPORT_SOURCE_ORDER = %w[cellxgene bgee ebi_sc hca hubmap broad_scp geo].freeze
   IMPORT_STATUSES = %w[idle importing failed].freeze
   SERIES_IDENTIFIER_KINDS = %w[geo_series array_express bioproject ega_study].freeze
   COLLECTION_URL_RE = %r{/collections/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})}i
@@ -140,6 +140,21 @@ class ExternalCatalogCandidate < ApplicationRecord
       gse = external_id.to_s.strip
       gse = gse.upcase if gse.match?(/\AGSE\d+\z/i)
       return "geo_series:#{gse}" if gse.present?
+    end
+
+    if source.to_s == 'ebi_sc'
+      acc = external_id.to_s.strip
+      return "array_express:#{acc}" if acc.present?
+    end
+
+    if source.to_s == 'broad_scp'
+      acc = external_id.to_s.strip
+      return "scp:#{acc}" if acc.present?
+    end
+
+    if source.to_s == 'hubmap'
+      acc = external_id.to_s.strip
+      return "hubmap:#{acc}" if acc.present?
     end
 
     Array(identifiers).each do |raw|
@@ -313,17 +328,20 @@ class ExternalCatalogCandidate < ApplicationRecord
 
     candidate =
       candidates.find { |c| c.import_project_id == project.id && c.collection_id.present? } ||
-      candidates.find { |c| %w[cellxgene hca].include?(c.source.to_s) && c.collection_id.present? }
+      candidates.find { |c| %w[cellxgene hca broad_scp].include?(c.source.to_s) && c.collection_id.present? }
     return nil unless candidate
 
     collection_id = candidate.collection_id.to_s.strip
     return nil if collection_id.blank?
 
     collection_url =
-      if candidate.source.to_s == 'cellxgene'
+      case candidate.source.to_s
+      when 'cellxgene'
         "https://cellxgene.cziscience.com/collections/#{collection_id}"
-      elsif candidate.source.to_s == 'hca'
+      when 'hca'
         "https://data.humancellatlas.org/explore/projects/#{collection_id}"
+      when 'broad_scp'
+        ExternalCatalog::BroadScpCatalog.collection_page_url(collection_id)
       else
         candidate.source_page_url.to_s.presence
       end
@@ -351,16 +369,19 @@ class ExternalCatalogCandidate < ApplicationRecord
   def self.backfill_catalog_collections!
     updated = 0
     current.where.not(collection_id: [nil, '']).find_each do |candidate|
-      next unless %w[cellxgene hca].include?(candidate.source.to_s)
+      next unless %w[cellxgene hca broad_scp].include?(candidate.source.to_s)
 
       collection_id = candidate.collection_id.to_s.strip
       next if collection_id.blank?
 
       collection_url =
-        if candidate.source.to_s == 'cellxgene'
+        case candidate.source.to_s
+        when 'cellxgene'
           "https://cellxgene.cziscience.com/collections/#{collection_id}"
-        else
+        when 'hca'
           "https://data.humancellatlas.org/explore/projects/#{collection_id}"
+        when 'broad_scp'
+          ExternalCatalog::BroadScpCatalog.collection_page_url(collection_id)
         end
 
       # Do not use dataset title as collection title — keep placeholder until catalog sync
@@ -524,12 +545,15 @@ class ExternalCatalogCandidate < ApplicationRecord
       collection_id_from_source_page_url(entry.source_page_url)
 
     catalog_collection = nil
-    if collection_id.present? && %w[cellxgene hca].include?(entry.source.to_s)
+    if collection_id.present? && %w[cellxgene hca broad_scp].include?(entry.source.to_s)
       collection_url =
-        if entry.source.to_s == 'cellxgene'
+        case entry.source.to_s
+        when 'cellxgene'
           "https://cellxgene.cziscience.com/collections/#{collection_id}"
-        elsif entry.source.to_s == 'hca'
+        when 'hca'
           "https://data.humancellatlas.org/explore/projects/#{collection_id}"
+        when 'broad_scp'
+          ExternalCatalog::BroadScpCatalog.collection_page_url(collection_id)
         end
       catalog_collection = ExternalCatalogCollection.upsert_from_catalog!(
         source: entry.source.to_s,

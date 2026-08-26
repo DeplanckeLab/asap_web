@@ -27,7 +27,10 @@ module ExternalCatalog
       case source.to_s
       when 'cellxgene' then 'CELLxGENE'
       when 'bgee' then 'Bgee'
+      when 'ebi_sc' then 'EBI single cell expression atlas'
       when 'hca' then 'Human Cell Atlas'
+      when 'hubmap' then 'HuBMAP'
+      when 'broad_scp' then 'Broad Single Cell Portal'
       when 'geo' then 'GEO'
       else
         raise ArgumentError, "Unknown catalog source: #{source.inspect}"
@@ -38,27 +41,30 @@ module ExternalCatalog
       case source.to_s
       when 'cellxgene' then 'CELLxGENE'
       when 'bgee' then 'Bgee'
+      when 'ebi_sc' then 'EBI_SC'
       when 'hca' then 'HCA'
+      when 'hubmap' then 'HUBMAP'
+      when 'broad_scp' then 'BROAD_SCP'
       when 'geo' then 'GEO'
       else
         raise ArgumentError, "Unknown catalog source: #{source.inspect}"
       end
     end
 
-    # ASAP Project#name. GEO always includes the GSE accession in the title.
+    # ASAP Project#name. GEO / EBI SC / Broad SCP / HuBMAP always include the accession in the title.
     def project_name(max_length: 200)
       base_title = title.to_s.strip
       name =
-        if source.to_s == 'geo'
-          gse = external_id.to_s.strip
-          raise ArgumentError, 'GEO entry missing external_id (GSE accession)' if gse.blank?
+        if %w[geo ebi_sc broad_scp hubmap].include?(source.to_s)
+          acc = external_id.to_s.strip
+          raise ArgumentError, "#{source} entry missing external_id (accession)" if acc.blank?
 
-          if base_title.match?(/\b#{Regexp.escape(gse)}\b/i)
+          if base_title.match?(/\b#{Regexp.escape(acc)}\b/i)
             base_title
           elsif base_title.present?
-            "#{gse}: #{base_title}"
+            "#{acc}: #{base_title}"
           else
-            gse
+            acc
           end
         else
           base_title.presence || external_id.to_s

@@ -296,6 +296,10 @@ module ExternalCatalog
         when 'bgee'
           # Bgee curated experiment page (ids are typically SRA/ENA study accessions).
           'https://www.bgee.org/experiment/#{id}'
+        when 'ebi_sc'
+          'https://www.ebi.ac.uk/gxa/sc/experiments/#{id}'
+        when 'broad_scp'
+          'https://singlecell.broadinstitute.org/single_cell/study/#{id}'
         end
 
       if desired_mask.present? && provider.url_mask != desired_mask
@@ -369,6 +373,10 @@ module ExternalCatalog
     end
 
     def download_and_preparse!(entry, organism)
+      if entry.source.to_s == 'broad_scp'
+        ExternalCatalog::BroadScpCatalog.authorization_header_for!(entry.url)
+      end
+
       original_name = entry.filename.presence ||
                       URI.parse(entry.url).path.to_s.split('/').last.presence ||
                       'input_file'
@@ -699,6 +707,8 @@ module ExternalCatalog
           "https://cellxgene.cziscience.com/collections/#{collection_id}"
         when 'hca'
           "https://data.humancellatlas.org/explore/projects/#{collection_id}"
+        when 'broad_scp'
+          ExternalCatalog::BroadScpCatalog.collection_page_url(collection_id)
         else
           entry.source_page_url.to_s.presence
         end

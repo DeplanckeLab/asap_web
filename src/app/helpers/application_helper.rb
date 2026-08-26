@@ -230,6 +230,25 @@ module ApplicationHelper
     value.to_s
   end
 
+  # Admin standalone-check User column: guests show creator X-Real-IP when known.
+  def standalone_compliance_check_user_label(check)
+    if check&.guest? && check.creator_ip.present?
+      check.creator_ip
+    else
+      check&.user&.email.presence || (check&.guest? ? 'Anonymous' : '—')
+    end
+  end
+
+  def standalone_compliance_check_user_title(check)
+    if check&.guest? && check.creator_ip.present?
+      'Guest creator X-Real-IP'
+    elsif check&.admin_run?
+      'Admin run'
+    else
+      'Owner email'
+    end
+  end
+
   def record_value(record, key)
     attr = key.to_s
     if record.respond_to?(attr)
@@ -358,7 +377,7 @@ module ApplicationHelper
       },
       {
         label: "External catalog",
-        description: "Candidate datasets from CELLxGENE, Bgee, HCA, GEO",
+        description: "Candidate datasets from CELLxGENE, Bgee, EBI SC Atlas, HCA, GEO",
         path: external_catalog_candidates_path,
         icon: "fas fa-file-import"
       },

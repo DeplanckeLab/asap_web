@@ -12,7 +12,19 @@ paths:
       summary: List projects
       description: |
         Canonical API endpoint.
-        Returns a list of public project objects.
+        Returns the full public project catalog as JSON (prebuilt `projects.json` under `DATA_DIR`).
+
+        Access URL (relative to the API server base above): `/projects`
+
+        Example:
+        `GET https://asap-test.epfl.ch/api/projects`
+
+        ```bash
+        curl -H 'Accept: application/json' 'https://asap-test.epfl.ch/api/projects'
+        ```
+
+        Try it out is disabled here because the response is too large for the Swagger UI.
+        Open the Access URL above in a browser or with curl.
       operationId: listProjectsApi
       tags:
         - Projects

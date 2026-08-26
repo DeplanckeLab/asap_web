@@ -81,7 +81,7 @@ class ProjectsController < ApplicationController
       format.html
       format.json {
 
-        file_path = Pathname.new(ENV.fetch("PROD_DATA_DIR")) + 'projects.json'
+        file_path = Pathname.new(ENV.fetch('DATA_DIR')) + 'projects.json'
         headers['Content-Type'] = 'application/json'
         headers['Cache-Control'] = 'no-cache'
         headers['Content-Disposition'] = "inline; filename=#{File.basename(file_path)}"

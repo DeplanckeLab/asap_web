@@ -24,16 +24,18 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
     final_path = rename_downloaded_file!(tmp_path, task_id, detected_format)
     finalize_downloaded_fu!(fu, final_path, detected_format)
 
-    queued_payload = {
+    # Run validation on this same worker immediately after download so files do
+    # not accumulate behind a FIFO backlog of other downloads on the default queue.
+    started_payload = {
       status: 'queued',
       task_id: task_id,
       progress: 5,
-      message: 'Validation queued',
+      message: 'Starting validation...',
       fu_id: fu.id
     }
-    write_and_broadcast(task_id, queued_payload)
+    write_and_broadcast(task_id, started_payload)
 
-    IsolatedComplianceValidationJob.perform_later(
+    IsolatedComplianceValidationJob.perform_now(
       task_id,
       fu.file_path.to_s,
       fu.compliance_schema_id,

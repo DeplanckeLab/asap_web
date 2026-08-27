@@ -125,4 +125,68 @@ class ExternalCatalogStandaloneScfairBatchValidatorTest < TestBaseWithoutFixture
 
     assert_operator result.skipped_existing, :>=, 1
   end
+
+  test 'limit counts only new validations after skipping existing' do
+    upload_type_id = UploadType.id_for('compliance_file_check')
+    skip 'compliance_file_check upload type missing' if upload_type_id.blank?
+
+    suffix = SecureRandom.hex(4)
+    existing_url = "https://example.com/limit-existing-#{suffix}.h5ad"
+    register_for_test_cleanup(
+      ExternalCatalogCandidate.create!(
+        source: 'cellxgene',
+        external_id: "batch-lim-old-#{suffix}",
+        provider_tag: 'cxg',
+        title: 'Already checked small',
+        url: existing_url,
+        filename: 'old.h5ad',
+        format_kind: 'h5ad',
+        project_type_tag: 'sc',
+        filesize: 1,
+        obsolete: false
+      )
+    )
+    register_for_test_cleanup(
+      StandaloneComplianceCheck.create!(
+        task_id: SecureRandom.uuid,
+        filename: 'old.h5ad',
+        source_url: existing_url,
+        format: 'h5ad',
+        schema_id: 'scfair_7_1_0',
+        passed: false,
+        status: 'completed',
+        checked_at: Time.current,
+        result_json: { 'valid' => false },
+        admin_run: true
+      )
+    )
+
+    3.times do |i|
+      register_for_test_cleanup(
+        ExternalCatalogCandidate.create!(
+          source: 'cellxgene',
+          external_id: "batch-lim-new-#{suffix}-#{i}",
+          provider_tag: 'cxg',
+          title: "New #{i}",
+          url: "https://example.com/limit-new-#{suffix}-#{i}.h5ad",
+          filename: "new-#{i}.h5ad",
+          format_kind: 'h5ad',
+          project_type_tag: 'sc',
+          filesize: 10 + i,
+          obsolete: false
+        )
+      )
+    end
+
+    result = ExternalCatalog::StandaloneScfairBatchValidator.new(
+      source: 'cellxgene',
+      limit: 2,
+      dry_run: true,
+      skip_existing: true,
+      max_filesize: 100
+    ).call
+
+    assert_equal 2, result.queued
+    assert_operator result.skipped_existing, :>=, 1
+  end
 end

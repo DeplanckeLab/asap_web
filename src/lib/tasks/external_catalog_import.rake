@@ -518,7 +518,8 @@ namespace :external_catalog do
   end
 
   desc 'Enqueue standalone scFAIR validation for SC external catalog candidates (loom/h5ad URLs). ' \
-       'SOURCE=all|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|allen_abc|matkp|geo COUNT/N/LIMIT MAX_FILESIZE SKIP_EXISTING=1 ' \
+       'SOURCE=all|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|allen_abc|matkp|geo COUNT/N/LIMIT ' \
+       '(LIMIT = max NEW validations to enqueue after skipping existing) MAX_FILESIZE SKIP_EXISTING=1 ' \
        'CANDIDATE_IDS=1,2 SCHEMA_ID IMPORT_USER_EMAIL|IMPORT_USER_ID DRY_RUN=1. Runs in background via Solid Queue.'
   task validate_scfair_standalone: :environment do
     source = ENV.fetch('SOURCE', 'all')

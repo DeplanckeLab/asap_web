@@ -5,6 +5,7 @@ module ExternalCatalog
   # for single-cell external catalog candidates that expose loom/h5ad URLs.
   class StandaloneScfairBatchValidator
     STANDALONE_FORMATS = %w[loom h5ad].freeze
+    CANDIDATE_TABLE = ExternalCatalogCandidate.table_name
 
     Result = Struct.new(
       :queued,
@@ -40,35 +41,40 @@ module ExternalCatalog
       raise ArgumentError, 'compliance_file_check upload type is missing' if upload_type_id.blank?
 
       queued = 0
-      skipped_existing = 0
       skipped_unsupported = 0
       skipped_blank_url = 0
-      candidates = select_candidates
+      scanned = 0
+      skipped_existing = @skip_existing ? count_already_validated : 0
 
-      candidates.each do |candidate|
-        url = candidate.url.to_s.strip
-        if url.blank?
-          skipped_blank_url += 1
-          next
+      # LIMIT is "enqueue up to N new validations", not "take N candidates then skip".
+      catch(:limit_reached) do
+        each_candidate do |candidate|
+          scanned += 1
+          url = candidate.url.to_s.strip
+          if url.blank?
+            skipped_blank_url += 1
+            next
+          end
+
+          unless standalone_format?(candidate)
+            skipped_unsupported += 1
+            next
+          end
+
+          # Defensive: still skip if a race inserted a check after the SQL exclude.
+          if @skip_existing && already_validated?(url)
+            next
+          end
+
+          if @dry_run
+            queued += 1
+          else
+            enqueue_candidate!(candidate, url, upload_type_id)
+            queued += 1
+          end
+
+          throw :limit_reached if @limit && queued >= @limit
         end
-
-        unless standalone_format?(candidate)
-          skipped_unsupported += 1
-          next
-        end
-
-        if @skip_existing && already_validated?(url)
-          skipped_existing += 1
-          next
-        end
-
-        if @dry_run
-          queued += 1
-          next
-        end
-
-        enqueue_candidate!(candidate, url, upload_type_id)
-        queued += 1
       end
 
       Result.new(
@@ -76,13 +82,32 @@ module ExternalCatalog
         skipped_existing: skipped_existing,
         skipped_unsupported: skipped_unsupported,
         skipped_blank_url: skipped_blank_url,
-        candidates: candidates.size
+        candidates: scanned
       )
     end
 
     private
 
-    def select_candidates
+    def each_candidate
+      scope = candidate_scope
+      scope = exclude_already_validated(scope) if @skip_existing
+      scope = scope.ordered_by_size
+
+      # find_each ignores ORDER BY; walk in ordered pages instead.
+      offset = 0
+      page_size = 100
+      loop do
+        batch = scope.offset(offset).limit(page_size).to_a
+        break if batch.empty?
+
+        batch.each { |candidate| yield candidate }
+
+        offset += page_size
+        break if batch.size < page_size
+      end
+    end
+
+    def candidate_scope
       scope = ExternalCatalogCandidate.current.for_project_type('sc').non_test_entry
       scope = scope.where(id: @candidate_ids) if @candidate_ids
       if @source.present? && @source != 'all'
@@ -95,8 +120,37 @@ module ExternalCatalog
       if @max_filesize
         scope = scope.where('filesize = 0 OR filesize <= ?', @max_filesize)
       end
-      scope = scope.ordered_by_size
-      @limit ? scope.limit(@limit).to_a : scope.to_a
+      scope
+    end
+
+    def exclude_already_validated(scope)
+      scope.where(
+        <<~SQL.squish
+          NOT EXISTS (
+            SELECT 1
+            FROM standalone_compliance_checks scc
+            WHERE scc.admin_run = TRUE
+              AND scc.source_url IS NOT NULL
+              AND scc.source_url <> ''
+              AND scc.source_url = #{CANDIDATE_TABLE}.url
+          )
+        SQL
+      )
+    end
+
+    def count_already_validated
+      candidate_scope.where(
+        <<~SQL.squish
+          EXISTS (
+            SELECT 1
+            FROM standalone_compliance_checks scc
+            WHERE scc.admin_run = TRUE
+              AND scc.source_url IS NOT NULL
+              AND scc.source_url <> ''
+              AND scc.source_url = #{CANDIDATE_TABLE}.url
+          )
+        SQL
+      ).count
     end
 
     def standalone_format?(candidate)

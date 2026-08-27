@@ -3,7 +3,7 @@
 require 'open3'
 
 class ComplianceFileCheckQueueService
-  MAX_UPLOAD_SIZE = 50.gigabytes
+  MAX_UPLOAD_SIZE = 200.gigabytes
   ALLOWED_EXTENSIONS = %w[.loom .h5ad].freeze
   UNSUPPORTED_FORMAT_ERROR_CODE = 'unsupported_file_format'
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze

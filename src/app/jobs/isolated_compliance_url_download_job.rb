@@ -168,6 +168,7 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
   def fail_task(fu, message, error_code: nil)
     task_id = fu&.compliance_task_id
     fu&.update(status: 'download_failed')
+    cleanup_temp_download_artifacts!(task_id)
     return if task_id.blank?
 
     payload = {
@@ -179,6 +180,43 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
     payload[:error_code] = error_code if error_code.present?
     write_and_broadcast(task_id, payload)
     record_download_failure(fu, message)
+    cleanup_remote_download_fu!(fu)
+  end
+
+  # Partial downloads (e.g. aborted at MAX_UPLOAD_SIZE) live under
+  # isolated_compliance_uploads until moved into the Fu dir. Remove them on failure
+  # so large aborted transfers do not fill the disk.
+  def cleanup_temp_download_artifacts!(task_id)
+    return if task_id.blank?
+
+    [
+      File.join(temp_dir, "#{task_id}.download"),
+      File.join(temp_dir, "#{task_id}.h5ad"),
+      File.join(temp_dir, "#{task_id}.loom")
+    ].each { |path| FileUtils.rm_f(path) }
+  rescue StandardError => e
+    Rails.logger.warn(
+      "[IsolatedComplianceUrlDownloadJob] Could not cleanup temp download for " \
+      "task=#{task_id}: #{e.class}: #{e.message}"
+    )
+  end
+
+  def cleanup_remote_download_fu!(fu)
+    return unless fu
+    return if fu.url.to_s.strip.blank?
+
+    dir = fu.global_upload_dir.to_s
+    root = File.expand_path(Fu.global_upload_root.to_s)
+    expanded = File.expand_path(dir)
+    if expanded == root || expanded.start_with?(root + File::SEPARATOR)
+      FileUtils.rm_rf(expanded) if File.directory?(expanded)
+    end
+    fu.destroy!
+  rescue StandardError => e
+    Rails.logger.warn(
+      "[IsolatedComplianceUrlDownloadJob] Could not cleanup remote download Fu##{fu&.id}: " \
+      "#{e.class}: #{e.message}"
+    )
   end
 
   def record_download_failure(fu, message)

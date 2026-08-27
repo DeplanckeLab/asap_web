@@ -71,10 +71,14 @@ class IsolatedComplianceValidationJob < ApplicationJob
     Rails.logger.error("[IsolatedComplianceValidationJob] #{e.class}: #{e.message}")
     Rails.logger.error(e.backtrace.join("\n")) if e.backtrace
   ensure
-    # When a Fu record tracks the file, keep it so the user can create a project
-    # from the validated file without re-uploading. Orphaned temp files (no fu_id)
-    # are cleaned up immediately.
-    cleanup_file(file_path) if fu_id.blank?
+    # After validation the StandaloneComplianceCheck already stores the result.
+    # Remote downloads only existed to feed this job: delete their Fu + files via
+    # fu_id. Browser uploads (no URL) are kept for project creation.
+    if fu_id.blank?
+      cleanup_file(file_path)
+    else
+      cleanup_remote_download_fu!(fu_id, file_path)
+    end
   end
 
   private
@@ -91,6 +95,35 @@ class IsolatedComplianceValidationJob < ApplicationJob
       admin_run: ActiveModel::Type::Boolean.new.cast(fu.admin_run),
       creator_ip: fu.creator_ip.to_s.strip.presence
     }
+  end
+
+  def cleanup_remote_download_fu!(fu_id, file_path)
+    fu = Fu.find_by(id: fu_id)
+    return unless fu
+    return if fu.url.to_s.strip.blank?
+
+    cleanup_file(file_path)
+    cleanup_fu_upload_dir!(fu)
+    fu.destroy!
+  rescue StandardError => e
+    Rails.logger.warn(
+      "[IsolatedComplianceValidationJob] Could not cleanup remote download Fu##{fu_id}: " \
+      "#{e.class}: #{e.message}"
+    )
+  end
+
+  def cleanup_fu_upload_dir!(fu)
+    dir = fu.global_upload_dir.to_s
+    root = File.expand_path(Fu.global_upload_root.to_s)
+    expanded = File.expand_path(dir)
+    unless expanded == root || expanded.start_with?(root + File::SEPARATOR)
+      Rails.logger.warn(
+        "[IsolatedComplianceValidationJob] Refusing to cleanup Fu##{fu.id} dir outside upload root: #{expanded}"
+      )
+      return
+    end
+
+    FileUtils.rm_rf(expanded) if File.directory?(expanded)
   end
 
   # Persistence of the failure row must not raise out of the rescue handler.

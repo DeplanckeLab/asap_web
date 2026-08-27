@@ -3,15 +3,22 @@
 class StandaloneComplianceChecksController < ApplicationController
   include ComplianceHelpers
 
+  PER_PAGE = 25
+
   before_action :authenticate_user!
   before_action :authorize_admin
   before_action :set_standalone_compliance_check, only: :show
 
   def index
     @origin_filter = StandaloneComplianceCheck.origin_filter(params[:origin])
+    @page = [params[:page].to_i, 1].max
+    @per_page = PER_PAGE
+
     scope = StandaloneComplianceCheck.for_origin_filter(@origin_filter).includes(:user).recent
-    @standalone_compliance_checks = scope
     @total_count = scope.count
+    total_pages = [(@total_count.to_f / @per_page).ceil, 1].max
+    @page = [@page, total_pages].min
+    @standalone_compliance_checks = scope.offset((@page - 1) * @per_page).limit(@per_page)
     @passed_count = scope.passed.count
     @failed_status_count = scope.where(status: 'failed').count
     @all_count = StandaloneComplianceCheck.count

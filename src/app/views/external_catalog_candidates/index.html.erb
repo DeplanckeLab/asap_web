@@ -321,22 +321,69 @@
 
   <% if @total_count > @per_page %>
     <% total_pages = (@total_count.to_f / @per_page).ceil %>
-    <div class="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
-      <div>
-        Page <%= @page %> of <%= total_pages %>
-      </div>
-      <div class="flex gap-2">
+    <% pagination_params = {
+         source: @source,
+         project_type: @project_type,
+         in_asap: @in_asap,
+         q: @q,
+         min_n_obs: @min_n_obs,
+         max_n_obs: @max_n_obs
+       }.compact %>
+    <% page_link_class = "relative inline-flex items-center px-2 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400 dark:hover:bg-gray-800" %>
+    <div class="mt-4 flex flex-col sm:flex-row items-center justify-center gap-4">
+      <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
         <% if @page > 1 %>
+          <%= link_to "First",
+                      external_catalog_candidates_path(pagination_params.merge(page: 1)),
+                      class: "#{page_link_class} rounded-l-md" %>
           <%= link_to "Previous",
-                      external_catalog_candidates_path(request.query_parameters.merge(page: @page - 1)),
-                      class: "rounded-md border border-gray-300 px-3 py-1 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800" %>
+                      external_catalog_candidates_path(pagination_params.merge(page: @page - 1)),
+                      class: page_link_class %>
         <% end %>
+
+        <% start_page = [@page - 2, 1].max %>
+        <% end_page = [@page + 2, total_pages].min %>
+
+        <% (start_page..end_page).each do |page| %>
+          <% if page == @page %>
+            <span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-blue-50 text-sm font-medium text-blue-600 dark:border-gray-700 dark:bg-blue-900/30 dark:text-blue-300<%= ' rounded-l-md' if @page == 1 %><%= ' rounded-r-md' if @page == total_pages %>">
+              <%= page %>
+            </span>
+          <% else %>
+            <%= link_to page,
+                        external_catalog_candidates_path(pagination_params.merge(page: page)),
+                        class: "relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800" %>
+          <% end %>
+        <% end %>
+
         <% if @page < total_pages %>
           <%= link_to "Next",
-                      external_catalog_candidates_path(request.query_parameters.merge(page: @page + 1)),
-                      class: "rounded-md border border-gray-300 px-3 py-1 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800" %>
+                      external_catalog_candidates_path(pagination_params.merge(page: @page + 1)),
+                      class: page_link_class %>
+          <%= link_to "Last",
+                      external_catalog_candidates_path(pagination_params.merge(page: total_pages)),
+                      class: "#{page_link_class} rounded-r-md" %>
         <% end %>
-      </div>
+      </nav>
+
+      <%= form_with url: external_catalog_candidates_path, method: :get, local: true, class: "flex items-center gap-2" do |page_form| %>
+        <%= hidden_field_tag :source, @source %>
+        <%= hidden_field_tag :project_type, @project_type %>
+        <%= hidden_field_tag :in_asap, @in_asap %>
+        <%= hidden_field_tag :q, @q %>
+        <%= hidden_field_tag :min_n_obs, @min_n_obs %>
+        <%= hidden_field_tag :max_n_obs, @max_n_obs %>
+        <label for="pagination_page" class="text-sm font-medium text-gray-700 whitespace-nowrap dark:text-gray-300">Go to page</label>
+        <%= page_form.number_field :page,
+            value: @page,
+            min: 1,
+            max: total_pages,
+            id: "pagination_page",
+            class: "w-20 px-2 py-1.5 border border-gray-300 rounded-md shadow-sm text-sm text-center focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100",
+            "aria-label": "Page number" %>
+        <span class="text-sm text-gray-500 whitespace-nowrap dark:text-gray-400">of <%= total_pages %></span>
+        <%= page_form.submit "Go", class: "px-3 py-1.5 border border-gray-300 rounded-md bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 cursor-pointer dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800" %>
+      <% end %>
     </div>
   <% end %>
 </div>

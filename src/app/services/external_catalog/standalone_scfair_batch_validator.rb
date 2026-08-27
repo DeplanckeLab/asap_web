@@ -23,6 +23,7 @@ module ExternalCatalog
       user: nil,
       dry_run: false,
       skip_existing: true,
+      retry_failed: false,
       max_filesize: nil,
       candidate_ids: nil
     )
@@ -32,6 +33,7 @@ module ExternalCatalog
       @user = user
       @dry_run = dry_run
       @skip_existing = skip_existing
+      @retry_failed = retry_failed
       @max_filesize = max_filesize.present? ? Integer(max_filesize) : nil
       @candidate_ids = Array(candidate_ids).compact.map(&:to_i).reject(&:zero?).presence
     end
@@ -44,7 +46,7 @@ module ExternalCatalog
       skipped_unsupported = 0
       skipped_blank_url = 0
       scanned = 0
-      skipped_existing = @skip_existing ? count_already_validated : 0
+      skipped_existing = (@skip_existing || @retry_failed) ? count_already_validated : 0
 
       # LIMIT is "enqueue up to N new validations", not "take N candidates then skip".
       catch(:limit_reached) do
@@ -62,7 +64,7 @@ module ExternalCatalog
           end
 
           # Defensive: still skip if a race inserted a check after the SQL exclude.
-          if @skip_existing && already_validated?(url)
+          if (@skip_existing || @retry_failed) && already_validated?(url)
             next
           end
 
@@ -90,7 +92,8 @@ module ExternalCatalog
 
     def each_candidate
       scope = candidate_scope
-      scope = exclude_already_validated(scope) if @skip_existing
+      scope = restrict_to_failed_retries(scope) if @retry_failed
+      scope = exclude_already_validated(scope) if @skip_existing || @retry_failed
       scope = scope.ordered_by_size
 
       # find_each ignores ORDER BY; walk in ordered pages instead.
@@ -123,7 +126,27 @@ module ExternalCatalog
       scope
     end
 
+    # RETRY_FAILED: only URLs that already have an admin check with status=failed.
+    def restrict_to_failed_retries(scope)
+      scope.where(
+        <<~SQL.squish
+          EXISTS (
+            SELECT 1
+            FROM standalone_compliance_checks scc
+            WHERE scc.admin_run = TRUE
+              AND scc.status = 'failed'
+              AND scc.source_url IS NOT NULL
+              AND scc.source_url <> ''
+              AND scc.source_url = #{CANDIDATE_TABLE}.url
+          )
+        SQL
+      )
+    end
+
+    # Skip URLs that already have a finished admin result.
+    # With RETRY_FAILED, only completed rows block retry (failed rows are eligible again).
     def exclude_already_validated(scope)
+      status_clause = @retry_failed ? "AND scc.status = 'completed'" : ''
       scope.where(
         <<~SQL.squish
           NOT EXISTS (
@@ -133,12 +156,14 @@ module ExternalCatalog
               AND scc.source_url IS NOT NULL
               AND scc.source_url <> ''
               AND scc.source_url = #{CANDIDATE_TABLE}.url
+              #{status_clause}
           )
         SQL
       )
     end
 
     def count_already_validated
+      status_clause = @retry_failed ? "AND scc.status = 'completed'" : ''
       candidate_scope.where(
         <<~SQL.squish
           EXISTS (
@@ -148,6 +173,7 @@ module ExternalCatalog
               AND scc.source_url IS NOT NULL
               AND scc.source_url <> ''
               AND scc.source_url = #{CANDIDATE_TABLE}.url
+              #{status_clause}
           )
         SQL
       ).count
@@ -162,7 +188,9 @@ module ExternalCatalog
     end
 
     def already_validated?(url)
-      StandaloneComplianceCheck.where(source_url: url, admin_run: true).exists?
+      scope = StandaloneComplianceCheck.where(source_url: url, admin_run: true)
+      scope = scope.where(status: 'completed') if @retry_failed
+      scope.exists?
     end
 
     def enqueue_candidate!(candidate, url, upload_type_id)

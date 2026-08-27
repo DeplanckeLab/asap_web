@@ -29,6 +29,8 @@ class ExternalCatalogCandidatesController < ApplicationController
     scope = filter_n_obs(scope)
 
     @total_count = scope.count
+    total_pages = [(@total_count.to_f / @per_page).ceil, 1].max
+    @page = [@page, total_pages].min
     @candidates = scope.ordered_by_size
                        .offset((@page - 1) * @per_page)
                        .limit(@per_page)

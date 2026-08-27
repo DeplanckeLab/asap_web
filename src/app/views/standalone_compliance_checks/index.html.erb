@@ -30,7 +30,11 @@
   <% end %>
 
   <p class="text-sm text-gray-600 dark:text-gray-300">
-    <%= @total_count %> shown
+    <% if @total_count.zero? %>
+      0 results
+    <% else %>
+      Showing <%= (@page - 1) * @per_page + 1 %>-<%= [@page * @per_page, @total_count].min %> of <%= @total_count %>
+    <% end %>
     · <%= @passed_count %> passed
     · <%= @failed_status_count %> job failures
   </p>
@@ -101,9 +105,29 @@
     </table>
   </div>
 
-  <% if @standalone_compliance_checks.empty? %>
+  <% if @total_count.zero? %>
     <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
       No standalone compliance checks match this filter.
+    </div>
+  <% elsif @total_count > @per_page %>
+    <% total_pages = (@total_count.to_f / @per_page).ceil %>
+    <% pagination_params = { origin: @origin_filter } %>
+    <div class="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
+      <div>
+        Page <%= @page %> of <%= total_pages %>
+      </div>
+      <div class="flex gap-2">
+        <% if @page > 1 %>
+          <%= link_to "Previous",
+                      standalone_compliance_checks_path(pagination_params.merge(page: @page - 1)),
+                      class: "rounded-md border border-gray-300 px-3 py-1 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800" %>
+        <% end %>
+        <% if @page < total_pages %>
+          <%= link_to "Next",
+                      standalone_compliance_checks_path(pagination_params.merge(page: @page + 1)),
+                      class: "rounded-md border border-gray-300 px-3 py-1 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800" %>
+        <% end %>
+      </div>
     </div>
   <% end %>
 </div>

@@ -189,4 +189,81 @@ class ExternalCatalogStandaloneScfairBatchValidatorTest < TestBaseWithoutFixture
     assert_equal 2, result.queued
     assert_operator result.skipped_existing, :>=, 1
   end
+
+  test 'retry_failed requeues admin status=failed URLs but not completed ones' do
+    upload_type_id = UploadType.id_for('compliance_file_check')
+    skip 'compliance_file_check upload type missing' if upload_type_id.blank?
+
+    suffix = SecureRandom.hex(4)
+    failed_url = "https://example.com/retry-failed-#{suffix}.h5ad"
+    completed_url = "https://example.com/retry-completed-#{suffix}.h5ad"
+
+    failed_candidate = register_for_test_cleanup(
+      ExternalCatalogCandidate.create!(
+        source: 'cellxgene',
+        external_id: "batch-retry-fail-#{suffix}",
+        provider_tag: 'cxg',
+        title: 'Failed check',
+        url: failed_url,
+        filename: 'failed.h5ad',
+        format_kind: 'h5ad',
+        project_type_tag: 'sc',
+        filesize: 5,
+        obsolete: false
+      )
+    )
+    completed_candidate = register_for_test_cleanup(
+      ExternalCatalogCandidate.create!(
+        source: 'cellxgene',
+        external_id: "batch-retry-ok-#{suffix}",
+        provider_tag: 'cxg',
+        title: 'Completed check',
+        url: completed_url,
+        filename: 'completed.h5ad',
+        format_kind: 'h5ad',
+        project_type_tag: 'sc',
+        filesize: 6,
+        obsolete: false
+      )
+    )
+    register_for_test_cleanup(
+      StandaloneComplianceCheck.create!(
+        task_id: SecureRandom.uuid,
+        filename: 'failed.h5ad',
+        source_url: failed_url,
+        format: 'h5ad',
+        schema_id: 'scfair_7_1_0',
+        passed: false,
+        status: 'failed',
+        checked_at: Time.current,
+        result_json: { 'error' => 'download boom' },
+        admin_run: true
+      )
+    )
+    register_for_test_cleanup(
+      StandaloneComplianceCheck.create!(
+        task_id: SecureRandom.uuid,
+        filename: 'completed.h5ad',
+        source_url: completed_url,
+        format: 'h5ad',
+        schema_id: 'scfair_7_1_0',
+        passed: false,
+        status: 'completed',
+        checked_at: Time.current,
+        result_json: { 'valid' => false },
+        admin_run: true
+      )
+    )
+
+    result = ExternalCatalog::StandaloneScfairBatchValidator.new(
+      candidate_ids: [failed_candidate.id, completed_candidate.id],
+      limit: 10,
+      dry_run: true,
+      skip_existing: true,
+      retry_failed: true
+    ).call
+
+    assert_equal 1, result.queued
+    assert_equal 1, result.skipped_existing
+  end
 end

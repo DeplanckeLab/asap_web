@@ -13,7 +13,82 @@ module ComplianceHelpers
       helper_method :compliance_check_report_payload
       helper_method :compliance_needs_fix?
       helper_method :compliance_atac_assay_present?
+      helper_method :compliance_summary_check_counts
+      helper_method :compliance_status_badge
     end
+  end
+
+  def compliance_status_badge(validation_result, schema_config: nil)
+    valid = validation_result[:valid] == true || validation_result['valid'] == true
+    icons = compliance_schema_badge_icons(validation_result, schema_config: schema_config)
+
+    if valid
+      {
+        icon: icons[:compliant_icon],
+        alt: 'scFAIR compliant',
+        url: icons[:url]
+      }
+    else
+      {
+        icon: icons[:not_compliant_icon],
+        alt: 'scFAIR not compliant',
+        url: icons[:url]
+      }
+    end
+  end
+
+  def compliance_schema_badge_icons(validation_result, schema_config: nil)
+    compliant_icon = validation_result[:compliant_icon] || validation_result['compliant_icon'] ||
+                     schema_config&.dig('compliant_icon')
+    not_compliant_icon = validation_result[:not_compliant_icon] || validation_result['not_compliant_icon'] ||
+                         schema_config&.dig('not_compliant_icon')
+    url = validation_result[:url] || validation_result['url'] || schema_config&.dig('url')
+
+    if compliant_icon.blank? || not_compliant_icon.blank?
+      cs = compliance_schema_for_validation(validation_result)
+      if cs
+        compliant_icon ||= cs.compliant_icon
+        not_compliant_icon ||= cs.not_compliant_icon
+        url ||= cs.url
+      end
+    end
+
+    {
+      compliant_icon: compliant_icon.presence || 'scfair_badge_compliant.svg',
+      not_compliant_icon: not_compliant_icon.presence || 'scfair_badge_noncompliant.svg',
+      url: url
+    }
+  end
+
+  def compliance_schema_for_validation(validation_result)
+    version = validation_result[:schema_version] || validation_result['schema_version']
+    if version.blank?
+      schema_id = resolve_validation_schema_id(validation_result)
+      version = Scfair::Rules.for(schema_id).schema_version
+    end
+    return nil if version.blank?
+
+    ComplianceSchema.active.find_by(version: version.to_s)
+  end
+
+  def compliance_summary_check_counts(validation_result, check_groups = nil)
+    groups = check_groups.presence
+    if groups.blank? && validation_result.present?
+      stored = validation_result[:check_groups] || validation_result['check_groups']
+      groups = symbolize_check_groups(stored) if stored.present?
+    end
+
+    if groups.present?
+      return Scfair::ComplianceReportGrouper.summarize_items(groups)
+    end
+
+    valid_checks = Array(validation_result[:valid_checks] || validation_result['valid_checks'])
+    {
+      passed: valid_checks.count { |entry| Scfair::ComplianceReportGrouper.item_status(entry) == 'passed' },
+      skipped: valid_checks.count { |entry| Scfair::ComplianceReportGrouper.item_status(entry) == 'skipped' },
+      failed: 0,
+      warning: 0
+    }
   end
 
   def compliance_report_uses_check_groups?(validation_result)
@@ -164,7 +239,8 @@ module ComplianceHelpers
       errors_count: result.errors.count,
       warnings_count: result.warnings.count,
       info_count: result.info.count,
-      valid_checks_count: CompliancePipeline.displayable_valid_checks(result.valid_checks).count,
+      valid_checks_count: project_validation_passed_checks_count(result),
+      skipped_checks_count: project_validation_skipped_checks_count(result),
       report_format: 'file_check',
       schema_id: result.respond_to?(:schema_id) ? result.schema_id : Scfair::Rules::DEFAULT_SCHEMA_ID
     }
@@ -178,6 +254,28 @@ module ComplianceHelpers
       payload[:format] = result.format
     end
     payload
+  end
+
+  def project_validation_passed_checks_count(result)
+    validation_check_status_counts(result)[:passed]
+  end
+
+  def project_validation_skipped_checks_count(result)
+    validation_check_status_counts(result)[:skipped]
+  end
+
+  def validation_check_status_counts(result)
+    if result.respond_to?(:check_groups) && result.check_groups.present?
+      return Scfair::ComplianceReportGrouper.summarize_items(result.check_groups)
+    end
+
+    valid_checks = Array(result.valid_checks)
+    {
+      passed: valid_checks.count { |entry| Scfair::ComplianceReportGrouper.item_status(entry) == 'passed' },
+      skipped: valid_checks.count { |entry| Scfair::ComplianceReportGrouper.item_status(entry) == 'skipped' },
+      failed: 0,
+      warning: 0
+    }
   end
 
   def resolve_compliance_check_groups(validation_result)

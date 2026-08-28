@@ -347,4 +347,28 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
     assert_equal 'loom.embeddings', groups.first[:id]
     assert_equal 2, groups.first[:items].size
   end
+
+  test 'summarize_items counts grouped statuses like the report banner' do
+    groups = [
+      {
+        id: 'obs.required_presence',
+        items: [
+          { field: 'obs/title', status: 'passed' },
+          { field: 'obs/assay', status: 'skipped' },
+          { field: 'obs/tissue', status: 'failed' }
+        ]
+      },
+      {
+        id: 'ontology.format',
+        items: [
+          { field: 'obs/organism', status: 'warning' },
+          { field: 'obs/donor', status: 'passed' }
+        ]
+      }
+    ]
+
+    counts = Scfair::ComplianceReportGrouper.summarize_items(groups)
+
+    assert_equal({ passed: 2, skipped: 1, failed: 1, warning: 1 }, counts)
+  end
 end

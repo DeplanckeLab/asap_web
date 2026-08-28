@@ -22,6 +22,25 @@ module Scfair
       ).category_for({ field: field, message: message, check_id: check_id })
     end
 
+    # Counts grouped check items by status (matches compliance report banner logic).
+    def self.summarize_items(check_groups)
+      counts = { passed: 0, skipped: 0, failed: 0, warning: 0 }
+      Array(check_groups).each do |group|
+        Array(group[:items] || group['items']).each do |item|
+          status = item_status(item)
+          counts[status.to_sym] += 1 if counts.key?(status.to_sym)
+        end
+      end
+      counts
+    end
+
+    def self.item_status(item)
+      explicit = (item[:status] || item['status']).to_s.strip.downcase
+      return explicit if explicit.present?
+
+      'passed'
+    end
+
     def initialize(checks_catalog:, valid_checks:, errors:, warnings:, format:)
       @checks_catalog = Array(checks_catalog)
       @valid_checks = Array(valid_checks)

@@ -157,6 +157,7 @@ class ComplianceController < ApplicationController
     end
 
     result = loom_compliance_result(file_path, logger: Rails.logger)
+    check_counts = Scfair::ComplianceReportGrouper.summarize_items(result.check_groups)
 
     render json: {
       valid: result.valid?,
@@ -170,7 +171,8 @@ class ComplianceController < ApplicationController
         errors_count: result.errors.count,
         warnings_count: result.warnings.count,
         info_count: result.info.count,
-        valid_checks_count: result.valid_checks.count
+        valid_checks_count: check_counts[:passed],
+        skipped_checks_count: check_counts[:skipped]
       }
     }
   end

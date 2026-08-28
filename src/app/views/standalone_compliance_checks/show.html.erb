@@ -41,21 +41,14 @@
       </p>
     </div>
   <% elsif @validation_result.present? %>
+    <% check_counts = compliance_summary_check_counts(@validation_result, @compliance_check_groups) %>
     <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold text-gray-900">Validation Summary</h2>
-        <% if @validation_result[:valid] %>
-          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-            Compliant
-          </span>
-        <% else %>
-          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
-            Non-compliant
-          </span>
-        <% end %>
+        <%= render 'compliance/compliance_status_badge', validation_result: @validation_result %>
       </div>
 
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="grid grid-cols-2 <%= check_counts[:skipped].to_i.positive? ? 'md:grid-cols-5' : 'md:grid-cols-4' %> gap-4">
         <% if @validation_result[:schema_version].present? %>
           <div class="bg-gray-50 rounded-lg p-4 text-center">
             <div class="text-2xl font-bold text-gray-900"><%= @validation_result[:schema_version] %></div>
@@ -79,10 +72,19 @@
 
         <div class="bg-green-50 rounded-lg p-4 text-center">
           <div class="text-2xl font-bold text-green-600">
-            <%= summary[:valid_checks_count] || Array(@validation_result[:valid_checks]).size %>
+            <%= check_counts[:passed] %>
           </div>
           <div class="text-sm text-gray-500">Passed</div>
         </div>
+
+        <% if check_counts[:skipped].to_i.positive? %>
+          <div class="bg-gray-50 rounded-lg p-4 text-center">
+            <div class="text-2xl font-bold text-gray-700">
+              <%= check_counts[:skipped] %>
+            </div>
+            <div class="text-sm text-gray-500">Not applicable</div>
+          </div>
+        <% end %>
       </div>
 
       <% if @validation_result[:validated_at].present? %>
@@ -99,7 +101,7 @@
            data-compliance-check-report-schema-id-value="<%= report_payload[:schema_id] %>"
            data-compliance-check-report-rules-snippet-url-value="<%= compliance_rules_snippet_path %>"
            data-compliance-check-report-rules-yaml-url-value="<%= compliance_rules_yaml_path %>"
-           data-compliance-check-report-show-result-banner-value="true">
+           data-compliance-check-report-show-result-banner-value="false">
         <div data-compliance-check-report-target="resultBody"></div>
         <%= render 'compliance/check_detail_modal',
             stimulus_controller: 'compliance-check-report',

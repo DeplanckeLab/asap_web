@@ -64,6 +64,7 @@ class ScfairValidationJob < ApplicationJob
     end
 
     # Broadcast completion
+    passed_count = grouped_check_status_counts(result)[:passed]
     if result.valid?
       broadcast(project_id,
         status: 'completed',
@@ -72,7 +73,7 @@ class ScfairValidationJob < ApplicationJob
         progress: 100,
         errors_count: 0,
         warnings_count: result.warnings.count,
-        valid_checks_count: result.valid_checks.count,
+        valid_checks_count: passed_count,
         redirect_url: redirect_url
       )
     else
@@ -83,7 +84,7 @@ class ScfairValidationJob < ApplicationJob
         progress: 100,
         errors_count: result.errors.count,
         warnings_count: result.warnings.count,
-        valid_checks_count: result.valid_checks.count,
+        valid_checks_count: passed_count,
         errors: result.errors.first(5),
         redirect_url: redirect_url
       )
@@ -168,6 +169,7 @@ class ScfairValidationJob < ApplicationJob
     schema_meta = cs ? cs.to_config_hash.transform_keys(&:to_sym) : {}
 
     validation_data = if result
+      check_counts = grouped_check_status_counts(result)
       data = {
         valid: result.valid?,
         schema_version: result.schema_version,
@@ -186,7 +188,8 @@ class ScfairValidationJob < ApplicationJob
         valid_checks: CompliancePipeline.displayable_valid_checks(result.valid_checks),
         errors_count: result.errors.count,
         warnings_count: result.warnings.count,
-        valid_checks_count: CompliancePipeline.displayable_valid_checks(result.valid_checks).count,
+        valid_checks_count: check_counts[:passed],
+        skipped_checks_count: check_counts[:skipped],
         report_format: 'file_check',
         schema_id: result.respond_to?(:schema_id) ? result.schema_id : Scfair::Rules::DEFAULT_SCHEMA_ID
       }
@@ -286,5 +289,19 @@ class ScfairValidationJob < ApplicationJob
     
     # Also broadcast to project channel for project page updates
     ActionCable.server.broadcast("project_#{project_id}", message)
+  end
+
+  def grouped_check_status_counts(result)
+    if result.respond_to?(:check_groups) && result.check_groups.present?
+      return Scfair::ComplianceReportGrouper.summarize_items(result.check_groups)
+    end
+
+    valid_checks = Array(result.valid_checks)
+    {
+      passed: valid_checks.count { |entry| Scfair::ComplianceReportGrouper.item_status(entry) == 'passed' },
+      skipped: valid_checks.count { |entry| Scfair::ComplianceReportGrouper.item_status(entry) == 'skipped' },
+      failed: 0,
+      warning: 0
+    }
   end
 end

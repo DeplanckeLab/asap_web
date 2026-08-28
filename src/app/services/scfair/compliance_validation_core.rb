@@ -152,6 +152,8 @@ module Scfair
 
       tick('finalizing', 'Finalizing compliance report', 95, format: format)
 
+      check_status_counts = ComplianceReportGrouper.summarize_items(check_groups)
+
       enrich_with_details(
         valid: errors.empty?,
         format: format,
@@ -170,7 +172,8 @@ module Scfair
           errors_count: errors.count,
           warnings_count: warnings.count,
           info_count: base_result.info.count,
-          valid_checks_count: valid_checks.count
+          valid_checks_count: check_status_counts[:passed],
+          skipped_checks_count: check_status_counts[:skipped]
         }
       )
     end

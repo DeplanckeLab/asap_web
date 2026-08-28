@@ -1,0 +1,8 @@
+<% badge = compliance_status_badge(validation_result, schema_config: local_assigns[:schema_config]) %>
+<% if badge[:url].present? %>
+  <a href="<%= badge[:url] %>" target="_blank" rel="noopener noreferrer">
+    <%= image_tag badge[:icon], alt: badge[:alt], class: 'h-10' %>
+  </a>
+<% else %>
+  <%= image_tag badge[:icon], alt: badge[:alt], class: 'h-10' %>
+<% end %>

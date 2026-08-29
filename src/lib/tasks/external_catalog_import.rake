@@ -517,11 +517,14 @@ namespace :external_catalog do
     end
   end
 
-  desc 'Enqueue standalone scFAIR validation for SC external catalog candidates (loom/h5ad URLs). ' \
-       'SOURCE=all|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|allen_abc|matkp|geo COUNT/N/LIMIT ' \
+  desc 'Enqueue standalone scFAIR validation for SC external catalog candidates (loom/h5ad URLs) ' \
+       'and/or public ASAP sc-like projects (matrix loom via get_file). ' \
+       'SOURCE=all|asap|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|allen_abc|matkp|geo ' \
+       '(all = catalog + ASAP public; asap = public ASAP only) COUNT/N/LIMIT ' \
        '(LIMIT = max NEW validations to enqueue after skipping existing) MAX_FILESIZE SKIP_EXISTING=1 ' \
        'RETRY_FAILED=1 (only re-queue URLs whose admin check status=failed; completed stay skipped) ' \
-       'CANDIDATE_IDS=1,2 SCHEMA_ID IMPORT_USER_EMAIL|IMPORT_USER_ID DRY_RUN=1. Runs in background via Solid Queue.'
+       'CANDIDATE_IDS=1,2 PROJECT_IDS=1,2 PUBLIC_IDS=48,98 SCHEMA_ID IMPORT_USER_EMAIL|IMPORT_USER_ID ' \
+       'DRY_RUN=1. Runs in background via Solid Queue.'
   task validate_scfair_standalone: :environment do
     source = ENV.fetch('SOURCE', 'all')
     count = external_catalog_count
@@ -531,6 +534,8 @@ namespace :external_catalog do
     max_filesize = ENV['MAX_FILESIZE'].presence&.to_i
     schema_id = ENV['SCHEMA_ID'].presence
     candidate_ids = ENV['CANDIDATE_IDS'].to_s.split(',').map(&:strip).reject(&:blank?)
+    project_ids = ENV['PROJECT_IDS'].to_s.split(',').map(&:strip).reject(&:blank?)
+    public_ids = ENV['PUBLIC_IDS'].to_s.split(',').map(&:strip).reject(&:blank?)
     user =
       if ENV['IMPORT_USER_EMAIL'].present? || ENV['IMPORT_USER_ID'].present?
         external_catalog_resolve_user!
@@ -539,7 +544,8 @@ namespace :external_catalog do
     puts "external_catalog:validate_scfair_standalone SOURCE=#{source} LIMIT=#{count.inspect} " \
          "SKIP_EXISTING=#{skip_existing} RETRY_FAILED=#{retry_failed} DRY_RUN=#{dry_run} " \
          "SCHEMA_ID=#{schema_id || 'default'} USER=#{user&.email || 'none'} " \
-         "MAX_FILESIZE=#{max_filesize.inspect} CANDIDATE_IDS=#{candidate_ids.presence || 'all'}"
+         "MAX_FILESIZE=#{max_filesize.inspect} CANDIDATE_IDS=#{candidate_ids.presence || 'all'} " \
+         "PROJECT_IDS=#{project_ids.presence || 'all'} PUBLIC_IDS=#{public_ids.presence || 'all'}"
 
     result = ExternalCatalog::StandaloneScfairBatchValidator.new(
       source: source,
@@ -550,13 +556,16 @@ namespace :external_catalog do
       skip_existing: skip_existing,
       retry_failed: retry_failed,
       max_filesize: max_filesize,
-      candidate_ids: candidate_ids
+      candidate_ids: candidate_ids,
+      project_ids: project_ids,
+      public_ids: public_ids
     ).call
 
     verb = dry_run ? 'Would enqueue' : 'Enqueued'
     puts "#{verb} #{result.queued} validation(s) from #{result.candidates} candidate(s); " \
          "skipped_existing=#{result.skipped_existing} " \
          "skipped_unsupported=#{result.skipped_unsupported} " \
-         "skipped_blank_url=#{result.skipped_blank_url}"
+         "skipped_blank_url=#{result.skipped_blank_url} " \
+         "skipped_missing_file=#{result.skipped_missing_file}"
   end
 end

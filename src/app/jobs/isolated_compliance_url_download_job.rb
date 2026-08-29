@@ -19,7 +19,7 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
     raise ArgumentError, "Fu##{fu.id} has no url" if fu.url.blank?
     raise ArgumentError, "Fu##{fu.id} has no compliance_schema_id" if fu.compliance_schema_id.blank?
 
-    tmp_path = download_remote_file!(task_id, fu.url)
+    tmp_path = obtain_file!(task_id, fu)
     detected_format = ComplianceFileCheckQueueService.validate_downloaded_file!(tmp_path)
     final_path = rename_downloaded_file!(tmp_path, task_id, detected_format)
     finalize_downloaded_fu!(fu, final_path, detected_format)
@@ -79,13 +79,45 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
     dir
   end
 
-  def download_remote_file!(task_id, url, redirect_limit: 5)
+  # Prefer a local disk copy for ASAP get_file URLs (public projects in batch),
+  # otherwise HTTP download. Local failures on get_file URLs are not retried via HTTP.
+  def obtain_file!(task_id, fu)
+    path = File.join(temp_dir, "#{task_id}.download")
+    begin
+      result = LocalAsapGetFileCopyService.copy_if_get_file_url!(
+        fu: fu,
+        url: fu.url,
+        dest_path: path
+      )
+      if result == :copied
+        size = File.size(path)
+        report_download_progress(task_id, size, size)
+        return path
+      end
+    rescue StandardError => e
+      if local_get_file_url?(fu.url)
+        raise ArgumentError, "Local ASAP get_file copy failed: #{e.message}"
+      end
+      raise
+    end
+
+    download_remote_file!(task_id, fu.url, dest_path: path)
+  end
+
+  def local_get_file_url?(url)
+    u = URI.parse(url.to_s)
+    u.path.to_s.match?(LocalAsapGetFileCopyService::GET_FILE_PATH_RE)
+  rescue URI::InvalidURIError
+    false
+  end
+
+  def download_remote_file!(task_id, url, dest_path: nil, redirect_limit: 5)
     raise ArgumentError, 'Too many redirects while downloading' if redirect_limit < 0
 
     uri = URI.parse(url.to_s.strip)
     raise ArgumentError, 'Only HTTP/HTTPS URLs are supported' unless uri.is_a?(URI::HTTP)
 
-    path = File.join(temp_dir, "#{task_id}.download")
+    path = dest_path.presence || File.join(temp_dir, "#{task_id}.download")
     downloaded = 0
     total = nil
     last_report_at = 0.0
@@ -105,7 +137,12 @@ class IsolatedComplianceUrlDownloadJob < ApplicationJob
           location = response['location'].to_s
           raise ArgumentError, "Download failed (HTTP #{response.code}) without Location" if location.blank?
 
-          return download_remote_file!(task_id, location, redirect_limit: redirect_limit - 1)
+          return download_remote_file!(
+            task_id,
+            location,
+            dest_path: path,
+            redirect_limit: redirect_limit - 1
+          )
         end
 
         raise ArgumentError, "Download failed (HTTP #{response.code})" unless response.code.to_i.between?(200, 299)

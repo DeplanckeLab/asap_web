@@ -8,7 +8,7 @@ class ExternalCatalogStandaloneScfairBatchValidatorTest < TestBaseWithoutFixture
     upload_type_id = UploadType.id_for('compliance_file_check')
     skip 'compliance_file_check upload type missing' if upload_type_id.blank?
 
-    register_for_test_cleanup(
+    h5ad = register_for_test_cleanup(
       ExternalCatalogCandidate.create!(
         source: 'cellxgene',
         external_id: "batch-sc-#{SecureRandom.hex(4)}",
@@ -22,7 +22,7 @@ class ExternalCatalogStandaloneScfairBatchValidatorTest < TestBaseWithoutFixture
         obsolete: false
       )
     )
-    register_for_test_cleanup(
+    mtx = register_for_test_cleanup(
       ExternalCatalogCandidate.create!(
         source: 'geo',
         external_id: "batch-mtx-#{SecureRandom.hex(4)}",
@@ -38,13 +38,13 @@ class ExternalCatalogStandaloneScfairBatchValidatorTest < TestBaseWithoutFixture
     )
 
     result = ExternalCatalog::StandaloneScfairBatchValidator.new(
-      source: 'all',
+      candidate_ids: [h5ad.id, mtx.id],
       dry_run: true,
       skip_existing: false
     ).call
 
-    assert_operator result.queued, :>=, 1
-    assert_operator result.skipped_unsupported, :>=, 1
+    assert_equal 1, result.queued
+    assert_equal 1, result.skipped_unsupported
   end
 
   test 'enqueue creates Fu with admin_run and queues download job' do
@@ -265,5 +265,104 @@ class ExternalCatalogStandaloneScfairBatchValidatorTest < TestBaseWithoutFixture
 
     assert_equal 1, result.queued
     assert_equal 1, result.skipped_existing
+  end
+
+  test 'SOURCE=asap enqueues public sc-like projects with on-disk matrix loom' do
+    upload_type_id = UploadType.id_for('compliance_file_check')
+    skip 'compliance_file_check upload type missing' if upload_type_id.blank?
+    skip 'SERVER_URL missing' if ENV['SERVER_URL'].to_s.strip.blank?
+    skip 'USER_DATA_DIR missing' if ENV['USER_DATA_DIR'].to_s.strip.blank?
+
+    sc = ProjectType.ensure_for_tag!('sc')
+    user = register_for_test_cleanup(
+      User.create!(email: "asap-batch-#{SecureRandom.hex(4)}@example.com", password: 'password123')
+    )
+    public_id = (Project.maximum(:public_id) || 0) + 1
+    project = create_test_project!(
+      user_id: user.id,
+      project_type_id: sc.id,
+      public: true,
+      public_at: Time.current,
+      public_id: public_id,
+      key: "ab#{SecureRandom.hex(3)}"
+    )
+
+    loom_rel = 'parsing/output.loom'
+    loom_abs = project.storage_dir.join(loom_rel)
+    FileUtils.mkdir_p(loom_abs.dirname)
+    File.binwrite(loom_abs, "loom-stub-#{SecureRandom.hex(8)}")
+
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: project.id,
+        filepath: loom_rel,
+        name: '/matrix',
+        dim: 3,
+        data_type_id: DataType.find_by(name: 'NUMERIC')&.id || 1,
+        user_id: user.id,
+        latest_version: true,
+        version_nber: 1
+      )
+    )
+
+    result = ExternalCatalog::StandaloneScfairBatchValidator.new(
+      source: 'asap',
+      public_ids: [public_id],
+      dry_run: false,
+      skip_existing: true
+    ).call
+    assert_equal 1, result.queued
+    assert_equal 0, result.skipped_missing_file
+
+    expected_url = Basic.data_file_url_for_project(project, loom_rel)
+    fu = Fu.where(url: expected_url, admin_run: true).order(id: :desc).first
+    assert fu, 'Expected Fu for ASAP public project get_file URL'
+    register_for_test_cleanup(fu)
+    assert_equal "ASAP#{public_id}_output.loom", fu.name
+    assert_equal 'downloading', fu.status
+  ensure
+    FileUtils.rm_f(loom_abs) if defined?(loom_abs) && loom_abs
+  end
+
+  test 'SOURCE=asap skips public projects without loom on disk' do
+    upload_type_id = UploadType.id_for('compliance_file_check')
+    skip 'compliance_file_check upload type missing' if upload_type_id.blank?
+    skip 'SERVER_URL missing' if ENV['SERVER_URL'].to_s.strip.blank?
+
+    sc = ProjectType.ensure_for_tag!('sc')
+    user = register_for_test_cleanup(
+      User.create!(email: "asap-miss-#{SecureRandom.hex(4)}@example.com", password: 'password123')
+    )
+    public_id = (Project.maximum(:public_id) || 0) + 1
+    project = create_test_project!(
+      user_id: user.id,
+      project_type_id: sc.id,
+      public: true,
+      public_at: Time.current,
+      public_id: public_id,
+      key: "am#{SecureRandom.hex(3)}"
+    )
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: project.id,
+        filepath: 'parsing/output.loom',
+        name: '/matrix',
+        dim: 3,
+        data_type_id: DataType.find_by(name: 'NUMERIC')&.id || 1,
+        user_id: user.id,
+        latest_version: true,
+        version_nber: 1
+      )
+    )
+
+    result = ExternalCatalog::StandaloneScfairBatchValidator.new(
+      source: 'asap',
+      public_ids: [public_id],
+      dry_run: true,
+      skip_existing: false
+    ).call
+
+    assert_equal 0, result.queued
+    assert_equal 1, result.skipped_missing_file
   end
 end

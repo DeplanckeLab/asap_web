@@ -11,9 +11,9 @@ class ComplianceController < ApplicationController
   include ComplianceHelpers
 
   before_action :set_project, only: %i[validate_project show_project_result fix_project apply_project_fix project_metadata_fields project_status]
-  before_action :authorize_project_compliance!, only: %i[validate_project show_project_result fix_project apply_project_fix project_metadata_fields project_status]
+  before_action :authorize_project_compliance!, only: %i[validate_project fix_project apply_project_fix project_metadata_fields project_status]
   around_action :with_project_compliance_rules_bundle, only: %i[fix_project apply_project_fix]
-  skip_before_action :authenticate_user!, only: %i[index schema_docs], raise: false
+  skip_before_action :authenticate_user!, only: %i[index schema_docs show_project_result], raise: false
 
   # GET /compliance
   # Main compliance page showing overview and documentation links
@@ -117,11 +117,17 @@ class ComplianceController < ApplicationController
   # Redirect to the project compliance view (moved to projects/:key?view=compliance)
   def show_project_result
     unless @project
-      redirect_to compliance_index_path, alert: 'Project not found'
+      respond_to do |format|
+        format.json { render json: { error: 'Project not found' }, status: :not_found }
+        format.any { redirect_to compliance_index_path, alert: 'Project not found' }
+      end
       return
     end
 
-    redirect_to project_path(@project, view: 'compliance'), status: :moved_permanently
+    respond_to do |format|
+      format.json { render_public_project_compliance_result_json(@project) }
+      format.any { redirect_to project_path(@project, view: 'compliance'), status: :moved_permanently }
+    end
   end
 
   # GET /compliance/projects/:id/status
@@ -1341,6 +1347,37 @@ class ComplianceController < ApplicationController
       format.html { redirect_to unauthorized_path }
       format.json { render json: { error: 'Not authorized' }, status: :forbidden }
       format.any { render plain: 'Not authorized', status: :forbidden }
+    end
+  end
+
+  # Public JSON download of the latest scFAIR result for a public project only.
+  def render_public_project_compliance_result_json(project)
+    unless project.public?
+      render json: { error: 'Compliance results are only downloadable for public projects' },
+             status: :forbidden
+      return
+    end
+
+    result = load_validation_result(project)
+    unless result
+      render json: { error: 'No validation result found' }, status: :not_found
+      return
+    end
+
+    payload = {
+      project_key: project.key,
+      public_id: project.public_id,
+      public: true,
+      result: result
+    }
+
+    if ActiveModel::Type::Boolean.new.cast(params[:download])
+      send_data payload.to_json,
+                filename: "scfair_compliance_#{project.key}.json",
+                type: 'application/json; charset=utf-8',
+                disposition: 'attachment'
+    else
+      render json: payload
     end
   end
 

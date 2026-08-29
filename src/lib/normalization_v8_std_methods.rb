@@ -155,7 +155,7 @@ module NormalizationV8StdMethods
           "param_key" => "output_matrix_dataset",
           "value" => OUTPUT_MATRIX_DATASET
         },
-        { "opt" => "--output_dir", "param_key" => "output_dir" }
+        { "opt" => "-o", "param_key" => "output_dir" }
       ]
       opts << { "opt" => "--log", "value" => "" } if defn[:python_log]
 

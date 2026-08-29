@@ -15,6 +15,50 @@ class ComplianceFileChecksController < ApplicationController
     render json: Scfair::RulesYamlDocument.call(schema_id: params[:schema_id])
   end
 
+  # GET /compliance/checks?source_url=... and/or ?filename=...
+  # Returns the latest standalone scFAIR check matching exact source_url and/or filename.
+  def lookup
+    source_url = params[:source_url].to_s.strip.presence
+    filename = params[:filename].to_s.strip.presence
+    if source_url.blank? && filename.blank?
+      render json: { error: 'Provide source_url and/or filename' }, status: :unprocessable_entity
+      return
+    end
+
+    check = StandaloneComplianceCheck.latest_matching(
+      source_url: source_url,
+      filename: filename
+    ).first
+
+    unless check
+      render json: { error: 'No matching compliance check found' }, status: :not_found
+      return
+    end
+
+    payload = {
+      id: check.id,
+      task_id: check.task_id,
+      filename: check.filename,
+      source_url: check.source_url,
+      schema_id: check.schema_id,
+      format: check.format,
+      passed: check.passed,
+      status: check.status,
+      checked_at: check.checked_at,
+      admin_run: check.admin_run,
+      result: check.result_json
+    }
+
+    if ActiveModel::Type::Boolean.new.cast(params[:download])
+      send_data payload.to_json,
+                filename: "scfair_compliance_check_#{check.id}.json",
+                type: 'application/json; charset=utf-8',
+                disposition: 'attachment'
+    else
+      render json: payload
+    end
+  end
+
   def index
     @available_schemas = Scfair::CheckCatalog.available_schemas
     @default_schema_id = Scfair::Rules::DEFAULT_SCHEMA_ID

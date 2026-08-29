@@ -31,6 +31,18 @@ class StandaloneComplianceCheck < ApplicationRecord
     end
   end
 
+  # Latest check matching exact source_url and/or filename (both ANDed when given).
+  def self.latest_matching(source_url: nil, filename: nil)
+    url = source_url.to_s.strip.presence
+    name = filename.to_s.strip.presence
+    return none if url.blank? && name.blank?
+
+    scope = recent
+    scope = scope.where(source_url: url) if url
+    scope = scope.where(filename: name) if name
+    scope
+  end
+
   def guest?
     user_id.blank?
   end

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_27_105500) do
+ActiveRecord::Schema[8.1].define(version: 2026_08_29_081809) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1580,8 +1580,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_27_105500) do
     t.integer "user_id"
     t.index ["admin_run"], name: "index_standalone_compliance_checks_on_admin_run"
     t.index ["checked_at"], name: "index_standalone_compliance_checks_on_checked_at"
+    t.index ["filename"], name: "index_standalone_compliance_checks_on_filename"
     t.index ["fu_id"], name: "index_standalone_compliance_checks_on_fu_id"
     t.index ["passed"], name: "index_standalone_compliance_checks_on_passed"
+    t.index ["source_url"], name: "index_standalone_compliance_checks_on_source_url"
     t.index ["status"], name: "index_standalone_compliance_checks_on_status"
     t.index ["task_id"], name: "index_standalone_compliance_checks_on_task_id"
     t.index ["user_id"], name: "index_standalone_compliance_checks_on_user_id"

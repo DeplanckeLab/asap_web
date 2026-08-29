@@ -257,6 +257,7 @@ Rails.application.routes.draw do
   get '/compliance/file-check/:task_id/status', to: 'compliance_file_checks#status', as: :compliance_file_check_status
   get '/compliance/rules_snippet', to: 'compliance_file_checks#rules_snippet', as: :compliance_rules_snippet
   get '/compliance/rules_yaml', to: 'compliance_file_checks#rules_yaml', as: :compliance_rules_yaml
+  get '/compliance/checks', to: 'compliance_file_checks#lookup', as: :compliance_checks_lookup, defaults: { format: :json }
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

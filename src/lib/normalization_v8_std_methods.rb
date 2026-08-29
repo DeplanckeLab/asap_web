@@ -32,7 +32,7 @@ module NormalizationV8StdMethods
       summary = { created: [], updated: [], unchanged: [] }
 
       definitions.each do |defn|
-        record = StdMethod.find_by(name: defn[:name], step_id: step.id, version_id: version_id)
+        record = find_existing_std_method(defn[:name], step: step, version_id: version_id)
         attrs = build_attrs(defn, step: step, docker_image: docker_image, speed: speed)
 
         if record.nil?
@@ -92,7 +92,9 @@ module NormalizationV8StdMethods
           project_types: %w[sc]
         },
         {
-          name: "scanpy_normalize_total",
+          # DB row name is "scanpy" (not scanpy_normalize_total); keep that name so upsert
+          # updates the method projects already use instead of creating a duplicate.
+          name: "scanpy",
           label: "normalize_total + log1p [Scanpy]",
           description: "Library-size normalization with scanpy (normalize_total) followed by log1p on the selected expression matrix.",
           link: "[<a href=\"https://scanpy.readthedocs.io/en/stable/generated/scanpy.pp.normalize_total.html\">Reference</a>]",
@@ -119,6 +121,18 @@ module NormalizationV8StdMethods
       raise "No DockerImage found for version_id=#{version_id}" unless image
 
       image
+    end
+
+    # Prefer the method on the target step; otherwise reuse any same-named
+    # normalization method for this version (avoids creating duplicates when
+    # docker_image / step resolution differs from the row already in use).
+    def find_existing_std_method(name, step:, version_id:)
+      StdMethod.find_by(name: name, step_id: step.id, version_id: version_id) ||
+        StdMethod.joins(:step).where(
+          name: name,
+          version_id: version_id,
+          steps: { name: "normalization", version_id: version_id }
+        ).order(:id).first
     end
 
     def build_attrs(defn, step:, docker_image:, speed:)

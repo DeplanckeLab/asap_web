@@ -365,4 +365,48 @@ class ExternalCatalogStandaloneScfairBatchValidatorTest < TestBaseWithoutFixture
     assert_equal 0, result.queued
     assert_equal 1, result.skipped_missing_file
   end
+
+  test 'SOURCE=asap enqueues S3-archived public projects without local loom' do
+    upload_type_id = UploadType.id_for('compliance_file_check')
+    skip 'compliance_file_check upload type missing' if upload_type_id.blank?
+    skip 'SERVER_URL missing' if ENV['SERVER_URL'].to_s.strip.blank?
+
+    sc = ProjectType.ensure_for_tag!('sc')
+    user = register_for_test_cleanup(
+      User.create!(email: "asap-arch-#{SecureRandom.hex(4)}@example.com", password: 'password123')
+    )
+    public_id = (Project.maximum(:public_id) || 0) + 1
+    project = create_test_project!(
+      user_id: user.id,
+      project_type_id: sc.id,
+      public: true,
+      public_at: Time.current,
+      public_id: public_id,
+      key: "aa#{SecureRandom.hex(3)}",
+      archive_status_id: 3,
+      disk_size_archived: 1_000_000
+    )
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: project.id,
+        filepath: 'parsing/output.loom',
+        name: '/matrix',
+        dim: 3,
+        data_type_id: DataType.find_by(name: 'NUMERIC')&.id || 1,
+        user_id: user.id,
+        latest_version: true,
+        version_nber: 1
+      )
+    )
+
+    result = ExternalCatalog::StandaloneScfairBatchValidator.new(
+      source: 'asap',
+      public_ids: [public_id],
+      dry_run: true,
+      skip_existing: false
+    ).call
+
+    assert_equal 1, result.queued
+    assert_equal 0, result.skipped_missing_file
+  end
 end

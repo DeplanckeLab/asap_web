@@ -5,6 +5,7 @@ require 'fileutils'
 require 'digest'
 require 'tempfile'
 require 'find'
+require 'securerandom'
 
 class ProjectS3Archive
   class << self
@@ -207,6 +208,55 @@ class ProjectS3Archive
         restored_dir: restored_dir,
         restored_mtime: directory_latest_mtime(restored_dir)
       }
+    end
+
+    # Download the project S3 .tgz to a temp file, extract a single member into +dest_path+,
+    # then delete the temp archive. Does not write into the project storage dir and does not
+    # change archive_status_id (no official unarchive).
+    #
+    # +member_rel+ is project-relative (e.g. parsing/output.loom). Archive members are
+    # stored as "#{project.key}/#{member_rel}".
+    def extract_member_to!(project, member_rel:, dest_path:, s3b: bucket_config)
+      rel = member_rel.to_s.sub(%r{\A/+}, '')
+      raise ArgumentError, 'member_rel is blank' if rel.blank?
+      raise ArgumentError, "Unsafe member_rel=#{member_rel.inspect}" if rel.include?('..')
+
+      member = "#{project.key}/#{rel}"
+      dest = Pathname.new(dest_path.to_s)
+      FileUtils.mkdir_p(dest.dirname)
+
+      tmp_root = Pathname.new(
+        ENV['UPLOAD_DATA_DIR'].presence || ENV['USER_DATA_DIR'].presence || Dir.tmpdir
+      ).join('asap_archive_member_extract')
+      FileUtils.mkdir_p(tmp_root)
+      archive_path = tmp_root.join("#{project.key}-#{SecureRandom.hex(8)}.tgz")
+
+      begin
+        h_s3_settings = Basic.get_s3_settings
+        s3_client = Basic.connect_s3(s3b, h_s3_settings)
+        downloaded = Basic.write_file_from_s3(s3_client, s3b[:key], project, archive_path.to_s)
+        unless downloaded && File.exist?(archive_path) && File.size(archive_path).to_i.positive?
+          raise "S3 archive download failed for project key=#{project.key}"
+        end
+
+        cmd = [
+          'pigz -p 8 -dc',
+          Shellwords.escape(archive_path.to_s),
+          '| tar -x -O',
+          Shellwords.escape(member),
+          '>',
+          Shellwords.escape(dest.to_s)
+        ].join(' ')
+        stderr = `#{cmd} 2>&1`
+        unless $?.success? && File.exist?(dest) && File.size(dest).to_i.positive?
+          FileUtils.rm_f(dest)
+          raise "Failed to extract #{member} from S3 archive for #{project.key}: #{stderr.to_s.strip}"
+        end
+
+        dest.to_s
+      ensure
+        FileUtils.rm_f(archive_path) if archive_path && File.exist?(archive_path)
+      end
     end
 
     def upload_project_archive_from_snapshot!(project, restored_project_dir:, s3b:)

@@ -360,7 +360,12 @@ module Scfair
     private
 
     def default_remote_db
-      RemoteOrganism.send(:default_remote_db)
+      # Prefer the newest asap_data shard. Older shards freeze latest_ensembl_release
+      # (e.g. asap_data_v4 stops around 97), which falsely fails
+      # var.cross_field.index.release for modern uns/ensembl_release values.
+      # Assemblies already use latest_remote_db for the same reason.
+      Asap2RemoteRecord.latest_remote_db.presence ||
+        RemoteOrganism.send(:default_remote_db)
     rescue StandardError
       nil
     end

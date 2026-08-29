@@ -78,6 +78,22 @@ class LocalAsapGetFileCopyService
       end
 
       unless File.exist?(filepath)
+        if project.archived_on_s3? && filepath.to_s.match?(/\.(loom|h5ad)\z/i)
+          rel = Pathname.new(filepath.to_s).expand_path.relative_path_from(
+            Pathname.new(project_dir.to_s).expand_path
+          ).to_s
+          FileUtils.mkdir_p(File.dirname(dest_path))
+          ProjectS3Archive.extract_member_to!(
+            project,
+            member_rel: rel,
+            dest_path: dest_path
+          )
+          copied = File.size(dest_path)
+          raise 'Extracted archive member is empty' unless copied.positive?
+
+          return :copied
+        end
+
         raise 'Source file does not exist'
       end
 

@@ -155,4 +155,24 @@ class ScfairEnsemblReferenceLookupTest < TestBaseWithoutFixtures
     assert_equal :ok, statuses['ENSMUSG00000086714']
     assert_equal :not_found, statuses['MISSINGGENE0001']
   end
+
+  test 'default remote_db is latest shard so modern ensembl_release checks do not use stale v4 windows' do
+    lookup = Scfair::EnsemblReferenceLookup.new
+    skip 'ASAP reference genes unavailable' unless lookup.remote_available?
+
+    latest = Asap2RemoteRecord.latest_remote_db.to_s
+    assert_equal latest, lookup.instance_variable_get(:@remote_db).to_s
+
+    organism = lookup.remote_organism_for_tax_id(9606)
+    skip 'Homo sapiens reference organism unavailable' unless organism
+
+    statuses = lookup.gene_statuses_at_release(
+      organism_id: organism.id,
+      release: 114,
+      ensembl_ids: %w[ENSG00000243485 ENSG00000000003]
+    )
+
+    assert_equal :ok, statuses['ENSG00000243485']
+    assert_equal :ok, statuses['ENSG00000000003']
+  end
 end

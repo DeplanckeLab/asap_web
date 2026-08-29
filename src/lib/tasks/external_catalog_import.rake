@@ -518,7 +518,8 @@ namespace :external_catalog do
   end
 
   desc 'Enqueue standalone scFAIR validation for SC external catalog candidates (loom/h5ad URLs) ' \
-       'and/or public ASAP sc-like projects (matrix loom via get_file). ' \
+       'and/or public ASAP sc-like projects (matrix loom via get_file; S3-archived projects extract ' \
+       'only that loom member temporarily without official unarchive). ' \
        'SOURCE=all|asap|cellxgene|bgee|ebi_sc|hca|hubmap|broad_scp|allen_abc|matkp|geo ' \
        '(all = catalog + ASAP public; asap = public ASAP only) COUNT/N/LIMIT ' \
        '(LIMIT = max NEW validations to enqueue after skipping existing) MAX_FILESIZE SKIP_EXISTING=1 ' \

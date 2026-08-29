@@ -135,8 +135,12 @@ module ExternalCatalog
 
         abs = project.storage_dir.join(loom_rel)
         unless File.exist?(abs)
-          @skipped_missing_file += 1
-          next
+          # S3-archived: still enqueue; IsolatedComplianceUrlDownloadJob extracts only
+          # this loom member from the archive without officially unarchiving.
+          unless project.archived_on_s3?
+            @skipped_missing_file += 1
+            next
+          end
         end
 
         url = Basic.data_file_url_for_project(project, loom_rel)

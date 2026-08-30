@@ -61,6 +61,18 @@ class HomeControllerTest < ActionDispatch::IntegrationTest
     assert_match(/Cannot access this page/, response.body)
   end
 
+  test "api-doc forces a full page load so Swagger UI can boot" do
+    host! ENV.fetch("HOST", "www.example.com")
+
+    get api_doc_path
+
+    assert_response :success
+    assert_includes response.body, 'name="turbo-visit-control" content="reload"'
+    assert_includes response.body, 'name="turbo-cache-control" content="no-cache"'
+    assert_includes response.body, 'id="swagger-ui"'
+    assert_includes response.body, "SwaggerUIBundle"
+  end
+
   private
 
   def set_or_delete_env(key, value)

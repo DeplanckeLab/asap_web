@@ -2,6 +2,9 @@
 <% content_for :meta_description, "ASAP REST API documentation for programmatic access to projects and analysis workflows." %>
 
 <% content_for :head do %>
+  <%# Swagger UI expects classic document script order; Turbo Drive breaks that on in-app navigation. %>
+  <meta name="turbo-visit-control" content="reload">
+  <meta name="turbo-cache-control" content="no-cache">
   <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
   <style>
     #swagger-ui .topbar {
@@ -33,9 +36,10 @@
   </div>
 </div>
 
-<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
 <script>
   (function () {
+    const SWAGGER_BUNDLE_URL = "https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js";
+
     function installInlineDataFileDropdown() {
       const root = document.getElementById("swagger-ui");
       if (!root) return;
@@ -186,45 +190,76 @@
       });
     }
 
-    window.ui = SwaggerUIBundle({
-      url: "/api/openapi.yaml?v=" + Date.now(),
-      dom_id: "#swagger-ui",
-      deepLinking: true,
-      presets: [SwaggerUIBundle.presets.apis],
-      docExpansion: "full",
-      defaultModelsExpandDepth: 10,
-      defaultModelExpandDepth: 10,
-      displayRequestDuration: true,
-      layout: "BaseLayout",
-      requestInterceptor: function (req) {
-        try {
-          if (req.url && req.url.includes("/data_file_metadata_catalog")) {
-            const allOps = document.querySelectorAll("#swagger-ui .opblock");
-            let catalogOp = null;
-            allOps.forEach((candidate) => {
-              const pathNode = candidate.querySelector(".opblock-summary-path");
-              if (pathNode && pathNode.textContent.includes("data_file_metadata_catalog")) {
-                catalogOp = candidate;
+    function mountSwaggerUi() {
+      const root = document.getElementById("swagger-ui");
+      if (!root || !window.SwaggerUIBundle) return;
+      if (root.dataset.swaggerMounted === "true") return;
+      root.dataset.swaggerMounted = "true";
+      window.__apiDocInlineDataFileDropdownInit = false;
+      window.__apiDocDataFileDropdownInit = false;
+
+      window.ui = SwaggerUIBundle({
+        url: "/api/openapi.yaml?v=" + Date.now(),
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis],
+        docExpansion: "full",
+        defaultModelsExpandDepth: 10,
+        defaultModelExpandDepth: 10,
+        displayRequestDuration: true,
+        layout: "BaseLayout",
+        requestInterceptor: function (req) {
+          try {
+            if (req.url && req.url.includes("/data_file_metadata_catalog")) {
+              const allOps = document.querySelectorAll("#swagger-ui .opblock");
+              let catalogOp = null;
+              allOps.forEach((candidate) => {
+                const pathNode = candidate.querySelector(".opblock-summary-path");
+                if (pathNode && pathNode.textContent.includes("data_file_metadata_catalog")) {
+                  catalogOp = candidate;
+                }
+              });
+              const select = catalogOp ? catalogOp.querySelector("select.data-file-select") : null;
+              if (select && select.value) {
+                const url = new URL(req.url, window.location.origin);
+                url.searchParams.set("data_file", select.value);
+                req.url = url.toString();
               }
-            });
-            const select = catalogOp ? catalogOp.querySelector("select.data-file-select") : null;
-            if (select && select.value) {
-              const url = new URL(req.url, window.location.origin);
-              url.searchParams.set("data_file", select.value);
-              req.url = url.toString();
             }
+          } catch (e) {
+            // Keep request unchanged on interceptor issues.
           }
-        } catch (e) {
-          // Keep request unchanged on interceptor issues.
+          return req;
+        },
+        onComplete: function () {
+          installInlineDataFileDropdown();
+          if (window.initApiDocDataFileDropdown) {
+            window.initApiDocDataFileDropdown();
+          }
         }
-        return req;
-      },
-      onComplete: function () {
-        installInlineDataFileDropdown();
-        if (window.initApiDocDataFileDropdown) {
-          window.initApiDocDataFileDropdown();
-        }
+      });
+    }
+
+    function loadSwaggerBundle() {
+      if (window.SwaggerUIBundle) {
+        mountSwaggerUi();
+        return;
       }
-    });
+
+      const existing = document.querySelector(`script[data-asap-swagger-bundle="true"]`);
+      if (existing) {
+        existing.addEventListener("load", mountSwaggerUi, { once: true });
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = SWAGGER_BUNDLE_URL;
+      script.async = false;
+      script.dataset.asapSwaggerBundle = "true";
+      script.onload = mountSwaggerUi;
+      document.head.appendChild(script);
+    }
+
+    loadSwaggerBundle();
   })();
 </script>

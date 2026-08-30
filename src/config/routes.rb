@@ -283,6 +283,7 @@ Rails.application.routes.draw do
     get 'projects/:id', to: '/projects#show'
     get 'projects/:id/project_data_files', to: '/projects#project_data_files'
     get 'projects/:id/data_file_metadata_catalog', to: '/projects#data_file_metadata_catalog'
+    get 'compliance/checks', to: '/compliance_file_checks#lookup'
     resources :guided_tours, only: %i[index show]
     get 'openapi.yaml', to: '/home#openapi_spec', defaults: { format: nil }
   end

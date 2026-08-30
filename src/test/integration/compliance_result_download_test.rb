@@ -111,6 +111,39 @@ class ComplianceResultDownloadTest < ActionDispatch::IntegrationTest
     refute_equal older.id, body['id']
   end
 
+  test 'API standalone check lookup by source_url returns latest result' do
+    url = "https://example.com/datasets/#{SecureRandom.hex(4)}.h5ad"
+    check = register_for_test_cleanup(
+      StandaloneComplianceCheckRecorder.record_completed!(
+        task_id: SecureRandom.uuid,
+        result: {
+          valid: true,
+          format: 'h5ad',
+          schema_id: 'scfair_7_1_0',
+          schema_version: '7.1.0',
+          validated_at: Time.current.iso8601,
+          errors: [],
+          warnings: [],
+          valid_checks: [{ field: 'obs/assay', message: 'ok' }],
+          summary: { errors_count: 0 }
+        },
+        filename: 'dataset.h5ad',
+        schema_id: 'scfair_7_1_0',
+        source_url: url,
+        admin_run: true
+      )
+    )
+
+    get '/api/compliance/checks', params: { source_url: url }
+    assert_response :success
+
+    body = JSON.parse(response.body)
+    assert_equal check.id, body['id']
+    assert_equal url, body['source_url']
+    assert_equal true, body['passed']
+    assert_equal true, body.dig('result', 'valid')
+  end
+
   test 'standalone check lookup by filename works' do
     filename = "unique_#{SecureRandom.hex(4)}.loom"
     check = register_for_test_cleanup(

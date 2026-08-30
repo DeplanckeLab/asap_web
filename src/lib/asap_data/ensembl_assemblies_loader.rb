@@ -57,7 +57,7 @@ module AsapData
 
       core_folders_cache = {}
       subdomain_latest_releases = load_subdomain_latest_releases(remote_db)
-      organisms = load_organisms(remote_db)
+      organisms = filter_organisms(load_organisms(remote_db))
       stats[:organisms_total] = organisms.size
 
       organisms.each do |organism|
@@ -383,6 +383,22 @@ module AsapData
       return [ensembl_db_name] if ensembl_db_name.present?
 
       nil
+    end
+
+    def filter_organisms(organisms)
+      organism_id = ENV["ORGANISM_ID"].to_s.strip
+      if organism_id.present?
+        id = organism_id.to_i
+        organisms = organisms.select { |organism| organism[:id] == id }
+      end
+
+      ensembl_db_name = ENV["ENSEMBL_DB_NAME"].to_s.strip
+      if ensembl_db_name.present?
+        names = ensembl_db_name.split(",").map(&:strip).reject(&:blank?).to_set
+        organisms = organisms.select { |organism| names.include?(organism[:ensembl_db_name]) }
+      end
+
+      organisms
     end
 
     def all_ensembl_base_dirs

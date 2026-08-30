@@ -221,8 +221,150 @@ paths:
           description: Missing `data_file` query parameter.
         '404':
           description: Project or data file not found.
+  /compliance/checks:
+    get:
+      summary: Lookup standalone scFAIR check by file URL or filename
+      description: |
+        Canonical API endpoint.
+        Returns the latest standalone (non-project) scFAIR compliance check matching an exact
+        `source_url` and/or `filename` (both are ANDed when provided).
+
+        Access URL (relative to the API server base above): `/compliance/checks`
+
+        Example:
+        `GET https://asap-test.epfl.ch/api/compliance/checks?source_url=https%3A%2F%2Fexample.com%2Fdataset.h5ad`
+
+        ```bash
+        curl -H 'Accept: application/json' \
+          'https://asap-test.epfl.ch/api/compliance/checks?source_url=https%3A%2F%2Fexample.com%2Fdataset.h5ad'
+        ```
+
+        Add `download=1` to receive the same JSON as a file attachment.
+      operationId: lookupStandaloneComplianceCheckApi
+      tags:
+        - Compliance
+      parameters:
+        - name: source_url
+          in: query
+          required: false
+          description: Exact source file URL stored on the standalone check (catalog / remote URL). At least one of `source_url` or `filename` is required.
+          schema:
+            type: string
+            format: uri
+            example: https://example.com/dataset.h5ad
+        - name: filename
+          in: query
+          required: false
+          description: Exact original filename stored on the standalone check. At least one of `source_url` or `filename` is required.
+          schema:
+            type: string
+            example: dataset.h5ad
+        - name: download
+          in: query
+          required: false
+          description: When truthy (`1`, `true`), return the JSON payload as a downloadable attachment.
+          schema:
+            type: boolean
+            example: false
+      responses:
+        '200':
+          description: Latest matching standalone compliance check.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandaloneComplianceCheckLookup'
+              examples:
+                passedCheck:
+                  summary: Passed standalone check
+                  value:
+                    id: 42
+                    task_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                    filename: "dataset.h5ad"
+                    source_url: "https://example.com/dataset.h5ad"
+                    schema_id: "scfair_7_1_0"
+                    format: "h5ad"
+                    passed: true
+                    status: "completed"
+                    checked_at: "2026-08-29T10:00:00Z"
+                    admin_run: true
+                    result:
+                      valid: true
+                      format: "h5ad"
+                      schema_id: "scfair_7_1_0"
+                      schema_version: "7.1.0"
+                      validated_at: "2026-08-29T10:00:00Z"
+                      errors: []
+                      warnings: []
+                      valid_checks:
+                        - field: "obs/assay"
+                          message: "ok"
+                      summary:
+                        errors_count: 0
+        '404':
+          description: No matching compliance check found.
+        '422':
+          description: Neither `source_url` nor `filename` was provided.
 components:
   schemas:
+    StandaloneComplianceCheckLookup:
+      title: Standalone scFAIR compliance check lookup
+      type: object
+      description: |
+        Latest standalone (non-project) scFAIR check matching exact `source_url` and/or `filename`.
+        `result` is the stored compliance report JSON (field_values and checks_catalog are omitted).
+      properties:
+        id:
+          type: integer
+          description: Internal standalone check id.
+          example: 42
+        task_id:
+          type: string
+          description: Async task id used when the check was run.
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        filename:
+          type: string
+          description: Original filename of the checked file.
+          example: dataset.h5ad
+        source_url:
+          type: string
+          format: uri
+          description: Exact source URL of the checked file when the check was URL-based.
+          example: https://example.com/dataset.h5ad
+        schema_id:
+          type: string
+          description: Compliance schema identifier used for the check.
+          example: scfair_7_1_0
+        format:
+          type: string
+          description: Detected file format.
+          enum:
+            - h5ad
+            - loom
+          example: h5ad
+        passed:
+          type: boolean
+          description: Whether the check passed overall.
+          example: true
+        status:
+          type: string
+          description: Check lifecycle status.
+          enum:
+            - completed
+            - failed
+          example: completed
+        checked_at:
+          type: string
+          format: date-time
+          description: When the check finished.
+          example: "2026-08-29T10:00:00Z"
+        admin_run:
+          type: boolean
+          description: Whether this check was recorded as an admin/batch run.
+          example: true
+        result:
+          type: object
+          description: Stored compliance report JSON for this check.
+          additionalProperties: true
     DataFileMetadataCatalog:
       title: Data file metadata catalog
       type: object

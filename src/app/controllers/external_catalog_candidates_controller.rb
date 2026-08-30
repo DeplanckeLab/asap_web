@@ -37,6 +37,9 @@ class ExternalCatalogCandidatesController < ApplicationController
                        .to_a
 
     @asap_projects_by_candidate_id = preload_asap_projects(@candidates)
+    @scfair_passed_by_url = StandaloneComplianceCheck.latest_passed_by_source_url(
+      @candidates.map(&:url)
+    )
   end
 
   def show

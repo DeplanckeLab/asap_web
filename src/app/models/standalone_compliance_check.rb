@@ -31,6 +31,21 @@ class StandaloneComplianceCheck < ApplicationRecord
     end
   end
 
+  # Latest completed admin-run outcome per source_url for catalog list views.
+  # Returns { source_url => { id:, passed: } }; missing keys mean not yet validated.
+  def self.latest_passed_by_source_url(urls)
+    list = Array(urls).map { |u| u.to_s.strip.presence }.compact.uniq
+    return {} if list.empty?
+
+    result = {}
+    admin_runs.where(source_url: list, status: "completed").order(checked_at: :desc).each do |row|
+      next if result.key?(row.source_url)
+
+      result[row.source_url] = { id: row.id, passed: row.passed }
+    end
+    result
+  end
+
   # Latest check matching exact source_url and/or filename (both ANDed when given).
   def self.latest_matching(source_url: nil, filename: nil)
     url = source_url.to_s.strip.presence

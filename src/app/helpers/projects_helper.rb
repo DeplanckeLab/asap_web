@@ -573,6 +573,45 @@ module ProjectsHelper
     end
   end
 
+  # Compact scFAIR status for the external catalog dataset column (beside title / DOI).
+  # Same check-icon language as project_scfair_compliance_list_icon; skipped for bulk.
+  # latest_passed_by_url from StandaloneComplianceCheck.latest_passed_by_source_url
+  # ({ url => { id:, passed: } }). Links to the standalone check when one exists.
+  def catalog_candidate_scfair_compliance_list_icon(candidate, latest_passed_by_url)
+    return if candidate.blank?
+    return if candidate.project_type_tag.to_s == 'bulk'
+
+    entry = (latest_passed_by_url || {})[candidate.url.to_s]
+    passed = entry&.fetch(:passed, nil)
+    check_id = entry&.fetch(:id, nil)
+
+    if passed == true
+      icon_class = 'fas fa-check text-green-600 text-xs'
+      title = 'scFAIR compliant'
+    else
+      icon_class = 'fas fa-check text-gray-300 text-xs'
+      title = if passed == false
+                'scFAIR not compliant'
+              else
+                'scFAIR not yet validated'
+              end
+    end
+
+    icon = content_tag(:i, '', class: icon_class)
+    wrapper_class = 'inline-flex items-center shrink-0'
+
+    if check_id.present?
+      link_to(
+        icon,
+        standalone_compliance_check_path(check_id),
+        class: "#{wrapper_class} hover:opacity-80",
+        title: "#{title} (open check)"
+      )
+    else
+      content_tag(:span, icon, class: wrapper_class, title: title)
+    end
+  end
+
   # Color from ontology_term_types (DB color / explore_color), with EXPLORE_STYLES fallback.
   # Accepts OntologyTermType#name (e.g. "technology") or field_group_id (e.g. "organism").
   def ontology_term_type_color(name_or_field_group)

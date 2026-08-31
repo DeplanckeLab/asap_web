@@ -71,6 +71,11 @@ task extract_ids_from_ontologies: :environment do
   h_node_term_ids = {}
 
   CellOntology.all.each do |co|
+    if ENV['ONTOLOGY_TAG'].present? && co.tag != ENV['ONTOLOGY_TAG']
+      puts "=> Skipping #{co.name} (ONTOLOGY_TAG=#{ENV['ONTOLOGY_TAG']})"
+      next
+    end
+
     puts "=> Treating #{co.name}"
 
     ## get genes
@@ -109,7 +114,7 @@ task extract_ids_from_ontologies: :environment do
       tmp_list.uniq!
 
       is_a_terms = Array(h_cot['is_a']).map { |e| normalize_ontology_identifier(e) }
-      part_of_terms = Array(h_cot.dig('relationship', 'part_of')).map { |e| normalize_ontology_identifier(e) }
+      part_of_terms = AsapData::OntologyLineageBridges.part_of_parent_identifiers(h_cot)
       bridge_terms = AsapData::OntologyLineageBridges.outbound_bridge_terms(
         cot.identifier,
         h_cot,

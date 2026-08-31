@@ -960,7 +960,8 @@ cross_field:
     EFO:0008919: [cell]
     EFO:0010184: [cell, nucleus]
     EFO:0008994: [na]
-  # Values forced when tissue_type is "cell line" (compliance fix form + CF-2a-2f).
+  # Values forced when tissue_type is "cell line" (compliance fix form + CF-2a-2d).
+  # suspension_type is NOT forced: schema constrains it via enum + CF-1 (assay map) only.
   cell_line_forced_fields:
     - field: self_reported_ethnicity_ontology_term_id
       value: na
@@ -975,8 +976,6 @@ cross_field:
       label_field: development_stage
       label_value: na
     - field: donor_id
-      value: na
-    - field: suspension_type
       value: na
   # Compliance fix form UI strings for cross-field constraints (CF-1, CF-2).
   fix_form:
@@ -1012,7 +1011,7 @@ cross_field:
   validation:
     # Shown when a conditional CF rule does not apply (e.g. CF-4 when not organoid).
     not_applicable: 'Not applicable'
-    # Template for CF-2a-2f when tissue_type is not "cell line"; %{detail} from skip_detail.
+    # Template for CF-2a-2d / CF-2f when tissue_type is not "cell line"; %{detail} from skip_detail.
     skip_not_cell_line_template: 'Not applicable (tissue_type is not "cell line"). For cell lines only: %{detail}'
     # Regex: routes obs/var field messages to cross-field.constraints in ComplianceReportGrouper.
     grouper_message_pattern: 'MUST|must not|must be|For assay|tissue_type is|Organism is|Organoid|Visium|C\. elegans|spatial\.is_single|Label must match special ontology id'
@@ -1085,19 +1084,6 @@ cross_field:
           field: donor_id
           severity: error
           template: 'tissue_type is "cell line" -- donor_id MUST be "na", got "%{value}".'
-      CF-2e:
-        slug: cell-line-suspension
-        title: 'CF-2e: Cell line suspension_type'
-        summary: 'When tissue_type is "cell line", suspension_type must be "na".'
-        token: suspension_type
-        messages:
-          skip_detail: 'suspension_type must be "na" (not used for cell line profiles)'
-          pass: 'suspension_type is "na"'
-          fail: 'suspension_type must be "na" for cell lines'
-        violation:
-          field: suspension_type
-          severity: error
-          template: 'tissue_type is "cell line" -- suspension_type MUST be "na", got "%{value}".'
       CF-2f:
         slug: cell-line-tissue-id
         title: 'CF-2f: Cell line tissue identifier'
@@ -1166,21 +1152,6 @@ cross_field:
         messages:
           pass: 'Spatial primary-data constraint OK'
           fail: 'is_primary_data must be false when spatial.is_single is false'
-      CF-7:
-        slug: cell-line-cell-type
-        title: 'CF-7: Cell line cell type'
-        summary: 'When tissue_type is "cell line", cell_type_ontology_term_id should be "na" or "unknown".'
-        checks:
-          - 'Applies only when tissue_type is "cell line"'
-          - 'Fails when cell_type_ontology_term_id is a real ontology term other than na or unknown'
-        messages:
-          pass: 'Cell line cell_type constraint OK'
-          fail: 'cell_type_ontology_term_id should be na/unknown for cell lines'
-        token: cell_type_ontology_term_id
-        violation:
-          field: cell_type_ontology_term_id
-          severity: error
-          template: 'tissue_type is "cell line" -- cell_type_ontology_term_id SHOULD be "na" or "unknown", got "%{value}".'
       CF-8:
         slug: visium-in-tissue
         title: 'CF-8: Visium in_tissue spots'
@@ -1512,11 +1483,11 @@ checks:
     summary: Metadata fields must satisfy cross-field consistency rules.
     rollup:
     - 'CF-1: assay_ontology_term_id determines allowed suspension_type values'
-    - 'CF-2a-2f: tissue_type "cell line" forces ethnicity, sex, development_stage,
-      donor_id, suspension_type, and tissue ID rules'
+    - 'CF-2a-2d, CF-2f: tissue_type "cell line" forces ethnicity, sex, development_stage,
+      donor_id to "na", and tissue ID should be Cellosaurus; suspension_type follows enum + CF-1'
     - 'CF-3: donor_id must not be "na" except for cell lines'
     - 'CF-4: organoid tissue must not be embryo (UBERON:0000922)'
-    - 'CF-5 to CF-9: spatial assay uniformity, metadata presence, is_primary_data,
+    - 'CF-5, CF-6, CF-8, CF-9: spatial assay uniformity, metadata presence, is_primary_data,
       and Visium in_tissue rules'
     - 'obs.label_pairs: ontology ID / label consistency (auto-generated from label_pairs)'
   ontology.database_resolution:
@@ -1660,7 +1631,7 @@ checks:
     summary: Optional numeric col_attrs used as embeddings (e.g. spatial coordinates).
     rollup:
     - /col_attrs/spatial coordinate embedding when present
-    - Embedding arrays are 2D with at least two columns
+    - Embedding arrays are 2D; X_* embeddings need at least two columns (other obsm keys: m >= 1)
     - Row counts match n_cells where applicable
     - No infinity or NaN values in embeddings
   loom.matrix_encoding:
@@ -1696,7 +1667,7 @@ checks:
     summary: Optional embedding matrices in obsm/varm/obsp/varp.
     rollup:
     - obsm/varm/obsp/varp embedding arrays are readable
-    - Embeddings are 2D with at least two columns
+    - Embeddings are 2D; X_* keys need at least two columns (other obsm keys: m >= 1)
     - Row counts match n_obs where applicable
     - No all-NaN or infinite values in embeddings
   h5ad.matrix_encoding:

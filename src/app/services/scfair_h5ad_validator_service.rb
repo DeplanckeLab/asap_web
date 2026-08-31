@@ -781,8 +781,14 @@ class ScfairH5adValidatorService
             store_obsm_spatial_metadata(arr)
           if n_obs and arr.shape[0] != n_obs:
             errors.append({"field": f"obsm/{key}", "message": "Embedding row count does not match n_obs"})
-          if arr.ndim != 2 or arr.shape[1] < 2:
-            errors.append({"field": f"obsm/{key}", "message": "Embedding must be 2D with at least 2 columns"})
+          # scFAIR: general obsm allows m >= 1; X_{suffix} (not X_spatial) requires >= 2 columns.
+          is_x_embedding = bool(re.match(r"^X_[A-Za-z][A-Za-z0-9_.-]*$", key)) and key != "X_spatial"
+          min_cols = 2 if is_x_embedding else 1
+          if arr.ndim != 2 or arr.shape[1] < min_cols:
+            if is_x_embedding:
+              errors.append({"field": f"obsm/{key}", "message": "X_* embedding must be 2D with at least 2 columns"})
+            else:
+              errors.append({"field": f"obsm/{key}", "message": "obsm array must be 2D with at least 1 column"})
           if np.isinf(arr).any():
             errors.append({"field": f"obsm/{key}", "message": "Embedding contains infinity values"})
           if np.isnan(arr).all():

@@ -34,8 +34,7 @@ module Scfair
         sex_term_id: sex,
         dev_stage_term_id: dev_stage,
         donor_id_val: donor,
-        tissue_term_id: tissue,
-        cell_type_term_id: first(@field_values["#{prefix}cell_type_ontology_term_id"])
+        tissue_term_id: tissue
       )
 
       errors = []
@@ -92,13 +91,6 @@ module Scfair
         field: Rules.cross_field_rule_field('CF-6'),
         status: is_single_present ? (cf6_bad ? 'failed' : 'passed') : 'skipped',
         message: is_single_present ? Rules.cross_field_rule_message_for_key('CF-6', cf6_bad ? :fail : :pass) : Rules.cross_field_not_applicable_message
-      }
-
-      cf7_bad = violated_keys.include?('CF-7')
-      rule_checks << {
-        field: Rules.cross_field_rule_field('CF-7'),
-        status: tissue_type == 'cell line' ? (cf7_bad ? 'failed' : 'passed') : 'skipped',
-        message: tissue_type == 'cell line' ? Rules.cross_field_rule_message_for_key('CF-7', cf7_bad ? :fail : :pass) : Rules.cross_field_not_applicable_message
       }
 
       rule_checks << cf8_visium_in_tissue_check(prefix, assays)

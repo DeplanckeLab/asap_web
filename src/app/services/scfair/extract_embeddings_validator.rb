@@ -2,8 +2,14 @@
 
 module Scfair
   # Embedding / coordinate array checks from obsm and col_embeddings metadata in a minimal extract.
+  #
+  # scFAIR 7.1.0:
+  # - general obsm arrays: shape (n_obs, m) with m >= 1
+  # - X_{suffix} embeddings: at least two columns; suffix must not be "spatial"
   class ExtractEmbeddingsValidator
-    MIN_COLUMNS = 2
+    X_EMBEDDING_KEY = /\AX_[A-Za-z][A-Za-z0-9_.-]*\z/
+    X_MIN_COLUMNS = 2
+    GENERAL_MIN_COLUMNS = 1
 
     def initialize(extract:, format:)
       @extract = extract || {}
@@ -19,7 +25,7 @@ module Scfair
       embedding_sections.each do |section|
         section.each do |key, meta|
           path = embedding_path(key)
-          validate_embedding(path, meta, errors)
+          validate_embedding(path, key, meta, errors)
         end
       end
 
@@ -62,7 +68,23 @@ module Scfair
       @format == 'loom' ? 'loom.embeddings' : 'obsm'
     end
 
-    def validate_embedding(path, meta, errors)
+    def embedding_base_key(path_or_key)
+      path_or_key.to_s.sub(%r{\Aobsm/}, '').sub(%r{\A/col_attrs/}, '')
+    end
+
+    # Schema X_{suffix} keys (not X_spatial). Other obsm keys only need m >= 1.
+    def schema_x_embedding_key?(path_or_key)
+      base = embedding_base_key(path_or_key)
+      return false if base == 'X_spatial'
+
+      base.match?(X_EMBEDDING_KEY)
+    end
+
+    def min_columns_for(path_or_key)
+      schema_x_embedding_key?(path_or_key) ? X_MIN_COLUMNS : GENERAL_MIN_COLUMNS
+    end
+
+    def validate_embedding(path, key, meta, errors)
       shape = Array(meta['shape']).map(&:to_i)
       if shape.empty?
         errors << { field: path, message: 'Could not read embedding array' }
@@ -73,8 +95,19 @@ module Scfair
         errors << { field: path, message: 'Embedding row count does not match n_obs' }
       end
 
-      if shape.size != 2 || shape.last < MIN_COLUMNS
-        errors << { field: path, message: 'Embedding must be 2D with at least 2 columns' }
+      min_columns = min_columns_for(key)
+      if shape.size != 2 || shape.last < min_columns
+        if schema_x_embedding_key?(key)
+          errors << {
+            field: path,
+            message: "X_* embedding must be 2D with at least #{X_MIN_COLUMNS} columns"
+          }
+        else
+          errors << {
+            field: path,
+            message: "obsm array must be 2D with at least #{GENERAL_MIN_COLUMNS} column"
+          }
+        end
       end
 
       if meta['has_inf'] == true

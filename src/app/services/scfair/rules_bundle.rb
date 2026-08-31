@@ -672,7 +672,7 @@ module Scfair
     end
 
     def cross_field_cell_line_forced_rule_keys
-      %w[CF-2a CF-2b CF-2c CF-2d CF-2e].freeze
+      %w[CF-2a CF-2b CF-2c CF-2d].freeze
     end
 
     def organism_dev_stage_mapping

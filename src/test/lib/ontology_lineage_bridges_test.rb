@@ -91,4 +91,25 @@ class OntologyLineageBridgesTest < TestBaseWithoutFixtures
 
     assert_equal ['ZFS:0100000'], targets
   end
+
+  test 'part_of_parent_identifiers reads BFO:0000050 relationship keys from OBO load' do
+    h_cot = {
+      'is_a' => ['GO:0005634'],
+      'relationship' => {
+        'BFO:0000050' => ['CL:0008046'],
+        'RO:0002131' => ['GO:0098522']
+      }
+    }
+
+    assert_equal ['CL:0008046'], AsapData::OntologyLineageBridges.part_of_parent_identifiers(h_cot)
+  end
+
+  test 'part_of_parent_identifiers also accepts legacy part_of relationship key' do
+    h_cot = {
+      'part_of' => ['CL:0000000'],
+      'relationship' => { 'part_of' => ['CL:0000187'] }
+    }
+
+    assert_equal %w[CL:0000000 CL:0000187], AsapData::OntologyLineageBridges.part_of_parent_identifiers(h_cot).sort
+  end
 end

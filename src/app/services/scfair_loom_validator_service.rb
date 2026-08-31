@@ -509,7 +509,7 @@ class ScfairLoomValidatorService
 
   # Cross-field constraint checks using the shared ScfairSchemaRules module.
   # These rules enforce dependencies between fields (e.g. assay determines
-  # suspension_type, tissue_type="cell line" forces several fields to "na").
+  # tissue_type="cell line" forces several fields to "na").
   def validate_cross_field_constraints
     return unless @file_info
 

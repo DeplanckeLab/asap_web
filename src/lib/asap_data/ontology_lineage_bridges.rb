@@ -41,6 +41,23 @@ module AsapData
       identifier.to_s.split(':', 2).first&.upcase
     end
 
+    # OBO loaders store part_of either as a top-level `part_of` tag or as
+    # relationship["part_of"] / relationship["BFO:0000050"] (RO/BFO CURIEs).
+    PART_OF_RELATION_KEYS = %w[part_of BFO:0000050].freeze
+
+    def part_of_parent_identifiers(h_cot)
+      terms = Array(h_cot['part_of'])
+      relationship_hash = h_cot['relationship'].is_a?(Hash) ? h_cot['relationship'] : {}
+      PART_OF_RELATION_KEYS.each do |key|
+        terms |= Array(relationship_hash[key])
+      end
+      terms.map { |entry| normalize_identifier(entry) }.compact.uniq
+    end
+
+    def part_of_relation_key?(rel)
+      PART_OF_RELATION_KEYS.include?(rel.to_s)
+    end
+
     # Identifiers referenced from content that belong to a different ontology prefix.
     def cross_ontology_targets(cot_identifier, h_cot, sources: :bridge)
       src_prefix = prefix_of(cot_identifier)
@@ -60,7 +77,7 @@ module AsapData
 
         relationship_hash = h_cot['relationship'].is_a?(Hash) ? h_cot['relationship'] : {}
         relationship_hash.each do |rel, values|
-          next if rel.to_s == 'part_of'
+          next if part_of_relation_key?(rel)
 
           candidates |= extract_identifiers_from_value(values)
         end

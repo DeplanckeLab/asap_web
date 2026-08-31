@@ -34,4 +34,37 @@ class ScfairExtractEmbeddingsValidatorTest < TestBaseWithoutFixtures
     passed = result[:valid_checks].find { |entry| entry[:field] == 'loom.embeddings' }
     assert_equal 'passed', passed[:status]
   end
+
+  test 'allows one-column non-X_obsm arrays per general obsm rule' do
+    result = Scfair::ExtractEmbeddingsValidator.new(
+      extract: {
+        'file_inventory' => { 'matrix' => { 'n_obs' => 7348 } },
+        'obsm' => {
+          'X_umap' => { 'shape' => [7348, 2], 'has_inf' => false },
+          'cluster_memberships' => { 'shape' => [7348, 1], 'has_inf' => false }
+        }
+      },
+      format: 'h5ad'
+    ).call
+
+    assert_empty result[:errors]
+    passed = result[:valid_checks].find { |entry| entry[:field] == 'obsm' }
+    assert_equal 'passed', passed[:status]
+  end
+
+  test 'still requires at least two columns for X_ embeddings' do
+    result = Scfair::ExtractEmbeddingsValidator.new(
+      extract: {
+        'file_inventory' => { 'matrix' => { 'n_obs' => 10 } },
+        'obsm' => {
+          'X_umap' => { 'shape' => [10, 1], 'has_inf' => false }
+        }
+      },
+      format: 'h5ad'
+    ).call
+
+    assert result[:errors].any? { |entry| entry[:field] == 'obsm/X_umap' }
+    assert_includes result[:errors].first[:message], 'X_* embedding'
+    assert_includes result[:errors].first[:message], '2 columns'
+  end
 end

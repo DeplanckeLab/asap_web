@@ -51,7 +51,6 @@ module ScfairSchemaRules
     dev_stage_term_id: nil,
     donor_id_val: nil,
     tissue_term_id: nil,
-    cell_type_term_id: nil,
     format: 'loom'
   )
     violations = []
@@ -74,8 +73,7 @@ module ScfairSchemaRules
         'CF-2a' => ['self_reported_ethnicity_ontology_term_id', ethnicity_term_id],
         'CF-2b' => ['sex_ontology_term_id', sex_term_id],
         'CF-2c' => ['development_stage_ontology_term_id', dev_stage_term_id],
-        'CF-2d' => ['donor_id', donor_id_val],
-        'CF-2e' => ['suspension_type', suspension_type]
+        'CF-2d' => ['donor_id', donor_id_val]
       }.each do |rule_key, (field, actual)|
         expected = cell_line_forced_value_for(field)
         next if actual.blank? || actual == expected
@@ -92,14 +90,6 @@ module ScfairSchemaRules
           'CF-2f',
           format: format,
           value: tissue_term_id
-        )
-      end
-
-      if cell_type_term_id.present? && !%w[na unknown].include?(cell_type_term_id)
-        violations << Scfair::Rules.cross_field_violation_message(
-          'CF-7',
-          format: format,
-          value: cell_type_term_id
         )
       end
     end

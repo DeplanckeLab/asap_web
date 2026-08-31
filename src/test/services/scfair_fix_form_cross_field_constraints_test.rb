@@ -85,7 +85,8 @@ class ScfairFixFormCrossFieldConstraintsTest < TestBaseWithoutFixtures
     assert_equal 'tissue_type is "cell line".', cell_line['reason']
 
     forced = cell_line['forced_fields']
-    assert_equal 5, forced.size
+    assert_equal 4, forced.size
+    refute forced.any? { |f| f['group_id'] == 'suspension_type' }
 
     ethnicity = forced.find { |f| f['group_id'] == 'self_reported_ethnicity' }
     assert_equal 'na', ethnicity['term_value']

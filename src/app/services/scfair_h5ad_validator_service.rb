@@ -102,23 +102,40 @@ class ScfairH5adValidatorService
         return [decode_attr(v) for v in value.tolist()]
       return value
 
+    STRUCTURAL_DATAFRAME_KEYS = {"_index", "index", "__categories"}
+
+    def read_dataframe_declared_columns(group):
+      co = group.attrs.get("column-order")
+      if co is None:
+        return []
+      if isinstance(co, np.ndarray):
+        co = co.tolist()
+      return [decode_attr(v) for v in co]
+
+    def dataframe_stored_column_names(group):
+      declared = read_dataframe_declared_columns(group)
+      stored = set()
+      if declared:
+        declared_set = set(declared)
+        for col in declared:
+          if col in group:
+            stored.add(col)
+        for key in group.keys():
+          if key in STRUCTURAL_DATAFRAME_KEYS:
+            continue
+          if key in declared_set:
+            continue
+          if any(d.startswith(f"{key}/") for d in declared_set):
+            continue
+          stored.add(key)
+        return sorted(stored)
+      return sorted(k for k in group.keys() if k not in STRUCTURAL_DATAFRAME_KEYS)
+
     def obs_dataset_keys(obs_group):
-      # Only AnnData structural keys are excluded. Single leading "_" (e.g. _Depth)
-      # is a valid column name; scFAIR forbids only the "__" prefix.
-      skip = {"_index", "index", "__categories"}
-      return {k for k in obs_group.keys() if k not in skip}
+      return set(dataframe_stored_column_names(obs_group))
 
     def metadata_column_keys(group):
-      skip = {"_index", "index", "__categories"}
-      return sorted(k for k in group.keys() if k not in skip)
-
-    def store_metadata_columns(layer, names):
-      if names:
-        field_values[f"metadata/{layer}/columns"] = sorted(names)
-
-    def metadata_column_keys(group):
-      skip = {"_index", "index", "__categories"}
-      return sorted(k for k in group.keys() if k not in skip)
+      return dataframe_stored_column_names(group)
 
     def store_metadata_columns(layer, names):
       if names:

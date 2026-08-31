@@ -9,13 +9,13 @@
 #
 # Optional env:
 #   OUT=tmp/column_order_rerun_candidates.tsv
-#   MATCH=underscore   (default: only when all missing cols start with _)
+#   MATCH=any          (default: any column-order not-stored error)
+#   MATCH=underscore   (only when all missing cols start with _)
 #   MATCH=scvi         (column-order error mentioning _scvi_* or _indices)
-#   MATCH=any          (any column-order not-stored error)
 
 require 'fileutils'
 
-MATCH_MODE = ENV.fetch('MATCH', 'underscore').downcase
+MATCH_MODE = ENV.fetch('MATCH', 'any').downcase
 OUT_PATH = ENV.fetch('OUT', Rails.root.join('tmp/column_order_rerun_candidates.tsv').to_s)
 
 def column_order_missing_columns(message)

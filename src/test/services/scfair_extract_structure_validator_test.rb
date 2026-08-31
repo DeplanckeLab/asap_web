@@ -58,6 +58,24 @@ class ScfairExtractStructureValidatorTest < ActiveSupport::TestCase
     refute result[:warnings].any? { |entry| entry[:field] == 'obs' }
   end
 
+  test 'passes column-order check for obs columns with slash in the name' do
+    extract = {
+      'file_inventory' => {
+        'structure' => { 'groups_present' => %w[obs var X] },
+        'matrix' => { 'n_obs' => 10, 'n_vars' => 100 },
+        'obs' => {
+          'column_names' => %w[organism T/NK_cycling T/NK_cycling_abundance],
+          'declared_column_names' => %w[organism T/NK_cycling T/NK_cycling_abundance]
+        }
+      }
+    }
+
+    result = Scfair::ExtractStructureValidator.new(extract: extract, format: 'h5ad').call
+
+    refute result[:errors].any? { |entry| entry[:field] == 'obs' }
+    refute result[:warnings].any? { |entry| entry[:field] == 'obs' }
+  end
+
   test 'errors when column-order lists obs columns not stored in the file' do
     extract = {
       'file_inventory' => {

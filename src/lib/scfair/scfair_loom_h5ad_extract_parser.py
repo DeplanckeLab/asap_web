@@ -289,11 +289,49 @@ def read_dataset_scalar(group: h5py.Group, key: str) -> Any | None:
     return None
 
 
+STRUCTURAL_DATAFRAME_KEYS = {"_index", "index", "__categories"}
+
+
 def list_group_columns(group: h5py.Group) -> list[str]:
-    # AnnData structural keys only. Single leading "_" (e.g. _scvi_batch) is valid metadata;
-    # scFAIR forbids only the "__" prefix (see metadata_rules.forbidden_name_prefix).
-    skip = {"_index", "index", "__categories"}
-    return sorted(k for k in group.keys() if k not in skip)
+    # Top-level keys only (used for uns and other groups without column-order).
+    return sorted(k for k in group.keys() if k not in STRUCTURAL_DATAFRAME_KEYS)
+
+
+def read_dataframe_declared_columns(group: h5py.Group) -> list[str]:
+    co = group.attrs.get("column-order")
+    if co is None:
+        return []
+    if isinstance(co, np.ndarray):
+        co = co.tolist()
+    if isinstance(co, (list, tuple)):
+        return [str(decode_attr(v)) for v in co]
+    return [str(decode_attr(co))]
+
+
+def dataframe_stored_column_names(group: h5py.Group) -> list[str]:
+    """Return AnnData dataframe column names as stored in HDF5.
+
+    Names may contain "/" (stored as nested paths) or leading "_" (valid metadata).
+    Existence is tested with ``name in group``, not via ``group.keys()`` alone.
+    """
+    declared = read_dataframe_declared_columns(group)
+    stored: set[str] = set()
+    if declared:
+        declared_set = set(declared)
+        for col in declared:
+            if col in group:
+                stored.add(col)
+        for key in group.keys():
+            if key in STRUCTURAL_DATAFRAME_KEYS:
+                continue
+            if key in declared_set:
+                continue
+            if any(d.startswith(f"{key}/") for d in declared_set):
+                continue
+            stored.add(key)
+        return sorted(stored)
+
+    return list_group_columns(group)
 
 
 def top_level_groups(f: h5py.File, candidates: list[str]) -> list[str]:
@@ -324,14 +362,7 @@ def read_matrix_dims_h5ad(f: h5py.File) -> dict[str, Any]:
 def read_obs_declared_columns(f: h5py.File) -> list[str]:
     if "obs" not in f:
         return []
-    co = f["obs"].attrs.get("column-order")
-    if co is None:
-        return []
-    if isinstance(co, np.ndarray):
-        co = co.tolist()
-    if isinstance(co, (list, tuple)):
-        return [str(decode_attr(v)) for v in co]
-    return [str(decode_attr(co))]
+    return read_dataframe_declared_columns(f["obs"])
 
 
 def array_stats(arr: np.ndarray) -> tuple[bool, bool]:
@@ -535,8 +566,8 @@ def assemble_extract(parsed: dict[str, Any]) -> dict[str, Any]:
 
 def parse_h5ad(file_path: Path) -> dict[str, Any]:
     with h5py.File(file_path, "r") as f:
-        obs_cols = list_group_columns(f["obs"]) if "obs" in f else []
-        var_cols = list_group_columns(f["var"]) if "var" in f else []
+        obs_cols = dataframe_stored_column_names(f["obs"]) if "obs" in f else []
+        var_cols = dataframe_stored_column_names(f["var"]) if "var" in f else []
         uns_keys = list_group_columns(f["uns"]) if "uns" in f else []
 
         dims = read_matrix_dims_h5ad(f)

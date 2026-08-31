@@ -9,13 +9,13 @@
 #
 # Optional env:
 #   OUT=tmp/column_order_rerun_candidates.tsv
-#   MATCH=underscore   (default: only when all missing cols start with _)
+#   MATCH=any          (default: any column-order not-stored error)
+#   MATCH=underscore   (only when all missing cols start with _)
 #   MATCH=scvi         (column-order error mentioning _scvi_* or _indices)
-#   MATCH=any          (any column-order not-stored error)
 
 require 'fileutils'
 
-MATCH_MODE = ENV.fetch('MATCH', 'underscore').downcase
+MATCH_MODE = ENV.fetch('MATCH', 'any').downcase
 OUT_PATH = ENV.fetch('OUT', Rails.root.join('tmp/column_order_rerun_candidates.tsv').to_s)
 
 def column_order_missing_columns(message)
@@ -162,8 +162,7 @@ if ids.size < 400
   sql_count = StandaloneComplianceCheck.admin_runs
                                        .where(status: 'completed')
                                        .where("result_json::text ILIKE ?", '%column-order attribute lists%not stored in the file%')
-                                       .where("result_json::text ILIKE ?", '%_scvi_%')
                                        .count
-  puts "\nDiagnostic: admin completed checks with column-order + _scvi in JSON: #{sql_count}"
+  puts "\nDiagnostic: admin completed checks with column-order not-stored error: #{sql_count}"
   puts "(If this is ~535 but matched is lower, URL/filename linkage to candidates is the gap.)"
 end

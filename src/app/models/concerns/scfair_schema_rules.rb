@@ -15,6 +15,11 @@ module ScfairSchemaRules
   VALID_SEX_TERMS = Scfair::Rules.valid_sex_terms
   CELL_LINE_FORCED_FIELDS = Scfair::Rules.cell_line_forced_fields
 
+  def cell_line_forced_value_for(field)
+    entry = CELL_LINE_FORCED_FIELDS.find { |forced| forced[:field] == field.to_s }
+    entry && entry[:value]
+  end
+
   def resolve_suspension_type_for_assay(assay_term_id)
     return nil if assay_term_id.blank?
 
@@ -65,43 +70,20 @@ module ScfairSchemaRules
     end
 
     if tissue_type == 'cell line'
-      if ethnicity_term_id.present? && ethnicity_term_id != 'na'
-        violations << Scfair::Rules.cross_field_violation_message(
-          'CF-2a',
-          format: format,
-          value: ethnicity_term_id
-        )
-      end
+      {
+        'CF-2a' => ['self_reported_ethnicity_ontology_term_id', ethnicity_term_id],
+        'CF-2b' => ['sex_ontology_term_id', sex_term_id],
+        'CF-2c' => ['development_stage_ontology_term_id', dev_stage_term_id],
+        'CF-2d' => ['donor_id', donor_id_val],
+        'CF-2e' => ['suspension_type', suspension_type]
+      }.each do |rule_key, (field, actual)|
+        expected = cell_line_forced_value_for(field)
+        next if actual.blank? || actual == expected
 
-      if sex_term_id.present? && sex_term_id != 'na'
         violations << Scfair::Rules.cross_field_violation_message(
-          'CF-2b',
+          rule_key,
           format: format,
-          value: sex_term_id
-        )
-      end
-
-      if dev_stage_term_id.present? && dev_stage_term_id != 'unknown'
-        violations << Scfair::Rules.cross_field_violation_message(
-          'CF-2c',
-          format: format,
-          value: dev_stage_term_id
-        )
-      end
-
-      if donor_id_val.present? && donor_id_val != 'na'
-        violations << Scfair::Rules.cross_field_violation_message(
-          'CF-2d',
-          format: format,
-          value: donor_id_val
-        )
-      end
-
-      if suspension_type.present? && suspension_type != 'na'
-        violations << Scfair::Rules.cross_field_violation_message(
-          'CF-2e',
-          format: format,
-          value: suspension_type
+          value: actual
         )
       end
 

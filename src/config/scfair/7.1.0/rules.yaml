@@ -747,10 +747,10 @@ fix_form:
       term_field: development_stage_ontology_term_id
       label_field: development_stage
       label: Development Stage
-      description: Developmental stage of the organism
+      description: 'Developmental stage or "unknown"; "na" when tissue_type is cell line (CF-2c)'
       display_order: 5
       field_kind: ontology_pair
-      term_format_hint: 'HsapDv:XXXXXXX or unknown'
+      term_format_hint: 'HsapDv:XXXXXXX or unknown or na'
     - id: disease
       layer: obs
       term_field: disease_ontology_term_id
@@ -971,9 +971,9 @@ cross_field:
       label_field: sex
       label_value: na
     - field: development_stage_ontology_term_id
-      value: unknown
+      value: na
       label_field: development_stage
-      label_value: unknown
+      label_value: na
     - field: donor_id
       value: na
     - field: suspension_type
@@ -1062,16 +1062,16 @@ cross_field:
       CF-2c:
         slug: cell-line-development-stage
         title: 'CF-2c: Cell line development stage'
-        summary: 'When tissue_type is "cell line", development_stage_ontology_term_id must be "unknown".'
+        summary: 'When tissue_type is "cell line", development_stage_ontology_term_id must be "na".'
         token: development_stage_ontology_term_id
         messages:
-          skip_detail: 'development_stage must be "unknown" (no in vivo stage for a line)'
-          pass: 'development_stage_ontology_term_id is "unknown"'
-          fail: 'development_stage_ontology_term_id must be "unknown" for cell lines'
+          skip_detail: 'development_stage must be "na" (no in vivo stage for a line)'
+          pass: 'development_stage_ontology_term_id is "na"'
+          fail: 'development_stage_ontology_term_id must be "na" for cell lines'
         violation:
           field: development_stage_ontology_term_id
           severity: error
-          template: 'tissue_type is "cell line" -- development_stage_ontology_term_id MUST be "unknown", got "%{value}".'
+          template: 'tissue_type is "cell line" -- development_stage_ontology_term_id MUST be "na", got "%{value}".'
       CF-2d:
         slug: cell-line-donor-id
         title: 'CF-2d: Cell line donor_id'

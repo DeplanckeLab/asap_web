@@ -93,8 +93,8 @@ class ScfairFixFormCrossFieldConstraintsTest < TestBaseWithoutFixtures
     assert_equal 'na', ethnicity['label_value']
 
     dev_stage = forced.find { |f| f['group_id'] == 'development_stage' }
-    assert_equal 'unknown', dev_stage['term_value']
-    assert_equal 'unknown', dev_stage['label_value']
+    assert_equal 'na', dev_stage['term_value']
+    assert_equal 'na', dev_stage['label_value']
 
     assert_includes cell_line['affected_group_ids'], 'tissue'
     assert_includes cell_line['tissue_note']['detail'], 'Cellosaurus'

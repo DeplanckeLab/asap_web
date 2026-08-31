@@ -19,6 +19,7 @@ import {
   queryDeSecondMetadataHidden
 } from "visualization/de_second_metadata_attrs"
 import { DE_COMPLEMENTARY_GROUP_VALUE } from "visualization/de_group_complementary"
+import { DeOperandCombobox, buildComposeOperandOptionGroups } from "visualization/de_operand_combobox"
 import { resetInputDataWidgetToEmptyPlaceholder } from "lib/reset_input_data_widget_placeholder"
 import { formatNumberWithDelimiter } from "lib/number_format"
 import { dataUrlToJpegThumbnail, isCheckpointThumbnailDataUrl, canvasToJpegThumbnailDataUrl } from "lib/checkpoint_thumbnail"
@@ -19889,6 +19890,8 @@ export default class extends Controller {
   closeDeSelectionModal() {
     this.stopDeSelectionDrag()
     this.stopDeSelectionResize()
+    this.deOperandComboboxA?.closeDropdown()
+    this.deOperandComboboxB?.closeDropdown()
     const overlay = document.getElementById('de-selection-overlay')
     if (!overlay) return
     overlay.style.display = 'none'
@@ -21004,9 +21007,9 @@ export default class extends Controller {
   }
 
   populateDeSelectionOperands() {
-    const operandASelect = document.getElementById('de-selection-operand-a')
-    const operandBSelect = document.getElementById('de-selection-operand-b')
-    if (!operandASelect || !operandBSelect) return
+    const operandAInput = document.getElementById('de-selection-operand-a')
+    const operandBInput = document.getElementById('de-selection-operand-b')
+    if (!operandAInput || !operandBInput) return
 
     const loomFile = this.getCurrentLoomFileForRequest()
     const items = (this.savedSelections || []).filter((item) => !loomFile || item.loomFile === loomFile)
@@ -21014,13 +21017,16 @@ export default class extends Controller {
 
     const savedOptions = items.map((item) => ({
       value: `saved:${item.id}`,
-      label: this.composeSelectionOptionLabel(item)
+      label: this.composeSelectionOptionLabel(item),
+      searchText: String(this.composeSelectionOptionLabel(item) || '').toLowerCase()
     }))
     const categoryOptions = this.collectComposeCategoryOperandOptions()
     const options = [...savedOptions, ...categoryOptions]
-    const optionMarkup = this.buildComposeOperandSelectMarkup([], savedOptions, categoryOptions)
-    operandASelect.innerHTML = optionMarkup || '<option value="">No groups available</option>'
-    operandBSelect.innerHTML = optionMarkup || '<option value="">No groups available</option>'
+    const groups = buildComposeOperandOptionGroups([], savedOptions, categoryOptions)
+
+    this.ensureDeOperandComboboxes()
+    this.deOperandComboboxA.setGroups(groups)
+    this.deOperandComboboxB.setGroups(groups)
 
     const validValues = new Set(options.map((opt) => opt.value))
     const checkedValuesInOrder = (this.savedCellSetSelectionOrder || [])
@@ -21034,8 +21040,8 @@ export default class extends Controller {
       secondValue = fallbackDistinct ? fallbackDistinct.value : firstValue
     }
 
-    if (validValues.has(firstValue)) operandASelect.value = firstValue
-    if (validValues.has(secondValue)) operandBSelect.value = secondValue
+    if (validValues.has(firstValue)) this.deOperandComboboxA.setValue(firstValue, { silent: true })
+    if (validValues.has(secondValue)) this.deOperandComboboxB.setValue(secondValue, { silent: true })
 
     const canCompareGroups = options.length >= 2
     const modeRow = document.getElementById('de-selection-mode-row')
@@ -21050,6 +21056,22 @@ export default class extends Controller {
       groupRadio.disabled = false
     }
     this.syncDeSelectionModeUi()
+  }
+
+  ensureDeOperandComboboxes() {
+    const wrapA = document.getElementById('de-selection-operand-a-wrap')
+    const wrapB = document.getElementById('de-selection-operand-b-combobox')
+    if (!wrapA || !wrapB) return
+
+    const onChange = () => this.updateDeSelectionPreview()
+    const comboboxOptions = { onChange, escapeHtmlFn: (text) => this.escapeHtml(text) }
+
+    if (!this.deOperandComboboxA) {
+      this.deOperandComboboxA = new DeOperandCombobox(wrapA, comboboxOptions)
+    }
+    if (!this.deOperandComboboxB) {
+      this.deOperandComboboxB = new DeOperandCombobox(wrapB, comboboxOptions)
+    }
   }
 
   getDeSelectionMode() {
@@ -21069,7 +21091,7 @@ export default class extends Controller {
     const colPlural = this.getColLabel({ plural: true })
     const operandALabel = document.getElementById('de-selection-operand-a-label')
     const operandBWrap = document.getElementById('de-selection-operand-b-wrap')
-    const operandBSelect = document.getElementById('de-selection-operand-b')
+    const operandBCombobox = document.getElementById('de-selection-operand-b-combobox')
     const operandBLabel = document.getElementById('de-selection-operand-b-label')
     const hint = document.getElementById('de-selection-mode-hint')
     let complementaryDisplay = document.getElementById('de-selection-complementary-display')
@@ -21088,10 +21110,10 @@ export default class extends Controller {
       complementaryDisplay.textContent = `All other ${colPlural}`
     }
 
-    if (operandBSelect) {
-      operandBSelect.style.display = isGroupMode ? '' : 'none'
-      operandBSelect.disabled = !isGroupMode
+    if (operandBCombobox) {
+      operandBCombobox.style.display = isGroupMode ? '' : 'none'
     }
+    this.deOperandComboboxB?.setDisabled(!isGroupMode)
     if (complementaryDisplay) {
       complementaryDisplay.style.display = isGroupMode ? 'none' : ''
     }
@@ -21522,22 +21544,22 @@ export default class extends Controller {
   async updateDeSelectionPreview() {
     this.ensureComposeSelectionStateInitialized()
     const preview = document.getElementById('de-selection-preview')
-    const operandASelect = document.getElementById('de-selection-operand-a')
-    const operandBSelect = document.getElementById('de-selection-operand-b')
-    if (!preview || !operandASelect) return
+    const operandAInput = document.getElementById('de-selection-operand-a')
+    const operandBInput = document.getElementById('de-selection-operand-b')
+    if (!preview || !operandAInput) return
 
     const mode = this.getDeSelectionMode()
     const colPlural = this.getColLabel({ plural: true })
     const colSets = this.getColSetLabel({ plural: true })
     const minCells = 3
-    if (!operandASelect.value || (mode === 'group' && (!operandBSelect || !operandBSelect.value))) {
+    if (!operandAInput.value || (mode === 'group' && (!operandBInput || !operandBInput.value))) {
       preview.innerHTML = '<div style="grid-column: 1 / -1; font-size: 12px; color: #6b7280; padding: 8px;">Select group(s) to preview.</div>'
       this.setDeSelectionRunEnabled(false, 'Select groups with at least 3 cells each to run DE')
       return
     }
 
     try {
-      const operandA = await this.resolveComposeOperandSelection(operandASelect.value)
+      const operandA = await this.resolveComposeOperandSelection(operandAInput.value)
       if (!operandA) {
         this.setDeSelectionRunEnabled(false, 'Select a valid reference group')
         return
@@ -21558,7 +21580,7 @@ export default class extends Controller {
       let comparedTitle = 'Complementary'
 
       if (mode === 'group') {
-        const operandB = await this.resolveComposeOperandSelection(operandBSelect.value)
+        const operandB = await this.resolveComposeOperandSelection(operandBInput.value)
         if (!operandB) {
           this.setDeSelectionRunEnabled(false, 'Select a valid compared group')
           return
@@ -21802,15 +21824,15 @@ export default class extends Controller {
   }
 
   getDeSelectedOperandItems() {
-    const operandASelect = document.getElementById('de-selection-operand-a')
-    const operandBSelect = document.getElementById('de-selection-operand-b')
-    if (!operandASelect) return { itemA: null, itemB: null, mode: 'complementary' }
+    const operandAInput = document.getElementById('de-selection-operand-a')
+    const operandBInput = document.getElementById('de-selection-operand-b')
+    if (!operandAInput) return { itemA: null, itemB: null, mode: 'complementary' }
 
     const mode = this.getDeSelectionMode()
-    const itemA = this.resolveDeOperandForSubmit(operandASelect.value)
+    const itemA = this.resolveDeOperandForSubmit(operandAInput.value)
     let itemB = null
-    if (mode === 'group' && operandBSelect) {
-      itemB = this.resolveDeOperandForSubmit(operandBSelect.value)
+    if (mode === 'group' && operandBInput) {
+      itemB = this.resolveDeOperandForSubmit(operandBInput.value)
     }
     return { itemA, itemB, mode }
   }
@@ -22691,24 +22713,14 @@ export default class extends Controller {
 
   buildComposeOperandSelectMarkup(virtualOptions, savedOptions, categoryOptions, fanoutOptions = []) {
     const renderOptions = (list) => (list || []).map((opt) => (
-      `<option value="${this.escapeHtml(opt.value)}">${this.escapeHtml(opt.label)}</option>`
+      `<option value="${this.escapeHtml(opt.value)}">${this.escapeHtml(opt.displayLabel || opt.label)}</option>`
     )).join('')
 
-    const groups = []
-    if (fanoutOptions.length > 0) {
-      groups.push(`<optgroup label="Batch fan-out">${renderOptions(fanoutOptions)}</optgroup>`)
-    }
-    if (virtualOptions.length > 0) {
-      groups.push(`<optgroup label="Virtual results">${renderOptions(virtualOptions)}</optgroup>`)
-    }
-    if (savedOptions.length > 0) {
-      groups.push(`<optgroup label="Saved selections">${renderOptions(savedOptions)}</optgroup>`)
-    }
-    if (categoryOptions.length > 0) {
-      groups.push(`<optgroup label="Metadata categories">${renderOptions(categoryOptions)}</optgroup>`)
-    }
+    const groups = buildComposeOperandOptionGroups(virtualOptions, savedOptions, categoryOptions, fanoutOptions)
     if (groups.length === 0) return ''
-    return groups.join('')
+    return groups.map((group) => (
+      `<optgroup label="${this.escapeHtml(group.label)}">${renderOptions(group.options)}</optgroup>`
+    )).join('')
   }
 
   collectComposeCategoryOperandOptions() {

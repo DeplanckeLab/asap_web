@@ -77,15 +77,43 @@
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; margin-bottom: 14px;">
           <div>
             <label id="de-selection-operand-a-label" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Reference group</label>
-            <select id="de-selection-operand-a"
-                    onchange="if (window.visualizationController) window.visualizationController.updateDeSelectionPreview()"
-                    style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+            <div id="de-selection-operand-a-wrap"
+                 class="de-operand-combobox"
+                 style="position: relative;">
+              <input type="hidden"
+                     id="de-selection-operand-a"
+                     data-de-operand-value
+                     value="">
+              <input type="text"
+                     id="de-selection-operand-a-input"
+                     data-de-operand-input
+                     placeholder="Search saved selections or metadata categories..."
+                     autocomplete="off"
+                     style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; box-sizing: border-box;">
+              <div id="de-selection-operand-a-dropdown"
+                   data-de-operand-dropdown
+                   style="display: none; position: absolute; top: 100%; left: 0; right: 0; margin-top: 2px; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; max-height: 260px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.12);"></div>
+            </div>
           </div>
           <div id="de-selection-operand-b-wrap">
             <label id="de-selection-operand-b-label" style="display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px;">Compared group</label>
-            <select id="de-selection-operand-b"
-                    onchange="if (window.visualizationController) window.visualizationController.updateDeSelectionPreview()"
-                    style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px;"></select>
+            <div id="de-selection-operand-b-combobox"
+                 class="de-operand-combobox"
+                 style="position: relative;">
+              <input type="hidden"
+                     id="de-selection-operand-b"
+                     data-de-operand-value
+                     value="">
+              <input type="text"
+                     id="de-selection-operand-b-input"
+                     data-de-operand-input
+                     placeholder="Search saved selections or metadata categories..."
+                     autocomplete="off"
+                     style="width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 12px; box-sizing: border-box;">
+              <div id="de-selection-operand-b-dropdown"
+                   data-de-operand-dropdown
+                   style="display: none; position: absolute; top: 100%; left: 0; right: 0; margin-top: 2px; background: #fff; border: 1px solid #d1d5db; border-radius: 6px; max-height: 260px; overflow-y: auto; z-index: 10; box-shadow: 0 4px 12px rgba(0,0,0,0.12);"></div>
+            </div>
           </div>
         </div>
         <div id="de-selection-mode-hint" style="margin: -8px 0 14px; font-size: 11px; color: #6b7280;">

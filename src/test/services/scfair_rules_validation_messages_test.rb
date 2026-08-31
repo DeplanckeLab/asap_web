@@ -24,7 +24,7 @@ class ScfairRulesValidationMessagesTest < TestBaseWithoutFixtures
 
   test 'cell type banned terms load from ontology_fields in rules.yaml' do
     banned = Scfair::Rules.banned_cell_type_terms
-    assert_equal %w[CL:0000003 CL:0000255 CL:0000548 CL:0001035], banned
+    assert_equal %w[CL:0000003 CL:0000255 CL:0000257 CL:0000548], banned
 
     semantic = Scfair::Rules.semantic_rules_for('cell_type_ontology_term_id')
     assert_equal banned, semantic[:forbidden_exact]

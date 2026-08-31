@@ -112,7 +112,8 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
     banned = detail[:constraints].find { |row| row[:label] == 'Banned terms' }
     assert_not_nil banned
     assert_includes banned[:value], 'CL:0000003'
-    assert_includes banned[:value], 'CL:0001035'
+    assert_includes banned[:value], 'CL:0000257'
+    refute_includes banned[:value], 'CL:0001035'
     assert detail[:constraints].any? { |row| row[:label] == 'Banned branches' && row[:value].include?('WBbt:0006803') }
     refute detail[:constraints].any? { |row| row[:label] == 'Must descend from' }
   end

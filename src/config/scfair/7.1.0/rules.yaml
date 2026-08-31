@@ -461,8 +461,8 @@ ontology_fields:
     banned_terms:
       - CL:0000003
       - CL:0000255
+      - CL:0000257
       - CL:0000548
-      - CL:0001035
   development_stage_ontology_term_id:
     prefixes: [HsapDv, MmusDv, WBls, ZFS, FBdv, UBERON]
     special_values: [unknown, na]

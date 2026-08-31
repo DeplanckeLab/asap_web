@@ -40,6 +40,24 @@ class ScfairExtractStructureValidatorTest < ActiveSupport::TestCase
     assert_match(/The obs columns CellID, assay are stored in the file/, result[:warnings].first[:message])
   end
 
+  test 'passes column-order check for underscore-prefixed obs metadata columns' do
+    extract = {
+      'file_inventory' => {
+        'structure' => { 'groups_present' => %w[obs var X] },
+        'matrix' => { 'n_obs' => 10, 'n_vars' => 100 },
+        'obs' => {
+          'column_names' => %w[organism _scvi_batch _scvi_labels],
+          'declared_column_names' => %w[organism _scvi_batch _scvi_labels]
+        }
+      }
+    }
+
+    result = Scfair::ExtractStructureValidator.new(extract: extract, format: 'h5ad').call
+
+    refute result[:errors].any? { |entry| entry[:field] == 'obs' }
+    refute result[:warnings].any? { |entry| entry[:field] == 'obs' }
+  end
+
   test 'errors when column-order lists obs columns not stored in the file' do
     extract = {
       'file_inventory' => {

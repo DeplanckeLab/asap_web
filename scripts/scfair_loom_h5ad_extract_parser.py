@@ -282,8 +282,10 @@ def read_dataset_scalar(group: h5py.Group, key: str) -> Any | None:
 
 
 def list_group_columns(group: h5py.Group) -> list[str]:
+    # AnnData structural keys only. Single leading "_" (e.g. _scvi_batch) is valid metadata;
+    # scFAIR forbids only the "__" prefix (see metadata_rules.forbidden_name_prefix).
     skip = {"_index", "index", "__categories"}
-    return sorted(k for k in group.keys() if k not in skip and not k.startswith("_"))
+    return sorted(k for k in group.keys() if k not in skip)
 
 
 def top_level_groups(f: h5py.File, candidates: list[str]) -> list[str]:

@@ -416,8 +416,19 @@ class ScfairLoomValidatorService
   end
 
   def validate_ontology_terms
+    tissue_type = get_metadata_sample('/col_attrs/tissue_type')&.to_s
+    organism = get_global_attr('organism_ontology_term_id')&.to_s
     Scfair::Rules.ontology_paths('loom').each do |path, prefixes|
       next if path.start_with?('/attrs/')
+
+      field_name = path.split('/').last.to_s
+      if Scfair::TissueOntologyValidation.field?(field_name)
+        prefixes = Scfair::TissueOntologyValidation.format_prefixes(
+          tissue_type: tissue_type,
+          organism: organism,
+          default_prefixes: prefixes
+        )
+      end
 
       allow_special = ALLOWED_SPECIAL_VALUES.fetch(path, [])
       validate_ontology_field(path, prefixes, allow_special: allow_special)

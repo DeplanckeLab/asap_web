@@ -59,6 +59,27 @@ class ScfairOntologySemanticsValidatorTest < TestBaseWithoutFixtures
     resolver.verify
   end
 
+  test 'uses cell type lineage rules for primary cell culture tissue terms' do
+    field_values = {
+      'obs/tissue_type' => ['primary cell culture'],
+      'obs/tissue_ontology_term_id' => ['CL:0000084'],
+      'obs/tissue' => ['T cell']
+    }
+    resolver = Minitest::Mock.new
+    resolver.expect :exists?, true, ['CL:0000084']
+    resolver.expect :descendant_of?, true, ['CL:0000084', 'CL:0000000']
+    resolver.expect :descendant_of?, false, ['CL:0000084', 'WBbt:0006803']
+
+    Scfair::OntologyLineageResolver.stub(:new, resolver) do
+      result = Scfair::OntologySemanticsValidator.new(field_values: field_values, format: 'h5ad').call
+      refute result[:errors].any? { |entry| entry[:message].to_s.include?('must be under UBERON:0001062') }
+      descendants = result[:valid_checks].find { |check| check[:field] == 'ontology.semantics.tissue_ontology_term_id.descendants' }
+      assert_equal 'passed', descendants[:status]
+    end
+
+    resolver.verify
+  end
+
   test 'does not split extracted label pair tokens on the pair separator' do
     field_values = {
       'obs/cell_type_ontology_term_id' => %w[CL:0000037 CL:0008065],

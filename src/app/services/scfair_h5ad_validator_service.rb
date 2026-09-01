@@ -558,8 +558,45 @@ class ScfairH5adValidatorService
         "message": check_message(check_id, code, path=field, **kwargs),
       }
 
-    def check_ontology_values(field_path, values):
-      prefixes = ONTOLOGY_FIELDS[field_path]
+    def read_obs_scalar(obs_group, key):
+      if obs_group is None or key not in obs_group:
+        return ""
+      values = read_obs_column_values(obs_group, key)
+      return values[0] if values else ""
+
+    def read_uns_scalar(uns_group, key):
+      if uns_group is None:
+        return ""
+      values = read_uns_value(uns_group, key)
+      return values[0] if values else ""
+
+    def tissue_ontology_format_prefixes(tissue_type, organism, default_prefixes):
+      cfg = RULES.get("tissue_ontology_validation", {})
+      cell_line = cfg.get("cell_line_tissue_type", "cell line")
+      primary = cfg.get("primary_cell_culture_tissue_type", "primary cell culture")
+      cvcl_tag = cfg.get("cellosaurus_prefix", "CVCL").rstrip("_")
+      cell_map = cfg.get("organism_cell_type_mapping", {})
+      cell_default = cfg.get("organism_cell_type_default_prefixes", ["CL"])
+      tissue_map = cfg.get("organism_tissue_mapping", {})
+      tissue_default = cfg.get("organism_tissue_default_prefixes", ["UBERON"])
+      tissue_type = (tissue_type or "").strip()
+      organism = (organism or "").strip()
+      if tissue_type == cell_line:
+        return [cvcl_tag]
+      if tissue_type == primary:
+        return list(cell_map.get(organism, cell_default))
+      if not tissue_type:
+        return list(default_prefixes)
+      if organism:
+        return list(tissue_map.get(organism, tissue_default))
+      return list(default_prefixes)
+
+    def check_ontology_values(field_path, values, obs_group=None, uns_group=None):
+      prefixes = list(ONTOLOGY_FIELDS[field_path])
+      if field_path == "obs/tissue_ontology_term_id":
+        tissue_type = read_obs_scalar(obs_group, "tissue_type")
+        organism = read_uns_scalar(uns_group, "organism_ontology_term_id") or read_obs_scalar(obs_group, "organism_ontology_term_id")
+        prefixes = tissue_ontology_format_prefixes(tissue_type, organism, prefixes)
       specials = SPECIAL_VALUES.get(field_path, set())
       field_values[field_path] = values
       issues = 0
@@ -764,7 +801,7 @@ class ScfairH5adValidatorService
           field_started = time.perf_counter()
           values = read_obs_column_values(obs_group, key)
           if values:
-            check_ontology_values(field_path, values)
+            check_ontology_values(field_path, values, obs_group=obs_group, uns_group=uns_group)
           emit_timing(f"h5py.ontology/{field_path}", field_started, {"n_unique": len(values)})
 
       if uns_group is not None:
@@ -776,7 +813,7 @@ class ScfairH5adValidatorService
           field_started = time.perf_counter()
           values = read_uns_value(uns_group, key)
           if values:
-            check_ontology_values(field_path, values)
+            check_ontology_values(field_path, values, obs_group=obs_group, uns_group=uns_group)
           emit_timing(f"h5py.ontology/{field_path}", field_started, {"n_unique": len(values)})
       emit_timing("h5py.ontology", ontology_started)
 

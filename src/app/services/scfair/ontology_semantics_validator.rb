@@ -13,8 +13,9 @@ module Scfair
 
     def call
       checks = []
+      @tissue_type = TissueOntologyValidation.tissue_type_from(@field_values, @format)
       field_names.each do |field_name|
-        rules = OntologySemanticRules.rules_for(field_name)
+        rules = semantic_rules_for(field_name)
         next if rules.blank?
         path = path_for(field_name)
         values = split_values(@field_values[path])
@@ -162,6 +163,14 @@ module Scfair
 
     def field_names
       Rules.semantic_field_names
+    end
+
+    def semantic_rules_for(field_name)
+      if TissueOntologyValidation.field?(field_name)
+        return TissueOntologyValidation.semantic_rules(tissue_type: @tissue_type)
+      end
+
+      OntologySemanticRules.rules_for(field_name)
     end
 
     def path_for(field_name)

@@ -1648,7 +1648,16 @@ module Scfair
         'ontology_format_examples' => ontology_fields.each_with_object({}) do |(field_name, _cfg), out|
           out[field_name.to_s] = ontology_format_example(field_name.to_s)
         end,
-        'check_messages' => validator_check_messages
+        'check_messages' => validator_check_messages,
+        'tissue_ontology_validation' => {
+          'cell_line_tissue_type' => organism_specific_validation_config[:cell_line_tissue_type],
+          'primary_cell_culture_tissue_type' => organism_specific_validation_config[:primary_cell_culture_tissue_type],
+          'cellosaurus_prefix' => cellosaurus_ontology_tag,
+          'organism_cell_type_mapping' => organism_cell_type_mapping,
+          'organism_cell_type_default_prefixes' => organism_cell_type_default_prefixes,
+          'organism_tissue_mapping' => organism_tissue_mapping,
+          'organism_tissue_default_prefixes' => organism_tissue_default_prefixes
+        }
       }
     end
 

@@ -12,11 +12,14 @@ module Scfair
       errors = []
       warnings = []
       valid_checks = []
+      @tissue_type = TissueOntologyValidation.tissue_type_from(@field_values, @format)
+      @organism_term_id = TissueOntologyValidation.organism_from(@field_values, @format)
 
       Rules.ontology_paths(@format).each do |path, prefixes|
         values = distinct_values(path)
         next if values.empty?
 
+        prefixes = effective_prefixes(path, prefixes)
         issues = 0
         values.each do |value|
           value.split(' || ').map(&:strip).reject(&:blank?).each do |term|
@@ -76,6 +79,16 @@ module Scfair
                  Rules.allowed_special_values(@format)[path.to_sym] ||
                  []
       specials.include?(term)
+    end
+
+    def effective_prefixes(path, default_prefixes)
+      return default_prefixes unless TissueOntologyValidation.field?(field_name(path))
+
+      TissueOntologyValidation.format_prefixes(
+        tissue_type: @tissue_type,
+        organism: @organism_term_id,
+        default_prefixes: default_prefixes
+      )
     end
   end
 end

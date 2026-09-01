@@ -204,6 +204,7 @@
             <th scope="col" class="px-3 py-2 text-left">Name</th>
             <th scope="col" class="px-3 py-2 text-left">User</th>
             <th scope="col" class="px-3 py-2 text-left">Project</th>
+            <th scope="col" class="px-3 py-2 text-left">Last active</th>
             <th scope="col" class="px-3 py-2 text-left">FU</th>
             <th scope="col" class="px-3 py-2 text-left">Archive</th>
             <th scope="col" class="px-3 py-2 text-left">Path</th>
@@ -224,6 +225,13 @@
                   -
                 <% end %>
               </td>
+              <td class="whitespace-nowrap px-3 py-2 text-xs">
+                <% if entry[:last_active_at].present? %>
+                  <%= Time.zone.parse(entry[:last_active_at].to_s).strftime("%Y-%m-%d %H:%M") %>
+                <% else %>
+                  -
+                <% end %>
+              </td>
               <td class="whitespace-nowrap px-3 py-2"><%= entry[:fu_id] || '-' %></td>
               <td class="whitespace-nowrap px-3 py-2 text-xs">
                 <% if status_id %>
@@ -237,7 +245,7 @@
           <% end %>
           <% if @report[:top_entries].blank? %>
             <tr>
-              <td colspan="8" class="px-3 py-4 text-center text-gray-500 dark:text-gray-400">No entries found.</td>
+              <td colspan="9" class="px-3 py-4 text-center text-gray-500 dark:text-gray-400">No entries found.</td>
             </tr>
           <% end %>
         </tbody>

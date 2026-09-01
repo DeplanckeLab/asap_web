@@ -4,7 +4,7 @@ require 'open3'
 
 # Read-only disk usage report for admin: USER_DATA_DIR + UPLOAD_DATA_DIR + S3 archives.
 class StorageUsageReport
-  CACHE_KEY = 'storage_usage_report:v2'
+  CACHE_KEY = 'storage_usage_report:v3'
   CACHE_TTL = 5.minutes
   DEFAULT_TOP_N = 50
 
@@ -40,7 +40,7 @@ class StorageUsageReport
 
   Entry = Struct.new(
     :bytes, :category, :path, :user_id, :project_key, :project_id,
-    :archive_status_id, :fu_id, :label,
+    :archive_status_id, :fu_id, :label, :last_active_at,
     keyword_init: true
   )
 
@@ -245,6 +245,7 @@ class StorageUsageReport
             project_key: key,
             project_id: project&.id,
             archive_status_id: project&.archive_status_id,
+            last_active_at: project_last_active_at(project),
             label: entry_name
           )
         elsif File.directory?(full.to_s)
@@ -272,6 +273,7 @@ class StorageUsageReport
             project_key: project_key,
             project_id: project&.id,
             archive_status_id: project&.archive_status_id,
+            last_active_at: project_last_active_at(project),
             label: "#{user_id}/#{project_key}"
           )
         elsif File.file?(full.to_s)
@@ -343,6 +345,7 @@ class StorageUsageReport
           archive_status_id: project&.archive_status_id,
           user_id: project&.user_id,
           project_key: project&.key,
+          last_active_at: project_last_active_at(project),
           label: "fu/#{fu_id}"
         )
       else
@@ -508,7 +511,14 @@ class StorageUsageReport
       project_id: entry.project_id,
       archive_status_id: entry.archive_status_id,
       fu_id: entry.fu_id,
-      name: entry.label
+      name: entry.label,
+      last_active_at: entry.last_active_at&.iso8601
     }
+  end
+
+  def project_last_active_at(project)
+    return nil if project.nil?
+
+    project.viewed_at || project.updated_at || project.created_at
   end
 end

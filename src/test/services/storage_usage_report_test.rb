@@ -30,4 +30,32 @@ class StorageUsageReportTest < TestBaseWithoutFixtures
     assert_equal 1, by_category['archived'][:count]
     assert_equal 200, by_category['archived'][:bytes]
   end
+
+  test 'entry_to_h includes last_active_at from project viewed_at updated_at created_at' do
+    viewed_at = Time.zone.parse('2024-06-01 10:00:00')
+    updated_at = Time.zone.parse('2024-05-01 10:00:00')
+    created_at = Time.zone.parse('2024-01-01 10:00:00')
+    project = Struct.new(:viewed_at, :updated_at, :created_at).new(viewed_at, updated_at, created_at)
+    report = StorageUsageReport.new
+
+    entry = StorageUsageReport::Entry.new(
+      bytes: 1,
+      category: :unarchived_project,
+      path: '/tmp/p',
+      project_id: 42,
+      last_active_at: report.send(:project_last_active_at, project)
+    )
+
+    assert_equal viewed_at.iso8601, report.send(:entry_to_h, entry)[:last_active_at]
+
+    project_without_view = Struct.new(:viewed_at, :updated_at, :created_at).new(nil, updated_at, created_at)
+    entry2 = StorageUsageReport::Entry.new(
+      bytes: 1,
+      category: :unarchived_project,
+      path: '/tmp/p',
+      project_id: 42,
+      last_active_at: report.send(:project_last_active_at, project_without_view)
+    )
+    assert_equal updated_at.iso8601, report.send(:entry_to_h, entry2)[:last_active_at]
+  end
 end

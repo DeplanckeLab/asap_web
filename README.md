@@ -183,7 +183,7 @@ docker compose -f docker-compose.test.yml exec website bundle exec rails tailwin
 
 ASAP exposes JSON endpoints under `/api` for listing projects, fetching project exports, and related metadata. The OpenAPI 3 specification lives in [`src/public/swagger/openapi.yaml`](src/public/swagger/openapi.yaml). When the app is running, interactive documentation is available at `/api_documentation`.
 
-Set `OPENAPI_SERVER_URL` in `.env` so the served spec points at your environment's API base URL.
+Set the served OpenAPI spec server URL and examples from `HOST` (`asap.epfl.ch` on production, `asap-test.epfl.ch` on the test instance).
 
 ---
 

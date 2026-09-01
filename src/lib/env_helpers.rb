@@ -32,5 +32,9 @@ module EnvHelpers
   def public_base_url
     "https://#{instance_host}"
   end
+
+  def openapi_api_base
+    "#{public_base_url}/api"
+  end
 end
 

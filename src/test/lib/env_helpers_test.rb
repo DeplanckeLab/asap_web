@@ -44,6 +44,14 @@ class EnvHelpersTest < ActiveSupport::TestCase
     assert_equal 'https://asap-test.epfl.ch', EnvHelpers.public_base_url
   end
 
+  test 'openapi_api_base appends /api to public_base_url' do
+    ENV['HOST'] = 'asap.epfl.ch'
+    assert_equal 'https://asap.epfl.ch/api', EnvHelpers.openapi_api_base
+
+    ENV['HOST'] = 'asap-test.epfl.ch'
+    assert_equal 'https://asap-test.epfl.ch/api', EnvHelpers.openapi_api_base
+  end
+
   test 'email_in_list? matches stripped case-insensitive addresses' do
     previous = ENV['ADMIN_REPORT_EMAILS']
     ENV['ADMIN_REPORT_EMAILS'] = 'one@example.com, Two@Example.com'

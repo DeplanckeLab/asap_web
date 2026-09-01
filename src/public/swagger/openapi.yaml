@@ -17,10 +17,10 @@ paths:
         Access URL (relative to the API server base above): `/projects`
 
         Example:
-        `GET https://asap-test.epfl.ch/api/projects`
+        `GET __ASAP_API_BASE__/projects`
 
         ```bash
-        curl -H 'Accept: application/json' 'https://asap-test.epfl.ch/api/projects'
+        curl -H 'Accept: application/json' '__ASAP_API_BASE__/projects'
         ```
 
         Try it out is disabled here because the response is too large for the Swagger UI.
@@ -232,11 +232,11 @@ paths:
         Access URL (relative to the API server base above): `/compliance/checks`
 
         Example:
-        `GET https://asap-test.epfl.ch/api/compliance/checks?source_url=https%3A%2F%2Fexample.com%2Fdataset.h5ad`
+        `GET __ASAP_API_BASE__/compliance/checks?source_url=https%3A%2F%2Fexample.com%2Fdataset.h5ad`
 
         ```bash
         curl -H 'Accept: application/json' \
-          'https://asap-test.epfl.ch/api/compliance/checks?source_url=https%3A%2F%2Fexample.com%2Fdataset.h5ad'
+          '__ASAP_API_BASE__/compliance/checks?source_url=https%3A%2F%2Fexample.com%2Fdataset.h5ad'
         ```
 
         Add `download=1` to receive the same JSON as a file attachment.

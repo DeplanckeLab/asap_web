@@ -118,9 +118,9 @@ class HomeController < ApplicationController
   def openapi_spec
     spec_path = Rails.root.join('public', 'swagger', 'openapi.yaml')
     spec = YAML.safe_load_file(spec_path, aliases: true)
-    api_base = ENV.fetch('OPENAPI_SERVER_URL').to_s.chomp('/')
+    api_base = EnvHelpers.openapi_api_base
     spec['servers'] = [{ 'url' => api_base }]
-    rewrite_projects_list_access_url!(spec, api_base)
+    substitute_openapi_api_base!(spec, api_base)
     filter_openapi_paths_for_current_user!(spec)
 
     render plain: spec.to_yaml, content_type: 'application/yaml'
@@ -347,24 +347,17 @@ class HomeController < ApplicationController
 
   private
 
-  def rewrite_projects_list_access_url!(spec, api_base)
-    operation = spec.dig('paths', '/projects', 'get')
-    return if operation.blank?
-
-    list_url = "#{api_base}/projects"
-    operation['description'] = <<~DESC.strip
-      Canonical API endpoint.
-      Returns the full public project catalog as JSON (prebuilt `projects.json` under `DATA_DIR`).
-
-      Access URL: `#{list_url}`
-
-      ```bash
-      curl -H 'Accept: application/json' '#{list_url}'
-      ```
-
-      Try it out is disabled here because the response is too large for the Swagger UI.
-      Open the Access URL above in a browser or with curl.
-    DESC
+  def substitute_openapi_api_base!(node, api_base)
+    case node
+    when Hash
+      node.each { |key, value| node[key] = substitute_openapi_api_base!(value, api_base) }
+    when Array
+      node.map! { |value| substitute_openapi_api_base!(value, api_base) }
+    when String
+      node.gsub('__ASAP_API_BASE__', api_base)
+    else
+      node
+    end
   end
 
   def filter_openapi_paths_for_current_user!(spec)

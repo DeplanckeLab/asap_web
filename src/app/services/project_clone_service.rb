@@ -48,6 +48,7 @@ class ProjectCloneService
     copy_fos
     copy_annots
     copy_annot_cell_sets
+    copy_checkpoints
     update_run_references
     copy_project_steps
     copy_associations
@@ -208,6 +209,125 @@ class ProjectCloneService
       new_acs.project_id = new_project.id
       new_acs.annot_id = @h_annots[acs.annot_id]&.id if acs.annot_id
       new_acs.save!
+    end
+  end
+
+  def copy_checkpoints
+    Checkpoint.where(project_id: source_project.id).order(:id).each do |checkpoint|
+      new_checkpoint = checkpoint.dup
+      new_checkpoint.project_id = new_project.id
+      new_checkpoint.run_id = @h_runs[checkpoint.run_id]&.id if checkpoint.run_id
+      new_checkpoint.state = remap_checkpoint_state(checkpoint.state)
+      new_checkpoint.save!
+    end
+  end
+
+  # Remap run/annot ids embedded in visualization and heatmap checkpoint JSON so
+  # restored views resolve against the cloned project's rows and loom paths.
+  ANNOT_ID_HASH_PARENT_KEYS = %w[
+    selectedCategories
+    selectedRanges
+    metadataFilterSwitches
+    metadata
+    adaptColorRangeByMetadataId
+    metadataGradients
+    metadataHistogramOptions
+    categoryColorOverrides
+  ].freeze
+
+  def remap_checkpoint_state(value, parent_key: nil)
+    case value
+    when Hash
+      value.each_with_object({}) do |(key, child), out|
+        remapped_key = remap_checkpoint_hash_key(key, parent_key: parent_key)
+        out[remapped_key] = remap_checkpoint_state(child, parent_key: key)
+      end
+    when Array
+      value.map { |item| remap_checkpoint_state(item, parent_key: parent_key) }
+    when String
+      remap_checkpoint_string_value(value, parent_key: parent_key)
+    when Integer
+      remap_checkpoint_integer_value(value, parent_key: parent_key)
+    else
+      value
+    end
+  end
+
+  def remap_checkpoint_hash_key(key, parent_key:)
+    key_s = key.to_s
+    parent = parent_key.to_s
+
+    if ANNOT_ID_HASH_PARENT_KEYS.include?(parent) && (annot = mapped_annot_for(key_s))
+      return key.is_a?(Integer) ? annot.id : annot.id.to_s
+    end
+
+    if (match = key_s.match(/\Agene_set_item_(.+)_(\d+)\z/)) && (annot = @h_annots[match[2].to_i])
+      return "gene_set_item_#{match[1]}_#{annot.id}"
+    end
+
+    if parent == 'categoryColorOverrides' &&
+       (match = key_s.match(/\Acategory_color_(\d+)_(.+)\z/)) &&
+       (annot = @h_annots[match[1].to_i])
+      return "category_color_#{annot.id}_#{match[2]}"
+    end
+
+    key
+  end
+
+  def remap_checkpoint_string_value(value, parent_key:)
+    key = parent_key.to_s
+
+    if run_id_checkpoint_key?(key) && (run = @h_runs[value.to_i])
+      return run.id.to_s
+    end
+
+    if annot_id_checkpoint_key?(key) && (annot = mapped_annot_for(value))
+      return annot.id.to_s
+    end
+
+    remap_checkpoint_path_string(value)
+  end
+
+  def remap_checkpoint_integer_value(value, parent_key:)
+    key = parent_key.to_s
+
+    if run_id_checkpoint_key?(key) && (run = @h_runs[value])
+      return run.id
+    end
+
+    if annot_id_checkpoint_key?(key) && (annot = @h_annots[value])
+      return annot.id
+    end
+
+    value
+  end
+
+  def run_id_checkpoint_key?(key)
+    %w[run_id runId].include?(key)
+  end
+
+  def annot_id_checkpoint_key?(key)
+    %w[annot_id annotId metadataId id].include?(key)
+  end
+
+  def mapped_annot_for(raw)
+    return nil if raw.nil?
+
+    text = raw.to_s
+    return nil unless text.match?(/\A\d+\z/)
+
+    @h_annots[text.to_i]
+  end
+
+  def remap_checkpoint_path_string(value)
+    return value unless value.include?('/')
+
+    value.gsub(%r{(^|/)([A-Za-z_][\w-]*)/(\d+)(?=/|\z)}) do
+      prefix = Regexp.last_match(1)
+      step_name = Regexp.last_match(2)
+      run_id = Regexp.last_match(3).to_i
+      new_run = @h_runs[run_id]
+      new_run ? "#{prefix}#{step_name}/#{new_run.id}" : Regexp.last_match(0)
     end
   end
 
@@ -446,6 +566,7 @@ class ProjectCloneService
 
     Fo.where(project_id: @new_project.id).find_each(&:destroy)
     AnnotCellSet.where(project_id: @new_project.id).find_each(&:destroy)
+    @new_project.checkpoints.find_each(&:destroy)
     @new_project.annots.find_each(&:destroy)
     @new_project.runs.find_each(&:destroy)
     @new_project.project_steps.find_each(&:destroy)

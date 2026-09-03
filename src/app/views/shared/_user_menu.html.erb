@@ -42,7 +42,11 @@
         </a>
         <%= button_to destroy_user_session_path, method: :delete,
             class: "flex items-center w-full px-4 py-2 text-sm text-left text-gray-700 hover:bg-gray-100 #{'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode}",
-            form: { class: "w-full" } do %>
+            form: { class: "w-full" },
+            data: {
+              controller: "sign-out-intent",
+              action: "click->sign-out-intent#announce"
+            } do %>
           <i class="fas fa-sign-out-alt mr-3 text-gray-400"></i>
           Sign Out
         <% end %>

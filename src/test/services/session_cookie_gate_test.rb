@@ -55,6 +55,18 @@ class SessionCookieGateTest < TestBaseWithoutFixtures
     )
   end
 
+  test 'challenge_required is false for signed-in users even when unarchive would run' do
+    assert_not SessionCookieGate.challenge_required?(
+      enabled: true,
+      search_engine: false,
+      signed_in: true,
+      archived: true,
+      project_show: true,
+      metadata_only: false,
+      force_unarchive: true
+    )
+  end
+
   test 'challenge_required is false for archived summary without force_unarchive' do
     assert_not SessionCookieGate.challenge_required?(
       enabled: true,

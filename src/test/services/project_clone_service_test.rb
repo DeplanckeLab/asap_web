@@ -209,4 +209,140 @@ class ProjectCloneServiceTest < TestBaseWithoutFixtures
       project.ensure_project_steps
     end
   end
+
+  test "clone copies visualization and heatmap checkpoints with remapped ids" do
+    user = register_for_test_cleanup(User.create!(email: "clone_ckpt_#{SecureRandom.hex(4)}@example.com", password: "password123"))
+    source = create_test_project!(
+      name: "Checkpoint source",
+      key: "cks#{SecureRandom.hex(3)}",
+      user_id: user.id,
+      version_id: 8
+    )
+    step = Step.find_by!(name: "parsing", version_id: 8)
+    source_run = register_for_test_cleanup(
+      Run.create!(project_id: source.id, user_id: user.id, step_id: step.id, status_id: 1, num: 1)
+    )
+    embedding = register_for_test_cleanup(
+      Annot.create!(
+        project_id: source.id,
+        user_id: user.id,
+        run_id: source_run.id,
+        store_run_id: source_run.id,
+        filepath: "dim_reduction/#{source_run.id}/output.loom",
+        name: "/col_attrs/X_umap",
+        dim: 1,
+        nber_rows: 2,
+        nber_cols: 100,
+        latest_version: true,
+        version_nber: 1
+      )
+    )
+    coloring = register_for_test_cleanup(
+      Annot.create!(
+        project_id: source.id,
+        user_id: user.id,
+        run_id: source_run.id,
+        store_run_id: source_run.id,
+        filepath: "dim_reduction/#{source_run.id}/output.loom",
+        name: "/col_attrs/cell_type",
+        dim: 1,
+        nber_cols: 100,
+        latest_version: true,
+        version_nber: 1
+      )
+    )
+
+    viz_state = {
+      "version" => 1,
+      "loomFile" => "dim_reduction/#{source_run.id}/output.loom",
+      "embedding" => { "id" => embedding.id.to_s, "loomFile" => "dim_reduction/#{source_run.id}/output.loom" },
+      "visualizationEmbedding" => {
+        "id" => embedding.id.to_s,
+        "loomFile" => "dim_reduction/#{source_run.id}/output.loom",
+        "name" => embedding.name
+      },
+      "matrix" => { "layer" => nil, "annotId" => coloring.id },
+      "coloring" => {
+        "metadataId" => coloring.id.to_s,
+        "metadataGradients" => { coloring.id.to_s => { "gradientScale" => "normal" } }
+      },
+      "filters" => {
+        "selectedCategories" => { coloring.id.to_s => ["T cell"] },
+        "selectedRanges" => {},
+        "metadataFilterSwitches" => {},
+        "geneFilterSwitches" => {},
+        "globalFiltersEnabled" => true
+      }
+    }
+    heatmap_state = {
+      "version" => 1,
+      "kind" => "heatmap",
+      "run_id" => source_run.id,
+      "colTracks" => [{ "id" => coloring.id.to_s, "type" => "categorical" }],
+      "rowTracks" => []
+    }
+
+    viz_checkpoint = register_for_test_cleanup(
+      Checkpoint.create!(
+        project: source,
+        user: user,
+        title: "Landing UMAP",
+        kind: Checkpoint::KIND_VISUALIZATION,
+        is_landing_page: true,
+        state: viz_state
+      )
+    )
+    heatmap_checkpoint = register_for_test_cleanup(
+      Checkpoint.create!(
+        project: source,
+        user: user,
+        title: "Heatmap view",
+        kind: Checkpoint::KIND_HEATMAP,
+        run_id: source_run.id,
+        state: heatmap_state
+      )
+    )
+    register_for_test_cleanup(
+      Checkpoint.create!(
+        project: source,
+        user: user,
+        title: Checkpoint::CURRENT_VISUALIZATION_TITLE,
+        kind: Checkpoint::KIND_VISUALIZATION,
+        state: { "version" => 1, "loomFile" => "parsing/output.loom" }
+      )
+    )
+
+    source_dir = Pathname.new(ENV["USER_DATA_DIR"]) + user.id.to_s + source.key
+    FileUtils.mkdir_p(source_dir + "dim_reduction" + source_run.id.to_s)
+    File.write(source_dir + "dim_reduction" + source_run.id.to_s + "output.loom", "loom")
+
+    service = ProjectCloneService.new(source, user: user, session: {})
+    clone = service.call
+    assert clone, "Expected clone to succeed: #{service.errors.inspect}"
+    register_for_test_cleanup(clone)
+
+    cloned_run = clone.runs.find_by!(cloned_run_id: source_run.id)
+    cloned_embedding = clone.annots.find_by!(name: embedding.name)
+    cloned_coloring = clone.annots.find_by!(name: coloring.name)
+
+    assert_equal 3, clone.checkpoints.count
+
+    cloned_viz = clone.checkpoints.find_by!(title: viz_checkpoint.title, kind: Checkpoint::KIND_VISUALIZATION)
+    assert cloned_viz.is_landing_page?
+    assert_nil cloned_viz.run_id
+    assert_equal "dim_reduction/#{cloned_run.id}/output.loom", cloned_viz.state["loomFile"]
+    assert_equal cloned_embedding.id.to_s, cloned_viz.state.dig("embedding", "id")
+    assert_equal cloned_embedding.id.to_s, cloned_viz.state.dig("visualizationEmbedding", "id")
+    assert_equal cloned_coloring.id, cloned_viz.state.dig("matrix", "annotId")
+    assert_equal cloned_coloring.id.to_s, cloned_viz.state.dig("coloring", "metadataId")
+    assert cloned_viz.state.dig("coloring", "metadataGradients").key?(cloned_coloring.id.to_s)
+    assert_equal ["T cell"], cloned_viz.state.dig("filters", "selectedCategories", cloned_coloring.id.to_s)
+
+    cloned_heatmap = clone.checkpoints.find_by!(title: heatmap_checkpoint.title, kind: Checkpoint::KIND_HEATMAP)
+    assert_equal cloned_run.id, cloned_heatmap.run_id
+    assert_equal cloned_run.id, cloned_heatmap.state["run_id"]
+    assert_equal cloned_coloring.id.to_s, cloned_heatmap.state.dig("colTracks", 0, "id")
+
+    assert clone.checkpoints.exists?(title: Checkpoint::CURRENT_VISUALIZATION_TITLE)
+  end
 end

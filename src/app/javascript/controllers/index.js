@@ -31,6 +31,10 @@ import NavDropdownController from "controllers/nav_dropdown_controller"
 application.register("nav-dropdown", NavDropdownController)
 console.log('Nav dropdown controller registered')
 
+import SignOutIntentController from "controllers/sign_out_intent_controller"
+application.register("sign-out-intent", SignOutIntentController)
+console.log('Sign out intent controller registered')
+
 import NavItemController from "controllers/nav_item_controller"
 application.register("nav-item", NavItemController)
 console.log('Nav item controller registered')

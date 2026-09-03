@@ -10,6 +10,9 @@
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
     <%= action_cable_meta_tag %>
+    <% if ActiveModel::Type::Boolean.new.cast(ENV['SESSION_DIAGNOSTICS']) %>
+      <script>window.SESSION_DIAGNOSTICS = true</script>
+    <% end %>
 
     <%= yield :head %>
 

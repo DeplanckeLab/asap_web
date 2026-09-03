@@ -83,6 +83,7 @@ class ApplicationController < ActionController::Base
     return true if request.request_method_symbol == :options
     return true if request.path == '/up'
     return true if request.path == '/security/session_cookie_challenge/solve'
+    return true if request.path == '/security/sign_out_intent'
 
     false
   end
@@ -106,6 +107,7 @@ class ApplicationController < ActionController::Base
       metadata_only: metadata_only_view_param? && !force_unarchive_param?,
       force_unarchive: force_unarchive_param?,
       search_engine: false,
+      signed_in: user_signed_in?,
       enabled: true
     )
   end

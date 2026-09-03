@@ -8,6 +8,7 @@ REQUIRED_ENV_VARS = %w[
   DOCKER_CALL
   ASAP_INSTANCE_NAME
   SERVER_URL
+  REDIS_SESSION_URL
 ].freeze
 
 missing_keys = REQUIRED_ENV_VARS.select { |key| ENV[key].blank? }

@@ -4,8 +4,8 @@ require 'redis'
 require 'json'
 require 'securerandom'
 
-# Human check used only when a request would restore an archived project from S3.
-# Ordinary pages are not challenged. Google/Bing never see this gate.
+# Human check used only when a guest request would restore an archived project from S3.
+# Signed-in users and search engines never see this gate. Ordinary pages are not challenged.
 class SessionCookieGate
   BLOCK_KEY_PREFIX = 'asap:session_cookie_gate:v2:block'
   STRIKE_KEY_PREFIX = 'asap:session_cookie_gate:v2:strikes'
@@ -29,9 +29,10 @@ class SessionCookieGate
       Rails.env.production?
     end
 
-    def challenge_required?(archived:, project_show:, metadata_only:, force_unarchive:, search_engine: false, enabled: nil)
+    def challenge_required?(archived:, project_show:, metadata_only:, force_unarchive:, search_engine: false, signed_in: false, enabled: nil)
       return false unless enabled.nil? ? self.enabled? : enabled
       return false if search_engine
+      return false if signed_in
       return false unless archived
       return false unless project_show
       return true if force_unarchive

@@ -294,6 +294,7 @@ Rails.application.routes.draw do
   get '/robots.txt', to: 'home#robots', as: :robots
   get '/llms.txt', to: 'home#llms', as: :llms
   post '/security/session_cookie_challenge/solve', to: 'security#solve_session_cookie_challenge'
+  post '/security/sign_out_intent', to: 'security#sign_out_intent'
   root "home#welcome"
 
 end

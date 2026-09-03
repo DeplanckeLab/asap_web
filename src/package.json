@@ -3,7 +3,11 @@
   "private": true,
   "dependencies": {
     "autoprefixer": "^10.4.20",
+    "browserslist": "^4.28.7",
     "postcss": "^8.5.26",
     "tailwindcss": "^4.0.12"
+  },
+  "resolutions": {
+    "browserslist": "^4.28.7"
   }
 }

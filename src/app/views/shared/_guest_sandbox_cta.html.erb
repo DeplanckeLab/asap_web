@@ -8,7 +8,6 @@
 <% sandbox = guest_sandbox_project %>
 <% replace_confirm = sandbox ? "Creating a new sandbox project will permanently replace your current sandbox (#{sandbox.display_name}). Continue?" : nil %>
 <% align_items = align == :center ? 'items-center' : 'items-end' %>
-<% text_align = align == :center ? 'text-center' : 'text-right' %>
 <% justify = align == :center ? 'justify-center' : 'justify-end' %>
 
 <% if variant == :hero %>
@@ -47,10 +46,5 @@
             data: { guided_tour: "projects-new-project-link" } %>
       <% end %>
     </div>
-    <% unless sandbox %>
-      <p class="text-xs text-gray-500 max-w-sm <%= text_align %>">
-        Guest mode creates a temporary sandbox project.
-      </p>
-    <% end %>
   </div>
 <% end %>

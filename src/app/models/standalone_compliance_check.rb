@@ -17,6 +17,15 @@ class StandaloneComplianceCheck < ApplicationRecord
   scope :failed_outcome, -> { where(passed: false) }
   scope :admin_runs, -> { where(admin_run: true) }
   scope :user_runs, -> { where(admin_run: false) }
+  # Checks whose source_url matches an external catalog candidate for the portal.
+  scope :for_portal_source, lambda { |source|
+    key = portal_source_filter(source)
+    next all if key.blank?
+
+    where(
+      source_url: ExternalCatalogCandidate.where(source: key).where.not(url: [nil, '']).select(:url)
+    )
+  }
 
   def self.origin_filter(value)
     key = value.to_s.strip.presence || DEFAULT_ORIGIN_FILTER
@@ -29,6 +38,14 @@ class StandaloneComplianceCheck < ApplicationRecord
     when 'all' then all
     else user_runs
     end
+  end
+
+  # Blank = all portals. Unknown values are ignored (treated as all).
+  def self.portal_source_filter(value)
+    key = value.to_s.strip.presence
+    return nil if key.blank?
+
+    ExternalCatalogCandidate::SOURCES.include?(key) ? key : nil
   end
 
   # Latest completed admin-run outcome per source_url for catalog list views.

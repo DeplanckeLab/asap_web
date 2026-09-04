@@ -23,6 +23,18 @@
                        class: "rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100",
                        onchange: "this.form.requestSubmit()" %>
       </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Portal</label>
+        <%= select_tag :source,
+                       options_for_select(
+                         [['All portals', '']] + ExternalCatalogCandidate::SOURCES.map { |s|
+                           [ExternalCatalog::Entry.new(source: s).provider_name, s]
+                         },
+                         @portal_source
+                       ),
+                       class: "rounded-md border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-950 dark:text-gray-100",
+                       onchange: "this.form.requestSubmit()" %>
+      </div>
       <span class="text-xs text-gray-500 dark:text-gray-400 pb-2">
         <%= @user_count %> user · <%= @admin_count %> admin · <%= @all_count %> all
       </span>
@@ -111,7 +123,7 @@
     </div>
   <% elsif @total_count > @per_page %>
     <% total_pages = (@total_count.to_f / @per_page).ceil %>
-    <% pagination_params = { origin: @origin_filter } %>
+    <% pagination_params = { origin: @origin_filter, source: @portal_source }.compact %>
     <div class="flex items-center justify-between text-sm text-gray-600 dark:text-gray-400">
       <div>
         Page <%= @page %> of <%= total_pages %>

@@ -11,10 +11,15 @@ class StandaloneComplianceChecksController < ApplicationController
 
   def index
     @origin_filter = StandaloneComplianceCheck.origin_filter(params[:origin])
+    @portal_source = StandaloneComplianceCheck.portal_source_filter(params[:source])
     @page = [params[:page].to_i, 1].max
     @per_page = PER_PAGE
 
-    scope = StandaloneComplianceCheck.for_origin_filter(@origin_filter).includes(:user).recent
+    scope = StandaloneComplianceCheck
+            .for_origin_filter(@origin_filter)
+            .for_portal_source(@portal_source)
+            .includes(:user)
+            .recent
     @total_count = scope.count
     total_pages = [(@total_count.to_f / @per_page).ceil, 1].max
     @page = [@page, total_pages].min

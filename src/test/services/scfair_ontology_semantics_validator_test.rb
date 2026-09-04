@@ -17,6 +17,7 @@ class ScfairOntologySemanticsValidatorTest < TestBaseWithoutFixtures
 
       refute_includes fields, 'ontology.semantics'
       refute_includes fields, 'ontology.semantics.cell_type_ontology_term_id'
+      assert_includes fields, 'ontology.semantics.cell_type_ontology_term_id.existence'
       assert_includes fields, 'ontology.semantics.cell_type_ontology_term_id.allowed_terms'
       assert_includes fields, 'ontology.semantics.cell_type_ontology_term_id.banned_terms'
       assert_includes fields, 'ontology.semantics.cell_type_ontology_term_id.descendants'
@@ -145,6 +146,24 @@ class ScfairOntologySemanticsValidatorTest < TestBaseWithoutFixtures
     assert result[:errors].any? { |entry| entry[:message].include?('EFO:0009310') && entry[:message].include?('term not found in ontology DB') }
   end
 
+  test 'passes existence when non-special ontology terms were checked successfully' do
+    field_values = { 'obs/cell_type_ontology_term_id' => ['CL:0000001', 'unknown'] }
+    resolver = Minitest::Mock.new
+    resolver.expect :exists?, true, ['CL:0000001']
+    resolver.expect :descendant_of?, true, ['CL:0000001', 'CL:0000000']
+    resolver.expect :descendant_of?, false, ['CL:0000001', 'WBbt:0006803']
+
+    Scfair::OntologyLineageResolver.stub(:new, resolver) do
+      result = Scfair::OntologySemanticsValidator.new(field_values: field_values, format: 'h5ad').call
+      existence = result[:valid_checks].find { |check| check[:field] == 'ontology.semantics.cell_type_ontology_term_id.existence' }
+
+      assert_equal 'passed', existence[:status]
+      assert_equal 'Ontology term existence checks passed', existence[:message]
+    end
+
+    resolver.verify
+  end
+
   test 'passes allowed_terms for active replacement of obsolete assay term' do
     skip 'EFO:0009899 not loaded; run load_ontologies' unless CellOntologyTerm.active_original_by_identifier('EFO:0009899')
 
@@ -156,6 +175,16 @@ class ScfairOntologySemanticsValidatorTest < TestBaseWithoutFixtures
 
     assert_equal 'passed', allowed[:status]
     refute result[:errors].any? { |entry| entry[:field].to_s.include?('existence') }
+  end
+
+  test 'does not emit existence when only special values are present' do
+    result = Scfair::OntologySemanticsValidator.new(
+      field_values: { 'obs/cell_type_ontology_term_id' => %w[unknown na] },
+      format: 'h5ad'
+    ).call
+
+    refute result[:valid_checks].any? { |check| check[:field] == 'ontology.semantics.cell_type_ontology_term_id.existence' }
+    assert_empty result[:errors]
   end
 
   test 'ontology semantics does not validate obs label pairs from sorted unique lists' do

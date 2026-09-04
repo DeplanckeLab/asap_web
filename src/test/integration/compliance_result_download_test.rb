@@ -5,11 +5,19 @@ require 'tmpdir'
 require 'fileutils'
 
 class ComplianceResultDownloadTest < ActionDispatch::IntegrationTest
+  include ActiveJob::TestHelper
+
   setup do
+    clear_enqueued_jobs
+    clear_performed_jobs
+
     @tmp_root = Dir.mktmpdir('compliance-result-download')
     @previous_user_data_dir = ENV['USER_DATA_DIR']
+    @previous_upload_data_dir = ENV['UPLOAD_DATA_DIR']
     ENV['USER_DATA_DIR'] = File.join(@tmp_root, 'projects')
+    ENV['UPLOAD_DATA_DIR'] = File.join(@tmp_root, 'fus')
     FileUtils.mkdir_p(ENV['USER_DATA_DIR'])
+    FileUtils.mkdir_p(ENV['UPLOAD_DATA_DIR'])
 
     @user = register_for_test_cleanup(
       User.create!(email: "crd_#{SecureRandom.hex(4)}@example.com", password: 'password123')
@@ -19,7 +27,10 @@ class ComplianceResultDownloadTest < ActionDispatch::IntegrationTest
   teardown do
     destroy_registered_test_records!
     ENV['USER_DATA_DIR'] = @previous_user_data_dir
+    ENV['UPLOAD_DATA_DIR'] = @previous_upload_data_dir
     FileUtils.rm_rf(@tmp_root) if @tmp_root.present?
+    clear_enqueued_jobs
+    clear_performed_jobs
   end
 
   test 'public project compliance result is downloadable as JSON' do
@@ -142,6 +153,76 @@ class ComplianceResultDownloadTest < ActionDispatch::IntegrationTest
     assert_equal url, body['source_url']
     assert_equal true, body['passed']
     assert_equal true, body.dig('result', 'valid')
+  end
+
+  test 'API standalone check lookup requires source_url' do
+    get '/api/compliance/checks', params: { filename: 'dataset.h5ad' }
+    assert_response :unprocessable_entity
+    body = JSON.parse(response.body)
+    assert_match(/source_url/i, body['error'])
+  end
+
+  test 'API standalone check lookup without results queues validation' do
+    upload_type_id = UploadType.id_for('compliance_file_check')
+    skip 'compliance_file_check upload type missing' if upload_type_id.blank?
+
+    url = "https://example.com/datasets/#{SecureRandom.hex(4)}.h5ad"
+
+    assert_enqueued_with(job: IsolatedComplianceUrlDownloadJob) do
+      get '/api/compliance/checks', params: { source_url: url }
+    end
+    assert_response :accepted
+
+    body = JSON.parse(response.body)
+    assert_equal url, body['source_url']
+    assert_equal 'downloading', body['status']
+    assert body['task_id'].present?
+    assert_equal "/compliance/file-check/#{body['task_id']}/status", body['status_url']
+
+    fu = Fu.find_by(id: body['fu_id'])
+    assert fu
+    register_for_test_cleanup(fu)
+    assert_equal url, fu.url
+    assert_equal 'downloading', fu.status
+  end
+
+  test 'API standalone check recheck queues a new validation even when results exist' do
+    upload_type_id = UploadType.id_for('compliance_file_check')
+    skip 'compliance_file_check upload type missing' if upload_type_id.blank?
+
+    url = "https://example.com/datasets/#{SecureRandom.hex(4)}.h5ad"
+    register_for_test_cleanup(
+      StandaloneComplianceCheckRecorder.record_completed!(
+        task_id: SecureRandom.uuid,
+        result: {
+          valid: true,
+          format: 'h5ad',
+          schema_id: 'scfair_7_1_0',
+          schema_version: '7.1.0',
+          validated_at: Time.current.iso8601,
+          errors: [],
+          warnings: [],
+          valid_checks: [],
+          summary: { errors_count: 0 }
+        },
+        filename: 'dataset.h5ad',
+        schema_id: 'scfair_7_1_0',
+        source_url: url,
+        admin_run: true
+      )
+    )
+
+    assert_enqueued_with(job: IsolatedComplianceUrlDownloadJob) do
+      get '/api/compliance/checks', params: { source_url: url, recheck: 1 }
+    end
+    assert_response :accepted
+
+    body = JSON.parse(response.body)
+    assert_equal url, body['source_url']
+    assert_equal 'downloading', body['status']
+    fu = Fu.find_by(id: body['fu_id'])
+    assert fu
+    register_for_test_cleanup(fu)
   end
 
   test 'standalone check lookup by filename works' do

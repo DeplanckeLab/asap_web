@@ -22,6 +22,8 @@ module Scfair
         next if values.empty?
 
         allowed_check_failed = false
+        existence_check_failed = false
+        existence_check_tested = false
         banned_check_failed = false
         lineage_check_failed = false
         special_check_failed = false
@@ -44,6 +46,7 @@ module Scfair
         values.each do |identifier|
           next if special_value?(identifier, allowed_specials)
 
+          existence_check_tested = true
           unless @resolver.exists?(identifier)
             obsolete = CellOntologyTerm.original.find_by(identifier: identifier.to_s)
             if obsolete&.obsolete?
@@ -56,6 +59,7 @@ module Scfair
             else
               @errors << { field: "ontology.semantics.#{field_name}.existence", message: "#{identifier}: term not found in ontology DB" }
             end
+            existence_check_failed = true
             allowed_check_failed = true
             next
           end
@@ -113,6 +117,14 @@ module Scfair
           status: allowed_check_failed ? 'failed' : 'passed',
           message: allowed_check_failed ? 'Allowed/known ontology term checks failed' : 'Allowed/known ontology term checks passed'
         }
+
+        if existence_check_tested
+          checks << {
+            field: "ontology.semantics.#{field_name}.existence",
+            status: existence_check_failed ? 'failed' : 'passed',
+            message: existence_check_failed ? 'Ontology term existence checks failed' : 'Ontology term existence checks passed'
+          }
+        end
 
         if rules[:forbidden_exact].present? || rules[:forbidden_branches].present?
           checks << {

@@ -223,11 +223,17 @@ paths:
           description: Project or data file not found.
   /compliance/checks:
     get:
-      summary: Lookup standalone scFAIR check by file URL or filename
+      summary: Lookup or run standalone scFAIR check by file URL
       description: |
         Canonical API endpoint.
-        Returns the latest standalone (non-project) scFAIR compliance check matching an exact
-        `source_url` and/or `filename` (both are ANDed when provided).
+        URL-only access to standalone (non-project) scFAIR compliance results.
+
+        - When a matching check already exists, returns that result (200).
+        - When no result exists yet, queues download+validation and returns 202.
+        - Pass `recheck=1` to force a new validation even if a result already exists.
+
+        Poll `status_url` from a 202 response, or call this endpoint again without
+        `recheck` until a 200 result payload is returned.
 
         Access URL (relative to the API server base above): `/compliance/checks`
 
@@ -239,30 +245,44 @@ paths:
           '__ASAP_API_BASE__/compliance/checks?source_url=https%3A%2F%2Fexample.com%2Fdataset.h5ad'
         ```
 
-        Add `download=1` to receive the same JSON as a file attachment.
+        Force recomputation:
+
+        ```bash
+        curl -H 'Accept: application/json' \
+          '__ASAP_API_BASE__/compliance/checks?source_url=https%3A%2F%2Fexample.com%2Fdataset.h5ad&recheck=1'
+        ```
+
+        Add `download=1` on a completed lookup to receive the JSON as a file attachment.
       operationId: lookupStandaloneComplianceCheckApi
       tags:
         - Compliance
       parameters:
         - name: source_url
           in: query
-          required: false
-          description: Exact source file URL stored on the standalone check (catalog / remote URL). At least one of `source_url` or `filename` is required.
+          required: true
+          description: Exact source file URL of the standalone check (catalog / remote URL). Required; filename-only lookup is not available on the API.
           schema:
             type: string
             format: uri
             example: https://example.com/dataset.h5ad
-        - name: filename
+        - name: recheck
           in: query
           required: false
-          description: Exact original filename stored on the standalone check. At least one of `source_url` or `filename` is required.
+          description: When truthy (`1`, `true`), recompute validation instead of returning an existing stored result.
+          schema:
+            type: boolean
+            example: false
+        - name: schema_id
+          in: query
+          required: false
+          description: Schema id used when starting a new validation (missing result or `recheck=1`). Defaults to the active scFAIR default.
           schema:
             type: string
-            example: dataset.h5ad
+            example: scfair_7_1_0
         - name: download
           in: query
           required: false
-          description: When truthy (`1`, `true`), return the JSON payload as a downloadable attachment.
+          description: When truthy (`1`, `true`) and a completed result is returned, send the JSON payload as a downloadable attachment.
           schema:
             type: boolean
             example: false
@@ -300,17 +320,67 @@ paths:
                           message: "ok"
                       summary:
                         errors_count: 0
-        '404':
-          description: No matching compliance check found.
+        '202':
+          description: Validation queued or still in progress for this URL. Poll `status_url` or retry this endpoint without `recheck` until a 200 result is available.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandaloneComplianceCheckAccepted'
+              examples:
+                queued:
+                  summary: Validation started
+                  value:
+                    task_id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+                    status: "downloading"
+                    schema_id: "scfair_7_1_0"
+                    fu_id: 123
+                    source_url: "https://example.com/dataset.h5ad"
+                    status_url: "/compliance/file-check/a1b2c3d4-e5f6-7890-abcd-ef1234567890/status"
+                    message: "Validation in progress; poll status_url or this endpoint until results are available"
         '422':
-          description: Neither `source_url` nor `filename` was provided.
+          description: `source_url` was missing or invalid.
 components:
   schemas:
+    StandaloneComplianceCheckAccepted:
+      title: Standalone scFAIR compliance check accepted
+      type: object
+      description: |
+        Returned with HTTP 202 when the API queues (or finds in-progress) download+validation
+        for a `source_url` that has no stored result yet, or when `recheck=1` was requested.
+      properties:
+        task_id:
+          type: string
+          description: Async task id for status polling.
+          example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        status:
+          type: string
+          description: Current async status (for example `downloading` or `validating`).
+          example: downloading
+        schema_id:
+          type: string
+          description: Compliance schema identifier used for the run.
+          example: scfair_7_1_0
+        fu_id:
+          type: integer
+          description: Internal upload record id for the in-progress run.
+          example: 123
+        source_url:
+          type: string
+          format: uri
+          description: Source URL being validated.
+          example: https://example.com/dataset.h5ad
+        status_url:
+          type: string
+          description: Relative URL to poll for download/validation progress.
+          example: /compliance/file-check/a1b2c3d4-e5f6-7890-abcd-ef1234567890/status
+        message:
+          type: string
+          description: Human-readable guidance for the client.
     StandaloneComplianceCheckLookup:
       title: Standalone scFAIR compliance check lookup
       type: object
       description: |
-        Latest standalone (non-project) scFAIR check matching exact `source_url` and/or `filename`.
+        Latest standalone (non-project) scFAIR check matching exact `source_url`.
         `result` is the stored compliance report JSON (field_values and checks_catalog are omitted).
       properties:
         id:

@@ -5,17 +5,24 @@
   <div class="flex items-start justify-between gap-4 flex-wrap">
     <div>
       <p class="text-sm text-gray-500 dark:text-gray-400">
-        <%= link_to 'Standalone scFAIR checks', standalone_compliance_checks_path, class: 'hover:underline' %>
-        / #<%= check.id %>
+        <% if admin? %>
+          <%= link_to 'Standalone scFAIR checks', standalone_compliance_checks_path, class: 'hover:underline' %>
+          /
+        <% end %>
+        #<%= check.id %>
       </p>
       <h1 class="mt-1 text-3xl font-semibold text-gray-900 dark:text-white">
         <%= check.filename.presence || "Check ##{check.id}" %>
       </h1>
       <p class="mt-2 text-gray-600 dark:text-gray-300">
         Checked <%= display_timestamp(check, :checked_at) %>
-        · <span title="<%= standalone_compliance_check_user_title(check) %>"><%= standalone_compliance_check_user_label(check) %></span>
-        <% if check.admin_run? %>
-          · admin run
+        <% if admin? %>
+          · <span title="<%= standalone_compliance_check_user_title(check) %>"><%= standalone_compliance_check_user_label(check) %></span>
+          <% if check.admin_run? %>
+            · admin run
+          <% end %>
+        <% elsif check.admin_run? %>
+          · admin automatic check
         <% end %>
         <% if check.format.present? %>
           · <%= check.format.upcase %>

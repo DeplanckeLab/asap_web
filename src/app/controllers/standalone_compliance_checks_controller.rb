@@ -5,9 +5,10 @@ class StandaloneComplianceChecksController < ApplicationController
 
   PER_PAGE = 25
 
-  before_action :authenticate_user!
-  before_action :authorize_admin
   before_action :set_standalone_compliance_check, only: :show
+  before_action :authenticate_user!, only: :index
+  before_action :authorize_admin, only: :index
+  before_action :authorize_standalone_compliance_check_show!, only: :show
 
   def index
     @origin_filter = StandaloneComplianceCheck.origin_filter(params[:origin])
@@ -40,6 +41,16 @@ class StandaloneComplianceChecksController < ApplicationController
 
   def set_standalone_compliance_check
     @standalone_compliance_check = StandaloneComplianceCheck.find(params[:id])
+  end
+
+  # Admin automatic catalog checks are public; user-submitted checks stay admin-only.
+  def authorize_standalone_compliance_check_show!
+    return if @standalone_compliance_check.admin_run?
+
+    authenticate_user!
+    return if performed?
+
+    authorize_admin
   end
 
   def validation_result_from_check(check)

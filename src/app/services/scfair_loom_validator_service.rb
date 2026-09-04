@@ -407,7 +407,7 @@ class ScfairLoomValidatorService
   def validate_schema_version
     result = Scfair::SchemaVersionEvaluator.call(
       file_version: get_global_attr('schema_version'),
-      reference_version: Scfair::Rules.schema_version,
+      expected_identifier: Scfair::Rules.schema_hash[:schema_version],
       format: 'loom'
     )
     @errors.concat(result[:errors])

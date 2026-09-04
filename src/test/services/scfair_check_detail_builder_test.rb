@@ -23,13 +23,14 @@ class ScfairCheckDetailBuilderTest < TestBaseWithoutFixtures
   test 'builds schema version detail' do
     detail = Scfair::CheckDetailBuilder.call(
       field: 'uns/schema_version',
-      message: 'schema_version minor version 7.0 (7.0.0) is lower than required 7.1 (7.1.0)',
+      message: 'schema_version "7.1.0" does not match the required identifier "7.1.0+scfair1.0"',
       format: 'h5ad'
     )
 
     assert_equal 'schema.version', detail[:category_id]
     assert_equal '7.1.0', detail[:schema_version]
-    assert detail[:constraints].any? { |row| row[:label] == 'Reference version' }
+    constraint = detail[:constraints].find { |row| row[:label] == 'Required identifier' }
+    assert_equal '7.1.0+scfair1.0', constraint[:value]
   end
 
   test 'builds cross-field rule detail' do

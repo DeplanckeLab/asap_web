@@ -429,7 +429,6 @@ module Scfair
       end
 
       if category_id == 'schema.version'
-        rows << constraint_row('Reference version', Rules.schema_version, from_rules: true, rules_path: 'schema.version')
         rows << constraint_row('Required identifier', Rules.schema_hash[:schema_version].to_s, from_rules: true, rules_path: 'schema.schema_version')
       end
 
@@ -1553,7 +1552,6 @@ module Scfair
         rows << constraint_row('Paired term field', 'organism_ontology_term_id', from_rules: true, rules_path: 'label_pairs.organism_ontology_term_id')
         append_field_constraint_rows(rows, :uns, field_name)
       when 'schema_version'
-        rows << constraint_row('Reference version', Rules.schema_version, from_rules: true, rules_path: 'schema.version')
         rows << constraint_row('Required identifier', Rules.schema_hash[:schema_version].to_s, from_rules: true, rules_path: 'schema.schema_version')
       when 'schema_reference'
         rows << constraint_row('Reference schema URL', Rules.schema_hash[:source_url].to_s, from_rules: true, rules_path: 'schema.source_url')

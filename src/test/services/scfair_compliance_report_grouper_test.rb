@@ -71,27 +71,27 @@ class ScfairComplianceReportGrouperTest < TestBaseWithoutFixtures
   end
 
   test 'routes schema version issues to schema.version category' do
-    catalog = [{ id: 'schema.version', label: 'Schema version compatibility' }]
-    errors = [{
+    catalog = [{ id: 'schema.version', label: 'Schema version identifier' }]
+    warnings = [{
       field: 'uns/schema_version',
-      message: 'schema_version minor version 7.0 (7.0.0) is lower than required 7.1 (7.1.0)'
+      message: 'schema_version "7.1.0" does not match the required identifier "7.1.0+scfair1.0"'
     }]
     valid_checks = [{
       field: 'uns/schema_version',
-      status: 'failed',
-      message: errors.first[:message]
+      status: 'warning',
+      message: warnings.first[:message]
     }]
 
     groups = Scfair::ComplianceReportGrouper.call(
       checks_catalog: catalog,
       valid_checks: valid_checks,
-      errors: errors,
-      warnings: [],
+      errors: [],
+      warnings: warnings,
       format: 'h5ad'
     )
 
     assert_equal 1, groups.first[:items].size
-    assert_equal 'failed', groups.first[:items].first[:status]
+    assert_equal 'warning', groups.first[:items].first[:status]
   end
 
   test 'omits catalog categories with no recorded checks' do

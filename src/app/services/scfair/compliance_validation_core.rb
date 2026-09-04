@@ -240,7 +240,7 @@ module Scfair
       file_version = Array(field_values[Rules.field_path(format, :uns, 'schema_version')]).first
       SchemaVersionEvaluator.call(
         file_version: file_version,
-        reference_version: Rules.schema_version,
+        expected_identifier: Rules.schema_hash[:schema_version],
         format: format
       )
     end

@@ -1,0 +1,59 @@
+<% content_for :title, "Server error ##{@server_error.id} - ASAP" %>
+<% error = @server_error %>
+<div class="max-w-6xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div>
+    <p class="text-sm text-gray-500 dark:text-gray-400">
+      <%= link_to "Server errors", server_errors_path, class: "hover:underline" %>
+      / #<%= error.id %>
+    </p>
+    <h1 class="mt-1 text-3xl font-semibold text-gray-900 dark:text-white">
+      <%= error.exception_class %>
+    </h1>
+    <p class="mt-2 text-gray-600 dark:text-gray-300">
+      <%= display_timestamp(error, :created_at) %>
+      · HTTP <%= error.status %>
+      · <%= error.http_method %> <%= error.path %>
+    </p>
+  </div>
+
+  <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900 space-y-4">
+    <div>
+      <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Message</h2>
+      <pre class="mt-2 whitespace-pre-wrap break-words font-mono text-sm text-gray-800 dark:text-gray-200"><%= error.message.presence || "—" %></pre>
+    </div>
+
+    <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2 text-sm">
+      <div>
+        <dt class="font-semibold text-gray-500 dark:text-gray-400">User</dt>
+        <dd class="mt-1 text-gray-800 dark:text-gray-200"><%= error.user&.email.presence || "—" %></dd>
+      </div>
+      <div>
+        <dt class="font-semibold text-gray-500 dark:text-gray-400">IP</dt>
+        <dd class="mt-1 text-gray-800 dark:text-gray-200"><%= error.ip.presence || "—" %></dd>
+      </div>
+      <div>
+        <dt class="font-semibold text-gray-500 dark:text-gray-400">Request ID</dt>
+        <dd class="mt-1 font-mono text-xs text-gray-800 dark:text-gray-200"><%= error.request_id.presence || "—" %></dd>
+      </div>
+      <div>
+        <dt class="font-semibold text-gray-500 dark:text-gray-400">User agent</dt>
+        <dd class="mt-1 break-all text-xs text-gray-800 dark:text-gray-200"><%= error.user_agent.presence || "—" %></dd>
+      </div>
+    </dl>
+  </div>
+
+  <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Filtered params</h2>
+    <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-gray-800 dark:text-gray-200"><%= error.filtered_params.presence || "{}" %></pre>
+  </div>
+
+  <div class="rounded-lg border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <h2 class="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Backtrace</h2>
+    <% lines = error.backtrace_lines %>
+    <% if lines.any? %>
+      <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-gray-800 dark:text-gray-200"><%= lines.join("\n") %></pre>
+    <% else %>
+      <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">No backtrace recorded.</p>
+    <% end %>
+  </div>
+</div>

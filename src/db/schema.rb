@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_29_081809) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_04_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1413,6 +1413,26 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_29_081809) do
     t.integer "user_id"
   end
 
+  create_table "server_errors", force: :cascade do |t|
+    t.text "backtrace"
+    t.datetime "created_at", null: false
+    t.string "exception_class", default: "UnknownError", null: false
+    t.text "filtered_params"
+    t.string "http_method", limit: 16, default: "GET", null: false
+    t.string "ip", limit: 64
+    t.text "message"
+    t.string "path", default: "", null: false
+    t.string "request_id", limit: 64
+    t.integer "status", default: 500, null: false
+    t.datetime "updated_at", null: false
+    t.text "user_agent"
+    t.bigint "user_id"
+    t.index ["created_at"], name: "index_server_errors_on_created_at"
+    t.index ["exception_class"], name: "index_server_errors_on_exception_class"
+    t.index ["status"], name: "index_server_errors_on_status"
+    t.index ["user_id"], name: "index_server_errors_on_user_id"
+  end
+
   create_table "sessions", id: :serial, force: :cascade do |t|
     t.datetime "created_at", precision: nil
     t.text "data"
@@ -2003,6 +2023,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_29_081809) do
   add_foreign_key "sample_identifiers", "identifier_types", name: "sample_identifiers_identifier_type_fkey"
   add_foreign_key "selections", "projects", name: "selections_project_id_fkey"
   add_foreign_key "selections", "users", name: "selections_user_id_fkey"
+  add_foreign_key "server_errors", "users", on_delete: :nullify
   add_foreign_key "shares", "projects", name: "shares_project_id_fkey"
   add_foreign_key "shares", "users", name: "shares_user_id_fkey"
   add_foreign_key "solid_queue_blocked_executions", "solid_queue_jobs", column: "job_id", on_delete: :cascade

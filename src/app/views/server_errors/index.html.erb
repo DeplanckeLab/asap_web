@@ -1,0 +1,90 @@
+<% content_for :title, "Server errors - ASAP" %>
+<div class="max-w-6xl mx-auto py-10 px-4 sm:px-6 lg:px-8 space-y-6">
+  <div>
+    <h1 class="text-3xl font-semibold text-gray-900 dark:text-white">Server errors</h1>
+    <p class="mt-2 text-gray-600 dark:text-gray-300">
+      Tracked HTTP 500 responses and uncaught exceptions.
+    </p>
+  </div>
+
+  <p class="text-sm text-gray-600 dark:text-gray-300">
+    <% if @total_count.zero? %>
+      0 results
+    <% else %>
+      Showing <%= (@page - 1) * @per_page + 1 %>-<%= [@page * @per_page, @total_count].min %> of <%= @total_count %>
+    <% end %>
+  </p>
+
+  <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+    <table class="min-w-full divide-y divide-gray-200 text-sm dark:divide-gray-800">
+      <thead class="bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-600 dark:bg-gray-950 dark:text-gray-400">
+        <tr>
+          <th scope="col" class="px-3 py-2 text-left">Date</th>
+          <th scope="col" class="px-3 py-2 text-left">Status</th>
+          <th scope="col" class="px-3 py-2 text-left">Exception</th>
+          <th scope="col" class="px-3 py-2 text-left">Path</th>
+          <th scope="col" class="px-3 py-2 text-left">User</th>
+          <th scope="col" class="px-3 py-2 text-left">Message</th>
+          <th scope="col" class="px-3 py-2 text-right"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 text-gray-700 dark:divide-gray-800 dark:text-gray-200">
+        <% @server_errors.each do |server_error| %>
+          <tr>
+            <td class="whitespace-nowrap px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+              <%= display_timestamp(server_error, :created_at) %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2">
+              <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200">
+                <%= server_error.status %>
+              </span>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 font-mono text-xs">
+              <%= server_error.exception_class %>
+            </td>
+            <td class="px-3 py-2 max-w-xs truncate font-mono text-xs" title="<%= server_error.http_method %> <%= server_error.path %>">
+              <%= server_error.http_method %> <%= server_error.path %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-xs">
+              <%= server_error.user&.email.presence || "—" %>
+            </td>
+            <td class="px-3 py-2 max-w-sm truncate text-sm" title="<%= server_error.message %>">
+              <%= server_error.short_message %>
+            </td>
+            <td class="whitespace-nowrap px-3 py-2 text-right">
+              <%= link_to "View",
+                          server_error_path(server_error),
+                          class: "text-sky-700 hover:underline dark:text-sky-300" %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if @server_errors.empty? %>
+    <div class="rounded-lg border border-dashed border-gray-300 bg-white px-6 py-10 text-center text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+      No server errors have been recorded yet.
+    </div>
+  <% end %>
+
+  <% if @total_count > @per_page %>
+    <div class="flex items-center justify-between gap-4 text-sm">
+      <% if @page > 1 %>
+        <%= link_to "Previous",
+                    server_errors_path(page: @page - 1),
+                    class: "text-sky-700 hover:underline dark:text-sky-300" %>
+      <% else %>
+        <span class="text-gray-400 dark:text-gray-600">Previous</span>
+      <% end %>
+      <span class="text-gray-600 dark:text-gray-300">Page <%= @page %></span>
+      <% if (@page * @per_page) < @total_count %>
+        <%= link_to "Next",
+                    server_errors_path(page: @page + 1),
+                    class: "text-sky-700 hover:underline dark:text-sky-300" %>
+      <% else %>
+        <span class="text-gray-400 dark:text-gray-600">Next</span>
+      <% end %>
+    </div>
+  <% end %>
+</div>

@@ -285,6 +285,12 @@ module ApplicationHelper
         icon: "fas fa-star"
       },
       {
+        label: "Server errors",
+        description: "Review tracked HTTP 500 responses and exceptions",
+        path: server_errors_path,
+        icon: "fas fa-bug"
+      },
+      {
         label: "Storage usage",
         description: "Disk space, largest directories, and project/FU storage categories",
         path: storage_usages_path,

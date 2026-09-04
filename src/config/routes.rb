@@ -161,6 +161,7 @@ Rails.application.routes.draw do
   resources :tools
   resources :ratings, only: [:index]
   resources :storage_usages, only: [:index]
+  resources :server_errors, only: [:index, :show]
   resources :standalone_compliance_checks, only: [:index, :show]
   resources :external_catalog_candidates, only: [:index, :show, :destroy] do
     member do

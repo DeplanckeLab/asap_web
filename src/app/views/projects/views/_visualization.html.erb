@@ -1051,6 +1051,7 @@ has_embeddings = embedding_groups.any? { |_path, embeddings| embeddings.present?
 default_embedding_id = default_embedding_record&.id
 can_edit_project = editable?(@project)
 can_analyze_project = analyzable?(@project)
+can_comment_checkpoints = checkpoint_commentable?(@project)
 
 possible_names = []
 if default_embedding_record&.name.present?
@@ -1111,6 +1112,8 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
      data-visualization-entry-checkpoint-title-value="<%= h(entry_checkpoint_title) %>"
      data-visualization-current-user-id-value="<%= current_user&.id.to_i %>"
      data-visualization-can-edit-value="<%= can_edit_project ? 'true' : 'false' %>"
+     data-visualization-can-analyze-value="<%= can_analyze_project ? 'true' : 'false' %>"
+     data-visualization-can-comment-value="<%= can_comment_checkpoints ? 'true' : 'false' %>"
      data-is-admin="<%= admin? ? 'true' : 'false' %>"
      style="display: flex; flex-direction: row; height: 100%; width: 100%; margin: 0; padding: 0; overflow: hidden;">
   
@@ -3926,13 +3929,15 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
       <div id="checkpoint-comment-choice-section" style="display: flex; flex-direction: column; gap: 8px;">
         <div style="display: flex; align-items: center; gap: 14px;">
           <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #111827; cursor: pointer;">
-            <input type="radio" name="checkpoint-comment-mode" value="existing" onchange="if (window.visualizationController) window.visualizationController.onCheckpointCommentModeChanged()">
+            <input type="radio" name="checkpoint-comment-mode" value="existing" <%= can_analyze_project ? '' : 'checked' %> onchange="if (window.visualizationController) window.visualizationController.onCheckpointCommentModeChanged()">
             Existing checkpoint
           </label>
-          <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #111827; cursor: pointer;">
-            <input type="radio" name="checkpoint-comment-mode" value="new" checked onchange="if (window.visualizationController) window.visualizationController.onCheckpointCommentModeChanged()">
-            New checkpoint
-          </label>
+          <% if can_analyze_project %>
+            <label id="checkpoint-comment-new-mode-label" style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #111827; cursor: pointer;">
+              <input type="radio" name="checkpoint-comment-mode" value="new" checked onchange="if (window.visualizationController) window.visualizationController.onCheckpointCommentModeChanged()">
+              New checkpoint
+            </label>
+          <% end %>
         </div>
         <div id="checkpoint-comment-existing-wrap" style="display: flex; flex-direction: column; gap: 6px;">
           <label for="checkpoint-comment-target-trigger" style="font-size: 12px; color: #4b5563;">Select checkpoint</label>
@@ -3951,26 +3956,30 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
           </div>
         </div>
         <div id="checkpoint-comment-new-wrap" style="display: none; flex-direction: column; gap: 6px;">
-          <label for="checkpoint-comment-new-title" style="font-size: 12px; color: #4b5563;">New checkpoint name</label>
-          <input id="checkpoint-comment-new-title"
-                 type="text"
-                 maxlength="255"
-                 placeholder="Checkpoint title"
-                 style="width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 7px 8px; font-size: 13px;">
+          <% if can_analyze_project %>
+            <label for="checkpoint-comment-new-title" style="font-size: 12px; color: #4b5563;">New checkpoint name</label>
+            <input id="checkpoint-comment-new-title"
+                   type="text"
+                   maxlength="255"
+                   placeholder="Checkpoint title"
+                   style="width: 100%; border: 1px solid #d1d5db; border-radius: 6px; padding: 7px 8px; font-size: 13px;">
+          <% end %>
         </div>
       </div>
     </div>
     <div id="checkpoint-comments-list" style="overflow: auto; flex: 1;"></div>
-    <div style="display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #e5e7eb;">
-      <textarea id="checkpoint-comment-input"
-                style="flex: 1; min-height: 64px; max-height: 140px; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; font-size: 13px; resize: vertical;"
-                placeholder="Add a comment about this view"></textarea>
-      <button type="button"
-              style="align-self: flex-end; padding: 8px 12px; border: 1px solid #3b82f6; background: #3b82f6; color: white; border-radius: 6px; cursor: pointer;"
-              onclick="if (window.visualizationController) window.visualizationController.submitCheckpointComment(event)">
-        Add comment
-      </button>
-    </div>
+    <% if can_comment_checkpoints %>
+      <div id="checkpoint-comment-composer" style="display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #e5e7eb;">
+        <textarea id="checkpoint-comment-input"
+                  style="flex: 1; min-height: 64px; max-height: 140px; border: 1px solid #d1d5db; border-radius: 6px; padding: 8px; font-size: 13px; resize: vertical;"
+                  placeholder="Add a comment about this view"></textarea>
+        <button type="button"
+                style="align-self: flex-end; padding: 8px 12px; border: 1px solid #3b82f6; background: #3b82f6; color: white; border-radius: 6px; cursor: pointer;"
+                onclick="if (window.visualizationController) window.visualizationController.submitCheckpointComment(event)">
+          Add comment
+        </button>
+      </div>
+    <% end %>
   </div>
 </div>
 

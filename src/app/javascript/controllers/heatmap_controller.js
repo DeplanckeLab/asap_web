@@ -27,6 +27,7 @@ export default class extends Controller {
     searchGeneUrl: String,
     canAnalyze: { type: Boolean, default: false },
     canEdit: { type: Boolean, default: false },
+    canComment: { type: Boolean, default: false },
     currentUserId: { type: Number, default: 0 }
   }
 
@@ -6903,6 +6904,8 @@ export default class extends Controller {
   }
 
   async saveCheckpoint(title, options = {}) {
+    if (!this.canAnalyzeValue) return
+
     const checkpointId = options.checkpointId ? String(options.checkpointId).trim() : ""
     const state = this.buildCheckpointState()
     try {
@@ -7722,7 +7725,7 @@ export default class extends Controller {
     const editingId = this.editingCheckpointCommentId != null ? String(this.editingCheckpointCommentId) : null
     this.checkpointCommentsListTarget.innerHTML = comments.map((comment) => {
       const authoredAt = comment.created_at ? new Date(comment.created_at).toLocaleString() : ""
-      const canManage = comment.user_can_manage === true && this.canAnalyzeValue
+      const canManage = comment.user_can_manage === true && this.canCommentValue
       const commentId = this.escape(comment.id || "")
       const isEdited = this.checkpointCommentIsEdited(comment)
       const isEditing = editingId != null && String(comment.id) === editingId
@@ -7778,7 +7781,7 @@ export default class extends Controller {
   }
 
   async submitCheckpointComment() {
-    if (!this.canAnalyzeValue) return
+    if (!this.canCommentValue) return
     const checkpointId = this.selectedCommentCheckpointId()
     if (!checkpointId) {
       alert("Select a checkpoint first.")
@@ -7818,7 +7821,7 @@ export default class extends Controller {
   }
 
   async editCheckpointComment(event) {
-    if (!this.canAnalyzeValue) return
+    if (!this.canCommentValue) return
     const commentId = event.params.id
     const checkpointId = this.selectedCommentCheckpointId()
     if (!checkpointId || !commentId) return
@@ -7835,7 +7838,7 @@ export default class extends Controller {
   }
 
   async saveCheckpointCommentEdit(event) {
-    if (!this.canAnalyzeValue) return
+    if (!this.canCommentValue) return
     const commentId = event.params.id
     const checkpointId = this.selectedCommentCheckpointId()
     if (!checkpointId || !commentId) return
@@ -7877,7 +7880,7 @@ export default class extends Controller {
   }
 
   async deleteCheckpointComment(event) {
-    if (!this.canAnalyzeValue) return
+    if (!this.canCommentValue) return
     const commentId = event.params.id
     const checkpointId = this.selectedCommentCheckpointId()
     if (!checkpointId || !commentId) return

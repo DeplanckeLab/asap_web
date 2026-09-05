@@ -133,6 +133,20 @@ module ProjectAuthorization
     analyzable?(project)
   end
 
+  # Comment on an existing checkpoint (does not allow creating checkpoints).
+  # - Analyzable users (and admins) always
+  # - Public projects: any logged-in user with ORCID
+  # - Private projects: analyzable only
+  def checkpoint_commentable?(project)
+    return false unless project
+    return true if admin?
+    return false unless current_user
+    return true if analyzable?(project)
+    return false unless current_user.orcid_user_id.present?
+
+    project.public?
+  end
+
   # Check if user can annotate an item in a project
   def annotable_item?(project, item)
     return false unless project && item

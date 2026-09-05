@@ -145,4 +145,114 @@ class CheckpointsControllerTest < ActionDispatch::IntegrationTest
     assert_equal 1, checkpoint.state['version']
     assert_equal 1, checkpoint.comments.length
   end
+
+  test 'orcid user can comment on existing checkpoint of a public project' do
+    @project.update!(public: true)
+    orcid = register_for_test_cleanup(
+      OrcidUser.create!(key: "orcid-#{SecureRandom.hex(4)}", name: 'Commenter')
+    )
+    commenter = register_for_test_cleanup(
+      User.create!(
+        email: "ckpt_orcid_#{SecureRandom.hex(4)}@example.com",
+        password: 'password123',
+        orcid_user: orcid
+      )
+    )
+    checkpoint = register_for_test_cleanup(
+      Checkpoint.create!(
+        project: @project,
+        user: @user,
+        title: 'Public named view',
+        kind: Checkpoint::KIND_VISUALIZATION,
+        state: { 'version' => 1 }
+      )
+    )
+
+    sign_in commenter
+    patch project_checkpoint_path(@project, checkpoint),
+          params: { checkpoint: { comment_body: 'Looks interesting' } },
+          as: :json
+
+    assert_response :success
+    comments = checkpoint.reload.comments
+    assert_equal 1, comments.length
+    assert_equal 'Looks interesting', comments.first['body']
+    assert_equal commenter.id, comments.first['user_id']
+  end
+
+  test 'orcid user cannot create checkpoint on a public project without analyze rights' do
+    @project.update!(public: true)
+    orcid = register_for_test_cleanup(
+      OrcidUser.create!(key: "orcid-#{SecureRandom.hex(4)}", name: 'Commenter')
+    )
+    commenter = register_for_test_cleanup(
+      User.create!(
+        email: "ckpt_orcid_create_#{SecureRandom.hex(4)}@example.com",
+        password: 'password123',
+        orcid_user: orcid
+      )
+    )
+
+    sign_in commenter
+    assert_no_difference -> { Checkpoint.where(project_id: @project.id).count } do
+      post project_checkpoints_path(@project),
+           params: { checkpoint: { title: 'Should fail', state: { 'version' => 1 } } },
+           as: :json
+    end
+    assert_response :forbidden
+  end
+
+  test 'logged in user without orcid cannot comment on public project checkpoint' do
+    @project.update!(public: true)
+    guest_user = register_for_test_cleanup(
+      User.create!(email: "ckpt_no_orcid_#{SecureRandom.hex(4)}@example.com", password: 'password123')
+    )
+    checkpoint = register_for_test_cleanup(
+      Checkpoint.create!(
+        project: @project,
+        user: @user,
+        title: 'Public named view',
+        kind: Checkpoint::KIND_VISUALIZATION,
+        state: { 'version' => 1 }
+      )
+    )
+
+    sign_in guest_user
+    patch project_checkpoint_path(@project, checkpoint),
+          params: { checkpoint: { comment_body: 'Nope' } },
+          as: :json
+
+    assert_response :forbidden
+    assert_equal 0, checkpoint.reload.comments.length
+  end
+
+  test 'orcid user cannot comment on private project checkpoint without analyze rights' do
+    orcid = register_for_test_cleanup(
+      OrcidUser.create!(key: "orcid-#{SecureRandom.hex(4)}", name: 'Commenter')
+    )
+    commenter = register_for_test_cleanup(
+      User.create!(
+        email: "ckpt_orcid_private_#{SecureRandom.hex(4)}@example.com",
+        password: 'password123',
+        orcid_user: orcid
+      )
+    )
+    checkpoint = register_for_test_cleanup(
+      Checkpoint.create!(
+        project: @project,
+        user: @user,
+        title: 'Private named view',
+        kind: Checkpoint::KIND_VISUALIZATION,
+        state: { 'version' => 1 }
+      )
+    )
+
+    sign_in commenter
+    patch project_checkpoint_path(@project, checkpoint),
+          params: { checkpoint: { comment_body: 'Nope' } },
+          as: :json
+
+    assert_response :forbidden
+    assert_equal 0, checkpoint.reload.comments.length
+  end
 end

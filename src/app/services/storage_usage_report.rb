@@ -4,7 +4,7 @@ require 'open3'
 
 # Read-only disk usage report for admin: USER_DATA_DIR + UPLOAD_DATA_DIR + S3 archives.
 class StorageUsageReport
-  CACHE_KEY = 'storage_usage_report:v3'
+  CACHE_KEY = 'storage_usage_report:v4'
   CACHE_TTL = 5.minutes
   DEFAULT_TOP_N = 50
 
@@ -134,7 +134,7 @@ class StorageUsageReport
       fus_dir: fus_root.to_s,
       filesystems: filesystem_stats([users_root.to_s, fus_root.to_s]),
       categories: categories,
-      largest_user_dirs: largest_children(users_root, max_depth: 1),
+      largest_user_dirs: enrich_user_dirs_with_email(largest_children(users_root, max_depth: 1)),
       largest_fus_dirs: largest_children(fus_root, max_depth: 1),
       top_entries: all_entries.sort_by { |e| -e.bytes }.first(@top_n).map { |e| entry_to_h(e) },
       users_total_bytes: users_entries.sum(&:bytes),
@@ -412,6 +412,15 @@ class StorageUsageReport
       .map { |path, bytes| { path: path, bytes: bytes, label: path.delete_prefix(root_s).delete_prefix('/') } }
       .sort_by { |row| -row[:bytes] }
       .first(@top_n)
+  end
+
+  def enrich_user_dirs_with_email(rows)
+    user_ids = rows.filter_map { |row| Integer(row[:label], exception: false) }
+    emails_by_id = User.where(id: user_ids).pluck(:id, :email).to_h
+    rows.map do |row|
+      user_id = Integer(row[:label], exception: false)
+      row.merge(email: emails_by_id[user_id])
+    end
   end
 
   def filesystem_stats(paths)

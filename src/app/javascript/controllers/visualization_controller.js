@@ -73,7 +73,9 @@ export default class extends Controller {
     cellIdAnnotIdsByLoom: Object,
     entryCheckpointTitle: String,
     currentUserId: Number,
-    canEdit: { type: Boolean, default: false }
+    canEdit: { type: Boolean, default: false },
+    canAnalyze: { type: Boolean, default: false },
+    canComment: { type: Boolean, default: false }
   }
   
   // Optional targets - manually check with querySelector
@@ -2445,6 +2447,9 @@ export default class extends Controller {
   }
 
   async saveCheckpoint(title, options = {}) {
+    // Matches CheckpointsController#create/#update (ensure_analyzable!).
+    if (this.canAnalyzeValue !== true) return
+
     const projectIdentifier = this.getProjectIdentifier()
     if (!projectIdentifier) {
       alert('Cannot determine project identifier.')
@@ -2453,6 +2458,7 @@ export default class extends Controller {
 
     const checkpointId = options.checkpointId ? String(options.checkpointId).trim() : ''
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    if (!csrfToken) return
     const state = this.buildCheckpointState()
     try {
       const thumbnails = await this.captureNamedCheckpointThumbnails()
@@ -3859,6 +3865,8 @@ export default class extends Controller {
 
   persistCurrentCheckpointOnServer(reason = 'unknown') {
     if (!this.hasMetadataSelectTarget) return
+    // Server upsert_current requires analyzable?; guests/crawlers must not PUT.
+    if (this.canAnalyzeValue !== true) return
     if (this.currentCheckpointLoadInProgress === true) return
     if (this.currentCheckpointReadyForOverwrite !== true) return
 
@@ -3866,6 +3874,10 @@ export default class extends Controller {
     if (!projectIdentifier) return
 
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    if (!csrfToken) {
+      this.checkpointDebug('persistCurrentCheckpointOnServer:missing-csrf', { reason })
+      return
+    }
     const state = this._lastPersistedState && this._lastPersistedState.clientSavedAt
       ? this._lastPersistedState
       : this.buildCurrentCheckpointPersistencePayload()
@@ -4347,13 +4359,14 @@ export default class extends Controller {
   }
 
   resolveCheckpointCommentMode() {
+    if (this.canAnalyzeValue !== true) return 'existing'
     if (this.checkpointCommentUiExactMatchOnly === true) return 'existing'
     const modal = document.getElementById('checkpoint-comments-modal')
-    if (!modal) return 'new'
+    if (!modal) return 'existing'
     const selected = modal.querySelector('input[name="checkpoint-comment-mode"]:checked')
     if (selected?.value === 'new') return 'new'
     if (selected?.value === 'existing') return 'existing'
-    return 'new'
+    return 'existing'
   }
 
   updateCheckpointCommentChoiceSectionVisibility(visible) {
@@ -4859,18 +4872,19 @@ export default class extends Controller {
       !!this.lastLoadedCheckpointId &&
       !!(persistedBaseline && typeof persistedBaseline === 'object') &&
       !this.isCheckpointStateAlreadyApplied(persistedBaseline)
-    const defaultMode = hasExactMatch
+    const canCreateCheckpoint = this.canAnalyzeValue === true
+    const defaultMode = (!canCreateCheckpoint || hasExactMatch)
       ? 'existing'
       : (lastLoadedDiffersFromCurrent || !hasPreferredExisting ? 'new' : 'existing')
     this.applyCheckpointCommentsDriftBannerForCurrentState()
     const { existingRadio, newRadio } = this.getCheckpointCommentModeRadioElements()
-    if (!hasExactMatch && existingRadio && newRadio) {
-      if (defaultMode === 'new') {
+    if (!hasExactMatch && existingRadio) {
+      if (defaultMode === 'new' && newRadio) {
         newRadio.checked = true
         existingRadio.checked = false
       } else {
         existingRadio.checked = true
-        newRadio.checked = false
+        if (newRadio) newRadio.checked = false
       }
     }
     this.isOpeningCheckpointComments = true
@@ -5034,6 +5048,7 @@ export default class extends Controller {
   async submitCheckpointComment(event) {
     event.preventDefault()
     event.stopPropagation()
+    if (this.canCommentValue !== true) return
 
     const { input, newTitleInput } = {
       input: document.getElementById('checkpoint-comment-input'),
@@ -5046,9 +5061,15 @@ export default class extends Controller {
     const projectIdentifier = this.getProjectIdentifier()
     if (!projectIdentifier) return
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    if (!csrfToken) return
 
     const mode = this.resolveCheckpointCommentMode()
     if (mode === 'new') {
+      // Creating a checkpoint from the comment modal requires analyzable rights.
+      if (this.canAnalyzeValue !== true) {
+        alert('Creating a checkpoint requires project analyze rights.')
+        return
+      }
       const requestedTitle = (newTitleInput?.value || '').trim()
       if (!requestedTitle) {
         alert('Please provide a name for the new checkpoint.')
@@ -5147,6 +5168,7 @@ export default class extends Controller {
   }
 
   async editCheckpointComment(commentId) {
+    if (this.canCommentValue !== true) return
     if (!this.currentCommentCheckpointId || !commentId) return
     const checkpoint = (this.checkpointHistory || []).find((item) => String(item.id) === String(this.currentCommentCheckpointId))
     const comments = Array.isArray(checkpoint?.comments) ? checkpoint.comments : []
@@ -5166,6 +5188,7 @@ export default class extends Controller {
   }
 
   async saveCheckpointCommentEdit(commentId) {
+    if (this.canCommentValue !== true) return
     if (!this.currentCommentCheckpointId || !commentId) return
     const list = document.getElementById('checkpoint-comments-list')
     const textarea = list?.querySelector(`textarea[data-checkpoint-comment-edit-input="${commentId}"]`)
@@ -5181,6 +5204,7 @@ export default class extends Controller {
     const projectIdentifier = this.getProjectIdentifier()
     if (!projectIdentifier) return
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    if (!csrfToken) return
 
     const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentCommentCheckpointId)}`, {
       method: 'PATCH',
@@ -5209,12 +5233,14 @@ export default class extends Controller {
   }
 
   async deleteCheckpointComment(commentId) {
+    if (this.canCommentValue !== true) return
     if (!this.currentCommentCheckpointId || !commentId) return
     if (!window.confirm('Delete this comment?')) return
 
     const projectIdentifier = this.getProjectIdentifier()
     if (!projectIdentifier) return
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+    if (!csrfToken) return
 
     const response = await fetch(`/projects/${encodeURIComponent(projectIdentifier)}/checkpoints/${encodeURIComponent(this.currentCommentCheckpointId)}`, {
       method: 'PATCH',

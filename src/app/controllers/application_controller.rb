@@ -17,7 +17,7 @@ class ApplicationController < ActionController::Base
   before_action :init_session
 
   # Make authorization methods available to views
-  helper_method :admin?, :uab?, :admin_report?, :authorized?, :readable?, :exportable?, :exportable_item?, :editable?, :owner?, :owner_or_admin?, :owner_or_admin_obj?, :read_only?, :clonable?, :analyzable?, :analyzable_item?, :annotable?, :annotable_item?, :cla_votable?, :downloadable?, :publication_snapshot_reader?, :annot_visible_under_publication_rules?, :run_visible_under_publication_rules?, :guest_sandbox_project, :synced_reference_data_writable?, :can_edit_synced_reference_data?, :search_engine_crawler?
+  helper_method :admin?, :uab?, :admin_report?, :authorized?, :readable?, :exportable?, :exportable_item?, :editable?, :owner?, :owner_or_admin?, :owner_or_admin_obj?, :read_only?, :clonable?, :analyzable?, :analyzable_item?, :annotable?, :annotable_item?, :cla_votable?, :checkpoint_commentable?, :downloadable?, :publication_snapshot_reader?, :annot_visible_under_publication_rules?, :run_visible_under_publication_rules?, :guest_sandbox_project, :synced_reference_data_writable?, :can_edit_synced_reference_data?, :search_engine_crawler?
 
   protected
 

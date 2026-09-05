@@ -58,4 +58,20 @@ class StorageUsageReportTest < TestBaseWithoutFixtures
     )
     assert_equal updated_at.iso8601, report.send(:entry_to_h, entry2)[:last_active_at]
   end
+
+  test 'enrich_user_dirs_with_email attaches email from user id label' do
+    user = register_for_test_cleanup(
+      User.create!(email: "storage-report_#{SecureRandom.hex(4)}@example.com", password: 'password123')
+    )
+    report = StorageUsageReport.new
+    rows = [
+      { path: "/users/#{user.id}", bytes: 100, label: user.id.to_s },
+      { path: '/users/999999999', bytes: 50, label: '999999999' }
+    ]
+
+    enriched = report.send(:enrich_user_dirs_with_email, rows)
+
+    assert_equal user.email, enriched[0][:email]
+    assert_nil enriched[1][:email]
+  end
 end

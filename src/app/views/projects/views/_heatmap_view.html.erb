@@ -4,6 +4,7 @@
 <% full_height = !!local_assigns[:full_height] %>
 <% can_analyze_heatmap = analyzable?(project) %>
 <% can_edit_heatmap = editable?(project) %>
+<% can_comment_heatmap_checkpoints = checkpoint_commentable?(project) %>
 <%
   heatmap_std_method = nil
   if defined?(@h_std_methods) && @h_std_methods.is_a?(Hash)
@@ -23,6 +24,7 @@
      data-heatmap-run-label-value="<%= heatmap_run_label %>"
      data-heatmap-can-analyze-value="<%= can_analyze_heatmap %>"
      data-heatmap-can-edit-value="<%= can_edit_heatmap %>"
+     data-heatmap-can-comment-value="<%= can_comment_heatmap_checkpoints %>"
      data-heatmap-current-user-id-value="<%= current_user&.id.to_i %>"
      data-heatmap-search-gene-url-value="<%= search_gene_project_path(project) %>"
      data-heatmap-data-url-value="<%= heatmap_data_project_path(project, run_id: run.id) %>">
@@ -1845,7 +1847,7 @@
                 style="width:100%;"></select>
       </div>
       <div data-heatmap-target="checkpointCommentsList" style="flex:1; min-height:0; overflow:auto;"></div>
-      <% if can_analyze_heatmap %>
+      <% if can_comment_heatmap_checkpoints %>
         <div style="padding:12px 16px; border-top:1px solid #e5e7eb; display:flex; flex-direction:column; gap:8px;">
           <textarea data-heatmap-target="checkpointCommentInput"
                     rows="3"

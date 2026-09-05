@@ -85,7 +85,14 @@ class CheckpointsController < ApplicationController
 
   def update
     return if performed?
-    return unless ensure_analyzable!
+
+    # Comment-only patches: ORCID users on public projects (or analyzable users).
+    # Creating/renaming/changing state/landing page still requires analyzable.
+    if comment_only_update?
+      return unless ensure_checkpoint_commentable!
+    else
+      return unless ensure_analyzable!
+    end
 
     if CURRENT_CHECKPOINT_TITLES.include?(checkpoint_title)
       render json: { error: 'Checkpoint title is reserved.' }, status: :unprocessable_entity
@@ -332,6 +339,18 @@ class CheckpointsController < ApplicationController
     params.dig(:checkpoint, :comment_id).to_s.strip
   end
 
+  def structural_checkpoint_update?
+    checkpoint_title.present? ||
+      checkpoint_state_param_present? ||
+      checkpoint_is_landing_page_param_present?
+  end
+
+  def comment_only_update?
+    return false if structural_checkpoint_update?
+
+    comment_action.in?(%w[edit delete]) || comment_body.present?
+  end
+
   def ensure_readable!
     return true if @project && readable?(@project)
 
@@ -341,6 +360,13 @@ class CheckpointsController < ApplicationController
 
   def ensure_analyzable!
     return true if @project && analyzable?(@project)
+
+    render json: { error: 'Not authorized' }, status: :forbidden
+    false
+  end
+
+  def ensure_checkpoint_commentable!
+    return true if @project && checkpoint_commentable?(@project)
 
     render json: { error: 'Not authorized' }, status: :forbidden
     false

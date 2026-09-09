@@ -47,10 +47,10 @@
   <%= render partial: 'projects/views/run_metadata', locals: { run: run_for_view, results: @h_res, queue_position: @queue_position, slurm_queue_hover: @slurm_queue_hover } %>
 <% else %>
 <div class="bg-white rounded-lg shadow-sm flex flex-col" id="result_summary" style="max-height: calc(100vh - 200px); overflow-y: auto; overflow-x: hidden; width: 100%;">
-  <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+  <div class="border-b border-gray-200 px-4 py-2 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
     <div class="flex items-center justify-between min-w-0">
       <div class="flex items-center gap-3 min-w-0 flex-1">
-        <h3 class="text-lg font-semibold text-gray-900 min-w-0 truncate">
+        <h3 class="text-base font-semibold text-gray-900 min-w-0 truncate">
           <%= @step.label.presence || @step.name %> results
         </h3>
         <% if run_for_view && run_for_view.status_id %>

@@ -6600,10 +6600,8 @@ class ProjectsController < ApplicationController
       down_gene_ids = parse_cla_field(cla.sorted_down_gene_ids.presence || cla.down_gene_ids)
       gene_info_map = symbol_map_by_project_id[cla.project_id] || {}
 
-      creator_label = if cla.user && current_user && cla.user.id == current_user.id
-                        'me'
-                      elsif cla.user&.email.present?
-                        cla.user.email.to_s.split('@').first
+      creator_label = if cla.user
+                        cla.user.public_display_name(viewer: current_user)
                       else
                         '-'
                       end

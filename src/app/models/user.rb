@@ -1,4 +1,8 @@
 class User < ApplicationRecord
+  # Shared sandbox owner for anonymous (guest) sessions. Do not show this
+  # account's real email / displayed_name in user-facing UI — use #public_display_name.
+  GUEST_SANDBOX_USER_ID = 1
+
   # Include default devise modules. Others available are:
   # :confirmable, :lockable, :timeoutable, :trackable and :omniauthable
   devise :database_authenticatable, :registerable,
@@ -23,6 +27,18 @@ class User < ApplicationRecord
   # Callbacks
   before_save :ensure_displayed_name
   after_create :create_slurm_account
+
+  def guest_account?
+    id == GUEST_SANDBOX_USER_ID
+  end
+
+  # Label for views / JSON payloads. Masks the guest sandbox account as "guest".
+  def public_display_name(viewer: nil)
+    return 'me' if viewer && id == viewer.id
+    return 'guest' if guest_account?
+
+    displayed_name.to_s.presence || email.to_s.split('@').first.presence || '-'
+  end
 
   private
 

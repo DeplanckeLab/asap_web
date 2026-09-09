@@ -161,6 +161,7 @@
                     <% if source_run_ids.any? %>
                       <% candidate_annots.concat(
                            Annot.where(project_id: @project.id, run_id: source_run_ids)
+                                .includes(:data_transformation)
                                 .order(:name, :id)
                                 .to_a
                                 .select do |annot|
@@ -173,6 +174,7 @@
                     <% end %>
                     <% if source_step_ids.any? %>
                       <% imported_annots = Annot.where(project_id: @project.id, imported: true)
+                                                .includes(:data_transformation)
                                                 .order(:name, :id)
                                                 .select { |annot| annot.matches_source_step_ids?(source_step_ids) } %>
                       <% candidate_annots.concat(imported_annots) %>
@@ -290,13 +292,25 @@
                                        class="mt-1 mr-3 h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                                        data-input-data-selector-target="option"
                                        data-action="change->input-data-selector#optionChanged">
-                                <div class="flex-1">
-                                  <div class="font-medium text-gray-900"><%= display_label %></div>
+                                <div class="flex-1 min-w-0">
+                                  <div class="font-medium text-gray-900 flex items-center gap-2 flex-wrap">
+                                    <span data-option-label="1"><%= display_label %></span>
+                                    <%= annot_imported_badge if annot.imported %>
+                                  </div>
+                                  <div class="mt-1.5 flex flex-wrap gap-2 items-center">
+                                    <% if annot.expression_matrix? %>
+                                      <%= dimension_badge(annot.nber_rows, :row, @project) if annot.nber_rows %>
+                                      <%= dimension_badge_col_aligned_with_matrix(annot.nber_cols, annot.filepath, @project) if annot.nber_cols %>
+                                      <%= annot_matrix_type_badge(annot, @project) if annot_storage_type_label(annot, @project).present? %>
+                                      <%= annot_data_transformation_badge(annot) %>
+                                    <% else %>
+                                      <% if annot.nber_cats.to_i > 0 %>
+                                        <span class="inline-block text-sm text-gray-600"><strong>Categories:</strong> <%= annot.nber_cats %></span>
+                                      <% end %>
+                                    <% end %>
+                                  </div>
                                   <div class="text-sm text-gray-600 mt-1">
                                     <span class="inline-block mr-3"><strong>Dataset:</strong> <%= annot.name %></span>
-                                    <% if annot.nber_cats.to_i > 0 %>
-                                      <span class="inline-block mr-3"><strong>Categories:</strong> <%= annot.nber_cats %></span>
-                                    <% end %>
                                     <% if annot.filepath.present? %>
                                       <span class="inline-block text-gray-500 text-xs"><%= annot.filepath %></span>
                                     <% end %>

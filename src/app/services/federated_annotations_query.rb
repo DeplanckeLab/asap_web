@@ -225,7 +225,7 @@ class FederatedAnnotationsQuery
       nber_agree: cla.nber_agree || 0,
       nber_disagree: cla.nber_disagree || 0,
       score: cla.score,
-      created_by: cla.user&.email.to_s.split('@').first.presence || '-',
+      created_by: cla.user&.public_display_name.presence || '-',
       created_at: cla.created_at&.strftime('%b %d, %Y'),
       cell_ontology_term_ids: parse_field(cla.sorted_cell_ontology_term_ids.presence || cla.cell_ontology_term_ids),
       up_gene_ids: parse_field(cla.sorted_up_gene_ids.presence || cla.up_gene_ids),

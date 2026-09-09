@@ -9,7 +9,7 @@ class ExternalCatalogCandidatesController < ApplicationController
 
   PER_PAGE = 25
   # Same technical owner as projects#create for guest sandboxes.
-  GUEST_SANDBOX_USER_ID = 1
+  GUEST_SANDBOX_USER_ID = User::GUEST_SANDBOX_USER_ID
 
   def index
     @source = params[:source].to_s.presence

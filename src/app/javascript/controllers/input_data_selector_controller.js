@@ -174,7 +174,7 @@ export default class extends Controller {
         const optionLabel = opt.closest('label')
         if (optionLabel) {
           const stepRunInfo = optionLabel.querySelector('.font-medium')
-          if (stepRunInfo && stepRunInfo.textContent.trim() === label) {
+          if (stepRunInfo && this.extractOptionDisplayLabel(stepRunInfo) === label) {
             opt.checked = false
           }
         }
@@ -298,6 +298,10 @@ export default class extends Controller {
   extractOptionDisplayLabel(stepRunInfo) {
     if (!stepRunInfo) {
       return ''
+    }
+    const labelEl = stepRunInfo.querySelector('[data-option-label="1"]')
+    if (labelEl && labelEl.textContent) {
+      return labelEl.textContent.trim()
     }
     const cloned = stepRunInfo.cloneNode(true)
     const badge = cloned.querySelector('[data-recommendation-badge="1"]')

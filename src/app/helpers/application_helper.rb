@@ -78,12 +78,8 @@ module ApplicationHelper
 
   def user_display_name(user, current_user: nil)
     return '-' unless user
-    return 'me' if current_user && user.id == current_user.id
 
-    email_prefix = user.email.to_s.split('@').first
-    return email_prefix if email_prefix.present?
-
-    user.displayed_name.to_s.presence || '-'
+    user.public_display_name(viewer: current_user)
   end
   
   def duration2(duration)

@@ -139,7 +139,7 @@ class CheckpointsController < ApplicationController
       updated_comments << {
         id: SecureRandom.uuid,
         user_id: current_user&.id,
-        user_name: current_user&.displayed_name.presence || current_user&.email,
+        user_name: current_user&.public_display_name || 'guest',
         body: comment_body,
         created_at: Time.current.iso8601
       }
@@ -381,7 +381,7 @@ class CheckpointsController < ApplicationController
       run_id: checkpoint.run_id,
       kind: checkpoint.kind,
       user_id: checkpoint.user_id,
-      user_name: checkpoint.user&.displayed_name.presence || checkpoint.user&.email,
+      user_name: checkpoint.user&.public_display_name,
       comments: comments,
       comments_count: comments.length,
       is_landing_page: checkpoint.is_landing_page,

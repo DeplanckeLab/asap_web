@@ -89,10 +89,10 @@
       <% end %>
       <% metadata_parts << "<span class='nowrap'>#{ram_text}</span>" %>
     <% end %>
-    <%# Email of the user that created this run %>
-    <% run_user_email = run.user&.email %>
-    <% if run_user_email.present? %>
-      <% metadata_parts << "<span class='nowrap'><i class='fas fa-user text-gray-400 mr-1'></i>#{h(run_user_email)}</span>" %>
+    <%# Display name of the user that created this run (guest sandbox masked) %>
+    <% run_user_label = user_display_name(run.user, current_user: current_user) %>
+    <% if run_user_label.present? && run_user_label != '-' %>
+      <% metadata_parts << "<span class='nowrap'><i class='fas fa-user text-gray-400 mr-1'></i>#{h(run_user_label)}</span>" %>
     <% end %>
     <%= raw metadata_parts.compact.join(" <span class='text-gray-300'>•</span> ") %>
     <%# Hidden spans for JavaScript - add separately after visible metadata to avoid extra separators %>

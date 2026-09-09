@@ -75,6 +75,12 @@ class ProjectCloneService
 
   def can_clone?
     return false unless source_project.present?
+
+    if source_project.sandbox? && user.nil?
+      @errors << 'Sandbox projects cannot be cloned in guest mode'
+      return false
+    end
+
     return true unless source_project.project_type&.admin_report_only?
     return true if EnvHelpers.email_in_list?('ADMIN_REPORT_EMAILS', user&.email)
 

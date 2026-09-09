@@ -77,6 +77,8 @@ module ProjectAuthorization
   # Check if user can clone/duplicate a project
   def clonable?(project)
     return false unless exportable?(project)
+    # Guests may clone public account projects into a sandbox, but not clone a sandbox.
+    return false if project.sandbox? && current_user.nil?
     return true unless project.project_type&.admin_report_only?
 
     admin_report?

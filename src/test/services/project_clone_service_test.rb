@@ -123,6 +123,25 @@ class ProjectCloneServiceTest < TestBaseWithoutFixtures
     spat&.update!(admin_report_only: true)
   end
 
+  test "start! refuses cloning a sandbox project in guest mode" do
+    source = create_test_project!(
+      name: "Guest sandbox source",
+      key: "gsb#{SecureRandom.hex(3)}",
+      user_id: User::GUEST_SANDBOX_USER_ID,
+      sandbox: true
+    )
+    source_dir = Pathname.new(ENV["USER_DATA_DIR"]) + User::GUEST_SANDBOX_USER_ID.to_s + source.key
+    FileUtils.mkdir_p(source_dir)
+
+    session = { sandbox: source.key }
+    service = ProjectCloneService.new(source, user: nil, session: session)
+    clone = service.start!
+
+    assert_nil clone
+    assert_includes service.errors, "Sandbox projects cannot be cloned in guest mode"
+    assert_equal source.key, session[:sandbox]
+  end
+
   test "start! allows admin_report_only project types for ADMIN_REPORT_EMAILS users" do
     spat = ProjectType.find_by(tag: "spat") || ProjectType.ensure_for_tag!("spat")
     spat.update!(admin_report_only: true)

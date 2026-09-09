@@ -915,6 +915,12 @@ button.subview-refresh-available .fa-sync-alt {
   container-name: doublet-calling;
   width: 100%;
   min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .doublet-calling-layout {
@@ -924,6 +930,8 @@ button.subview-refresh-available .fa-sync-alt {
   gap: 1rem;
   width: 100%;
   min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .doublet-calling-controls-col {
@@ -941,9 +949,24 @@ button.subview-refresh-available .fa-sync-alt {
   width: 100%;
   display: flex;
   flex-direction: column;
+  gap: 1rem;
   overflow-x: hidden;
   container-type: inline-size;
   container-name: doublet-calling-plots;
+}
+
+.doublet-calling-plots-fixed {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.doublet-calling-plots-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
 }
 
 .doublet-calling-plot-area {
@@ -963,8 +986,14 @@ button.subview-refresh-available .fa-sync-alt {
 }
 
 @container doublet-calling (min-width: 53rem) {
+  .doublet-calling-layout-host {
+    overflow: hidden;
+  }
+
   .doublet-calling-layout {
+    flex-wrap: nowrap;
     align-items: stretch;
+    overflow: hidden;
   }
 
   .doublet-calling-controls-col {
@@ -972,13 +1001,25 @@ button.subview-refresh-available .fa-sync-alt {
     width: auto;
     max-width: 24rem;
     align-self: stretch;
+    overflow-y: auto;
+    min-height: 0;
+    padding-right: 0.25rem;
   }
 
   .doublet-calling-plots-col {
     flex: 1 1 28rem;
     width: auto;
-    min-width: 28rem;
+    min-width: 0;
     align-self: stretch;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .doublet-calling-plots-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding-right: 0.25rem;
   }
 }
 

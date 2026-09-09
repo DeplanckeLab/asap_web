@@ -159,16 +159,16 @@ export default class extends Controller {
     if (!this.hasStatsPanelTarget) return
 
     this.statsPanelTarget.innerHTML = `
-      <div class="inline-flex items-center gap-2 px-4 py-2 bg-red-50 border border-red-200 rounded-lg">
+      <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg">
         <span class="text-sm font-medium text-red-900">Doublets: <span class="font-bold">${this.formatNum(nDoublets)}</span></span>
       </div>
-      <div class="inline-flex items-center gap-2 px-4 py-2 bg-green-50 border border-green-200 rounded-lg">
+      <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg">
         <span class="text-sm font-medium text-green-900">Singlets: <span class="font-bold">${this.formatNum(nSinglets)}</span></span>
       </div>
-      <div class="inline-flex items-center gap-2 px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg">
+      <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg">
         <span class="text-sm font-medium text-gray-900">Doublet rate: <span class="font-bold">${this.formatRate(rate)}</span></span>
       </div>
-      <div class="inline-flex items-center gap-2 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-lg">
+      <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-200 rounded-lg">
         <span class="text-sm font-medium text-indigo-900">Threshold: <span class="font-bold">${this.formatThreshold(threshold)}</span></span>
       </div>
     `

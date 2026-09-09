@@ -1387,7 +1387,10 @@ export default class extends Controller {
       }
 
       if (selectedEmbeddingId.length > 0) {
+        const embeddingIdFromUrl = String(params.get('embedding_id') || '').trim()
+        // URL embedding_id is intentional (run Visualization link), not a server fallback.
         const selectedIsServerDefault = (
+          embeddingIdFromUrl.length === 0 &&
           this.hasDefaultEmbeddingIdValue &&
           String(this.defaultEmbeddingIdValue || '').trim().length > 0 &&
           selectedEmbeddingId === String(this.defaultEmbeddingIdValue || '').trim()
@@ -3541,6 +3544,7 @@ export default class extends Controller {
 
       const params = new URLSearchParams(window.location.search)
       const checkpointIdFromUrl = params.get('checkpoint_id')
+      const embeddingIdFromUrl = String(params.get('embedding_id') || '').trim()
       const shouldOpenCommentsFromUrl = ['1', 'true', 'yes'].includes(String(params.get('open_checkpoint_comments') || '').toLowerCase())
       if (checkpointIdFromUrl) {
         const urlTitle = this.resolveCheckpointTitleFromHistory(checkpointIdFromUrl) ||
@@ -3550,6 +3554,15 @@ export default class extends Controller {
         if (shouldOpenCommentsFromUrl) {
           await this.openCheckpointComments()
         }
+        return
+      }
+
+      // Explicit embedding_id (e.g. Visualization from a tSNE/UMAP run) must win over
+      // auto-restored current/landing checkpoints, which would keep the previous embedding.
+      if (embeddingIdFromUrl.length > 0) {
+        this.checkpointDebug('loadInitialCheckpointOnEntry:skip-auto-checkpoint-for-url-embedding-id', {
+          embeddingIdFromUrl
+        })
         return
       }
 
@@ -3594,7 +3607,11 @@ export default class extends Controller {
 
     const defaultInfo = this.determineDefaultEmbedding()
     const checkpointApplied = this._checkpointEntryAppliedVisualizationState === true
+    const params = new URLSearchParams(window.location.search)
+    const embeddingIdFromUrl = String(params.get('embedding_id') || '').trim()
+    // URL embedding_id is intentional (run Visualization link), not a server fallback.
     const selectedIsServerDefault = (
+      embeddingIdFromUrl.length === 0 &&
       this.hasDefaultEmbeddingIdValue &&
       String(this.defaultEmbeddingIdValue || '').trim().length > 0 &&
       selectedEmbeddingId.length > 0 &&

@@ -6,73 +6,139 @@ const POPOVER_ID = "run-param-info-popover"
 let lastAnchorElement = null
 let boundOutsideClick = null
 let boundEscape = null
-let dragHandlersBound = false
+const dialogsWithParamInfoCloseBound = new WeakSet()
+
+function isRunParamInfoPopoverOpen(popover) {
+  return !!(popover && !popover.classList.contains("hidden"))
+}
+
+function applyRunParamInfoPosition(popover, viewportLeft, viewportTop) {
+  const parent = popover.parentElement
+  const inDialog = !!(parent && parent.tagName === "DIALOG")
+  let left = viewportLeft
+  let top = viewportTop
+
+  if (inDialog) {
+    const parentRect = parent.getBoundingClientRect()
+    left = viewportLeft - parentRect.left
+    top = viewportTop - parentRect.top
+    popover.style.setProperty("position", "absolute", "important")
+  } else {
+    popover.style.setProperty("position", "fixed", "important")
+  }
+
+  popover.style.setProperty("margin", "0", "important")
+  popover.style.setProperty("inset", "auto", "important")
+  popover.style.setProperty("right", "auto", "important")
+  popover.style.setProperty("bottom", "auto", "important")
+  popover.style.setProperty("left", `${left}px`, "important")
+  popover.style.setProperty("top", `${top}px`, "important")
+  popover.style.transform = "none"
+  popover.style.zIndex = "80"
+}
 
 function makeRunParamInfoDraggable(popover, handle) {
-  if (dragHandlersBound) return
-  dragHandlersBound = true
+  if (popover.dataset.dragBound === "1") return
+  popover.dataset.dragBound = "1"
 
   let isDragging = false
-  let startX
-  let startY
-  let initialLeft
-  let initialTop
+  let startX = 0
+  let startY = 0
+  let initialLeft = 0
+  let initialTop = 0
+  let activePointerId = null
 
-  handle.addEventListener("mousedown", (event) => {
+  const onPointerMove = (event) => {
+    if (!isDragging) return
+    if (activePointerId !== null && event.pointerId !== activePointerId) return
+    event.preventDefault()
+
+    let newLeft = initialLeft + (event.clientX - startX)
+    let newTop = initialTop + (event.clientY - startY)
+    const width = popover.offsetWidth
+    const height = popover.offsetHeight
+    newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - width))
+    newTop = Math.max(0, Math.min(newTop, window.innerHeight - height))
+    applyRunParamInfoPosition(popover, newLeft, newTop)
+  }
+
+  const endDrag = (event) => {
+    if (!isDragging) return
+    if (activePointerId !== null && event.pointerId !== activePointerId) return
+
+    isDragging = false
+    activePointerId = null
+    popover.style.transition = ""
+    handle.style.cursor = "move"
+    document.body.style.userSelect = ""
+    document.body.style.cursor = ""
+
+    try {
+      if (typeof handle.hasPointerCapture === "function" && handle.hasPointerCapture(event.pointerId)) {
+        handle.releasePointerCapture(event.pointerId)
+      }
+    } catch (_error) {
+      // ignore
+    }
+
+    window.removeEventListener("pointermove", onPointerMove, true)
+    window.removeEventListener("pointerup", endDrag, true)
+    window.removeEventListener("pointercancel", endDrag, true)
+  }
+
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== undefined && event.button !== 0) return
     if (event.target.closest('button[aria-label="Close"]')) return
 
     isDragging = true
+    activePointerId = event.pointerId
     startX = event.clientX
     startY = event.clientY
 
     const rect = popover.getBoundingClientRect()
     initialLeft = rect.left
     initialTop = rect.top
+    applyRunParamInfoPosition(popover, initialLeft, initialTop)
 
     popover.style.transition = "none"
-    handle.style.cursor = "move"
+    handle.style.cursor = "grabbing"
     document.body.style.userSelect = "none"
+    document.body.style.cursor = "grabbing"
+
+    try {
+      handle.setPointerCapture(event.pointerId)
+    } catch (_error) {
+      // ignore
+    }
+
+    window.addEventListener("pointermove", onPointerMove, true)
+    window.addEventListener("pointerup", endDrag, true)
+    window.addEventListener("pointercancel", endDrag, true)
+
     event.preventDefault()
-  })
-
-  document.addEventListener("mousemove", (event) => {
-    if (!isDragging) return
-
-    let newLeft = initialLeft + (event.clientX - startX)
-    let newTop = initialTop + (event.clientY - startY)
-
-    const rect = popover.getBoundingClientRect()
-    newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - rect.width))
-    newTop = Math.max(0, Math.min(newTop, window.innerHeight - rect.height))
-
-    popover.style.left = `${newLeft}px`
-    popover.style.top = `${newTop}px`
-  })
-
-  document.addEventListener("mouseup", () => {
-    if (!isDragging) return
-    isDragging = false
-    popover.style.transition = ""
-    handle.style.cursor = "move"
-    document.body.style.userSelect = ""
+    event.stopPropagation()
   })
 }
 
 function closeRunParamInfoPopover() {
   const popover = document.getElementById(POPOVER_ID)
   if (!popover) return
+
   popover.classList.add("hidden")
   popover.dataset.openFor = ""
+  if (popover.parentElement && popover.parentElement !== document.body) {
+    document.body.appendChild(popover)
+  }
   unbindRunParamInfoDismissHandlers()
 }
 
 function unbindRunParamInfoDismissHandlers() {
   if (boundOutsideClick) {
-    document.removeEventListener("click", boundOutsideClick)
+    document.removeEventListener("pointerdown", boundOutsideClick, true)
     boundOutsideClick = null
   }
   if (boundEscape) {
-    document.removeEventListener("keydown", boundEscape)
+    document.removeEventListener("keydown", boundEscape, true)
     boundEscape = null
   }
 }
@@ -82,27 +148,72 @@ function bindRunParamInfoDismissHandlers() {
 
   boundOutsideClick = (event) => {
     const popover = document.getElementById(POPOVER_ID)
-    if (!popover || popover.classList.contains("hidden")) return
+    if (!isRunParamInfoPopoverOpen(popover)) return
     if (popover.contains(event.target)) return
     if (event.target.closest('[data-controller~="run-param-info"]')) return
     closeRunParamInfoPopover()
   }
 
   boundEscape = (event) => {
-    if (event.key === "Escape") closeRunParamInfoPopover()
+    if (event.key !== "Escape") return
+    const popover = document.getElementById(POPOVER_ID)
+    if (!isRunParamInfoPopoverOpen(popover)) return
+    event.preventDefault()
+    event.stopPropagation()
+    closeRunParamInfoPopover()
   }
 
-  document.addEventListener("click", boundOutsideClick)
-  document.addEventListener("keydown", boundEscape)
+  // pointerdown avoids fighting with drag gesture click synthesis
+  document.addEventListener("pointerdown", boundOutsideClick, true)
+  document.addEventListener("keydown", boundEscape, true)
+}
+
+function closestOpenDialog(element) {
+  const dialog = element?.closest?.("dialog")
+  if (!dialog) return null
+  if (typeof dialog.open === "boolean" && !dialog.open) return null
+  return dialog
+}
+
+function mountRunParamInfoPopover(popover, anchorElement) {
+  // Modal <dialog> uses the browser top layer; mount inside it so the
+  // badge popover is not greyed by the dialog backdrop.
+  const openDialog = closestOpenDialog(anchorElement)
+  const mountParent = openDialog || document.body
+  if (popover.parentElement !== mountParent) {
+    mountParent.appendChild(popover)
+  }
+
+  if (openDialog) {
+    openDialog.style.overflow = "visible"
+    if (!dialogsWithParamInfoCloseBound.has(openDialog)) {
+      dialogsWithParamInfoCloseBound.add(openDialog)
+      openDialog.addEventListener("close", () => {
+        closeRunParamInfoPopover()
+      })
+    }
+  }
 }
 
 function ensureRunParamInfoPopover() {
   let popover = document.getElementById(POPOVER_ID)
+  if (popover && (popover.hasAttribute("popover") || popover.dataset.dragVersion !== "3")) {
+    try {
+      if (typeof popover.hidePopover === "function" && popover.hasAttribute("popover") && popover.matches(":popover-open")) {
+        popover.hidePopover()
+      }
+    } catch (_error) {
+      // ignore
+    }
+    popover.remove()
+    popover = null
+  }
   if (popover) return popover
 
   popover = document.createElement("div")
   popover.id = POPOVER_ID
-  popover.className = "hidden fixed z-[60] w-[min(28rem,92vw)] max-h-[min(24rem,70vh)] bg-white rounded-lg border border-gray-200 shadow-xl flex flex-col overflow-hidden"
+  popover.dataset.dragVersion = "3"
+  popover.className = "hidden fixed z-[80] w-[min(28rem,92vw)] max-h-[min(24rem,70vh)] bg-white rounded-lg border border-gray-200 shadow-xl flex flex-col overflow-hidden"
   popover.setAttribute("role", "dialog")
   popover.setAttribute("aria-modal", "false")
 
@@ -173,6 +284,7 @@ function ensureRunParamInfoPopover() {
     })
   })
 
+  popover.addEventListener("pointerdown", (event) => event.stopPropagation())
   popover.addEventListener("click", (event) => event.stopPropagation())
 
   return popover
@@ -195,12 +307,13 @@ export default class extends Controller {
 
     this.assignElementId()
     const popover = ensureRunParamInfoPopover()
-    if (popover.dataset.openFor === this.element.id && !popover.classList.contains("hidden")) {
+    if (popover.dataset.openFor === this.element.id && isRunParamInfoPopoverOpen(popover)) {
       closeRunParamInfoPopover()
       return
     }
 
     this.populatePopover(popover)
+    mountRunParamInfoPopover(popover, this.element)
     popover.classList.remove("hidden")
     popover.dataset.openFor = this.element.id
     lastAnchorElement = this.element
@@ -267,8 +380,7 @@ export default class extends Controller {
       top = Math.max(margin, event.clientY - height - margin)
     }
 
-    popover.style.left = `${left}px`
-    popover.style.top = `${top}px`
+    applyRunParamInfoPosition(popover, left, top)
     popover.style.visibility = "visible"
   }
 }

@@ -1251,15 +1251,7 @@ module ApplicationHelper
       categories_badge_html = " <span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{categories_count} #{categories_label}</span>"
     end
     if is_categorical
-      obs_count = if dim.to_i == 1 && annot.nber_rows.present? && annot.nber_rows.to_i > 0
-                    annot.nber_rows.to_i
-                  elsif annot.nber_cols.present? && annot.nber_cols.to_i > 0 && annot.nber_rows.present? && annot.nber_rows.to_i > 0
-                    [annot.nber_cols.to_i, annot.nber_rows.to_i].max
-                  elsif annot.nber_cols.present? && annot.nber_cols.to_i > 0
-                    annot.nber_cols.to_i
-                  else
-                    annot.nber_rows.to_i
-                  end
+      obs_count = results_dataset_obs_count(annot, dim)
       base_col_label = @project&.project_type&.col_label.presence || 'cells'
       obs_label = obs_count == 1 ? base_col_label.to_s.singularize : base_col_label.to_s.pluralize
       primary_badge_html = "<span class='inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-white text-gray-600 border border-gray-300'>#{obs_count} #{obs_label}</span>"
@@ -1276,6 +1268,38 @@ module ApplicationHelper
       else
         "<button id='annot_#{annot.id}_btn' class='btn btn-outline-secondary btn-sm annot_btn'>#{annot.name} <span class='badge badge-light'>#{annot.nber_cols} #{col_name}</span> <span class='badge badge-light'>#{annot.nber_rows} #{row_name}</span></button>"
       end
+    end
+  end
+
+  # Observation count for categorical result chips.
+  # Cell/gene metadata vectors often store component length in nber_rows/nber_cols (e.g. 1),
+  # while the real cell/gene count lives on the loom /matrix — same source as annots#show.
+  def results_dataset_obs_count(annot, dim)
+    dim_i = dim.to_i
+    name = annot.name.to_s
+    project = @project || Project.find_by(id: annot.project_id)
+    matrix_dims = matrix_dims_for_filepath(project, annot.filepath)
+
+    if dim_i == 1 || name.start_with?('/col_attrs/')
+      matrix_cols = matrix_dims&.dig(:cols).to_i
+      return matrix_cols if matrix_cols > 0
+      return annot.nber_cols.to_i if annot.nber_cols.to_i > 0
+      return annot.nber_rows.to_i
+    end
+
+    if dim_i == 2 || name.start_with?('/row_attrs/')
+      matrix_rows = matrix_dims&.dig(:rows).to_i
+      return matrix_rows if matrix_rows > 0
+      return annot.nber_rows.to_i if annot.nber_rows.to_i > 0
+      return annot.nber_cols.to_i
+    end
+
+    if annot.nber_cols.to_i > 0 && annot.nber_rows.to_i > 0
+      [annot.nber_cols.to_i, annot.nber_rows.to_i].max
+    elsif annot.nber_cols.to_i > 0
+      annot.nber_cols.to_i
+    else
+      annot.nber_rows.to_i
     end
   end
   

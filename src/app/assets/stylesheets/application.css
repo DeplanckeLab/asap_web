@@ -153,6 +153,64 @@ p, label, li, td, th, input, select, textarea, button {
   line-height: inherit;
 }
 
+/* Analysis views: reclaim vertical space so plots fit above the fold. */
+.analysis-view > .mb-2.flex-shrink-0,
+.analysis-view > .mb-4.flex-shrink-0 {
+  margin-bottom: 0.5rem !important;
+}
+
+.analysis-view > .mb-4.flex-shrink-0 h2 {
+  font-size: 1rem;
+  line-height: 1.35rem;
+}
+
+.analysis-view #result_summary,
+.analysis-view #run_result_summary_panel,
+.analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col,
+.analysis-view [style*="max-height: calc(100vh - 200px)"] {
+  max-height: calc(100vh - 140px) !important;
+}
+
+.analysis-view #result_summary > .border-b.border-gray-200,
+.analysis-view #run_result_summary_panel > .border-b.border-gray-200,
+.analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .border-b.border-gray-200 {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
+}
+
+.analysis-view #result_summary > .border-b.border-gray-200 h3,
+.analysis-view #run_result_summary_panel > .border-b.border-gray-200 h3,
+.analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .border-b.border-gray-200 h3 {
+  font-size: 0.95rem;
+  line-height: 1.35rem;
+}
+
+.analysis-view #result_summary > .px-6.py-5,
+.analysis-view #run_result_summary_panel > .px-6.py-5,
+.analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .px-6.py-5 {
+  padding-top: 0.75rem !important;
+  padding-bottom: 0.75rem !important;
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
+}
+
+.analysis-view #result_summary .bg-gray-50.border-b.border-gray-200.px-6.py-3,
+.analysis-view #run_result_summary_panel .bg-gray-50.border-b.border-gray-200.px-6.py-3,
+.analysis-view [id^="run_metadata_sticky"] .bg-gray-50.border-b.border-gray-200.px-6.py-3 {
+  padding-top: 0.375rem !important;
+  padding-bottom: 0.375rem !important;
+  padding-left: 1rem !important;
+  padding-right: 1rem !important;
+}
+
+.analysis-view #result_summary .space-y-6 > :not([hidden]) ~ :not([hidden]),
+.analysis-view #run_result_summary_panel .space-y-6 > :not([hidden]) ~ :not([hidden]),
+.analysis-view .analysis-subview-surface .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 1rem !important;
+}
+
 /* Tour chrome (panel, overlay root, try bar) sits above page UI including header dropdowns
    (nav/project use up to z-[10000]). Highlighted page nodes use a low z-index so they do not
    stack above the fixed header; only the popup is lifted. */
@@ -927,7 +985,7 @@ button.subview-refresh-available .fa-sync-alt {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
-  gap: 1rem;
+  gap: 0.75rem;
   width: 100%;
   min-width: 0;
   min-height: 0;
@@ -940,7 +998,7 @@ button.subview-refresh-available .fa-sync-alt {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .doublet-calling-plots-col {
@@ -949,7 +1007,7 @@ button.subview-refresh-available .fa-sync-alt {
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.5rem;
   overflow-x: hidden;
   container-type: inline-size;
   container-name: doublet-calling-plots;
@@ -959,18 +1017,61 @@ button.subview-refresh-available .fa-sync-alt {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.5rem;
 }
 
 .doublet-calling-plots-scroll {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.5rem;
   min-width: 0;
 }
 
+.doublet-calling-plot-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.doublet-calling-plot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.doublet-calling-plot-title {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #374151;
+  line-height: 1.25;
+  min-width: 0;
+}
+
+.doublet-calling-plot-export {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #4f46e5;
+  cursor: pointer;
+  line-height: 1.25;
+}
+
+.doublet-calling-plot-export:hover {
+  color: #3730a3;
+}
+
 .doublet-calling-plot-area {
-  min-height: 280px;
+  min-height: 300px;
+  height: 300px;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
@@ -980,7 +1081,7 @@ button.subview-refresh-available .fa-sync-alt {
 .doublet-calling-plot-grid {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 0.5rem;
   width: 100%;
   min-width: 0;
 }
@@ -1027,7 +1128,7 @@ button.subview-refresh-available .fa-sync-alt {
   .doublet-calling-plot-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 1rem;
+    gap: 0.5rem;
   }
 }
 

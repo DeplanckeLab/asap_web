@@ -159,17 +159,17 @@ export default class extends Controller {
     if (!this.hasStatsPanelTarget) return
 
     this.statsPanelTarget.innerHTML = `
-      <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg">
-        <span class="text-sm font-medium text-red-900">Doublets: <span class="font-bold">${this.formatNum(nDoublets)}</span></span>
+      <div class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-50 border border-red-200 rounded-lg">
+        <span class="text-xs font-medium text-red-900">Doublets: <span class="font-bold">${this.formatNum(nDoublets)}</span></span>
       </div>
-      <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-lg">
-        <span class="text-sm font-medium text-green-900">Singlets: <span class="font-bold">${this.formatNum(nSinglets)}</span></span>
+      <div class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-green-50 border border-green-200 rounded-lg">
+        <span class="text-xs font-medium text-green-900">Singlets: <span class="font-bold">${this.formatNum(nSinglets)}</span></span>
       </div>
-      <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg">
-        <span class="text-sm font-medium text-gray-900">Doublet rate: <span class="font-bold">${this.formatRate(rate)}</span></span>
+      <div class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-lg">
+        <span class="text-xs font-medium text-gray-900">Doublet rate: <span class="font-bold">${this.formatRate(rate)}</span></span>
       </div>
-      <div class="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-200 rounded-lg">
-        <span class="text-sm font-medium text-indigo-900">Threshold: <span class="font-bold">${this.formatThreshold(threshold)}</span></span>
+      <div class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-indigo-50 border border-indigo-200 rounded-lg">
+        <span class="text-xs font-medium text-indigo-900">Threshold: <span class="font-bold">${this.formatThreshold(threshold)}</span></span>
       </div>
     `
   }
@@ -228,6 +228,59 @@ export default class extends Controller {
     return { singlets, doublets }
   }
 
+  plotlyConfig() {
+    return {
+      responsive: true,
+      displayModeBar: false
+    }
+  }
+
+  downloadSvg(event) {
+    if (!window.Plotly) return
+    const plotKey = event.params.plot
+    const plotEl = this.plotElementFor(plotKey)
+    if (!plotEl?.data) return
+
+    const filenames = {
+      histogram: "doublet-score-distribution",
+      scatter: "doublet-per-cell-scores",
+      sorted: "doublet-sorted-scores"
+    }
+
+    Plotly.downloadImage(plotEl, {
+      format: "svg",
+      filename: filenames[plotKey] || "doublet-plot",
+      height: plotEl.clientHeight || 300,
+      width: plotEl.clientWidth || 600
+    })
+  }
+
+  plotElementFor(plotKey) {
+    if (plotKey === "histogram" && this.hasHistogramPlotTarget) return this.histogramPlotTarget
+    if (plotKey === "scatter" && this.hasScatterPlotTarget) return this.scatterPlotTarget
+    if (plotKey === "sorted" && this.hasSortedPlotTarget) return this.sortedPlotTarget
+    return null
+  }
+
+  // Titles and export controls are HTML above each chart. No Plotly modebar.
+  // Legend sits under the axes.
+  plotLayout(overrides = {}) {
+    return {
+      autosize: true,
+      title: false,
+      margin: { t: 12, r: 12, b: 56, l: 48 },
+      legend: {
+        orientation: "h",
+        yanchor: "top",
+        y: -0.28,
+        x: 0,
+        xanchor: "left",
+        font: { size: 11 }
+      },
+      ...overrides
+    }
+  }
+
   renderHistogram(threshold) {
     if (!this.hasHistogramPlotTarget || !window.Plotly) return
     const { singlets, doublets } = this.splitScores(threshold)
@@ -252,17 +305,15 @@ export default class extends Controller {
       }
     ]
 
-    const layout = {
-      title: "Score distribution (singlet vs doublet)",
+    const layout = this.plotLayout({
       xaxis: { title: "Doublet score" },
       yaxis: { title: "Cells" },
       barmode: "stack",
-      margin: { t: 40, r: 20, b: 50, l: 50 },
-      shapes: this.thresholdLineV(threshold),
-      legend: { orientation: "h", y: 1.12 }
-    }
+      margin: { t: 12, r: 12, b: 72, l: 48 },
+      shapes: this.thresholdLineV(threshold)
+    })
 
-    Plotly.react(this.histogramPlotTarget, traces, layout, { responsive: true, displayModeBar: true })
+    Plotly.react(this.histogramPlotTarget, traces, layout, this.plotlyConfig())
     this.schedulePlotResize()
   }
 
@@ -291,7 +342,7 @@ export default class extends Controller {
         x: singletX,
         y: singletY,
         mode: "markers",
-        type: "scattergl",
+        type: "scatter",
         name: "Singlet",
         marker: { color: "#16a34a", size: 4, opacity: 0.6 }
       },
@@ -299,22 +350,20 @@ export default class extends Controller {
         x: doubletX,
         y: doubletY,
         mode: "markers",
-        type: "scattergl",
+        type: "scatter",
         name: "Doublet",
         marker: { color: "#dc2626", size: 4, opacity: 0.7 }
       }
     ]
 
-    const layout = {
-      title: "Per-cell doublet scores",
+    const layout = this.plotLayout({
       xaxis: { title: "Cell index" },
       yaxis: { title: "Doublet score" },
-      margin: { t: 40, r: 20, b: 50, l: 50 },
-      shapes: this.thresholdLineH(threshold),
-      legend: { orientation: "h", y: 1.12 }
-    }
+      margin: { t: 12, r: 12, b: 72, l: 48 },
+      shapes: this.thresholdLineH(threshold)
+    })
 
-    Plotly.react(this.scatterPlotTarget, traces, layout, { responsive: true, displayModeBar: true })
+    Plotly.react(this.scatterPlotTarget, traces, layout, this.plotlyConfig())
     this.schedulePlotResize()
   }
 
@@ -324,28 +373,48 @@ export default class extends Controller {
     const t = Number(threshold)
     if (!scores.length || !Number.isFinite(t)) return
 
-    const xs = scores.map((_, i) => i + 1)
-    const colors = scores.map((s) => (s >= t ? "#dc2626" : "#16a34a"))
+    const singletX = []
+    const singletY = []
+    const doubletX = []
+    const doubletY = []
+    scores.forEach((s, i) => {
+      const x = i + 1
+      if (s >= t) {
+        doubletX.push(x)
+        doubletY.push(s)
+      } else {
+        singletX.push(x)
+        singletY.push(s)
+      }
+    })
 
-    const traces = [{
-      x: xs,
-      y: scores,
-      mode: "markers",
-      type: "scatter",
-      name: "Sorted scores",
-      marker: { color: colors, size: 5, opacity: 0.8 },
-      showlegend: false
-    }]
+    const traces = [
+      {
+        x: singletX,
+        y: singletY,
+        mode: "markers",
+        type: "scatter",
+        name: "Singlet",
+        marker: { color: "#16a34a", size: 5, opacity: 0.8 }
+      },
+      {
+        x: doubletX,
+        y: doubletY,
+        mode: "markers",
+        type: "scatter",
+        name: "Doublet",
+        marker: { color: "#dc2626", size: 5, opacity: 0.8 }
+      }
+    ]
 
-    const layout = {
-      title: "Sorted scores (green = singlet, red = doublet)",
+    const layout = this.plotLayout({
       xaxis: { title: "Rank (low to high score)" },
       yaxis: { title: "Doublet score" },
-      margin: { t: 40, r: 20, b: 50, l: 50 },
+      margin: { t: 12, r: 12, b: 72, l: 48 },
       shapes: this.thresholdLineH(threshold)
-    }
+    })
 
-    Plotly.react(this.sortedPlotTarget, traces, layout, { responsive: true, displayModeBar: true })
+    Plotly.react(this.sortedPlotTarget, traces, layout, this.plotlyConfig())
     this.schedulePlotResize()
   }
 

@@ -8193,8 +8193,10 @@ class ProjectsController < ApplicationController
           Rails.logger.error("[step_results] Error preparing doublet calling data: #{e.class} - #{e.message}")
           Rails.logger.error("[step_results] Backtrace: #{e.backtrace.first(10).join("\n")}")
           @doublet_loom_path = nil
+          @doublet_loom_rel = nil
           @doublet_score_path = nil
           @doublet_call_path = nil
+          @doublet_call_annot = nil
           @doublet_score_histogram = {}
           @doublet_scores = []
           @std_method = nil
@@ -16994,8 +16996,10 @@ class ProjectsController < ApplicationController
       run = @run || @current_run || @runs&.first
       unless run
         @doublet_loom_path = nil
+        @doublet_loom_rel = nil
         @doublet_score_path = nil
         @doublet_call_path = nil
+        @doublet_call_annot = nil
         @doublet_score_histogram = {}
         @doublet_scores = []
         @std_method = nil
@@ -17017,8 +17021,14 @@ class ProjectsController < ApplicationController
 
       ctx = DoubletCallingFilterService.context_for_run(@project, run, @step)
       @doublet_loom_path = ctx[:loom_path]
+      @doublet_loom_rel = ctx[:loom_rel]
       @doublet_score_path = ctx[:input_score_meta]
       @doublet_call_path = ctx[:output_call_meta]
+      @doublet_call_annot = if @doublet_call_path.present?
+        scope = Annot.light.where(project_id: @project.id, name: @doublet_call_path)
+        scope = scope.where(filepath: @doublet_loom_rel) if @doublet_loom_rel.present?
+        scope.order(:id).first || Annot.light.find_by(run_id: run.id, name: @doublet_call_path)
+      end
 
       @std_method = run.std_method
       @h_run_attrs = Basic.safe_parse_json(run.attrs_json, {})
@@ -17067,8 +17077,10 @@ class ProjectsController < ApplicationController
     rescue DoubletCallingFilterService::FilterError => e
       Rails.logger.warn("[prepare_doublet_calling_data] #{e.message}")
       @doublet_loom_path = nil
+      @doublet_loom_rel = nil
       @doublet_score_path = nil
       @doublet_call_path = nil
+      @doublet_call_annot = nil
       @doublet_score_histogram = {}
       @doublet_scores = []
       @std_method = nil

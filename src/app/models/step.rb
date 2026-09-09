@@ -11,6 +11,7 @@ class Step < ApplicationRecord
   EMBEDDING_STEP_NAMES = %w[
     dim_reduction
     pca
+    pca_sc
     tsne
     umap
   ].freeze

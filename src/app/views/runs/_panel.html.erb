@@ -127,10 +127,10 @@
           <% embedding_annot = Annot.where(project_id: @project.id, ori_run_id: @run.id).where('nber_rows >= ?', 2).order(:name).first %>
           <% if embedding_annot %>
             <%= link_to project_path(@project, view: 'visualization', embedding_id: embedding_annot.id),
-                class: "px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300",
+                class: "inline-flex items-center box-border h-8 px-3 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-xs transition-colors cursor-pointer border border-gray-300",
                 title: "Visualization",
                 style: "flex-shrink: 0;" do %>
-              <span class="inline-flex sm:mr-1"><%= render 'shared/scatter_plot_icon' %></span><span class="hidden sm:inline"> Visualization</span>
+              <span class="inline-flex items-center justify-center w-3 h-3 sm:mr-1 shrink-0 [&>svg]:w-full [&>svg]:h-full"><%= render 'shared/scatter_plot_icon' %></span><span class="hidden sm:inline">Visualization</span>
             <% end %>
           <% end %>
         <% end %>

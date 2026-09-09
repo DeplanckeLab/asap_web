@@ -12,6 +12,10 @@
 <% can_filter = step_result_refinement_allowed?(@project, run_for_view) && run_status_id == 3 && @doublet_loom_path.present? %>
 <% initial_method = call_block["method"].presence || "auto" %>
 <% params_block = h_res["parameters"].is_a?(Hash) ? h_res["parameters"] : {} %>
+<% # Prefill adjust-calling controls from the latest calling parameters / results %>
+<% form_n_doublets = params_block["n_doublets"].presence || initial_doublets %>
+<% form_doublet_rate = params_block["doublet_rate"].presence || initial_rate %>
+<% form_threshold = params_block["threshold"].presence || initial_threshold %>
 <% form_param_context = {
      h_annots: @h_annots_for_params || {},
      h_runs: @h_ori_runs_for_params || {},
@@ -84,9 +88,15 @@
              data-doublet-calling-filter-url-value="<%= filter_doublet_results_project_path(@project) %>"
              data-doublet-calling-can-filter-value="<%= can_filter %>"
              data-doublet-calling-scores-value='<%= doublet_scores.to_json %>'
-             data-doublet-calling-initial-threshold-value="<%= initial_threshold.to_f if initial_threshold.present? %>"
              data-doublet-calling-initial-method-value="<%= initial_method %>"
-             data-doublet-calling-run-id-value="<%= run_for_view.id %>">
+             data-doublet-calling-run-id-value="<%= run_for_view.id %>"
+             <% if initial_threshold.present? %>data-doublet-calling-initial-threshold-value="<%= initial_threshold.to_f %>"<% end %>
+             <% if initial_doublets.present? %>data-doublet-calling-initial-n-doublets-value="<%= initial_doublets %>"<% end %>
+             <% if initial_singlets.present? %>data-doublet-calling-initial-n-singlets-value="<%= initial_singlets %>"<% end %>
+             <% if initial_rate.present? %>data-doublet-calling-initial-doublet-rate-value="<%= initial_rate %>"<% end %>
+             <% if form_n_doublets.present? %>data-doublet-calling-initial-param-n-doublets-value="<%= form_n_doublets %>"<% end %>
+             <% if form_doublet_rate.present? %>data-doublet-calling-initial-param-doublet-rate-value="<%= form_doublet_rate %>"<% end %>
+             <% if form_threshold.present? %>data-doublet-calling-initial-param-threshold-value="<%= form_threshold %>"<% end %>>
           <div class="doublet-calling-layout">
           <div class="doublet-calling-controls-col">
           <div class="bg-white border border-gray-200 rounded-lg shadow-sm px-3 py-2">
@@ -166,16 +176,16 @@
                     <div class="text-gray-900 mt-0.5"><%= params_block["threshold"] %></div>
                   </div>
                 <% end %>
-                <% if params_block["n_doublets"].present? %>
+                <% if form_n_doublets.present? %>
                   <div>
                     <div class="font-medium text-gray-700">Number of doublets</div>
-                    <div class="text-gray-900 mt-0.5"><%= number_with_delimiter(params_block["n_doublets"]) %></div>
+                    <div class="text-gray-900 mt-0.5"><%= number_with_delimiter(form_n_doublets) %></div>
                   </div>
                 <% end %>
-                <% if params_block["doublet_rate"].present? %>
+                <% if form_doublet_rate.present? %>
                   <div>
                     <div class="font-medium text-gray-700">Doublet rate</div>
-                    <div class="text-gray-900 mt-0.5"><%= "#{(params_block["doublet_rate"].to_f * 100).round(2)}%" %></div>
+                    <div class="text-gray-900 mt-0.5"><%= "#{(form_doublet_rate.to_f * 100).round(2)}%" %></div>
                   </div>
                 <% end %>
               </div>
@@ -198,7 +208,7 @@
               <label class="block text-sm font-medium text-gray-700 mb-1">Threshold</label>
               <input type="number" step="any" min="0" max="1"
                      data-doublet-calling-target="threshold"
-                     value="<%= initial_threshold.to_f if initial_method == 'threshold' && initial_threshold.present? %>"
+                     value="<%= form_threshold if form_threshold.present? %>"
                      class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                      <%= "disabled" unless can_filter %>>
             </div>
@@ -206,6 +216,7 @@
               <label class="block text-sm font-medium text-gray-700 mb-1">Number of doublets</label>
               <input type="number" step="1" min="0"
                      data-doublet-calling-target="nDoublets"
+                     value="<%= form_n_doublets if form_n_doublets.present? %>"
                      class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                      <%= "disabled" unless can_filter %>>
             </div>
@@ -213,6 +224,7 @@
               <label class="block text-sm font-medium text-gray-700 mb-1">Doublet rate</label>
               <input type="number" step="any" min="0" max="1"
                      data-doublet-calling-target="doubletRate"
+                     value="<%= form_doublet_rate if form_doublet_rate.present? %>"
                      class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                      <%= "disabled" unless can_filter %>>
             </div>

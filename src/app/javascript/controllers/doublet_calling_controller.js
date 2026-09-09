@@ -13,23 +13,22 @@ export default class extends Controller {
     scores: Array,
     initialThreshold: Number,
     initialMethod: String,
+    initialNDoublets: Number,
+    initialNSinglets: Number,
+    initialDoubletRate: Number,
+    initialParamNDoublets: String,
+    initialParamDoubletRate: String,
+    initialParamThreshold: String,
     runId: Number
   }
 
   connect() {
     this.syncMethodFields()
     this.currentThreshold = this.validThreshold(this.initialThresholdValue)
-    this.renderAll(this.currentThreshold, {
-      doublet_call: {
-        method: this.initialMethodValue || "auto",
-        threshold_used: this.currentThreshold
-      }
-    })
-    if (this.canFilterValue) {
-      this.applyFilter()
-    } else {
-      this.schedulePlotResize()
-    }
+    // Show the latest stored calling results. Do not auto-re-run adjust calling
+    // on page load (that used empty form fields and could fail for top_n/top_pct).
+    this.renderAll(this.currentThreshold, this.initialPayload())
+    this.schedulePlotResize()
 
     this.boundResizePlots = () => this.schedulePlotResize()
     window.addEventListener("resize", this.boundResizePlots)
@@ -37,6 +36,29 @@ export default class extends Controller {
       this.schedulePlotResize()
     })
     this.resizeObserver.observe(this.element)
+  }
+
+  initialPayload() {
+    const parameters = {}
+    if (this.hasInitialParamNDoubletsValue && this.initialParamNDoubletsValue !== "") {
+      parameters.n_doublets = this.initialParamNDoubletsValue
+    }
+    if (this.hasInitialParamDoubletRateValue && this.initialParamDoubletRateValue !== "") {
+      parameters.doublet_rate = this.initialParamDoubletRateValue
+    }
+    if (this.hasInitialParamThresholdValue && this.initialParamThresholdValue !== "") {
+      parameters.threshold = this.initialParamThresholdValue
+    }
+
+    const doubletCall = {
+      method: this.initialMethodValue || "auto",
+      threshold_used: this.currentThreshold
+    }
+    if (this.hasInitialNDoubletsValue) doubletCall.n_doublets_called = this.initialNDoubletsValue
+    if (this.hasInitialNSingletsValue) doubletCall.n_singlets_called = this.initialNSingletsValue
+    if (this.hasInitialDoubletRateValue) doubletCall.doublet_rate = this.initialDoubletRateValue
+
+    return { doublet_call: doubletCall, parameters }
   }
 
   disconnect() {
@@ -79,17 +101,32 @@ export default class extends Controller {
 
     this.syncMethodFields()
     if (this.hasErrorTarget) this.errorTarget.classList.add("hidden")
+
+    const method = this.methodTarget.value
+    if (method === "threshold" && !String(this.thresholdTarget.value || "").trim()) {
+      this.showFilterError("Threshold is required when method is threshold.")
+      return
+    }
+    if (method === "top_n" && !String(this.nDoubletsTarget.value || "").trim()) {
+      this.showFilterError("Number of doublets is required when method is top_n.")
+      return
+    }
+    if (method === "top_pct" && !String(this.doubletRateTarget.value || "").trim()) {
+      this.showFilterError("Doublet rate is required when method is top_pct.")
+      return
+    }
+
     if (this.hasSpinnerTarget) this.spinnerTarget.classList.remove("hidden")
 
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content")
     const formData = new FormData()
-    formData.append("filter[method]", this.methodTarget.value)
+    formData.append("filter[method]", method)
     formData.append("filter[run_id]", this.runIdValue)
-    if (this.methodTarget.value === "threshold") {
+    if (method === "threshold") {
       formData.append("filter[threshold]", this.thresholdTarget.value)
-    } else if (this.methodTarget.value === "top_n") {
+    } else if (method === "top_n") {
       formData.append("filter[n_doublets]", this.nDoubletsTarget.value)
-    } else if (this.methodTarget.value === "top_pct") {
+    } else if (method === "top_pct") {
       formData.append("filter[doublet_rate]", this.doubletRateTarget.value)
     }
 
@@ -116,14 +153,17 @@ export default class extends Controller {
       })
       .catch((error) => {
         console.error("[DoubletCallingController]", error)
-        if (this.hasErrorTarget) {
-          this.errorTarget.textContent = error.message || "Doublet calling filter failed."
-          this.errorTarget.classList.remove("hidden")
-        }
+        this.showFilterError(error.message || "Doublet calling filter failed.")
       })
       .finally(() => {
         if (this.hasSpinnerTarget) this.spinnerTarget.classList.add("hidden")
       })
+  }
+
+  showFilterError(message) {
+    if (!this.hasErrorTarget) return
+    this.errorTarget.textContent = message
+    this.errorTarget.classList.remove("hidden")
   }
 
   renderAll(threshold, payload) {

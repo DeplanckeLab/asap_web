@@ -208,12 +208,12 @@ class ProjectsController < ApplicationController
     
     @h_metadata = organize_metadata(existing_metadata)
 
-    # Filter loom files to only include those with 2D visualizations (2 rows)
+    # Filter loom files to only include those with plottable embeddings (2+ rows)
     @available_loom_files = existing_loom_files.select do |filepath|
       @h_metadata[filepath] && 
       @h_metadata[filepath]['cell'] && 
       @h_metadata[filepath]['cell']['NUMERIC'] &&
-      @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows == 2) }
+      @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows >= 2) }
     end
     
     # Get default loom file - use the first loom file with visualizations (only from existing files)
@@ -222,19 +222,19 @@ class ProjectsController < ApplicationController
     @default_loom_file = @available_loom_files.first || existing_loom_files.first
     Rails.logger.debug "[show] Default loom file set to: #{@default_loom_file.inspect}"
 
-    # Build embedding metadata (2-row coordinate sets) grouped by loom file
+    # Build embedding metadata (2+ row coordinate sets) grouped by loom file
     @all_embeddings_by_loom = {}
     @available_loom_files.each do |filepath|
       numeric_metadata = @h_metadata.dig(filepath, 'cell', 'NUMERIC') || []
       @all_embeddings_by_loom[filepath] = numeric_metadata.select do |metadata|
-        metadata.nber_rows.present? && metadata.nber_rows == 2
+        metadata.nber_rows.present? && metadata.nber_rows >= 2
       end
     end
     
     # Check if a specific embedding_id was requested
     if params[:embedding_id].present?
       requested_embedding = Annot.find_by(id: params[:embedding_id], project_id: @project.id)
-      if requested_embedding && requested_embedding.nber_rows.present? && requested_embedding.nber_rows == 2
+      if requested_embedding && requested_embedding.nber_rows.present? && requested_embedding.nber_rows >= 2
         @default_embedding = requested_embedding
         @default_embedding_loom_file = requested_embedding.filepath
         @default_loom_file = requested_embedding.filepath if requested_embedding.filepath.present?
@@ -7206,6 +7206,16 @@ class ProjectsController < ApplicationController
       render json: { error: 'Metadata not found' }, status: 404
       return
     end
+
+    nber_rows = metadata.nber_rows.to_i
+    dim_x = params[:dim_x].present? ? params[:dim_x].to_i : 1
+    dim_y = params[:dim_y].present? ? params[:dim_y].to_i : 2
+    begin
+      H5DataService.validate_embedding_dims!(nber_rows, dim_x, dim_y)
+    rescue ArgumentError => e
+      render json: { error: e.message }, status: 400
+      return
+    end
     
     # Use the metadata's own filepath to find the correct loom file
     loom_file = params[:loom_file] || metadata.filepath
@@ -7222,11 +7232,11 @@ class ProjectsController < ApplicationController
     
     begin
       # Extract metadata coordinates using the service
-      Rails.logger.info "Extracting metadata coordinates for: #{metadata.name}"
+      Rails.logger.info "Extracting metadata coordinates for: #{metadata.name} (dims #{dim_x}/#{dim_y})"
       Rails.logger.info "Loom file path: #{loom_path}"
       
       # Use metadata name directly (it should already include the correct path)
-      coordinates = H5DataService.get_metadata_vector(loom_path.to_s, metadata.name)
+      coordinates = H5DataService.get_metadata_vector(loom_path.to_s, metadata.name, dim_x: dim_x, dim_y: dim_y)
       
       Rails.logger.info "Raw coordinates retrieved: #{coordinates.length} coordinate pairs"
       Rails.logger.info "First 5 coordinates: #{coordinates.first(5).inspect}"
@@ -7258,8 +7268,13 @@ class ProjectsController < ApplicationController
       response.headers['X-Metadata-Name'] = metadata.display_name
       response.headers['X-Cell-Count'] = coordinates.length.to_s
       response.headers['X-Data-Type'] = 'coordinates'
+      response.headers['X-Dim-X'] = dim_x.to_s
+      response.headers['X-Dim-Y'] = dim_y.to_s
       
       render body: binary_data
+    rescue ArgumentError => e
+      Rails.logger.error "Invalid embedding dimensions: #{e.message}"
+      render json: { error: e.message }, status: 400
     rescue => e
       Rails.logger.error "Error fetching metadata coordinates: #{e.message}"
       render json: { error: 'Failed to fetch coordinates' }, status: 500
@@ -10782,7 +10797,8 @@ class ProjectsController < ApplicationController
     def project_has_embeddings?
       Annot.light.where(project_id: @project.id)
            .where.not(filepath: nil)
-           .where(dim: 1, nber_rows: 2)
+           .where(dim: 1)
+           .where('nber_rows >= ?', 2)
            .exists?
     end
 
@@ -10970,7 +10986,7 @@ class ProjectsController < ApplicationController
           @h_metadata[filepath] &&
             @h_metadata[filepath]['cell'] &&
             @h_metadata[filepath]['cell']['NUMERIC'] &&
-            @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows == 2) }
+            @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows >= 2) }
         end
       end
 
@@ -10980,7 +10996,7 @@ class ProjectsController < ApplicationController
         @available_loom_files.each do |filepath|
           numeric_metadata = @h_metadata.dig(filepath, 'cell', 'NUMERIC') || []
           h_res[filepath] = numeric_metadata.select do |metadata|
-            metadata.nber_rows.present? && metadata.nber_rows == 2
+            metadata.nber_rows.present? && metadata.nber_rows >= 2
           end
         end
         h_res
@@ -10989,7 +11005,7 @@ class ProjectsController < ApplicationController
       timed_step.call('resolve_default_embedding') do
         if params[:embedding_id].present?
           requested_embedding = Annot.find_by(id: params[:embedding_id], project_id: @project.id)
-          if requested_embedding && requested_embedding.nber_rows.present? && requested_embedding.nber_rows == 2
+          if requested_embedding && requested_embedding.nber_rows.present? && requested_embedding.nber_rows >= 2
             @default_embedding = requested_embedding
             @default_embedding_loom_file = requested_embedding.filepath
             @default_loom_file = requested_embedding.filepath if requested_embedding.filepath.present?
@@ -13012,7 +13028,7 @@ class ProjectsController < ApplicationController
       @summary_shared_users_count = @project.shares.count
       # Do not use Annot.light here: its multi-column select makes .count emit
       # COUNT(col1, col2, ...) which PostgreSQL rejects.
-      embedding_scope = apply_publication_snapshot_to_annots(Annot.where(project_id: @project.id, nber_rows: 2))
+      embedding_scope = apply_publication_snapshot_to_annots(Annot.where(project_id: @project.id).where('nber_rows >= ?', 2))
       @summary_embedding_count = embedding_scope.count
       @summary_run_user_count = apply_publication_snapshot_to_runs(@project.runs)
                                  .where.not(user_id: nil)
@@ -13500,12 +13516,28 @@ class ProjectsController < ApplicationController
             origin: (embedding_raw['origin'] || embedding_raw[:origin]).to_s,
             loom_file: (embedding_raw['loom_file'] || embedding_raw[:loom_file]).to_s
           },
-          axes: {
-            x: (axes_raw['x'] || axes_raw[:x]).presence || 'Dimension 1',
-            y: (axes_raw['y'] || axes_raw[:y]).presence || 'Dimension 2'
-          }
+          axes: sanitize_embedding_plot_axes(axes_raw)
         }
       end
+    end
+
+    def sanitize_embedding_plot_axes(raw_axes)
+      axes = normalize_selection_nested_hash(raw_axes) || {}
+      dim_x = (axes['dim_x'] || axes[:dim_x]).to_i
+      dim_y = (axes['dim_y'] || axes[:dim_y]).to_i
+      dim_x = 1 if dim_x < 1
+      dim_y = 2 if dim_y < 1
+      if dim_x == dim_y
+        dim_y = dim_x == 1 ? 2 : 1
+      end
+      x_label = (axes['x'] || axes[:x]).presence || "Dimension #{dim_x}"
+      y_label = (axes['y'] || axes[:y]).presence || "Dimension #{dim_y}"
+      {
+        x: x_label,
+        y: y_label,
+        dim_x: dim_x,
+        dim_y: dim_y
+      }
     end
 
     def sanitize_plot_axis(raw_axis)
@@ -15284,7 +15316,7 @@ class ProjectsController < ApplicationController
 
       if loom_file.present?
         embedding_id = Annot.light.where(project_id: @project.id, filepath: loom_file)
-                            .where(nber_rows: 2)
+                            .where('nber_rows >= ?', 2)
                             .order(:id)
                             .pick(:id)
         meta['embedding_metadata_id'] = embedding_id if embedding_id

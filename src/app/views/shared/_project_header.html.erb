@@ -72,11 +72,11 @@
              'Clone' => clonable?(@project),
              'Edit' => editable?(@project)
            } %>
-        <%# Match projects#show: any embedding coordinates in @all_embeddings_by_loom (not only Annot nber_rows==2). %>
+        <%# Match projects#show: any embedding coordinates in @all_embeddings_by_loom (nber_rows >= 2). %>
         <% has_visualization_embeddings = if defined?(@all_embeddings_by_loom) && @all_embeddings_by_loom.is_a?(Hash)
               @all_embeddings_by_loom.any? { |_filepath, embeddings| embeddings.present? }
             else
-              Annot.where(project_id: @project.id, nber_rows: 2).exists?
+              Annot.where(project_id: @project.id).where('nber_rows >= ?', 2).exists?
             end %>
         <%
           heatmap_nav_docker = Basic.get_asap_docker(@project.version)

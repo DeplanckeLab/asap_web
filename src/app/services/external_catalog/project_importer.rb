@@ -1124,7 +1124,8 @@ module ExternalCatalog
     def visualization_available?(project)
       Annot.light.where(project_id: project.id)
            .where.not(filepath: nil)
-           .where(dim: 1, nber_rows: 2)
+           .where(dim: 1)
+           .where('nber_rows >= ?', 2)
            .exists?
     end
 
@@ -1244,7 +1245,8 @@ module ExternalCatalog
 
     def visualization_embedding_annots(project)
       Annot.light
-           .where(project_id: project.id, dim: 1, nber_rows: 2)
+           .where(project_id: project.id, dim: 1)
+           .where('nber_rows >= ?', 2)
            .where.not(filepath: nil)
            .to_a
     end
@@ -1342,13 +1344,17 @@ module ExternalCatalog
         'loomFile' => loom_file,
         'embedding' => {
           'id' => embedding.id.to_s,
-          'loomFile' => loom_file
+          'loomFile' => loom_file,
+          'dim_x' => 1,
+          'dim_y' => 2
         },
         'visualizationEmbedding' => {
           'id' => embedding.id.to_s,
           'loomFile' => loom_file,
           'name' => embedding.name,
-          'dimension' => nil
+          'dimension' => nil,
+          'dim_x' => 1,
+          'dim_y' => 2
         },
         'matrix' => {
           'layer' => nil,

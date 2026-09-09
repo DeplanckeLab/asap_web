@@ -124,7 +124,7 @@
           <% end %>
         <% end %>
         <% if @step&.embedding_step? && @run %>
-          <% embedding_annot = Annot.where(project_id: @project.id, ori_run_id: @run.id, nber_rows: 2).order(:name).first %>
+          <% embedding_annot = Annot.where(project_id: @project.id, ori_run_id: @run.id).where('nber_rows >= ?', 2).order(:name).first %>
           <% if embedding_annot %>
             <%= link_to project_path(@project, view: 'visualization', embedding_id: embedding_annot.id),
                 class: "px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300",

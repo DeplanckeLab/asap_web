@@ -1956,6 +1956,9 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                   <span class="embedding-link-sep"> > </span>
                 <% end %>
                 <span class="embedding-link-embedding" title="<%= default_origin_label.present? ? "#{default_origin_label} > #{default_embedding_name_text}" : default_embedding_name_text %>"><%= default_embedding_name_text %></span>
+                <% if default_embedding_record&.nber_rows.to_i > 2 %>
+                  <span class="embedding-link-axes">[1,2]</span>
+                <% end %>
               </span>
               <% if default_dimension_label.present? %>
                 <span class="embedding-link-dimension"><%= default_dimension_label %></span>
@@ -2022,15 +2025,56 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                         <% base_label = base_label_raw.include?('/') ? base_label_raw.split('/').last : base_label_raw %>
                         <% combined_label = base_label %>
                         <% is_selected = default_embedding_id.present? && embedding.id == default_embedding_id %>
-                        <button type="button"
-                                class="embedding-menu-item<%= is_selected ? ' selected' : '' %>"
-                                data-embedding-id="<%= embedding.id %>"
-                                data-embedding-label="<%= combined_label %>"
-                                data-loom-file="<%= filepath %>"
-                                data-selected="<%= is_selected ? 'true' : 'false' %>"
-                                data-action="click->visualization#selectEmbedding">
-                          <span class="embedding-menu-item-label"><%= base_label %></span>
-                        </button>
+                        <% nber_rows = embedding.nber_rows.to_i %>
+                        <div class="embedding-menu-item-wrap"
+                             data-embedding-id="<%= embedding.id %>"
+                             data-loom-file="<%= filepath %>"
+                             data-nber-rows="<%= nber_rows %>">
+                          <button type="button"
+                                  class="embedding-menu-item<%= is_selected ? ' selected' : '' %>"
+                                  data-embedding-id="<%= embedding.id %>"
+                                  data-embedding-label="<%= combined_label %>"
+                                  data-loom-file="<%= filepath %>"
+                                  data-nber-rows="<%= nber_rows %>"
+                                  data-selected="<%= is_selected ? 'true' : 'false' %>"
+                                  data-action="click->visualization#selectEmbedding">
+                            <span class="embedding-menu-item-label"><%= base_label %></span>
+                            <% if nber_rows > 2 %>
+                              <span class="embedding-menu-item-dim"><%= nber_rows %>D</span>
+                            <% end %>
+                          </button>
+                          <% if nber_rows > 2 %>
+                            <div class="embedding-menu-dims"
+                                 data-action="click->visualization#preventEmbeddingMenuClose">
+                              <label class="embedding-menu-dim-label">
+                                <span>X</span>
+                                <select class="embedding-menu-dim-select"
+                                        data-axis="x"
+                                        data-embedding-id="<%= embedding.id %>"
+                                        data-loom-file="<%= filepath %>"
+                                        data-nber-rows="<%= nber_rows %>"
+                                        data-action="change->visualization#changeEmbeddingDim">
+                                  <% (1..nber_rows).each do |dim| %>
+                                    <option value="<%= dim %>"<%= dim == 1 ? ' selected' : '' %>><%= dim %></option>
+                                  <% end %>
+                                </select>
+                              </label>
+                              <label class="embedding-menu-dim-label">
+                                <span>Y</span>
+                                <select class="embedding-menu-dim-select"
+                                        data-axis="y"
+                                        data-embedding-id="<%= embedding.id %>"
+                                        data-loom-file="<%= filepath %>"
+                                        data-nber-rows="<%= nber_rows %>"
+                                        data-action="change->visualization#changeEmbeddingDim">
+                                  <% (1..nber_rows).each do |dim| %>
+                                    <option value="<%= dim %>"<%= dim == 2 ? ' selected' : '' %>><%= dim %></option>
+                                  <% end %>
+                                </select>
+                              </label>
+                            </div>
+                          <% end %>
+                        </div>
                       <% end %>
                     <% else %>
                       <div class="embedding-menu-empty">No embeddings available</div>
@@ -2262,6 +2306,37 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
           .embedding-selection-menu .embedding-menu-item-dim {
             font-size: 12px;
             color: #6b7280;
+          }
+          .embedding-selection-menu .embedding-menu-item-wrap {
+            margin-top: 8px;
+          }
+          .embedding-selection-menu .embedding-menu-item-wrap .embedding-menu-item {
+            margin-top: 0;
+          }
+          .embedding-selection-menu .embedding-menu-dims {
+            display: none;
+            align-items: center;
+            gap: 10px;
+            padding: 6px 10px 2px 10px;
+          }
+          .embedding-selection-menu .embedding-menu-item-wrap .embedding-menu-item.selected + .embedding-menu-dims,
+          .embedding-selection-menu .embedding-menu-item-wrap.is-active .embedding-menu-dims {
+            display: flex;
+          }
+          .embedding-selection-menu .embedding-menu-dim-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            color: #6b7280;
+          }
+          .embedding-selection-menu .embedding-menu-dim-select {
+            font-size: 12px;
+            padding: 2px 4px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            background: white;
+            color: #1f2937;
           }
           .embedding-selection-menu .embedding-menu-empty {
             font-size: 12px;
@@ -2504,6 +2579,12 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+          }
+          .embedding-link-axes {
+            flex-shrink: 0;
+            margin-left: 4px;
+            font-weight: 600;
+            color: #4b5563;
           }
           .embedding-link-dimension {
             font-size: 11px;

@@ -288,8 +288,13 @@ export class DataManager {
       return
     }
     
-    // Get embedding ID for caching (use name as key)
-    const embeddingId = this.controller.metadataData.name
+    // Get embedding cache key (include selected dims so ND axis swaps do not reuse wrong pairs)
+    const dims = (typeof this.controller.getSelectedEmbeddingDims === 'function')
+      ? this.controller.getSelectedEmbeddingDims()
+      : { dimX: this.controller.metadataData.dim_x || 1, dimY: this.controller.metadataData.dim_y || 2 }
+    const embeddingId = (typeof this.controller.coordinatesCacheKey === 'function')
+      ? this.controller.coordinatesCacheKey(this.controller.metadataData.id || this.controller.metadataData.name, dims.dimX, dims.dimY)
+      : `${this.controller.metadataData.name}:${dims.dimX}:${dims.dimY}`
     
     // Check cache first to avoid re-decompressing
     let decompressedCoords
@@ -2780,6 +2785,8 @@ export class DataManager {
       name: data.name,
       cellCount: data.cellCount,
       binaryData: data.binaryData, // ArrayBuffer with binary data
+      dim_x: data.dim_x != null ? Number(data.dim_x) : this.controller.getSelectedEmbeddingDims?.().dimX,
+      dim_y: data.dim_y != null ? Number(data.dim_y) : this.controller.getSelectedEmbeddingDims?.().dimY,
       loadedAt: Date.now()
     }
     

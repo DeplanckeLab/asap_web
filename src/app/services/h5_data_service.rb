@@ -505,7 +505,39 @@ class H5DataService
     }
   end
 
-  def self.get_metadata_vector(h5_file, metadata_path)
+  # Validate 1-based embedding axis indices. Raises ArgumentError on invalid input.
+  def self.validate_embedding_dims!(nber_rows, dim_x, dim_y)
+    rows = nber_rows.to_i
+    x = dim_x.to_i
+    y = dim_y.to_i
+    if rows < 2
+      raise ArgumentError, "Embedding must have at least 2 dimensions (got nber_rows=#{rows})"
+    end
+    if x == y
+      raise ArgumentError, "dim_x and dim_y must be different (got #{x} and #{y})"
+    end
+    if x < 1 || y < 1 || x > rows || y > rows
+      raise ArgumentError, "dim_x/dim_y out of range for embedding with #{rows} dimensions (got dim_x=#{x}, dim_y=#{y})"
+    end
+    [x, y]
+  end
+
+  # Zip two 1-based dimension vectors from an embedding matrix into [[x,y], ...].
+  def self.zip_embedding_dimension_vectors(values, dim_x, dim_y, nber_rows: nil)
+    rows = (nber_rows || values.length).to_i
+    x, y = validate_embedding_dims!(rows, dim_x, dim_y)
+    unless values.is_a?(Array) && values.length >= rows
+      raise ArgumentError, "Embedding values must be an array of #{rows} vectors (got length=#{values&.length})"
+    end
+    vx = values[x - 1]
+    vy = values[y - 1]
+    unless vx.is_a?(Array) && vy.is_a?(Array) && vx.length == vy.length
+      raise ArgumentError, "Invalid embedding vectors for dims #{x}/#{y}: lengths=#{vx&.length}/#{vy&.length}"
+    end
+    vx.zip(vy)
+  end
+
+  def self.get_metadata_vector(h5_file, metadata_path, dim_x: 1, dim_y: 2)
     error_details = {}
     begin
       # Use ASAP.jar to extract the full metadata vector (with values)
@@ -540,24 +572,13 @@ class H5DataService
           Rails.logger.info "Metadata extraction result for #{metadata_path}: nber_rows=#{json_data['nber_rows']}, values type=#{json_data['values']&.class}"
           
           if json_data['values'].is_a?(Array)
-            case json_data['nber_rows']
-            when 2
-              # Coordinate pairs - extract two vectors and zip them
-              v1, v2 = json_data['values']
-              if v1.is_a?(Array) && v2.is_a?(Array) && v1.length == v2.length
-                # Convert to coordinate pairs
-                coordinates = v1.zip(v2)
-                Rails.logger.info "Successfully extracted metadata vector with #{coordinates.length} coordinate pairs from #{metadata_path}"
-                return coordinates
-              else
-                Rails.logger.error "Invalid vector format for coordinate pairs: v1.length=#{v1&.length}, v2.length=#{v2&.length}"
-                Rails.logger.error "v1 type: #{v1&.class}, v2 type: #{v2&.class}"
-                return []
-              end
-            when 1
+            nber_rows = json_data['nber_rows'].to_i
+            nber_cols = json_data['nber_cols'].to_i
+            values = json_data['values']
+
+            if nber_rows == 1
               # Single vector - return as array of single values
-              # Handle case where values might be nested in another array
-              single_vector = json_data['values']
+              single_vector = values
               if single_vector.is_a?(Array)
                 # Check if it's nested: [[values]] vs [values]
                 if single_vector.length == 1 && single_vector[0].is_a?(Array)
@@ -570,60 +591,47 @@ class H5DataService
                 Rails.logger.error "Invalid single vector format: type=#{single_vector.class}"
                 return []
               end
-            else
-              nber_rows = json_data['nber_rows']
-              nber_cols = json_data['nber_cols'] || 0
-              
-              # Handle case where nber_rows equals the number of genes (row metadata)
-              # For row attributes like _StableID, nber_rows is the number of rows (genes)
-              # and values should be a flat array with one value per row
-              if json_data['values'].is_a?(Array)
-                if nber_rows > 2 && nber_cols == 1
-                  # This is row metadata: nber_rows = number of genes, nber_cols = 1 (one value per gene)
-                  # Values should be a flat array: [val1, val2, val3, ...]
-                  Rails.logger.info "Detected row metadata format: nber_rows=#{nber_rows} (genes), nber_cols=#{nber_cols}"
-                  
-                  # Check if values is nested or flat
-                  if json_data['values'].length == 1 && json_data['values'][0].is_a?(Array)
-                    # Nested: [[val1, val2, ...]]
-                    single_vector = json_data['values'][0]
-                    Rails.logger.info "Unwrapping nested array, extracted #{single_vector.length} values"
-                    return single_vector
-                  elsif json_data['values'].all? { |v| !v.is_a?(Array) }
-                    # Flat array: [val1, val2, ...]
-                    Rails.logger.info "Using flat array directly, extracted #{json_data['values'].length} values"
-                    return json_data['values']
-                  else
-                    # Mixed or unexpected format
-                    Rails.logger.warn "Unexpected mixed format in values array"
-                    # Try to flatten it
-                    flattened = json_data['values'].flatten
-                    Rails.logger.info "Flattened array, extracted #{flattened.length} values"
-                    return flattened
-                  end
-                else
-                  # Unknown format, log and try to handle
-                  Rails.logger.warn "Unexpected nber_rows value: #{nber_rows}, nber_cols: #{nber_cols}"
-                  Rails.logger.warn "Values array length: #{json_data['values'].length}"
-                  Rails.logger.warn "First value type: #{json_data['values'][0]&.class}"
-                  
-                  # Try to extract a flat vector if possible
-                  if json_data['values'].all? { |v| !v.is_a?(Array) }
-                    Rails.logger.warn "All values are non-array, using directly"
-                    return json_data['values']
-                  elsif json_data['values'].length == 1 && json_data['values'][0].is_a?(Array)
-                    Rails.logger.warn "Single nested array, unwrapping"
-                    return json_data['values'][0]
-                  end
-                end
+            elsif nber_rows >= 2 && values.length >= 2 && values.all? { |v| v.is_a?(Array) }
+              # Multi-dimension embedding: zip the two requested component vectors
+              coordinates = zip_embedding_dimension_vectors(values, dim_x, dim_y, nber_rows: nber_rows)
+              Rails.logger.info "Successfully extracted metadata vector with #{coordinates.length} coordinate pairs from #{metadata_path} (dims #{dim_x}/#{dim_y})"
+              return coordinates
+            elsif nber_rows > 2 && nber_cols == 1
+              # Row metadata: nber_rows = number of genes, nber_cols = 1 (one value per gene)
+              Rails.logger.info "Detected row metadata format: nber_rows=#{nber_rows} (genes), nber_cols=#{nber_cols}"
+
+              if values.length == 1 && values[0].is_a?(Array)
+                single_vector = values[0]
+                Rails.logger.info "Unwrapping nested array, extracted #{single_vector.length} values"
+                return single_vector
+              elsif values.all? { |v| !v.is_a?(Array) }
+                Rails.logger.info "Using flat array directly, extracted #{values.length} values"
+                return values
+              else
+                Rails.logger.warn "Unexpected mixed format in values array"
+                flattened = values.flatten
+                Rails.logger.info "Flattened array, extracted #{flattened.length} values"
+                return flattened
               end
-              
-              error_msg = "Unexpected nber_rows value: #{nber_rows} (expected 1 or 2, or row metadata format)"
+            else
+              Rails.logger.warn "Unexpected nber_rows value: #{nber_rows}, nber_cols: #{nber_cols}"
+              Rails.logger.warn "Values array length: #{values.length}"
+              Rails.logger.warn "First value type: #{values[0]&.class}"
+
+              if values.all? { |v| !v.is_a?(Array) }
+                Rails.logger.warn "All values are non-array, using directly"
+                return values
+              elsif values.length == 1 && values[0].is_a?(Array)
+                Rails.logger.warn "Single nested array, unwrapping"
+                return values[0]
+              end
+
+              error_msg = "Unexpected nber_rows value: #{nber_rows} (expected 1, >=2 embedding matrix, or row metadata format)"
               Rails.logger.error error_msg
               Rails.logger.error "JSON structure: #{json_data.keys}" if json_data.is_a?(Hash)
               Rails.logger.error "nber_cols: #{nber_cols}"
-              Rails.logger.error "Values length: #{json_data['values']&.length}"
-              Rails.logger.error "Values first element type: #{json_data['values']&.first&.class}"
+              Rails.logger.error "Values length: #{values&.length}"
+              Rails.logger.error "Values first element type: #{values&.first&.class}"
               raise "Metadata extraction failed: #{error_msg}. JSON keys: #{json_data.keys.inspect}. Check Rails logs for full details."
             end
           else
@@ -651,6 +659,8 @@ class H5DataService
         error_details[:stdout_preview] = stdout[0..500] if stdout
         raise "Metadata extraction failed: #{error_msg}. STDERR: #{stderr}. Check Rails logs for full details."
       end
+    rescue ArgumentError
+      raise
     rescue => e
       Rails.logger.error "Error extracting metadata vector from #{metadata_path}: #{e.message}"
       Rails.logger.error e.backtrace.join("\n")

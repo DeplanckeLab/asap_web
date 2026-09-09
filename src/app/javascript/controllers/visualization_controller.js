@@ -642,10 +642,16 @@ export default class extends Controller {
     this.selectedYButton = null
     
     // Cache for decompressed embedding coordinates (avoid re-decompressing)
-    if (!this.decompressedCoordinatesCache) this.decompressedCoordinatesCache = new Map() // Key: embeddingId, Value: decompressed coordinates
-    
+    // Key: `${embeddingId}:${dimX}:${dimY}`, Value: decompressed coordinates
+    if (!this.decompressedCoordinatesCache) this.decompressedCoordinatesCache = new Map()
+
     // Cache for binary embedding data (avoid re-fetching from network)
-    if (!this.binaryDataCache) this.binaryDataCache = new Map() // Key: embeddingId, Value: { name, cellCount, binaryData }
+    // Key: `${embeddingId}:${dimX}:${dimY}`, Value: { name, cellCount, binaryData }
+    if (!this.binaryDataCache) this.binaryDataCache = new Map()
+
+    // 1-based embedding axis indices for the main scatter plot (must stay distinct)
+    this.selectedDimX = 1
+    this.selectedDimY = 2
     
     // Expose the main visualization controller globally for external button handlers.
     if (this.hasMetadataSelectTarget) {
@@ -1354,6 +1360,17 @@ export default class extends Controller {
       return
     }
 
+    const urlParams = new URLSearchParams(window.location.search)
+    const urlDimX = urlParams.get('dim_x')
+    const urlDimY = urlParams.get('dim_y')
+    if (urlDimX != null || urlDimY != null) {
+      this.setSelectedEmbeddingDims(
+        urlDimX != null ? urlDimX : 1,
+        urlDimY != null ? urlDimY : 2,
+        { nberRows: this.getEmbeddingNberRows(defaultInfo.embedding), syncMenu: true }
+      )
+    }
+
     const initialSelectedEmbeddingId = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '').trim() : ''
     if (initialSelectedEmbeddingId.length > 0) {
       const currentLoom = this.getCurrentLoomFile() || this.currentLoomFile || this.defaultLoomFileValue || ''
@@ -1868,12 +1885,15 @@ export default class extends Controller {
   }
 
   applyEmbeddingSelection(embeddingId, loomFile, options = {}) {
-    const { skipLoad = false, expectedEmbeddingName = null } = options
+    const { skipLoad = false, expectedEmbeddingName = null, dimX = null, dimY = null, resetDims = false } = options
     this.checkpointDebug('applyEmbeddingSelection:start', {
       embeddingId: String(embeddingId),
       loomFile,
       skipLoad,
-      expectedEmbeddingName
+      expectedEmbeddingName,
+      dimX,
+      dimY,
+      resetDims
     })
     const info = this.findEmbeddingById(embeddingId, loomFile, expectedEmbeddingName)
 
@@ -1885,6 +1905,19 @@ export default class extends Controller {
 
     const targetId = String(info.embedding.id).trim()
     const targetLoom = info.loomFile
+    const nberRows = this.getEmbeddingNberRows(info.embedding)
+
+    if (resetDims || (dimX == null && dimY == null && nberRows <= 2)) {
+      this.setSelectedEmbeddingDims(1, 2, { nberRows, syncMenu: false })
+    } else if (dimX != null || dimY != null) {
+      this.setSelectedEmbeddingDims(
+        dimX != null ? dimX : this.selectedDimX,
+        dimY != null ? dimY : this.selectedDimY,
+        { nberRows, syncMenu: false }
+      )
+    } else {
+      this.setSelectedEmbeddingDims(this.selectedDimX, this.selectedDimY, { nberRows, syncMenu: false })
+    }
 
     this.currentLoomFile = targetLoom
     if (this.loomFileSelectTarget) {
@@ -1908,17 +1941,22 @@ export default class extends Controller {
       this.updateMetadata()
     }
 
+    const dims = this.getSelectedEmbeddingDims()
     this.checkpointDebug('applyEmbeddingSelection:applied', {
       resolvedEmbeddingId: targetId,
       resolvedEmbeddingName: this.getEmbeddingName(info.embedding),
       resolvedLoomFile: targetLoom,
+      dimX: dims.dimX,
+      dimY: dims.dimY,
       metadataSelectValue: this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : null
     })
 
     return {
       embeddingId: targetId,
       loomFile: targetLoom,
-      embeddingName: this.getEmbeddingName(info.embedding)
+      embeddingName: this.getEmbeddingName(info.embedding),
+      dim_x: dims.dimX,
+      dim_y: dims.dimY
     }
   }
 
@@ -1936,12 +1974,15 @@ export default class extends Controller {
 
   getCurrentSelectedEmbeddingState() {
     const selectedId = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : ''
+    const dims = this.getSelectedEmbeddingDims()
     if (!selectedId) {
       return {
         id: null,
         loomFile: this.getCurrentLoomFile(),
         name: null,
-        dimension: null
+        dimension: null,
+        dim_x: dims.dimX,
+        dim_y: dims.dimY
       }
     }
 
@@ -1952,7 +1993,9 @@ export default class extends Controller {
         id: selectedId,
         loomFile: currentLoom,
         name: null,
-        dimension: null
+        dimension: null,
+        dim_x: dims.dimX,
+        dim_y: dims.dimY
       }
     }
 
@@ -1960,8 +2003,107 @@ export default class extends Controller {
       id: String(info.embedding.id),
       loomFile: info.loomFile,
       name: this.getEmbeddingName(info.embedding),
-      dimension: this.getEmbeddingDimensionLabel(info.embedding)
+      dimension: this.getEmbeddingDimensionLabel(info.embedding),
+      dim_x: dims.dimX,
+      dim_y: dims.dimY
     }
+  }
+
+  getEmbeddingNberRows(embedding) {
+    const rows = Number(embedding?.nber_rows)
+    return Number.isFinite(rows) && rows > 0 ? Math.trunc(rows) : 0
+  }
+
+  getSelectedEmbeddingDims() {
+    const dimX = Number(this.selectedDimX)
+    const dimY = Number(this.selectedDimY)
+    return {
+      dimX: Number.isFinite(dimX) && dimX >= 1 ? Math.trunc(dimX) : 1,
+      dimY: Number.isFinite(dimY) && dimY >= 1 ? Math.trunc(dimY) : 2
+    }
+  }
+
+  coordinatesCacheKey(embeddingId, dimX = null, dimY = null) {
+    const dims = (dimX != null && dimY != null)
+      ? { dimX: Number(dimX), dimY: Number(dimY) }
+      : this.getSelectedEmbeddingDims()
+    return `${String(embeddingId)}:${dims.dimX}:${dims.dimY}`
+  }
+
+  nextAvailableEmbeddingDim(nberRows, takenDim, preferredDim = null) {
+    const rows = Math.max(2, Number(nberRows) || 2)
+    const taken = Number(takenDim)
+    const preferred = Number(preferredDim)
+    if (Number.isFinite(preferred) && preferred >= 1 && preferred <= rows && preferred !== taken) {
+      return Math.trunc(preferred)
+    }
+    for (let dim = 1; dim <= rows; dim += 1) {
+      if (dim !== taken) return dim
+    }
+    return taken === 1 ? 2 : 1
+  }
+
+  normalizeEmbeddingDims(dimX, dimY, nberRows = null) {
+    const rows = Number(nberRows)
+    const maxDim = Number.isFinite(rows) && rows >= 2 ? Math.trunc(rows) : null
+    let x = Number(dimX)
+    let y = Number(dimY)
+    x = Number.isFinite(x) && x >= 1 ? Math.trunc(x) : 1
+    y = Number.isFinite(y) && y >= 1 ? Math.trunc(y) : 2
+    if (maxDim) {
+      if (x > maxDim) x = 1
+      if (y > maxDim) y = Math.min(2, maxDim)
+      if (x > maxDim) x = 1
+    }
+    if (x === y) {
+      y = this.nextAvailableEmbeddingDim(maxDim || 2, x, y === 1 ? 2 : 1)
+      if (maxDim && y > maxDim) {
+        y = this.nextAvailableEmbeddingDim(maxDim, x)
+      }
+    }
+    if (maxDim && x === y) {
+      x = 1
+      y = this.nextAvailableEmbeddingDim(maxDim, x)
+    }
+    return { dimX: x, dimY: y }
+  }
+
+  setSelectedEmbeddingDims(dimX, dimY, options = {}) {
+    const nberRows = options.nberRows != null
+      ? options.nberRows
+      : this.getEmbeddingNberRows(this.findEmbeddingById(
+          this.hasMetadataSelectTarget ? this.metadataSelectTarget.value : null,
+          this.getCurrentLoomFile()
+        )?.embedding)
+    const normalized = this.normalizeEmbeddingDims(dimX, dimY, nberRows || null)
+    this.selectedDimX = normalized.dimX
+    this.selectedDimY = normalized.dimY
+    if (options.syncMenu !== false) {
+      this.syncEmbeddingDimSelects()
+    }
+    return normalized
+  }
+
+  syncEmbeddingDimSelects(embeddingId = null, loomFile = null) {
+    const targetId = String(embeddingId || (this.hasMetadataSelectTarget ? this.metadataSelectTarget.value : '') || '')
+    const targetLoom = loomFile || this.getCurrentLoomFile()
+    const dims = this.getSelectedEmbeddingDims()
+    const wraps = document.querySelectorAll('.embedding-menu-item-wrap')
+    wraps.forEach((wrap) => {
+      const isMatch = String(wrap.dataset.embeddingId || '') === targetId &&
+        (!targetLoom || String(wrap.dataset.loomFile || '') === String(targetLoom))
+      wrap.classList.toggle('is-active', isMatch)
+      const selects = wrap.querySelectorAll('.embedding-menu-dim-select')
+      selects.forEach((select) => {
+        const axis = String(select.dataset.axis || '')
+        if (axis === 'x') select.value = String(dims.dimX)
+        if (axis === 'y') select.value = String(dims.dimY)
+      })
+    })
+  }
+
+  formatEmbeddingAxisLabel(dim) {
+    return `Dimension ${Number(dim) || 1}`
   }
 
   syncEmbeddingUiToLoadedEmbedding(embeddingId, embeddingName = null) {
@@ -1995,11 +2137,16 @@ export default class extends Controller {
     }
 
     const info = this.getEmbeddingDisplayInfo(embedding, loomFile)
+    const dims = this.getSelectedEmbeddingDims()
+    const nberRows = this.getEmbeddingNberRows(embedding)
+    const showAxisDims = nberRows > 2
 
     link.dataset.selectedEmbeddingId = embedding ? String(embedding.id) : ''
     link.dataset.currentLoomFile = loomFile || ''
     link.dataset.originLabel = info.origin || ''
     link.dataset.dimensionLabel = info.dimension || ''
+    link.dataset.dimX = String(dims.dimX)
+    link.dataset.dimY = String(dims.dimY)
 
     link.innerHTML = ''
 
@@ -2042,6 +2189,13 @@ export default class extends Controller {
       nameSpan.appendChild(embeddingSpan)
     }
 
+    if (showAxisDims) {
+      const axesSpan = document.createElement('span')
+      axesSpan.className = 'embedding-link-axes'
+      axesSpan.textContent = `[${dims.dimX},${dims.dimY}]`
+      nameSpan.appendChild(axesSpan)
+    }
+
     wrapper.appendChild(nameSpan)
 
     if (info.dimension) {
@@ -2063,6 +2217,8 @@ export default class extends Controller {
       item.classList.toggle('selected', isMatch)
       item.dataset.selected = isMatch ? 'true' : 'false'
     })
+
+    this.syncEmbeddingDimSelects(targetId, loomFile)
 
     if (loomFile) {
       this.setEmbeddingGroupOpenState(loomFile, true)
@@ -2246,9 +2402,13 @@ export default class extends Controller {
     const item = event.currentTarget
     const embeddingId = item.dataset.embeddingId
     const loomFile = item.dataset.loomFile
+    const nberRows = Number(item.dataset.nberRows) || this.getEmbeddingNberRows(
+      this.findEmbeddingById(embeddingId, loomFile)?.embedding
+    )
 
     const currentId = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '').trim() : ''
     const currentLoom = this.getCurrentLoomFile()
+    const currentDims = this.getSelectedEmbeddingDims()
     const sameEmbedding = String(embeddingId || '').trim() === currentId
     const sameLoom = !loomFile || !currentLoom || String(loomFile) === String(currentLoom)
     if (sameEmbedding && sameLoom && Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0) {
@@ -2256,8 +2416,52 @@ export default class extends Controller {
       return
     }
 
-    this.applyEmbeddingSelection(embeddingId, loomFile)
+    this.applyEmbeddingSelection(embeddingId, loomFile, {
+      resetDims: !sameEmbedding,
+      dimX: sameEmbedding ? currentDims.dimX : 1,
+      dimY: sameEmbedding ? currentDims.dimY : 2,
+      nberRows
+    })
     this.closeAllDropdowns()
+  }
+
+  changeEmbeddingDim(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const select = event.currentTarget
+    const axis = String(select.dataset.axis || '').toLowerCase()
+    const embeddingId = String(select.dataset.embeddingId || '').trim()
+    const loomFile = select.dataset.loomFile || this.getCurrentLoomFile()
+    const nberRows = Number(select.dataset.nberRows) || this.getEmbeddingNberRows(
+      this.findEmbeddingById(embeddingId, loomFile)?.embedding
+    )
+    const nextValue = Number(select.value)
+    if (!embeddingId || (axis !== 'x' && axis !== 'y') || !Number.isFinite(nextValue)) {
+      return
+    }
+
+    const currentDims = this.getSelectedEmbeddingDims()
+    let dimX = currentDims.dimX
+    let dimY = currentDims.dimY
+    if (axis === 'x') {
+      dimX = Math.trunc(nextValue)
+      if (dimX === dimY) {
+        dimY = this.nextAvailableEmbeddingDim(nberRows, dimX, currentDims.dimY)
+      }
+    } else {
+      dimY = Math.trunc(nextValue)
+      if (dimY === dimX) {
+        dimX = this.nextAvailableEmbeddingDim(nberRows, dimY, currentDims.dimX)
+      }
+    }
+
+    const normalized = this.setSelectedEmbeddingDims(dimX, dimY, { nberRows, syncMenu: true })
+    this.applyEmbeddingSelection(embeddingId, loomFile, {
+      dimX: normalized.dimX,
+      dimY: normalized.dimY,
+      skipLoad: false
+    })
   }
 
   toggleSaveMenu(event) {
@@ -5535,7 +5739,9 @@ export default class extends Controller {
   async loadMetadataCoordinates(metadataId) {
     const normalizedMetadataId = String(metadataId)
     const requestedLoomFile = this.getCurrentLoomFileForRequest()
-    const requestKey = `${normalizedMetadataId}::${requestedLoomFile || ''}`
+    const dims = this.getSelectedEmbeddingDims()
+    const cacheKey = this.coordinatesCacheKey(normalizedMetadataId, dims.dimX, dims.dimY)
+    const requestKey = `${cacheKey}::${requestedLoomFile || ''}`
 
     // Spatial (Visium) embeddings use a dedicated JSON path that also carries the
     // tissue image and scalefactors; they cannot use the lossy Int16 binary path.
@@ -5551,7 +5757,9 @@ export default class extends Controller {
     if (pendingRequest) {
       this.checkpointDebug('loadMetadataCoordinates:dedup-hit', {
         metadataId: normalizedMetadataId,
-        loomFile: requestedLoomFile
+        loomFile: requestedLoomFile,
+        dimX: dims.dimX,
+        dimY: dims.dimY
       })
       return pendingRequest
     }
@@ -5561,15 +5769,19 @@ export default class extends Controller {
       this.checkpointDebug('loadMetadataCoordinates:start', {
         metadataId: normalizedMetadataId,
         currentLoomFile: this.currentLoomFile,
-        requestedLoomFile: this.getCurrentLoomFile()
+        requestedLoomFile: this.getCurrentLoomFile(),
+        dimX: dims.dimX,
+        dimY: dims.dimY,
+        cacheKey
       })
       
       try {
-        if (this.binaryDataCache.has(normalizedMetadataId)) {
+        if (this.binaryDataCache.has(cacheKey)) {
           this.checkpointDebug('loadMetadataCoordinates:binary-cache-hit', {
-            metadataId: normalizedMetadataId
+            metadataId: normalizedMetadataId,
+            cacheKey
           })
-          const cachedData = this.binaryDataCache.get(normalizedMetadataId)
+          const cachedData = this.binaryDataCache.get(cacheKey)
           await this.dataManager.storeBinaryMetadataData(cachedData)
           this.syncEmbeddingUiToLoadedEmbedding(cachedData?.id || normalizedMetadataId, cachedData?.name || null)
           this.checkpointDebug('loadMetadataCoordinates:binary-cache-rendered', {
@@ -5583,17 +5795,20 @@ export default class extends Controller {
             metadataId: normalizedMetadataId,
             source: 'memory-cache',
             durationMs: Number((performance.now() - fetchStart).toFixed(2)),
-            coordinatesCount: this.currentCoordinates?.length || 0
+            coordinatesCount: this.currentCoordinates?.length || 0,
+            dimX: dims.dimX,
+            dimY: dims.dimY
           }, { cellCount: this.currentCoordinates?.length || 0 })
           return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
         }
         
-        const diskData = await this.memoryManager.loadCoordinatesFromIndexedDB(normalizedMetadataId)
+        const diskData = await this.memoryManager.loadCoordinatesFromIndexedDB(cacheKey)
         if (diskData) {
           this.checkpointDebug('loadMetadataCoordinates:indexeddb-cache-hit', {
-            metadataId: normalizedMetadataId
+            metadataId: normalizedMetadataId,
+            cacheKey
           })
-          this.binaryDataCache.set(normalizedMetadataId, diskData)
+          this.binaryDataCache.set(cacheKey, diskData)
           await this.dataManager.storeBinaryMetadataData(diskData)
           this.syncEmbeddingUiToLoadedEmbedding(diskData?.id || normalizedMetadataId, diskData?.name || null)
           this.checkpointDebug('loadMetadataCoordinates:indexeddb-cache-rendered', {
@@ -5607,18 +5822,22 @@ export default class extends Controller {
             metadataId: normalizedMetadataId,
             source: 'indexeddb',
             durationMs: Number((performance.now() - fetchStart).toFixed(2)),
-            coordinatesCount: this.currentCoordinates?.length || 0
+            coordinatesCount: this.currentCoordinates?.length || 0,
+            dimX: dims.dimX,
+            dimY: dims.dimY
           }, { cellCount: this.currentCoordinates?.length || 0 })
           return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
         }
         
         this.checkpointDebug('loadMetadataCoordinates:request', {
           metadataId: normalizedMetadataId,
-          loomFile: requestedLoomFile
+          loomFile: requestedLoomFile,
+          dimX: dims.dimX,
+          dimY: dims.dimY
         })
         
         const projectIdentifier = this.getProjectIdentifier()
-        const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_coordinates?metadata_id=${normalizedMetadataId}&loom_file=${encodeURIComponent(requestedLoomFile || '')}`
+        const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_coordinates?metadata_id=${normalizedMetadataId}&loom_file=${encodeURIComponent(requestedLoomFile || '')}&dim_x=${encodeURIComponent(dims.dimX)}&dim_y=${encodeURIComponent(dims.dimY)}`
         
         const csrfMetaTag = document.querySelector('meta[name="csrf-token"]')
         const csrfToken = csrfMetaTag?.getAttribute('content')
@@ -5660,11 +5879,13 @@ export default class extends Controller {
           id: headerMetadataId,
           name: metadataName,
           cellCount: cellCount,
-          binaryData: arrayBuffer
+          binaryData: arrayBuffer,
+          dim_x: dims.dimX,
+          dim_y: dims.dimY
         }
         
-        this.binaryDataCache.set(normalizedMetadataId, dataObject)
-        this.memoryManager.storeCoordinatesInIndexedDB(normalizedMetadataId, dataObject).catch(error => {
+        this.binaryDataCache.set(cacheKey, dataObject)
+        this.memoryManager.storeCoordinatesInIndexedDB(cacheKey, dataObject).catch(error => {
           console.warn('Failed to store coordinates in IndexedDB:', error)
         })
         
@@ -5677,7 +5898,9 @@ export default class extends Controller {
           headerMetadataId: String(headerMetadataId || ''),
           metadataName,
           cellCount,
-          loomFile: requestedLoomFile
+          loomFile: requestedLoomFile,
+          dimX: dims.dimX,
+          dimY: dims.dimY
         })
         this.checkpointDebug('loadMetadataCoordinates:post-render-state', {
           metadataDataId: String(this.metadataData?.id || ''),
@@ -5698,14 +5921,18 @@ export default class extends Controller {
           totalMs: Number((performance.now() - fetchStart).toFixed(2)),
           responseBytes: arrayBuffer.byteLength,
           cellCount: Number.isFinite(cellCount) ? cellCount : null,
-          loomFile: requestedLoomFile
+          loomFile: requestedLoomFile,
+          dimX: dims.dimX,
+          dimY: dims.dimY
         }, { cellCount })
         return Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0
       } catch (error) {
         this.checkpointDebug('loadMetadataCoordinates:error', {
           metadataId: normalizedMetadataId,
           error: String(error?.message || error),
-          stack: error?.stack || null
+          stack: error?.stack || null,
+          dimX: dims.dimX,
+          dimY: dims.dimY
         })
         console.error('Error loading metadata coordinates:', error)
         alert(`Failed to load metadata coordinates: ${error.message}`)
@@ -9516,13 +9743,17 @@ export default class extends Controller {
       loomFile: this.getCurrentLoomFile(),
       embedding: {
         id: selectedEmbedding.id,
-        loomFile: selectedEmbedding.loomFile
+        loomFile: selectedEmbedding.loomFile,
+        dim_x: selectedEmbedding.dim_x,
+        dim_y: selectedEmbedding.dim_y
       },
       visualizationEmbedding: {
         id: selectedEmbedding.id,
         loomFile: selectedEmbedding.loomFile,
         name: selectedEmbedding.name,
-        dimension: selectedEmbedding.dimension
+        dimension: selectedEmbedding.dimension,
+        dim_x: selectedEmbedding.dim_x,
+        dim_y: selectedEmbedding.dim_y
       },
       matrix: {
         layer: this.geneManager?.currentMatrixLayer || null,
@@ -10213,6 +10444,8 @@ export default class extends Controller {
     const checkpointEmbeddingId = state.embedding?.id || state.visualizationEmbedding?.id
     const checkpointEmbeddingLoomFile = state.embedding?.loomFile || state.visualizationEmbedding?.loomFile || state.loomFile || null
     const checkpointEmbeddingName = state.visualizationEmbedding?.name || null
+    const checkpointDimX = state.embedding?.dim_x ?? state.visualizationEmbedding?.dim_x ?? 1
+    const checkpointDimY = state.embedding?.dim_y ?? state.visualizationEmbedding?.dim_y ?? 2
     const selectedEmbeddingIdBeforeApply = this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '').trim() : ''
     const selectedLoomFileBeforeApply = String(this.getCurrentLoomFile() || '')
     let embeddingCoordinatesReady = !checkpointEmbeddingId
@@ -10220,6 +10453,8 @@ export default class extends Controller {
       checkpointEmbeddingId: checkpointEmbeddingId ? String(checkpointEmbeddingId) : null,
       checkpointEmbeddingLoomFile,
       checkpointEmbeddingName,
+      checkpointDimX,
+      checkpointDimY,
       currentSelectedBeforeApply: this.hasMetadataSelectTarget ? String(this.metadataSelectTarget.value || '') : null,
       currentLoomBeforeApply: this.currentLoomFile
     })
@@ -10227,14 +10462,17 @@ export default class extends Controller {
       const normalizedEmbeddingId = String(checkpointEmbeddingId)
       let applyResult = this.applyEmbeddingSelection(normalizedEmbeddingId, checkpointEmbeddingLoomFile, {
         skipLoad: true,
-        expectedEmbeddingName: checkpointEmbeddingName
+        expectedEmbeddingName: checkpointEmbeddingName,
+        dimX: checkpointDimX,
+        dimY: checkpointDimY
       })
       if (!applyResult) {
         const fallbackInfo = this.determineDefaultEmbedding()
         if (fallbackInfo?.embedding?.id) {
           applyResult = this.applyEmbeddingSelection(String(fallbackInfo.embedding.id), fallbackInfo.loomFile, {
             skipLoad: true,
-            expectedEmbeddingName: this.getEmbeddingName(fallbackInfo.embedding)
+            expectedEmbeddingName: this.getEmbeddingName(fallbackInfo.embedding),
+            resetDims: true
           })
           this.checkpointDebug('applyCheckpointState:embedding-fallback-used', {
             requestedEmbeddingId: normalizedEmbeddingId,
@@ -10316,7 +10554,9 @@ export default class extends Controller {
       if (resolvedEmbeddingId) {
         const uiSyncResult = this.applyEmbeddingSelection(resolvedEmbeddingId, targetLoomForLoad, {
           skipLoad: true,
-          expectedEmbeddingName: checkpointEmbeddingName
+          expectedEmbeddingName: checkpointEmbeddingName,
+          dimX: checkpointDimX,
+          dimY: checkpointDimY
         })
         if (!uiSyncResult) {
           this.updateEmbeddingSelectionLink({
@@ -18960,6 +19200,7 @@ export default class extends Controller {
     const embedding = embeddingMatch?.embedding || this.metadataData || null
     const displayInfo = this.getEmbeddingDisplayInfo(embedding, loomFile || embeddingMatch?.loomFile)
 
+    const dims = this.getSelectedEmbeddingDims()
     return {
       plot: 'main',
       embedding: {
@@ -18969,8 +19210,10 @@ export default class extends Controller {
         loom_file: String(loomFile || embeddingMatch?.loomFile || '')
       },
       axes: {
-        x: 'Dimension 1',
-        y: 'Dimension 2'
+        x: this.formatEmbeddingAxisLabel(dims.dimX),
+        y: this.formatEmbeddingAxisLabel(dims.dimY),
+        dim_x: dims.dimX,
+        dim_y: dims.dimY
       }
     }
   }
@@ -19082,8 +19325,10 @@ export default class extends Controller {
     const embeddingName = String(embedding.name || 'Embedding')
     const origin = String(embedding.origin || '').trim()
     const embeddingLabel = origin ? `${origin} > ${embeddingName}` : embeddingName
-    const xAxis = String(axes.x || 'Dimension 1')
-    const yAxis = String(axes.y || 'Dimension 2')
+    const dimX = Number(axes.dim_x || axes.dimX)
+    const dimY = Number(axes.dim_y || axes.dimY)
+    const xAxis = String(axes.x || (Number.isFinite(dimX) && dimX >= 1 ? this.formatEmbeddingAxisLabel(dimX) : 'Dimension 1'))
+    const yAxis = String(axes.y || (Number.isFinite(dimY) && dimY >= 1 ? this.formatEmbeddingAxisLabel(dimY) : 'Dimension 2'))
     return `
       <div style="font-size:11px;color:#6b7280;margin-top:2px;">Plot: Main plot</div>
       <div style="font-size:11px;color:#6b7280;margin-top:2px;">Embedding: ${this.escapeHtml(embeddingLabel)}</div>
@@ -23039,30 +23284,39 @@ export default class extends Controller {
       throw new Error('No embedding selected for preview')
     }
 
-    const cacheKey = `${loomFile || ''}::${embeddingId}`
+    const dims = this.getSelectedEmbeddingDims()
+    const cacheKey = `${loomFile || ''}::${this.coordinatesCacheKey(embeddingId, dims.dimX, dims.dimY)}`
     if (this.composeSelectionCoordinatesCache.has(cacheKey)) {
       return this.composeSelectionCoordinatesCache.get(cacheKey)
     }
 
-    if (this.currentCoordinates && this.currentCoordinates.length > 0 && this.metadataData && String(this.metadataData.id) === String(embeddingId)) {
+    if (
+      this.currentCoordinates &&
+      this.currentCoordinates.length > 0 &&
+      this.metadataData &&
+      String(this.metadataData.id) === String(embeddingId) &&
+      Number(this.metadataData.dim_x || dims.dimX) === dims.dimX &&
+      Number(this.metadataData.dim_y || dims.dimY) === dims.dimY
+    ) {
       this.composeSelectionCoordinatesCache.set(cacheKey, this.currentCoordinates)
       return this.currentCoordinates
     }
 
+    const binaryCacheKey = this.coordinatesCacheKey(embeddingId, dims.dimX, dims.dimY)
     let binaryDataObject = null
-    if (this.binaryDataCache.has(embeddingId)) {
-      binaryDataObject = this.binaryDataCache.get(embeddingId)
+    if (this.binaryDataCache.has(binaryCacheKey)) {
+      binaryDataObject = this.binaryDataCache.get(binaryCacheKey)
     } else {
-      const diskData = await this.memoryManager.loadCoordinatesFromIndexedDB(embeddingId)
+      const diskData = await this.memoryManager.loadCoordinatesFromIndexedDB(binaryCacheKey)
       if (diskData && diskData.binaryData) {
-        this.binaryDataCache.set(embeddingId, diskData)
+        this.binaryDataCache.set(binaryCacheKey, diskData)
         binaryDataObject = diskData
       }
     }
 
     if (!binaryDataObject || !binaryDataObject.binaryData) {
       const projectIdentifier = this.getProjectIdentifier()
-      const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_coordinates?metadata_id=${encodeURIComponent(embeddingId)}&loom_file=${encodeURIComponent(loomFile || '')}`
+      const url = `/projects/${encodeURIComponent(projectIdentifier)}/metadata_coordinates?metadata_id=${encodeURIComponent(embeddingId)}&loom_file=${encodeURIComponent(loomFile || '')}&dim_x=${encodeURIComponent(dims.dimX)}&dim_y=${encodeURIComponent(dims.dimY)}`
       const response = await fetch(url, {
         method: 'GET',
         headers: { 'Accept': 'application/octet-stream' },
@@ -23084,10 +23338,12 @@ export default class extends Controller {
         id: String(embeddingId),
         name: response.headers.get('X-Metadata-Name') || `Embedding ${embeddingId}`,
         cellCount: Number(response.headers.get('X-Cell-Count') || 0),
-        binaryData: arrayBuffer
+        binaryData: arrayBuffer,
+        dim_x: dims.dimX,
+        dim_y: dims.dimY
       }
-      this.binaryDataCache.set(embeddingId, binaryDataObject)
-      this.memoryManager.storeCoordinatesInIndexedDB(embeddingId, binaryDataObject).catch(() => {})
+      this.binaryDataCache.set(binaryCacheKey, binaryDataObject)
+      this.memoryManager.storeCoordinatesInIndexedDB(binaryCacheKey, binaryDataObject).catch(() => {})
     }
 
     const coordinates = this.dataManager.decompressBinaryCoordinates(binaryDataObject.binaryData)

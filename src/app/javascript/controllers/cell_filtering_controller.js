@@ -330,23 +330,9 @@ export default class extends Controller {
       this.h_manually_discarded = {};
       this.h_discarded = {};
       
-      // Handle manually discarded from metadata checkboxes
-      const checkboxes = document.querySelectorAll('#list_of_cats input[type="checkbox"]');
-      checkboxes.forEach(checkbox => {
-        if (!checkbox.checked) {
-          let indices = [];
-          try {
-            indices = JSON.parse(checkbox.dataset.cellIndices || "[]");
-          } catch (e) {
-            indices = [];
-          }
-          indices.forEach((i) => {
-            const idx = parseInt(i, 10);
-            if (!Number.isNaN(idx)) {
-              this.h_manually_discarded[idx] = 1;
-            }
-          });
-        }
+      // Metadata composition (single or multi-annot set operations)
+      this.getMetadataDiscardedIndices().forEach((idx) => {
+        this.h_manually_discarded[idx] = 1;
       });
       
       const list_manually_discarded = [];
@@ -657,16 +643,32 @@ export default class extends Controller {
       if (row) row.classList.add("opacity-60");
     });
 
-    this.element.querySelectorAll(".check_box_cat").forEach((checkbox) => {
-      checkbox.checked = true;
-    });
-
-    const manualSelection = document.getElementById("attrs_manual_selection");
-    if (manualSelection) manualSelection.value = "";
-    const discardedMetadata = document.getElementById("attrs_discarded_metadata_json");
-    if (discardedMetadata) discardedMetadata.value = "{}";
+    const metadataController = this.metadataController();
+    if (metadataController && typeof metadataController.reset === "function") {
+      metadataController.reset();
+    } else {
+      const manualSelection = document.getElementById("attrs_manual_selection");
+      if (manualSelection) manualSelection.value = "";
+      const discardedMetadata = document.getElementById("attrs_discarded_metadata_json");
+      if (discardedMetadata) discardedMetadata.value = "{}";
+    }
 
     this.changeCutoff(false);
+  }
+
+  metadataController() {
+    const metadataElement = this.element.querySelector('[data-controller~="cell-filtering-metadata"]');
+    if (!metadataElement || !this.application) return null;
+    return this.application.getControllerForElementAndIdentifier(metadataElement, "cell-filtering-metadata");
+  }
+
+  getMetadataDiscardedIndices() {
+    const metadataController = this.metadataController();
+    if (metadataController && typeof metadataController.getDiscardedIndices === "function") {
+      const indices = metadataController.getDiscardedIndices();
+      return Array.isArray(indices) ? indices : [];
+    }
+    return [];
   }
 
   plotSelectChange(event) {

@@ -205,6 +205,16 @@
           </div>
 
           <div class="doublet-calling-plots-col space-y-6">
+          <% if @doublet_call_path.present? %>
+            <div class="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-900">
+              <p class="mb-0">
+                The output of this step is cell metadata
+                <code class="font-mono text-xs bg-blue-100 px-1.5 py-0.5 rounded"><%= @doublet_call_path %></code>
+                (singlet / doublet calls). You can use this metadata in the
+                <span class="font-medium">Cell filtering</span> step to keep or discard cells.
+              </p>
+            </div>
+          <% end %>
           <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-4 sm:p-6">
             <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Summary</h4>
             <div data-doublet-calling-target="statsPanel" class="flex flex-wrap gap-3">

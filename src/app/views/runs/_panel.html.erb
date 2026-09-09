@@ -252,21 +252,36 @@
 
       <!-- Warnings -->
       <% if @run.status_id == 3 && @h_res && @h_res['warnings'] && @h_res['warnings'].any? %>
-        <div class="alert alert-warning flex items-start gap-3">
+        <% warning_preview_limit = 5 %>
+        <div class="alert alert-warning flex items-start gap-3"
+             data-controller="expandable-warnings">
           <i class="fas fa-exclamation-triangle text-yellow-600 mt-0.5"></i>
           <div class="flex-1">
-            <h4 class="text-sm font-semibold text-yellow-800 mb-2">Warnings</h4>
-            <% @h_res['warnings'].each do |warning| %>
+            <h4 class="text-sm font-semibold text-yellow-800 mb-2">
+              Warnings (<%= @h_res['warnings'].size %>)
+            </h4>
+            <% @h_res['warnings'].each_with_index do |warning, index| %>
+              <% extra = index >= warning_preview_limit %>
               <% if warning.is_a?(Hash) %>
-                <p class="text-yellow-800 mb-1">
+                <p class="text-yellow-800 mb-1<%= ' hidden' if extra %>" <% if extra %>data-expandable-warnings-target="extra"<% end %>>
                   <strong><%= warning['name'] %></strong>
                   <% if warning['description'] %>
                     <span class="block text-sm mt-1"><%= warning['description'] %></span>
                   <% end %>
                 </p>
               <% else %>
-                <p class="text-yellow-800 mb-1"><%= warning %></p>
+                <p class="text-yellow-800 mb-1<%= ' hidden' if extra %>" <% if extra %>data-expandable-warnings-target="extra"<% end %>>
+                  <%= warning %>
+                </p>
               <% end %>
+            <% end %>
+            <% if @h_res['warnings'].size > warning_preview_limit %>
+              <button type="button"
+                      data-expandable-warnings-target="expandButton"
+                      data-action="click->expandable-warnings#expand"
+                      class="mt-2 px-2.5 py-1 text-xs font-medium text-yellow-900 bg-white border border-yellow-300 rounded hover:bg-yellow-50">
+                Show all <%= @h_res['warnings'].size %> warnings
+              </button>
             <% end %>
           </div>
         </div>

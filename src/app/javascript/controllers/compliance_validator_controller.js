@@ -306,21 +306,33 @@ export default class extends Controller {
 
     // Warnings
     if (warnings.length > 0) {
+      const previewLimit = 5
+      const truncated = warnings.length > previewLimit
       html += `
-        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4" data-warnings-list>
           <h4 class="text-yellow-800 font-semibold mb-2">Warnings (${warnings.length})</h4>
           <ul class="space-y-2">
       `
-      warnings.forEach(warning => {
+      warnings.forEach((warning, index) => {
         const field = warning.field || warning['field'] || ''
         const message = warning.message || warning['message'] || ''
+        const extraClass = truncated && index >= previewLimit ? ' hidden' : ''
+        const extraAttr = truncated && index >= previewLimit ? ' data-warning-extra' : ''
         html += `
-          <li class="text-sm text-yellow-700">
+          <li class="text-sm text-yellow-700${extraClass}"${extraAttr}>
             <code class="bg-yellow-100 px-1 rounded">${this.escapeHtml(field)}</code>: ${this.escapeHtml(message)}
           </li>
         `
       })
-      html += '</ul></div>'
+      html += '</ul>'
+      if (truncated) {
+        html += `
+          <button type="button" data-expand-warnings class="mt-2 px-2.5 py-1 text-xs font-medium text-yellow-900 bg-white border border-yellow-300 rounded hover:bg-yellow-50">
+            Show all ${warnings.length} warnings
+          </button>
+        `
+      }
+      html += '</div>'
     }
 
     // Info (collapsible)
@@ -345,6 +357,22 @@ export default class extends Controller {
     }
 
     this.resultTarget.innerHTML = html
+    this.bindWarningExpandClicks()
+  }
+
+  bindWarningExpandClicks() {
+    if (!this.hasResultTarget) return
+    this.resultTarget.querySelectorAll("[data-expand-warnings]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault()
+        const list = button.closest("[data-warnings-list]")
+        if (!list) return
+        list.querySelectorAll("[data-warning-extra]").forEach((el) => {
+          el.classList.remove("hidden")
+        })
+        button.remove()
+      })
+    })
   }
 
   displayError(message) {

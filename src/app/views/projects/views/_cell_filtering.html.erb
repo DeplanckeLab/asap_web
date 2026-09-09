@@ -213,49 +213,49 @@
             <% end %>
           <% end %>
           
-          <%= hidden_field_tag 'attrs[manual_selection]', '', {:placeholder => '', :class => 'form-control', data: { 'cell-filtering-metadata-target': 'manualSelectionHidden' }} %>
-          <%= hidden_field_tag 'attrs[discarded_metadata_json]', '{}', data: { 'cell-filtering-metadata-target': 'discardedMetadataHidden' } %>
-          
-          <% if @annots && @annots.size > 0 %>
+          <% if (@metadata_annots_by_run || {}).values.any? { |list| list.present? } %>
+            <%
+              cell_filtering_metadata_runs = ([@parsing_run] + (@cell_filtering_runs || []) + (@gene_filtering_runs || [])).compact.map do |r|
+                { id: r.id, label: display_run(r) }
+              end
+            %>
             <div class='cell-filtering-section'>
               <h4 class='font-semibold text-gray-900'>Filter using metadata</h4>
               <div class='cell-filtering-info-box bg-green-50 border border-green-200 rounded-md text-green-800'>
-                <p class='mb-0'><span class='font-semibold'>Keep</span> <%= col_label(@project) %> that belong to selected metadata categories:</p>
+                <p class='mb-0'>
+                  <span class='font-semibold'>Keep</span> <%= col_label(@project) %> from a composition of metadata filters.
+                  Categories within one annotation are combined (OR). Multiple annotations are combined with set operations (UNION, INTERSECTION, differences, XOR), left to right.
+                </p>
               </div>
               <div class='space-y-2'
                    data-controller="cell-filtering-metadata"
                    data-cell-filtering-metadata-project-key-value="<%= @project.key %>"
-                   data-cell-filtering-metadata-annots-by-run-value='<%= raw (@metadata_annots_by_run || {}).to_json %>'>
-                <% l = ([@parsing_run] + @cell_filtering_runs + @gene_filtering_runs).compact.map{|r| [display_run(r), r.id]} %>
-                <div class='cell-filtering-field'>
-                  <label>Run</label>
-                  <%= select_tag 'store_run_id',
-                      options_for_select(l, @parsing_run&.id),
-                      {
-                        class: 'w-full border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500',
-                        data: {
-                          action: 'change->cell-filtering-metadata#storeRunChanged',
-                          'cell-filtering-metadata-target': 'storeRunSelect'
-                        }
-                      } %>
+                   data-cell-filtering-metadata-nber-cells-value="<%= @project.nber_cols || 0 %>"
+                   data-cell-filtering-metadata-annots-by-run-value='<%= raw (@metadata_annots_by_run || {}).to_json %>'
+                   data-cell-filtering-metadata-runs-value='<%= raw cell_filtering_metadata_runs.to_json %>'>
+                <%= hidden_field_tag 'attrs[manual_selection]', '', {
+                      id: 'attrs_manual_selection',
+                      data: { 'cell-filtering-metadata-target': 'manualSelectionHidden' }
+                    } %>
+                <%= hidden_field_tag 'attrs[discarded_metadata_json]', '{}', {
+                      id: 'attrs_discarded_metadata_json',
+                      data: { 'cell-filtering-metadata-target': 'discardedMetadataHidden' }
+                    } %>
+                <div data-cell-filtering-metadata-target="filtersContainer" class="cell-filtering-metadata-filters"></div>
+                <div class="cell-filtering-metadata-toolbar">
+                  <button type="button"
+                          class="bg-sky-600 hover:bg-sky-700 text-white rounded"
+                          data-action="click->cell-filtering-metadata#addFilter">
+                    Add metadata filter
+                  </button>
                 </div>
-                <% l = @annots.map{|a| [a[:name].to_s + " ", a[:id]]}.sort %>
-                <% l.unshift ["Select an annotation", nil] %>
-                <div class='cell-filtering-field'>
-                  <label>Annotation</label>
-                  <%= select_tag 'annot_id',
-                      options_for_select(l, nil),
-                      {
-                        class: 'w-full border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500',
-                        data: {
-                          action: 'change->cell-filtering-metadata#annotChanged',
-                          'cell-filtering-metadata-target': 'annotSelect'
-                        }
-                      } %>
-                </div>
-                <div id='annot_categories' data-cell-filtering-metadata-target="categoriesContainer"></div>
+                <div class="cell-filtering-hint"
+                     data-cell-filtering-metadata-target="resultSummary">No metadata filter applied.</div>
               </div>
             </div>
+          <% else %>
+            <%= hidden_field_tag 'attrs[manual_selection]', '', { id: 'attrs_manual_selection' } %>
+            <%= hidden_field_tag 'attrs[discarded_metadata_json]', '{}', { id: 'attrs_discarded_metadata_json' } %>
           <% end %>
 
       </div>

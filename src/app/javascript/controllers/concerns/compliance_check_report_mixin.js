@@ -45,6 +45,7 @@ export const complianceCheckReportMixin = {
       ${groups.map((group) => this.renderDetailList(group.label, group.items || [], issueContext)).join("")}
     `
     this.bindCheckDetailClicks()
+    this.bindWarningExpandClicks()
   },
 
   formatFieldValues(values) {
@@ -70,6 +71,24 @@ export const complianceCheckReportMixin = {
       element.addEventListener("click", (event) => {
         const index = Number(event.currentTarget.dataset.checkDetailIndex)
         this.showCheckDetail(index)
+      })
+    })
+  },
+
+  warningsPreviewLimit() {
+    return 5
+  },
+
+  bindWarningExpandClicks() {
+    this.resultBodyTarget.querySelectorAll("[data-expand-warnings]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.preventDefault()
+        const list = button.closest("[data-warnings-list]")
+        if (!list) return
+        list.querySelectorAll("[data-warning-extra]").forEach((el) => {
+          el.classList.remove("hidden")
+        })
+        button.remove()
       })
     })
   },
@@ -512,7 +531,9 @@ export const complianceCheckReportMixin = {
     if (failedCount > 0) summaryParts.push(`${failedCount} failed`)
     if (warningCount > 0) summaryParts.push(`${warningCount} warning(s)`)
     const summary = summaryParts.length > 0 ? ` - ${summaryParts.join(", ")}` : ""
-    const lines = items.map((it) => {
+    const truncateWarnings = color === "yellow"
+    const previewLimit = truncateWarnings ? this.warningsPreviewLimit() : null
+    const lines = items.map((it, index) => {
       const field = this.escape(it.field || "-")
       const msg = this.escape(it.message || "")
       const valueText = this.formatFieldValues(it.values || it["values"])
@@ -522,16 +543,24 @@ export const complianceCheckReportMixin = {
       const listLabel = statusKey === "failed" ? "Failed" : st.label
       const badge = `<span class="ml-2 px-1.5 py-0.5 rounded text-xs ${st.badge}">${listLabel}</span>`
       const detailIndex = this.registerCheckDetail(it.detail, it, resolveOptions)
+      const isExtra = previewLimit !== null && index >= previewLimit
       const clickable = detailIndex !== null ? " cursor-pointer hover:bg-white/70 rounded px-1 -mx-1" : ""
+      const hiddenClass = isExtra ? " hidden" : ""
+      const extraAttr = isExtra ? " data-warning-extra" : ""
       const detailAttr = detailIndex !== null
         ? ` data-check-detail-index="${detailIndex}" title="Show rule details"`
         : ""
-      return `<li class="text-sm${clickable}"${detailAttr}><code class="px-1 rounded ${codeClass}">${field}</code>${badge} ${msg}${valueText}</li>`
+      return `<li class="text-sm${clickable}${hiddenClass}"${extraAttr}${detailAttr}><code class="px-1 rounded ${codeClass}">${field}</code>${badge} ${msg}${valueText}</li>`
     }).join("")
+    const expandButton = previewLimit !== null && items.length > previewLimit
+      ? `<button type="button" data-expand-warnings class="mt-2 px-2.5 py-1 text-xs font-medium text-yellow-900 bg-white border border-yellow-300 rounded hover:bg-yellow-50">Show all ${items.length} warnings</button>`
+      : ""
+    const listAttr = truncateWarnings ? " data-warnings-list" : ""
     return `
-      <div class="mb-4 p-3 rounded border ${style.box}">
+      <div class="mb-4 p-3 rounded border ${style.box}"${listAttr}>
         <div class="font-medium mb-2">${title} (${items.length})${summary}</div>
         <ul class="space-y-1">${lines}</ul>
+        ${expandButton}
       </div>
     `
   },

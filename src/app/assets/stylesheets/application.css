@@ -819,17 +819,91 @@ button.subview-refresh-available .fa-sync-alt {
   margin-bottom: 0.375rem;
 }
 
-.cell-filtering-form-compact .cell-filtering-metadata-actions button {
+.cell-filtering-form-compact .cell-filtering-metadata-actions button,
+.cell-filtering-form-compact .cell-filtering-metadata-toolbar button {
   padding: 0.125rem 0.375rem;
   font-size: 0.625rem;
   line-height: 1.2;
 }
 
-.cell-filtering-form-compact #list_of_cats {
+.cell-filtering-form-compact .cell-filtering-metadata-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.375rem;
+}
+
+.cell-filtering-form-compact .cell-filtering-metadata-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.cell-filtering-form-compact .cell-filtering-metadata-filter {
+  border: 1px solid #e5e7eb;
+  border-radius: 0.375rem;
+  background: #f9fafb;
+  padding: 0.5rem;
+}
+
+.cell-filtering-form-compact .cell-filtering-metadata-filter-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.375rem;
+}
+
+.cell-filtering-form-compact .cell-filtering-metadata-filter-title {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: #111827;
+}
+
+.cell-filtering-form-compact .cell-filtering-metadata-remove {
+  padding: 0.125rem 0.375rem;
+  font-size: 0.625rem;
+  line-height: 1.2;
+  color: #b91c1c;
+  background: #fff;
+  border: 1px solid #fecaca;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+.cell-filtering-form-compact .cell-filtering-metadata-remove:hover {
+  background: #fef2f2;
+}
+
+.cell-filtering-form-compact .cell-filtering-set-op {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px dashed #d1d5db;
+}
+
+.cell-filtering-form-compact .cell-filtering-set-op label {
+  display: block;
+  margin-bottom: 0.125rem;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+.cell-filtering-form-compact .cell-filtering-set-op select {
+  width: 100%;
+  padding: 0.25rem 0.375rem;
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  border: 1px solid #d1d5db;
+  border-radius: 0.25rem;
+  background: #fff;
+}
+
+.cell-filtering-form-compact .list_of_cats {
   gap: 0.25rem;
 }
 
-.cell-filtering-form-compact #list_of_cats label {
+.cell-filtering-form-compact .list_of_cats label {
   gap: 0.25rem;
   padding: 0.125rem 0.375rem;
   font-size: 0.6875rem;

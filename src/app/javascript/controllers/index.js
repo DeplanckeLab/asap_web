@@ -207,6 +207,9 @@ application.register("dna-accessibility-card", DnaAccessibilityCardController)
 
 import ComplianceCheckReportController from "controllers/compliance_check_report_controller"
 application.register("compliance-check-report", ComplianceCheckReportController)
+
+import ExpandableWarningsController from "controllers/expandable_warnings_controller"
+application.register("expandable-warnings", ExpandableWarningsController)
 console.log('Isolated compliance controller registered')
 
 import CloneOverlayController from "controllers/clone_overlay_controller"

@@ -666,22 +666,52 @@
         }
         script.remove()
       })
+
+      const finishInsert = () => {
+        // Insert HTML only after scripts/data are ready so Stimulus connects correctly
+        // (e.g. cell filtering needs Plotly + window.cellFilteringData first).
+        controller.contentTarget.innerHTML = tempDiv.innerHTML
+        controller.contentTarget.style.display = 'block'
+
+        if (controller.hasLoadingStateTarget) {
+          controller.loadingStateTarget.style.display = 'none'
+        }
+
+        if (window.Stimulus && window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
+          setTimeout(() => {
+            window.Stimulus.router.scan()
+          }, 0)
+
+          setTimeout(() => {
+            window.Stimulus.router.scan()
+          }, 100)
+        }
+
+        if (isGraphRequest) {
+          setPipelineHeaderButtonMode('details')
+        } else {
+          setPipelineHeaderButtonMode('graph')
+        }
+      }
       
-      // Update content with form (without script tags)
-      controller.contentTarget.innerHTML = tempDiv.innerHTML
-      controller.contentTarget.style.display = 'block'
-      
-      // Load external scripts first, then execute inline scripts
+      // Load external scripts first, then execute inline scripts, then insert HTML
       const loadScripts = (index) => {
         if (index < externalScripts.length) {
+          const src = externalScripts[index]
+          if ((src.includes('plotly') && typeof Plotly !== 'undefined') ||
+              (src.includes('pako') && typeof pako !== 'undefined') ||
+              document.querySelector(`script[src="${src}"]`)) {
+            loadScripts(index + 1)
+            return
+          }
           const script = document.createElement('script')
-          script.src = externalScripts[index]
+          script.src = src
           script.onload = () => {
-            console.log('[loadFormInRightPanel] External script loaded:', externalScripts[index])
+            console.log('[loadFormInRightPanel] External script loaded:', src)
             loadScripts(index + 1)
           }
           script.onerror = () => {
-            console.error('[loadFormInRightPanel] Failed to load script:', externalScripts[index])
+            console.error('[loadFormInRightPanel] Failed to load script:', src)
             loadScripts(index + 1) // Continue even if one fails
           }
           document.head.appendChild(script)
@@ -694,28 +724,7 @@
             document.head.removeChild(script) // Remove after execution
             console.log('[loadFormInRightPanel] Inline script executed:', idx)
           })
-          
-          // Hide loading state
-          if (controller.hasLoadingStateTarget) {
-            controller.loadingStateTarget.style.display = 'none'
-          }
-          
-          // Trigger Stimulus to scan for new controllers in the form
-          if (window.Stimulus && window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
-            setTimeout(() => {
-              window.Stimulus.router.scan()
-            }, 0)
-            
-            setTimeout(() => {
-              window.Stimulus.router.scan()
-            }, 100)
-          }
-
-          if (isGraphRequest) {
-            setPipelineHeaderButtonMode('details')
-          } else {
-            setPipelineHeaderButtonMode('graph')
-          }
+          finishInsert()
         }
       }
       
@@ -730,26 +739,7 @@
           document.head.appendChild(script)
           document.head.removeChild(script)
         })
-        
-        if (controller.hasLoadingStateTarget) {
-          controller.loadingStateTarget.style.display = 'none'
-        }
-        
-        if (window.Stimulus && window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
-          setTimeout(() => {
-            window.Stimulus.router.scan()
-          }, 0)
-          
-          setTimeout(() => {
-            window.Stimulus.router.scan()
-          }, 100)
-        }
-
-        if (isGraphRequest) {
-          setPipelineHeaderButtonMode('details')
-        } else {
-          setPipelineHeaderButtonMode('graph')
-        }
+        finishInsert()
       }
     })
     .catch(error => {
@@ -878,45 +868,81 @@
         controller.contentTarget.style.display = 'block'
         return
       }
-      // Update content with run
-      controller.contentTarget.innerHTML = html
-      controller.contentTarget.style.display = 'block'
-      
-      // Hide loading state
-      if (controller.hasLoadingStateTarget) {
-        controller.loadingStateTarget.style.display = 'none'
-      }
-      
-      // Trigger Stimulus to connect new controllers in the dynamically loaded content
-      console.log('[loadRunInRightPanel] Triggering Stimulus to connect new controllers...')
-      
-      // Log what controllers are in the new content
-      const newControllerElements = controller.contentTarget.querySelectorAll('[data-controller]')
-      console.log('[loadRunInRightPanel] Found elements with data-controller:', newControllerElements.length)
-      newControllerElements.forEach(el => {
-        console.log('[loadRunInRightPanel] Controller element:', el.getAttribute('data-controller'), el)
+      // Update content with run — load scripts before inserting HTML so Stimulus
+      // controllers (e.g. cell-filtering QC plots) connect with deps ready.
+      const tempDiv = document.createElement('div')
+      tempDiv.innerHTML = html
+      const externalScripts = []
+      const inlineScripts = []
+      tempDiv.querySelectorAll('script').forEach((script) => {
+        if (script.src) {
+          externalScripts.push(script.src)
+        } else if (script.textContent && script.textContent.trim().length > 0) {
+          inlineScripts.push(script.textContent)
+        }
+        script.remove()
       })
-      
-      // The MutationObserver in Stimulus should automatically detect new elements
-      // But let's also try forcing a reconnection by temporarily removing and re-adding
-      // the content to trigger the mutation
-      setTimeout(() => {
-        // Check if controllers are connected
-        const pipelineRunsElements = controller.contentTarget.querySelectorAll('[data-controller*="pipeline-runs"]')
-        console.log('[loadRunInRightPanel] pipeline-runs elements:', pipelineRunsElements.length)
-        pipelineRunsElements.forEach(el => {
-          if (window.Stimulus) {
-            const ctrl = window.Stimulus.getControllerForElementAndIdentifier(el, 'pipeline-runs')
-            console.log('[loadRunInRightPanel] pipeline-runs controller connected:', !!ctrl, el)
-            if (!ctrl) {
-              // Controller not connected - try to force it by cloning
-              console.log('[loadRunInRightPanel] Attempting to force controller connection...')
-              const clone = el.cloneNode(true)
-              el.parentNode.replaceChild(clone, el)
-            }
-          }
+
+      const finishRunInsert = () => {
+        controller.contentTarget.innerHTML = tempDiv.innerHTML
+        controller.contentTarget.style.display = 'block'
+
+        if (controller.hasLoadingStateTarget) {
+          controller.loadingStateTarget.style.display = 'none'
+        }
+
+        console.log('[loadRunInRightPanel] Triggering Stimulus to connect new controllers...')
+        const newControllerElements = controller.contentTarget.querySelectorAll('[data-controller]')
+        console.log('[loadRunInRightPanel] Found elements with data-controller:', newControllerElements.length)
+        newControllerElements.forEach(el => {
+          console.log('[loadRunInRightPanel] Controller element:', el.getAttribute('data-controller'), el)
         })
-      }, 200)
+
+        if (window.Stimulus && window.Stimulus.router && typeof window.Stimulus.router.scan === 'function') {
+          setTimeout(() => window.Stimulus.router.scan(), 0)
+          setTimeout(() => window.Stimulus.router.scan(), 100)
+        }
+      }
+
+      const loadScripts = (index) => {
+        if (index < externalScripts.length) {
+          const src = externalScripts[index]
+          if ((src.includes('plotly') && typeof Plotly !== 'undefined') ||
+              (src.includes('pako') && typeof pako !== 'undefined') ||
+              document.querySelector(`script[src="${src}"]`)) {
+            loadScripts(index + 1)
+            return
+          }
+          const script = document.createElement('script')
+          script.src = src
+          script.onload = () => loadScripts(index + 1)
+          script.onerror = () => {
+            console.error('[loadRunInRightPanel] Failed to load script:', src)
+            loadScripts(index + 1)
+          }
+          document.head.appendChild(script)
+        } else {
+          inlineScripts.forEach((scriptText) => {
+            const script = document.createElement('script')
+            script.textContent = scriptText
+            document.head.appendChild(script)
+            document.head.removeChild(script)
+          })
+          finishRunInsert()
+        }
+      }
+
+      if (externalScripts.length > 0) {
+        loadScripts(0)
+      } else {
+        inlineScripts.forEach((scriptText) => {
+          const script = document.createElement('script')
+          script.textContent = scriptText
+          document.head.appendChild(script)
+          document.head.removeChild(script)
+        })
+        finishRunInsert()
+      }
     })
     .catch(error => {
       console.error('[loadRunInRightPanel] Error loading run:', error)

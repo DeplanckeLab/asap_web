@@ -23,85 +23,115 @@ export default class extends Controller {
     this.isRecomputing = false;
     this.lastDiscardedCount = 0;
     this.toggleSubmitSpinner(false);
+    this._cancelled = false;
 
-    console.log("=== CELL FILTERING CONTROLLER CONNECTED ===");
-    console.log("Element:", this.element);
-    console.log("Element HTML (first 500 chars):", this.element.outerHTML.substring(0, 500));
-    
-    // When content is loaded via AJAX, script tags don't execute automatically
-    // We need to manually find and execute them
-    // Script tag might be before the element, so check parent and siblings too
-    let scripts = this.element.querySelectorAll('script');
-    console.log("Found", scripts.length, "script tags inside element");
-    
-    // Also check if script is a sibling (before the element)
-    let parent = this.element.parentElement;
-    if (parent) {
-      const allScripts = parent.querySelectorAll('script');
-      console.log("Found", allScripts.length, "script tags in parent element");
-      // Filter to only scripts that are before this element
-      const scriptsBefore = Array.from(allScripts).filter(script => {
-        return script.compareDocumentPosition(this.element) & Node.DOCUMENT_POSITION_PRECEDING;
-      });
-      console.log("Found", scriptsBefore.length, "script tags before this element");
-      scripts = Array.from(scripts).concat(scriptsBefore);
-    }
-    
-    // Also check the element itself and previous siblings
-    let prevSibling = this.element.previousElementSibling;
-    while (prevSibling) {
-      if (prevSibling.tagName === 'SCRIPT') {
-        console.log("Found script tag as previous sibling");
-        scripts = Array.from(scripts).concat([prevSibling]);
-      }
-      prevSibling = prevSibling.previousElementSibling;
-    }
-    
-    console.log("Total script tags to execute:", scripts.length);
-    
-    scripts.forEach((script, index) => {
-      try {
-        console.log(`Executing script tag ${index + 1}...`);
-        if (script.src) {
-          // External script - load it
-          console.log(`Loading external script: ${script.src}`);
-          const newScript = document.createElement('script');
-          newScript.src = script.src;
-          newScript.onload = () => {
-            console.log(`External script ${index + 1} loaded: ${script.src}`);
-          };
-          newScript.onerror = (e) => {
-            console.error(`Error loading external script ${index + 1}:`, e);
-          };
-          document.head.appendChild(newScript);
-        } else {
-          // Inline script - execute it
-          console.log(`Script content (first 200 chars):`, script.textContent.substring(0, 200));
-          const newScript = document.createElement('script');
-          newScript.textContent = script.textContent;
-          document.head.appendChild(newScript);
-          document.head.removeChild(newScript);
-          console.log(`Script tag ${index + 1} executed successfully`);
-          console.log("window.cellFilteringData after execution:", window.cellFilteringData);
-        }
-      } catch(e) {
-        console.error(`Error executing script tag ${index + 1}:`, e);
-      }
-    });
-    
-    // Wait a moment for scripts to execute, then get data
-    setTimeout(() => {
-      this.initialize();
-    }, 100);
+    // AJAX panel loaders may insert this controller before nearby scripts run.
+    // Kick script loading once, then wait for QC data + pako + Plotly together.
+    this._loadNearbyScripts();
+    this._ensureDependenciesAndInitialize();
 
     this.boundResizePlot = this.resizePlot.bind(this);
     window.addEventListener("resize", this.boundResizePlot);
   }
 
   disconnect() {
+    this._cancelled = true;
     if (this.boundResizePlot) {
       window.removeEventListener("resize", this.boundResizePlot);
     }
+  }
+
+  _collectNearbyScripts() {
+    const scripts = [];
+    const seen = new Set();
+
+    const addScript = (script) => {
+      if (!script || seen.has(script)) return;
+      seen.add(script);
+      scripts.push(script);
+    };
+
+    this.element.querySelectorAll("script").forEach(addScript);
+
+    let parent = this.element.parentElement;
+    if (parent) {
+      parent.querySelectorAll("script").forEach((script) => {
+        // Scripts that precede this controller in document order.
+        if (this.element.compareDocumentPosition(script) & Node.DOCUMENT_POSITION_PRECEDING) {
+          addScript(script);
+        }
+      });
+    }
+
+    let prevSibling = this.element.previousElementSibling;
+    while (prevSibling) {
+      if (prevSibling.tagName === "SCRIPT") addScript(prevSibling);
+      prevSibling = prevSibling.previousElementSibling;
+    }
+
+    return scripts;
+  }
+
+  _loadNearbyScripts() {
+    this._collectNearbyScripts().forEach((script) => {
+      try {
+        if (script.src) {
+          const src = script.src;
+          if (src.includes("plotly") && typeof Plotly !== "undefined") return;
+          if (src.includes("pako") && typeof pako !== "undefined") return;
+          if (document.querySelector(`script[data-cell-filtering-loaded-src="${src}"]`)) return;
+
+          const newScript = document.createElement("script");
+          newScript.src = src;
+          newScript.setAttribute("data-cell-filtering-loaded-src", src);
+          document.head.appendChild(newScript);
+        } else if (typeof window.cellFilteringData === "undefined" || !window.cellFilteringData || !window.cellFilteringData.hData) {
+          const newScript = document.createElement("script");
+          newScript.textContent = script.textContent;
+          document.head.appendChild(newScript);
+          document.head.removeChild(newScript);
+        }
+      } catch (e) {
+        console.error("cell-filtering: failed to load nearby script", e);
+      }
+    });
+  }
+
+  _dependenciesReady() {
+    const hasData = typeof window.cellFilteringData !== "undefined" &&
+      window.cellFilteringData &&
+      window.cellFilteringData.hData &&
+      Object.keys(window.cellFilteringData.hData).length > 0;
+    const hasPako = typeof pako !== "undefined";
+    const hasPlotly = typeof Plotly !== "undefined";
+    return { hasData, hasPako, hasPlotly, ready: hasData && hasPako && hasPlotly };
+  }
+
+  _ensureDependenciesAndInitialize(attempt = 0) {
+    if (this._cancelled) return;
+
+    const status = this._dependenciesReady();
+    if (status.ready) {
+      this.initialize();
+      return;
+    }
+
+    if (attempt === 0 || attempt % 10 === 0) {
+      console.log("cell-filtering: waiting for dependencies", status, `attempt ${attempt + 1}`);
+    }
+
+    if (attempt >= 100) {
+      console.error("cell-filtering: dependencies not ready after waiting", status);
+      this.updateCounts(0, 0);
+      return;
+    }
+
+    // Retry loading nearby scripts a few times in case AJAX injects them late.
+    if (attempt > 0 && attempt < 20 && attempt % 5 === 0) {
+      this._loadNearbyScripts();
+    }
+
+    setTimeout(() => this._ensureDependenciesAndInitialize(attempt + 1), 100);
   }
   
   initialize() {
@@ -140,51 +170,28 @@ export default class extends Controller {
     this.list_p = listP || [];
     this.nber_cells = nberCells || 0;
     
-    // Wait for pako library to be available before decompressing
-    this.waitForPako(() => {
-      // Decompress data
-      this.decompressData();
+    // Decompress data (pako is guaranteed by _ensureDependenciesAndInitialize)
+    this.decompressData();
 
-      // Read-only mode for results pages: use persisted discarded cells from run attrs
-      // and render plots without relying on editable form fields.
-      if (this.readOnlyValue) {
-        const discarded = Array.isArray(this.discardedColsValue) ? this.discardedColsValue : [];
-        this.h_discarded = {};
-        discarded.forEach((idx) => {
-          const i = parseInt(idx, 10);
-          if (!Number.isNaN(i)) this.h_discarded[i] = 1;
-        });
-        const discardedCount = Object.keys(this.h_discarded).length;
-        const keptCount = Math.max(0, this.nber_cells - discardedCount);
-        this.updateCounts(keptCount, discardedCount);
-        this.plot(1);
-        return;
-      }
-
-      // Editable form mode
-      this.changeCutoff(false);
+    // Read-only mode for results pages: use persisted discarded cells from run attrs
+    // and render plots without relying on editable form fields.
+    if (this.readOnlyValue) {
+      const discarded = Array.isArray(this.discardedColsValue) ? this.discardedColsValue : [];
+      this.h_discarded = {};
+      discarded.forEach((idx) => {
+        const i = parseInt(idx, 10);
+        if (!Number.isNaN(i)) this.h_discarded[i] = 1;
+      });
+      const discardedCount = Object.keys(this.h_discarded).length;
+      const keptCount = Math.max(0, this.nber_cells - discardedCount);
+      this.updateCounts(keptCount, discardedCount);
       this.plot(1);
-    });
-  }
-  
-  waitForPako(callback, maxAttempts = 20, attempt = 0) {
-    if (typeof pako !== 'undefined') {
-      console.log("pako library is available");
-      callback();
       return;
     }
-    
-    if (attempt >= maxAttempts) {
-      console.error("pako library not available after", maxAttempts, "attempts");
-      // Try to continue anyway, decompression will fail gracefully
-      callback();
-      return;
-    }
-    
-    console.log("Waiting for pako library... (attempt", attempt + 1, "of", maxAttempts + ")");
-    setTimeout(() => {
-      this.waitForPako(callback, maxAttempts, attempt + 1);
-    }, 100);
+
+    // Editable form mode
+    this.changeCutoff(false);
+    this.plot(1);
   }
   
   initializeWithData(hData, hFloat, listP, nberCells) {

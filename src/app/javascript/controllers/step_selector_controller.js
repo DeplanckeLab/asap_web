@@ -1375,21 +1375,96 @@ export default class extends Controller {
     loadRunInRightPanel(`/runs/${autoRunId}`, stepIdString)
   }
 
-  _executeInlineScripts() {
-    if (!this.hasContentTarget) return
-    const scripts = this.contentTarget.querySelectorAll('script')
-    scripts.forEach(original => {
-      try {
-        const replacement = document.createElement('script')
-        if (original.src) {
-          replacement.src = original.src
-        } else {
-          replacement.textContent = original.textContent
-        }
-        original.parentNode.replaceChild(replacement, original)
-      } catch (error) {
-        console.warn('[StepSelectorController] Inline script execution failed:', error)
+  _extractScriptsFromHtml(html) {
+    const tempDiv = document.createElement('div')
+    tempDiv.innerHTML = html
+    const externalSrcs = []
+    const inlineTexts = []
+    tempDiv.querySelectorAll('script').forEach((script) => {
+      if (script.src) {
+        externalSrcs.push(script.src)
+      } else if (script.textContent && script.textContent.trim().length > 0) {
+        inlineTexts.push(script.textContent)
       }
+      script.remove()
+    })
+    return { cleanHtml: tempDiv.innerHTML, externalSrcs, inlineTexts }
+  }
+
+  _loadExternalScript(src) {
+    return new Promise((resolve) => {
+      if (!src) {
+        resolve()
+        return
+      }
+      if (src.includes('plotly') && typeof Plotly !== 'undefined') {
+        resolve()
+        return
+      }
+      if (src.includes('pako') && typeof pako !== 'undefined') {
+        resolve()
+        return
+      }
+      const existing = document.querySelector(`script[src="${src}"]`)
+      if (existing) {
+        // Already requested; give the browser a tick in case it is still loading.
+        setTimeout(resolve, 0)
+        return
+      }
+      const script = document.createElement('script')
+      script.src = src
+      script.onload = () => resolve()
+      script.onerror = () => {
+        console.error('[StepSelectorController] Failed to load script:', src)
+        resolve()
+      }
+      document.head.appendChild(script)
+    })
+  }
+
+  _executeInlineScriptTexts(inlineTexts) {
+    ;(inlineTexts || []).forEach((scriptText) => {
+      const script = document.createElement('script')
+      script.textContent = scriptText
+      document.head.appendChild(script)
+      document.head.removeChild(script)
+    })
+  }
+
+  // Load external scripts, run inline scripts, then insert HTML so Stimulus
+  // connects only after dependencies (e.g. Plotly + cellFilteringData) are ready.
+  _insertHtmlWithScripts(html) {
+    if (!this.hasContentTarget) return Promise.resolve()
+    const { cleanHtml, externalSrcs, inlineTexts } = this._extractScriptsFromHtml(html)
+    let chain = Promise.resolve()
+    externalSrcs.forEach((src) => {
+      chain = chain.then(() => this._loadExternalScript(src))
+    })
+    return chain.then(() => {
+      this._executeInlineScriptTexts(inlineTexts)
+      this.contentTarget.innerHTML = cleanHtml
+    })
+  }
+
+  _executeInlineScripts() {
+    if (!this.hasContentTarget) return Promise.resolve()
+    const scripts = Array.from(this.contentTarget.querySelectorAll('script'))
+    const externalSrcs = []
+    const inlineTexts = []
+    scripts.forEach((original) => {
+      if (original.src) {
+        externalSrcs.push(original.src)
+      } else if (original.textContent && original.textContent.trim().length > 0) {
+        inlineTexts.push(original.textContent)
+      }
+      original.remove()
+    })
+    let chain = Promise.resolve()
+    externalSrcs.forEach((src) => {
+      chain = chain.then(() => this._loadExternalScript(src))
+    })
+    return chain.then(() => {
+      this._executeInlineScriptTexts(inlineTexts)
     })
   }
 
@@ -2320,10 +2395,7 @@ export default class extends Controller {
         }
       } else {
         console.log('[StepSelectorController] Inserting HTML into content target')
-        controller.contentTarget.innerHTML = html
-
-        controller._executeInlineScripts()
-
+        controller._insertHtmlWithScripts(html).then(() => {
         if (window.Stimulus && window.Stimulus.router) {
           console.log('[StepSelectorController] Triggering Stimulus scan for new controllers...')
           try {
@@ -2362,6 +2434,7 @@ export default class extends Controller {
         controller._analysisRestoreRunPanelFromCanonicalUrl(stepIdString, query)
 
         controller.showStepPanelFlashFromQuery(query)
+        })
       }
 
       const skippedStepHtmlForAutoRunPanel = Boolean(

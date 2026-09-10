@@ -44,15 +44,19 @@ export default class extends Controller {
     "editTrackDisplayMode", "editTrackDisplayModeWrap",
     "editTrackSize", "editTrackShowLegend", "editTrackLegendWrap", "editTrackGradientBtn",
     "colTreeToggle", "rowTreeToggle", "labelsToggle",
+    "cellLabelsToggle", "trackMetadataNamesToggle",
     "colTreeState", "rowTreeState", "labelsState",
+    "cellLabelsState", "trackMetadataNamesState",
     "settingsBtn", "settingsMenu", "legendWidthSlider", "legendWidthValue",
     "rightMarginSlider", "rightMarginValue",
+    "reorganizeCalloutLabelsBtn",
     "checkpointHistoryOverlay", "checkpointHistoryList", "checkpointHistoryLoading", "checkpointHistoryBtn",
     "checkpointCommentsOverlay", "checkpointCommentsTitle", "checkpointCommentsList",
     "checkpointCommentSelect", "checkpointCommentInput", "checkpointCommentsBtn",
     "checkpointLoadingOverlay", "checkpointLoadingMessage",
     "panModeBtn", "selectModeBtn", "controlInstructions",
     "selectedGenesCount", "selectedCellsCount",
+    "heatmapGenesCountBadge",
     "savedCellSetsList",
     "geneSelectionStatus", "cellSelectionStatus",
     "clearGeneSelectionBtn", "clearCellSelectionBtn", "restorePreviousGenesBtn",
@@ -66,7 +70,14 @@ export default class extends Controller {
     this.dpr = window.devicePixelRatio || 1
     this.showRowTree = true
     this.showColTree = true
-    this.showLabels = true
+    this.showGeneLabels = true
+    this.showCellLabels = true
+    this.showTrackMetadataNames = false
+    this.selectedGeneCalloutManual = new Map()
+    this.selectedCellCalloutManual = new Map()
+    this.selectedGeneCalloutBounds = []
+    this.selectedCellCalloutBounds = []
+    this.draggingCallout = null
     this.dragging = false
     this.selecting = false
     this.selectionRect = null
@@ -341,6 +352,7 @@ export default class extends Controller {
         ? Number(this.meta.embedding_metadata_id)
         : null
       this.rebuildGeneRowIndex()
+      this.updateHeatmapGenesCountBadge()
 
       this.setupExpressionGradient()
       this.setStatus("")
@@ -1833,7 +1845,11 @@ export default class extends Controller {
   reset() {
     this.showRowTree = true
     this.showColTree = true
-    this.showLabels = true
+    this.showGeneLabels = true
+    this.showCellLabels = true
+    this.showTrackMetadataNames = false
+    this.selectedGeneCalloutManual.clear()
+    this.selectedCellCalloutManual.clear()
     this.syncToggleButtons()
     this.resetView(true)
     this.handleResize()
@@ -1853,11 +1869,42 @@ export default class extends Controller {
     this.persistCurrentCheckpointOnServer("toggle-col-tree")
   }
 
-  toggleLabels() {
-    this.showLabels = !this.showLabels
+  toggleGeneLabels() {
+    this.showGeneLabels = !this.showGeneLabels
+    if (!this.showGeneLabels) {
+      this.selectedGeneCalloutManual.clear()
+      if (this.draggingCallout?.kind === "gene") this.draggingCallout = null
+    }
     this.syncToggleButtons()
     this.handleResize()
-    this.persistCurrentCheckpointOnServer("toggle-labels")
+    this.persistCurrentCheckpointOnServer("toggle-gene-labels")
+  }
+
+  toggleCellLabels() {
+    this.showCellLabels = !this.showCellLabels
+    if (!this.showCellLabels) {
+      this.selectedCellCalloutManual.clear()
+      if (this.draggingCallout?.kind === "cell") this.draggingCallout = null
+    }
+    this.syncToggleButtons()
+    this.handleResize()
+    this.persistCurrentCheckpointOnServer("toggle-cell-labels")
+  }
+
+  toggleTrackMetadataNames() {
+    this.showTrackMetadataNames = !this.showTrackMetadataNames
+    this.syncToggleButtons()
+    this.handleResize()
+    this.persistCurrentCheckpointOnServer("toggle-track-metadata-names")
+  }
+
+  reorganizeCalloutLabels(event) {
+    if (event) event.preventDefault()
+    this.selectedGeneCalloutManual.clear()
+    this.selectedCellCalloutManual.clear()
+    if (this.draggingCallout) this.draggingCallout = null
+    this.drawOverlay()
+    this.persistCurrentCheckpointOnServer("reorganize-callout-labels")
   }
 
   syncToggleButtons() {
@@ -1869,7 +1916,17 @@ export default class extends Controller {
       this.showRowTree)
     this.applyToggleState(this.hasLabelsToggleTarget ? this.labelsToggleTarget : null,
       this.hasLabelsStateTarget ? this.labelsStateTarget : null,
-      this.showLabels)
+      this.showGeneLabels)
+    this.applyToggleState(
+      this.hasCellLabelsToggleTarget ? this.cellLabelsToggleTarget : null,
+      this.hasCellLabelsStateTarget ? this.cellLabelsStateTarget : null,
+      this.showCellLabels
+    )
+    this.applyToggleState(
+      this.hasTrackMetadataNamesToggleTarget ? this.trackMetadataNamesToggleTarget : null,
+      this.hasTrackMetadataNamesStateTarget ? this.trackMetadataNamesStateTarget : null,
+      this.showTrackMetadataNames
+    )
   }
 
   applyToggleState(button, stateLabel, isOn) {
@@ -1952,31 +2009,80 @@ export default class extends Controller {
       if (ti < rowTracks.length - 1) rowTracksW += L.trackGap
     })
 
-    // Track bands only — + buttons and c/r refs are overlays and must not open a gap
-    // between tracks and the heatmap matrix.
+    // Track color bands only. Cell-metadata (column) labels use colTrackLabelW on the right.
+    // Gene-metadata (row) labels are drawn vertically in the gutter above the row tracks
+    // (left of the matrix), reusing the top tree/track band so we do not open a gap
+    // between cell metadata tracks and the heatmap.
     this.leftTracksW = rowTracksW
     this.topTracksH = colTracksH
-    this.trackRefW = colTracks.length ? L.trackRefW : 0
-    this.trackRefH = rowTracks.length ? L.trackRefH : 0
+    this.colTrackLabelW = mobile ? 0 : this.estimateColTrackLabelBand(colTracks)
+
+    const topBand = colTreeH + this.topTracksH
+    let rowTrackLabelH = 0
+    if (!mobile && rowTracks.length) {
+      // Prefer the existing space beside the column tree/tracks; only reserve extra
+      // height when there is nothing above the matrix yet.
+      rowTrackLabelH = topBand > 0 ? topBand : this.estimateRowTrackLabelBand(rowTracks)
+    }
+    this.rowTrackLabelH = rowTrackLabelH
 
     this.mx = L.pad + rowTreeW + this.leftTracksW
-    this.my = L.pad + colTreeH + this.topTracksH
+    this.my = L.pad + topBand + (topBand > 0 ? 0 : rowTrackLabelH)
     this.colTreeH = colTreeH
     this.rowTreeW = rowTreeW
     this.rightLegendW = mobile ? 0 : this.estimateRightLegendWidth()
     this.rightMargin = mobile ? 0 : this.estimateRightMargin()
-    this.labelW = this.showLabels ? (mobile ? Math.min(L.rowLabelW, 36) : L.rowLabelW) : 0
+    // Keep the gene-label gutter whenever gene naming is on, including callout mode,
+    // so selected leader-line labels stay the default distance from the heatmap border.
+    this.labelW = this.showGeneLabels ? (mobile ? Math.min(L.rowLabelW, 36) : L.rowLabelW) : 0
+    this.calloutW = this.selectedGeneCalloutsActive({ mobile }) ? 118 : 0
 
     // Mobile: keep side gene labels, but do not reserve space under the matrix
     // (that empty band sat between the heatmap and the +/- footer).
-    const labelH = (!mobile && this.showLabels) ? L.colLabelH : 0
+    // Cell fixed-label band only when there is room; otherwise use the callout strip.
+    const labelH = (!mobile && this.showCellLabels && this.cellInlineLabelRoomAvailable()) ? L.colLabelH : 0
+    this.cellCalloutH = this.selectedCellCalloutsActive({ mobile }) ? 56 : 0
     const bottomPad = mobile ? 0 : L.pad
-    // Right side: [matrix][gene labels][rightMargin][legend][pad]
-    this.mw = Math.max(20, this.containerW - this.mx - this.labelW - this.rightMargin - this.rightLegendW - L.pad)
-    this.mh = Math.max(20, this.containerH - this.my - labelH - bottomPad)
+    // Right: [matrix][cell-track labels][gene gutter][selected callouts][rightMargin][legend][pad]
+    // Bottom: [matrix][cell labels or selected cell callouts][pad]
+    this.mw = Math.max(
+      20,
+      this.containerW - this.mx - this.colTrackLabelW - this.labelW - this.calloutW - this.rightMargin - this.rightLegendW - L.pad
+    )
+    this.mh = Math.max(20, this.containerH - this.my - labelH - this.cellCalloutH - bottomPad)
     this.colLabelH = labelH
-    this.legendLeft = this.mx + this.mw + this.labelW + this.rightMargin
+    this.legendLeft = this.mx + this.mw + this.colTrackLabelW + this.labelW + this.calloutW + this.rightMargin
     this.positionAddTrackButtons()
+  }
+
+  estimateTrackLabelTextWidth(text, fontPx = 9) {
+    const value = String(text || "")
+    if (!value) return 0
+    return Math.ceil(value.length * fontPx * 0.62)
+  }
+
+  estimateRowTrackLabelBand(rowTracks) {
+    if (!rowTracks.length) return 0
+    if (this.showTrackMetadataNames) {
+      let maxW = 40
+      rowTracks.forEach((track) => {
+        maxW = Math.max(maxW, this.estimateTrackLabelTextWidth(this.truncate(track.name || "", 22), 9))
+      })
+      return Math.min(120, Math.max(48, maxW + 8))
+    }
+    return 28
+  }
+
+  estimateColTrackLabelBand(colTracks) {
+    if (!colTracks.length) return 0
+    if (this.showTrackMetadataNames) {
+      let maxW = 40
+      colTracks.forEach((track) => {
+        maxW = Math.max(maxW, this.estimateTrackLabelTextWidth(this.truncate(track.name || "", 22), 9))
+      })
+      return Math.min(120, Math.max(48, maxW + 8))
+    }
+    return 28
   }
 
   positionAddTrackButtons() {
@@ -1984,7 +2090,8 @@ export default class extends Controller {
     const size = 22
     const gap = 4
 
-    // Cell metadata track control: right of the horizontal (column) tree, bottom of the tree band.
+    // Cell metadata track control: left-aligned with horizontal track names
+    // (just right of the matrix / column tree), not past the label band.
     const colTreeBottom = this.layout.pad + this.colTreeH
     const colLeft = this.mx + this.mw + gap
     const colTop = this.colTreeH > 0
@@ -2066,7 +2173,7 @@ export default class extends Controller {
     this._onClick = (e) => this.onClick(e)
     this._onDblClick = (e) => this.onDblClick(e)
     this._onPointerLeave = () => {
-      if (!this.selecting && !this.dragging) this.hideTooltip()
+      if (!this.selecting && !this.dragging && !this.draggingCallout) this.hideTooltip()
     }
 
     ov.addEventListener("wheel", this._onWheel, { passive: false })
@@ -2880,6 +2987,30 @@ export default class extends Controller {
     if (e.pointerType === "mouse" && e.button !== 0) return
 
     const p = this.localPoint(e)
+    const calloutHit = this.hitTestSelectedGeneCallout(p) || this.hitTestSelectedCellCallout(p)
+    if (calloutHit) {
+      e.preventDefault()
+      try {
+        this.overlayTarget.setPointerCapture?.(e.pointerId)
+      } catch (_err) {
+        // Some browsers reject capture if the pointer is already released.
+      }
+      this._activePointerId = e.pointerId
+      this.draggingCallout = {
+        kind: calloutHit.kind,
+        key: calloutHit.key,
+        grabOffsetY: p.y - calloutHit.labelY,
+        grabOffsetX: p.x - calloutHit.labelX,
+        startX: p.x,
+        startY: p.y,
+        moved: false
+      }
+      this.hideTooltip()
+      this.overlayTarget.style.cursor = "grabbing"
+      this.drawOverlay()
+      return
+    }
+
     if (!this.inMatrix(p)) return
 
     e.preventDefault()
@@ -2926,6 +3057,35 @@ export default class extends Controller {
 
     const p = this.localPoint(e)
 
+    if (this.draggingCallout) {
+      const dragDist = Math.hypot(
+        p.x - this.draggingCallout.startX,
+        p.y - this.draggingCallout.startY
+      )
+      if (dragDist > 4) this.draggingCallout.moved = true
+      if (!this.draggingCallout.moved) return
+
+      if (this.draggingCallout.kind === "cell") {
+        const band = this.selectedCellCalloutBand()
+        let labelX = p.x - this.draggingCallout.grabOffsetX
+        let labelY = p.y - this.draggingCallout.grabOffsetY
+        labelX = Math.max(this.mx + 8, Math.min(this.mx + this.mw - 8, labelX))
+        labelY = Math.max(band.top + 8, Math.min(band.bottom - 8, labelY))
+        this.selectedCellCalloutManual.set(this.draggingCallout.key, { labelX, labelY })
+      } else {
+        const xRange = this.selectedGeneCalloutDragXRange()
+        let labelX = p.x - this.draggingCallout.grabOffsetX
+        let labelY = p.y - this.draggingCallout.grabOffsetY
+        labelX = Math.max(xRange.minX, Math.min(xRange.maxX, labelX))
+        labelY = Math.max(this.my + 6, Math.min(this.my + this.mh - 6, labelY))
+        // Snap back to the default auto column so labels can rejoin easily.
+        if (Math.abs(labelX - xRange.defaultX) <= 6) labelX = xRange.defaultX
+        this.selectedGeneCalloutManual.set(this.draggingCallout.key, { labelX, labelY })
+      }
+      this.drawOverlay()
+      return
+    }
+
     if (this.selecting && this.selectionRect) {
       this.selectionRect.x1 = Math.max(this.mx, Math.min(this.mx + this.mw, p.x))
       this.selectionRect.y1 = Math.max(this.my, Math.min(this.my + this.mh, p.y))
@@ -2950,6 +3110,20 @@ export default class extends Controller {
 
     // Hover tooling is mouse-only; skip expensive hit-tests during unrelated touch moves.
     if (e.pointerType && e.pointerType !== "mouse") return
+
+    const calloutHit = this.hitTestSelectedGeneCallout(p) || this.hitTestSelectedCellCallout(p)
+    if (calloutHit) {
+      this.overlayTarget.style.cursor = "grab"
+      this.hideTooltip()
+      return
+    }
+
+    const fixedGeneHit = this.hitTestFixedGeneLabel(p)
+    if (fixedGeneHit) {
+      this.overlayTarget.style.cursor = "pointer"
+      this.hideTooltip()
+      return
+    }
 
     const hoveringTarget = this.hitTestEditableLegend(p)
     const hoveringLegend = !!hoveringTarget
@@ -2988,6 +3162,29 @@ export default class extends Controller {
   onPointerUp(e) {
     if (this._activePointerId != null && e.pointerId !== this._activePointerId) return
     this._activePointerId = null
+
+    if (this.draggingCallout) {
+      const callout = this.draggingCallout
+      const moved = !!callout.moved
+      this.draggingCallout = null
+      if (this.interactionMode === "select") {
+        this.overlayTarget.style.cursor = "crosshair"
+      } else {
+        this.overlayTarget.style.cursor = "grab"
+      }
+      if (moved) {
+        this._suppressNextOverlayClick = true
+        const reason = callout.kind === "cell"
+          ? "move-selected-cell-callout"
+          : "move-selected-gene-callout"
+        this.persistCurrentCheckpointOnServer(reason)
+        this.drawOverlay()
+      } else if (callout.kind === "gene") {
+        this._suppressNextOverlayClick = true
+        this.focusGeneListItem(callout.key)
+      }
+      return
+    }
 
     if (this.selecting && this.selectionRect) {
       this.commitSelectionRect(this.selectionRect)
@@ -3160,6 +3357,16 @@ export default class extends Controller {
       this.clearCellSelectionBtnTarget.style.display = this.selectedCells.size > 0 ? "inline-flex" : "none"
     }
     this.syncToggleAllGenesButton()
+  }
+
+  updateHeatmapGenesCountBadge() {
+    if (!this.hasHeatmapGenesCountBadgeTarget) return
+    const count = Number(this.nOrigRows)
+    if (Number.isFinite(count) && count > 0) {
+      this.heatmapGenesCountBadgeTarget.textContent = count.toLocaleString()
+    } else {
+      this.heatmapGenesCountBadgeTarget.textContent = "-"
+    }
   }
 
   syncToggleAllGenesButton() {
@@ -3965,9 +4172,72 @@ export default class extends Controller {
       const cards = Array.from(this.geneSearchListTarget.querySelectorAll("[data-heatmap-gene-item='true']"))
       const card = cards.find((el) => el.dataset.geneSymbol === target)
       if (!card) return
-      card.scrollIntoView({ block: "nearest", behavior: "smooth" })
+      card.scrollIntoView({ block: "center", behavior: "smooth" })
+      this.flashGeneListItemCard(card)
     }
-    requestAnimationFrame(scrollIntoView)
+    requestAnimationFrame(() => requestAnimationFrame(scrollIntoView))
+  }
+
+  flashGeneListItemCard(card) {
+    if (!card) return
+    const prevBorder = card.style.borderColor
+    const prevBg = card.style.backgroundColor
+    const prevShadow = card.style.boxShadow
+    card.style.borderColor = "#93c5fd"
+    card.style.backgroundColor = "#eff6ff"
+    card.style.boxShadow = "0 0 0 2px rgba(59,130,246,0.25)"
+    window.setTimeout(() => {
+      if (!card.isConnected) return
+      card.style.borderColor = prevBorder
+      card.style.backgroundColor = prevBg
+      card.style.boxShadow = prevShadow
+    }, 1400)
+  }
+
+  focusGeneListItem(symbol) {
+    const raw = String(symbol || "").trim()
+    if (!raw) return
+    const resolved = this.resolveGeneSymbol(raw) || raw
+    this.ensureGenesPanelVisible()
+
+    let item = this.geneListItems.find((entry) => entry.symbol.toLowerCase() === resolved.toLowerCase())
+    if (!item) {
+      item = this.addGeneToList(resolved, { checked: true, render: false, sync: true })
+    }
+    if (!item) return
+    item.expanded = true
+    this.renderGeneSearchList()
+    this.scrollGeneListToSymbol(item.symbol)
+  }
+
+  ensureGenesPanelVisible() {
+    if (this.isMobileHeatmapLayout()) {
+      this.openMobilePanel("genes")
+    }
+  }
+
+  geneLabelGutterX() {
+    return this.mx + this.mw + (this.colTrackLabelW || 0)
+  }
+
+  hitTestFixedGeneLabel(p) {
+    if (!this.inlineGeneLabelsVisible() || !(this.labelW > 0)) return null
+    if (!this.view || !this.rowGroups) return null
+    const labelLeft = this.geneLabelGutterX()
+    const labelRight = labelLeft + this.labelW
+    if (p.x < labelLeft || p.x > labelRight) return null
+    if (p.y < this.my || p.y > this.my + this.mh) return null
+
+    const displayRow = Math.floor(this.rowForY(p.y))
+    if (displayRow < 0 || displayRow >= this.nDispRows) return null
+    if (displayRow + 1 <= this.view.rowStart || displayRow >= this.view.rowEnd) return null
+
+    const group = this.rowGroups[displayRow]
+    if (!group) return null
+    const label = (this.meta?.row_labels || [])[group[0]]
+    const symbol = label == null ? "" : String(label).trim()
+    if (!symbol) return null
+    return { symbol, displayRow }
   }
 
   escapeHtml(value) {
@@ -3988,10 +4258,27 @@ export default class extends Controller {
     if (v.rowEnd > this.nDispRows) { v.rowEnd = this.nDispRows; v.rowStart = this.nDispRows - rowSpan }
   }
 
-  // Click on expression or continuous-track legend opens the shared gradient editor.
+  // Click on gene labels focuses the gene list item; legend opens gradient editor.
   onClick(e) {
     if (this.interactionMode === "select") return
+    if (this._suppressNextOverlayClick) {
+      this._suppressNextOverlayClick = false
+      return
+    }
     const p = this.localPoint(e)
+
+    const calloutHit = this.hitTestSelectedGeneCallout(p)
+    if (calloutHit) {
+      this.focusGeneListItem(calloutHit.key)
+      return
+    }
+
+    const fixedGeneHit = this.hitTestFixedGeneLabel(p)
+    if (fixedGeneHit) {
+      this.focusGeneListItem(fixedGeneHit.symbol)
+      return
+    }
+
     const legendHit = this.hitTestEditableLegend(p)
     if (legendHit) {
       if (legendHit.type === "expression") this.openExpressionGradientEditor()
@@ -4026,8 +4313,63 @@ export default class extends Controller {
 
   render() {
     if (!this.renderer) return
+    if (this.syncCalloutLayoutReservation()) return
     this.renderer.render(this.view)
     this.drawOverlay()
+  }
+
+  // When zoom crosses the inline-label threshold, drop/restore callout bands.
+  // Returns true if handleResize already re-rendered.
+  syncCalloutLayoutReservation() {
+    if (this._syncingCalloutLayout) return false
+    const wantGeneW = this.selectedGeneCalloutsActive() ? 118 : 0
+    const wantCellH = this.selectedCellCalloutsActive() ? 56 : 0
+    if (wantGeneW === (this.calloutW || 0) && wantCellH === (this.cellCalloutH || 0)) return false
+    this._syncingCalloutLayout = true
+    try {
+      this.handleResize()
+    } finally {
+      this._syncingCalloutLayout = false
+    }
+    return true
+  }
+
+  inlineGeneLabelsVisible() {
+    if (!this.showGeneLabels) return false
+    return this.geneInlineLabelRoomAvailable()
+  }
+
+  inlineCellLabelsVisible() {
+    if (!this.showCellLabels) return false
+    return this.cellInlineLabelRoomAvailable()
+  }
+
+  geneInlineLabelRoomAvailable() {
+    if (!this.view || !(this.mh > 0)) return false
+    const span = this.view.rowEnd - this.view.rowStart
+    if (!(span > 0)) return false
+    return (this.mh / span) >= 8
+  }
+
+  cellInlineLabelRoomAvailable() {
+    if (!this.view || !(this.mw > 0)) return false
+    const span = this.view.colEnd - this.view.colStart
+    if (!(span > 0)) return false
+    return this.cellLabelFontSize(this.mw / span) > 0
+  }
+
+  // Auto mode: with "Show gene labels" on, use fixed labels when there is room,
+  // otherwise leader-line callouts for selected genes only.
+  selectedGeneCalloutsActive({ mobile = null } = {}) {
+    const isMobile = mobile == null ? this.isMobileHeatmapLayout() : !!mobile
+    if (!this.showGeneLabels || isMobile) return false
+    return !this.geneInlineLabelRoomAvailable()
+  }
+
+  selectedCellCalloutsActive({ mobile = null } = {}) {
+    const isMobile = mobile == null ? this.isMobileHeatmapLayout() : !!mobile
+    if (!this.showCellLabels || isMobile) return false
+    return !this.cellInlineLabelRoomAvailable()
   }
 
   drawOverlay() {
@@ -4046,8 +4388,10 @@ export default class extends Controller {
     if (this.showRowTree && this.rowTree) this.drawDendrogram(ctx, this.rowTree, "row")
 
     this.drawTracks(ctx)
-    if (this.showLabels) this.drawLabels(ctx)
+    this.drawLabels(ctx)
     this.drawSelectedGeneZoomedOutMarks(ctx)
+    this.drawSelectedGeneCallouts(ctx)
+    this.drawSelectedCellCallouts(ctx)
     if (this.isMobileHeatmapLayout()) {
       this.legendBounds = null
       this.trackLegendBounds = []
@@ -4273,22 +4617,6 @@ export default class extends Controller {
     })
     ctx.restore()
 
-    // Column track refs sit aside (right of tracks), without shifting the heatmap.
-    if (colTracks.length && this.trackRefW > 0) {
-      ctx.save()
-      ctx.fillStyle = "#334155"
-      ctx.font = "10px sans-serif"
-      ctx.textAlign = "left"
-      ctx.textBaseline = "middle"
-      colTracks.forEach((track, ti) => {
-        const thickness = track.thickness || L.trackH
-        const y = L.pad + this.colTreeH + (this.colTrackOffsets?.[ti] || 0)
-        const ref = this.trackRefFor("column", track)
-        ctx.fillText(ref, this.mx + this.mw + 3, y + thickness / 2)
-      })
-      ctx.restore()
-    }
-
     ctx.save()
     ctx.beginPath(); ctx.rect(L.pad, this.my, this.containerW, this.mh); ctx.clip()
     rowTracks.forEach((track, ti) => {
@@ -4317,21 +4645,66 @@ export default class extends Controller {
     })
     ctx.restore()
 
-    // Row track refs sit aside (above matrix), without shifting the heatmap.
-    if (rowTracks.length && this.trackRefH > 0) {
+    this.drawTrackPlotLabels(ctx)
+  }
+
+  trackPlotLabelText(axis, track) {
+    if (this.showTrackMetadataNames) {
+      return this.truncate(String(track?.name || "").trim() || this.trackRefFor(axis, track), 22)
+    }
+    return this.trackRefFor(axis, track)
+  }
+
+  drawTrackPlotLabels(ctx) {
+    const L = this.layout
+    const colTracks = this.colTracks.filter((t) => !t.loading)
+    const rowTracks = this.rowTracks.filter((t) => !t.loading)
+    if (!colTracks.length && !rowTracks.length) return
+
+    ctx.save()
+    ctx.fillStyle = "#334155"
+    ctx.font = this.showTrackMetadataNames ? "9px sans-serif" : "10px sans-serif"
+
+    if (colTracks.length && this.colTrackLabelW > 0) {
+      // Cell metadata labels stay horizontal beside each top track.
+      const maxLen = Math.max(12, this.colTrackLabelW - 6)
+      ctx.textAlign = "left"
+      ctx.textBaseline = "middle"
+      colTracks.forEach((track, ti) => {
+        const thickness = track.thickness || L.trackH
+        const y = L.pad + this.colTreeH + (this.colTrackOffsets?.[ti] || 0)
+        const text = this.fitTextToWidth(ctx, this.trackPlotLabelText("column", track), maxLen)
+        if (!text) return
+        ctx.fillText(text, this.mx + this.mw + 4, y + thickness / 2)
+      })
+    }
+
+    if (rowTracks.length && this.rowTrackLabelH > 0) {
+      // Vertical labels sit in the left gutter above the row tracks (beside the
+      // column tree/tracks), not in a full-width band under cell metadata.
+      const maxLen = Math.max(12, this.rowTrackLabelH - 6)
+      const labelTop = this.my - this.rowTrackLabelH
       ctx.save()
-      ctx.fillStyle = "#334155"
-      ctx.font = "10px sans-serif"
-      ctx.textAlign = "center"
-      ctx.textBaseline = "bottom"
+      ctx.beginPath()
+      ctx.rect(this.mx - this.leftTracksW, labelTop, this.leftTracksW, this.rowTrackLabelH)
+      ctx.clip()
       rowTracks.forEach((track, ti) => {
         const thickness = track.thickness || L.trackW
         const x = this.mx - this.leftTracksW + (this.rowTrackOffsets?.[ti] || 0)
-        const ref = this.trackRefFor("row", track)
-        ctx.fillText(ref, x + thickness / 2, this.my - 2)
+        const text = this.fitTextToWidth(ctx, this.trackPlotLabelText("row", track), maxLen)
+        if (!text) return
+        ctx.save()
+        ctx.translate(x + thickness / 2, this.my - 3)
+        ctx.rotate(-Math.PI / 2)
+        ctx.textAlign = "left"
+        ctx.textBaseline = "middle"
+        ctx.fillText(text, 0, 0)
+        ctx.restore()
       })
       ctx.restore()
     }
+
+    ctx.restore()
   }
 
   hitTestTracks(p) {
@@ -4381,50 +4754,72 @@ export default class extends Controller {
   drawLabels(ctx) {
     const v = this.view
     ctx.fillStyle = "#1f2937"
-    ctx.font = "11px sans-serif"
 
-    const rowH = this.mh / (v.rowEnd - v.rowStart)
-    if (rowH >= 8) {
-      ctx.textAlign = "left"
-      ctx.textBaseline = "middle"
-      ctx.save()
-      ctx.beginPath(); ctx.rect(this.mx + this.mw, this.my, this.layout.rowLabelW, this.mh); ctx.clip()
-      const start = Math.max(0, Math.floor(v.rowStart))
-      const end = Math.min(this.nDispRows, Math.ceil(v.rowEnd))
-      for (let d = start; d < end; d++) {
-        const y = this.yForRow(d + 0.5)
-        const label = this.truncate(this.displayRowLabel(d), 22)
-        if (this.displayRowIsSelected(d)) {
-          const textW = Math.min(this.layout.rowLabelW - 8, ctx.measureText(label).width + 6)
-          const boxH = Math.min(rowH - 1, 14)
-          ctx.fillStyle = "#fef08a"
-          ctx.fillRect(this.mx + this.mw + 3, y - boxH / 2, Math.max(4, textW), boxH)
+    if (this.showGeneLabels) {
+      const rowH = this.mh / (v.rowEnd - v.rowStart)
+      if (rowH >= 8) {
+        const geneX = this.geneLabelGutterX()
+        ctx.font = "11px sans-serif"
+        ctx.textAlign = "left"
+        ctx.textBaseline = "middle"
+        ctx.save()
+        ctx.beginPath(); ctx.rect(geneX, this.my, this.layout.rowLabelW, this.mh); ctx.clip()
+        const start = Math.max(0, Math.floor(v.rowStart))
+        const end = Math.min(this.nDispRows, Math.ceil(v.rowEnd))
+        for (let d = start; d < end; d++) {
+          const y = this.yForRow(d + 0.5)
+          const label = this.truncate(this.displayRowLabel(d), 22)
+          if (this.displayRowIsSelected(d)) {
+            const textW = Math.min(this.layout.rowLabelW - 8, ctx.measureText(label).width + 6)
+            const boxH = Math.min(rowH - 1, 14)
+            ctx.fillStyle = "#fef08a"
+            ctx.fillRect(geneX + 3, y - boxH / 2, Math.max(4, textW), boxH)
+          }
+          ctx.fillStyle = "#1f2937"
+          ctx.fillText(label, geneX + 5, y)
         }
-        ctx.fillStyle = "#1f2937"
-        ctx.fillText(label, this.mx + this.mw + 5, y)
+        ctx.restore()
       }
-      ctx.restore()
     }
 
+    if (!this.showCellLabels) return
     const colW = this.mw / (v.colEnd - v.colStart)
     const colLabelBand = Number.isFinite(this.colLabelH) ? this.colLabelH : this.layout.colLabelH
-    if (colW >= 7 && colLabelBand > 0) {
+    const fontSize = this.cellLabelFontSize(colW)
+    if (fontSize > 0 && colLabelBand > 0) {
       ctx.save()
       ctx.beginPath(); ctx.rect(this.mx, this.my + this.mh, this.mw, colLabelBand); ctx.clip()
+      ctx.font = `${fontSize}px sans-serif`
       ctx.textAlign = "right"
       ctx.textBaseline = "middle"
       const start = Math.max(0, Math.floor(v.colStart))
       const end = Math.min(this.nDispCols, Math.ceil(v.colEnd))
+      const maxChars = Math.max(4, Math.min(18, Math.floor(colLabelBand / Math.max(5, fontSize * 0.7))))
       for (let d = start; d < end; d++) {
         const x = this.xForCol(d + 0.5)
+        const label = this.truncate(this.displayColLabel(d), maxChars)
         ctx.save()
         ctx.translate(x, this.my + this.mh + 5)
         ctx.rotate(-Math.PI / 2)
-        ctx.fillText(this.truncate(this.displayColLabel(d), 12), 0, 0)
+        if (this.displayColIsSelected(d)) {
+          const textW = ctx.measureText(label).width
+          const boxH = Math.min(colW - 1, fontSize + 3)
+          ctx.fillStyle = "#fef08a"
+          ctx.fillRect(-textW - 2, -boxH / 2, textW + 4, boxH)
+        }
+        ctx.fillStyle = "#1f2937"
+        ctx.fillText(label, 0, 0)
         ctx.restore()
       }
       ctx.restore()
     }
+  }
+
+  cellLabelFontSize(colW) {
+    const width = Number(colW)
+    if (!Number.isFinite(width) || width < 3.5) return 0
+    // Scale text with column width so dense zooms stay readable without overlap.
+    return Math.max(6, Math.min(11, Math.floor(width * 0.9)))
   }
 
   displayRowIsSelected(d) {
@@ -4437,15 +4832,27 @@ export default class extends Controller {
     return false
   }
 
+  displayColIsSelected(d) {
+    if (!this.selectedOrigCols?.size || !this.colGroups) return false
+    const group = this.colGroups[d]
+    if (!group) return false
+    for (let i = group[0]; i <= group[1]; i++) {
+      if (this.selectedOrigCols.has(i)) return true
+    }
+    return false
+  }
+
   drawSelectedGeneZoomedOutMarks(ctx) {
     if (!this.selectedOrigRows?.size || !this.rowGroups) return
-    if (!this.showLabels || this.labelW <= 0) return
+    if (!this.showGeneLabels || this.labelW <= 0) return
+    // Callout labels already mark selected genes at any zoom.
+    if (this.selectedGeneCalloutsActive()) return
     const v = this.view
     const rowH = this.mh / (v.rowEnd - v.rowStart)
     // Zoomed in: yellow label backgrounds already mark selected genes.
     if (rowH >= 8) return
 
-    const markX = this.mx + this.mw
+    const markX = this.geneLabelGutterX()
     const markW = this.labelW
     ctx.save()
     ctx.beginPath()
@@ -4463,6 +4870,527 @@ export default class extends Controller {
       const markH = Math.max(1, Math.min(h, 3))
       const y = y0 + (h - markH) / 2
       ctx.fillRect(markX, y, markW, markH)
+    }
+    ctx.restore()
+  }
+
+  selectedGeneCalloutLabelLeft() {
+    return this.geneLabelGutterX() + this.labelW + 4
+  }
+
+  selectedGeneCalloutLabelRight() {
+    const rightLimit = this.legendLeft > 0
+      ? this.legendLeft - 4
+      : (this.geneLabelGutterX() + this.labelW + this.calloutW + this.rightMargin)
+    return Math.max(this.selectedGeneCalloutLabelLeft() + 24, rightLimit)
+  }
+
+  // Horizontal drag range for gene callouts. Do not subtract text width here:
+  // that collapsed the range onto the default X for longer names and made
+  // labels impossible to move horizontally away from / back to the auto column.
+  selectedGeneCalloutDragXRange() {
+    const minX = this.mx + this.mw + (this.colTrackLabelW || 0) + 4
+    const maxX = Math.max(minX + 24, (Number.isFinite(this.legendLeft) ? this.legendLeft : (minX + (this.calloutW || 118))) - 8)
+    const defaultX = Math.max(minX, Math.min(maxX, this.selectedGeneCalloutLabelLeft() + 2))
+    return { minX, maxX, defaultX }
+  }
+
+  hitTestSelectedGeneCallout(p) {
+    if (!this.selectedGeneCalloutsActive() || !Array.isArray(this.selectedGeneCalloutBounds)) return null
+    for (let i = this.selectedGeneCalloutBounds.length - 1; i >= 0; i--) {
+      const b = this.selectedGeneCalloutBounds[i]
+      if (!b) continue
+      if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) {
+        return b
+      }
+    }
+    return null
+  }
+
+  hitTestSelectedCellCallout(p) {
+    if (!this.selectedCellCalloutsActive() || !Array.isArray(this.selectedCellCalloutBounds)) return null
+    for (let i = this.selectedCellCalloutBounds.length - 1; i >= 0; i--) {
+      const b = this.selectedCellCalloutBounds[i]
+      if (!b) continue
+      if (p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h) {
+        return b
+      }
+    }
+    return null
+  }
+
+  pruneSelectedGeneCalloutManual() {
+    if (!(this.selectedGeneCalloutManual instanceof Map)) {
+      this.selectedGeneCalloutManual = new Map()
+      return
+    }
+    const keep = new Set(
+      (this.geneListItems || []).filter((item) => item.checked).map((item) => item.symbol)
+    )
+    for (const symbol of Array.from(this.selectedGeneCalloutManual.keys())) {
+      if (!keep.has(symbol)) this.selectedGeneCalloutManual.delete(symbol)
+    }
+  }
+
+  buildSelectedGeneCallouts(ctx) {
+    this.selectedGeneCalloutBounds = []
+    if (!this.selectedGeneCalloutsActive()) return []
+    if (!this.view || !this.origRowToDisplay || !this.rowGroups) return []
+
+    this.pruneSelectedGeneCalloutManual()
+    const v = this.view
+    const xRange = this.selectedGeneCalloutDragXRange()
+    const textMaxW = Math.max(24, xRange.maxX - xRange.minX + 40)
+    const minY = this.my + 7
+    const maxY = this.my + this.mh - 7
+    const { min: minFont, max: maxFont } = this.calloutFontSizeBounds()
+
+    const bySymbol = new Map()
+    for (const item of (this.geneListItems || [])) {
+      if (!item?.checked) continue
+      const symbol = String(item.symbol || "").trim()
+      if (!symbol || bySymbol.has(symbol)) continue
+      const rowIndices = this.rowIndicesForSymbol(symbol)
+      if (!rowIndices.length) continue
+
+      let displayRow = null
+      for (const rowIndex of rowIndices) {
+        const d = this.origRowToDisplay[rowIndex]
+        if (!Number.isFinite(d)) continue
+        if (displayRow == null || Math.abs(d + 0.5 - (v.rowStart + v.rowEnd) / 2) <
+            Math.abs(displayRow + 0.5 - (v.rowStart + v.rowEnd) / 2)) {
+          displayRow = d
+        }
+      }
+      if (displayRow == null) continue
+      if (displayRow + 1 < v.rowStart - 1 || displayRow > v.rowEnd + 1) continue
+
+      const anchorY = Math.max(minY, Math.min(maxY, this.yForRow(displayRow + 0.5)))
+      const manual = this.selectedGeneCalloutManual.get(symbol)
+      bySymbol.set(symbol, {
+        symbol,
+        text: this.truncate(symbol, 18),
+        anchorY,
+        preferredY: Number.isFinite(manual?.labelY) ? manual.labelY : anchorY,
+        labelX: Number.isFinite(manual?.labelX) ? manual.labelX : xRange.defaultX,
+        manual: !!manual
+      })
+    }
+
+    const baseItems = Array.from(bySymbol.values()).sort((a, b) => a.preferredY - b.preferredY)
+    if (!baseItems.length) return []
+
+    const available = Math.max(0, maxY - minY)
+    let fontSize = maxFont
+    let boxPadX = 3
+    let boxPadY = 2
+    let textH = fontSize + 1
+    let boxH = textH + boxPadY * 2
+    for (fontSize = maxFont; fontSize >= minFont; fontSize--) {
+      const pads = this.calloutLabelPadding(fontSize)
+      boxPadX = pads.boxPadX
+      boxPadY = pads.boxPadY
+      textH = fontSize + 1
+      boxH = textH + boxPadY * 2
+      if (baseItems.length <= 1 || (baseItems.length - 1) * boxH <= available) break
+    }
+
+    ctx.font = `${fontSize}px sans-serif`
+    const items = baseItems.map((item) => {
+      const measured = Math.ceil(ctx.measureText(item.text).width)
+      return {
+        ...item,
+        textW: Math.min(textMaxW, Math.max(8, measured)),
+        textH,
+        fontSize
+      }
+    })
+
+    const ys = this.layoutGeneCalloutYs(
+      items.map((item) => item.preferredY),
+      items.map((item) => !!item.manual),
+      minY,
+      maxY,
+      boxH
+    )
+
+    return items.map((item, i) => {
+      const labelY = ys[i]
+      const labelX = Math.max(xRange.minX, Math.min(xRange.maxX, item.labelX))
+      const boxW = item.textW + boxPadX * 2
+      return {
+        symbol: item.symbol,
+        text: item.text,
+        fontSize,
+        anchorX: this.mx + this.mw,
+        anchorY: item.anchorY,
+        labelX,
+        labelY,
+        textW: item.textW,
+        boxX: labelX - boxPadX,
+        boxY: labelY - boxH / 2,
+        boxW,
+        boxH
+      }
+    })
+  }
+
+  calloutFontSizeBounds() {
+    // Match the fixed cell-label range that still remains readable on screen.
+    return { min: 6, max: 11 }
+  }
+
+  calloutLabelPadding(fontSize) {
+    const { min, max } = this.calloutFontSizeBounds()
+    const size = Number(fontSize)
+    const t = Number.isFinite(size)
+      ? Math.max(0, Math.min(1, (size - min) / Math.max(1, max - min)))
+      : 1
+    return {
+      boxPadX: Math.max(1, Math.round(1 + t * 2)),
+      boxPadY: Math.max(1, Math.round(1 + t))
+    }
+  }
+
+  // Place gene callout centers: keep row-aligned positions when they already fit,
+  // otherwise spread evenly across the full available height (ordered by gene row).
+  layoutGeneCalloutYs(preferred, manualFlags, minY, maxY, minGap) {
+    const n = preferred.length
+    if (n === 0) return []
+    const clamp = (y) => Math.max(minY, Math.min(maxY, y))
+    if (n === 1) return [clamp(preferred[0])]
+
+    const anyManual = manualFlags.some(Boolean)
+    if (anyManual) {
+      return this.packCalloutCenters(preferred, manualFlags, minY, maxY, minGap)
+    }
+
+    const trial = preferred.map((y) => clamp(y))
+    let collides = false
+    for (let i = 1; i < n; i++) {
+      if (trial[i] < trial[i - 1] + minGap) {
+        collides = true
+        break
+      }
+    }
+    if (!collides) return trial
+
+    // Dense set: use the whole vertical band, fully packed / evenly spaced.
+    const available = Math.max(0, maxY - minY)
+    const step = Math.max(minGap, available / (n - 1))
+    const span = step * (n - 1)
+    const start = minY + Math.max(0, (available - span) / 2)
+    return preferred.map((_, i) => start + i * step)
+  }
+
+  // Pack label centers along one axis without overlapping.
+  // Prefer overflowing the [minPos, maxPos] range over letting pills collide.
+  packCalloutCenters(preferred, manualFlags, minPos, maxPos, minGap) {
+    const n = preferred.length
+    const pos = preferred.map((value, i) => {
+      const v = Number(value)
+      if (manualFlags[i]) return Math.max(minPos, Math.min(maxPos, v))
+      return Math.max(minPos, Math.min(maxPos, v))
+    })
+    if (n <= 1) return pos
+
+    for (let i = 0; i < n; i++) {
+      if (manualFlags[i]) continue
+      let p = pos[i]
+      for (let j = 0; j < i; j++) p = Math.max(p, pos[j] + minGap)
+      pos[i] = p
+    }
+    for (let i = n - 1; i >= 0; i--) {
+      if (manualFlags[i]) continue
+      let p = pos[i]
+      for (let j = i + 1; j < n; j++) p = Math.min(p, pos[j] - minGap)
+      pos[i] = p
+    }
+    for (let i = 1; i < n; i++) {
+      if (manualFlags[i]) continue
+      pos[i] = Math.max(pos[i], pos[i - 1] + minGap)
+    }
+
+    // If the packed run spilled past the bounds, shift as a block to fit when possible.
+    const first = pos[0]
+    const last = pos[n - 1]
+    if (last - first <= maxPos - minPos) {
+      let shift = 0
+      if (first < minPos) shift = minPos - first
+      if (last + shift > maxPos) shift = maxPos - last
+      if (shift !== 0) {
+        for (let i = 0; i < n; i++) {
+          if (!manualFlags[i]) pos[i] += shift
+        }
+      }
+    }
+
+    // Final hard non-overlap pass (may leave some labels slightly outside the band).
+    for (let i = 1; i < n; i++) {
+      if (pos[i] < pos[i - 1] + minGap) pos[i] = pos[i - 1] + minGap
+    }
+    return pos
+  }
+
+  drawSelectedGeneCallouts(ctx) {
+    const callouts = this.buildSelectedGeneCallouts(ctx)
+    this.selectedGeneCalloutBounds = []
+    if (!callouts.length) return
+
+    const fontSize = callouts[0].fontSize || 11
+    ctx.save()
+    ctx.font = `${fontSize}px sans-serif`
+    ctx.textAlign = "left"
+    ctx.textBaseline = "middle"
+
+    for (const c of callouts) {
+      if (c.fontSize && c.fontSize !== fontSize) {
+        ctx.font = `${c.fontSize}px sans-serif`
+      }
+      const elbowX = Math.min(c.labelX - 2, c.anchorX + 10)
+      ctx.strokeStyle = "#2563eb"
+      ctx.fillStyle = "#2563eb"
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(c.anchorX, c.anchorY)
+      ctx.lineTo(elbowX, c.anchorY)
+      ctx.lineTo(c.labelX - 2, c.labelY)
+      ctx.stroke()
+
+      ctx.beginPath()
+      ctx.arc(c.anchorX, c.anchorY, 2.2, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.fillStyle = "#ffffff"
+      ctx.strokeStyle = "#93c5fd"
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.rect(c.boxX, c.boxY, c.boxW, c.boxH)
+      ctx.fill()
+      ctx.stroke()
+
+      ctx.fillStyle = "#1e3a8a"
+      ctx.fillText(c.text, c.labelX, c.labelY)
+
+      this.selectedGeneCalloutBounds.push({
+        kind: "gene",
+        key: c.symbol,
+        x: c.boxX,
+        y: c.boxY,
+        w: c.boxW,
+        h: c.boxH,
+        labelX: c.labelX,
+        labelY: c.labelY
+      })
+    }
+    ctx.restore()
+  }
+
+  selectedCellCalloutBand() {
+    const top = this.my + this.mh + (this.colLabelH || 0) + 2
+    const height = Math.max(24, this.cellCalloutH || 56)
+    return { top, bottom: top + height - 2, height }
+  }
+
+  pruneSelectedCellCalloutManual() {
+    if (!(this.selectedCellCalloutManual instanceof Map)) {
+      this.selectedCellCalloutManual = new Map()
+      return
+    }
+    const keep = new Set()
+    for (const origCol of (this.selectedOrigCols || [])) {
+      keep.add(String(origCol))
+    }
+    for (const key of Array.from(this.selectedCellCalloutManual.keys())) {
+      if (!keep.has(key)) this.selectedCellCalloutManual.delete(key)
+    }
+  }
+
+  buildSelectedCellCallouts(ctx) {
+    this.selectedCellCalloutBounds = []
+    if (!this.selectedCellCalloutsActive()) return []
+    if (!this.view || !this.origColToDisplay || !this.colGroups) return []
+    if (!this.selectedOrigCols?.size) return []
+
+    this.pruneSelectedCellCalloutManual()
+    const v = this.view
+    const band = this.selectedCellCalloutBand()
+    const minX = this.mx + 8
+    const maxX = this.mx + this.mw - 8
+    const defaultLabelY = band.top + Math.min(22, Math.max(14, band.height * 0.45))
+    const edgeGap = 0
+    const { min: minFont, max: maxFont } = this.calloutFontSizeBounds()
+
+    const baseEntries = []
+    const seenDisplay = new Set()
+    for (const origCol of this.selectedOrigCols) {
+      const displayCol = this.origColToDisplay[origCol]
+      if (!Number.isFinite(displayCol)) continue
+      if (displayCol + 1 < v.colStart - 1 || displayCol > v.colEnd + 1) continue
+      if (seenDisplay.has(displayCol)) continue
+      seenDisplay.add(displayCol)
+      const key = String(origCol)
+      const anchorX = Math.max(minX, Math.min(maxX, this.xForCol(displayCol + 0.5)))
+      const manual = this.selectedCellCalloutManual.get(key)
+      baseEntries.push({
+        key,
+        text: this.truncate(this.displayColLabel(displayCol), 16),
+        anchorX,
+        preferredX: Number.isFinite(manual?.labelX) ? manual.labelX : anchorX,
+        labelY: Number.isFinite(manual?.labelY) ? manual.labelY : defaultLabelY,
+        manual: !!manual
+      })
+    }
+    baseEntries.sort((a, b) => a.preferredX - b.preferredX)
+    if (!baseEntries.length) return []
+
+    const available = Math.max(0, maxX - minX)
+    let chosen = null
+    for (let fontSize = maxFont; fontSize >= minFont; fontSize--) {
+      const { boxPadX, boxPadY } = this.calloutLabelPadding(fontSize)
+      const textH = fontSize + 1
+      ctx.font = `${fontSize}px sans-serif`
+      const items = baseEntries.map((entry) => {
+        const textW = Math.max(8, Math.ceil(ctx.measureText(entry.text).width))
+        return {
+          ...entry,
+          textW,
+          textH,
+          fontSize,
+          boxPadX,
+          boxPadY,
+          half: (textW + boxPadX * 2) / 2
+        }
+      })
+
+      const xs = items.map((item) => item.preferredX)
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].manual) {
+          xs[i] = Math.max(minX, Math.min(maxX, items[i].preferredX))
+          continue
+        }
+        let x = Math.max(minX, Math.min(maxX, xs[i]))
+        for (let j = 0; j < i; j++) {
+          x = Math.max(x, xs[j] + items[j].half + items[i].half + edgeGap)
+        }
+        xs[i] = x
+      }
+      for (let i = items.length - 1; i >= 0; i--) {
+        if (items[i].manual) {
+          xs[i] = Math.max(minX, Math.min(maxX, items[i].preferredX))
+          continue
+        }
+        let x = xs[i]
+        for (let j = i + 1; j < items.length; j++) {
+          x = Math.min(x, xs[j] - items[j].half - items[i].half - edgeGap)
+        }
+        xs[i] = x
+      }
+      for (let i = 1; i < items.length; i++) {
+        if (items[i].manual) continue
+        xs[i] = Math.max(xs[i], xs[i - 1] + items[i - 1].half + items[i].half + edgeGap)
+      }
+
+      const firstLeft = xs[0] - items[0].half
+      const lastRight = xs[xs.length - 1] + items[items.length - 1].half
+      let span = lastRight - firstLeft
+      if (span <= available) {
+        let shift = 0
+        if (firstLeft < minX - items[0].half) shift = (minX - items[0].half) - firstLeft
+        if (lastRight + shift > maxX + items[items.length - 1].half) {
+          shift = (maxX + items[items.length - 1].half) - lastRight
+        }
+        if (shift !== 0) {
+          for (let i = 0; i < items.length; i++) {
+            if (!items[i].manual) xs[i] += shift
+          }
+        }
+      }
+      for (let i = 1; i < items.length; i++) {
+        const need = xs[i - 1] + items[i - 1].half + items[i].half + edgeGap
+        if (xs[i] < need) xs[i] = need
+      }
+      span = (xs[xs.length - 1] + items[items.length - 1].half) - (xs[0] - items[0].half)
+
+      chosen = { items, xs, fontSize, textH, boxPadX, boxPadY }
+      if (items.length <= 1 || span <= available || fontSize === minFont) break
+    }
+
+    const { items, xs, fontSize, textH, boxPadX, boxPadY } = chosen
+    return items.map((item, i) => {
+      const labelX = xs[i]
+      const labelY = Math.max(band.top + 8, Math.min(band.bottom - 8, item.labelY))
+      const padX = item.boxPadX ?? boxPadX
+      const padY = item.boxPadY ?? boxPadY
+      const boxW = item.textW + padX * 2
+      const boxH = textH + padY * 2
+      return {
+        key: item.key,
+        text: item.text,
+        fontSize,
+        anchorX: item.anchorX,
+        anchorY: this.my + this.mh,
+        labelX,
+        labelY,
+        textW: item.textW,
+        boxX: labelX - boxW / 2,
+        boxY: labelY - boxH / 2,
+        boxW,
+        boxH
+      }
+    })
+  }
+
+  drawSelectedCellCallouts(ctx) {
+    const callouts = this.buildSelectedCellCallouts(ctx)
+    this.selectedCellCalloutBounds = []
+    if (!callouts.length) return
+
+    const fontSize = callouts[0].fontSize || 11
+    ctx.save()
+    ctx.font = `${fontSize}px sans-serif`
+    ctx.textAlign = "center"
+    ctx.textBaseline = "middle"
+
+    for (const c of callouts) {
+      if (c.fontSize && c.fontSize !== fontSize) {
+        ctx.font = `${c.fontSize}px sans-serif`
+      }
+      const elbowY = Math.min(c.labelY - 2, c.anchorY + 10)
+      ctx.strokeStyle = "#0284c7"
+      ctx.fillStyle = "#0284c7"
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(c.anchorX, c.anchorY)
+      ctx.lineTo(c.anchorX, elbowY)
+      ctx.lineTo(c.labelX, c.labelY - 2)
+      ctx.stroke()
+
+      ctx.beginPath()
+      ctx.arc(c.anchorX, c.anchorY, 2.2, 0, Math.PI * 2)
+      ctx.fill()
+
+      ctx.fillStyle = "#ffffff"
+      ctx.strokeStyle = "#7dd3fc"
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.rect(c.boxX, c.boxY, c.boxW, c.boxH)
+      ctx.fill()
+      ctx.stroke()
+
+      ctx.fillStyle = "#0c4a6e"
+      ctx.fillText(c.text, c.labelX, c.labelY)
+
+      this.selectedCellCalloutBounds.push({
+        kind: "cell",
+        key: c.key,
+        x: c.boxX,
+        y: c.boxY,
+        w: c.boxW,
+        h: c.boxH,
+        labelX: c.labelX,
+        labelY: c.labelY
+      })
     }
     ctx.restore()
   }
@@ -4572,7 +5500,7 @@ export default class extends Controller {
       y += 16
 
       tracks.forEach((track) => {
-        const ref = this.trackRefFor(track.axis, track)
+        const ref = this.showTrackMetadataNames ? "" : this.trackRefFor(track.axis, track)
         ctx.textAlign = "left"
         ctx.textBaseline = "top"
         let titleX = x0
@@ -6500,7 +7428,19 @@ export default class extends Controller {
       view: this.view ? { ...this.view } : null,
       showColTree: !!this.showColTree,
       showRowTree: !!this.showRowTree,
-      showLabels: !!this.showLabels,
+      showGeneLabels: !!this.showGeneLabels,
+      showCellLabels: !!this.showCellLabels,
+      showTrackMetadataNames: !!this.showTrackMetadataNames,
+      selectedGeneCalloutManual: Array.from(this.selectedGeneCalloutManual || []).map(([symbol, pos]) => ({
+        symbol: String(symbol),
+        labelX: Number(pos?.labelX),
+        labelY: Number(pos?.labelY)
+      })).filter((entry) => entry.symbol && Number.isFinite(entry.labelX) && Number.isFinite(entry.labelY)),
+      selectedCellCalloutManual: Array.from(this.selectedCellCalloutManual || []).map(([key, pos]) => ({
+        key: String(key),
+        labelX: Number(pos?.labelX),
+        labelY: Number(pos?.labelY)
+      })).filter((entry) => entry.key && Number.isFinite(entry.labelX) && Number.isFinite(entry.labelY)),
       legendWidthPx: this.estimateRightLegendWidth(),
       rightMarginPx: this.estimateRightMargin(),
       colTracks: this.colTracks.filter((t) => !t.loading).map((t) => this.serializeTrackCheckpoint(t)),
@@ -7488,7 +8428,37 @@ export default class extends Controller {
 
     this.showColTree = state.showColTree !== false
     this.showRowTree = state.showRowTree !== false
-    this.showLabels = state.showLabels !== false
+    if (Object.prototype.hasOwnProperty.call(state, "showGeneLabels") ||
+        Object.prototype.hasOwnProperty.call(state, "showCellLabels")) {
+      this.showGeneLabels = state.showGeneLabels !== false
+      this.showCellLabels = state.showCellLabels !== false
+    } else {
+      // Older checkpoints used a single showLabels flag for both axes.
+      const legacyShowLabels = state.showLabels !== false
+      this.showGeneLabels = legacyShowLabels
+      this.showCellLabels = legacyShowLabels
+    }
+    this.showTrackMetadataNames = !!state.showTrackMetadataNames
+    this.selectedGeneCalloutManual = new Map()
+    if (Array.isArray(state.selectedGeneCalloutManual)) {
+      for (const entry of state.selectedGeneCalloutManual) {
+        const symbol = String(entry?.symbol || "").trim()
+        const labelX = Number(entry?.labelX)
+        const labelY = Number(entry?.labelY)
+        if (!symbol || !Number.isFinite(labelX) || !Number.isFinite(labelY)) continue
+        this.selectedGeneCalloutManual.set(symbol, { labelX, labelY })
+      }
+    }
+    this.selectedCellCalloutManual = new Map()
+    if (Array.isArray(state.selectedCellCalloutManual)) {
+      for (const entry of state.selectedCellCalloutManual) {
+        const key = String(entry?.key || "").trim()
+        const labelX = Number(entry?.labelX)
+        const labelY = Number(entry?.labelY)
+        if (!key || !Number.isFinite(labelX) || !Number.isFinite(labelY)) continue
+        this.selectedCellCalloutManual.set(key, { labelX, labelY })
+      }
+    }
     if (Number.isFinite(Number(state.legendWidthPx))) {
       this.legendWidthPx = Number(state.legendWidthPx)
       this.syncLegendWidthControls()

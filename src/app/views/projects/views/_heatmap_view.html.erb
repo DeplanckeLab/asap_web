@@ -1026,14 +1026,49 @@
           <button type="button"
                   class="<%= heatmap_toggle %>"
                   data-heatmap-target="labelsToggle"
-                  data-action="heatmap#toggleLabels"
+                  data-action="heatmap#toggleGeneLabels"
                   aria-pressed="true"
+                  title="When zoomed in enough, show all gene names. When zoomed out, show leader-line labels for selected genes only."
                   style="width:100%; justify-content:space-between;">
             <span style="display:inline-flex; align-items:center; gap:8px;">
               <span class="heatmap-switch" aria-hidden="true"></span>
               <span>Show gene labels</span>
             </span>
             <span class="heatmap-toggle-state" data-heatmap-target="labelsState">On</span>
+          </button>
+          <button type="button"
+                  class="<%= heatmap_toggle %>"
+                  data-heatmap-target="cellLabelsToggle"
+                  data-action="heatmap#toggleCellLabels"
+                  aria-pressed="true"
+                  title="When zoomed in enough, show all cell names. When zoomed out, show leader-line labels for selected cells only."
+                  style="width:100%; justify-content:space-between;">
+            <span style="display:inline-flex; align-items:center; gap:8px;">
+              <span class="heatmap-switch" aria-hidden="true"></span>
+              <span>Show cell labels</span>
+            </span>
+            <span class="heatmap-toggle-state" data-heatmap-target="cellLabelsState">On</span>
+          </button>
+          <button type="button"
+                  class="<%= heatmap_toggle %>"
+                  data-heatmap-target="trackMetadataNamesToggle"
+                  data-action="heatmap#toggleTrackMetadataNames"
+                  aria-pressed="false"
+                  title="Show metadata names on the plot instead of track IDs. Gene metadata labels are vertical; cell metadata labels stay horizontal. Track IDs are hidden from the plot and legend."
+                  style="width:100%; justify-content:space-between;">
+            <span style="display:inline-flex; align-items:center; gap:8px;">
+              <span class="heatmap-switch" aria-hidden="true"></span>
+              <span>Show metadata names on plot</span>
+            </span>
+            <span class="heatmap-toggle-state" data-heatmap-target="trackMetadataNamesState">Off</span>
+          </button>
+          <button type="button"
+                  class="<%= heatmap_btn %>"
+                  data-heatmap-target="reorganizeCalloutLabelsBtn"
+                  data-action="heatmap#reorganizeCalloutLabels"
+                  title="Reset dragged gene and cell leader-line labels and pack them automatically"
+                  style="width:100%; justify-content:center;">
+            Reorganize targeted labels
           </button>
         </div>
         <label style="display:block; font-size:12px; color:#374151; margin-bottom:6px;">
@@ -1156,7 +1191,12 @@
       <div id="heatmap-genes-panel" style="height:50%; display:flex; flex-direction:column; min-height:0; background:#ffffff; overflow:hidden;">
         <div style="padding:12px 14px; border-bottom:1px solid #e5e7eb; flex-shrink:0; background:#fff;">
           <div style="display:flex; align-items:center; gap:8px;">
-            <h3 style="margin:0; font-size:14px; font-weight:600; color:#111827; flex:1; min-width:0;">Genes</h3>
+            <div style="display:flex; align-items:center; gap:8px; flex:1; min-width:0;">
+              <h3 style="margin:0; font-size:14px; font-weight:600; color:#111827; white-space:nowrap;">Genes</h3>
+              <span style="font-size:11px; font-weight:400; color:#6b7280; white-space:nowrap;">(present in the heatmap)</span>
+              <span data-heatmap-target="heatmapGenesCountBadge"
+                    style="display:inline-flex; align-items:center; padding:4px 8px; background-color:#e5e7eb; color:#374151; border-radius:12px; font-size:12px; font-weight:500;">-</span>
+            </div>
             <button type="button"
                     class="heatmap-panel-header-icon-btn heatmap-mobile-panel-close-btn"
                     data-action="click->heatmap#closeMobilePanel"

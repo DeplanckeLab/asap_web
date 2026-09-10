@@ -865,14 +865,18 @@ class ReqsController < ApplicationController
           raise "Failed to inspect #{dataset_path} in loom: #{shape_stderr.presence || shape_stdout.presence || 'unknown error'}"
         end
 
-        dataspaces = shape_stdout.scan(/DATASPACE\s+([^\n]+)/).flatten
-        dataspaces = dataspaces.map(&:strip)
-        shape_desc = dataspaces.last
+        # h5dump -H prints the dataset DATASPACE first, then any ATTRIBUTE
+        # DATASPACE lines. Using .last misclassified 2D /attrs datasets that
+        # carry 1D attribute metadata (e.g. /attrs/_de_* with column_names).
+        dataspaces = shape_stdout.scan(/DATASPACE\s+([^\n]+)/).flatten.map(&:strip)
+        shape_desc = dataspaces.first
         unless shape_desc
           raise "Unexpected shape output for #{dataset_path}: #{shape_stdout}"
         end
 
-        if shape_desc.include?('SCALAR') || shape_desc.match?(/\(\s*\d+\s*\)/)
+        # Keep only scalar or true 1-D datasets (single extent in the shape).
+        one_d = shape_desc.match?(/SIMPLE\s*\{\s*\(\s*\d+\s*\)\s*\//)
+        if shape_desc.include?('SCALAR') || one_d
           attrs_to_copy << dataset_path
         else
           removed_attrs << dataset_path

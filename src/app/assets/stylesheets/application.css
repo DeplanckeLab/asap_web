@@ -715,8 +715,27 @@ button.subview-refresh-available .fa-sync-alt {
   overflow: hidden;
 }
 
-/* Side-by-side: fill panel, scroll form and plot independently when needed. */
+/* Side-by-side columns. Height-fill rules are form-only (see frame selectors below)
+   so the results page keeps natural content height and does not collapse to empty. */
 @container cell-filtering (min-width: 40rem) {
+  .cell-filtering-layout {
+    flex-direction: row;
+    align-items: stretch;
+  }
+
+  .cell-filtering-form-col {
+    flex: 0 0 46%;
+    width: 46%;
+    max-width: 28rem;
+    align-self: stretch;
+  }
+
+  .cell-filtering-plot-col {
+    flex: 1 1 0;
+    width: auto;
+  }
+
+  /* Form panel: fill available height and scroll columns independently. */
   .cell-filtering-layout-frame {
     flex: 1 1 0;
     min-height: 0;
@@ -727,33 +746,25 @@ button.subview-refresh-available .fa-sync-alt {
     overflow: hidden;
   }
 
-  .cell-filtering-layout {
-    flex-direction: row;
-    align-items: stretch;
+  .cell-filtering-layout-frame .cell-filtering-layout {
     flex: 1 1 0;
     min-height: 0;
     height: 100%;
   }
 
-  .cell-filtering-form-col {
-    flex: 0 0 46%;
-    width: 46%;
-    max-width: 28rem;
+  .cell-filtering-layout-frame .cell-filtering-form-col {
     height: 100%;
     overflow-y: auto;
-    align-self: stretch;
   }
 
-  .cell-filtering-plot-col {
-    flex: 1 1 0;
-    width: auto;
+  .cell-filtering-layout-frame .cell-filtering-plot-col {
     height: 100%;
     min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
   }
 
-  .cell-filtering-plot-area {
+  .cell-filtering-layout-frame .cell-filtering-plot-area {
     flex: 1 0 auto;
     min-height: 20rem;
     height: auto;
@@ -761,7 +772,8 @@ button.subview-refresh-available .fa-sync-alt {
   }
 }
 
-/* Desktop panel fill: keep header/footer fixed. Mobile keeps normal page scroll. */
+/* Desktop panel fill: keep header/footer fixed. Mobile keeps normal page scroll.
+   Scoped to the form root so results views are not height-collapsed. */
 @media (min-width: 1024px) {
   .analysis-view [data-step-selector-target="resultsContainer"] > .overflow-y-auto:has(.cell-filtering-form-root) {
     display: flex;
@@ -803,12 +815,12 @@ button.subview-refresh-available .fa-sync-alt {
     flex-direction: column;
   }
 
-  .cell-filtering-layout-host {
+  .cell-filtering-form-root .cell-filtering-layout-host {
     flex: 1 1 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
+    overflow: hidden;
   }
 }
 

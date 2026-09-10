@@ -256,35 +256,48 @@
       <!-- Warnings -->
       <% if @run.status_id == 3 && @h_res && @h_res['warnings'] && @h_res['warnings'].any? %>
         <% warning_preview_limit = 5 %>
+        <% run_warnings = @h_res['warnings'] %>
+        <% truncated_warnings = run_warnings.size > warning_preview_limit %>
         <div class="alert alert-warning flex items-start gap-3"
              data-controller="expandable-warnings">
           <i class="fas fa-exclamation-triangle text-yellow-600 mt-0.5"></i>
           <div class="flex-1">
             <h4 class="text-sm font-semibold text-yellow-800 mb-2">
-              Warnings (<%= @h_res['warnings'].size %>)
+              Warnings (<%= run_warnings.size %>)
             </h4>
-            <% @h_res['warnings'].each_with_index do |warning, index| %>
-              <% extra = index >= warning_preview_limit %>
+            <% run_warnings.first(warning_preview_limit).each do |warning| %>
               <% if warning.is_a?(Hash) %>
-                <p class="text-yellow-800 mb-1<%= ' hidden' if extra %>" <% if extra %>data-expandable-warnings-target="extra"<% end %>>
+                <p class="text-yellow-800 mb-1">
                   <strong><%= warning['name'] %></strong>
                   <% if warning['description'] %>
                     <span class="block text-sm mt-1"><%= warning['description'] %></span>
                   <% end %>
                 </p>
               <% else %>
-                <p class="text-yellow-800 mb-1<%= ' hidden' if extra %>" <% if extra %>data-expandable-warnings-target="extra"<% end %>>
-                  <%= warning %>
-                </p>
+                <p class="text-yellow-800 mb-1"><%= warning %></p>
               <% end %>
             <% end %>
-            <% if @h_res['warnings'].size > warning_preview_limit %>
+            <% if truncated_warnings %>
               <button type="button"
                       data-expandable-warnings-target="expandButton"
-                      data-action="click->expandable-warnings#expand"
+                      data-action="click->expandable-warnings#open"
                       class="mt-2 px-2.5 py-1 text-xs font-medium text-yellow-900 bg-white border border-yellow-300 rounded hover:bg-yellow-50">
-                Show all <%= @h_res['warnings'].size %> warnings
+                Show all <%= run_warnings.size %> warnings
               </button>
+              <%= render layout: 'shared/alert_list_popup', locals: { title: 'Warnings', count: run_warnings.size, tone: 'warning', list_class: 'space-y-2' } do %>
+                <% run_warnings.each do |warning| %>
+                  <% if warning.is_a?(Hash) %>
+                    <p class="text-yellow-800 mb-1">
+                      <strong><%= warning['name'] %></strong>
+                      <% if warning['description'] %>
+                        <span class="block text-sm mt-1"><%= warning['description'] %></span>
+                      <% end %>
+                    </p>
+                  <% else %>
+                    <p class="text-yellow-800 mb-1"><%= warning %></p>
+                  <% end %>
+                <% end %>
+              <% end %>
             <% end %>
           </div>
         </div>

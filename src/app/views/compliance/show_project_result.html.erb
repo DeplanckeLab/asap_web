@@ -152,16 +152,20 @@
 
     <!-- Errors Section -->
     <% if @validation_result[:errors]&.any? %>
-      <div class="bg-white rounded-lg shadow-sm border border-red-200 p-6 mb-6">
+      <% error_preview_limit = 5 %>
+      <% errors_list = @validation_result[:errors] %>
+      <% truncated_errors = errors_list.size > error_preview_limit %>
+      <div class="bg-white rounded-lg shadow-sm border border-red-200 p-6 mb-6"
+           data-controller="expandable-warnings">
         <h2 class="text-lg font-semibold text-red-800 mb-4 flex items-center">
           <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
-          Errors (<%= @validation_result[:errors].count %>)
+          Errors (<%= errors_list.count %>)
         </h2>
         
         <div class="space-y-3">
-          <% @validation_result[:errors].each do |error| %>
+          <% errors_list.first(error_preview_limit).each do |error| %>
             <div class="bg-red-50 border border-red-200 rounded-lg p-4">
               <div class="flex items-start">
                 <div class="flex-shrink-0">
@@ -179,6 +183,33 @@
             </div>
           <% end %>
         </div>
+        <% if truncated_errors %>
+          <button type="button"
+                  data-expandable-warnings-target="expandButton"
+                  data-action="click->expandable-warnings#open"
+                  class="mt-3 px-2.5 py-1 text-xs font-medium text-red-900 bg-white border border-red-300 rounded hover:bg-red-50">
+            Show all <%= errors_list.size %> errors
+          </button>
+          <%= render layout: 'shared/alert_list_popup', locals: { title: 'Errors', count: errors_list.size, tone: 'error', list_class: 'space-y-3' } do %>
+            <% errors_list.each do |error| %>
+              <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div class="flex items-start">
+                  <div class="flex-shrink-0">
+                    <svg class="w-5 h-5 text-red-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </div>
+                  <div class="ml-3">
+                    <div class="font-medium text-red-800">
+                      <code class="text-sm bg-red-100 px-1 rounded"><%= error[:field] || error['field'] %></code>
+                    </div>
+                    <div class="text-red-700 mt-1"><%= error[:message] || error['message'] %></div>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+          <% end %>
+        <% end %>
       </div>
     <% end %>
 
@@ -186,6 +217,7 @@
     <% if @validation_result[:warnings]&.any? %>
       <% warning_preview_limit = 5 %>
       <% warnings_list = @validation_result[:warnings] %>
+      <% truncated_warnings = warnings_list.size > warning_preview_limit %>
       <div class="bg-white rounded-lg shadow-sm border border-yellow-200 p-6 mb-6"
            data-controller="expandable-warnings">
         <h2 class="text-lg font-semibold text-yellow-800 mb-4 flex items-center">
@@ -196,8 +228,8 @@
         </h2>
         
         <div class="space-y-3">
-          <% warnings_list.each_with_index do |warning, index| %>
-            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4<%= ' hidden' if index >= warning_preview_limit %>" <% if index >= warning_preview_limit %>data-expandable-warnings-target="extra"<% end %>>
+          <% warnings_list.first(warning_preview_limit).each do |warning| %>
+            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
               <div class="flex items-start">
                 <div class="flex-shrink-0">
                   <svg class="w-5 h-5 text-yellow-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -214,13 +246,32 @@
             </div>
           <% end %>
         </div>
-        <% if warnings_list.size > warning_preview_limit %>
+        <% if truncated_warnings %>
           <button type="button"
                   data-expandable-warnings-target="expandButton"
-                  data-action="click->expandable-warnings#expand"
+                  data-action="click->expandable-warnings#open"
                   class="mt-3 px-2.5 py-1 text-xs font-medium text-yellow-900 bg-white border border-yellow-300 rounded hover:bg-yellow-50">
             Show all <%= warnings_list.size %> warnings
           </button>
+          <%= render layout: 'shared/alert_list_popup', locals: { title: 'Warnings', count: warnings_list.size, tone: 'warning', list_class: 'space-y-3' } do %>
+            <% warnings_list.each do |warning| %>
+              <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <div class="flex items-start">
+                  <div class="flex-shrink-0">
+                    <svg class="w-5 h-5 text-yellow-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01" />
+                    </svg>
+                  </div>
+                  <div class="ml-3">
+                    <div class="font-medium text-yellow-800">
+                      <code class="text-sm bg-yellow-100 px-1 rounded"><%= warning[:field] || warning['field'] %></code>
+                    </div>
+                    <div class="text-yellow-700 mt-1"><%= warning[:message] || warning['message'] %></div>
+                  </div>
+                </div>
+              </div>
+            <% end %>
+          <% end %>
         <% end %>
       </div>
     <% end %>

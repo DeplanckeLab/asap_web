@@ -45,7 +45,7 @@ export const complianceCheckReportMixin = {
       ${groups.map((group) => this.renderDetailList(group.label, group.items || [], issueContext)).join("")}
     `
     this.bindCheckDetailClicks()
-    this.bindWarningExpandClicks()
+    this.bindAlertListExpandClicks()
   },
 
   formatFieldValues(values) {
@@ -75,22 +75,93 @@ export const complianceCheckReportMixin = {
     })
   },
 
-  warningsPreviewLimit() {
+  alertListPreviewLimit() {
     return 5
   },
 
-  bindWarningExpandClicks() {
-    this.resultBodyTarget.querySelectorAll("[data-expand-warnings]").forEach((button) => {
+  bindAlertListExpandClicks() {
+    this.resultBodyTarget.querySelectorAll("[data-expand-alert-list]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.preventDefault()
-        const list = button.closest("[data-warnings-list]")
+        const list = button.closest("[data-alert-list]")
         if (!list) return
-        list.querySelectorAll("[data-warning-extra]").forEach((el) => {
-          el.classList.remove("hidden")
-        })
-        button.remove()
+        const modal = list.querySelector("[data-alert-list-modal]")
+        if (!modal) return
+        modal.classList.remove("hidden")
+        document.body.classList.add("overflow-hidden")
       })
     })
+
+    this.resultBodyTarget.querySelectorAll("[data-alert-list-modal]").forEach((modal) => {
+      const backdrop = modal.querySelector("[data-alert-list-modal-backdrop]")
+      if (backdrop) {
+        backdrop.addEventListener("click", () => this.closeAlertListModal(modal))
+      }
+
+      modal.querySelectorAll("[data-close-alert-list-modal]").forEach((closeButton) => {
+        closeButton.addEventListener("click", (event) => {
+          event.preventDefault()
+          this.closeAlertListModal(modal)
+        })
+      })
+    })
+
+    if (!this._alertListModalEscapeBound) {
+      this._alertListModalEscapeBound = true
+      this._alertListModalEscapeHandler = (event) => {
+        if (event.key !== "Escape") return
+        const openModal = this.resultBodyTarget.querySelector("[data-alert-list-modal]:not(.hidden)")
+        if (openModal) this.closeAlertListModal(openModal)
+      }
+      window.addEventListener("keydown", this._alertListModalEscapeHandler)
+    }
+  },
+
+  closeAlertListModal(modal) {
+    if (!modal) return
+    modal.classList.add("hidden")
+    if (!this.resultBodyTarget.querySelector("[data-alert-list-modal]:not(.hidden)")) {
+      document.body.classList.remove("overflow-hidden")
+    }
+  },
+
+  renderAlertListModal(itemsHtml, { title, count, tone }) {
+    const styles = tone === "error"
+      ? {
+          border: "border-red-200",
+          header: "bg-red-50 border-red-200",
+          title: "text-red-900",
+          body: "text-red-800"
+        }
+      : {
+          border: "border-yellow-200",
+          header: "bg-yellow-50 border-yellow-200",
+          title: "text-yellow-900",
+          body: "text-yellow-800"
+        }
+    return `
+      <div data-alert-list-modal class="hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="${title} (${count})">
+        <div data-alert-list-modal-backdrop class="absolute inset-0 bg-black/50"></div>
+        <div class="absolute inset-0 overflow-y-auto pointer-events-none">
+          <div class="flex min-h-full items-center justify-center p-4">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col border ${styles.border} pointer-events-auto">
+              <div class="px-5 py-4 border-b ${styles.header} flex items-center justify-between gap-3 shrink-0">
+                <h2 class="text-base font-semibold ${styles.title} m-0">${title} (${count})</h2>
+                <button type="button"
+                        data-close-alert-list-modal
+                        class="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                        aria-label="Close">
+                  Close
+                </button>
+              </div>
+              <div class="px-5 py-4 overflow-y-auto">
+                <ul class="space-y-1 text-sm ${styles.body}">${itemsHtml}</ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `
   },
 
   showCheckDetail(index) {
@@ -531,9 +602,16 @@ export const complianceCheckReportMixin = {
     if (failedCount > 0) summaryParts.push(`${failedCount} failed`)
     if (warningCount > 0) summaryParts.push(`${warningCount} warning(s)`)
     const summary = summaryParts.length > 0 ? ` - ${summaryParts.join(", ")}` : ""
-    const truncateWarnings = color === "yellow"
-    const previewLimit = truncateWarnings ? this.warningsPreviewLimit() : null
-    const lines = items.map((it, index) => {
+    const truncateList = color === "yellow" || color === "red"
+    const previewLimit = truncateList ? this.alertListPreviewLimit() : null
+    const truncated = previewLimit !== null && items.length > previewLimit
+    const tone = color === "red" ? "error" : "warning"
+    const itemLabel = color === "red" ? "errors" : "warnings"
+    const buttonClass = color === "red"
+      ? "mt-2 px-2.5 py-1 text-xs font-medium text-red-900 bg-white border border-red-300 rounded hover:bg-red-50"
+      : "mt-2 px-2.5 py-1 text-xs font-medium text-yellow-900 bg-white border border-yellow-300 rounded hover:bg-yellow-50"
+
+    const renderLine = (it) => {
       const field = this.escape(it.field || "-")
       const msg = this.escape(it.message || "")
       const valueText = this.formatFieldValues(it.values || it["values"])
@@ -543,24 +621,29 @@ export const complianceCheckReportMixin = {
       const listLabel = statusKey === "failed" ? "Failed" : st.label
       const badge = `<span class="ml-2 px-1.5 py-0.5 rounded text-xs ${st.badge}">${listLabel}</span>`
       const detailIndex = this.registerCheckDetail(it.detail, it, resolveOptions)
-      const isExtra = previewLimit !== null && index >= previewLimit
       const clickable = detailIndex !== null ? " cursor-pointer hover:bg-white/70 rounded px-1 -mx-1" : ""
-      const hiddenClass = isExtra ? " hidden" : ""
-      const extraAttr = isExtra ? " data-warning-extra" : ""
       const detailAttr = detailIndex !== null
         ? ` data-check-detail-index="${detailIndex}" title="Show rule details"`
         : ""
-      return `<li class="text-sm${clickable}${hiddenClass}"${extraAttr}${detailAttr}><code class="px-1 rounded ${codeClass}">${field}</code>${badge} ${msg}${valueText}</li>`
-    }).join("")
-    const expandButton = previewLimit !== null && items.length > previewLimit
-      ? `<button type="button" data-expand-warnings class="mt-2 px-2.5 py-1 text-xs font-medium text-yellow-900 bg-white border border-yellow-300 rounded hover:bg-yellow-50">Show all ${items.length} warnings</button>`
+      return `<li class="text-sm${clickable}"${detailAttr}><code class="px-1 rounded ${codeClass}">${field}</code>${badge} ${msg}${valueText}</li>`
+    }
+
+    // Register detail handlers once for the full list (modal), then reuse HTML for the preview.
+    const allLines = items.map((it) => renderLine(it))
+    const previewLines = truncated ? allLines.slice(0, previewLimit) : allLines
+    const expandButton = truncated
+      ? `<button type="button" data-expand-alert-list class="${buttonClass}">Show all ${items.length} ${itemLabel}</button>`
       : ""
-    const listAttr = truncateWarnings ? " data-warnings-list" : ""
+    const modalHtml = truncated
+      ? this.renderAlertListModal(allLines.join(""), { title, count: items.length, tone })
+      : ""
+    const listAttr = truncateList ? " data-alert-list" : ""
     return `
       <div class="mb-4 p-3 rounded border ${style.box}"${listAttr}>
         <div class="font-medium mb-2">${title} (${items.length})${summary}</div>
-        <ul class="space-y-1">${lines}</ul>
+        <ul class="space-y-1">${previewLines.join("")}</ul>
         ${expandButton}
+        ${modalHtml}
       </div>
     `
   },

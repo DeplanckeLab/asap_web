@@ -287,49 +287,63 @@ export default class extends Controller {
 
     // Errors
     if (errors.length > 0) {
-      html += `
-        <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4">
-          <h4 class="text-red-800 font-semibold mb-2">Errors (${errors.length})</h4>
-          <ul class="space-y-2">
-      `
-      errors.forEach(error => {
+      const previewLimit = 5
+      const truncated = errors.length > previewLimit
+      const renderErrorLine = (error) => {
         const field = error.field || error['field'] || ''
         const message = error.message || error['message'] || ''
-        html += `
+        return `
           <li class="text-sm text-red-700">
             <code class="bg-red-100 px-1 rounded">${this.escapeHtml(field)}</code>: ${this.escapeHtml(message)}
           </li>
         `
-      })
-      html += '</ul></div>'
+      }
+      const allLines = errors.map((error) => renderErrorLine(error))
+      const previewLines = truncated ? allLines.slice(0, previewLimit) : allLines
+
+      html += `
+        <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-4" data-alert-list>
+          <h4 class="text-red-800 font-semibold mb-2">Errors (${errors.length})</h4>
+          <ul class="space-y-2">${previewLines.join('')}</ul>
+      `
+      if (truncated) {
+        html += `
+          <button type="button" data-expand-alert-list class="mt-2 px-2.5 py-1 text-xs font-medium text-red-900 bg-white border border-red-300 rounded hover:bg-red-50">
+            Show all ${errors.length} errors
+          </button>
+          ${this.renderAlertListModalHtml(allLines.join(''), { title: 'Errors', count: errors.length, tone: 'error' })}
+        `
+      }
+      html += '</div>'
     }
 
     // Warnings
     if (warnings.length > 0) {
       const previewLimit = 5
       const truncated = warnings.length > previewLimit
-      html += `
-        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4" data-warnings-list>
-          <h4 class="text-yellow-800 font-semibold mb-2">Warnings (${warnings.length})</h4>
-          <ul class="space-y-2">
-      `
-      warnings.forEach((warning, index) => {
+      const renderWarningLine = (warning) => {
         const field = warning.field || warning['field'] || ''
         const message = warning.message || warning['message'] || ''
-        const extraClass = truncated && index >= previewLimit ? ' hidden' : ''
-        const extraAttr = truncated && index >= previewLimit ? ' data-warning-extra' : ''
-        html += `
-          <li class="text-sm text-yellow-700${extraClass}"${extraAttr}>
+        return `
+          <li class="text-sm text-yellow-700">
             <code class="bg-yellow-100 px-1 rounded">${this.escapeHtml(field)}</code>: ${this.escapeHtml(message)}
           </li>
         `
-      })
-      html += '</ul>'
+      }
+      const allLines = warnings.map((warning) => renderWarningLine(warning))
+      const previewLines = truncated ? allLines.slice(0, previewLimit) : allLines
+
+      html += `
+        <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4" data-alert-list>
+          <h4 class="text-yellow-800 font-semibold mb-2">Warnings (${warnings.length})</h4>
+          <ul class="space-y-2">${previewLines.join('')}</ul>
+      `
       if (truncated) {
         html += `
-          <button type="button" data-expand-warnings class="mt-2 px-2.5 py-1 text-xs font-medium text-yellow-900 bg-white border border-yellow-300 rounded hover:bg-yellow-50">
+          <button type="button" data-expand-alert-list class="mt-2 px-2.5 py-1 text-xs font-medium text-yellow-900 bg-white border border-yellow-300 rounded hover:bg-yellow-50">
             Show all ${warnings.length} warnings
           </button>
+          ${this.renderAlertListModalHtml(allLines.join(''), { title: 'Warnings', count: warnings.length, tone: 'warning' })}
         `
       }
       html += '</div>'
@@ -357,22 +371,94 @@ export default class extends Controller {
     }
 
     this.resultTarget.innerHTML = html
-    this.bindWarningExpandClicks()
+    this.bindAlertListExpandClicks()
   }
 
-  bindWarningExpandClicks() {
+  renderAlertListModalHtml(itemsHtml, { title, count, tone }) {
+    const styles = tone === 'error'
+      ? {
+          border: 'border-red-200',
+          header: 'bg-red-50 border-red-200',
+          title: 'text-red-900',
+          body: 'text-red-800'
+        }
+      : {
+          border: 'border-yellow-200',
+          header: 'bg-yellow-50 border-yellow-200',
+          title: 'text-yellow-900',
+          body: 'text-yellow-800'
+        }
+    return `
+      <div data-alert-list-modal class="hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-label="${title} (${count})">
+        <div data-alert-list-modal-backdrop class="absolute inset-0 bg-black/50"></div>
+        <div class="absolute inset-0 overflow-y-auto pointer-events-none">
+          <div class="flex min-h-full items-center justify-center p-4">
+            <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col border ${styles.border} pointer-events-auto">
+              <div class="px-5 py-4 border-b ${styles.header} flex items-center justify-between gap-3 shrink-0">
+                <h2 class="text-base font-semibold ${styles.title} m-0">${title} (${count})</h2>
+                <button type="button"
+                        data-close-alert-list-modal
+                        class="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                        aria-label="Close">
+                  Close
+                </button>
+              </div>
+              <div class="px-5 py-4 overflow-y-auto">
+                <ul class="space-y-2 text-sm ${styles.body}">${itemsHtml}</ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `
+  }
+
+  bindAlertListExpandClicks() {
     if (!this.hasResultTarget) return
-    this.resultTarget.querySelectorAll("[data-expand-warnings]").forEach((button) => {
+
+    this.resultTarget.querySelectorAll("[data-expand-alert-list]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.preventDefault()
-        const list = button.closest("[data-warnings-list]")
+        const list = button.closest("[data-alert-list]")
         if (!list) return
-        list.querySelectorAll("[data-warning-extra]").forEach((el) => {
-          el.classList.remove("hidden")
-        })
-        button.remove()
+        const modal = list.querySelector("[data-alert-list-modal]")
+        if (!modal) return
+        modal.classList.remove("hidden")
+        document.body.classList.add("overflow-hidden")
       })
     })
+
+    this.resultTarget.querySelectorAll("[data-alert-list-modal]").forEach((modal) => {
+      const backdrop = modal.querySelector("[data-alert-list-modal-backdrop]")
+      if (backdrop) {
+        backdrop.addEventListener("click", () => this.closeAlertListModal(modal))
+      }
+
+      modal.querySelectorAll("[data-close-alert-list-modal]").forEach((closeButton) => {
+        closeButton.addEventListener("click", (event) => {
+          event.preventDefault()
+          this.closeAlertListModal(modal)
+        })
+      })
+    })
+
+    if (!this._alertListModalEscapeBound) {
+      this._alertListModalEscapeBound = true
+      this._alertListModalEscapeHandler = (event) => {
+        if (event.key !== "Escape") return
+        const openModal = this.resultTarget.querySelector("[data-alert-list-modal]:not(.hidden)")
+        if (openModal) this.closeAlertListModal(openModal)
+      }
+      window.addEventListener("keydown", this._alertListModalEscapeHandler)
+    }
+  }
+
+  closeAlertListModal(modal) {
+    if (!modal) return
+    modal.classList.add("hidden")
+    if (!this.resultTarget.querySelector("[data-alert-list-modal]:not(.hidden)")) {
+      document.body.classList.remove("overflow-hidden")
+    }
   }
 
   displayError(message) {

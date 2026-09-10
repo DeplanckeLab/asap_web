@@ -1,0 +1,60 @@
+<%#
+  Closable popup shell for truncated alert lists (errors / warnings).
+  Locals:
+    - title (String): e.g. "Warnings" or "Errors"
+    - count (Integer)
+    - tone (optional): "warning" (default) or "error"
+    - list_class (optional): classes for the scrollable list container
+%>
+<%
+  title = local_assigns.fetch(:title)
+  count = local_assigns.fetch(:count)
+  tone = local_assigns.fetch(:tone, "warning")
+  list_class = local_assigns.fetch(:list_class, "space-y-2")
+  tone_styles = {
+    "warning" => {
+      border: "border-yellow-200",
+      header: "bg-yellow-50 border-yellow-200",
+      title: "text-yellow-900",
+      body: "text-yellow-800"
+    },
+    "error" => {
+      border: "border-red-200",
+      header: "bg-red-50 border-red-200",
+      title: "text-red-900",
+      body: "text-red-800"
+    }
+  }
+  styles = tone_styles[tone] || tone_styles["warning"]
+  title_id = "#{tone}-list-popup-title"
+%>
+<div data-expandable-warnings-target="modal"
+     class="hidden fixed inset-0 z-50"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="<%= title_id %>"
+     data-action="keydown@window->expandable-warnings#closeOnEscape">
+  <div class="absolute inset-0 bg-black/50"
+       data-action="click->expandable-warnings#close"></div>
+  <div class="absolute inset-0 overflow-y-auto pointer-events-none">
+    <div class="flex min-h-full items-center justify-center p-4">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col border <%= styles[:border] %> pointer-events-auto"
+           data-action="click->expandable-warnings#stop">
+        <div class="px-5 py-4 border-b <%= styles[:header] %> flex items-center justify-between gap-3 shrink-0">
+          <h2 id="<%= title_id %>" class="text-base font-semibold <%= styles[:title] %> m-0">
+            <%= title %> (<%= count %>)
+          </h2>
+          <button type="button"
+                  class="px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                  data-action="click->expandable-warnings#close"
+                  aria-label="Close">
+            Close
+          </button>
+        </div>
+        <div class="px-5 py-4 overflow-y-auto text-sm <%= styles[:body] %> <%= list_class %>">
+          <%= yield %>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1244,11 +1244,22 @@ module ExternalCatalog
     end
 
     def visualization_embedding_annots(project)
+      matrices_by_filepath = Annot.light
+                                  .where(project_id: project.id, name: '/matrix')
+                                  .index_by(&:filepath)
+
       Annot.light
            .where(project_id: project.id, dim: 1)
            .where('nber_rows >= ?', 2)
            .where.not(filepath: nil)
            .to_a
+           .select do |annot|
+             matrix = matrices_by_filepath[annot.filepath]
+             annot.plottable_embedding?(
+               matrix_nber_rows: matrix&.nber_rows,
+               matrix_nber_cols: matrix&.nber_cols
+             )
+           end
     end
 
     def prefer_embedding_annot(project)

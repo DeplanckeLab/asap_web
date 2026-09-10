@@ -921,6 +921,16 @@ export default class extends Controller {
     return String(this.currentStepId) === String(stepId)
   }
 
+  // Reveal the right-panel content without forcing display:block.
+  // New-run forms rely on CSS (application.css) setting display:flex on
+  // [data-step-selector-target="content"]:has(.std-form) / :has(.cell-filtering-form-root)
+  // so the action footer stays pinned. An inline display:block overrides that and
+  // clips the footer behind the parent's overflow:hidden.
+  showRightPanelContent() {
+    if (!this.hasContentTarget) return
+    this.contentTarget.style.removeProperty('display')
+  }
+
   // True when the right panel is showing a form or step subview that must not
   // be replaced by a websocket-driven step_results / run-panel reload.
   shouldPreserveRightPanel() {
@@ -2372,7 +2382,7 @@ export default class extends Controller {
           if (controller.hasEmptyStateTarget) {
             controller.emptyStateTarget.style.display = 'none'
           }
-          controller.contentTarget.style.display = 'block'
+          controller.showRightPanelContent()
           if (typeof window.setPipelineHeaderButtonMode === 'function') {
             window.setPipelineHeaderButtonMode('graph')
           }
@@ -2426,7 +2436,7 @@ export default class extends Controller {
         if (controller.hasEmptyStateTarget) {
           controller.emptyStateTarget.style.display = 'none'
         }
-        controller.contentTarget.style.display = 'block'
+        controller.showRightPanelContent()
         if (typeof window.setPipelineHeaderButtonMode === 'function') {
           window.setPipelineHeaderButtonMode('graph')
         }
@@ -2530,8 +2540,8 @@ export default class extends Controller {
           console.log('[StepSelectorController] Content target innerHTML preview:', controller.contentTarget.innerHTML.substring(0, 200))
 
           if (window.getComputedStyle(controller.contentTarget).display === 'none') {
-            console.warn('[StepSelectorController] Content is still hidden! Forcing display block...')
-            controller.contentTarget.style.display = 'block'
+            console.warn('[StepSelectorController] Content is still hidden! Revealing via showRightPanelContent...')
+            controller.showRightPanelContent()
           }
         }
         console.log('[StepSelectorController] currentStepId AFTER update:', controller.currentStepId)
@@ -2565,7 +2575,7 @@ export default class extends Controller {
             Error loading step results: ${error.message}. Please try again.
           </div>
         `
-        controller.contentTarget.style.display = 'block'
+        controller.showRightPanelContent()
       }
       if (controller.hasEmptyStateTarget) {
         controller.emptyStateTarget.style.display = 'none'

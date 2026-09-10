@@ -134,6 +134,28 @@ class Annot < ApplicationRecord
     return false unless original_run.present?
     original_run.embedding_run?
   end
+
+  # True when this annot is usable as visualization coordinates (UMAP/t-SNE/PCA/...).
+  # ASAP stores embeddings as cell attrs with nber_rows = n_axes (>= 2) and
+  # nber_cols = n_cells. Some 1D cell vectors were wrongly stamped with
+  # nber_rows = n_cells (e.g. _Mitochondrial_Content); reject those.
+  def plottable_embedding?(matrix_nber_rows: nil, matrix_nber_cols: nil)
+    rows = nber_rows.to_i
+    cols = nber_cols.to_i
+    return false if rows < 2
+    return false if cols < 1
+
+    m_rows = matrix_nber_rows.to_i
+    m_cols = matrix_nber_cols.to_i
+
+    # Cell vector corruption: n_cells stored as nber_rows
+    return false if m_cols.positive? && rows == m_cols
+
+    # Full expression-matrix shape wrongly stamped onto an attr
+    return false if m_rows.positive? && m_cols.positive? && rows == m_rows && cols == m_cols
+
+    true
+  end
   
   # Check if this is metadata
   def metadata?

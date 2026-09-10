@@ -146,7 +146,8 @@
             <p class="text-gray-600 mb-0">Loading step...</p>
           </div>
           <% if has_server_content %>
-            <div data-step-selector-target="content" style="display: block; width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow-x: hidden !important; box-sizing: border-box !important;" class="analysis-subview-surface w-full max-w-full min-w-0 overflow-x-hidden">
+            <%# Do not set inline display:block — new-run form CSS needs display:flex to pin the footer. %>
+            <div data-step-selector-target="content" style="width: 100% !important; max-width: 100% !important; min-width: 0 !important; overflow-x: hidden !important; box-sizing: border-box !important;" class="analysis-subview-surface w-full max-w-full min-w-0 overflow-x-hidden">
               <% if @load_sub_view && @sub_view_html.present? %>
                 <%= @sub_view_html.html_safe %>
               <% elsif @load_run_panel && @run_panel_html.present? %>
@@ -640,14 +641,14 @@
         if (controller.hasLoadingStateTarget) {
           controller.loadingStateTarget.style.display = 'none'
         }
-        controller.contentTarget.style.display = 'block'
+        controller.showRightPanelContent()
         return
       }
       if (controller._stepResultsRequestSeq !== stepResultsSeqWhenFormFetchStarted) {
         if (controller.hasLoadingStateTarget) {
           controller.loadingStateTarget.style.display = 'none'
         }
-        controller.contentTarget.style.display = 'block'
+        controller.showRightPanelContent()
         return
       }
       
@@ -673,7 +674,7 @@
         // Insert HTML only after scripts/data are ready so Stimulus connects correctly
         // (e.g. cell filtering needs Plotly + window.cellFilteringData first).
         controller.contentTarget.innerHTML = tempDiv.innerHTML
-        controller.contentTarget.style.display = 'block'
+        controller.showRightPanelContent()
 
         if (controller.hasLoadingStateTarget) {
           controller.loadingStateTarget.style.display = 'none'
@@ -755,7 +756,7 @@
           Error loading form: ${error.message}
         </div>
       `
-      controller.contentTarget.style.display = 'block'
+      controller.showRightPanelContent()
     })
   }
 
@@ -860,14 +861,14 @@
         if (controller.hasLoadingStateTarget) {
           controller.loadingStateTarget.style.display = 'none'
         }
-        controller.contentTarget.style.display = 'block'
+        controller.showRightPanelContent()
         return
       }
       if (controller._stepResultsRequestSeq !== stepResultsSeqWhenRunFetchStarted) {
         if (controller.hasLoadingStateTarget) {
           controller.loadingStateTarget.style.display = 'none'
         }
-        controller.contentTarget.style.display = 'block'
+        controller.showRightPanelContent()
         return
       }
       // Update content with run — load scripts before inserting HTML so Stimulus
@@ -887,7 +888,7 @@
 
       const finishRunInsert = () => {
         controller.contentTarget.innerHTML = tempDiv.innerHTML
-        controller.contentTarget.style.display = 'block'
+        controller.showRightPanelContent()
 
         if (controller.hasLoadingStateTarget) {
           controller.loadingStateTarget.style.display = 'none'
@@ -957,7 +958,7 @@
           Error loading run: ${error.message}
         </div>
       `
-      controller.contentTarget.style.display = 'block'
+      controller.showRightPanelContent()
     })
   }
 

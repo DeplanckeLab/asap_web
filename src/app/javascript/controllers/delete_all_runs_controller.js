@@ -58,7 +58,7 @@ export default class extends Controller {
               .then(html => {
                 if (stepSelectorController.hasContentTarget) {
                   stepSelectorController.contentTarget.innerHTML = html
-                  stepSelectorController.contentTarget.style.display = 'block'
+                  stepSelectorController.showRightPanelContent()
                   if (stepSelectorController.hasLoadingStateTarget) {
                     stepSelectorController.loadingStateTarget.style.display = 'none'
                   }

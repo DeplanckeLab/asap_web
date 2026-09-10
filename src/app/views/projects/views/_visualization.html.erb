@@ -2038,9 +2038,16 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                                   data-nber-rows="<%= nber_rows %>"
                                   data-selected="<%= is_selected ? 'true' : 'false' %>"
                                   data-action="click->visualization#selectEmbedding">
-                            <span class="embedding-menu-item-label"><%= base_label %></span>
-                            <% if nber_rows > 2 %>
-                              <span class="embedding-menu-item-dim"><%= nber_rows %>D</span>
+                            <span class="embedding-menu-item-main">
+                              <span class="embedding-menu-item-label"><%= base_label %></span>
+                              <% if nber_rows > 2 %>
+                                <span class="embedding-menu-item-dim"><%= nber_rows %>D</span>
+                              <% end %>
+                            </span>
+                            <% if embedding.imported %>
+                              <span class="embedding-menu-item-meta">
+                                <%= annot_imported_badge %>
+                              </span>
                             <% end %>
                           </button>
                           <% if nber_rows > 2 %>
@@ -2303,9 +2310,31 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
             background-color: #eff6ff;
             border-color: #bfdbfe;
           }
+          .embedding-selection-menu .embedding-menu-item-main {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            min-width: 0;
+            flex: 1 1 auto;
+          }
+          .embedding-selection-menu .embedding-menu-item-label {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            text-align: left;
+          }
+          .embedding-selection-menu .embedding-menu-item-meta {
+            display: inline-flex;
+            align-items: center;
+            justify-content: flex-end;
+            margin-left: auto;
+            flex-shrink: 0;
+          }
           .embedding-selection-menu .embedding-menu-item-dim {
             font-size: 12px;
             color: #6b7280;
+            flex-shrink: 0;
           }
           .embedding-selection-menu .embedding-menu-item-wrap {
             margin-top: 8px;

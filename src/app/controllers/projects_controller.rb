@@ -207,13 +207,15 @@ class ProjectsController < ApplicationController
     end
     
     @h_metadata = organize_metadata(existing_metadata)
+    matrix_dims_by_filepath = matrix_dims_by_filepath_from_annots(existing_metadata)
 
-    # Filter loom files to only include those with plottable embeddings (2+ rows)
+    # Filter loom files to only include those with plottable embeddings (2+ axes)
     @available_loom_files = existing_loom_files.select do |filepath|
-      @h_metadata[filepath] && 
-      @h_metadata[filepath]['cell'] && 
-      @h_metadata[filepath]['cell']['NUMERIC'] &&
-      @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows >= 2) }
+      plottable_embeddings_for_filepath(
+        filepath,
+        @h_metadata.dig(filepath, 'cell', 'NUMERIC') || [],
+        matrix_dims_by_filepath
+      ).any?
     end
     
     # Get default loom file - use the first loom file with visualizations (only from existing files)
@@ -222,19 +224,24 @@ class ProjectsController < ApplicationController
     @default_loom_file = @available_loom_files.first || existing_loom_files.first
     Rails.logger.debug "[show] Default loom file set to: #{@default_loom_file.inspect}"
 
-    # Build embedding metadata (2+ row coordinate sets) grouped by loom file
+    # Build embedding metadata (2+ axis coordinate sets) grouped by loom file
     @all_embeddings_by_loom = {}
     @available_loom_files.each do |filepath|
-      numeric_metadata = @h_metadata.dig(filepath, 'cell', 'NUMERIC') || []
-      @all_embeddings_by_loom[filepath] = numeric_metadata.select do |metadata|
-        metadata.nber_rows.present? && metadata.nber_rows >= 2
-      end
+      @all_embeddings_by_loom[filepath] = plottable_embeddings_for_filepath(
+        filepath,
+        @h_metadata.dig(filepath, 'cell', 'NUMERIC') || [],
+        matrix_dims_by_filepath
+      )
     end
     
     # Check if a specific embedding_id was requested
     if params[:embedding_id].present?
       requested_embedding = Annot.find_by(id: params[:embedding_id], project_id: @project.id)
-      if requested_embedding && requested_embedding.nber_rows.present? && requested_embedding.nber_rows >= 2
+      matrix_dims = matrix_dims_by_filepath[requested_embedding&.filepath]
+      if requested_embedding&.plottable_embedding?(
+           matrix_nber_rows: matrix_dims&.at(0),
+           matrix_nber_cols: matrix_dims&.at(1)
+         )
         @default_embedding = requested_embedding
         @default_embedding_loom_file = requested_embedding.filepath
         @default_loom_file = requested_embedding.filepath if requested_embedding.filepath.present?
@@ -10805,8 +10812,43 @@ class ProjectsController < ApplicationController
       Annot.light.where(project_id: @project.id)
            .where.not(filepath: nil)
            .where(dim: 1)
-           .where('nber_rows >= ?', 2)
+           .where('annots.nber_rows >= ?', 2)
+           .where('annots.nber_cols >= ?', 1)
+           .where(<<~SQL.squish)
+             NOT EXISTS (
+               SELECT 1 FROM annots matrices
+               WHERE matrices.project_id = annots.project_id
+                 AND matrices.filepath = annots.filepath
+                 AND matrices.name = '/matrix'
+                 AND (
+                   annots.nber_rows = matrices.nber_cols
+                   OR (
+                     annots.nber_rows = matrices.nber_rows
+                     AND annots.nber_cols = matrices.nber_cols
+                   )
+                 )
+             )
+           SQL
            .exists?
+    end
+
+    def matrix_dims_by_filepath_from_annots(annots)
+      Array(annots).each_with_object({}) do |annot, hash|
+        next unless annot.name == '/matrix'
+        next if annot.filepath.blank?
+
+        hash[annot.filepath] = [annot.nber_rows, annot.nber_cols]
+      end
+    end
+
+    def plottable_embeddings_for_filepath(filepath, numeric_metadata, matrix_dims_by_filepath)
+      matrix_dims = matrix_dims_by_filepath[filepath]
+      Array(numeric_metadata).select do |metadata|
+        metadata.plottable_embedding?(
+          matrix_nber_rows: matrix_dims&.at(0),
+          matrix_nber_cols: matrix_dims&.at(1)
+        )
+      end
     end
 
     def with_request_profile(endpoint, view: nil)
@@ -10987,13 +11029,15 @@ class ProjectsController < ApplicationController
 
       existing_metadata = timed_step.call('filter_existing_metadata') { available_metadata.select { |metadata| existing_loom_files.include?(metadata.filepath) } }
       @h_metadata = timed_step.call('organize_metadata') { organize_metadata(existing_metadata) }
+      matrix_dims_by_filepath = matrix_dims_by_filepath_from_annots(existing_metadata)
 
       @available_loom_files = timed_step.call('filter_visualizable_loom_files') do
         existing_loom_files.select do |filepath|
-          @h_metadata[filepath] &&
-            @h_metadata[filepath]['cell'] &&
-            @h_metadata[filepath]['cell']['NUMERIC'] &&
-            @h_metadata[filepath]['cell']['NUMERIC'].any? { |m| m.nber_rows && (m.nber_rows >= 2) }
+          plottable_embeddings_for_filepath(
+            filepath,
+            @h_metadata.dig(filepath, 'cell', 'NUMERIC') || [],
+            matrix_dims_by_filepath
+          ).any?
         end
       end
 
@@ -11001,10 +11045,11 @@ class ProjectsController < ApplicationController
       @all_embeddings_by_loom = timed_step.call('build_embeddings_by_loom') do
         h_res = {}
         @available_loom_files.each do |filepath|
-          numeric_metadata = @h_metadata.dig(filepath, 'cell', 'NUMERIC') || []
-          h_res[filepath] = numeric_metadata.select do |metadata|
-            metadata.nber_rows.present? && metadata.nber_rows >= 2
-          end
+          h_res[filepath] = plottable_embeddings_for_filepath(
+            filepath,
+            @h_metadata.dig(filepath, 'cell', 'NUMERIC') || [],
+            matrix_dims_by_filepath
+          )
         end
         h_res
       end
@@ -11012,7 +11057,11 @@ class ProjectsController < ApplicationController
       timed_step.call('resolve_default_embedding') do
         if params[:embedding_id].present?
           requested_embedding = Annot.find_by(id: params[:embedding_id], project_id: @project.id)
-          if requested_embedding && requested_embedding.nber_rows.present? && requested_embedding.nber_rows >= 2
+          matrix_dims = matrix_dims_by_filepath[requested_embedding&.filepath]
+          if requested_embedding&.plottable_embedding?(
+               matrix_nber_rows: matrix_dims&.at(0),
+               matrix_nber_cols: matrix_dims&.at(1)
+             )
             @default_embedding = requested_embedding
             @default_embedding_loom_file = requested_embedding.filepath
             @default_loom_file = requested_embedding.filepath if requested_embedding.filepath.present?

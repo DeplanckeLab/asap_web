@@ -9437,6 +9437,9 @@ class ProjectsController < ApplicationController
       all_annots_for_loom = load_loom_file_list_context
       if @available_loom_files.present?
         assign_analysis_loom_file_from_session!
+        # ASAP v>=8: once cell filtering exists, later-step run forms should
+        # propose matrices from the cell-filtering loom only.
+        apply_cell_filtering_loom_scope_for_run_form!
 
         if @selected_loom_file && all_annots_for_loom
           loom_run_ids = all_annots_for_loom.select { |a| a.filepath == @selected_loom_file }.map(&:run_id).compact.uniq
@@ -12454,6 +12457,55 @@ class ProjectsController < ApplicationController
         @selected_loom_file = nil
         session[:analysis_loom_file][project_session_key] = '__all__'
       end
+    end
+
+    def cell_filtering_step_for_project
+      step_scope_for_project(@project).find_by(name: 'cell_filtering')
+    end
+
+    # Latest successful cell-filtering /matrix filepath for this project, if any.
+    def preferred_cell_filtering_loom_file(cf_step = nil)
+      cf_step ||= cell_filtering_step_for_project
+      return nil unless cf_step
+
+      cf_run_ids = Run.where(project_id: @project.id, step_id: cf_step.id, status_id: 3)
+                      .order(created_at: :desc)
+                      .pluck(:id)
+      return nil if cf_run_ids.empty?
+
+      annots_by_run_id = Annot.light.where(project_id: @project.id, run_id: cf_run_ids, name: '/matrix')
+                              .where.not(filepath: [nil, ''])
+                              .pluck(:run_id, :filepath)
+                              .to_h
+      cf_run_ids.each do |run_id|
+        filepath = annots_by_run_id[run_id].to_s
+        return filepath if filepath.present?
+      end
+      nil
+    end
+
+    # For ASAP v>=8 run forms on steps after cell filtering, scope input matrices
+    # to the cell-filtering loom when one is available. Keeps a later loom
+    # (e.g. gene_filtering) if the user already scoped to it.
+    def apply_cell_filtering_loom_scope_for_run_form!
+      return unless version_v8_or_later?(@project.version_id)
+      return unless @step&.rank
+      return if @step.name.to_s == 'cell_filtering'
+
+      cf_step = cell_filtering_step_for_project
+      return unless cf_step&.rank
+      return unless @step.rank.to_i > cf_step.rank.to_i
+
+      cf_loom = preferred_cell_filtering_loom_file(cf_step)
+      return if cf_loom.blank?
+      return if @available_loom_files.present? && !@available_loom_files.include?(cf_loom)
+
+      if @selected_loom_file.present? && @selected_loom_file != cf_loom
+        selected_rank = (@filepath_info || {})[@selected_loom_file]&.dig(:step_rank)
+        return if selected_rank.present? && selected_rank.to_i > cf_step.rank.to_i
+      end
+
+      @selected_loom_file = cf_loom
     end
 
     def analysis_single_visible_run_id_for_step(step, all_annots_for_loom, selected_loom_file)

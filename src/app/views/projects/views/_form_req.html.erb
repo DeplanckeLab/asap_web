@@ -169,9 +169,9 @@
   </div>
 
   <% unless @h_step_attrs["hide_submit_btns"] %>
-    <div class="std-form-req-footer flex-shrink-0 border-t border-gray-200 px-6 pt-4 pb-4 max-lg:pb-6 bg-white z-10">
-      <div id="prevent_req_messages" class="alert alert-danger hidden flex items-start gap-3 mb-3" data-form-req-target="errorMessages"></div>
-      <div class="flex flex-wrap items-center gap-x-3 gap-y-2">
+    <div class="std-form-req-footer flex-shrink-0 border-t border-gray-200 px-6 bg-white z-10">
+      <div id="prevent_req_messages" class="alert alert-danger hidden mb-2" data-form-req-target="errorMessages"></div>
+      <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-2 leading-none">
         <% if analyzable?(@project) %>
           <button id="<%= @step.name %>_button" type="button" 
                   class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors opacity-50 cursor-not-allowed req_submit"

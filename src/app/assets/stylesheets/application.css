@@ -178,11 +178,15 @@ p, label, li, td, th, input, select, textarea, button {
 .analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .border-b.border-gray-200,
 .analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .sticky > .border-b.border-gray-200,
 .analysis-view .step-results .border-b.border-gray-200.px-4.py-2,
-.analysis-view .step-results .border-b.border-gray-200.px-6.py-4 {
+.analysis-view .step-results .border-b.border-gray-200.px-6.py-4,
+.analysis-view #cell_filtering_form_container > * > .cell-filtering-header,
+.analysis-view .cell-filtering-header.border-b.border-gray-200 {
   padding-top: 0.5rem !important;
   padding-bottom: 0.5rem !important;
   padding-left: 1rem !important;
   padding-right: 1rem !important;
+  min-height: 3rem;
+  box-sizing: border-box;
 }
 
 .analysis-view #result_summary > .border-b.border-gray-200 h3,
@@ -191,7 +195,8 @@ p, label, li, td, th, input, select, textarea, button {
 .analysis-view #run_result_summary_panel > .sticky > .border-b.border-gray-200 h3,
 .analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .border-b.border-gray-200 h3,
 .analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .sticky > .border-b.border-gray-200 h3,
-.analysis-view .step-results .border-b.border-gray-200 h3 {
+.analysis-view .step-results .border-b.border-gray-200 h3,
+.analysis-view .cell-filtering-header h3 {
   font-size: 0.95rem;
   line-height: 1.35rem;
 }
@@ -672,6 +677,12 @@ button.subview-refresh-available .fa-sync-alt {
   min-width: 0;
 }
 
+/* Stacked / mobile: natural height, page scrolls. */
+.cell-filtering-layout-frame {
+  width: 100%;
+  min-width: 0;
+}
+
 .cell-filtering-layout {
   display: flex;
   flex-direction: column;
@@ -685,6 +696,7 @@ button.subview-refresh-available .fa-sync-alt {
   width: 100%;
   max-width: 100%;
   flex: none;
+  overflow-x: hidden;
 }
 
 .cell-filtering-plot-col {
@@ -692,55 +704,150 @@ button.subview-refresh-available .fa-sync-alt {
   width: 100%;
   display: flex;
   flex-direction: column;
+  flex: none;
 }
 
 .cell-filtering-plot-area {
-  min-height: 400px;
-  height: 400px;
+  min-height: 20rem;
+  height: 20rem;
   width: 100%;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
+/* Side-by-side: fill panel, scroll form and plot independently when needed. */
 @container cell-filtering (min-width: 40rem) {
+  .cell-filtering-layout-frame {
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
   .cell-filtering-layout {
     flex-direction: row;
     align-items: stretch;
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
   }
 
   .cell-filtering-form-col {
     flex: 0 0 46%;
     width: 46%;
     max-width: 28rem;
+    height: 100%;
     overflow-y: auto;
-    max-height: calc(100vh - 220px);
+    align-self: stretch;
   }
 
   .cell-filtering-plot-col {
     flex: 1 1 0;
     width: auto;
-    display: flex;
-    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .cell-filtering-plot-area {
+    flex: 1 0 auto;
+    min-height: 20rem;
+    height: auto;
+    overflow: hidden;
   }
 }
 
-.cell-filtering-toolbar {
-  padding: 0.5rem 1rem;
-  margin-bottom: 0.75rem;
+/* Desktop panel fill: keep header/footer fixed. Mobile keeps normal page scroll. */
+@media (min-width: 1024px) {
+  .analysis-view [data-step-selector-target="resultsContainer"] > .overflow-y-auto:has(.cell-filtering-form-root) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  [data-step-selector-target="content"]:has(.cell-filtering-form-root),
+  .step-results:has(.cell-filtering-form-root) {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1;
+  }
+
+  [data-step-selector-target="content"] .cell-filtering-form-root,
+  .step-results .cell-filtering-form-root,
+  [data-step-selector-target="content"] .cell-filtering-form-root [data-controller="cell-filtering"],
+  .step-results .cell-filtering-form-root [data-controller="cell-filtering"] {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  [data-step-selector-target="content"] #cell_filtering_form_container,
+  .step-results #cell_filtering_form_container {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    flex: 1;
+    min-height: 0;
+    max-height: none !important;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .cell-filtering-layout-host {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
 }
 
-.cell-filtering-toolbar h4 {
-  font-size: 0.75rem;
+@media (max-width: 1023px) {
+  [data-step-selector-target="content"] .cell-filtering-form-root,
+  .step-results .cell-filtering-form-root,
+  [data-step-selector-target="content"] #cell_filtering_form_container,
+  .step-results #cell_filtering_form_container {
+    height: auto;
+    flex: none;
+    max-height: none !important;
+    overflow: visible;
+  }
+
+  [data-step-selector-target="content"] #cell_filtering_form_container,
+  .step-results #cell_filtering_form_container {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  [data-controller="cell-filtering"] {
+    height: auto;
+    flex: none;
+    overflow: visible;
+  }
 }
 
-.cell-filtering-toolbar .cell-filtering-stat {
-  padding: 0.125rem 0.5rem;
-  font-size: 0.6875rem;
+/* Compact action footers: button height + small vertical padding only. */
+.std-form-req-footer,
+.cell-filtering-footer {
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
 }
 
-.cell-filtering-toolbar .cell-filtering-action-btn {
+.cell-filtering-footer .cell-filtering-stat {
   padding: 0.25rem 0.625rem;
-  font-size: 0.6875rem;
-  line-height: 1.2;
+  font-size: 0.8125rem;
+  line-height: 1.25rem;
 }
 
 .cell-filtering-form-compact {
@@ -1227,6 +1334,52 @@ button.subview-refresh-available .fa-sync-alt {
   box-shadow: none;
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: none;
+}
+
+[data-step-selector-target="content"] .std-form .std-form-req,
+.step-results .std-form .std-form-req {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Pin new-run form footer to the bottom of the right panel. */
+@media (min-width: 1024px) {
+  .analysis-view [data-step-selector-target="resultsContainer"] > .overflow-y-auto:has(.std-form) {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  [data-step-selector-target="content"]:has(.std-form),
+  .step-results:has(.std-form) {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex: 1;
+  }
+}
+
+@media (max-width: 1023px) {
+  [data-step-selector-target="content"] .std-form,
+  .step-results > .std-form,
+  [data-step-selector-target="content"] .std-form > .std-form-card,
+  .step-results > .std-form > .std-form-card,
+  [data-step-selector-target="content"] .std-form .std-form-req,
+  .step-results .std-form .std-form-req {
+    height: auto;
+    flex: none;
+    max-height: none;
+    overflow: visible;
+  }
 }
 
 /* std-form attribute validation error highlighting */

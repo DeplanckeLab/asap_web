@@ -10,6 +10,9 @@
      data-step-selector-loom-file-value="<%= @selected_loom_file.to_s %>"
      data-step-selector-step-id-to-name-value="<%= (@analysis_step_id_to_name || {}).to_json %>"
      <% if @parsing_step_id.present? %>data-step-selector-parsing-step-id-value="<%= @parsing_step_id %>"<% end %>>
+  <% analysis_import_loom_file = @selected_loom_file.presence || (defined?(@available_loom_files) && @available_loom_files&.first) %>
+  <%= render partial: 'projects/views/add_metadata_modal', locals: { default_loom_file: analysis_import_loom_file } %>
+
   <!-- Header -->
   <div class="mb-2 flex-shrink-0">
     <div class="flex items-center justify-between gap-3 mb-1">
@@ -192,7 +195,6 @@
     </div>
   </div>
 </div>
-
 
 <script>
   function analysisSelectedLoomFile() {

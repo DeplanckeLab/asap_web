@@ -1431,8 +1431,10 @@ export default class extends Controller {
     })
   }
 
-  // Load external scripts, run inline scripts, then insert HTML so Stimulus
-  // connects only after dependencies (e.g. Plotly + cellFilteringData) are ready.
+  // Load external scripts first, insert HTML, then run inline scripts.
+  // Inline scripts often bind to DOM nodes in the inserted HTML (e.g. import
+  // metadata modal). Stimulus connects via MutationObserver microtasks after
+  // this synchronous turn, so globals set by inline scripts are ready in time.
   _insertHtmlWithScripts(html) {
     if (!this.hasContentTarget) return Promise.resolve()
     const { cleanHtml, externalSrcs, inlineTexts } = this._extractScriptsFromHtml(html)
@@ -1441,8 +1443,8 @@ export default class extends Controller {
       chain = chain.then(() => this._loadExternalScript(src))
     })
     return chain.then(() => {
-      this._executeInlineScriptTexts(inlineTexts)
       this.contentTarget.innerHTML = cleanHtml
+      this._executeInlineScriptTexts(inlineTexts)
     })
   }
 

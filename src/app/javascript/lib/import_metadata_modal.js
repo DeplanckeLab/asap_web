@@ -1,15 +1,40 @@
-<%# Shared Import metadata modal scripts (visualization + heatmap + analysis). Requires local: loom_file %>
-<% wrap_in_script_tag = local_assigns.fetch(:wrap_in_script_tag, true) %>
-<% if wrap_in_script_tag %><script><% end %>
-var IMPORT_METADATA_DEFAULT_LOOM_FILE = <%= loom_file.to_json %>
+// Shared Import metadata modal logic (analysis / visualization / heatmap).
+// Loom file is resolved at call time from the analysis selector or modal data attribute.
+
+function defaultImportMetadataLoomFile() {
+  const modal = document.getElementById('add-metadata-modal')
+  const fromModal = modal && modal.dataset ? modal.dataset.defaultLoomFile : ''
+  if (fromModal) return fromModal
+  return null
+}
+
+function loomFromAnalysisUi() {
+  const loomSelect = document.getElementById('analysis-loom-select')
+  if (loomSelect && loomSelect.value) {
+    try {
+      const selectedUrl = new URL(loomSelect.value, window.location.origin)
+      const fromQuery = selectedUrl.searchParams.get('loom_file')
+      if (fromQuery) return fromQuery
+    } catch (_e) {
+      // ignore invalid select values
+    }
+  }
+
+  const stepSelectorElement = document.querySelector('[data-controller*="step-selector"]')
+  const loomFromData = stepSelectorElement && stepSelectorElement.getAttribute('data-step-selector-loom-file-value')
+  return loomFromData || null
+}
 
 function resolveImportMetadataLoomFile() {
-  if (typeof analysisSelectedLoomFile === 'function') {
-    var selected = analysisSelectedLoomFile()
+  if (typeof window.analysisSelectedLoomFile === 'function') {
+    const selected = window.analysisSelectedLoomFile()
     if (selected && selected !== '__all__') return selected
   }
-  return IMPORT_METADATA_DEFAULT_LOOM_FILE
+  const fromUi = loomFromAnalysisUi()
+  if (fromUi && fromUi !== '__all__') return fromUi
+  return defaultImportMetadataLoomFile()
 }
+
 
 function openAddMetadataModal(metadataTypeId) {
   var modal = document.getElementById('add-metadata-modal')
@@ -114,6 +139,9 @@ function openAddMetadataModal(metadataTypeId) {
 
   modal.classList.remove('hidden')
 
+  // Always show an example placeholder immediately (defaults if samples are not loaded yet).
+  updateModalPlaceholder()
+
   var projectId = window.location.pathname.match(/\/projects\/([^\/]+)/)?.[1]
   var loomFile = resolveImportMetadataLoomFile()
   if (projectId && loomFile) {
@@ -126,10 +154,11 @@ function openAddMetadataModal(metadataTypeId) {
       window._sampleGenes = data.genes || []
       updateModalPlaceholder()
     })
-    .catch(function() {})
+    .catch(function() {
+      updateModalPlaceholder()
+    })
   }
 }
-window.openAddMetadataModal = openAddMetadataModal
 
 function updateModalPlaceholder() {
   var modal = document.getElementById('add-metadata-modal')
@@ -138,6 +167,10 @@ function updateModalPlaceholder() {
   var inputType = modal.querySelector('#import-input-type-id')?.value
   var content = modal.querySelector('#import-metadata-content')
   if (!content) return
+  if (metadataType === '4') {
+    content.placeholder = 'Any text or JSON'
+    return
+  }
   var cells = window._sampleCells && window._sampleCells.length > 0 ? window._sampleCells : ['Cell1', 'Cell2', 'Cell3']
   var genes = window._sampleGenes && window._sampleGenes.length > 0 ? window._sampleGenes : ['Gene1', 'Gene2', 'Gene3']
   if (inputType === '2') {
@@ -148,6 +181,40 @@ function updateModalPlaceholder() {
     content.placeholder = lines.join('\n')
   } else {
     content.placeholder = (metadataType === '2' ? genes : cells).join('\n')
+  }
+}
+
+function applyMetadataTypeUi(modal, type) {
+  var delimiterGroup = modal.querySelector('#import-delimiter-group')
+  var nameGroup = modal.querySelector('#import-name-group')
+  var hasHeaderGroup = modal.querySelector('#import-has-header-group')
+  var formatGroup = modal.querySelector('#import-format-group')
+  var descGlobal = modal.querySelector('#import-format-desc-global')
+  var descList = modal.querySelector('#import-format-desc-list')
+  var descMatrix = modal.querySelector('#import-format-desc-matrix')
+  var inputType = modal.querySelector('#import-input-type-id')?.value
+
+  if (type === '4') {
+    if (delimiterGroup) delimiterGroup.classList.add('hidden')
+    if (hasHeaderGroup) hasHeaderGroup.classList.add('hidden')
+    if (formatGroup) formatGroup.classList.add('hidden')
+    if (nameGroup) nameGroup.classList.remove('hidden')
+    if (descGlobal) descGlobal.classList.remove('hidden')
+    if (descList) descList.classList.add('hidden')
+    if (descMatrix) descMatrix.classList.add('hidden')
+  } else {
+    if (delimiterGroup) delimiterGroup.classList.remove('hidden')
+    if (hasHeaderGroup) hasHeaderGroup.classList.remove('hidden')
+    if (formatGroup) formatGroup.classList.remove('hidden')
+    if (nameGroup) nameGroup.classList.remove('hidden')
+    if (descGlobal) descGlobal.classList.add('hidden')
+    if (inputType === '2') {
+      if (descList) descList.classList.add('hidden')
+      if (descMatrix) descMatrix.classList.remove('hidden')
+    } else {
+      if (descList) descList.classList.remove('hidden')
+      if (descMatrix) descMatrix.classList.add('hidden')
+    }
   }
 }
 
@@ -205,11 +272,13 @@ function setupModalFormListeners() {
   modal.querySelectorAll('.metadata-type-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       var type = btn.getAttribute('data-metadata-type')
+      var typeInput = modal.querySelector('#import-metadata-type-id')
+      var previousType = typeInput ? typeInput.value : null
       if (type === '4' && modal.querySelector('#import-input-method-id')?.value === '3') {
         var im1 = modal.querySelector('.input-method-btn[data-input-method="1"]')
         if (im1) im1.click()
       }
-      modal.querySelector('#import-metadata-type-id').value = type
+      if (typeInput) typeInput.value = type
       modal.querySelectorAll('.metadata-type-btn').forEach(function(b) {
         if (b.getAttribute('data-metadata-type') === type) { b.classList.remove('bg-gray-100','text-gray-700','hover:bg-gray-200'); b.classList.add('bg-blue-600','text-white') }
         else { b.classList.remove('bg-blue-600','text-white'); b.classList.add('bg-gray-100','text-gray-700','hover:bg-gray-200') }
@@ -223,6 +292,11 @@ function setupModalFormListeners() {
           b.removeAttribute('disabled')
         }
       })
+      applyMetadataTypeUi(modal, type)
+      if (previousType !== type) {
+        var content = modal.querySelector('#import-metadata-content')
+        if (content) content.value = ''
+      }
       updateModalPlaceholder()
       checkModalForm()
     })
@@ -300,14 +374,6 @@ function setupModalFormListeners() {
     if (sp > 0 && aid > 0) vizPickCrossProjectAnnot(modal, sp, aid, aname)
   })
 }
-document.addEventListener('DOMContentLoaded', setupModalFormListeners)
-document.addEventListener('turbo:load', setupModalFormListeners)
-// Step AJAX injection runs these scripts before the modal HTML is inserted, and
-// DOMContentLoaded/turbo:load have already fired — attach when possible, and again on open.
-document.querySelectorAll('body > #add-metadata-modal').forEach(function(staleModal) { staleModal.remove() })
-if (document.readyState !== 'loading') setupModalFormListeners()
-window.setupModalFormListeners = setupModalFormListeners
-window.openAddMetadataModal = openAddMetadataModal
 
 function vizEscAttr(s) {
   return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
@@ -875,9 +941,17 @@ function handleSubmitMetadata(btn) {
   })
 }
 
-window.handleFillExampleContent = handleFillExampleContent
-window.handlePreviewMetadata = handlePreviewMetadata
-window.handleBackToImportForm = handleBackToImportForm
-window.handleSubmitMetadata = handleSubmitMetadata
 
-<% if wrap_in_script_tag %></script><% end %>
+
+export function installImportMetadataModal() {
+  window.openAddMetadataModal = openAddMetadataModal
+  window.setupModalFormListeners = setupModalFormListeners
+  window.handleFillExampleContent = handleFillExampleContent
+  window.handlePreviewMetadata = handlePreviewMetadata
+  window.handleBackToImportForm = handleBackToImportForm
+  window.handleSubmitMetadata = handleSubmitMetadata
+  document.addEventListener('turbo:load', setupModalFormListeners)
+  if (document.readyState !== 'loading') setupModalFormListeners()
+}
+
+export { openAddMetadataModal, setupModalFormListeners, handleFillExampleContent }

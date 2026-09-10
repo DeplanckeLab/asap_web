@@ -322,6 +322,9 @@ import NewsFilterController from "controllers/news_filter_controller"
 application.register("news-filter", NewsFilterController)
 console.log('News filter controller registered')
 
+import OpenImportMetadataController from "controllers/open_import_metadata_controller"
+application.register("open-import-metadata", OpenImportMetadataController)
+
 // Log all registered controllers
 console.log('Registered controllers:', Object.keys(application.router.modulesByIdentifier))
 

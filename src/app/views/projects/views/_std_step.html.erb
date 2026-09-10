@@ -101,6 +101,33 @@
                   <i class="fas fa-th sm:mr-1"></i><span class="hidden sm:inline"> Heatmap viewer</span>
                 <% end %>
               <% end %>
+              <!-- New Import Button (import_metadata uses the shared import popup on the analysis page) -->
+              <% if @step.name == 'import_metadata' %>
+                <% import_modal_ready = (@selected_loom_file.present? || (defined?(@available_loom_files) && @available_loom_files.present?)) %>
+                <% if editable?(@project) && import_modal_ready %>
+                  <button type="button"
+                          class="inline-flex items-center box-border h-8 px-3 border border-transparent bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-xs transition-colors cursor-pointer"
+                          data-controller="open-import-metadata"
+                          data-action="click->open-import-metadata#open"
+                          style="flex-shrink: 0;">
+                    <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New import</span>
+                  </button>
+                <% elsif editable?(@project) %>
+                  <button type="button" disabled
+                          class="inline-flex items-center box-border h-8 px-3 border border-transparent bg-gray-300 text-gray-500 rounded-md font-medium text-xs cursor-not-allowed"
+                          style="flex-shrink: 0;"
+                          title="No loom file is available for metadata import yet">
+                    <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New import</span>
+                  </button>
+                <% else %>
+                  <button type="button" disabled
+                          class="inline-flex items-center box-border h-8 px-3 border border-transparent bg-gray-300 text-gray-500 rounded-md font-medium text-xs cursor-not-allowed"
+                          style="flex-shrink: 0;"
+                          title="You need edit rights to import metadata">
+                    <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New import</span>
+                  </button>
+                <% end %>
+              <% end %>
               <!-- New Run Button -->
               <% if @step.has_std_form && @step.multiple_runs %>
                 <% if analyzable?(@project) %>
@@ -249,6 +276,33 @@
                     style: "flex-shrink: 0;",
                     title: "Open heatmap viewer" do %>
                   <i class="fas fa-th sm:mr-1"></i><span class="hidden sm:inline"> Heatmap viewer</span>
+                <% end %>
+              <% end %>
+              <!-- New Import Button (import_metadata uses the shared import popup on the analysis page) -->
+              <% if @step.name == 'import_metadata' %>
+                <% import_modal_ready = (@selected_loom_file.present? || (defined?(@available_loom_files) && @available_loom_files.present?)) %>
+                <% if editable?(@project) && import_modal_ready %>
+                  <button type="button"
+                          class="inline-flex items-center box-border h-8 px-3 border border-transparent bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-xs transition-colors cursor-pointer"
+                          data-controller="open-import-metadata"
+                          data-action="click->open-import-metadata#open"
+                          style="flex-shrink: 0;">
+                    <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New import</span>
+                  </button>
+                <% elsif editable?(@project) %>
+                  <button type="button" disabled
+                          class="inline-flex items-center box-border h-8 px-3 border border-transparent bg-gray-300 text-gray-500 rounded-md font-medium text-xs cursor-not-allowed"
+                          style="flex-shrink: 0;"
+                          title="No loom file is available for metadata import yet">
+                    <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New import</span>
+                  </button>
+                <% else %>
+                  <button type="button" disabled
+                          class="inline-flex items-center box-border h-8 px-3 border border-transparent bg-gray-300 text-gray-500 rounded-md font-medium text-xs cursor-not-allowed"
+                          style="flex-shrink: 0;"
+                          title="You need edit rights to import metadata">
+                    <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New import</span>
+                  </button>
                 <% end %>
               <% end %>
               <!-- New Run Button -->

@@ -1,4 +1,6 @@
-<div id="add-metadata-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+<div id="add-metadata-modal"
+     class="hidden fixed inset-0 z-[13000] flex items-center justify-center"
+     <% if local_assigns[:default_loom_file].present? %>data-default-loom-file="<%= default_loom_file %>"<% end %>>
   <div class="absolute inset-0 bg-black/40"
        onclick="document.getElementById('add-metadata-modal').classList.add('hidden')"></div>
   <div class="relative bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] flex flex-col">

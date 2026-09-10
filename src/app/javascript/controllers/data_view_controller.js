@@ -220,7 +220,9 @@ export default class extends Controller {
 
   selectMetadataType(event) {
     const type = event.currentTarget.getAttribute('data-metadata-type')
-    this.element.querySelector('#import-metadata-type-id').value = type
+    const typeInput = this.element.querySelector('#import-metadata-type-id')
+    const previousType = typeInput ? typeInput.value : null
+    if (typeInput) typeInput.value = type
     this.activateButton('.metadata-type-btn', type, 'data-metadata-type')
 
     const delimiterGroup = this.element.querySelector('#import-delimiter-group')
@@ -264,6 +266,10 @@ export default class extends Controller {
       }
     })
 
+    if (previousType !== type) {
+      const content = this.element.querySelector('#import-metadata-content')
+      if (content) content.value = ''
+    }
     this.updatePlaceholder()
     this.checkForm()
   }

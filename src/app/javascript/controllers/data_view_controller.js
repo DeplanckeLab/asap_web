@@ -1,7 +1,16 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["content", "loading"]
+  static targets = [
+    "content",
+    "loading",
+    "dataTypeAnnotName",
+    "dataTypeUpdateUrl",
+    "dataTypeSelect",
+    "dataTypeNumericHint",
+    "simStepUpdateUrl",
+    "simStepSelect"
+  ]
   static values = {
     projectId: String
   }
@@ -1069,6 +1078,9 @@ export default class extends Controller {
       event.stopPropagation()
     }
 
+    this._currentLoomFile = loomFile
+    this._currentDataType = dataType
+
     console.log('[DataViewController] Loading content:', { loomFile, dataType })
 
     if (this.hasLoadingTarget) {
@@ -1221,14 +1233,68 @@ export default class extends Controller {
     }
   }
 
-  simStepChanged(event) {
-    const select = event.currentTarget
-    const url = select.dataset.updateUrl
-    if (!url) return
+  openDataTypeModal(event) {
+    if (event.type === 'keydown' && event.key === ' ') {
+      event.preventDefault()
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    const btn = event.currentTarget
+    const modal = this.element.querySelector('#data-view-edit-data-type-modal')
+    if (!modal || !this.hasDataTypeSelectTarget) return
+
+    if (this.hasDataTypeUpdateUrlTarget) {
+      this.dataTypeUpdateUrlTarget.value = btn.dataset.updateUrl || ''
+    }
+    if (this.hasDataTypeAnnotNameTarget) {
+      this.dataTypeAnnotNameTarget.textContent = btn.dataset.annotName || ''
+    }
+
+    const allowedIds = (btn.dataset.optionIds || '').split(',').filter(Boolean)
+    const disabledIds = (btn.dataset.disabledIds || '').split(',').filter(Boolean)
+    const selectedId = String(btn.dataset.dataTypeId || '')
+    const select = this.dataTypeSelectTarget
+
+    Array.from(select.options).forEach((opt) => {
+      const id = String(opt.value)
+      const allowed = allowedIds.length === 0 || allowedIds.includes(id)
+      const disabled = disabledIds.includes(id)
+      opt.hidden = !allowed
+      opt.disabled = !allowed || disabled
+    })
+
+    const selectable = Array.from(select.options).find((opt) => !opt.hidden && !opt.disabled && opt.value === selectedId)
+    if (selectable) {
+      select.value = selectedId
+    } else {
+      const first = Array.from(select.options).find((opt) => !opt.hidden && !opt.disabled)
+      if (first) select.value = first.value
+    }
+
+    if (this.hasDataTypeNumericHintTarget) {
+      this.dataTypeNumericHintTarget.classList.toggle('hidden', disabledIds.length === 0)
+    }
+
+    modal.classList.remove('hidden')
+  }
+
+  closeDataTypeModal(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const modal = this.element.querySelector('#data-view-edit-data-type-modal')
+    if (modal) modal.classList.add('hidden')
+  }
+
+  submitDataTypeForm(event) {
+    event.preventDefault()
+    const url = this.hasDataTypeUpdateUrlTarget ? this.dataTypeUpdateUrlTarget.value : ''
+    if (!url || !this.hasDataTypeSelectTarget) return
 
     const csrfToken = document.querySelector('meta[name="csrf-token"]')
-    const previousValue = select.dataset.lastValue || ''
-    select.disabled = true
+    const submitBtn = event.currentTarget.querySelector('button[type="submit"]')
+    if (submitBtn) submitBtn.disabled = true
 
     fetch(url, {
       method: 'PATCH',
@@ -1238,23 +1304,123 @@ export default class extends Controller {
         'X-CSRF-Token': csrfToken ? csrfToken.content : ''
       },
       credentials: 'same-origin',
-      body: JSON.stringify({ annot: { sim_step_id: select.value } })
+      body: JSON.stringify({ annot: { data_type_id: this.dataTypeSelectTarget.value } })
     })
       .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
       .then((res) => {
         if (res.ok) {
-          select.dataset.lastValue = select.value
+          this.closeDataTypeModal()
+          this.reloadCurrentContent()
         } else {
-          select.value = previousValue
+          window.alert(res.data.error || 'Failed to update data type.')
+        }
+      })
+      .catch(() => {
+        window.alert('Failed to update data type.')
+      })
+      .finally(() => {
+        if (submitBtn) submitBtn.disabled = false
+      })
+  }
+
+  openSimStepModal(event) {
+    if (event.type === 'keydown' && event.key === ' ') {
+      event.preventDefault()
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    const btn = event.currentTarget
+    const modal = this.element.querySelector('#data-view-edit-sim-step-modal')
+    if (!modal || !this.hasSimStepSelectTarget) return
+
+    if (this.hasSimStepUpdateUrlTarget) {
+      this.simStepUpdateUrlTarget.value = btn.dataset.updateUrl || ''
+    }
+    this.simStepSelectTarget.value = btn.dataset.simStepId || ''
+    this._simStepAnnotId = btn.dataset.annotSimStepLabel ||
+      (btn.dataset.updateUrl || '').match(/\/annots\/(\d+)/)?.[1]
+    modal.classList.remove('hidden')
+  }
+
+  closeSimStepModal(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const modal = this.element.querySelector('#data-view-edit-sim-step-modal')
+    if (modal) modal.classList.add('hidden')
+  }
+
+  submitSimStepForm(event) {
+    event.preventDefault()
+    const url = this.hasSimStepUpdateUrlTarget ? this.simStepUpdateUrlTarget.value : ''
+    if (!url || !this.hasSimStepSelectTarget) return
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')
+    const submitBtn = event.currentTarget.querySelector('button[type="submit"]')
+    if (submitBtn) submitBtn.disabled = true
+    const selectedOption = this.simStepSelectTarget.selectedOptions[0]
+    const label = selectedOption && selectedOption.value
+      ? selectedOption.textContent
+      : 'Not defined'
+
+    fetch(url, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-CSRF-Token': csrfToken ? csrfToken.content : ''
+      },
+      credentials: 'same-origin',
+      body: JSON.stringify({ annot: { sim_step_id: this.simStepSelectTarget.value } })
+    })
+      .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
+      .then((res) => {
+        if (res.ok) {
+          const annotId = this._simStepAnnotId
+          if (annotId) {
+            const badgeEl = this.element.querySelector(`[data-annot-sim-step-label="${annotId}"]`)
+            if (badgeEl) {
+              const stepLabel = res.data.step_label || label
+              const defined = !!this.simStepSelectTarget.value
+              const text = defined ? `Mapped to: ${stepLabel}` : 'Mapped to: -'
+              const css = defined
+                ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 hover:border-indigo-300'
+                : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200 hover:border-gray-300'
+              badgeEl.className = `inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium border cursor-pointer ${css}`
+              badgeEl.innerHTML = `${this.escapeHtml(text)}<i class="fas fa-pen opacity-70" style="font-size:7px;line-height:1;" aria-hidden="true"></i>`
+              badgeEl.dataset.simStepId = this.simStepSelectTarget.value || ''
+            }
+          }
+          this.closeSimStepModal()
+        } else {
           window.alert(res.data.error || 'Failed to save ASAP step mapping.')
         }
       })
       .catch(() => {
-        select.value = previousValue
         window.alert('Failed to save ASAP step mapping.')
       })
       .finally(() => {
-        select.disabled = false
+        if (submitBtn) submitBtn.disabled = false
       })
+  }
+
+  reloadCurrentContent() {
+    const loomFile = this._currentLoomFile
+    const dataType = this._currentDataType
+    if (loomFile && dataType) {
+      this.loadContent(loomFile, dataType)
+      return
+    }
+
+    const activeTab = this.element.querySelector('[data-data-view-data-type-param].bg-blue-600')
+    const activeLoom = this.element.querySelector('[data-loom-file].bg-blue-50, [data-loom-file].border-blue-500')
+    const resolvedType = activeTab?.dataset?.dataTypeParam ||
+      activeTab?.getAttribute('data-data-view-data-type-param') ||
+      'matrices'
+    const resolvedLoom = activeTab?.dataset?.loomFileParam ||
+      activeTab?.getAttribute('data-data-view-loom-file-param') ||
+      activeLoom?.dataset?.loomFile
+    if (resolvedLoom) this.loadContent(resolvedLoom, resolvedType)
   }
 }

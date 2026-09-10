@@ -1,6 +1,9 @@
 <div class="flex flex-col h-full">
 <% if @selected_loom_file && @annots_by_loom_and_type && @annots_by_loom_and_type[@selected_loom_file] %>
   <% loom_data = @annots_by_loom_and_type[@selected_loom_file] %>
+  <% data_type_blocked_ids = Array(@data_type_blocked_annot_ids).map(&:to_i) %>
+  <% numeric_disabled_ids = Array(@data_type_numeric_disabled_annot_ids).map(&:to_i) %>
+  <% numeric_type_id = @numeric_data_type_id %>
   
   <!-- Sticky Top Menu: Data Type Tabs -->
   <div class="sticky top-0 z-10 bg-white border-b border-gray-200 flex-shrink-0" data-guided-tour="data-type-tabs">
@@ -66,6 +69,9 @@
       <% if selected_annots && selected_annots.any? %>
         <div class="space-y-3">
           <% selected_annots.each do |annot| %>
+            <% type_options = annot.expression_matrix? ? @matrix_data_type_options : @annot_data_type_options %>
+            <% can_edit_data_type = type_options.present? && !data_type_blocked_ids.include?(annot.id) %>
+            <% disabled_type_ids = numeric_disabled_ids.include?(annot.id) ? [numeric_type_id].compact : [] %>
             <div class="bg-gray-50 rounded-lg border border-gray-200 p-4 hover:bg-gray-100 hover:border-blue-300 transition-colors">
               <div class="flex items-start justify-between gap-3">
                 <%= link_to annot_path(annot, from: 'data'), class: 'flex-1 min-w-0 cursor-pointer' do %>
@@ -78,60 +84,78 @@
                   <% if card_value.present? %>
                     <p class="text-sm text-gray-800 font-mono break-all mb-2"><%= card_value %></p>
                   <% end %>
-                  <div class="flex flex-wrap gap-2 items-center">
-                    <% if annot.dim == 3 || annot.name == '/matrix' || annot.name.start_with?('/layers/') %>
-                      <%= dimension_badge(annot.nber_rows, :row, @project) if annot.nber_rows %>
-                      <%= dimension_badge_col_aligned_with_matrix(annot.nber_cols, annot.filepath, @project) if annot.nber_cols %>
-                    <% elsif annot.name.start_with?('/col_attrs/') %>
-                      <%= dimension_badge(matrix_nber_cols, :col, @project) if matrix_nber_cols %>
-                      <%= component_dimension_badge(annot.nber_rows) %>
-                    <% elsif annot.name.start_with?('/row_attrs/') %>
-                      <%= dimension_badge(matrix_nber_rows, :row, @project) if matrix_nber_rows %>
-                      <%= component_dimension_badge(annot.nber_cols) %>
-                    <% else %>
-                      <%= annot_global_badge %>
-                    <% end %>
-                    <%= annot_data_type_badge(annot) %>
-                    <% if annot_storage_type_label(annot, @project).present? %>
-                      <%= annot_matrix_type_badge(annot, @project) %>
-                    <% end %>
-                    <% if annot.expression_matrix? %>
-                      <%= annot_data_transformation_badge(annot) %>
-                    <% end %>
-                    <%= categorical_categories_badge(annot) %>
-                  </div>
-                  <% if annot.mem_size %>
-                    <div class="mt-2 text-xs text-gray-500">
-                      Size: <%= display_mem(annot.mem_size) %>
-                    </div>
-                  <% end %>
                 <% end %>
                 <%= annot_download_links(annot, wrapper_class: 'flex items-center gap-1 flex-shrink-0') %>
               </div>
-              <% unless annot.name.to_s.start_with?('/attrs/') %>
-              <% if @sim_step_options && annot.imported? %>
-                <div class="mt-3 pt-3 border-t border-gray-200">
-                  <label class="block text-xs font-medium text-gray-500 mb-1">ASAP step mapping</label>
-                  <select class="annot-sim-step-select w-full max-w-xs rounded-md border border-gray-300 px-2 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
-                          data-annot-id="<%= annot.id %>"
-                          data-update-url="<%= annot_path(annot, from: 'data') %>"
-                          data-action="change->data-view#simStepChanged">
-                    <option value="">Not defined</option>
-                    <% @sim_step_options.each do |label, step_id| %>
-                      <option value="<%= step_id %>" <%= 'selected' if annot.sim_step_id == step_id %>><%= label %></option>
-                    <% end %>
-                  </select>
-                  <p class="mt-1 text-xs text-gray-400 mb-0">Map imported data to a pipeline step for downstream analyses.</p>
-                </div>
-              <% elsif annot.imported? && annot.sim_step_id.present? %>
-                <% mapped_step = Step.find_by(id: annot.sim_step_id) %>
-                <% if mapped_step %>
-                  <div class="mt-3 pt-3 border-t border-gray-200">
-                    <span class="text-xs font-medium text-gray-500">ASAP step mapping</span>
-                    <p class="mt-1 text-xs text-gray-700 mb-0"><%= mapped_step.label.presence || mapped_step.name.humanize %></p>
-                  </div>
+
+              <div class="mt-2 flex flex-wrap gap-2 items-center">
+                <% if annot.dim == 3 || annot.name == '/matrix' || annot.name.start_with?('/layers/') %>
+                  <%= dimension_badge(annot.nber_rows, :row, @project) if annot.nber_rows %>
+                  <%= dimension_badge_col_aligned_with_matrix(annot.nber_cols, annot.filepath, @project) if annot.nber_cols %>
+                <% elsif annot.name.start_with?('/col_attrs/') %>
+                  <%= dimension_badge(matrix_nber_cols, :col, @project) if matrix_nber_cols %>
+                  <%= component_dimension_badge(annot.nber_rows) %>
+                <% elsif annot.name.start_with?('/row_attrs/') %>
+                  <%= dimension_badge(matrix_nber_rows, :row, @project) if matrix_nber_rows %>
+                  <%= component_dimension_badge(annot.nber_cols) %>
+                <% else %>
+                  <%= annot_global_badge %>
                 <% end %>
-              <% end %>
+                <% if annot_storage_type_label(annot, @project).present? %>
+                  <%= annot_matrix_type_badge(annot, @project) %>
+                <% end %>
+                <% if annot.expression_matrix? %>
+                  <%= annot_data_transformation_badge(annot) %>
+                <% end %>
+                <%= categorical_categories_badge(annot) %>
+                <% if can_edit_data_type %>
+                  <%= annot_data_type_badge(
+                        annot,
+                        editable: true,
+                        data: {
+                          action: 'click->data-view#openDataTypeModal keydown.enter->data-view#openDataTypeModal keydown.space->data-view#openDataTypeModal',
+                          update_url: annot_path(annot, from: 'data'),
+                          annot_name: annot.name,
+                          data_type_id: annot.data_type_id,
+                          option_ids: type_options.map(&:last).join(','),
+                          disabled_ids: disabled_type_ids.join(',')
+                        }
+                      ) %>
+                <% else %>
+                  <%= annot_data_type_badge(annot) %>
+                <% end %>
+                <% if !annot.name.to_s.start_with?('/attrs/') && annot.imported? %>
+                  <% if @sim_step_options %>
+                    <%= annot_sim_step_badge(
+                          annot,
+                          prefixed: true,
+                          editable: true,
+                          data: {
+                            action: 'click->data-view#openSimStepModal keydown.enter->data-view#openSimStepModal keydown.space->data-view#openSimStepModal',
+                            update_url: annot_path(annot, from: 'data'),
+                            sim_step_id: annot.sim_step_id,
+                            annot_sim_step_label: annot.id
+                          }
+                        ) %>
+                  <% else %>
+                    <%= annot_sim_step_badge(annot, prefixed: true) %>
+                  <% end %>
+                <% end %>
+              </div>
+              <% creator_name = user_display_name(annot.user || annot.run&.user, current_user: current_user) %>
+              <% created_at_label = annot.created_at ? annot.created_at.strftime('%b %d, %Y %H:%M') : nil %>
+              <% if creator_name != '-' || created_at_label || annot.mem_size %>
+                <div class="mt-2 text-xs text-gray-500 flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <% if creator_name != '-' %>
+                    <span>Created by <%= creator_name %></span>
+                  <% end %>
+                  <% if created_at_label %>
+                    <span><%= created_at_label %></span>
+                  <% end %>
+                  <% if annot.mem_size %>
+                    <span>Size: <%= display_mem(annot.mem_size) %></span>
+                  <% end %>
+                </div>
               <% end %>
             </div>
           <% end %>
@@ -143,6 +167,93 @@
       <% end %>
     </div>
   </div>
+
+  <% if @annot_data_type_options.present? || @matrix_data_type_options.present? %>
+    <div id="data-view-edit-data-type-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/40"
+           data-action="click->data-view#closeDataTypeModal"></div>
+      <div class="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h3 class="text-lg font-semibold text-gray-900">Edit data type</h3>
+          <button type="button"
+                  aria-label="Close"
+                  data-action="click->data-view#closeDataTypeModal"
+                  class="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer">
+            <i class="fas fa-times text-lg"></i>
+          </button>
+        </div>
+        <div class="px-6 py-5">
+          <p class="text-sm text-gray-600 mb-4">
+            Change the data type of <span class="font-mono text-gray-900" data-data-view-target="dataTypeAnnotName"></span>.
+            The change is applied to every loom file in this project that contains an annotation with the same name.
+          </p>
+          <form data-action="submit->data-view#submitDataTypeForm" class="space-y-3">
+            <input type="hidden" name="update_url" data-data-view-target="dataTypeUpdateUrl">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Data type</label>
+              <select data-data-view-target="dataTypeSelect"
+                      class="block w-full max-w-md rounded-md border border-gray-300 shadow-sm px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <% Array(@annot_data_type_options).each do |label, id| %>
+                  <option value="<%= id %>" data-option-id="<%= id %>"><%= label %></option>
+                <% end %>
+              </select>
+              <p class="mt-1 text-xs text-gray-500 hidden" data-data-view-target="dataTypeNumericHint">
+                NUMERIC is disabled because some category names are not numeric values.
+              </p>
+            </div>
+            <div>
+              <button type="submit"
+                      class="inline-flex justify-center px-4 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 cursor-pointer border-0">
+                Update data type
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  <% end %>
+
+  <% if @sim_step_options.present? %>
+    <div id="data-view-edit-sim-step-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+      <div class="absolute inset-0 bg-black/40"
+           data-action="click->data-view#closeSimStepModal"></div>
+      <div class="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h3 class="text-lg font-semibold text-gray-900">Edit ASAP step mapping</h3>
+          <button type="button"
+                  aria-label="Close"
+                  data-action="click->data-view#closeSimStepModal"
+                  class="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer">
+            <i class="fas fa-times text-lg"></i>
+          </button>
+        </div>
+        <div class="px-6 py-5">
+          <p class="text-sm text-gray-600 mb-4">
+            Associate imported metadata or matrices with a pipeline step so they become available as input for downstream analyses.
+          </p>
+          <form data-action="submit->data-view#submitSimStepForm" class="space-y-3">
+            <input type="hidden" name="update_url" data-data-view-target="simStepUpdateUrl">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">ASAP step</label>
+              <select data-data-view-target="simStepSelect"
+                      class="block w-full max-w-md rounded-md border border-gray-300 shadow-sm px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                <option value="">Not defined</option>
+                <% @sim_step_options.each do |label, step_id| %>
+                  <option value="<%= step_id %>"><%= label %></option>
+                <% end %>
+              </select>
+            </div>
+            <div>
+              <button type="submit"
+                      class="inline-flex justify-center px-4 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 cursor-pointer border-0">
+                Update step mapping
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  <% end %>
 <% elsif @available_loom_files && @available_loom_files.any? %>
   <div class="flex-1 overflow-y-auto flex items-center justify-center">
     <div class="text-center py-12 px-6">
@@ -158,4 +269,3 @@
 <% end %>
 
 </div>
-

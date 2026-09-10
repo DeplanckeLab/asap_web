@@ -480,7 +480,7 @@ class ProjectsController < ApplicationController
       all_annots = apply_publication_snapshot_to_annots(
         Annot.light.where(project_id: @project.id)
              .where.not(filepath: nil)
-             .includes(:step, :data_type, :data_transformation, run: [:std_method])
+             .includes(:step, :sim_step, :data_type, :data_transformation, :user, run: [:std_method, :user])
              .order(:name)
       )
       
@@ -553,6 +553,7 @@ class ProjectsController < ApplicationController
 
       if editable?(@project)
         @sim_step_options = helpers.sim_step_options_for_project(@project)
+        load_data_view_annot_edit_options!
       end
     end
     
@@ -3212,7 +3213,7 @@ class ProjectsController < ApplicationController
     annot_relation = annot_relation.where(filepath: @selected_loom_file) if @selected_loom_file.present?
 
     all_annots = apply_publication_snapshot_to_annots(
-      annot_relation.includes(:step, :data_type, :data_transformation, run: [:std_method]).order(:name)
+      annot_relation.includes(:step, :sim_step, :data_type, :data_transformation, :user, run: [:std_method, :user]).order(:name)
     ).to_a
 
     filepath_info = if @selected_loom_file.present?
@@ -3289,6 +3290,7 @@ class ProjectsController < ApplicationController
 
     if editable?(@project)
       @sim_step_options = helpers.sim_step_options_for_project(@project)
+      load_data_view_annot_edit_options!
     end
     
     respond_to do |format|
@@ -12640,6 +12642,41 @@ class ProjectsController < ApplicationController
           @selected_loom_file,
           @annots_by_loom_and_type[@selected_loom_file]&.dig(:global) || []
         )
+      end
+    end
+
+    # Shared edit affordances for data-view annot cards (type + ASAP step mapping).
+    def load_data_view_annot_edit_options!
+      @annot_data_type_options = DataType.order(:id)
+                                         .where(name: %w[NUMERIC DISCRETE STRING])
+                                         .map { |dt| [dt.label.presence || dt.name, dt.id] }
+      @matrix_data_type_options = DataType.order(:id)
+                                          .where(name: 'NUMERIC')
+                                          .map { |dt| [dt.label.presence || dt.name, dt.id] }
+      @numeric_data_type_id = DataType.find_by(name: 'NUMERIC')&.id
+      numeric_id = @numeric_data_type_id
+
+      @data_type_blocked_annot_ids = []
+      @data_type_numeric_disabled_annot_ids = []
+      return if @selected_loom_file.blank?
+
+      file_groups = @annots_by_loom_and_type[@selected_loom_file]
+      return if file_groups.blank?
+
+      displayed = file_groups.values.flatten
+      ref_by_name = {}
+      displayed.each do |annot|
+        next if annot.filepath.blank?
+
+        refs = (ref_by_name[annot.name] ||= RunAnnotReferenceScanner.run_ids_referencing_annot_name(@project.id, annot.name))
+        if refs.any?
+          @data_type_blocked_annot_ids << annot.id
+          next
+        end
+
+        if annot.data_type_id == 3 && numeric_id && !annot.categorical_numeric_coercible?
+          @data_type_numeric_disabled_annot_ids << annot.id
+        end
       end
     end
 

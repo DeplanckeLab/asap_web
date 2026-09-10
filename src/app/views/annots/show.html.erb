@@ -121,12 +121,12 @@
                 <button type="button"
                         aria-label="Edit data type"
                         title="Edit data type"
-                        class="inline-flex items-center justify-center w-7 h-7 rounded-md text-gray-500 hover:text-blue-600 hover:bg-blue-50 border border-gray-300 hover:border-blue-300 transition-colors cursor-pointer"
+                        class="<%= annot_badge_edit_button_class %>"
                         onclick="document.getElementById('edit-data-type-modal').classList.remove('hidden')">
                   <i class="fas fa-pen text-xs"></i>
                 </button>
               <% elsif @data_type_edit_blocked %>
-                <span class="text-xs text-gray-500" title="Editing is disabled while pipeline runs use this data as input">
+                <span class="text-xs text-gray-500" title="Editing is disabled while pipeline runs use this data as input. See Used as input by analyses below.">
                   Used as pipeline input
                 </span>
               <% end %>
@@ -206,31 +206,44 @@
               <% end %>
             </p>
           </div>
-          <% if !@annot.name.to_s.start_with?('/attrs/') && @sim_step_options && @annot.imported? %>
-            <div class="md:col-span-2">
-              <span class="text-sm font-medium text-gray-500">Manual mapping to ASAP step</span>
-              <p class="mt-1 text-xs text-gray-500 mb-2">
-                Imported metadata and matrices can be associated with a pipeline step so they become available as input for downstream analyses.
-              </p>
-              <div class="flex items-center gap-2 max-w-md">
-                <select id="annot-sim-step-id"
-                        class="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
-                        data-annot-id="<%= @annot.id %>"
-                        data-update-url="<%= annot_path(@annot, from: @from) %>">
-                  <option value="">Not defined</option>
-                  <% @sim_step_options.each do |label, step_id| %>
-                    <option value="<%= step_id %>" <%= 'selected' if @annot.sim_step_id == step_id %>><%= label %></option>
-                  <% end %>
-                </select>
-                <span id="annot-sim-step-status" class="text-sm text-green-600 hidden" aria-live="polite">Saved</span>
-              </div>
+          <% if @referencing_runs.present? %>
+            <div class="md:col-span-2" id="annot-referencing-runs">
+              <span class="text-sm font-medium text-gray-500">Used as input by analyses</span>
+              <% if @data_type_edit_blocked %>
+                <p class="mt-1 text-xs text-gray-500 mb-2">
+                  Data type cannot be changed while these analyses depend on this metadata.
+                </p>
+              <% end %>
+              <ul class="mt-1 space-y-1 list-none pl-0 mb-0">
+                <% @referencing_runs.each do |run| %>
+                  <% analysis_run_url = project_path(@project, view: 'analysis', panel_mode: 'run_details', step_id: run.step_id, run_id: run.id, loom_file: '__all__') %>
+                  <li class="text-sm text-gray-900">
+                    <%= link_to analysis_run_url, class: 'text-blue-600 hover:text-blue-800 hover:underline' do %>
+                      <%= run.step ? (run.step.label.presence || run.step.name.humanize) : 'Unknown' %>
+                      <% if run.step && run.step.multiple_runs %>
+                        #<%= run.num || run.id %>
+                      <% end %>
+                    <% end %>
+                  </li>
+                <% end %>
+              </ul>
             </div>
-          <% elsif !@annot.name.to_s.start_with?('/attrs/') && @annot.imported? && @annot.sim_step_id.present? && @annot.sim_step %>
-            <div>
+          <% end %>
+          <% if !@annot.name.to_s.start_with?('/attrs/') && @annot.imported? && (@sim_step_options || (@annot.sim_step_id.present? && @annot.sim_step)) %>
+            <div id="annot-sim-step">
               <span class="text-sm font-medium text-gray-500">Manual mapping to ASAP step</span>
-              <p class="mt-1 text-sm text-gray-900">
-                <%= @annot.sim_step.label.presence || @annot.sim_step.name.humanize %>
-              </p>
+              <div class="mt-2 flex items-center gap-2">
+                <%= annot_sim_step_badge(@annot) %>
+                <% if @sim_step_options %>
+                  <button type="button"
+                          aria-label="Edit ASAP step mapping"
+                          title="Edit ASAP step mapping"
+                          class="<%= annot_badge_edit_button_class %>"
+                          onclick="document.getElementById('edit-sim-step-modal').classList.remove('hidden')">
+                    <i class="fas fa-pen text-xs"></i>
+                  </button>
+                <% end %>
+              </div>
             </div>
           <% end %>
           <% if @annot.mem_size %>
@@ -544,6 +557,33 @@
                    annot: @annot,
                    data_type_options: @data_type_options,
                    disabled_data_type_ids: @disabled_data_type_ids,
+                   back_params: { from: params[:from], run_id: params[:run_id], step_id: params[:step_id] }.compact %>
+      </div>
+    </div>
+  </div>
+<% end %>
+
+<% if @sim_step_options && @annot.imported? && !@annot.name.to_s.start_with?('/attrs/') %>
+  <div id="edit-sim-step-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center">
+    <div class="absolute inset-0 bg-black/40"
+         onclick="document.getElementById('edit-sim-step-modal').classList.add('hidden')"></div>
+    <div class="relative bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+        <h3 class="text-lg font-semibold text-gray-900">Edit ASAP step mapping</h3>
+        <button type="button"
+                aria-label="Close"
+                onclick="document.getElementById('edit-sim-step-modal').classList.add('hidden')"
+                class="text-gray-400 hover:text-gray-600 transition-colors cursor-pointer">
+          <i class="fas fa-times text-lg"></i>
+        </button>
+      </div>
+      <div class="px-6 py-5">
+        <p class="text-sm text-gray-600 mb-4">
+          Associate imported metadata or matrices with a pipeline step so they become available as input for downstream analyses.
+        </p>
+        <%= render 'sim_step_form',
+                   annot: @annot,
+                   sim_step_options: @sim_step_options,
                    back_params: { from: params[:from], run_id: params[:run_id], step_id: params[:step_id] }.compact %>
       </div>
     </div>
@@ -969,53 +1009,4 @@ function initAnnotScaleControls() {
 <% end %>
 
 initAnnotScaleControls();
-
-<% if @sim_step_options && @annot.imported? && !@annot.name.to_s.start_with?('/attrs/') %>
-(function() {
-  var select = document.getElementById('annot-sim-step-id');
-  if (!select) return;
-  var status = document.getElementById('annot-sim-step-status');
-  var csrfToken = document.querySelector('meta[name="csrf-token"]');
-  select.addEventListener('change', function() {
-    var url = select.getAttribute('data-update-url');
-    if (!url) return;
-    if (status) {
-      status.classList.add('hidden');
-      status.textContent = 'Saving...';
-      status.classList.remove('hidden', 'text-green-600', 'text-red-600');
-      status.classList.add('text-gray-500');
-    }
-    fetch(url, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'X-CSRF-Token': csrfToken ? csrfToken.content : ''
-      },
-      credentials: 'same-origin',
-      body: JSON.stringify({ annot: { sim_step_id: select.value } })
-    })
-      .then(function(r) { return r.json().then(function(data) { return { ok: r.ok, data: data }; }); })
-      .then(function(res) {
-        if (!status) return;
-        if (res.ok) {
-          status.textContent = 'Saved';
-          status.classList.remove('text-gray-500', 'text-red-600', 'hidden');
-          status.classList.add('text-green-600');
-          setTimeout(function() { status.classList.add('hidden'); }, 2000);
-        } else {
-          status.textContent = res.data.error || 'Save failed';
-          status.classList.remove('text-gray-500', 'text-green-600', 'hidden');
-          status.classList.add('text-red-600');
-        }
-      })
-      .catch(function() {
-        if (!status) return;
-        status.textContent = 'Save failed';
-        status.classList.remove('text-gray-500', 'text-green-600', 'hidden');
-        status.classList.add('text-red-600');
-      });
-  });
-})();
-<% end %>
 <% end %>

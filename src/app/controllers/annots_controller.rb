@@ -331,7 +331,10 @@ class AnnotsController < ApplicationController
       end
     end
 
-    if editable?(@project) && data_type_editable?(@annot)
+    referencing_run_ids = referencing_run_ids_for(@annot)
+    @referencing_runs = Run.where(id: referencing_run_ids).includes(:step).order(:id).to_a
+
+    if editable?(@project) && data_type_editable?(@annot, referencing_run_ids: referencing_run_ids)
       allowed_type_names = allowed_data_type_names_for(@annot)
       @data_type_options = DataType.order(:id)
                                    .select { |dt| allowed_type_names.include?(dt.name) }
@@ -346,7 +349,7 @@ class AnnotsController < ApplicationController
         @disabled_data_type_ids << numeric_id if numeric_id
       end
     elsif editable?(@project) && annot_loom_file_present?(@annot)
-      @data_type_edit_blocked = annot_referenced_by_runs?(@annot)
+      @data_type_edit_blocked = referencing_run_ids.any?
     end
 
     load_sim_step_options if editable?(@project) && @annot.imported? && !@annot.name.to_s.start_with?('/attrs/')
@@ -452,7 +455,11 @@ class AnnotsController < ApplicationController
   def update
     @project = @annot.project
     unless editable?(@project)
-      redirect_to annot_path(@annot, annot_back_params), alert: 'You cannot edit this project.' and return
+      respond_to do |format|
+        format.html { redirect_to annot_path(@annot, annot_back_params), alert: 'You cannot edit this project.' }
+        format.json { render json: { error: 'You cannot edit this project.' }, status: :forbidden }
+      end
+      return
     end
 
     if params[:annot]&.key?(:sim_step_id)
@@ -460,13 +467,21 @@ class AnnotsController < ApplicationController
     end
 
     unless data_type_editable?(@annot)
-      redirect_to annot_path(@annot, annot_back_params), alert: data_type_edit_blocked_message(@annot) and return
+      respond_to do |format|
+        format.html { redirect_to annot_path(@annot, annot_back_params), alert: data_type_edit_blocked_message(@annot) }
+        format.json { render json: { error: data_type_edit_blocked_message(@annot) }, status: :unprocessable_entity }
+      end
+      return
     end
 
     permitted = annot_params
     new_type_id = permitted[:data_type_id].presence&.to_i
     unless new_type_id.positive? && DataType.exists?(id: new_type_id)
-      redirect_to annot_path(@annot, annot_back_params), alert: 'Invalid data type.' and return
+      respond_to do |format|
+        format.html { redirect_to annot_path(@annot, annot_back_params), alert: 'Invalid data type.' }
+        format.json { render json: { error: 'Invalid data type.' }, status: :unprocessable_entity }
+      end
+      return
     end
 
     # Guard: forbid DISCRETE -> NUMERIC conversion when categories are not
@@ -474,8 +489,12 @@ class AnnotsController < ApplicationController
     # category names, which would corrupt downstream numeric interpretation.
     numeric_type_id = DataType.find_by(name: 'NUMERIC')&.id
     if numeric_type_id && @annot.data_type_id == 3 && new_type_id == numeric_type_id && !@annot.categorical_numeric_coercible?
-      redirect_to annot_path(@annot, annot_back_params),
-                  alert: "Cannot change data type to NUMERIC: some category names are not numeric values." and return
+      msg = 'Cannot change data type to NUMERIC: some category names are not numeric values.'
+      respond_to do |format|
+        format.html { redirect_to annot_path(@annot, annot_back_params), alert: msg }
+        format.json { render json: { error: msg }, status: :unprocessable_entity }
+      end
+      return
     end
 
     h_data_types = {}
@@ -485,12 +504,21 @@ class AnnotsController < ApplicationController
 
     ori_annot = Annot.where(project_id: @project.id, name: @annot.name).order(:id).first
     unless ori_annot
-      redirect_to annot_path(@annot, annot_back_params), alert: 'Annotation not found.' and return
+      respond_to do |format|
+        format.html { redirect_to annot_path(@annot, annot_back_params), alert: 'Annotation not found.' }
+        format.json { render json: { error: 'Annotation not found.' }, status: :not_found }
+      end
+      return
     end
 
     all_annots = Annot.where(project_id: @project.id, name: @annot.name).order(:id)
     if all_annots.any? { |a| a.run_id.blank? }
-      redirect_to annot_path(@annot, annot_back_params), alert: 'Cannot update: a related row is missing its run.' and return
+      msg = 'Cannot update: a related row is missing its run.'
+      respond_to do |format|
+        format.html { redirect_to annot_path(@annot, annot_back_params), alert: msg }
+        format.json { render json: { error: msg }, status: :unprocessable_entity }
+      end
+      return
     end
 
     old_type_label = @annot.data_type&.then { |dt| dt.label.presence || dt.name } || 'none'
@@ -538,10 +566,23 @@ class AnnotsController < ApplicationController
       end
     end
 
-    redirect_to annot_path(@annot, annot_back_params), notice: notice
+    respond_to do |format|
+      format.html { redirect_to annot_path(@annot, annot_back_params), notice: notice }
+      format.json do
+        render json: {
+          data_type_id: @annot.reload.data_type_id,
+          data_type_name: @annot.data_type&.name,
+          data_type_label: @annot.data_type&.label.presence || @annot.data_type&.name,
+          notice: notice
+        }
+      end
+    end
   rescue StandardError => e
     Rails.logger.error("[annots#update] #{e.class}: #{e.message}\n#{e.backtrace&.first(12)&.join("\n")}")
-    redirect_to annot_path(@annot, annot_back_params), alert: "Update failed: #{e.message}"
+    respond_to do |format|
+      format.html { redirect_to annot_path(@annot, annot_back_params), alert: "Update failed: #{e.message}" }
+      format.json { render json: { error: e.message }, status: :internal_server_error }
+    end
   end
 
   def annot_back_params
@@ -688,11 +729,13 @@ class AnnotsController < ApplicationController
     data_type_editable?(annot)
   end
 
-  def data_type_editable?(annot)
+  def data_type_editable?(annot, referencing_run_ids: :scan)
     return false if annot.blank?
     return false if annot.filepath.blank?
     return false unless annot_loom_file_present?(annot)
-    return false if annot_referenced_by_runs?(annot)
+
+    ids = referencing_run_ids == :scan ? referencing_run_ids_for(annot) : Array(referencing_run_ids)
+    return false if ids.any?
 
     true
   end
@@ -703,10 +746,12 @@ class AnnotsController < ApplicationController
     File.exist?(loom)
   end
 
+  def referencing_run_ids_for(annot)
+    RunAnnotReferenceScanner.run_ids_referencing_annot_name(annot.project_id, annot.name)
+  end
+
   def annot_referenced_by_runs?(annot)
-    Annot.where(project_id: annot.project_id, name: annot.name).any? do |a|
-      RunAnnotReferenceScanner.run_ids_referencing_annot(annot.project_id, a).any?
-    end
+    referencing_run_ids_for(annot).any?
   end
 
   def data_type_edit_blocked_message(annot)

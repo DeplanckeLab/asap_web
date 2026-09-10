@@ -509,11 +509,86 @@ module ProjectsHelper
                 class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200')
   end
 
-  def annot_data_type_badge(annot)
+  def annot_data_type_badge(annot, editable: false, **html_options)
     return '' unless annot&.data_type
 
-    content_tag(:span, annot.data_type.name,
-                class: 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200')
+    base_class = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 border border-gray-200'
+    label = annot.data_type.name
+
+    if editable
+      content_tag(
+        :span,
+        safe_join([
+          ERB::Util.html_escape(label),
+          content_tag(:i, '', class: 'fas fa-pen opacity-70', style: 'font-size:7px;line-height:1;', 'aria-hidden': true)
+        ]),
+        {
+          role: 'button',
+          tabindex: 0,
+          class: "#{base_class} gap-1 hover:bg-gray-200 hover:border-gray-300 cursor-pointer",
+          title: 'Edit data type',
+          'aria-label': 'Edit data type'
+        }.merge(html_options)
+      )
+    else
+      content_tag(:span, label, class: base_class)
+    end
+  end
+
+  # Badge for manual ASAP step mapping on imported annots.
+  # @param annot [Annot]
+  # @param prefixed [Boolean] when true, label is "Mapped to: <step>" or "Mapped to: -"
+  # @param editable [Boolean] when true, render a clickable control with a pen icon
+  # @return [String] HTML badge
+  def annot_sim_step_badge(annot, prefixed: false, editable: false, **html_options)
+    mapped = annot&.sim_step.present?
+    step_label = if mapped
+                   annot.sim_step.label.presence || annot.sim_step.name.humanize
+                 else
+                   nil
+                 end
+
+    if prefixed
+      text = "Mapped to: #{mapped ? step_label : '-'}"
+      css = if mapped
+              'bg-indigo-50 text-indigo-700 border-indigo-200'
+            else
+              'bg-gray-100 text-gray-500 border-gray-200'
+            end
+    elsif mapped
+      text = step_label
+      css = 'bg-indigo-50 text-indigo-700 border-indigo-200'
+    else
+      text = 'Not defined'
+      css = 'bg-gray-100 text-gray-500 border-gray-200'
+    end
+
+    base_class = "inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border #{css}"
+
+    if editable
+      hover = mapped ? 'hover:bg-indigo-100 hover:border-indigo-300' : 'hover:bg-gray-200 hover:border-gray-300'
+      content_tag(
+        :span,
+        safe_join([
+          ERB::Util.html_escape(text),
+          content_tag(:i, '', class: 'fas fa-pen opacity-70', style: 'font-size:7px;line-height:1;', 'aria-hidden': true)
+        ]),
+        {
+          role: 'button',
+          tabindex: 0,
+          class: "#{base_class} gap-1 #{hover} cursor-pointer",
+          title: 'Edit ASAP step mapping',
+          'aria-label': 'Edit ASAP step mapping'
+        }.merge(html_options)
+      )
+    else
+      content_tag(:span, text, class: base_class)
+    end
+  end
+
+  # Compact edit control next to annot badges (annot show page).
+  def annot_badge_edit_button_class
+    'inline-flex items-center justify-center w-6 h-6 rounded text-gray-500 hover:text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer leading-none'
   end
 
   def annot_matrix_type_badge(annot, project = nil)

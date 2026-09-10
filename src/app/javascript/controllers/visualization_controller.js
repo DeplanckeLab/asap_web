@@ -2411,8 +2411,12 @@ export default class extends Controller {
     const currentDims = this.getSelectedEmbeddingDims()
     const sameEmbedding = String(embeddingId || '').trim() === currentId
     const sameLoom = !loomFile || !currentLoom || String(loomFile) === String(currentLoom)
+    // Keep the menu open for >2D embeddings so the X/Y axis dropdowns stay visible.
+    const shouldKeepMenuOpen = nberRows > 2
     if (sameEmbedding && sameLoom && Array.isArray(this.currentCoordinates) && this.currentCoordinates.length > 0) {
-      this.closeAllDropdowns()
+      if (!shouldKeepMenuOpen) {
+        this.closeAllDropdowns()
+      }
       return
     }
 
@@ -2422,7 +2426,9 @@ export default class extends Controller {
       dimY: sameEmbedding ? currentDims.dimY : 2,
       nberRows
     })
-    this.closeAllDropdowns()
+    if (!shouldKeepMenuOpen) {
+      this.closeAllDropdowns()
+    }
   }
 
   changeEmbeddingDim(event) {

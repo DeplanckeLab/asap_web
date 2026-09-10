@@ -903,6 +903,27 @@ export default class extends Controller {
         input.checked = false
       }
     })
+
+    this.updateInputMatrixGroupVisibility()
+  }
+
+  updateInputMatrixGroupVisibility() {
+    this.element.querySelectorAll('[data-input-matrix-group]').forEach((groupEl) => {
+      const optionInputs = groupEl.querySelectorAll('[data-input-data-selector-target="option"]')
+      if (optionInputs.length === 0) {
+        groupEl.style.display = 'none'
+        return
+      }
+
+      const anyVisible = Array.from(optionInputs).some((input) => {
+        const optionLabel = input.closest('label')
+        if (!optionLabel) {
+          return false
+        }
+        return optionLabel.style.display !== 'none'
+      })
+      groupEl.style.display = anyVisible ? '' : 'none'
+    })
   }
 
   validateSelection() {

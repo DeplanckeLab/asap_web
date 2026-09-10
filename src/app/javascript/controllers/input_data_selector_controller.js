@@ -1,4 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
+import { scrollFormAttrIntoView } from "lib/scroll_form_attr_into_view"
 import { queryDeSecondMetadataHidden } from "visualization/de_second_metadata_attrs"
 import {
   DE_COMPLEMENTARY_GROUP_LABEL,
@@ -116,6 +117,7 @@ export default class extends Controller {
       if (this.hasSelectedDivTarget && !this.selectedDivTarget.classList.contains('hidden')) {
         this.selectedDivTarget.classList.add('hidden')
       }
+      scrollFormAttrIntoView(this.element)
       console.log("[InputDataSelectorController] Dropdown opened, visible:", this.dropdownMenuTarget.offsetHeight > 0)
     } else {
       this.dropdownMenuTarget.classList.add('hidden')

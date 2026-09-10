@@ -1,4 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
+import { scrollFormAttrIntoView } from "lib/scroll_form_attr_into_view"
 
 export default class extends Controller {
   static targets = ["searchInput", "results", "hiddenField", "selectedDisplay"]
@@ -270,7 +271,11 @@ export default class extends Controller {
     if (!this.hasResultsTarget) {
       return
     }
+    const wasHidden = this.resultsTarget.classList.contains("hidden")
     this.resultsTarget.classList.remove("hidden")
+    if (wasHidden) {
+      scrollFormAttrIntoView(this.element)
+    }
   }
 
   hideResults() {

@@ -18,6 +18,41 @@
       hint_parsing_step && ProjectStep.find_by(project_id: @project.id, step_id: hint_parsing_step.id)
     compliance_hint_parsing_complete = hint_project_step.present? && hint_project_step.status_id.to_i == 3
   end
+
+  header_archive_availability_state = @project.archive_availability_state
+  header_archive_data_unavailable = header_archive_availability_state != :available
+  header_archive_disabled_tooltip =
+    case header_archive_availability_state
+    when :unarchiving
+      'Project files are being unarchived. Downloads will be available once the data is restored.'
+    when :archiving
+      'Project files are being archived. Downloads are disabled while the archive is being created.'
+    when :missing
+      'Project files are missing on this server. Downloads are unavailable until the project data is restored.'
+    else
+      'Project files are archived. Click the Unarchive button at the top of this page to restore the data and enable downloads.'
+    end
+  header_atac_dataset =
+    if respond_to?(:compliance_atac_assay_present?)
+      compliance_atac_assay_present?(@project.cxg_validation_result)
+    else
+      false
+    end
+  header_downloads_label = header_atac_dataset ? 'LOOM/H5AD/DNA accessibility' : 'LOOM/H5AD'
+  header_downloads_aria_label = header_atac_dataset ? 'LOOM, H5AD, and DNA accessibility downloads' : 'LOOM and H5AD downloads'
+  header_show_input_file = @summary_show_submitted_file_link && @summary_input_file_get_file_query_param.present?
+  header_input_file_url =
+    if header_show_input_file
+      get_file_project_path(@project.key, filename: @summary_input_file_get_file_query_param)
+    end
+  header_downloads_menu_locals = {
+    downloads_label: header_downloads_label,
+    downloads_aria_label: header_downloads_aria_label,
+    archive_data_unavailable: header_archive_data_unavailable,
+    archive_disabled_tooltip: header_archive_disabled_tooltip,
+    show_input_file: header_show_input_file,
+    input_file_url: header_input_file_url
+  }
 %>
 <div id="project-page-header"
      class="bg-black shadow-sm border-b border-gray-200 sticky top-0 z-[80] overflow-visible"
@@ -477,6 +512,15 @@
                 Clone
               <% end %>
             <% end %>
+
+            <div class="px-4 py-2">
+              <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Downloads</p>
+            </div>
+            <%= render "shared/project_downloads_menu",
+                       header_downloads_menu_locals.merge(
+                         mobile: true,
+                         wrapper_classes: ""
+                       ) %>
             
             <div class="border-t border-gray-200 my-1"></div>
 
@@ -608,6 +652,23 @@
               },
               form: { data: { skip_visualization_leave_guard: "true" } } do %><i class="fas fa-clone text-lg"></i><% end %>
         <% end %>
+
+        <div class="relative"
+             data-controller="nav-dropdown"
+             data-guided-tour="project-nav-downloads">
+          <button type="button"
+                  class="p-2 rounded-lg <%= nav_available_icon_class %> hover:bg-gray-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-gray-600 transition <%= header_archive_data_unavailable ? 'opacity-60' : '' %>"
+                  title="<%= header_archive_data_unavailable ? header_archive_disabled_tooltip : 'Downloads' %>"
+                  aria-label="Downloads"
+                  data-nav-dropdown-toggle>
+            <i class="fas fa-download text-lg"></i>
+          </button>
+          <%= render "shared/project_downloads_menu",
+                     header_downloads_menu_locals.merge(
+                       wrapper_classes: "hidden absolute right-0 mt-2 w-72 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-50 p-1",
+                       data_attributes: { nav_menu: true }
+                     ) %>
+        </div>
         
         <%= header_separator %>
 
@@ -676,4 +737,8 @@
     </div>
   </div>
 </div>
+
+<%= render "shared/loom_downloads_modal",
+           downloads_label: header_downloads_label,
+           downloads_aria_label: header_downloads_aria_label %>
 

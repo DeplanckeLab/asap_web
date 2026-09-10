@@ -195,6 +195,57 @@
               <p class="text-sm text-gray-600">No filtering parameters available.</p>
             <% end %>
           </div>
+
+          <% metadata_composition = cell_filtering_metadata_composition(run_attrs) %>
+          <% if metadata_composition %>
+            <div class="bg-white border border-gray-200 rounded-lg shadow-sm p-3 sm:p-4">
+              <h4 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Metadata filter composition</h4>
+              <% if metadata_composition[:filters].any? %>
+                <div class="space-y-2">
+                  <% metadata_composition[:filters].each_with_index do |filter, index| %>
+                    <% step = index.positive? ? metadata_composition[:steps][index - 1] : nil %>
+                    <% if step %>
+                      <div class="flex items-center gap-2 px-1">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide bg-sky-50 text-sky-800 border border-sky-100">
+                          <%= step[:operation_label] %>
+                        </span>
+                        <% if step[:result_count] %>
+                          <span class="text-[11px] text-gray-500">
+                            result: <%= number_with_delimiter(step[:result_count]) %> cells
+                          </span>
+                        <% end %>
+                      </div>
+                    <% end %>
+                    <div class="border border-gray-100 rounded-md bg-gray-50 px-3 py-2">
+                      <div class="text-xs font-semibold text-gray-800 truncate" title="<%= filter[:annot] %>">
+                        <%= filter[:annot_label] %>
+                      </div>
+                      <div class="mt-1 text-[11px] text-gray-600">
+                        <% if filter[:mode] == :exclude_list %>
+                          Exclude
+                        <% else %>
+                          Keep
+                        <% end %>
+                        <% if filter[:categories].any? %>
+                          <div class="mt-1.5 flex flex-wrap gap-1">
+                            <% filter[:categories].each do |category| %>
+                              <span class="inline-flex items-center px-1.5 py-0.5 rounded border border-gray-200 bg-white text-gray-700 text-[11px]">
+                                <%= category %>
+                              </span>
+                            <% end %>
+                          </div>
+                        <% else %>
+                          <span class="text-gray-500">no categories</span>
+                        <% end %>
+                      </div>
+                    </div>
+                  <% end %>
+                </div>
+              <% elsif metadata_composition[:manual_selection].present? %>
+                <p class="text-xs text-gray-700 break-words"><%= metadata_composition[:manual_selection] %></p>
+              <% end %>
+            </div>
+          <% end %>
         </div>
 
       <%

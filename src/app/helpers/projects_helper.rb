@@ -351,6 +351,38 @@ module ProjectsHelper
     formatted.presence || 'Unnamed'
   end
 
+  # Parse cell-filtering discarded_metadata_json into a display-friendly composition.
+  # Supports v2 recipes ({ version, filters, steps }) and legacy annot=>{type,vals} maps.
+  # Returns nil when no metadata filter was applied.
+  def cell_filtering_metadata_composition(run_attrs)
+    attrs = run_attrs.is_a?(Hash) ? run_attrs : {}
+    raw = attrs['discarded_metadata_json'] || attrs[:discarded_metadata_json]
+    recipe = raw.is_a?(String) ? Basic.safe_parse_json(raw, {}) : raw
+    recipe = {} unless recipe.is_a?(Hash)
+
+    manual_selection = (attrs['manual_selection'] || attrs[:manual_selection]).to_s.strip
+    filters = normalize_cell_filtering_metadata_filters(recipe)
+    steps = Array(recipe['steps'] || recipe[:steps]).map { |step| normalize_cell_filtering_metadata_step(step) }.compact
+
+    return nil if filters.empty? && manual_selection.blank?
+
+    {
+      filters: filters,
+      steps: steps,
+      manual_selection: manual_selection.presence
+    }
+  end
+
+  def cell_filtering_set_operation_label(operation)
+    {
+      'intersection' => 'INTERSECTION',
+      'union' => 'UNION',
+      'difference_ab' => 'A \\ B',
+      'difference_ba' => 'B \\ A',
+      'xor' => 'SYMMETRIC DIFFERENCE'
+    }[operation.to_s] || operation.to_s.upcase.presence || 'UNION'
+  end
+
   # Get the metadata type label for an annotation
   # @param annot [Annot] The annotation object
   # @param project [Project] The project instance
@@ -757,6 +789,78 @@ module ProjectsHelper
   end
 
   private
+
+  def normalize_cell_filtering_metadata_filters(recipe)
+    raw_filters = recipe['filters'] || recipe[:filters]
+    if raw_filters.is_a?(Array) && raw_filters.any?
+      return raw_filters.filter_map { |entry| normalize_cell_filtering_metadata_filter_entry(entry) }
+    end
+
+    reserved = %w[version filters steps]
+    recipe.filter_map do |annot, entry|
+      next if reserved.include?(annot.to_s)
+      next unless entry.is_a?(Hash)
+
+      normalize_cell_filtering_metadata_filter_entry(entry.merge('annot' => annot))
+    end
+  end
+
+  def normalize_cell_filtering_metadata_filter_entry(entry)
+    return nil unless entry.is_a?(Hash)
+
+    annot = (entry['annot'] || entry[:annot]).to_s
+    return nil if annot.blank?
+
+    type = (entry['type'] || entry[:type]).to_s
+    vals = Array(entry['vals'] || entry[:vals]).map(&:to_s)
+    selected = entry.key?('selected') || entry.key?(:selected)
+    selected_vals = Array(entry['selected'] || entry[:selected]).map(&:to_s)
+
+    if selected
+      {
+        annot: annot,
+        annot_label: format_annot_name(annot),
+        mode: :keep_list,
+        categories: selected_vals
+      }
+    elsif type == 'sel'
+      {
+        annot: annot,
+        annot_label: format_annot_name(annot),
+        mode: :keep_list,
+        categories: vals
+      }
+    elsif type == 'unsel'
+      {
+        annot: annot,
+        annot_label: format_annot_name(annot),
+        mode: :exclude_list,
+        categories: vals
+      }
+    else
+      {
+        annot: annot,
+        annot_label: format_annot_name(annot),
+        mode: :keep_list,
+        categories: vals
+      }
+    end
+  end
+
+  def normalize_cell_filtering_metadata_step(step)
+    return nil unless step.is_a?(Hash)
+
+    operation = (step['operation'] || step[:operation]).to_s
+    {
+      operation: operation,
+      operation_label: cell_filtering_set_operation_label(operation),
+      operand_a_count: step['operand_a_count'] || step[:operand_a_count],
+      operand_b_count: step['operand_b_count'] || step[:operand_b_count],
+      result_count: step['result_count'] || step[:result_count],
+      operand_b_annot: (step['operand_b_annot'] || step[:operand_b_annot]).to_s,
+      operand_b_annot_label: format_annot_name(step['operand_b_annot'] || step[:operand_b_annot])
+    }
+  end
 
   def ontology_term_type_color_cache
     @ontology_term_type_color_cache ||= {}

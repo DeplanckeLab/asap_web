@@ -170,6 +170,7 @@ class ProjectsController < ApplicationController
         @project.ensure_project_steps unless METADATA_ONLY_PROJECT_VIEWS.include?(@view_type)
         return unless authorize_requested_view_access!(@view_type)
         load_view_context_for(@view_type)
+        assign_summary_submitted_file_link!
         return if performed?
 
         respond_to do |format|
@@ -299,6 +300,7 @@ class ProjectsController < ApplicationController
     default_view = "summary" #has_visualization_embeddings ? 'visualization' : 'summary'
     @view_type = resolve_project_view_type(params[:view].presence || default_view)
     return unless authorize_requested_view_access!(@view_type)
+    assign_summary_submitted_file_link!
     
     load_gene_set_collections if @view_type == 'visualization'
 

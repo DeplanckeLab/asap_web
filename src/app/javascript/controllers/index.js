@@ -298,6 +298,10 @@ console.log('Annotations page controller registered')
 import AnnotDownloadController from "controllers/annot_download_controller"
 application.register("annot-download", AnnotDownloadController)
 
+import LoomDownloadsController from "controllers/loom_downloads_controller"
+application.register("loom-downloads", LoomDownloadsController)
+console.log('Loom downloads controller registered')
+
 import HeatmapController from "controllers/heatmap_controller"
 application.register("heatmap", HeatmapController)
 console.log('Heatmap controller registered')

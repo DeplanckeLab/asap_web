@@ -205,11 +205,11 @@ class AnndataMappingBuilder
 
   def obsm_annot?(annot, key)
     return false if RESERVED_OBS_INDEX_KEYS.include?(key)
-    # AnnData obsm must be 2D. ASAP stores that as dim=1 col_attrs with nber_rows > 1
-    # (coordinate axes x cells). 1D vectors (nber_rows == 1) belong in obs — including
-    # cell selections named like X_tsne.sel_N that inherit an X_ prefix from the parent
-    # embedding and must not be declared in anndata_mapping['obsm'].
-    return false unless annot.dim.to_i == 1 && annot.nber_rows.to_i > 1
+    # AnnData obsm must be 2D. ASAP stores that as dim=1 col_attrs with
+    # nber_rows > 1 (coordinate axes) and nber_cols > 1 (cells).
+    # 1D vectors are 1 x n_cells. Transposed tool bugs (n_cells x 1) must not
+    # land in obsm — including numeric doublet scores and X_*-prefixed selections.
+    return false unless annot.dim.to_i == 1 && annot.nber_rows.to_i > 1 && annot.nber_cols.to_i > 1
 
     return true if annot.embedding?
     return true if key == 'spatial' || key.start_with?('X_')

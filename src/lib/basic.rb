@@ -766,8 +766,31 @@ module Basic
     end
 
     # Mounts/env injected for every asap_run docker run (project data + Ensembl dumps).
+    # Also overlay live doublet scripts from the asap_run checkout when present on the host
+    # so SLURM jobs pick up metadata-orientation fixes without rebuilding fabdavid/asap_run:v8.
     def asap_run_docker_volume_mount_args
-      "#{user_data_docker_volume_mount_arg} #{ensembl_data_docker_volume_mount_arg}"
+      [
+        user_data_docker_volume_mount_arg,
+        ensembl_data_docker_volume_mount_arg,
+        asap_run_script_overlay_mount_args
+      ].reject(&:blank?).join(' ')
+    end
+
+    # Optional -v overlays for asap_run scripts edited on the host (compose-mounted checkout).
+    # Paths are host paths: docker run is executed on the SLURM node / Docker host.
+    def asap_run_script_overlay_mount_args
+      root = ENV.fetch('ASAP_RUN_SRC_DIR', '/srv/asap_run_new').to_s
+      overlays = [
+        ['python/doublet.calling.v8.py', '/srv/doublet.calling.v8.py'],
+        ['python/doublet.scoring.v8.py', '/srv/doublet.scoring.v8.py'],
+        ['R/doublet.scoring.v8.R', '/srv/doublet.scoring.v8.R']
+      ]
+      overlays.filter_map do |rel, dest|
+        src = File.join(root, rel)
+        next unless File.file?(src)
+
+        "-v #{src}:#{dest}:ro"
+      end.join(' ')
     end
 
     # Host path to .env_asap_run (sibling of USER_DATA_DIR users/ and fus/ dirs).
@@ -5431,6 +5454,7 @@ module Basic
 
     # DB-only: attr annots whose nber_rows x nber_cols equal the loom /matrix shape
     # (vector metadata wrongly stamped with matrix dims). No output.json required.
+    # Also repairs 1D CELL/GENE vectors stored transposed (n_cells x 1 / 1 x n_genes).
     # Target shape from dim (or path): CELL => 1 x n_cols, GENE => n_rows x 1, GLOBAL => 1 x 1.
     # Returns { changes: [...] } (possibly empty).
     def plan_matrix_shaped_vector_annot_repairs(project_id: nil, run_id: nil)
@@ -5452,10 +5476,28 @@ module Basic
          AND m.name = '/matrix'
         WHERE a.run_id IS NOT NULL
           AND a.dim IS DISTINCT FROM 3
-          AND a.nber_rows > 1
-          AND a.nber_cols > 1
-          AND a.nber_rows = m.nber_rows
-          AND a.nber_cols = m.nber_cols
+          AND (
+            (
+              a.nber_rows > 1
+              AND a.nber_cols > 1
+              AND a.nber_rows = m.nber_rows
+              AND a.nber_cols = m.nber_cols
+            )
+            OR (
+              a.dim = 1
+              AND a.name LIKE '/col_attrs/%'
+              AND a.nber_cols = 1
+              AND a.nber_rows > 1
+              AND a.nber_rows = m.nber_cols
+            )
+            OR (
+              a.dim = 2
+              AND a.name LIKE '/row_attrs/%'
+              AND a.nber_rows = 1
+              AND a.nber_cols > 1
+              AND a.nber_cols = m.nber_rows
+            )
+          )
           AND (
             a.name LIKE '/col_attrs/%'
             OR a.name LIKE '/row_attrs/%'
@@ -5526,6 +5568,31 @@ module Basic
       when :global then [1, 1]
       else [nil, nil]
       end
+    end
+
+    # Tools sometimes emit 1D CELL/GENE vectors transposed (n_cells x 1 or 1 x n_genes).
+    # ASAP Annot convention is CELL => 1 x n_cells, GENE => n_genes x 1.
+    # True embeddings are n_dims x n_cells with both dimensions > 1 — leave those alone.
+    def normalize_vector_metadata_dims!(meta)
+      return meta unless meta.is_a?(Hash)
+
+      nr = meta['nber_rows'].to_i
+      nc = meta['nber_cols'].to_i
+      return meta if nr <= 0 || nc <= 0
+
+      case meta['on'].to_s
+      when 'CELL'
+        if nc == 1 && nr > 1
+          meta['nber_rows'] = 1
+          meta['nber_cols'] = nr
+        end
+      when 'GENE'
+        if nr == 1 && nc > 1
+          meta['nber_rows'] = nc
+          meta['nber_cols'] = 1
+        end
+      end
+      meta
     end
 
     def normalize_dataset_path(path)
@@ -5791,6 +5858,9 @@ module Basic
       list_p.each do |k|
         meta[k] = meta_compl[k] if meta_compl[k]
       end
+
+      # After tool JSON + optional loom extract: coerce transposed 1D vectors to ASAP orientation.
+      normalize_vector_metadata_dims!(meta)
 
       data_class_names = meta['data_class_names'] || []
       explicit_data_classes = meta.key?('data_class_names') && meta['data_class_names'].is_a?(Array)

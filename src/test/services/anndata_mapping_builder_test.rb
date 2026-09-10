@@ -128,6 +128,12 @@ class AnndataMappingBuilderTest < ActiveSupport::TestCase
         data_type_id: @discrete.id,
         list_cat_json: %w[T B myeloid].to_json,
         categories_json: { 'myeloid' => 3, 'B' => 2, 'T' => 1 }.to_json
+      ),
+      # Tool bug: 1D CELL score stored as n_cells x 1 — must not map to obsm.
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/col_attrs/_doublet_scoring_doublet_finder_score_df', dim: 1,
+        nber_rows: 50, nber_cols: 1
       )
     )
 
@@ -137,6 +143,7 @@ class AnndataMappingBuilderTest < ActiveSupport::TestCase
     assert_equal '/col_attrs/X_tsne', payload['obsm']['X_tsne']
     refute payload['obsm'].key?('X_tsne.sel_3')
     refute payload['obsm'].key?('cell_type')
+    refute payload['obsm'].key?('_doublet_scoring_doublet_finder_score_df')
     assert_equal %w[in out], payload['categoricals']['X_tsne.sel_3']['categories']
     assert_equal %w[T B myeloid], payload['categoricals']['cell_type']['categories']
     assert_includes payload['uns_json_keys'], 'analysis_pipeline'

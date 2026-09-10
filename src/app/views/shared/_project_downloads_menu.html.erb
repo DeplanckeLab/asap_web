@@ -1,0 +1,78 @@
+<%#
+  Project header downloads submenu items.
+  Locals:
+    - downloads_label, downloads_aria_label
+    - archive_data_unavailable, archive_disabled_tooltip
+    - show_input_file, input_file_url (optional)
+    - mobile: when true, use mobile menu link styling
+%>
+<%
+  downloads_label = local_assigns[:downloads_label] || 'LOOM/H5AD'
+  downloads_aria_label = local_assigns[:downloads_aria_label] || 'LOOM and H5AD downloads'
+  archive_data_unavailable = local_assigns[:archive_data_unavailable]
+  archive_disabled_tooltip = local_assigns[:archive_disabled_tooltip]
+  show_input_file = local_assigns[:show_input_file]
+  input_file_url = local_assigns[:input_file_url]
+  mobile = local_assigns[:mobile]
+  item_class = mobile ?
+    "flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left" :
+    "flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 text-left rounded-lg"
+  disabled_class = mobile ?
+    "flex items-center w-full px-4 py-2 text-sm text-gray-400 cursor-not-allowed text-left" :
+    "flex items-center gap-2 w-full px-3 py-2 text-sm text-gray-400 cursor-not-allowed text-left rounded-lg"
+%>
+<div class="<%= local_assigns[:wrapper_classes] || 'py-1' %>"
+     <%= (local_assigns[:data_attributes] || {}).map { |key, value| %(data-#{key.to_s.tr('_', '-')}="#{value}") }.join(' ') %>>
+  <% if show_input_file && input_file_url.present? %>
+    <% if archive_data_unavailable %>
+      <span class="<%= disabled_class %>"
+            aria-disabled="true"
+            title="<%= archive_disabled_tooltip %>">
+        <i class="fas fa-file-alt <%= mobile ? 'text-lg mr-3' : 'w-4 text-center' %> text-gray-400" aria-hidden="true"></i>
+        Input file
+      </span>
+    <% else %>
+      <%= link_to input_file_url,
+                  target: "_blank",
+                  rel: "noopener noreferrer",
+                  class: item_class,
+                  aria: { label: "Input file download" } do %>
+        <i class="fas fa-file-alt <%= mobile ? 'text-lg mr-3' : 'w-4 text-center' %> text-gray-500" aria-hidden="true"></i>
+        Input file
+      <% end %>
+    <% end %>
+  <% end %>
+
+  <% if archive_data_unavailable %>
+    <span class="<%= disabled_class %>"
+          aria-disabled="true"
+          title="<%= archive_disabled_tooltip %>"
+          aria-label="<%= downloads_aria_label %> (disabled, project archived)">
+      <i class="fas fa-download <%= mobile ? 'text-lg mr-3' : 'w-4 text-center' %> text-gray-400" aria-hidden="true"></i>
+      <%= downloads_label %>
+    </span>
+  <% else %>
+    <button type="button"
+            class="<%= item_class %>"
+            data-loom-downloads-open
+            aria-label="<%= downloads_aria_label %>">
+      <i class="fas fa-download <%= mobile ? 'text-lg mr-3' : 'w-4 text-center' %> text-gray-500" aria-hidden="true"></i>
+      <%= downloads_label %>
+    </button>
+  <% end %>
+
+  <% if archive_data_unavailable %>
+    <span class="<%= disabled_class %>"
+          aria-disabled="true"
+          title="<%= archive_disabled_tooltip %>">
+      <i class="fas fa-list <%= mobile ? 'text-lg mr-3' : 'w-4 text-center' %> text-gray-400" aria-hidden="true"></i>
+      List of Loom files (JSON)
+    </span>
+  <% else %>
+    <%= link_to get_loom_files_json_project_path(@project.key, download: 1),
+                class: item_class do %>
+      <i class="fas fa-list <%= mobile ? 'text-lg mr-3' : 'w-4 text-center' %> text-gray-500" aria-hidden="true"></i>
+      List of Loom files (JSON)
+    <% end %>
+  <% end %>
+</div>

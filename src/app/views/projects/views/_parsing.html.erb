@@ -223,9 +223,25 @@
         </div>
       </div>
     </div>
-    <div id="run_metadata_sticky_parsing" class="sticky z-10 flex-shrink-0 bg-white" style="top: 73px;">
+    <div id="run_metadata_sticky_parsing" class="sticky z-10 flex-shrink-0 bg-white" style="top: 3rem;">
       <%= render partial: 'projects/views/run_metadata', locals: { run: @parsing_run, results: @results, queue_position: @queue_position, slurm_queue_hover: @slurm_queue_hover } %>
     </div>
+    <script>
+      (function() {
+        const container = document.querySelector('#result_summary');
+        if (!container) return;
+        const header = container.querySelector('[class*="sticky top-0"]');
+        const metadata = container.querySelector('#run_metadata_sticky_parsing');
+        if (!header || !metadata) return;
+        const updateTop = () => {
+          metadata.style.top = header.offsetHeight + 'px';
+        };
+        updateTop();
+        window.addEventListener('resize', updateTop);
+        setTimeout(updateTop, 100);
+        setTimeout(updateTop, 500);
+      })();
+    </script>
     <% if @parsing_run %>
       <div class="px-6 pt-2">
         <%# render partial: 'runs/run_information', locals: { run: @parsing_run, step: @step, std_method: @std_method } %>

@@ -3,10 +3,31 @@
 <% run_status_id = run_for_view&.status_id.to_i if run_for_view %>
 <% run_in_progress = run_for_view && [1, 2, 6].include?(run_status_id) %>
 <%
-  discarded_cols_payload = run_attrs['discarded_cols'] || run_attrs[:discarded_cols]
-  if discarded_cols_payload.is_a?(String)
-    discarded_cols_payload = Basic.safe_parse_json(discarded_cols_payload, {})
+  cell_filtering_output_dir = if @project && run_for_view
+    project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+    step_dir = project_dir + (@step&.name.presence || 'cell_filtering')
+    (@step&.multiple_runs) ? (step_dir + run_for_view.id.to_s) : step_dir
   end
+
+  resolve_write_in_file_payload = lambda do |payload, filename|
+    return payload unless payload.is_a?(String)
+    parsed = Basic.safe_parse_json(payload, nil)
+    return parsed unless parsed.nil?
+
+    # write_in_file stores a SHA in attrs_json and the real JSON on disk.
+    if cell_filtering_output_dir && filename.present?
+      filepath = cell_filtering_output_dir + filename
+      if File.exist?(filepath)
+        return Basic.safe_parse_json(File.read(filepath), {})
+      end
+    end
+    {}
+  end
+
+  discarded_cols_payload = resolve_write_in_file_payload.call(
+    run_attrs['discarded_cols'] || run_attrs[:discarded_cols],
+    'discarded_cols.json'
+  )
   discarded_cols = if discarded_cols_payload.is_a?(Hash)
     discarded_cols_payload['discarded_cols'] || discarded_cols_payload[:discarded_cols] || []
   elsif discarded_cols_payload.is_a?(Array)
@@ -14,10 +35,10 @@
   else
     []
   end
-  manually_discarded_payload = run_attrs['manually_discarded_cols'] || run_attrs[:manually_discarded_cols]
-  if manually_discarded_payload.is_a?(String)
-    manually_discarded_payload = Basic.safe_parse_json(manually_discarded_payload, {})
-  end
+  manually_discarded_payload = resolve_write_in_file_payload.call(
+    run_attrs['manually_discarded_cols'] || run_attrs[:manually_discarded_cols],
+    'manually_discarded_cols.json'
+  )
   manually_discarded_cols = if manually_discarded_payload.is_a?(Hash)
     manually_discarded_payload['manually_discarded_cols'] || manually_discarded_payload[:manually_discarded_cols] || []
   elsif manually_discarded_payload.is_a?(Array)
@@ -38,6 +59,9 @@
   discarded_cells_count = discarded_indices.size
   if discarded_cells_count.zero? && kept_cells_count && total_cells_count.positive?
     discarded_cells_count = [total_cells_count - kept_cells_count, 0].max
+  end
+  if kept_cells_count.nil? && total_cells_count.positive? && discarded_cells_count.positive?
+    kept_cells_count = [total_cells_count - discarded_cells_count, 0].max
   end
 %>
 
@@ -103,6 +127,22 @@
     <div id="run_metadata_sticky_cell_filtering" class="sticky z-10 flex-shrink-0 bg-white" style="top: 3rem;">
       <%= render partial: 'projects/views/run_metadata', locals: { run: run_for_view, results: @h_res, queue_position: @queue_position, slurm_queue_hover: @slurm_queue_hover } %>
     </div>
+    <script>
+      (function() {
+        const container = document.querySelector('#result_summary');
+        if (!container) return;
+        const header = container.querySelector('[class*="sticky top-0"]');
+        const metadata = container.querySelector('#run_metadata_sticky_cell_filtering');
+        if (!header || !metadata) return;
+        const updateTop = () => {
+          metadata.style.top = header.offsetHeight + 'px';
+        };
+        updateTop();
+        window.addEventListener('resize', updateTop);
+        setTimeout(updateTop, 100);
+        setTimeout(updateTop, 500);
+      })();
+    </script>
   <% end %>
 
   <div class="px-6 py-5 space-y-6 flex-1 min-w-0 overflow-x-hidden">

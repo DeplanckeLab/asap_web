@@ -172,11 +172,11 @@ p, label, li, td, th, input, select, textarea, button {
 }
 
 .analysis-view #result_summary > .border-b.border-gray-200,
-.analysis-view #result_summary > .sticky > .border-b.border-gray-200,
+.analysis-view #result_summary > .sticky:not([id^="run_metadata_sticky"]) > .border-b.border-gray-200,
 .analysis-view #run_result_summary_panel > .border-b.border-gray-200,
-.analysis-view #run_result_summary_panel > .sticky > .border-b.border-gray-200,
+.analysis-view #run_result_summary_panel > .sticky:not([id^="run_metadata_sticky"]) > .border-b.border-gray-200,
 .analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .border-b.border-gray-200,
-.analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .sticky > .border-b.border-gray-200,
+.analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .sticky:not([id^="run_metadata_sticky"]) > .border-b.border-gray-200,
 .analysis-view .step-results .border-b.border-gray-200.px-4.py-2,
 .analysis-view .step-results .border-b.border-gray-200.px-6.py-4,
 .analysis-view #cell_filtering_form_container > * > .cell-filtering-header,
@@ -190,11 +190,11 @@ p, label, li, td, th, input, select, textarea, button {
 }
 
 .analysis-view #result_summary > .border-b.border-gray-200 h3,
-.analysis-view #result_summary > .sticky > .border-b.border-gray-200 h3,
+.analysis-view #result_summary > .sticky:not([id^="run_metadata_sticky"]) > .border-b.border-gray-200 h3,
 .analysis-view #run_result_summary_panel > .border-b.border-gray-200 h3,
-.analysis-view #run_result_summary_panel > .sticky > .border-b.border-gray-200 h3,
+.analysis-view #run_result_summary_panel > .sticky:not([id^="run_metadata_sticky"]) > .border-b.border-gray-200 h3,
 .analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .border-b.border-gray-200 h3,
-.analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .sticky > .border-b.border-gray-200 h3,
+.analysis-view .analysis-subview-surface > .bg-white.rounded-lg.shadow-sm.flex.flex-col > .sticky:not([id^="run_metadata_sticky"]) > .border-b.border-gray-200 h3,
 .analysis-view .step-results .border-b.border-gray-200 h3,
 .analysis-view .cell-filtering-header h3 {
   font-size: 0.95rem;
@@ -210,13 +210,15 @@ p, label, li, td, th, input, select, textarea, button {
   padding-right: 1rem !important;
 }
 
-.analysis-view #result_summary .bg-gray-50.border-b.border-gray-200.px-6.py-3,
-.analysis-view #run_result_summary_panel .bg-gray-50.border-b.border-gray-200.px-6.py-3,
-.analysis-view [id^="run_metadata_sticky"] .bg-gray-50.border-b.border-gray-200.px-6.py-3 {
+/* Run details banner: keep natural compact height (do not inherit panel-header min-height). */
+.analysis-view #result_summary .bg-gray-50.border-b.border-gray-200,
+.analysis-view #run_result_summary_panel .bg-gray-50.border-b.border-gray-200,
+.analysis-view [id^="run_metadata_sticky"] .bg-gray-50.border-b.border-gray-200 {
   padding-top: 0.375rem !important;
   padding-bottom: 0.375rem !important;
   padding-left: 1rem !important;
   padding-right: 1rem !important;
+  min-height: 0 !important;
 }
 
 .analysis-view #result_summary .space-y-6 > :not([hidden]) ~ :not([hidden]),

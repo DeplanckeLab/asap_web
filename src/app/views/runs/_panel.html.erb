@@ -1,10 +1,10 @@
 <!-- Run panel - for display in right panel and standalone show view -->
 <div class="bg-white rounded-lg shadow-sm flex flex-col" id="run_result_summary_panel" data-run-id="<%= @run&.id %>" data-step-id="<%= @step&.id %>" style="max-height: calc(100vh - 200px); overflow-y: auto; overflow-x: hidden !important; max-width: 100% !important; box-sizing: border-box !important; min-width: 0; width: 100% !important;">
   <!-- Header with title and status - Sticky -->
-  <div class="border-b border-gray-200 px-6 py-4 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
-    <div class="flex items-center justify-between min-w-0">
+  <div class="border-b border-gray-200 px-4 py-2 sticky top-0 z-10 flex-shrink-0" style="background: linear-gradient(to right, #eff6ff, #eef2ff); background-color: #ffffff;">
+    <div class="flex items-center justify-between min-w-0 min-h-8">
       <div class="flex items-center gap-3 min-w-0 flex-1">
-        <h3 class="text-lg font-semibold text-gray-900 flex items-center gap-2 min-w-0 truncate">
+        <h3 class="text-base font-semibold text-gray-900 flex items-center gap-2 min-w-0 truncate">
           <%= run_card_title(@run, @step, @std_method) %>
         </h3>
         <% if @status %>
@@ -137,36 +137,34 @@
       </div>
     </div>
   </div>
-  <div id="run_metadata_sticky_panel" class="sticky z-10 flex-shrink-0 bg-white" style="top: 60px;">
+  <div id="run_metadata_sticky_panel" class="sticky z-10 flex-shrink-0 bg-white" style="top: 3rem;">
     <%= render partial: 'projects/views/run_metadata', locals: { run: @run, results: @h_res } %>
   </div>
   <% if @run %>
 
     <script>
-      // Dynamically calculate the top position for run_information based on actual heights
+      // Keep sticky run-metadata flush under the compact header (same as doublet calling).
       (function() {
         const container = document.querySelector('#run_result_summary_panel');
         if (!container) return;
-        
+
         const header = container.querySelector('[class*="sticky top-0"]');
         const metadata = container.querySelector('#run_metadata_sticky_panel');
         const runInfo = container.querySelector('#run_information_sticky_panel');
-        
-        if (header && metadata && runInfo) {
-          const updateTop = () => {
-            const headerHeight = header.offsetHeight;
-            const metadataHeight = metadata.offsetHeight;
-            runInfo.style.top = (headerHeight + metadataHeight) + 'px';
-          };
-          
-          // Update on load and resize
-          updateTop();
-          window.addEventListener('resize', updateTop);
-          
-          // Also update after delays to account for dynamic content
-          setTimeout(updateTop, 100);
-          setTimeout(updateTop, 500);
-        }
+        if (!header || !metadata) return;
+
+        const updateTop = () => {
+          const headerHeight = header.offsetHeight;
+          metadata.style.top = headerHeight + 'px';
+          if (runInfo) {
+            runInfo.style.top = (headerHeight + metadata.offsetHeight) + 'px';
+          }
+        };
+
+        updateTop();
+        window.addEventListener('resize', updateTop);
+        setTimeout(updateTop, 100);
+        setTimeout(updateTop, 500);
       })();
     </script>
   <% end %>

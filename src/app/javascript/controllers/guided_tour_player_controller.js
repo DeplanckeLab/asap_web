@@ -40,6 +40,7 @@ export default class extends Controller {
     this.pendingTourId = null
     this.tryItBar = null
     this.tourDrivenNavigation = false
+    this.playGeneration = 0
 
     this.onTurboLoad = this.handleTurboLoad.bind(this)
     this.onTurboBeforeVisit = this.handleTurboBeforeVisit.bind(this)
@@ -60,6 +61,7 @@ export default class extends Controller {
 
   disconnect() {
     this.gtLog("disconnect")
+    this.playGeneration += 1
     document.removeEventListener("turbo:load", this.onTurboLoad)
     document.removeEventListener("turbo:before-visit", this.onTurboBeforeVisit)
     document.removeEventListener("keydown", this.onKeydown)
@@ -82,11 +84,28 @@ export default class extends Controller {
   /**
    * User left the step page: pause and show Resume / Exit bar.
    * Tour-driven visits (Next/Back/Resume) are skipped.
+   * Starting another tour via ?guided_tour= ends the current one instead of pausing.
    */
   handleTurboBeforeVisit(event) {
     if (this.tourDrivenNavigation) {
       return
     }
+
+    let dest
+    try {
+      dest = new URL(event.detail.url, window.location.origin)
+    } catch {
+      return
+    }
+
+    if (dest.searchParams.has("guided_tour")) {
+      this.gtLog("before-visit: end tour before starting another", {
+        nextTourId: dest.searchParams.get("guided_tour")
+      })
+      this.endTour()
+      return
+    }
+
     const state = this.readState()
     if (!state || state.tourId == null || state.tryIt) {
       return
@@ -95,14 +114,7 @@ export default class extends Controller {
       return
     }
 
-    let destPath = ""
-    try {
-      const dest = new URL(event.detail.url, window.location.origin)
-      destPath = dest.pathname + dest.search
-    } catch {
-      return
-    }
-
+    const destPath = dest.pathname + dest.search
     const step = this.tour?.steps?.[this.stepIndex]
     if (step && this.pathsMatch(step.page_url, destPath)) {
       return
@@ -208,9 +220,11 @@ export default class extends Controller {
       return
     }
 
+    const generation = this.playGeneration
+
     if (state.tryIt) {
       this.fetchTour(state.tourId).then((tour) => {
-        if (!this.isPlayerConnected()) {
+        if (!this.isPlayGenerationCurrent(generation) || !this.isPlayerConnected()) {
           return
         }
         if (!tour || !tour.steps || !tour.steps.length) {
@@ -223,6 +237,9 @@ export default class extends Controller {
         this.writeState(tour.id, this.stepIndex, true)
         this.showTryItBar()
       }).catch(() => {
+        if (!this.isPlayGenerationCurrent(generation)) {
+          return
+        }
         this.clearState()
         this.removeTryItBar()
       })
@@ -230,8 +247,8 @@ export default class extends Controller {
     }
 
     this.fetchTour(state.tourId).then((tour) => {
-      if (!this.isPlayerConnected()) {
-        this.gtLog("resumeIfNeeded fetch done: player not connected, abort")
+      if (!this.isPlayGenerationCurrent(generation) || !this.isPlayerConnected()) {
+        this.gtLog("resumeIfNeeded fetch done: stale or disconnected, abort")
         return
       }
       if (!tour || !tour.steps || !tour.steps.length) {
@@ -263,6 +280,9 @@ export default class extends Controller {
       this.writeState(tour.id, idx, false)
       void this.openTourAtCurrentStep({ fromResume: true })
     }).catch((err) => {
+      if (!this.isPlayGenerationCurrent(generation)) {
+        return
+      }
       this.gtLog("resumeIfNeeded fetch failed", err)
       this.clearState()
     })
@@ -288,12 +308,19 @@ export default class extends Controller {
   }
 
   startTour(tourId) {
+    const generation = ++this.playGeneration
     this.pendingTourId = tourId
     this.clearAutoAdvance()
+    this.clearState()
+    this.tour = null
+    this.stepIndex = 0
     this.teardownOverlay()
     this.removeHighlight()
     this.removeTryItBar()
     this.fetchTour(tourId).then((tour) => {
+      if (!this.isPlayGenerationCurrent(generation)) {
+        return
+      }
       this.pendingTourId = null
       if (!this.isPlayerConnected()) {
         return
@@ -306,12 +333,16 @@ export default class extends Controller {
       this.writeState(tour.id, 0, false)
       this.goToStep(0)
     }).catch(() => {
+      if (!this.isPlayGenerationCurrent(generation)) {
+        return
+      }
       this.pendingTourId = null
     })
   }
 
   endTour() {
     this.gtLog("endTour")
+    this.playGeneration += 1
     this.pendingTourId = null
     this.clearAutoAdvance()
     this.clearState()
@@ -320,6 +351,10 @@ export default class extends Controller {
     this.teardownOverlay()
     this.removeHighlight()
     this.removeTryItBar()
+  }
+
+  isPlayGenerationCurrent(generation) {
+    return generation === this.playGeneration
   }
 
   goToStep(index) {
@@ -403,10 +438,11 @@ export default class extends Controller {
   }
 
   async openTourAtCurrentStep(options = {}) {
-    if (!this.isPlayerConnected()) {
-      this.gtLog("openTourAtCurrentStep abort: not connected")
+    if (!this.isPlayerConnected() || !this.tour) {
+      this.gtLog("openTourAtCurrentStep abort: not connected or no tour")
       return
     }
+    const generation = this.playGeneration
     const step = this.tour.steps[this.stepIndex]
     if (!step) {
       this.gtLog("openTourAtCurrentStep abort: no step", this.stepIndex)
@@ -423,16 +459,16 @@ export default class extends Controller {
       this.gtLog("replayPriorSamePageStepActions", { here })
       await this.replayPriorSamePageStepActions(here)
     }
-    if (!this.isPlayerConnected()) {
-      this.gtLog("openTourAtCurrentStep abort after replay: not connected")
+    if (!this.isPlayGenerationCurrent(generation) || !this.isPlayerConnected() || !this.tour) {
+      this.gtLog("openTourAtCurrentStep abort after replay: stale or disconnected")
       return
     }
     const fromResume = options.fromResume === true
     await this.runStepActions(step.step_actions || [], {
       skipSearchSubmitIfQueryPresent: fromResume
     })
-    if (!this.isPlayerConnected()) {
-      this.gtLog("openTourAtCurrentStep abort after actions: not connected")
+    if (!this.isPlayGenerationCurrent(generation) || !this.isPlayerConnected() || !this.tour) {
+      this.gtLog("openTourAtCurrentStep abort after actions: stale or disconnected")
       return
     }
     this.removeHighlight()
@@ -618,7 +654,11 @@ export default class extends Controller {
   }
 
   resumeFromTryIt() {
+    const generation = this.playGeneration
     const continueResume = () => {
+      if (!this.isPlayGenerationCurrent(generation) || !this.isPlayerConnected()) {
+        return
+      }
       if (!this.tour || !this.tour.steps?.[this.stepIndex]) {
         this.endTour()
         return
@@ -640,7 +680,7 @@ export default class extends Controller {
         return
       }
       this.fetchTour(state.tourId).then((tour) => {
-        if (!this.isPlayerConnected()) {
+        if (!this.isPlayGenerationCurrent(generation) || !this.isPlayerConnected()) {
           return
         }
         if (!tour || !tour.steps || !tour.steps.length) {
@@ -652,6 +692,9 @@ export default class extends Controller {
         this.stepIndex = Math.min(Math.max(0, state.stepIndex), tour.steps.length - 1)
         continueResume()
       }).catch(() => {
+        if (!this.isPlayGenerationCurrent(generation)) {
+          return
+        }
         this.clearState()
         this.removeTryItBar()
       })

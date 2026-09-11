@@ -4,13 +4,17 @@ require 'uri'
 class FuDownloadFromUrlJob < ApplicationJob
   queue_as :default
 
-  def perform(fu_id, url, organism_id: nil, version_id: nil)
+  # import_progress_candidate_id: optional ExternalCatalogCandidate id for catalog-import overlay.
+  def perform(fu_id, url, organism_id: nil, version_id: nil, import_progress_candidate_id: nil)
+    @import_progress_candidate_id = import_progress_candidate_id
     fu = Fu.find_by(id: fu_id)
     return unless fu
 
     upload_dir = fu.upload_dir
     FileUtils.mkdir_p(upload_dir)
     upload_file_path = upload_dir.join(fu.upload_file_name)
+
+    report_import_progress!(step: 'downloading')
 
     copied_internally = false
     begin
@@ -31,7 +35,12 @@ class FuDownloadFromUrlJob < ApplicationJob
     end
 
     unless copied_internally
-      UrlDownloadService.new(fu: fu, url: url, dest_path: upload_file_path).call
+      UrlDownloadService.new(
+        fu: fu,
+        url: url,
+        dest_path: upload_file_path,
+        progress_callback: import_download_progress_callback
+      ).call
     end
 
     downloaded_size = File.size(upload_file_path)
@@ -60,6 +69,7 @@ class FuDownloadFromUrlJob < ApplicationJob
       preparsing_version_id: version_id
     )
     InputFileSha256.clear_state!(fu.id)
+    report_import_progress!(step: 'preparsing')
     broadcast(fu.id, status: 'started')
 
     result = FuPreparsingService.new(fu, options).call
@@ -142,5 +152,24 @@ class FuDownloadFromUrlJob < ApplicationJob
 
   def broadcast(fu_id, payload)
     ActionCable.server.broadcast("fu_#{fu_id}", { stage: 'preparsing', fu_id: fu_id }.merge(payload))
+  end
+
+  def import_download_progress_callback
+    candidate_id = @import_progress_candidate_id
+    return nil if candidate_id.blank?
+
+    lambda do |downloaded, total|
+      ExternalCatalog::ImportProgress.report_download(
+        candidate_id,
+        downloaded: downloaded,
+        total: total
+      )
+    end
+  end
+
+  def report_import_progress!(step:)
+    return if @import_progress_candidate_id.blank?
+
+    ExternalCatalog::ImportProgress.report(@import_progress_candidate_id, step: step)
   end
 end

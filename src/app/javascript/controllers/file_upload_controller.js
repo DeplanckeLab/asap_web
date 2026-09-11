@@ -699,14 +699,33 @@ export default class extends Controller {
     }
 
     if (this.hasPercentageTarget) {
-      this.percentageTarget.textContent = '...'
+      this.percentageTarget.textContent = '0%'
     }
     if (this.hasProgressBarTarget) {
-      // Keep a visible bar even when remote content-length is unavailable.
-      this.progressBarTarget.style.width = '100%'
+      // Unknown total size: start at 0% so the bar does not flash full then drop.
+      this.progressBarTarget.style.width = '0%'
     }
     if (this.hasStatusTarget) {
       this.statusTarget.textContent = `Downloading... ${this.formatBytes(downloadedValue)}`
+    }
+  }
+
+  // Snap the bar to 0% without CSS transition so a previous 100% state cannot animate down.
+  resetDownloadProgressBar() {
+    if (this.hasPercentageTarget) {
+      this.percentageTarget.textContent = '0%'
+    }
+    if (this.hasProgressBarTarget) {
+      const bar = this.progressBarTarget
+      const previousTransition = bar.style.transition
+      bar.style.transition = 'none'
+      bar.style.width = '0%'
+      // Force reflow so the next width update can transition from 0%.
+      void bar.offsetWidth
+      bar.style.transition = previousTransition
+    }
+    if (this.hasProgressTarget) {
+      this.progressTarget.classList.remove('hidden')
     }
   }
 
@@ -2964,9 +2983,6 @@ export default class extends Controller {
       if (this.hasFilenameTarget) {
         this.filenameTarget.textContent = result.filename || 'downloaded_file'
       }
-      if (this.hasProgressTarget) {
-        this.progressTarget.classList.remove('hidden')
-      }
 
       const terminalStatuses = ['uploaded', 'preparsing', 'preparsed', 'completed']
       if (result.reused && terminalStatuses.includes(result.status)) {
@@ -2984,6 +3000,7 @@ export default class extends Controller {
         return
       }
 
+      this.resetDownloadProgressBar()
       this.updateDownloadProgress(0, 0)
       this.startDownloadStatusPoll(this.fuId)
 

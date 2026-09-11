@@ -55,7 +55,8 @@ module ExternalCatalog
       parse_timeout_sec: nil,
       archiver: nil,
       sandbox: false,
-      sandbox_key: nil
+      sandbox_key: nil,
+      progress_candidate_id: nil
     )
       @user = user
       @version = version
@@ -69,6 +70,7 @@ module ExternalCatalog
       @archiver = archiver
       @sandbox = ActiveModel::Type::Boolean.new.cast(sandbox)
       @sandbox_key = sandbox_key.to_s.strip.presence
+      @progress_candidate_id = progress_candidate_id
       @last_pipeline_status = ExternalCatalog::ImportSuccessRegistry.empty_status
       raise Error, 'sandbox_key required for sandbox import' if @sandbox && @sandbox_key.blank?
 
@@ -129,7 +131,9 @@ module ExternalCatalog
 
       @last_import_outcome = nil
       reset_pipeline_status!
+      report_progress!(step: 'downloading')
       fu = download_and_preparse!(entry, organism)
+      report_progress!(step: 'preparsing')
       sel_name, dims, file_type = choose_matrix_selection!(fu, organism)
       parsing_attrs = build_parsing_attrs(entry, sel_name, dims, file_type)
       preparsing_fp = preparsing_fingerprint(parsing_attrs)
@@ -141,18 +145,22 @@ module ExternalCatalog
           "sha=#{content_sha} fp=#{preparsing_fp} -> existing project_id=#{existing.id} key=#{existing.key}; " \
           'linking provider instead of creating a new project'
         )
+        report_progress!(step: 'linking_project')
         link_existing_project!(existing, entry, provider)
         discard_unused_fu!(fu)
         @last_import_outcome = :linked
         on_project_ready&.call(existing, :linked)
+        report_progress!(step: 'opening', project_key: existing.key)
         return existing
       end
 
+      report_progress!(step: 'creating_project')
       project = create_project!(entry, fu, organism, parsing_attrs, preparsing_fp)
       attach_project_collection!(project, entry)
       attach_provider_label!(project, provider, entry)
       # parse_files has already been queued inside create_project!; notify so the UI can open analysis.
       on_project_ready&.call(project, :created)
+      report_progress!(step: 'opening', project_key: project.key)
       wait_for_parse!(project)
       mark_pipeline!(parsed: true)
       attach_reference_metadata!(project, entry)
@@ -206,6 +214,12 @@ module ExternalCatalog
 
     def reset_pipeline_status!
       @last_pipeline_status = ExternalCatalog::ImportSuccessRegistry.empty_status
+    end
+
+    def report_progress!(step:, **extra)
+      return if @progress_candidate_id.blank?
+
+      ExternalCatalog::ImportProgress.report(@progress_candidate_id, step: step, **extra)
     end
 
     def mark_pipeline!(**attrs)
@@ -432,7 +446,8 @@ module ExternalCatalog
         fu.id,
         entry.url,
         organism_id: organism.id,
-        version_id: @version.id
+        version_id: @version.id,
+        import_progress_candidate_id: @progress_candidate_id
       )
       fu.reload
 

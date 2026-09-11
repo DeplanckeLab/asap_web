@@ -7,6 +7,7 @@ require 'open3'
 class UrlDownloadService
   PID_FILENAME = 'download.pid'
   HEARTBEAT_SEC = 15
+  PROGRESS_INTERVAL_SEC = 1
   # HuBMAP assets CDN rejects requests with no / default curl User-Agent (HTTP 403).
   USER_AGENT = 'ASAP-external-catalog (https://asap.epfl.ch)'.freeze
 
@@ -30,18 +31,22 @@ class UrlDownloadService
     pid
   end
 
-  def initialize(fu:, url:, dest_path:, logger: Rails.logger)
+  # progress_callback receives (downloaded_bytes, total_bytes_or_nil) while curl runs.
+  def initialize(fu:, url:, dest_path:, logger: Rails.logger, progress_callback: nil)
     @fu = fu
     @url = url.to_s
     @dest_path = dest_path.to_s
     @logger = logger
+    @progress_callback = progress_callback
+    @expected_size = nil
   end
 
   def call
     FileUtils.mkdir_p(File.dirname(@dest_path))
     FileUtils.mkdir_p(@fu.global_upload_dir.to_s)
-    expected = fetch_remote_size
-    @fu.update_column(:upload_file_size, expected) if expected.to_i.positive?
+    @expected_size = fetch_remote_size
+    @fu.update_column(:upload_file_size, @expected_size) if @expected_size.to_i.positive?
+    report_progress!
 
     pid_path = self.class.pid_path_for_fu(@fu)
     existing_pid = self.class.live_pid(pid_path)
@@ -52,8 +57,10 @@ class UrlDownloadService
       download_with_curl!(pid_path)
     end
 
-    verify_complete!(expected)
-    File.size(@dest_path)
+    verify_complete!(@expected_size)
+    size = File.size(@dest_path)
+    report_progress!(downloaded: size)
+    size
   end
 
   private
@@ -97,9 +104,16 @@ class UrlDownloadService
   end
 
   def heartbeat_until(wait_thr)
+    last_touch = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    interval = @progress_callback ? PROGRESS_INTERVAL_SEC : HEARTBEAT_SEC
     while wait_thr.alive?
-      @fu.touch
-      wait_thr.join(HEARTBEAT_SEC)
+      report_progress!
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      if now - last_touch >= HEARTBEAT_SEC
+        @fu.touch
+        last_touch = now
+      end
+      wait_thr.join(interval)
     end
   end
 
@@ -112,9 +126,26 @@ class UrlDownloadService
       rescue Errno::EPERM
         # Process exists.
       end
+      report_progress!
       @fu.touch
-      sleep HEARTBEAT_SEC
+      sleep(@progress_callback ? PROGRESS_INTERVAL_SEC : HEARTBEAT_SEC)
     end
+  end
+
+  def report_progress!(downloaded: nil)
+    return unless @progress_callback
+
+    bytes =
+      if downloaded
+        downloaded.to_i
+      elsif File.exist?(@dest_path)
+        File.size(@dest_path)
+      else
+        0
+      end
+    @progress_callback.call(bytes, @expected_size)
+  rescue StandardError => e
+    @logger.warn("[UrlDownloadService] progress callback failed: #{e.class}: #{e.message}")
   end
 
   def verify_complete!(expected)

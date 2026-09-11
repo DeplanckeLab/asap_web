@@ -647,8 +647,8 @@ class IsolatedComplianceController extends Controller {
         this.transferProgressBarTarget.style.width = `${this.currentTransferProgress}%`
       }
     } else if (this.hasTransferProgressBarTarget) {
-      this.transferProgressBarTarget.style.width = "100%"
-      this.transferProgressBarTarget.classList.add("animate-pulse")
+      this.transferProgressBarTarget.style.width = "0%"
+      this.transferProgressBarTarget.classList.remove("animate-pulse")
     }
 
     if (this.hasTransferProgressDetailTarget) {

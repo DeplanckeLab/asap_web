@@ -109,7 +109,7 @@ class ExternalCatalogCandidatesController < ApplicationController
       import_error: error,
       project_url: project_url,
       project_key: project&.key
-    }
+    }.merge(import_progress_payload)
   end
 
   def destroy
@@ -127,6 +127,21 @@ class ExternalCatalogCandidatesController < ApplicationController
   end
 
   private
+
+  def import_progress_payload
+    progress = ExternalCatalog::ImportProgress.read(@candidate.id)
+    return {} if progress.blank?
+
+    progress.slice(
+      'step',
+      'message',
+      'steps_completed',
+      'steps',
+      'transfer_progress',
+      'transfer_downloaded',
+      'transfer_total'
+    )
+  end
 
   def set_candidate
     @candidate = ExternalCatalogCandidate.find(params[:id])
@@ -147,6 +162,7 @@ class ExternalCatalogCandidatesController < ApplicationController
       import_error: nil,
       import_user_id: current_user.id
     )
+    ExternalCatalog::ImportProgress.report(@candidate.id, step: 'queued')
 
     ExternalCatalogImportCandidateJob.perform_later(@candidate.id, current_user.id)
 
@@ -184,6 +200,7 @@ class ExternalCatalogCandidatesController < ApplicationController
       import_error: nil,
       import_user_id: guest_user.id
     )
+    ExternalCatalog::ImportProgress.report(@candidate.id, step: 'queued')
 
     ExternalCatalogImportCandidateJob.perform_later(
       @candidate.id,

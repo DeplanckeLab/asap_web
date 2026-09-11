@@ -54,4 +54,32 @@ class UrlDownloadServiceTest < ActiveSupport::TestCase
     assert_match(/got 10 bytes/, error.message)
     assert_match(/expected 100 bytes/, error.message)
   end
+
+  test 'progress_callback receives downloaded and total bytes' do
+    fu = register_for_test_cleanup(
+      Fu.create!(
+        name: 'remote.h5ad',
+        upload_file_name: 'input_file.h5ad',
+        upload_file_size: 0,
+        status: 'downloading',
+        url: 'https://example.com/remote.h5ad'
+      )
+    )
+    dest = File.join(fu.global_upload_dir.to_s, fu.upload_file_name)
+    FileUtils.mkdir_p(File.dirname(dest))
+    reports = []
+    service = UrlDownloadService.new(
+      fu: fu,
+      url: fu.url,
+      dest_path: dest,
+      progress_callback: ->(downloaded, total) { reports << [downloaded, total] }
+    )
+    service.define_singleton_method(:fetch_remote_size) { 20 }
+    service.define_singleton_method(:download_with_curl!) do |_pid_path|
+      File.write(dest, 'x' * 20)
+    end
+
+    assert_equal 20, service.call
+    assert reports.any? { |downloaded, total| downloaded == 20 && total == 20 }
+  end
 end

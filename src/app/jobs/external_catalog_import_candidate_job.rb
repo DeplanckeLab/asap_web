@@ -16,7 +16,7 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
 
     user = User.find_by(id: user_id)
     unless user
-      candidate.update!(import_status: 'failed', import_error: "User #{user_id} not found")
+      fail_import!(candidate, "User #{user_id} not found")
       return
     end
 
@@ -27,7 +27,7 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
         Version.activated.where('id > 3').order(id: :desc).first
       end
     unless version
-      candidate.update!(import_status: 'failed', import_error: 'No activated Version (id > 3) found')
+      fail_import!(candidate, 'No activated Version (id > 3) found')
       return
     end
 
@@ -36,6 +36,7 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       import_error: nil,
       import_user_id: user.id
     )
+    ExternalCatalog::ImportProgress.report(candidate.id, step: 'queued')
 
     importer = nil
 
@@ -46,6 +47,11 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
         candidate.update!(import_status: 'idle', import_error: nil)
         candidate.link_matched_project!(project, link_kind: 'provider_match') if project
         ExternalCatalog::ImportSuccessRegistry.record_import_attempt!(project: project) if project
+        ExternalCatalog::ImportProgress.report(
+          candidate.id,
+          step: 'opening',
+          project_key: project&.key
+        )
         Rails.logger.info(
           "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} already accessible in ASAP " \
           "project=#{project&.key} user=#{user.id} (matched, import_project_id unchanged)"
@@ -66,7 +72,8 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       ),
       archiver: nil,
       sandbox: guest_import,
-      sandbox_key: sandbox_key
+      sandbox_key: sandbox_key,
+      progress_candidate_id: candidate.id
     )
 
     project_ready = false
@@ -87,12 +94,12 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       }
     )
     if result == :dry_run
-      candidate.update!(import_status: 'failed', import_error: 'dry_run unexpected')
+      fail_import!(candidate, 'dry_run unexpected')
       return
     end
 
     unless result.is_a?(Project)
-      candidate.update!(import_status: 'failed', import_error: 'Import returned no project')
+      fail_import!(candidate, 'Import returned no project')
       return
     end
 
@@ -118,8 +125,13 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       candidate.update!(import_status: 'idle', import_error: nil)
       candidate.link_matched_project!(project, link_kind: 'provider_match')
       ExternalCatalog::ImportSuccessRegistry.record_import_attempt!(project: project)
+      ExternalCatalog::ImportProgress.report(
+        candidate.id,
+        step: 'opening',
+        project_key: project.key
+      )
     else
-      candidate&.update!(import_status: 'failed', import_error: e.message.to_s.truncate(2000))
+      fail_import!(candidate, e.message.to_s.truncate(2000))
     end
     Rails.logger.warn("[ExternalCatalogImportCandidateJob] skip candidate=#{candidate_id}: #{e.message}")
   rescue StandardError => e
@@ -127,10 +139,24 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       "[ExternalCatalogImportCandidateJob] fail candidate=#{candidate_id}: #{e.class} #{e.message}"
     )
     Rails.logger.error(e.backtrace.first(20).join("\n")) if e.backtrace
-    candidate&.update!(import_status: 'failed', import_error: "#{e.class}: #{e.message}".truncate(2000))
+    fail_import!(candidate, "#{e.class}: #{e.message}".truncate(2000))
     failed_project = candidate&.import_project.presence || candidate&.asap_projects&.order(id: :desc)&.first
     ExternalCatalog::ImportSuccessRegistry.record_import_attempt!(project: failed_project, importer: importer) if failed_project
   ensure
     ExternalCatalog::ImportRateLimit.release_inflight!(session_key: sandbox_key) if sandbox_key.present?
+  end
+
+  private
+
+  def fail_import!(candidate, message)
+    return unless candidate
+
+    candidate.update!(import_status: 'failed', import_error: message)
+    ExternalCatalog::ImportProgress.report(
+      candidate.id,
+      step: 'failed',
+      import_error: message,
+      message: message
+    )
   end
 end

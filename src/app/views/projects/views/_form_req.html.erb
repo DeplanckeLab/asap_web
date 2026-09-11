@@ -110,47 +110,92 @@
             
             Rails.logger.info("[_form_req] Filtered methods count: #{filtered_methods.count}")
             
-            # Build options - include all methods, mark unavailable ones
-            options = filtered_methods.map do |method|
-              is_unavailable = @h_unavailable_methods[method.id] == true
-              label = method.label || method.name
-              label = "#{label} (not available)" if is_unavailable
-              [label, method.id]
-            end
-            
-            # Get IDs of unavailable methods for disabled attribute
-            unavailable_method_ids = filtered_methods.select { |m| @h_unavailable_methods[m.id] == true }.map(&:id)
-            
-            Rails.logger.info("[_form_req] Options count: #{options.count}")
-            Rails.logger.info("[_form_req] Unavailable method IDs: #{unavailable_method_ids.inspect}")
-            
-            # Set default value (must be in filtered_methods so options_for_select can select it)
+            # Set default value (must be in filtered_methods)
             default_value = if default_std_method && filtered_methods.include?(default_std_method)
               default_std_method.id
             else
               filtered_methods.find { |m| !@h_unavailable_methods[m.id] }&.id
             end
           %>
-          <% if options.empty? %>
+          <% if filtered_methods.empty? %>
             <div class="text-red-600 text-sm p-2">
               No methods available for this step.
             </div>
           <% else %>
+            <%
+              selected_method = filtered_methods.find { |m| m.id == default_value }
+              selected_label = selected_method ? (selected_method.label || selected_method.name).to_s : 'Select a method'
+              selected_is_recommended = selected_method.present? && default_std_method.present? && selected_method.id == default_std_method.id
+            %>
             <div class="flex items-center gap-3">
-              <%= f.select :std_method_id, options_for_select(options, default_value), 
-                  { disabled: unavailable_method_ids }, 
-                  { 
-                    class: 'flex-1 min-w-0 rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white',
-                    data: { form_req_target: 'methodSelect' }
-                  } %>
+              <div class="relative flex-1 min-w-0">
+                <button type="button"
+                        data-form-req-target="methodDropdownButton"
+                        data-action="click->form-req#toggleMethodDropdown"
+                        class="w-full rounded-md border border-gray-300 px-3 py-2 text-left shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white flex items-center justify-between">
+                  <span class="text-gray-900 font-medium flex items-center gap-2 flex-wrap min-w-0"
+                        data-form-req-target="methodDropdownText">
+                    <% if selected_is_recommended %>
+                      <span data-recommendation-badge="1"
+                            class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800">Recommended</span>
+                    <% end %>
+                    <span data-option-label="1"><%= selected_label %></span>
+                  </span>
+                  <span class="ml-2 text-gray-400 flex-shrink-0">▼</span>
+                </button>
+                <div data-form-req-target="methodDropdownMenu"
+                     class="hidden absolute z-50 top-full left-0 w-full max-h-96 overflow-auto rounded-md border border-gray-300 bg-white shadow-lg mt-1">
+                  <div class="py-1">
+                    <% filtered_methods.each do |method| %>
+                      <%
+                        is_unavailable = @h_unavailable_methods[method.id] == true
+                        is_recommended = default_std_method.present? && method.id == default_std_method.id
+                        is_selected = method.id == default_value
+                        label = method.label || method.name
+                        logo_url = method_package_logo_url(label, tool_versions)
+                        option_classes = ['w-full text-left flex items-start px-4 py-3 border-b border-gray-100 last:border-b-0']
+                        if is_unavailable
+                          option_classes << 'opacity-60 cursor-not-allowed bg-gray-50'
+                        else
+                          option_classes << 'hover:bg-gray-50 cursor-pointer'
+                        end
+                        option_classes << 'bg-blue-50' if is_selected
+                      %>
+                      <button type="button"
+                              data-form-req-target="methodOption"
+                              data-action="click->form-req#selectMethod"
+                              data-method-id="<%= method.id %>"
+                              data-method-label="<%= label %>"
+                              data-recommended="<%= is_recommended ? '1' : '0' %>"
+                              data-unavailable="<%= is_unavailable ? '1' : '0' %>"
+                              <%= 'disabled' if is_unavailable %>
+                              class="<%= option_classes.join(' ') %>">
+                        <div class="flex-1 min-w-0">
+                          <div class="font-medium text-gray-900 flex items-center gap-2 flex-wrap">
+                            <% if is_recommended %>
+                              <span data-recommendation-badge="1"
+                                    class="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800">Recommended</span>
+                            <% end %>
+                            <span data-option-label="1" class="<%= 'text-red-600 italic' if is_unavailable %>"><%= label %></span>
+                            <% if is_unavailable %>
+                              <span class="text-xs text-red-600 italic">(not available)</span>
+                            <% end %>
+                          </div>
+                        </div>
+                        <% if logo_url.present? %>
+                          <img src="<%= logo_url %>" alt="" class="ml-3 h-8 w-auto max-w-[4.5rem] flex-shrink-0 object-contain" />
+                        <% end %>
+                      </button>
+                    <% end %>
+                  </div>
+                </div>
+                <%= f.hidden_field :std_method_id,
+                      value: default_value,
+                      id: 'req_std_method_id',
+                      data: { form_req_target: 'methodSelect' } %>
+              </div>
               <img data-form-req-target="methodLogo" class="hidden h-10 w-auto max-w-[6rem] flex-shrink-0 object-contain" alt="" />
             </div>
-            <style>
-              select option:disabled {
-                color: #dc2626 !important;
-                font-style: italic;
-              }
-            </style>
           <% end %>
         </div>
       </div>

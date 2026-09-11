@@ -197,6 +197,7 @@ module ClusteringV8StdMethods
       upsert_definitions!(SCANPY_DEFINITIONS, step: step, docker_image: docker_image, speed: speed,
                           version_id: version_id, summary: summary, backend: :scanpy)
       obsolete_duplicate_scanpy_clustering_methods!(step, version_id)
+      obsolete_extra_same_name_methods!(step, version_id, (SEURAT_DEFINITIONS + SCANPY_DEFINITIONS).map { |d| d[:name] })
 
       summary
     end
@@ -222,9 +223,20 @@ module ClusteringV8StdMethods
                .update_all(obsolete: true)
     end
 
+    # find_by(name) only updates one row; mark any extra same-name copies obsolete.
+    def obsolete_extra_same_name_methods!(step, version_id, names)
+      names.each do |name|
+        records = StdMethod.where(step_id: step.id, version_id: version_id, name: name, obsolete: false).order(:id).to_a
+        next if records.size <= 1
+
+        records.drop(1).each { |record| record.update!(obsolete: true) }
+      end
+    end
+
     def upsert_definitions!(definitions, step:, docker_image:, speed:, version_id:, summary:, backend:)
       definitions.each do |defn|
-        record = StdMethod.find_by(name: defn[:name], step_id: step.id, version_id: version_id)
+        records = StdMethod.where(name: defn[:name], step_id: step.id, version_id: version_id).order(:id).to_a
+        record = records.first
         attrs = build_attrs(defn, step: step, docker_image: docker_image, speed: speed, backend: backend)
 
         if record.nil?
@@ -236,6 +248,8 @@ module ClusteringV8StdMethods
         else
           summary[:unchanged] << defn[:name]
         end
+
+        records.drop(1).each { |extra| extra.update!(obsolete: true) }
       end
     end
 

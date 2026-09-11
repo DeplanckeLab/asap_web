@@ -16,6 +16,10 @@ export default class extends Controller {
   static targets = [
     "submitButton",
     "methodSelect",
+    "methodDropdownButton",
+    "methodDropdownMenu",
+    "methodDropdownText",
+    "methodOption",
     "methodLogo",
     "methodDesc",
     "methodPred",
@@ -58,13 +62,17 @@ export default class extends Controller {
     if (this.hasMethodSelectTarget) {
       console.log("[FormReqController] Initializing method selection...")
       this.updateMethodSelectOptions()
+      this.syncMethodDropdownDisplay()
       this.handleMethodChange()
-      
-      // Listen for method changes
+
       this.methodSelectTarget.addEventListener('change', () => {
         console.log("[FormReqController] Method selection changed")
+        this.syncMethodDropdownDisplay()
         this.handleMethodChange()
       })
+
+      this.boundCloseMethodDropdownOnOutsideClick = this.closeMethodDropdownOnOutsideClick.bind(this)
+      document.addEventListener('click', this.boundCloseMethodDropdownOnOutsideClick, true)
     } else {
       console.warn("[FormReqController] Method select target not found")
       // Hidden method field: load attrs for the preselected method if present.
@@ -119,15 +127,18 @@ export default class extends Controller {
       clearTimeout(this._resourcePredictionTimer)
       this._resourcePredictionTimer = null
     }
+    if (this.boundCloseMethodDropdownOnOutsideClick) {
+      document.removeEventListener('click', this.boundCloseMethodDropdownOnOutsideClick, true)
+      this.boundCloseMethodDropdownOnOutsideClick = null
+    }
     console.log("[FormReqController] Disconnected")
   }
 
   updateMethodSelectOptions() {
-    if (!this.hasMethodSelectTarget || !this.unavailableMethodsValue) {
+    if (!this.hasMethodOptionTarget || !this.unavailableMethodsValue) {
       return
     }
 
-    // Parse if it's a JSON string
     let unavailableMethods = this.unavailableMethodsValue
     if (typeof unavailableMethods === 'string') {
       try {
@@ -138,12 +149,106 @@ export default class extends Controller {
       }
     }
 
-    const options = this.methodSelectTarget.querySelectorAll('option')
-    options.forEach(option => {
-      if (unavailableMethods && unavailableMethods[option.value]) {
+    this.methodOptionTargets.forEach((option) => {
+      const methodId = option.dataset.methodId
+      if (unavailableMethods && unavailableMethods[methodId]) {
         option.classList.add('unavailable_method')
+        option.dataset.unavailable = '1'
+        option.disabled = true
       }
     })
+  }
+
+  toggleMethodDropdown(event) {
+    if (event) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    if (!this.hasMethodDropdownMenuTarget) {
+      return
+    }
+    this.methodDropdownMenuTarget.classList.toggle('hidden')
+  }
+
+  closeMethodDropdown() {
+    if (this.hasMethodDropdownMenuTarget) {
+      this.methodDropdownMenuTarget.classList.add('hidden')
+    }
+  }
+
+  closeMethodDropdownOnOutsideClick(event) {
+    if (!this.hasMethodDropdownMenuTarget || this.methodDropdownMenuTarget.classList.contains('hidden')) {
+      return
+    }
+    const target = event.target
+    if (!(target instanceof Element)) {
+      return
+    }
+    if (this.hasMethodDropdownButtonTarget && this.methodDropdownButtonTarget.contains(target)) {
+      return
+    }
+    if (this.methodDropdownMenuTarget.contains(target)) {
+      return
+    }
+    this.closeMethodDropdown()
+  }
+
+  selectMethod(event) {
+    const option = event.currentTarget
+    if (!option || option.disabled || option.dataset.unavailable === '1') {
+      return
+    }
+    const methodId = option.dataset.methodId
+    if (!methodId || !this.hasMethodSelectTarget) {
+      return
+    }
+
+    this.methodSelectTarget.value = methodId
+    this.closeMethodDropdown()
+    this.methodSelectTarget.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+
+  getSelectedMethodOption() {
+    if (!this.hasMethodSelectTarget || !this.hasMethodOptionTarget) {
+      return null
+    }
+    const selectedId = String(this.methodSelectTarget.value || '')
+    return this.methodOptionTargets.find((option) => String(option.dataset.methodId) === selectedId) || null
+  }
+
+  syncMethodDropdownDisplay() {
+    if (!this.hasMethodDropdownTextTarget) {
+      return
+    }
+
+    const selectedOption = this.getSelectedMethodOption()
+    const label = selectedOption?.dataset.methodLabel || 'Select a method'
+    const isRecommended = selectedOption?.dataset.recommended === '1'
+    const selectedId = selectedOption ? String(selectedOption.dataset.methodId) : ''
+
+    this.methodDropdownTextTarget.innerHTML = ''
+    this.methodDropdownTextTarget.classList.remove('text-gray-500')
+    this.methodDropdownTextTarget.classList.add('text-gray-900', 'font-medium')
+
+    if (isRecommended) {
+      const badge = document.createElement('span')
+      badge.setAttribute('data-recommendation-badge', '1')
+      badge.className = 'inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800'
+      badge.textContent = 'Recommended'
+      this.methodDropdownTextTarget.appendChild(badge)
+    }
+
+    const labelSpan = document.createElement('span')
+    labelSpan.setAttribute('data-option-label', '1')
+    labelSpan.textContent = label
+    this.methodDropdownTextTarget.appendChild(labelSpan)
+
+    if (this.hasMethodOptionTarget) {
+      this.methodOptionTargets.forEach((option) => {
+        const isSelected = String(option.dataset.methodId) === selectedId
+        option.classList.toggle('bg-blue-50', isSelected)
+      })
+    }
   }
 
   updateMethodLogo(logoUrl) {
@@ -152,9 +257,8 @@ export default class extends Controller {
     }
 
     if (logoUrl) {
-      const optionText = this.hasMethodSelectTarget
-        ? (this.methodSelectTarget.selectedOptions[0]?.textContent || '')
-        : ''
+      const selectedOption = this.getSelectedMethodOption()
+      const optionText = selectedOption?.dataset.methodLabel || ''
       const bracketMatch = optionText.match(/\[([^\]]+)\]/)
       this.methodLogoTarget.src = logoUrl
       this.methodLogoTarget.alt = bracketMatch ? `${bracketMatch[1]} logo` : ''

@@ -8,6 +8,15 @@ module Basic
   # Manual annotations submitted from the visualization annotation popup.
   MANUAL_CLA_SOURCE_ID = 1
   DE_OUTPUT_TXT_LAYOUT_IDENTITY = 'gene_identity_from_matrix_v1'
+  # Fixed gene-list TSV columns written by run_de_filter / shown in DE gene tables.
+  # Legacy matrices stop after Avg group2 (10 cols). v8+ may append Tau and Specificity (12 cols).
+  DE_GENE_LIST_FIELD_NAMES = [
+    'Gene index', 'EnsemblID', 'Gene name', 'Alt names', 'Description',
+    'logFC', 'P-value', 'FDR', 'Avg group1', 'Avg group2',
+    'Tau', 'Specificity'
+  ].freeze
+  DE_GENE_LIST_BASE_NCOLS = 10
+  DE_GENE_LIST_WITH_SPECIFICITY_NCOLS = 12
   # DE methods other than t_test_approx are blocked at or above this cell count.
   DE_LARGE_DATASET_MIN_CELLS = 100_000
   DE_LARGE_DATASET_ALLOWED_METHOD_NAMES = %w[t_test_approx].freeze
@@ -1757,11 +1766,12 @@ module Basic
     end
 
     # DE /attrs matrices: legacy runs expose five numeric columns (logFC, P-value, FDR, Avg group1, Avg group2)
-    # as the first columns in ExtractMetadata JSON "values". v8+ may prepend string columns; column titles
-    # are stored on Annot#headers_json (same order as output.json "headers", before optional leading HDF5-only
-    # fields such as Gene). Returns 0-based indices into values[col][gene_idx] for those five metrics in order,
-    # plus sort_idx (logFC source column) for ranking rows. Falls back to [0,1,2,3,4] when headers are absent
-    # or ambiguous.
+    # as the first columns in ExtractMetadata JSON "values". v8+ may prepend string columns and may append
+    # Tau / Specificity after the five classic metrics; column titles are stored on Annot#headers_json
+    # (same order as output.json "headers", before optional leading HDF5-only fields such as Gene).
+    # Returns 0-based indices into values[col][gene_idx] for those five metrics in order, optional
+    # extra_indices for Tau/Specificity when present, plus sort_idx (logFC source column) for ranking rows.
+    # Falls back to [0,1,2,3,4] when headers are absent or ambiguous.
     def de_normalize_de_header_label(s)
       s.to_s.strip.downcase.gsub(/\s+/, ' ')
     end
@@ -1808,6 +1818,26 @@ module Basic
       { logfc: logfc, p_value: pval, fdr: fdr, avg1: avg1, avg2: avg2 }
     end
 
+    def de_tau_specificity_indices_from_header_names(headers)
+      return { tau: nil, specificity: nil } unless headers.is_a?(Array) && headers.any?
+
+      nh = headers.map { |h| de_normalize_de_header_label(h) }
+      tau = nh.index { |x| x == 'tau' }
+      specificity = nh.index { |x| x == 'specificity' }
+      { tau: tau, specificity: specificity }
+    end
+
+    def de_extra_metric_source_indices(headers, prefix, n_value_cols)
+      n = n_value_cols.to_i
+      raw = de_tau_specificity_indices_from_header_names(headers)
+      %i[tau specificity].filter_map do |key|
+        next if raw[key].nil?
+
+        idx = raw[key] + prefix.to_i
+        idx if idx >= 0 && idx < n
+      end
+    end
+
     def de_tail_headers_are_legacy_metric_pack?(five_headers)
       m = de_metric_indices_from_header_names(five_headers)
       m && m[:logfc].zero? && m[:p_value] == 1 && m[:fdr] == 2 && m[:avg1] == 3 && m[:avg2] == 4
@@ -1830,33 +1860,34 @@ module Basic
 
     def de_metric_source_indices_for_extract_metadata(annot, n_value_cols, headers_override: nil)
       n = n_value_cols.to_i
-      return { indices: [0, 1, 2, 3, 4], sort_idx: 0 } if n < 5
+      return { indices: [0, 1, 2, 3, 4], sort_idx: 0, extra_indices: [] } if n < 5
 
       headers = de_headers_array_from_annot(annot, headers_override: headers_override)
       prefix = de_header_column_prefix(headers, n)
+      extra = de_extra_metric_source_indices(headers, prefix, n)
 
       if headers.size >= 5
         tail = headers.last(5)
         if de_tail_headers_are_legacy_metric_pack?(tail)
           start_h = headers.size - 5
           idxs = (0...5).map { |k| start_h + k + prefix }
-          return { indices: idxs, sort_idx: idxs[0] } if idxs.max < n
+          return { indices: idxs, sort_idx: idxs[0], extra_indices: extra } if idxs.max < n
         end
       end
 
       by_name = de_metric_indices_from_header_names(headers)
       if by_name
         idxs = %i[logfc p_value fdr avg1 avg2].map { |k| by_name[k] + prefix }
-        return { indices: idxs, sort_idx: idxs[0] } if idxs.max < n
+        return { indices: idxs, sort_idx: idxs[0], extra_indices: extra } if idxs.max < n
       end
 
       if n > 5
         start = n - 5
         idxs = (0...5).map { |k| start + k }
-        return { indices: idxs, sort_idx: idxs[0] }
+        return { indices: idxs, sort_idx: idxs[0], extra_indices: extra }
       end
 
-      { indices: [0, 1, 2, 3, 4], sort_idx: 0 }
+      { indices: [0, 1, 2, 3, 4], sort_idx: 0, extra_indices: extra }
     end
 
     def de_identity_column_indices_for_extract_metadata(annot, n_value_cols, headers_override: nil)
@@ -1882,14 +1913,39 @@ module Basic
       p.sub_ext('.layout')
     end
 
-    def de_output_txt_needs_rebuild?(output_txt, annot)
+    def de_output_txt_expected_ncols(annot, headers_override: nil)
+      headers = de_headers_array_from_annot(annot, headers_override: headers_override)
+      extra_n = de_tau_specificity_indices_from_header_names(headers).values.compact.size
+      DE_GENE_LIST_BASE_NCOLS + extra_n
+    end
+
+    def de_gene_list_fields_for_n_cols(n_cols)
+      n = n_cols.to_i
+      n = DE_GENE_LIST_BASE_NCOLS if n < DE_GENE_LIST_BASE_NCOLS
+      n = DE_GENE_LIST_FIELD_NAMES.size if n > DE_GENE_LIST_FIELD_NAMES.size
+      DE_GENE_LIST_FIELD_NAMES.first(n)
+    end
+
+    def de_gene_list_fields_for_output_txt(output_txt)
+      path = output_txt.to_s
+      unless File.exist?(path) && File.size(path).positive?
+        return de_gene_list_fields_for_n_cols(DE_GENE_LIST_BASE_NCOLS)
+      end
+
+      first_line = File.open(path, 'r', &:gets)
+      ncol = first_line&.chomp&.split("\t")&.size.to_i
+      de_gene_list_fields_for_n_cols(ncol)
+    end
+
+    def de_output_txt_needs_rebuild?(output_txt, annot, headers_override: nil)
       path = output_txt.to_s
       return true unless File.exist?(path) && File.size(path).positive?
 
       first_line = File.open(path, 'r', &:gets)
       ncol = first_line&.chomp&.split("\t")&.size.to_i
-      return true if ncol != 10 || de_output_txt_first_line_is_column_header?(first_line)
-      return false unless de_matrix_has_gene_identity_columns?(annot)
+      expected = de_output_txt_expected_ncols(annot, headers_override: headers_override)
+      return true if ncol != expected || de_output_txt_first_line_is_column_header?(first_line)
+      return false unless de_matrix_has_gene_identity_columns?(annot, headers_override: headers_override)
 
       layout_path = de_output_txt_layout_path(path)
       return true unless File.exist?(layout_path.to_s)
@@ -1934,7 +1990,7 @@ module Basic
       nil
     end
 
-    def de_output_txt_line_for_matrix_row(i, vals, metric_idxs, identity_idxs, ensembl_ids, gene_names, h_genes, ensembl_to_idx, gene_to_idx, loom_n)
+    def de_output_txt_line_for_matrix_row(i, vals, metric_idxs, identity_idxs, ensembl_ids, gene_names, h_genes, ensembl_to_idx, gene_to_idx, loom_n, extra_metric_idxs: [])
       loom_i = de_loom_gene_index_for_matrix_row(i, identity_idxs, vals, ensembl_to_idx, gene_to_idx, loom_n)
       return nil if loom_i.nil?
 
@@ -1958,8 +2014,8 @@ module Basic
         gname = gene_from_matrix.presence || (gene_names && gene_names[loom_i])
         details = [loom_i, ens, gname, nil, nil]
       end
-      metric_cells = (0..4).map do |slot|
-        ci = metric_idxs[slot]
+      all_metric_idxs = Array(metric_idxs) + Array(extra_metric_idxs)
+      metric_cells = all_metric_idxs.each_with_index.map do |ci, slot|
         raw = vals[ci].is_a?(Array) ? vals[ci][i] : nil
         de_format_output_txt_metric_value(raw, slot)
       end

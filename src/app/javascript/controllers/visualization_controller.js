@@ -976,6 +976,7 @@ export default class extends Controller {
       this.finishInitialCheckpointEntryLoading()
       this.ensureDefaultEmbeddingAfterCheckpointEntry()
       this.scheduleAutoMetadataPreload()
+      this.openDeFromUrlIfPresent()
     })
 
     this.boundCheckpointTraceClick = (event) => {
@@ -11736,7 +11737,7 @@ export default class extends Controller {
     const catIdx = Number(result?.cat_idx)
 
     if (resultType === 'de_result') {
-      await this.openDeResultFromMetadataSearch(result)
+      await this.openDeResultFromMetadataSearch({ ...result, openGeneList: true })
       return
     }
 
@@ -20214,17 +20215,59 @@ export default class extends Controller {
   async openDeResultFromMetadataSearch(result) {
     const annotId = String(result?.annot_id || result?.metadata_id || '').trim()
     const runId = String(result?.run_id || '').trim()
+    const directionRaw = String(result?.direction || result?.de_direction || '').trim().toLowerCase()
+    const direction = (directionRaw === 'up' || directionRaw === 'down') ? directionRaw : ''
+    const openGeneList = result?.openGeneList === true || result?.open_gene_list === true || !!direction
     if (!annotId && !runId) return
 
-    const loomFile = this.getCurrentLoomFileForRequest()
     if (!this.prepareDeSelectionModal({ canRunNewDe: this.canRunDeFromVisualization() })) return
 
     this.switchDeModalTab('results', { reloadResults: false })
     await this.loadDeVizResults()
-    this.selectDeVizResultFromSearch({ annotId, runId })
+    this.selectDeVizResultFromSearch({ annotId, runId, direction, openGeneList })
   }
 
-  selectDeVizResultFromSearch({ annotId, runId }) {
+  async openDeFromUrlIfPresent() {
+    if (this._openDeFromUrlHandled === true) return
+    const params = new URLSearchParams(window.location.search)
+    const openDe = ['1', 'true', 'yes'].includes(String(params.get('open_de') || '').toLowerCase())
+    if (!openDe) return
+    this._openDeFromUrlHandled = true
+
+    const runId = String(params.get('de_run_id') || '').trim()
+    const annotId = String(params.get('de_annot_id') || '').trim()
+    const directionRaw = String(params.get('de_direction') || '').trim().toLowerCase()
+    const direction = (directionRaw === 'up' || directionRaw === 'down') ? directionRaw : ''
+    this.clearOpenDeUrlParams()
+    if (!runId && !annotId) return
+
+    try {
+      await this.openDeResultFromMetadataSearch({
+        run_id: runId,
+        annot_id: annotId,
+        direction: direction,
+        openGeneList: !!direction
+      })
+    } catch (error) {
+      console.error('Failed to open DE from URL:', error)
+    }
+  }
+
+  clearOpenDeUrlParams() {
+    try {
+      const url = new URL(window.location.href)
+      ;['open_de', 'de_run_id', 'de_annot_id', 'de_direction'].forEach((key) => {
+        url.searchParams.delete(key)
+      })
+      window.history.replaceState({}, '', url.toString())
+    } catch (_error) {
+      // ignore
+    }
+  }
+
+  selectDeVizResultFromSearch({ annotId, runId, direction, openGeneList }) {
+    const preferredDirection = (direction === 'up' || direction === 'down') ? direction : ''
+    const shouldOpenGeneList = openGeneList === true || !!preferredDirection
     const browser = document.getElementById('de-viz-results-browser')
     if (browser && Array.isArray(this._deVizCatalog) && this._deVizCatalog.length > 0) {
       const annotIdStr = String(annotId || '').trim()
@@ -20245,23 +20288,36 @@ export default class extends Controller {
         }
         this.refreshDeVizCatalogSelectors({ preferSelection: true })
         const selected = this.getSelectedDeVizCatalogEntry()
-        if (selected) {
-          const fakeEl = {
-            getAttribute: (name) => {
-              const map = {
-                'data-gene-list-url': selected.gene_list_up_url || selected.gene_list_down_url || '',
-                'data-run-id': String(selected.run_id || ''),
-                'data-annot-id': String(selected.annot_id || ''),
-                'data-direction': selected.gene_list_up_url ? 'up' : 'down',
-                'data-run-num': String(selected.run_num || ''),
-                'data-method': selected.method_label || '',
-                'data-ref-group': selected.reference_group || '',
-                'data-compared-group': selected.compared_group || ''
-              }
-              return map[name] || ''
-            }
+        if (selected && shouldOpenGeneList) {
+          let geneDirection = preferredDirection
+          let geneListUrl = ''
+          if (geneDirection === 'up') {
+            geneListUrl = selected.gene_list_up_url || ''
+          } else if (geneDirection === 'down') {
+            geneListUrl = selected.gene_list_down_url || ''
+          } else if (selected.gene_list_up_url) {
+            geneDirection = 'up'
+            geneListUrl = selected.gene_list_up_url
+          } else if (selected.gene_list_down_url) {
+            geneDirection = 'down'
+            geneListUrl = selected.gene_list_down_url
           }
-          if (fakeEl.getAttribute('data-gene-list-url')) {
+          if (geneListUrl) {
+            const fakeEl = {
+              getAttribute: (name) => {
+                const map = {
+                  'data-gene-list-url': geneListUrl,
+                  'data-run-id': String(selected.run_id || ''),
+                  'data-annot-id': String(selected.annot_id || ''),
+                  'data-direction': geneDirection,
+                  'data-run-num': String(selected.run_num || ''),
+                  'data-method': selected.method_label || '',
+                  'data-ref-group': selected.reference_group || '',
+                  'data-compared-group': selected.compared_group || ''
+                }
+                return map[name] || ''
+              }
+            }
             this.openDeVizGeneList(fakeEl)
           }
         }
@@ -20281,14 +20337,22 @@ export default class extends Controller {
     const geneListBadges = Array.from(area.querySelectorAll('[data-gene-list-url]'))
     let badge = null
     if (annotId) {
-      badge = geneListBadges.find((el) => String(el.getAttribute('data-annot-id') || '').trim() === String(annotId) && el.getAttribute('data-direction') === 'up') ||
-        geneListBadges.find((el) => String(el.getAttribute('data-annot-id') || '').trim() === String(annotId) && el.getAttribute('data-direction') === 'down') ||
-        geneListBadges.find((el) => String(el.getAttribute('data-annot-id') || '').trim() === String(annotId)) ||
+      const annotBadges = geneListBadges.filter((el) => String(el.getAttribute('data-annot-id') || '').trim() === String(annotId))
+      if (preferredDirection) {
+        badge = annotBadges.find((el) => el.getAttribute('data-direction') === preferredDirection) || null
+      }
+      badge = badge ||
+        annotBadges.find((el) => el.getAttribute('data-direction') === 'up') ||
+        annotBadges.find((el) => el.getAttribute('data-direction') === 'down') ||
+        annotBadges[0] ||
         null
     }
     if (!badge && runId) {
       const runBadges = geneListBadges.filter((el) => String(el.getAttribute('data-run-id') || '').trim() === String(runId))
-      badge = runBadges.find((el) => {
+      if (preferredDirection) {
+        badge = runBadges.find((el) => el.getAttribute('data-direction') === preferredDirection) || null
+      }
+      badge = badge || runBadges.find((el) => {
         const elAnnotId = String(el.getAttribute('data-annot-id') || '').trim()
         return !elAnnotId || elAnnotId === String(annotId || '')
       }) || runBadges.find((el) => el.getAttribute('data-direction') === 'up') || runBadges[0] || null
@@ -20318,7 +20382,7 @@ export default class extends Controller {
       }, 3500)
     }
 
-    if (badge && badge.getAttribute('data-gene-list-url')) {
+    if (shouldOpenGeneList && badge && badge.getAttribute('data-gene-list-url')) {
       this.openDeVizGeneList(badge)
     }
   }

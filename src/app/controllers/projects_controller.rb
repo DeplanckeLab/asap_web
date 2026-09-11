@@ -386,7 +386,6 @@ class ProjectsController < ApplicationController
           @run = gl_run
           @step = gl_step
           @std_method = gl_std_method
-          @fields = ["Gene index", "EnsemblID", "Gene name", "Alt names", "Description", "logFC", "P-value", "FDR", "Avg group1", "Avg group2"]
           @limit = 3000
           @h_std_method_attrs = { gl_std_method.id => Basic.get_std_method_attrs(gl_std_method, gl_step)[:h_attrs] }
           @h_run_attrs = gl_run.attrs_json ? JSON.parse(gl_run.attrs_json) : {}
@@ -403,6 +402,7 @@ class ProjectsController < ApplicationController
           @nber_genes = list_filtered_rows.size
 
           output_txt = de_list_dir + 'output.txt'
+          @fields = Basic.de_gene_list_fields_for_output_txt(output_txt)
           @tmp_data = File.readlines(output_txt)
           i = 0; j = 0
           if params[:type] == 'up'
@@ -12402,7 +12402,6 @@ class ProjectsController < ApplicationController
           @run = gl_run
           @step = gl_step
           @std_method = gl_std_method
-          @fields = ["Gene index", "EnsemblID", "Gene name", "Alt names", "Description", "logFC", "P-value", "FDR", "Avg group1", "Avg group2"]
           @limit = 3000
           @h_std_method_attrs = { gl_std_method.id => Basic.get_std_method_attrs(gl_std_method, gl_step)[:h_attrs] }
           @h_run_attrs = gl_run.attrs_json ? JSON.parse(gl_run.attrs_json) : {}
@@ -12419,6 +12418,7 @@ class ProjectsController < ApplicationController
           @nber_genes = list_filtered_rows.size
 
           output_txt = de_list_dir + 'output.txt'
+          @fields = Basic.de_gene_list_fields_for_output_txt(output_txt)
           @tmp_data = File.readlines(output_txt)
           i = 0
           j = 0
@@ -14623,6 +14623,7 @@ class ProjectsController < ApplicationController
       pack = Basic.de_metric_source_indices_for_extract_metadata(annot, n_cols, headers_override: headers_override)
       identity_idxs = Basic.de_identity_column_indices_for_extract_metadata(annot, n_cols, headers_override: headers_override)
       metric_idxs = pack[:indices]
+      extra_metric_idxs = pack[:extra_indices] || []
       sort_col = pack[:sort_idx]
 
       ensembl_ids = h_ensembl_ids_by_loom_path[loom_path]
@@ -14659,7 +14660,8 @@ class ProjectsController < ApplicationController
               Basic.de_output_txt_line_for_matrix_row(
                 i, vals, metric_idxs, identity_idxs,
                 ensembl_ids, gene_names, h_genes,
-                ensembl_to_idx, gene_to_idx, loom_n
+                ensembl_to_idx, gene_to_idx, loom_n,
+                extra_metric_idxs: extra_metric_idxs
               )
             }.join("\n")
           body = "#{body}\n" if body.present?
@@ -14673,7 +14675,7 @@ class ProjectsController < ApplicationController
 
       Rails.logger.info(
         "[run_de_filter] wrote_de_output_txt project_id=#{@project.id} run_id=#{annot.run_id} annot_id=#{annot.id} " \
-        "attrs_h5py=#{attrs_via_h5py} orient=#{de_orient_note} n_cols=#{n_cols} metric_idxs=#{metric_idxs.inspect} sort_col=#{sort_col} " \
+        "attrs_h5py=#{attrs_via_h5py} orient=#{de_orient_note} n_cols=#{n_cols} metric_idxs=#{metric_idxs.inspect} extra_metric_idxs=#{extra_metric_idxs.inspect} sort_col=#{sort_col} " \
         "fdr_cutoff=#{h_de_filter['fdr_cutoff']} fc_cutoff=#{h_de_filter['fc_cutoff']} " \
         "sample_line=#{sample_preview.inspect}"
       )

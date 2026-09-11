@@ -173,16 +173,20 @@ module ApplicationHelper
     url = ensembl_gene_browser_url(ensembl_id, assembly: assembly, project: project)
     return content_tag(:span, label) if url.blank?
 
-    link_to(
-      label,
-      url,
-      {
-        target: '_blank',
-        rel: 'noopener noreferrer',
-        class: 'text-blue-600 cursor-pointer hover:underline gene-link',
-        data: { ensembl_id: ensembl_id }
-      }.deep_merge(html_options)
-    )
+    opts = {
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      class: 'inline-flex items-center gap-1 text-blue-600 cursor-pointer hover:underline gene-link',
+      title: 'Open in Ensembl',
+      data: { ensembl_id: ensembl_id }
+    }.deep_merge(html_options)
+
+    link_to(url, opts) do
+      safe_join([
+        label,
+        content_tag(:i, '', class: 'fas fa-external-link-alt text-xs', 'aria-hidden': true)
+      ])
+    end
   end
 
   def display_reference(article)

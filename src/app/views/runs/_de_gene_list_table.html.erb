@@ -1,6 +1,6 @@
 <%# Shared DE gene list table. Locals: compact (boolean) for viz modal styling. %>
 <% compact = local_assigns.fetch(:compact, false) %>
-<% numeric_fields = ['Gene index', 'logFC', 'P-value', 'FDR', 'Avg group1', 'Avg group2'] %>
+<% numeric_fields = ['Gene index', 'logFC', 'P-value', 'FDR', 'Avg group1', 'Avg group2', 'Tau', 'Specificity'] %>
 <% is_up_regulated = params[:type].to_s == 'up' %>
 <% gene_badge_cls = is_up_regulated ? 'bg-green-100 text-green-800 hover:bg-green-200' : 'bg-red-100 text-red-800 hover:bg-red-200' %>
 <% sort_onclick = "(function(th){var c=document.getElementById('de-genelist-container');if(!c)return;var tbody=c.querySelector('tbody');if(!tbody)return;var col=parseInt(th.dataset.col);var num=th.dataset.numeric==='true';var rows=Array.from(tbody.querySelectorAll('tr'));var cur=th.dataset.sortDir||'none';var asc=(cur!=='asc');th.dataset.sortDir=asc?'asc':'desc';c.querySelectorAll('th[data-col]').forEach(function(h){if(h!==th){h.dataset.sortDir='none';var si=h.querySelector('.sort-indicator');if(si)si.textContent='';}});var si=th.querySelector('.sort-indicator');if(si)si.textContent=asc?' \\u25B2':' \\u25BC';rows.sort(function(a,b){var ac=a.cells[col],bc=b.cells[col];var av=ac?(ac.getAttribute('data-sort-value')||ac.textContent.trim()):'';var bv=bc?(bc.getAttribute('data-sort-value')||bc.textContent.trim()):'';if(num){var an=parseFloat(av);if(isNaN(an))an=0;var bn=parseFloat(bv);if(isNaN(bn))bn=0;return asc?an-bn:bn-an;}return asc?av.localeCompare(bv):bv.localeCompare(av);});rows.forEach(function(r){tbody.appendChild(r);});})(this)" %>
@@ -66,16 +66,7 @@
                 style="<%= compact ? 'padding: 5px 8px; color: #374151; white-space: nowrap;' : '' %>"
                 <% if sort_value.present? %>data-sort-value="<%= sort_value %>" title="<%= sort_value %>"<% end %>>
               <% if @fields[i] == 'EnsemblID' && e[i].present? %>
-                <% ensembl_url = ensembl_gene_browser_url(e[i], assembly: @ensembl_genome_browser_assembly, project: @project) %>
-                <% if ensembl_url.present? %>
-                  <a class="text-blue-600 cursor-pointer hover:underline gene-link"
-                     href="<%= ensembl_url %>"
-                     target="_blank"
-                     rel="noopener noreferrer"
-                     data-ensembl-id="<%= e[i] %>"><%= e[i] %></a>
-                <% else %>
-                  <span data-ensembl-id="<%= e[i] %>"><%= e[i] %></span>
-                <% end %>
+                <%= ensembl_gene_browser_link(e[i], assembly: @ensembl_genome_browser_assembly, project: @project) %>
               <% elsif @fields[i] == 'Gene name' %>
                 <span class="gene-badge cursor-pointer inline-flex items-center px-2 py-0.5 rounded text-xs font-medium <%= gene_badge_cls %>"
                       data-ensembl-id="<%= ensembl_id %>"

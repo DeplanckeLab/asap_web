@@ -52,6 +52,50 @@ module ProjectsHelper
     end
   end
 
+  # Visualization deep-link: current checkpoint, open DE popup on Existing DE, select run/contrast.
+  # Optional direction ('up'/'down') opens that gene list in the DE popup.
+  def project_visualization_open_de_path(project, run_id:, annot_id: nil, direction: nil)
+    opts = {
+      view: 'visualization',
+      open_de: 1,
+      de_run_id: run_id
+    }
+    opts[:de_annot_id] = annot_id if annot_id.present?
+    dir = direction.to_s.strip.downcase
+    opts[:de_direction] = dir if %w[up down].include?(dir)
+    project_path(project, opts)
+  end
+
+  def visualization_open_de_button(project, run_id:, annot_id: nil, direction: nil, size: :sm)
+    return ''.html_safe if project.blank? || run_id.blank?
+
+    path = project_visualization_open_de_path(project, run_id: run_id, annot_id: annot_id, direction: direction)
+    title = if direction.to_s.strip.downcase == 'up'
+              'Open up-regulated genes in visualization'
+            elsif direction.to_s.strip.downcase == 'down'
+              'Open down-regulated genes in visualization'
+            else
+              'Open this DE result in visualization'
+            end
+
+    css = if size.to_sym == :xs
+            'inline-flex items-center box-border h-8 px-2 sm:px-3 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-xs transition-colors cursor-pointer border border-gray-300'
+          else
+            'inline-flex items-center px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300'
+          end
+
+    link_to path, class: css, title: title, style: 'flex-shrink: 0;' do
+      safe_join([
+        content_tag(
+          :span,
+          render('shared/scatter_plot_icon'),
+          class: 'inline-flex items-center justify-center w-3 h-3 sm:mr-1 shrink-0 [&>svg]:w-full [&>svg]:h-full'
+        ),
+        content_tag(:span, 'Visualization', class: 'hidden sm:inline')
+      ])
+    end
+  end
+
   def de_viz_reference_group_label(row, h_attrs)
     row[:reference_group].presence ||
       h_attrs['group_ref'].to_s.strip.presence ||

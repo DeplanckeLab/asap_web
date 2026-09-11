@@ -8,9 +8,19 @@ class BasicDeResultIndicesTest < ActiveSupport::TestCase
     'Avg. Exp. Group 1', 'Avg. Exp. Group 2'
   ].freeze
 
+  PairwiseHeadersWithTau = [
+    'ensembl_id', 'gene_name', 'log Fold-Change', 'p-value', 'FDR',
+    'Avg. Exp. Group 1', 'Avg. Exp. Group 2', 'Tau', 'Specificity'
+  ].freeze
+
   AllMarkersHeaders = [
     'Compared group', 'ensembl_id', 'gene_name', 'log Fold-Change', 'p-value', 'FDR',
     'Avg. exp. (tested group)', 'Avg. exp. (other cells)'
+  ].freeze
+
+  AllMarkersHeadersWithTau = [
+    'Compared group', 'ensembl_id', 'gene_name', 'log Fold-Change', 'p-value', 'FDR',
+    'Avg. exp. (tested group)', 'Avg. exp. (other cells)', 'Tau', 'Specificity'
   ].freeze
 
   LegacyMetricHeaders = ['logFC', 'P-value', 'FDR', 'Avg group1', 'Avg group2'].freeze
@@ -21,15 +31,26 @@ class BasicDeResultIndicesTest < ActiveSupport::TestCase
     annot = StubAnnot.new(PairwiseHeaders.to_json)
     pack = Basic.de_metric_source_indices_for_extract_metadata(annot, 7)
     assert_equal [2, 3, 4, 5, 6], pack[:indices]
+    assert_equal [], pack[:extra_indices]
     idc = Basic.de_identity_column_indices_for_extract_metadata(annot, 7)
     assert_equal 0, idc[:ensembl]
     assert_equal 1, idc[:gene]
+  end
+
+  test 'pairwise headers with Tau and Specificity expose extra metric indices' do
+    annot = StubAnnot.new(PairwiseHeadersWithTau.to_json)
+    pack = Basic.de_metric_source_indices_for_extract_metadata(annot, 9)
+    assert_equal [2, 3, 4, 5, 6], pack[:indices]
+    assert_equal [7, 8], pack[:extra_indices]
+    assert_equal 12, Basic.de_output_txt_expected_ncols(annot)
   end
 
   test 'legacy five metric headers stay at columns 0-4' do
     annot = StubAnnot.new(LegacyMetricHeaders.to_json)
     pack = Basic.de_metric_source_indices_for_extract_metadata(annot, 5)
     assert_equal [0, 1, 2, 3, 4], pack[:indices]
+    assert_equal [], pack[:extra_indices]
+    assert_equal 10, Basic.de_output_txt_expected_ncols(annot)
     idc = Basic.de_identity_column_indices_for_extract_metadata(annot, 5)
     assert_nil idc[:ensembl]
     assert_nil idc[:gene]
@@ -39,15 +60,24 @@ class BasicDeResultIndicesTest < ActiveSupport::TestCase
     annot = StubAnnot.new(LegacyMetricHeaders.to_json)
     pack = Basic.de_metric_source_indices_for_extract_metadata(annot, 7)
     assert_equal [2, 3, 4, 5, 6], pack[:indices]
+    assert_equal [], pack[:extra_indices]
   end
 
   test 'FindAllMarkers headers map metrics after group and identity columns' do
     annot = StubAnnot.new(AllMarkersHeaders.to_json)
     pack = Basic.de_metric_source_indices_for_extract_metadata(annot, 8)
     assert_equal [3, 4, 5, 6, 7], pack[:indices]
+    assert_equal [], pack[:extra_indices]
     idc = Basic.de_identity_column_indices_for_extract_metadata(annot, 8)
     assert_equal 1, idc[:ensembl]
     assert_equal 2, idc[:gene]
+  end
+
+  test 'FindAllMarkers headers with Tau and Specificity keep classic metrics and extras' do
+    annot = StubAnnot.new(AllMarkersHeadersWithTau.to_json)
+    pack = Basic.de_metric_source_indices_for_extract_metadata(annot, 10)
+    assert_equal [3, 4, 5, 6, 7], pack[:indices]
+    assert_equal [8, 9], pack[:extra_indices]
   end
 
   test 'sorted DE matrix row maps gene index from ensembl column not row position' do
@@ -79,6 +109,40 @@ class BasicDeResultIndicesTest < ActiveSupport::TestCase
     assert_equal 'ENSG00000000003', cols[1]
     assert_equal 'TSPAN6', cols[2]
     assert_equal '1.500', cols[5]
+    assert_equal 10, cols.size
+  end
+
+  test 'output txt line appends Tau and Specificity when present' do
+    annot = StubAnnot.new(PairwiseHeadersWithTau.to_json)
+    identity_idxs = Basic.de_identity_column_indices_for_extract_metadata(annot, 9)
+    pack = Basic.de_metric_source_indices_for_extract_metadata(annot, 9)
+    vals = [
+      ['ENSG1'],
+      ['G1'],
+      [1.5],
+      [0.001],
+      [0.01],
+      [1.0],
+      [0.5],
+      [0.82],
+      [12.5]
+    ]
+    ensembl_ids = %w[ENSG1]
+    gene_names = %w[G1]
+    line = Basic.de_output_txt_line_for_matrix_row(
+      0, vals, pack[:indices], identity_idxs,
+      ensembl_ids, gene_names, {},
+      Basic.de_index_lookup_from_vector(ensembl_ids),
+      Basic.de_index_lookup_from_vector(gene_names),
+      1,
+      extra_metric_idxs: pack[:extra_indices]
+    )
+    cols = line.split("\t")
+    assert_equal 12, cols.size
+    assert_equal '0.820', cols[10]
+    assert_equal '12.500', cols[11]
+    assert_equal Basic::DE_GENE_LIST_FIELD_NAMES, Basic.de_gene_list_fields_for_n_cols(12)
+    assert_equal Basic::DE_GENE_LIST_FIELD_NAMES.first(10), Basic.de_gene_list_fields_for_n_cols(10)
   end
 
   test 'legacy matrix without identity columns keeps loom row index' do
@@ -106,5 +170,6 @@ class BasicDeResultIndicesTest < ActiveSupport::TestCase
     assert_equal 'ENSG2', cols[1]
     assert_equal 'G2', cols[2]
     assert_equal '1.200', cols[5]
+    assert_equal 10, cols.size
   end
 end

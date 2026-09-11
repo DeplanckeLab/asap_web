@@ -93,6 +93,12 @@
         #<%= @run.num || @run.id %> - <%= @nber_genes %> <%= params[:type] %>-regulated genes
       </h3>
       <div class="flex items-center gap-2">
+        <%= visualization_open_de_button(
+              @project,
+              run_id: @run.id,
+              annot_id: @de_gene_list_annot_id,
+              direction: params[:type].to_s
+            ) %>
         <% if exportable?(@project) %>
           <button type="button"
                   class="px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-sm transition-colors cursor-pointer border border-gray-300"

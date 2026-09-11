@@ -72,7 +72,6 @@ class RunsController < ApplicationController
   
   def get_de_gene_list
     params[:from] ||= 'de_results'
-    @fields = ["Gene index", "EnsemblID", "Gene name", "Alt names", "Description", "logFC", "P-value", "FDR", "Avg group1", "Avg group2"]
     @limit = 3000
     @h_std_method_attrs = {
       @std_method.id => Basic.get_std_method_attrs(@std_method, @step)[:h_attrs]
@@ -101,6 +100,7 @@ class RunsController < ApplicationController
     @nber_genes = list_filtered_rows.size
     
     output_txt = de_list_dir + 'output.txt'
+    @fields = Basic.de_gene_list_fields_for_output_txt(output_txt)
     i = 0
     j = 0
 

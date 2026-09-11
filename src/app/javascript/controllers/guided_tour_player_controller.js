@@ -45,9 +45,11 @@ export default class extends Controller {
     this.onTurboLoad = this.handleTurboLoad.bind(this)
     this.onTurboBeforeVisit = this.handleTurboBeforeVisit.bind(this)
     this.onKeydown = this.handleKeydown.bind(this)
+    this.onTourStartClick = this.handleTourStartClick.bind(this)
     document.addEventListener("turbo:load", this.onTurboLoad)
     document.addEventListener("turbo:before-visit", this.onTurboBeforeVisit)
     document.addEventListener("keydown", this.onKeydown)
+    document.addEventListener("click", this.onTourStartClick, true)
 
     this.gtLog("connect")
 
@@ -65,10 +67,43 @@ export default class extends Controller {
     document.removeEventListener("turbo:load", this.onTurboLoad)
     document.removeEventListener("turbo:before-visit", this.onTurboBeforeVisit)
     document.removeEventListener("keydown", this.onKeydown)
+    document.removeEventListener("click", this.onTourStartClick, true)
     this.clearAutoAdvance()
     this.teardownOverlay()
     this.removeHighlight()
     this.removeTryItBar()
+  }
+
+  /**
+   * Menu / listing links carry data-guided-tour-start-id. Start that tour in-place
+   * so an active tour is replaced instead of paused via Turbo navigation.
+   */
+  handleTourStartClick(event) {
+    if (event.defaultPrevented || event.button !== 0) {
+      return
+    }
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+      return
+    }
+    const el = event.target.closest?.("[data-guided-tour-start-id]")
+    if (!el) {
+      return
+    }
+    const tourId = parseInt(el.getAttribute("data-guided-tour-start-id"), 10)
+    if (Number.isNaN(tourId)) {
+      return
+    }
+
+    event.preventDefault()
+    event.stopPropagation()
+
+    const dropdown = el.closest('[data-controller~="nav-dropdown"]')
+    if (dropdown) {
+      dropdown.dispatchEvent(new CustomEvent("nav-dropdown:close", { bubbles: false }))
+    }
+
+    this.gtLog("tour start click", { tourId })
+    this.startTour(tourId)
   }
 
   handleTurboLoad() {
@@ -84,7 +119,8 @@ export default class extends Controller {
   /**
    * User left the step page: pause and show Resume / Exit bar.
    * Tour-driven visits (Next/Back/Resume) are skipped.
-   * Starting another tour via ?guided_tour= ends the current one instead of pausing.
+   * Navigations that start another tour (?guided_tour=) must not pause the old one;
+   * startTour replaces it.
    */
   handleTurboBeforeVisit(event) {
     if (this.tourDrivenNavigation) {
@@ -99,10 +135,9 @@ export default class extends Controller {
     }
 
     if (dest.searchParams.has("guided_tour")) {
-      this.gtLog("before-visit: end tour before starting another", {
+      this.gtLog("before-visit: skip pause, new tour start in URL", {
         nextTourId: dest.searchParams.get("guided_tour")
       })
-      this.endTour()
       return
     }
 

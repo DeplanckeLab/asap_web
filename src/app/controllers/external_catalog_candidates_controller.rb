@@ -276,9 +276,11 @@ class ExternalCatalogCandidatesController < ApplicationController
   def filter_in_asap(scope, flag)
     case flag.to_s
     when 'yes'
-      scope.where(id: asap_candidate_ids)
+      ids = asap_candidate_ids
+      ids.empty? ? scope.none : scope.where(id: ids)
     when 'no'
-      scope.where.not(id: asap_candidate_ids)
+      ids = asap_candidate_ids
+      ids.empty? ? scope : scope.where.not(id: ids)
     else
       scope
     end
@@ -307,19 +309,56 @@ class ExternalCatalogCandidatesController < ApplicationController
     scope.for_n_obs_between(@min_n_obs, @max_n_obs)
   end
 
+  # Candidate ids that have at least one linked ASAP project readable by the
+  # current user/guest (same rules as readable? / preload_asap_projects).
   def asap_candidate_ids
-    ExternalCatalogCandidate
-      .joins(
-        "INNER JOIN providers ON providers.tag = external_catalog_candidates.provider_tag
-         INNER JOIN provider_projects ON provider_projects.provider_id = providers.id
-           AND provider_projects.key = external_catalog_candidates.external_id
-         INNER JOIN projects_provider_projects
-           ON projects_provider_projects.provider_project_id = provider_projects.id
-         INNER JOIN projects ON projects.id = projects_provider_projects.project_id"
-      )
-      .where('projects.being_deleted IS NULL OR projects.being_deleted = ?', false)
-      .distinct
-      .pluck(:id)
+    @asap_candidate_ids ||= begin
+      scope = ExternalCatalogCandidate
+        .joins(
+          "INNER JOIN providers ON providers.tag = external_catalog_candidates.provider_tag
+           INNER JOIN provider_projects ON provider_projects.provider_id = providers.id
+             AND provider_projects.key = external_catalog_candidates.external_id
+           INNER JOIN projects_provider_projects
+             ON projects_provider_projects.provider_project_id = provider_projects.id
+           INNER JOIN projects ON projects.id = projects_provider_projects.project_id"
+        )
+        .where('projects.being_deleted IS NULL OR projects.being_deleted = ?', false)
+
+      scope = scope.where(readable_linked_project_sql, *readable_linked_project_binds) unless admin?
+      scope.distinct.pluck(:id)
+    end
+  end
+
+  # SQL fragment matching ProjectAuthorization#readable? (public / owner / share /
+  # sandbox session). IP-restricted access is omitted here; it needs request keys
+  # and is applied per-project in preload_asap_projects via readable?.
+  def readable_linked_project_sql
+    parts = ['projects.public = TRUE']
+    if current_user
+      parts << 'projects.user_id = ?'
+      parts << <<~SQL.squish
+        EXISTS (
+          SELECT 1 FROM shares
+          WHERE shares.project_id = projects.id
+            AND shares.user_id = ?
+            AND shares.view_perm = TRUE
+        )
+      SQL
+    end
+    if session[:sandbox].present?
+      parts << '(projects.sandbox = TRUE AND projects.key = ?)'
+    end
+    "(#{parts.join(' OR ')})"
+  end
+
+  def readable_linked_project_binds
+    binds = []
+    if current_user
+      binds << current_user.id
+      binds << current_user.id
+    end
+    binds << session[:sandbox] if session[:sandbox].present?
+    binds
   end
 
   def preload_asap_projects(candidates)

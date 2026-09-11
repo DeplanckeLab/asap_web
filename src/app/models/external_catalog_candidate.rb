@@ -484,16 +484,17 @@ class ExternalCatalogCandidate < ApplicationRecord
     blocking.empty?
   end
 
-  # Projects already linked that this user can open (public, owned, or shared).
+  # Projects already linked that this user (or guest) can open.
+  # Guests: public only. Signed-in: public, owned, or shared with view_perm.
   def asap_projects_accessible_to(user)
     scope = asap_projects
-    return scope.none if user.blank?
-
     ids = scope.where(public: true).pluck(:id)
-    ids.concat(scope.where(user_id: user.id).pluck(:id))
-    ids.concat(
-      scope.joins(:shares).where(shares: { user_id: user.id, view_perm: true }).pluck(:id)
-    )
+    if user.present?
+      ids.concat(scope.where(user_id: user.id).pluck(:id))
+      ids.concat(
+        scope.joins(:shares).where(shares: { user_id: user.id, view_perm: true }).pluck(:id)
+      )
+    end
     scope.where(id: ids.uniq)
   end
 

@@ -157,6 +157,55 @@ class ExternalCatalogCandidateProjectTest < ActiveSupport::TestCase
                  candidate.reload.external_catalog_candidate_projects.find_by!(project_id: duplicate.id).link_kind
   end
 
+  test 'asap_projects_accessible_to includes public for guests and excludes private' do
+    provider = Provider.find_or_create_by!(tag: 'CELLxGENE') do |p|
+      p.name = 'CELLxGENE'
+    end
+    external_id = "ds-#{SecureRandom.hex(4)}"
+    candidate = register_for_test_cleanup(
+      ExternalCatalogCandidate.create!(
+        source: 'cellxgene',
+        external_id: external_id,
+        provider_tag: 'CELLxGENE',
+        title: 'Access check',
+        url: 'https://example.com/access.h5ad',
+        import_status: 'idle',
+        tax_id: 9606
+      )
+    )
+    pp = ProviderProject.find_or_create_by!(provider_id: provider.id, key: external_id) do |row|
+      row.title = 'PP'
+    end
+    private_project = create_test_project!(
+      name: 'Private linked',
+      key: "prv#{SecureRandom.hex(3)}",
+      public: false
+    )
+    private_project.provider_projects << pp unless private_project.provider_projects.exists?(id: pp.id)
+
+    assert candidate.already_in_asap?
+    assert_empty candidate.asap_projects_accessible_to(nil)
+
+    private_project.update!(public: true, public_at: Time.current, public_id: (Project.maximum(:public_id) || 0) + 1)
+    assert_includes candidate.asap_projects_accessible_to(nil).pluck(:id), private_project.id
+
+    owner = register_for_test_cleanup(
+      User.create!(email: "ecc_acc_#{SecureRandom.hex(4)}@example.com", password: 'password123')
+    )
+    owned = create_test_project!(
+      name: 'Owned private',
+      key: "own#{SecureRandom.hex(3)}",
+      public: false,
+      user_id: owner.id
+    )
+    owned.provider_projects << pp unless owned.provider_projects.exists?(id: pp.id)
+    assert_includes candidate.asap_projects_accessible_to(owner).pluck(:id), owned.id
+    stranger = register_for_test_cleanup(
+      User.create!(email: "ecc_str_#{SecureRandom.hex(4)}@example.com", password: 'password123')
+    )
+    refute_includes candidate.asap_projects_accessible_to(stranger).pluck(:id), owned.id
+  end
+
   test 'sync_catalog_links assigns project_collection from candidate collection_id' do
     provider = Provider.find_or_create_by!(tag: 'CELLxGENE') do |p|
       p.name = 'CELLxGENE'

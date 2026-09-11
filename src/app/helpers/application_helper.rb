@@ -1643,4 +1643,56 @@ module ApplicationHelper
     path = "/#{path.delete_prefix('/')}"
     "#{seo_site_base_url}#{path}"
   end
+
+  # "UMAP [Scanpy]" / "Leiden [Seurat]" -> "scanpy" / "seurat"
+  def method_package_key_from_label(label)
+    return nil if label.blank?
+
+    match = label.to_s.match(/\[([^\]]+)\]/)
+    return nil unless match
+
+    match[1].to_s.strip.downcase.presence
+  end
+
+  def tool_version_for_package(tool_versions, package_key)
+    return nil if tool_versions.blank? || package_key.blank?
+
+    key = package_key.to_s
+    return tool_versions[key] if tool_versions.key?(key)
+
+    tool_versions.each do |name, version|
+      return version if name.to_s.casecmp?(key)
+    end
+    nil
+  end
+
+  # Prefer "#{package}.#{major}.png", then "#{package}.png" (png only).
+  def package_logo_logical_path(package_key, package_version = nil)
+    return nil if package_key.blank?
+
+    key = package_key.to_s.downcase
+    major = package_version.to_s.split('.').first.presence
+    candidates = []
+    candidates << "#{key}.#{major}.png" if major
+    candidates << "#{key}.png"
+    candidates.find { |path| propshaft_asset_exists?(path) }
+  end
+
+  def package_logo_url(package_key, package_version = nil)
+    logical_path = package_logo_logical_path(package_key, package_version)
+    return nil unless logical_path
+
+    asset_path(logical_path)
+  end
+
+  def method_package_logo_url(label, tool_versions)
+    package_key = method_package_key_from_label(label)
+    return nil unless package_key
+
+    package_logo_url(package_key, tool_version_for_package(tool_versions, package_key))
+  end
+
+  def propshaft_asset_exists?(logical_path)
+    Rails.application.assets.load_path.find(logical_path).present?
+  end
 end

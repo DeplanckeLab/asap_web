@@ -3,7 +3,17 @@
 
 <% 
   h_methods = {}
-  @std_methods.each { |f| h_methods[f.id] = [(f.speed_id rescue nil), f.description, (f.link rescue '')] }
+  asap_docker_image = Basic.get_asap_docker(@project.version)
+  tool_versions = if asap_docker_image
+    Basic.safe_parse_json(asap_docker_image.tool_versions_json.presence || asap_docker_image.tools_json, {})
+  else
+    {}
+  end
+  @std_methods.each do |f|
+    label = f.label.presence || f.name
+    logo_url = method_package_logo_url(label, tool_versions)
+    h_methods[f.id] = [(f.speed_id rescue nil), f.description, (f.link rescue ''), logo_url]
+  end
 %>
 
 <%= form_for(@req, method: 'post', 
@@ -126,12 +136,15 @@
               No methods available for this step.
             </div>
           <% else %>
-            <%= f.select :std_method_id, options_for_select(options, default_value), 
-                { disabled: unavailable_method_ids }, 
-                { 
-                  class: 'w-full rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white',
-                  data: { form_req_target: 'methodSelect' }
-                } %>
+            <div class="flex items-center gap-3">
+              <%= f.select :std_method_id, options_for_select(options, default_value), 
+                  { disabled: unavailable_method_ids }, 
+                  { 
+                    class: 'flex-1 min-w-0 rounded-md border border-gray-300 px-3 py-2 shadow-sm focus:border-gray-900 focus:outline-none focus:ring-1 focus:ring-gray-900 bg-white',
+                    data: { form_req_target: 'methodSelect' }
+                  } %>
+              <img data-form-req-target="methodLogo" class="hidden h-10 w-auto max-w-[6rem] flex-shrink-0 object-contain" alt="" />
+            </div>
             <style>
               select option:disabled {
                 color: #dc2626 !important;

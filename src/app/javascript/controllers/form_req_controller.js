@@ -16,6 +16,7 @@ export default class extends Controller {
   static targets = [
     "submitButton",
     "methodSelect",
+    "methodLogo",
     "methodDesc",
     "methodPred",
     "predictionPrevent",
@@ -145,6 +146,26 @@ export default class extends Controller {
     })
   }
 
+  updateMethodLogo(logoUrl) {
+    if (!this.hasMethodLogoTarget) {
+      return
+    }
+
+    if (logoUrl) {
+      const optionText = this.hasMethodSelectTarget
+        ? (this.methodSelectTarget.selectedOptions[0]?.textContent || '')
+        : ''
+      const bracketMatch = optionText.match(/\[([^\]]+)\]/)
+      this.methodLogoTarget.src = logoUrl
+      this.methodLogoTarget.alt = bracketMatch ? `${bracketMatch[1]} logo` : ''
+      this.methodLogoTarget.classList.remove('hidden')
+    } else {
+      this.methodLogoTarget.removeAttribute('src')
+      this.methodLogoTarget.alt = ''
+      this.methodLogoTarget.classList.add('hidden')
+    }
+  }
+
   handleMethodChange() {
     if (!this.hasMethodSelectTarget || !this.methodsValue) {
       return
@@ -174,7 +195,7 @@ export default class extends Controller {
     const method = methods[selectedMethodId]
 
     if (method) {
-      const [speedId, description, link] = method
+      const [speedId, description, link, logoUrl] = method
       const isUnavailable = unavailableMethods && unavailableMethods[selectedMethodId]
 
       // Unavailable methods stay blocked; otherwise button state comes from
@@ -187,6 +208,8 @@ export default class extends Controller {
       if (this.hasMethodDescTarget) {
         this.methodDescTarget.innerHTML = (description || '') + ' ' + (link || '')
       }
+
+      this.updateMethodLogo(logoUrl)
 
       // Show/hide speed image
       if (speedId) {
@@ -216,6 +239,7 @@ export default class extends Controller {
         this.validateForm()
       }
     } else {
+      this.updateMethodLogo(null)
       if (this.hasAttrsContainerTarget) {
         this.attrsContainerTarget.innerHTML = ''
       }

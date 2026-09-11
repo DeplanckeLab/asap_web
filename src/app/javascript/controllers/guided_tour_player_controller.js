@@ -346,9 +346,10 @@ export default class extends Controller {
     const generation = ++this.playGeneration
     this.pendingTourId = tourId
     this.clearAutoAdvance()
-    this.clearState()
     this.tour = null
     this.stepIndex = 0
+    // Persist the new tour immediately so a Turbo reconnect cannot revive the old one.
+    this.writeState(tourId, 0, false)
     this.teardownOverlay()
     this.removeHighlight()
     this.removeTryItBar()
@@ -361,6 +362,7 @@ export default class extends Controller {
         return
       }
       if (!tour.steps || tour.steps.length === 0) {
+        this.clearState()
         return
       }
       this.tour = tour

@@ -3129,9 +3129,6 @@ class ProjectsController < ApplicationController
         end
       end
 
-      h_env = @project.version ? Basic.safe_parse_json(@project.version.env_json, {}) : {}
-      db_version = asap_data_db_name_for_env(h_env, context: "search_visualization_metadata")
-
       gene_ids = clas.flat_map do |cla|
         [
           parse_cla_field(cla.sorted_up_gene_ids.presence || cla.up_gene_ids),
@@ -3139,24 +3136,11 @@ class ProjectsController < ApplicationController
         ].flatten
       end.map { |value| value.to_s.strip }.reject(&:blank?).uniq
 
-      gene_map = {}
-      loom_gene_map = project_cla_gene_info_by_stable_id(@project)
-      gene_ids.each do |gid|
-        info = loom_gene_map[gid]
-        next unless info
-
-        gene_map[gid] = { symbol: info[:symbol].to_s, ensembl_id: info[:ensembl_id].to_s }
-      end
-
-      # Legacy rows may still store asap_data genes.id; fill only unresolved ids.
-      unresolved_gene_ids = gene_ids.reject { |gid| gene_map.key?(gid) }.map(&:to_i).select(&:positive?).uniq
-      if db_version.present? && unresolved_gene_ids.any?
-        RemoteGene.with_remote(db_version) do
-          RemoteGene.where(id: unresolved_gene_ids).pluck(:id, :name, :ensembl_id).each do |gid, symbol, ensembl_id|
-            gene_map[gid.to_s] = { symbol: symbol.to_s, ensembl_id: ensembl_id.to_s }
-          end
-        end
-      end
+      gene_map = project_cla_gene_info_by_stable_id(
+        @project,
+        required_ids: gene_ids,
+        include_legacy_asap_data_ids: true
+      )
 
       clas.each do |cla|
         metadata = metadata_by_id[cla.annot_id]

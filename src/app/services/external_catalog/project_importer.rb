@@ -613,14 +613,15 @@ module ExternalCatalog
           raise Error, "Missing MATKP zip for Fu##{fu.id}" unless zip_path
 
           require 'zip'
-          Zip::File.open(zip_path) do |zip_file|
+          # rubyzip 3 + Ruby 3.4: extract(path) joins under CWD; use destination_directory.
+          Zip::File.open(zip_path.to_s) do |zip_file|
             entry_zip = zip_file.find_entry(matrix_name) ||
                         zip_file.entries.find { |e| File.basename(e.name) == matrix_name }
             unless entry_zip
               raise SkipEntry, "MATKP zip missing #{matrix_name} for #{entry.external_id}"
             end
 
-            entry_zip.extract(extracted) { true }
+            entry_zip.extract(matrix_name, destination_directory: upload_dir.to_s) { true }
           end
           File.delete(zip_path) if File.exist?(zip_path)
         end

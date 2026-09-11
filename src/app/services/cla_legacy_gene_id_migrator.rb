@@ -168,8 +168,11 @@ class ClaLegacyGeneIdMigrator
     end
 
     unless dry_run
+      # Data-only rewrite of gene id fields. Avoid model validations (e.g. belongs_to
+      # :cell_set) so orphaned clas with missing cell_sets can still be migrated.
       attrs = field_changes.transform_values { |change| change[:to] }
-      cla.update!(attrs)
+      attrs[:updated_at] = Time.current
+      cla.update_columns(attrs)
     end
 
     Result.new(

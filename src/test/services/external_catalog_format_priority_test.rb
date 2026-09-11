@@ -29,4 +29,25 @@ class ExternalCatalogFormatPriorityTest < ActiveSupport::TestCase
     picked = ExternalCatalog::FormatPriority.pick_geo_sc_file(names)
     assert_equal ['b.loom', :loom], picked
   end
+
+  test 'find_mtx_companions pairs prefixed GEO sidecars' do
+    names = [
+      'GSM1_matrix.mtx.gz',
+      'GSM1_barcodes.tsv.gz',
+      'GSM1_features.tsv.gz',
+      'other_barcodes.tsv.gz'
+    ]
+    found = ExternalCatalog::FormatPriority.find_mtx_companions(names, 'GSM1_matrix.mtx.gz')
+    assert_equal(
+      { barcodes: 'GSM1_barcodes.tsv.gz', features: 'GSM1_features.tsv.gz' },
+      found
+    )
+  end
+
+  test 'find_mtx_companions returns nil without barcodes or features' do
+    assert_nil ExternalCatalog::FormatPriority.find_mtx_companions(
+      ['matrix.mtx.gz', 'barcodes.tsv.gz'],
+      'matrix.mtx.gz'
+    )
+  end
 end

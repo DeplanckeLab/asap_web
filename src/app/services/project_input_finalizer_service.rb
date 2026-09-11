@@ -38,7 +38,8 @@ class ProjectInputFinalizerService
     return false unless outp.file?
 
     h = Basic.safe_parse_json(File.read(outp), {})
-    h["detected_format"].to_s.casecmp("mtx").zero?
+    fmt = h["detected_format"].to_s
+    fmt.casecmp("mtx").zero? || fmt.casecmp("mex").zero?
   rescue StandardError
     false
   end

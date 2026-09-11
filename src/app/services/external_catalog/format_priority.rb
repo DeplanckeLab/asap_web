@@ -48,6 +48,56 @@ module ExternalCatalog
       ranked.min_by { |rank, name, _| [rank, name.to_s] }.then { |_rank, name, kind| [name, kind] }
     end
 
+    # Role of a GEO/suppl filename for a 10x MTX triplet (:matrix, :barcodes, :features) or nil.
+    def mtx_companion_role(filename)
+      bare = filename.to_s.sub(/\.gz\z/i, '')
+      base = File.basename(bare).downcase
+      return :matrix if base.end_with?('.mtx')
+      return :barcodes if base.match?(/\A(.*[\._-])?barcodes?\.(tsv|csv)\z/)
+      return :features if base.match?(/\A(.*[\._-])?(features?|genes)\.(tsv|csv)\z/)
+
+      nil
+    end
+
+    # Shared stem used to pair prefixed GEO MTX sidecars (e.g. GSM1_matrix.mtx.gz).
+    def mtx_companion_stem(filename)
+      bare = File.basename(filename.to_s.sub(/\.gz\z/i, ''))
+      case mtx_companion_role(filename)
+      when :matrix
+        bare.sub(/[\._-]?matrix\.mtx\z/i, '').sub(/\.mtx\z/i, '')
+      when :barcodes
+        bare.sub(/[\._-]?barcodes?\.(tsv|csv)\z/i, '')
+      when :features
+        bare.sub(/[\._-]?(features?|genes)\.(tsv|csv)\z/i, '')
+      else
+        bare
+      end.downcase
+    end
+
+    # Among +filenames+, find barcodes + features companions for +mtx_filename+.
+    # Prefers the same stem/prefix as the matrix. Returns { barcodes:, features: } or nil.
+    def find_mtx_companions(filenames, mtx_filename)
+      names = Array(filenames).map(&:to_s)
+      mtx = mtx_filename.to_s
+      return nil if mtx.blank? || mtx_companion_role(mtx) != :matrix
+
+      by_role = names.group_by { |n| mtx_companion_role(n) }
+      barcodes = Array(by_role[:barcodes])
+      features = Array(by_role[:features])
+      return nil if barcodes.empty? || features.empty?
+
+      stem = mtx_companion_stem(mtx)
+      barcode = barcodes.find { |n| mtx_companion_stem(n) == stem } ||
+                barcodes.find { |n| mtx_companion_stem(n).empty? } ||
+                barcodes.min
+      feature = features.find { |n| mtx_companion_stem(n) == stem } ||
+                features.find { |n| mtx_companion_stem(n).empty? } ||
+                features.min
+      return nil if barcode.blank? || feature.blank?
+
+      { barcodes: barcode, features: feature }
+    end
+
     def geo_bulk_series_matrix?(filename)
       filename.to_s.downcase.include?('series_matrix') && filename.to_s.downcase.end_with?('.txt.gz', '.txt')
     end

@@ -184,4 +184,59 @@ class ExternalCatalogGeoCatalogTest < ActiveSupport::TestCase
     assert_equal({ 'ok' => true }, body)
     assert_equal 2, calls
   end
+
+  test 'entry_from_summary catalogs SC MTX when barcodes and features companions exist' do
+    summary = {
+      'accession' => 'GSE999010',
+      'title' => 'Single-cell RNA-seq of cortex',
+      'ftplink' => 'ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE999nnn/GSE999010/',
+      'gdstype' => 'Expression profiling by high throughput sequencing',
+      'taxon' => 'Homo sapiens',
+      'taxid' => '9606',
+      'pubmedids' => []
+    }
+    @catalog.define_singleton_method(:list_geo_files) do |_ftp, _accession|
+      [
+        {
+          name: 'GSM1_matrix.mtx.gz',
+          url: 'https://example.com/GSM1_matrix.mtx.gz',
+          filesize: 100
+        },
+        {
+          name: 'GSM1_barcodes.tsv.gz',
+          url: 'https://example.com/GSM1_barcodes.tsv.gz',
+          filesize: 10
+        },
+        {
+          name: 'GSM1_features.tsv.gz',
+          url: 'https://example.com/GSM1_features.tsv.gz',
+          filesize: 10
+        }
+      ]
+    end
+
+    entry = @catalog.send(:entry_from_summary, summary, mode: 'sc')
+    assert entry
+    assert_equal :mtx, entry.format_kind
+    assert_equal 'GSM1_matrix.mtx.gz', entry.filename
+    assert_equal 2, entry.companion_files.size
+    assert_equal 'barcodes', entry.companion_files.first[:role]
+    assert_equal 'https://example.com/GSM1_barcodes.tsv.gz', entry.companion_files.first[:url]
+  end
+
+  test 'entry_from_summary skips SC MTX without companion files' do
+    summary = {
+      'accession' => 'GSE999011',
+      'title' => 'Single-cell RNA-seq lone matrix',
+      'ftplink' => 'ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE999nnn/GSE999011/',
+      'gdstype' => 'Expression profiling by high throughput sequencing',
+      'taxon' => 'Homo sapiens',
+      'taxid' => '9606'
+    }
+    @catalog.define_singleton_method(:list_geo_files) do |_ftp, _accession|
+      [{ name: 'matrix.mtx.gz', url: 'https://example.com/matrix.mtx.gz', filesize: 100 }]
+    end
+
+    assert_nil @catalog.send(:entry_from_summary, summary, mode: 'sc')
+  end
 end

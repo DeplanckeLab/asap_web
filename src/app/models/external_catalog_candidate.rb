@@ -556,8 +556,24 @@ class ExternalCatalogCandidate < ApplicationRecord
       source_page_url: source_page_url,
       collection_id: collection_id.presence || external_catalog_collection&.external_key,
       collection_title: external_catalog_collection&.title,
-      collection_description: external_catalog_collection&.description
+      collection_description: external_catalog_collection&.description,
+      companion_files: companion_files_from_attrs
     )
+  end
+
+  def companion_files_from_attrs
+    raw = parsed_attrs['companion_files']
+    return nil unless raw.is_a?(Array) && raw.any?
+
+    raw.map do |item|
+      next unless item.is_a?(Hash)
+
+      {
+        role: (item['role'] || item[:role]).to_s,
+        url: (item['url'] || item[:url]).to_s,
+        filename: (item['filename'] || item[:filename]).to_s
+      }
+    end.compact
   end
 
   def self.upsert_from_entry!(entry)
@@ -588,6 +604,23 @@ class ExternalCatalogCandidate < ApplicationRecord
       )
     end
 
+    attrs = record.parsed_attrs
+    companions = Array(entry.companion_files).filter_map do |item|
+      next unless item.is_a?(Hash)
+
+      role = (item[:role] || item['role']).to_s
+      url = (item[:url] || item['url']).to_s
+      filename = (item[:filename] || item['filename']).to_s
+      next if role.blank? || url.blank?
+
+      { 'role' => role, 'url' => url, 'filename' => filename }
+    end
+    if companions.any?
+      attrs['companion_files'] = companions
+    else
+      attrs.delete('companion_files')
+    end
+
     record.assign_attributes(
       provider_tag: entry.provider_tag,
       title: entry.title.to_s.presence || entry.external_id.to_s,
@@ -606,6 +639,7 @@ class ExternalCatalogCandidate < ApplicationRecord
       dois_json: entry.normalized_dois.to_json,
       pmids_json: entry.normalized_pmids.to_json,
       identifiers_json: entry.normalized_identifiers.to_json,
+      attrs_json: attrs.present? ? attrs.to_json : nil,
       last_seen_at: Time.current,
       obsolete: false
     )

@@ -130,8 +130,9 @@ class ExternalCatalogBroadScpCatalogTest < ActiveSupport::TestCase
     end
 
     entries = catalog.each.to_a
-    assert_equal 1, entries.size
-    entry = entries.first
+    assert_equal 2, entries.size
+    by_id = entries.index_by(&:external_id)
+    entry = by_id.fetch('SCP3828')
     assert_equal 'broad_scp', entry.source
     assert_equal 'SCP3828', entry.external_id
     assert_equal 'BROAD_SCP', entry.provider_tag
@@ -149,6 +150,13 @@ class ExternalCatalogBroadScpCatalogTest < ActiveSupport::TestCase
     assert_equal ['10.1126/science.aad7038'], entry.normalized_dois
     assert_equal 'geo_series', entry.normalized_identifiers.first[:kind]
     assert_equal 'GSE12345', entry.normalized_identifiers.first[:value]
+
+    mtx_entry = by_id.fetch('SCP-SKIP')
+    assert_equal :mtx, mtx_entry.format_kind
+    assert_equal 'matrix.mtx', mtx_entry.filename
+    assert_equal 2, mtx_entry.companion_files.size
+    roles = mtx_entry.companion_files.map { |c| c[:role] }.sort
+    assert_equal %w[barcodes features], roles
 
     description = ExternalCatalog::BroadScpCatalog.project_description_for(entry)
     assert_includes description, 'SCP3828'

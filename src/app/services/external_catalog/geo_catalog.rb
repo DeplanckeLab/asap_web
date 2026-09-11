@@ -217,6 +217,7 @@ module ExternalCatalog
       end
 
       files = list_geo_files(ftp, accession)
+      companion_files = nil
       if sc
         picked = FormatPriority.pick_geo_sc_file(files.map { |f| f[:name] })
         return nil unless picked
@@ -224,6 +225,25 @@ module ExternalCatalog
         name, kind = picked
         meta = files.find { |f| f[:name] == name }
         project_type = 'sc'
+        if kind == :mtx
+          companions = FormatPriority.find_mtx_companions(files.map { |f| f[:name] }, name)
+          unless companions
+            @logger.info(
+              "[ExternalCatalog::GeoCatalog] skip #{accession}: MTX without barcodes/features companions"
+            )
+            return nil
+          end
+
+          companion_files = %i[barcodes features].map do |role|
+            companion_name = companions[role]
+            companion_meta = files.find { |f| f[:name] == companion_name }
+            {
+              role: role.to_s,
+              filename: companion_name,
+              url: companion_meta[:url]
+            }
+          end
+        end
       else
         picked = FormatPriority.pick_geo_bulk_file(files.map { |f| f[:name] })
         return nil unless picked
@@ -255,7 +275,8 @@ module ExternalCatalog
         dois: dois,
         pmids: pmids,
         identifiers: identifiers,
-        source_page_url: "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=#{accession}"
+        source_page_url: "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=#{accession}",
+        companion_files: companion_files
       )
     rescue StandardError => e
       @logger.warn("[ExternalCatalog::GeoCatalog] #{accession}: #{e.class} #{e.message}")

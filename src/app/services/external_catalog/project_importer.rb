@@ -425,6 +425,11 @@ module ExternalCatalog
         end
       end
 
+      companions = normalized_mtx_companions(entry)
+      if companions
+        return download_mtx_triplet_and_preparse!(entry, organism, companions)
+      end
+
       original_name = entry.filename.presence ||
                       URI.parse(entry.url).path.to_s.split('/').last.presence ||
                       'input_file'
@@ -473,6 +478,121 @@ module ExternalCatalog
       end
 
       fu
+    end
+
+    # MTX imports need barcodes + features beside matrix.mtx under fus/<id>/input_file/.
+    # Preparsing receives the mtx path; parsing later uses the whole directory.
+    def download_mtx_triplet_and_preparse!(entry, organism, companions)
+      matrix_name = entry.filename.presence ||
+                    URI.parse(entry.url).path.to_s.split('/').last.presence ||
+                    'matrix.mtx'
+      matrix_name = matrix_name.gsub(/[()\[\]#?$]/, '')
+
+      fu = Fu.create!(
+        user_id: @user.id,
+        upload_file_name: 'input_file/matrix.mtx',
+        upload_file_size: 0,
+        status: 'downloading',
+        name: matrix_name,
+        url: entry.url
+      )
+
+      bundle_dir = fu.upload_dir.join('input_file')
+      FileUtils.mkdir_p(bundle_dir)
+      ExternalCatalog::ImportProgress.report(@progress_candidate_id, step: 'downloading') if @progress_candidate_id
+
+      download_mtx_member_to_canonical!(
+        fu: fu,
+        url: entry.url,
+        dest_path: bundle_dir.join('matrix.mtx'),
+        source_filename: matrix_name
+      )
+      companions.each do |companion|
+        canonical =
+          case companion[:role].to_s
+          when 'barcodes' then 'barcodes.tsv'
+          when 'features' then 'features.tsv'
+          else
+            raise Error, "Unknown MTX companion role=#{companion[:role].inspect}"
+          end
+        download_mtx_member_to_canonical!(
+          fu: fu,
+          url: companion[:url],
+          dest_path: bundle_dir.join(canonical),
+          source_filename: companion[:filename]
+        )
+      end
+
+      %w[matrix.mtx barcodes.tsv features.tsv].each do |name|
+        path = bundle_dir.join(name)
+        raise Error, "Missing #{name} after MTX triplet download for Fu##{fu.id}" unless path.file? && path.size.positive?
+      end
+
+      matrix_path = bundle_dir.join('matrix.mtx')
+      content_sha256 = InputFileSha256.hexdigest_file(matrix_path)
+      fu.update!(
+        upload_file_name: 'input_file/matrix.mtx',
+        upload_file_size: File.size(matrix_path),
+        content_sha256: content_sha256,
+        status: 'preparsing',
+        preparsing_version_id: @version.id
+      )
+      InputFileSha256.clear_state!(fu.id)
+      ExternalCatalog::ImportProgress.report(@progress_candidate_id, step: 'preparsing') if @progress_candidate_id
+
+      FuPreparsingService.new(
+        fu,
+        organism_id: organism.id,
+        version_id: @version.id
+      ).call
+      fu.update!(status: 'preparsed')
+      fu
+    end
+
+    def normalized_mtx_companions(entry)
+      raw = Array(entry.companion_files)
+      return nil if raw.empty?
+
+      by_role = {}
+      raw.each do |item|
+        next unless item.is_a?(Hash)
+
+        role = (item[:role] || item['role']).to_s
+        url = (item[:url] || item['url']).to_s
+        filename = (item[:filename] || item['filename']).to_s
+        next unless %w[barcodes features].include?(role) && url.present?
+
+        by_role[role] = { role: role, url: url, filename: filename.presence || File.basename(URI.parse(url).path.to_s) }
+      end
+      return nil unless by_role['barcodes'] && by_role['features']
+
+      [by_role['barcodes'], by_role['features']]
+    rescue URI::InvalidURIError
+      nil
+    end
+
+    def download_mtx_member_to_canonical!(fu:, url:, dest_path:, source_filename:)
+      staging = dest_path.dirname.join("#{dest_path.basename}.download")
+      FileUtils.rm_f(staging)
+      UrlDownloadService.new(fu: fu, url: url, dest_path: staging.to_s).call
+      raise Error, "Downloaded empty MTX member from #{url}" unless staging.file? && staging.size.positive?
+
+      compressed =
+        source_filename.to_s.downcase.end_with?('.gz') ||
+        begin
+          File.open(staging, 'rb') { |f| f.read(2) } == "\x1f\x8b".b
+        end
+
+      FileUtils.rm_f(dest_path)
+      if compressed
+        Zlib::GzipReader.open(staging.to_s) do |gz|
+          File.open(dest_path, 'wb') { |out| IO.copy_stream(gz, out) }
+        end
+      else
+        FileUtils.mv(staging, dest_path)
+      end
+      FileUtils.rm_f(staging)
+      raise Error, "Empty MTX member after materialize at #{dest_path}" unless dest_path.file? && dest_path.size.positive?
     end
 
     # MATKP download_public ZIPs contain norm_counts.tsv.gz (+ metadata). ASAP needs the TSV.

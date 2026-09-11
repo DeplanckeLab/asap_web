@@ -38,6 +38,7 @@ class FuPreparsingService
       run_preparsing(mtx_result, working_file)
       output = load_output_json
     end
+    output = enrich_mex_directory_sidecars!(output, working_file)
     output = apply_legacy_rds_preparsing_labels(output, working_file) if @legacy_rds_upload
     output = enrich_h5ad_metadata_if_needed!(output)
     output = enrich_file_title_if_needed!(output)
@@ -232,6 +233,53 @@ class FuPreparsingService
 
     @logger.info("[FuPreparsingService] RDS converted to #{loom_path} (#{File.size(loom_path)} bytes)")
     loom_path
+  end
+
+  # When preparsing is given a lone .mtx but barcodes/features sit in the same
+  # directory (catalog MTX triplet download), attach those paths and sample labels.
+  def enrich_mex_directory_sidecars!(output, working_file)
+    return output unless output.is_a?(Hash)
+
+    fmt = output['detected_format'].to_s
+    return output unless fmt.match?(/\A(MEX|MTX)\z/i)
+
+    mtx_path = Pathname.new(working_file.to_s)
+    return output unless mtx_path.file? && mtx_path.extname.downcase == '.mtx'
+
+    dir = mtx_path.dirname
+    barcodes = dir.join('barcodes.tsv')
+    features = [dir.join('features.tsv'), dir.join('genes.tsv')].find { |p| p.file? }
+    return output unless barcodes.file? && features
+
+    existing = Array(output['file_path']).map(&:to_s)
+    paths = [mtx_path.to_s, barcodes.to_s, features.to_s]
+    return output if paths.all? { |p| existing.include?(p) }
+
+    output['file_path'] = paths
+    output['detected_format'] = 'MEX'
+    group = Array(output['list_groups']).first
+    if group.is_a?(Hash)
+      group['cells'] = sample_tsv_first_column(barcodes, 10)
+      group['genes'] = sample_tsv_first_column(features, 10)
+    end
+    persist_preparsing_output_json(output)
+    @logger.info(
+      "[FuPreparsingService] Attached MTX sidecars beside #{mtx_path.basename}: " \
+      "barcodes.tsv + #{features.basename}"
+    )
+    output
+  end
+
+  def sample_tsv_first_column(path, limit)
+    values = []
+    File.foreach(path.to_s) do |line|
+      value = line.to_s.split("\t", 2).first.to_s.strip
+      next if value.blank?
+
+      values << value
+      break if values.size >= limit
+    end
+    values
   end
 
   # Java/Python first pass on tar.gz often returns ARCHIVE* + list_files. When the archive

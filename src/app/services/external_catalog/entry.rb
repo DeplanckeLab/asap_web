@@ -21,6 +21,8 @@ module ExternalCatalog
     :collection_id,
     :collection_title,
     :collection_description,
+    # Optional MTX sidecars: [{ role: 'barcodes'|'features', url:, filename: }, ...]
+    :companion_files,
     keyword_init: true
   ) do
     def provider_name

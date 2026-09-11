@@ -305,7 +305,8 @@ module ExternalCatalog
         source_page_url: SOURCE_PAGE.call(accession, study_url),
         collection_id: collection && collection[:id],
         collection_title: collection && collection[:title],
-        collection_description: nil
+        collection_description: nil,
+        companion_files: picked[:companion_files]
       )
     rescue StandardError => e
       @logger.error("[ExternalCatalog::BroadScpCatalog] #{accession}: #{e.class} #{e.message}")
@@ -351,8 +352,8 @@ module ExternalCatalog
       Date.current < date
     end
 
-    # Prefer AnnData, then Seurat, then a single Expression Matrix file.
-    # Skip multi-file MTX / split CSV expression sets (ASAP imports one URL).
+    # Prefer AnnData, then Seurat, then a complete MTX triplet (matrix + barcodes +
+    # features/genes), then a single Expression Matrix file.
     def pick_matrix_file(study_files, accession:)
       files = Array(study_files).select { |f| f.is_a?(Hash) }
 
@@ -363,6 +364,9 @@ module ExternalCatalog
       seurat = files.select { |f| seurat_file?(f) }
       picked = prefer_raw_or_smallest(seurat)
       return file_pick(picked, :rds, accession: accession) if picked
+
+      mtx_pick = pick_mtx_triplet(files, accession: accession)
+      return mtx_pick if mtx_pick
 
       expr = files.select { |f| f['file_type'].to_s == 'Expression Matrix' }
       return nil unless expr.size == 1
@@ -381,6 +385,50 @@ module ExternalCatalog
 
       name = file['name'].to_s.downcase
       name.end_with?('.rds', '.rdata')
+    end
+
+    def mtx_matrix_file?(file)
+      return true if file['file_type'].to_s == 'MM Coordinate Matrix'
+
+      file['name'].to_s.downcase.end_with?('.mtx', '.mtx.gz')
+    end
+
+    def mtx_barcodes_file?(file)
+      return true if file['file_type'].to_s == '10X Barcodes File'
+
+      FormatPriority.mtx_companion_role(file['name']) == :barcodes
+    end
+
+    def mtx_features_file?(file)
+      return true if file['file_type'].to_s == '10X Genes File'
+
+      FormatPriority.mtx_companion_role(file['name']) == :features
+    end
+
+    def pick_mtx_triplet(files, accession:)
+      matrices = files.select { |f| mtx_matrix_file?(f) }
+      barcodes = files.select { |f| mtx_barcodes_file?(f) }
+      features = files.select { |f| mtx_features_file?(f) }
+      return nil if matrices.empty? || barcodes.empty? || features.empty?
+
+      matrix = prefer_raw_or_smallest(matrices)
+      barcode = prefer_raw_or_smallest(barcodes)
+      feature = prefer_raw_or_smallest(features)
+      return nil unless matrix && barcode && feature
+
+      pick = file_pick(matrix, :mtx, accession: accession)
+      return nil unless pick
+
+      barcode_pick = file_pick(barcode, :mtx, accession: accession)
+      feature_pick = file_pick(feature, :mtx, accession: accession)
+      return nil unless barcode_pick && feature_pick
+
+      pick.merge(
+        companion_files: [
+          { role: 'barcodes', url: barcode_pick[:url], filename: barcode_pick[:filename] },
+          { role: 'features', url: feature_pick[:url], filename: feature_pick[:filename] }
+        ]
+      )
     end
 
     def prefer_raw_or_smallest(files)

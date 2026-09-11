@@ -2313,13 +2313,21 @@ module Basic
         collection_id: p['global_gene_set_collection_id']
       )
 
+      input_step_name = heatmap_input_matrix_step_name(p)
+      value_transform = p['value_transform'].presence || 'zscore'
+      # Scaled matrices are already z-scored / variance-stabilized; refuse double-scaling.
+      if input_step_name.to_s == 'scaling' && value_transform == 'zscore'
+        value_transform = 'none'
+      end
+
       config = {
         'gene_identifiers' => resolved.genes,
         'cells_metadata' => h_var['cells_metadata'].presence,
         'cells_categories' => heatmap_normalize_list(p['cells_metadata_sel']),
         'column_mode' => p['column_mode'].presence || 'cells',
         'group_metadata' => h_var['group_metadata'].presence,
-        'value_transform' => p['value_transform'].presence || 'zscore',
+        'value_transform' => value_transform,
+        'input_matrix_step_name' => input_step_name,
         'max_cells' => (p['max_cells'].presence || 5000).to_i,
         'seed' => (p['seed'].presence || 42).to_i,
         'cluster_rows' => command_json_boolean_truthy?(p.fetch('cluster_rows', true)),
@@ -2331,6 +2339,40 @@ module Basic
 
       File.write((out + 'heatmap_config.json').to_s, JSON.pretty_generate(config))
       config
+    end
+
+    def heatmap_input_matrix_step_name(p)
+      im = p.is_a?(Hash) ? (p['input_matrix'] || p[:input_matrix]) : nil
+      im = im.first if im.is_a?(Array)
+      return nil unless im.is_a?(Hash)
+
+      # Imported matrices: honor sim_step_id mapping (e.g. mapped to scaling).
+      sim_step_id = im['sim_step_id'] || im[:sim_step_id]
+      if sim_step_id.present?
+        name = Step.find_by(id: sim_step_id)&.name
+        return name if name.present?
+      end
+
+      annot_id = im['annot_id'] || im[:annot_id]
+      if annot_id.present?
+        annot = Annot.find_by(id: annot_id)
+        if annot
+          step_id = annot.effective_source_step_id
+          name = Step.find_by(id: step_id)&.name if step_id.present?
+          return name if name.present?
+        end
+      end
+
+      step_name = (im['step_name'] || im[:step_name]).presence
+      return step_name.to_s if step_name.present?
+
+      run_id = im['run_id'] || im[:run_id]
+      return nil if run_id.blank?
+
+      run = Run.find_by(id: run_id)
+      return nil unless run
+
+      Step.find_by(id: run.step_id)&.name
     end
 
     def heatmap_normalize_list(val)

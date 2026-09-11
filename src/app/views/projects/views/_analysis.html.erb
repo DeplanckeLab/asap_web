@@ -55,7 +55,9 @@
           </div>
         </div>
 
-        <% if defined?(@available_loom_files) && @available_loom_files.many? %>
+        <%# v>=8: loom scope is applied automatically (e.g. cell-filtering for later run forms);
+            do not show a manual "Filter runs" LOOM picker even when several looms exist. %>
+        <% if defined?(@available_loom_files) && @available_loom_files.many? && @project.version_id.to_i < 8 %>
           <div class="inline-flex items-center h-9">
             <div class="inline-flex h-9 items-center px-3 border border-gray-300 rounded-l-md bg-gray-50 text-xs font-medium text-gray-700">
               <i class="fa fa-filter mr-1"></i>

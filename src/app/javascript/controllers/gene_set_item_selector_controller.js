@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { scrollFormAttrIntoView } from "lib/scroll_form_attr_into_view"
+import { scrollFormAttrIntoView, clearFormAttrScrollPadding } from "lib/scroll_form_attr_into_view"
 
 export default class extends Controller {
   static targets = ["searchInput", "results", "hiddenField", "selectedDisplay"]
@@ -32,7 +32,8 @@ export default class extends Controller {
     document.addEventListener("click", this.boundDocumentClick, true)
 
     this.restoreFromHiddenField()
-    this.refreshItems("")
+    // Prefetch quietly; do not open the results panel on connect.
+    this.refreshItems("", { openResults: false })
   }
 
   disconnect() {
@@ -55,17 +56,19 @@ export default class extends Controller {
   searchInputChanged() {
     clearTimeout(this.debounceTimer)
     this.debounceTimer = setTimeout(() => {
-      this.refreshItems(this.searchInputTarget.value.trim())
+      this.refreshItems(this.searchInputTarget.value.trim(), { openResults: true })
     }, 300)
   }
 
   handleCollectionChange() {
     this.clearSelection()
-    this.refreshItems(this.searchInputTarget.value.trim())
+    this.refreshItems(this.searchInputTarget.value.trim(), { openResults: true })
   }
 
   handleMatrixContextChanged() {
-    this.refreshItems(this.searchInputTarget.value.trim())
+    // Matrix changes only refresh "in dataset" counts; keep the panel closed
+    // unless the user already had it open.
+    this.refreshItems(this.searchInputTarget.value.trim(), { openResults: false })
   }
 
   handleDocumentClick(event) {
@@ -121,16 +124,19 @@ export default class extends Controller {
     }
   }
 
-  async refreshItems(query) {
+  async refreshItems(query, options = {}) {
     const collectionId = this.getCollectionSelect()?.value
     const loomFile = this.getLoomFile()
+    const wasOpen = this.hasResultsTarget && !this.resultsTarget.classList.contains("hidden")
+    // Open only on explicit user actions, or keep open if already visible.
+    const openResults = options.openResults === true || wasOpen
 
     if (!collectionId) {
-      this.renderResultsMessage("Select a gene set collection first")
+      this.renderResultsMessage("Select a gene set collection first", { reveal: openResults })
       return
     }
     if (!loomFile) {
-      this.renderResultsMessage("Select an input matrix first")
+      this.renderResultsMessage("Select an input matrix first", { reveal: openResults })
       return
     }
 
@@ -147,20 +153,20 @@ export default class extends Controller {
       )
       const payload = await response.json()
       if (!response.ok || payload.status !== "ok") {
-        this.renderResultsMessage(payload.message || "Failed to load gene sets")
+        this.renderResultsMessage(payload.message || "Failed to load gene sets", { reveal: openResults })
         return
       }
 
       const items = Array.isArray(payload.items)
         ? payload.items.filter((item) => this.allowLocalValue || item.supports_module_score !== false)
         : []
-      this.renderItems(items)
+      this.renderItems(items, { reveal: openResults })
     } catch (_e) {
-      this.renderResultsMessage("Failed to load gene sets")
+      this.renderResultsMessage("Failed to load gene sets", { reveal: openResults })
     }
   }
 
-  renderResultsMessage(message) {
+  renderResultsMessage(message, options = {}) {
     if (!this.hasResultsTarget) {
       return
     }
@@ -169,7 +175,9 @@ export default class extends Controller {
     row.className = "px-4 py-3 text-sm text-gray-500"
     row.textContent = message
     this.resultsTarget.appendChild(row)
-    this.showResults()
+    if (options.reveal !== false) {
+      this.showResults()
+    }
   }
 
   formatItemNameHtml(name) {
@@ -212,14 +220,14 @@ export default class extends Controller {
     return this.escapeHtml(item.display_name || `Item ${item.id}`)
   }
 
-  renderItems(items) {
+  renderItems(items, options = {}) {
     if (!this.hasResultsTarget) {
       return
     }
     this.resultsTarget.innerHTML = ""
 
     if (items.length === 0) {
-      this.renderResultsMessage("No matching gene sets")
+      this.renderResultsMessage("No matching gene sets", options)
       return
     }
 
@@ -248,7 +256,9 @@ export default class extends Controller {
       this.resultsTarget.appendChild(button)
     })
 
-    this.showResults()
+    if (options.reveal !== false) {
+      this.showResults()
+    }
   }
 
   selectItem(itemId, label) {
@@ -274,7 +284,9 @@ export default class extends Controller {
     const wasHidden = this.resultsTarget.classList.contains("hidden")
     this.resultsTarget.classList.remove("hidden")
     if (wasHidden) {
-      scrollFormAttrIntoView(this.element)
+      requestAnimationFrame(() => {
+        scrollFormAttrIntoView(this.element, { revealElement: this.resultsTarget })
+      })
     }
   }
 
@@ -283,6 +295,7 @@ export default class extends Controller {
       return
     }
     this.resultsTarget.classList.add("hidden")
+    clearFormAttrScrollPadding(this.element)
   }
 
   escapeHtml(value) {

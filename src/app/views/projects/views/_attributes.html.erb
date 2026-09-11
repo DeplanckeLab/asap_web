@@ -161,7 +161,7 @@
                     <% if source_run_ids.any? %>
                       <% candidate_annots.concat(
                            Annot.where(project_id: @project.id, run_id: source_run_ids)
-                                .includes(:data_transformation)
+                                .includes(:data_transformation, :sim_step)
                                 .order(:name, :id)
                                 .to_a
                                 .select do |annot|
@@ -174,7 +174,7 @@
                     <% end %>
                     <% if source_step_ids.any? %>
                       <% imported_annots = Annot.where(project_id: @project.id, imported: true)
-                                                .includes(:data_transformation)
+                                                .includes(:data_transformation, :sim_step)
                                                 .order(:name, :id)
                                                 .select { |annot| annot.matches_source_step_ids?(source_step_ids) } %>
                       <% candidate_annots.concat(imported_annots) %>
@@ -235,7 +235,8 @@
                            data-input-data-selector-max-items-value="<%= max_items || '' %>"
                            data-input-data-selector-is-multiple-value="<%= is_multiple ? 'true' : 'false' %>"
                            data-input-data-selector-dropdown-placeholder-value="<%= h(input_data_dropdown_placeholder.to_s) %>"
-                           data-input-data-selector-selected-loom-file-value="<%= h((defined?(@selected_loom_file) && @selected_loom_file).to_s) %>">
+                           data-input-data-selector-selected-loom-file-value="<%= h((defined?(@selected_loom_file) && @selected_loom_file).to_s) %>"
+                           data-input-data-selector-preferred-source-steps-value="<%= h(Array(attr['preferred_source_steps']).to_json) %>">
                         <button type="button"
                                 data-input-data-selector-target="dropdownButton"
                                 data-action="click->input-data-selector#toggleDropdown"
@@ -265,12 +266,14 @@
                                 <% group[:annots].each do |annot| %>
                                   <% run_id = annot.run_id || annot.ori_run_id || annot.store_run_id %>
                                   <% run = run_id ? (@h_runs[run_id] || h_runs_by_id[run_id]) : nil %>
-                                  <% step = if annot.sim_step_id && h_steps_by_id[annot.sim_step_id]
-                                              h_steps_by_id[annot.sim_step_id]
+                                  <%# Prefer sim_step_id for imported matrices mapped to a pipeline step. %>
+                                  <% source_step_id = annot.effective_source_step_id %>
+                                  <% step = if source_step_id
+                                              h_steps_by_id[source_step_id] ||
+                                                (annot.sim_step if annot.sim_step_id.to_i == source_step_id.to_i) ||
+                                                Step.find_by(id: source_step_id)
                                             elsif run
                                               h_steps_by_id[run.step_id]
-                                            else
-                                              h_steps_by_id[annot.step_id] || h_steps_by_id[annot.ori_step_id]
                                             end %>
                                   <% categories = Basic.safe_parse_json(annot.categories_json, nil) %>
                                   <% if categories.blank? %>
@@ -292,6 +295,7 @@
                                        nber_cols: annot.nber_cols,
                                        imported: annot.imported,
                                        from_asap_pipeline: from_asap_pipeline,
+                                       sim_step_id: annot.sim_step_id,
                                        step_name: step&.name,
                                        step_rank: step&.rank
                                      } %>
@@ -325,12 +329,11 @@
                                           <% end %>
                                         <% end %>
                                       </div>
-                                      <div class="text-sm text-gray-600 mt-1">
-                                        <span class="inline-block mr-3"><strong>Dataset:</strong> <%= annot.name %></span>
-                                        <% if annot.filepath.present? %>
-                                          <span class="inline-block text-gray-500 text-xs"><%= annot.filepath %></span>
-                                        <% end %>
-                                      </div>
+                                      <% if annot.filepath.present? %>
+                                        <div class="text-xs text-gray-500 mt-1 truncate" title="<%= annot.filepath %>">
+                                          <%= annot.filepath %>
+                                        </div>
+                                      <% end %>
                                     </div>
                                   </label>
                                 <% end %>

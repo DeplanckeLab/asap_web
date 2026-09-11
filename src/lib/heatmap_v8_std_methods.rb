@@ -47,10 +47,11 @@ module HeatmapV8StdMethods
   METHOD_ATTRS_JSON = {
     "input_matrix" => {
       "label" => "Input matrix",
-      "description" => "Expression matrix to build the heatmap from (normalized/scaled values give the most readable heatmaps).",
+      "description" => "Prefer a normalized expression matrix (recommended). Scaled matrices are allowed, but row z-score is then disabled to avoid double-scaling.",
       "widget" => "input_data",
       "valid_types" => [["dataset"], ["num_matrix", "int_matrix"]],
       "source_steps" => %w[parsing cell_filtering gene_filtering normalization scaling clustering dim_reduction],
+      "preferred_source_steps" => %w[normalization],
       "req_data_structure" => "array",
       "constraints" => {},
       "min_nber_items" => 1,
@@ -124,11 +125,19 @@ module HeatmapV8StdMethods
     },
     "value_transform" => {
       "label" => "Value transform",
-      "description" => "Per-gene z-score highlights relative up/down-regulation. Log1p or raw values are also available.",
+      "description" => "Per-gene z-score highlights relative up/down-regulation on normalized or raw matrices. Disabled when the input matrix comes from the scaling step (already scaled).",
       "widget" => "select",
       "list" => [["Row z-score", "zscore"], ["Log1p", "log1p"], ["None (raw)", "none"]],
       "default" => "zscore",
-      "not_null" => true
+      "not_null" => true,
+      "constraints" => {
+        "force_value_if" => [
+          { "attr" => "input_matrix.step_name", "equals" => "scaling", "value" => "none" }
+        ],
+        "disabled_if" => [
+          { "attr" => "input_matrix.step_name", "equals" => "scaling" }
+        ]
+      }
     },
     "max_cells" => {
       "label" => "Max cells (columns)",

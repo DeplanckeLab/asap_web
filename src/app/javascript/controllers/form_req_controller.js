@@ -1103,13 +1103,7 @@ export default class extends Controller {
     if (entries.length === 0) {
       return true
     }
-    return entries.every((entry) => {
-      if (!entry.attr) {
-        return false
-      }
-      const actualValue = this.parseFieldValueForConstraint(String(entry.attr))
-      return this.valuesEqualForConstraint(actualValue, entry.equals)
-    })
+    return entries.every((entry) => this.isConstraintEntrySatisfied(entry))
   }
 
   isFieldActive(container) {
@@ -1226,6 +1220,8 @@ export default class extends Controller {
         badge.remove()
       }
     })
+
+    this.syncForceAndDisabledConstraints()
 
     if (this.stepNameValue === 'de') {
       this.applyDeFormConditionalVisibility()
@@ -1760,6 +1756,143 @@ export default class extends Controller {
     return []
   }
 
+  // Resolve "attr" or "attr.nested.field" against form fields.
+  // For input_data attrs, nested fields dig into the selected JSON object (first item if array).
+  resolveConstraintAttrValue(attrPath) {
+    const parts = String(attrPath || '').split('.').map((p) => p.trim()).filter(Boolean)
+    if (parts.length === 0) {
+      return null
+    }
+    let value = this.parseFieldValueForConstraint(parts[0])
+    for (let i = 1; i < parts.length; i++) {
+      if (value == null) {
+        return null
+      }
+      if (Array.isArray(value)) {
+        value = value.length > 0 ? value[0] : null
+      }
+      if (value == null || typeof value !== 'object') {
+        return null
+      }
+      value = Object.prototype.hasOwnProperty.call(value, parts[i]) ? value[parts[i]] : null
+    }
+    return value
+  }
+
+  isConstraintEntrySatisfied(entry) {
+    if (!entry || !entry.attr) {
+      return false
+    }
+    const actualValue = this.resolveConstraintAttrValue(String(entry.attr))
+    return this.valuesEqualForConstraint(actualValue, entry.equals)
+  }
+
+  attrFieldInput(container, attrName) {
+    if (!container) {
+      return null
+    }
+    return container.querySelector(
+      `#attrs_${attrName}, select[name="attrs[${attrName}]"], input[name="attrs[${attrName}]"], textarea[name="attrs[${attrName}]"]`
+    )
+  }
+
+  ensureForcedSubmitValue(container, attrName, value) {
+    const name = `attrs[${attrName}]`
+    let hidden = container.querySelector(`[data-attr-forced-submit="1"][name="${name}"]`)
+    if (!hidden) {
+      hidden = document.createElement('input')
+      hidden.type = 'hidden'
+      hidden.name = name
+      hidden.setAttribute('data-attr-forced-submit', '1')
+      container.appendChild(hidden)
+    }
+    hidden.value = value
+  }
+
+  clearForcedSubmitValue(container, attrName) {
+    const name = `attrs[${attrName}]`
+    container.querySelectorAll(`[data-attr-forced-submit="1"][name="${name}"]`).forEach((el) => el.remove())
+  }
+
+  syncForceAndDisabledConstraints() {
+    if (!this.hasAttrsContainerTarget || this._applyingConstraintForce) {
+      return
+    }
+    this._applyingConstraintForce = true
+    try {
+      this.attrsContainerTarget.querySelectorAll('[data-attr-name]').forEach((container) => {
+        const attrName = container.getAttribute('data-attr-name')
+        if (!attrName) {
+          return
+        }
+        const constraints = this.parseAttrConstraints(container)
+        const forceEntries = this.normalizeRequiredIfEntries(constraints.force_value_if)
+        const disabledEntries = this.normalizeRequiredIfEntries(constraints.disabled_if)
+        const forceMatch = forceEntries.find((entry) => this.isConstraintEntrySatisfied(entry))
+        const shouldDisable = !!forceMatch || disabledEntries.some((entry) => this.isConstraintEntrySatisfied(entry))
+        const input = this.attrFieldInput(container, attrName)
+        if (!input) {
+          return
+        }
+
+        if (forceMatch && forceMatch.value != null && forceMatch.value !== undefined) {
+          const forced = String(forceMatch.value)
+          if (container.dataset.attrConstraintForced !== '1') {
+            container.dataset.attrValueBeforeForce = String(input.value ?? '')
+          }
+          if (String(input.value) !== forced) {
+            input.value = forced
+          }
+          container.dataset.attrConstraintForced = '1'
+          this.ensureForcedSubmitValue(container, attrName, forced)
+        } else if (container.dataset.attrConstraintForced === '1') {
+          const previous = container.dataset.attrValueBeforeForce
+          delete container.dataset.attrConstraintForced
+          delete container.dataset.attrValueBeforeForce
+          this.clearForcedSubmitValue(container, attrName)
+          if (previous != null && previous !== '') {
+            input.value = previous
+          }
+        }
+
+        input.disabled = shouldDisable
+        if (shouldDisable) {
+          if (!input.dataset.originalName && input.name) {
+            input.dataset.originalName = input.name
+          }
+          input.removeAttribute('name')
+          this.ensureForcedSubmitValue(container, attrName, String(input.value ?? ''))
+        } else {
+          if (input.dataset.originalName) {
+            input.name = input.dataset.originalName
+            delete input.dataset.originalName
+          }
+          if (container.dataset.attrConstraintForced !== '1') {
+            this.clearForcedSubmitValue(container, attrName)
+          }
+        }
+
+        const label = container.querySelector('label')
+        if (label) {
+          let hint = label.querySelector('[data-attr-disabled-hint="1"]')
+          if (shouldDisable) {
+            if (!hint) {
+              hint = document.createElement('span')
+              hint.setAttribute('data-attr-disabled-hint', '1')
+              hint.className = 'ml-2 inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200'
+              label.appendChild(hint)
+            }
+            hint.textContent = 'Locked by input selection'
+          } else if (hint) {
+            hint.remove()
+          }
+        }
+      })
+    } finally {
+      this._applyingConstraintForce = false
+    }
+  }
+
   parseFieldValueForConstraint(attrName) {
     if (!this.hasAttrsContainerTarget) {
       return null
@@ -1828,13 +1961,7 @@ export default class extends Controller {
     if (entries.length === 0) {
       return false
     }
-    return entries.every((entry) => {
-      if (!entry.attr) {
-        return false
-      }
-      const actualValue = this.parseFieldValueForConstraint(String(entry.attr))
-      return this.valuesEqualForConstraint(actualValue, entry.equals)
-    })
+    return entries.every((entry) => this.isConstraintEntrySatisfied(entry))
   }
 
   syncMandatoryBadge(container, shouldShow) {

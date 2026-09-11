@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { scrollFormAttrIntoView } from "lib/scroll_form_attr_into_view"
+import { scrollFormAttrIntoView, clearFormAttrScrollPadding } from "lib/scroll_form_attr_into_view"
 import { queryDeSecondMetadataHidden } from "visualization/de_second_metadata_attrs"
 import {
   DE_COMPLEMENTARY_GROUP_LABEL,
@@ -24,7 +24,8 @@ export default class extends Controller {
     maxItems: { type: Number, default: null },
     isMultiple: Boolean,
     dropdownPlaceholder: { type: String, default: "" },
-    selectedLoomFile: { type: String, default: "" }
+    selectedLoomFile: { type: String, default: "" },
+    preferredSourceSteps: { type: Array, default: [] }
   }
 
   emptyDropdownLabel() {
@@ -117,27 +118,32 @@ export default class extends Controller {
       if (this.hasSelectedDivTarget && !this.selectedDivTarget.classList.contains('hidden')) {
         this.selectedDivTarget.classList.add('hidden')
       }
-      scrollFormAttrIntoView(this.element)
+      // Wait a frame so the menu has a real height before scrolling it into view.
+      requestAnimationFrame(() => {
+        scrollFormAttrIntoView(this.element, { revealElement: this.dropdownMenuTarget })
+      })
       console.log("[InputDataSelectorController] Dropdown opened, visible:", this.dropdownMenuTarget.offsetHeight > 0)
     } else {
-      this.dropdownMenuTarget.classList.add('hidden')
-      this.dropdownMenuTarget.style.display = 'none'
-      // Show selected tags when dropdown is closed (if there are any selected)
-      if (this.hasSelectedDivTarget && this.selectedDivTarget.children.length > 0) {
-        this.selectedDivTarget.classList.remove('hidden')
-      }
+      this.closeDropdownMenu()
+    }
+  }
+
+  closeDropdownMenu() {
+    if (!this.hasDropdownMenuTarget) {
+      return
+    }
+    this.dropdownMenuTarget.classList.add('hidden')
+    this.dropdownMenuTarget.style.display = 'none'
+    clearFormAttrScrollPadding(this.element)
+    if (this.hasSelectedDivTarget && this.selectedDivTarget.children.length > 0) {
+      this.selectedDivTarget.classList.remove('hidden')
     }
   }
 
   closeDropdown(event) {
     // Close if clicking outside
     if (!this.dropdownMenuTarget.contains(event.target) && !this.dropdownButtonTarget.contains(event.target)) {
-      this.dropdownMenuTarget.classList.add('hidden')
-      this.dropdownMenuTarget.style.display = 'none'
-      // Show selected tags when dropdown is closed (if there are any selected)
-      if (this.hasSelectedDivTarget && this.selectedDivTarget.children.length > 0) {
-        this.selectedDivTarget.classList.remove('hidden')
-      }
+      this.closeDropdownMenu()
     }
   }
 
@@ -156,11 +162,7 @@ export default class extends Controller {
 
     // UX: for single-select widgets (radio), close dropdown immediately after selection
     if (!this.isMultipleValue && input.checked) {
-      this.dropdownMenuTarget.classList.add('hidden')
-      this.dropdownMenuTarget.style.display = 'none'
-      if (this.hasSelectedDivTarget && this.selectedDivTarget.children.length > 0) {
-        this.selectedDivTarget.classList.remove('hidden')
-      }
+      this.closeDropdownMenu()
     }
   }
 
@@ -560,6 +562,20 @@ export default class extends Controller {
     })
     if (candidates.length === 0) {
       return null
+    }
+
+    const preferredSteps = Array.isArray(this.preferredSourceStepsValue)
+      ? this.preferredSourceStepsValue.map((s) => String(s || "").trim()).filter(Boolean)
+      : []
+    for (let i = 0; i < preferredSteps.length; i++) {
+      const stepName = preferredSteps[i]
+      const preferred = candidates.filter((input) => {
+        const value = this.parseOptionValue(input)
+        return String((value && value.step_name) || "") === stepName
+      })
+      if (preferred.length > 0) {
+        return this.selectBestByReverseStepRank(preferred)
+      }
     }
 
     const p1 = candidates.filter((input) => this.isAsapNormalizedDataset(this.parseOptionValue(input)))

@@ -174,12 +174,14 @@ export default class extends Controller {
     const runIdFromUrl = urlParams.get('run_id')
     const stepIdFromUrl = urlParams.get('step_id')
     const showFormFromUrl = urlParams.get('show_form')
+    const forceShowFormFromUrl = urlParams.get('force_show_form')
     const panelModeFromUrl = urlParams.get('panel_mode')
     const loomFileFromUrl = urlParams.get('loom_file')
     const hasTransientUrlParams = !!(
       runIdFromUrl ||
       stepIdFromUrl ||
       showFormFromUrl ||
+      forceShowFormFromUrl ||
       panelModeFromUrl ||
       loomFileFromUrl ||
       urlParams.get('sub_view') ||
@@ -273,7 +275,10 @@ export default class extends Controller {
             }, 0)
             return true
           }
-          const extraQuery = showFormFromUrl === '1' ? '&show_form=1' : ''
+          const extraQueryParts = []
+          if (showFormFromUrl === '1') extraQueryParts.push('show_form=1')
+          if (forceShowFormFromUrl === '1') extraQueryParts.push('force_show_form=1')
+          const extraQuery = extraQueryParts.length ? `&${extraQueryParts.join('&')}` : ''
           if (controller.isParsingStepId(stepId)) {
             controller.loadParsingStepResults(stepId, 'connect:url_step')
           } else {
@@ -1259,7 +1264,7 @@ export default class extends Controller {
   _cleanUrlParams() {
     const url = new URL(window.location.href)
     const keysToRemove = ['step_id', 'run_id', 'sub_view',
-      'panel_mode', 'show_form', 'loom_file',
+      'panel_mode', 'show_form', 'force_show_form', 'loom_file',
       'de_fdr', 'de_fc',
       'markers_fdr', 'markers_fc', 'markers_max_genes', 'markers_highlight', 'markers_analysis',
       'ge_fdr',

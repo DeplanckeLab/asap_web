@@ -448,15 +448,15 @@ export default class extends Controller {
       values: this.baseMatrix,
       compression_info: { min_val: this.vmin, max_val: this.vmax }
     }
+    // Colormap maps through meta value_min/value_max (symmetric ±P99 for z-score).
+    // Build stops from that display range so white lands on 0, not on full-matrix
+    // extremes (outliers beyond the clip make ColorManager put white off-center).
     this.gradientMinValue = this.vmin
     this.gradientMaxValue = this.vmax
     this.customColorRange = null
     this.gradientScale = "normal"
     this.customGradientControlPoints = null
-    this.colorManager.initializeDefaultGradient()
-    if (!this.gradientControlPoints || !this.gradientControlPoints.length) {
-      this.gradientControlPoints = this.defaultHeatmapControlPoints()
-    }
+    this.gradientControlPoints = this.defaultHeatmapControlPoints()
     this.gradientManager.saveGradientForMetadata(this.currentMetadataId)
     this.editingGradientTarget = { type: "expression" }
     this.expressionCustomColorRange = null
@@ -5449,12 +5449,18 @@ export default class extends Controller {
     ctx.fillStyle = "#334155"
     ctx.font = "9px sans-serif"
     ctx.textBaseline = "top"
-    const mid = ((this.vmax + this.vmin) / 2).toFixed(1)
+    // Place the middle tick at value 0 when the display range spans zero
+    // (z-score), otherwise at the geometric midpoint.
+    const span = (this.vmax - this.vmin) || 1
+    const spansZero = this.vmin < 0 && this.vmax > 0
+    const midValue = spansZero ? 0 : (this.vmax + this.vmin) / 2
+    const midPos = spansZero ? ((0 - this.vmin) / span) : 0.5
+    const midText = midValue.toFixed(1)
     const maxText = this.vmax.toFixed(1)
     ctx.textAlign = "left"
     ctx.fillText(this.vmin.toFixed(1), x0, y)
     ctx.textAlign = "center"
-    ctx.fillText(mid, x0 + barW / 2, y)
+    ctx.fillText(midText, x0 + barW * midPos, y)
     ctx.textAlign = "right"
     ctx.fillText(maxText, x0 + barW, y)
 
@@ -5798,10 +5804,9 @@ export default class extends Controller {
       this.gradientControlPoints = this.defaultNumericalTrackControlPoints()
       this.customColorRange = null
     } else {
-      this.colorManager.initializeDefaultGradient()
-      if (!this.gradientControlPoints || !this.gradientControlPoints.length) {
-        this.gradientControlPoints = this.defaultHeatmapControlPoints()
-      }
+      this.gradientMinValue = this.vmin
+      this.gradientMaxValue = this.vmax
+      this.gradientControlPoints = this.defaultHeatmapControlPoints()
       this.customColorRange = null
       this.expressionCustomColorRange = null
     }

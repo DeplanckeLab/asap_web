@@ -8,6 +8,11 @@
   else
     project_path(@project, view: 'analysis')
   end
+  new_heatmap_form_path = if heatmap_step
+    project_path(@project, view: 'analysis', step_id: heatmap_step.id, show_form: 1, force_show_form: 1)
+  else
+    nil
+  end
 %>
 
 <div data-guided-tour="project-heatmap-view"
@@ -19,7 +24,6 @@
       <%= link_to back_analysis_path,
           class: "inline-flex items-center gap-2 px-3 py-1.5 bg-white hover:bg-gray-100 text-gray-700 rounded-md font-medium text-xs transition-colors cursor-pointer border border-gray-300 shadow-sm",
           title: "Back to heatmap runs in analysis" do %>
-        <i class="fas fa-arrow-left"></i>
         <span>Back to analysis</span>
       <% end %>
       <h1 style="margin:0; font-size:16px; font-weight:600; color:#111827;">Heatmap</h1>
@@ -44,6 +48,23 @@
             <% end %>
           </select>
         </label>
+      <% end %>
+    </div>
+    <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0;">
+      <% if new_heatmap_form_path %>
+        <% if analyzable?(@project) %>
+          <%= link_to new_heatmap_form_path,
+              class: "inline-flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-xs transition-colors cursor-pointer border border-blue-600 shadow-sm",
+              title: "Open the new heatmap form in analysis" do %>
+            <span>New heatmap</span>
+          <% end %>
+        <% else %>
+          <button type="button" disabled
+                  class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-xs cursor-not-allowed border border-gray-300 shadow-sm"
+                  title="You need analysis rights to run new analyses">
+            <span>New heatmap</span>
+          </button>
+        <% end %>
       <% end %>
     </div>
   </div>

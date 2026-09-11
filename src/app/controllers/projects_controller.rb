@@ -12492,7 +12492,9 @@ class ProjectsController < ApplicationController
       project_session_key = @project.id.to_s
 
       # One loom file: no contextual filter (matches analysis UI where the picker is hidden).
-      if @available_loom_files&.one?
+      # v>=8: loom scope for forms is applied automatically; analysis has no manual LOOM
+      # picker even with several files, so do not keep a sticky session filter.
+      if @available_loom_files&.one? || version_v8_or_later?(@project.version_id)
         @selected_loom_file = nil
         session[:analysis_loom_file][project_session_key] = '__all__'
         return

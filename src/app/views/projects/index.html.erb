@@ -17,7 +17,8 @@
         <h1 class="text-3xl font-bold text-gray-900 mb-2">Search projects</h1>
         <p class="text-gray-600">Search and explore ASAP projects</p>
       </div>
-      <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
+      <div class="flex flex-wrap items-center justify-end gap-3 shrink-0">
+        <%= render 'projects/user_storage_quota', user_storage_quota: @user_storage_quota, variant: :toolbar %>
         <%= link_to external_catalog_candidates_path,
             class: "inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 whitespace-nowrap",
             title: "Import a dataset from an external catalog" do %>

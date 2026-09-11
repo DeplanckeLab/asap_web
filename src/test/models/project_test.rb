@@ -1,5 +1,6 @@
 require_relative "../services/test_base_without_fixtures"
 require "fileutils"
+require "minitest/mock"
 
 class ProjectTest < TestBaseWithoutFixtures
   test "destroy removes project directory and local archive tgz under USER_DATA_DIR" do
@@ -36,6 +37,51 @@ class ProjectTest < TestBaseWithoutFixtures
       ENV["USER_DATA_DIR"] = previous_user_data_dir
       FileUtils.rm_rf(tmp_root) if tmp_root.present?
     end
+  end
+
+  test "destroy kills active runs before cascade delete" do
+    user = register_for_test_cleanup(
+      User.create!(email: "proj_destroy_kill_#{SecureRandom.hex(4)}@example.com", password: "password123")
+    )
+    project = create_test_project!(
+      name: "Destroy kills runs",
+      key: "dkr#{SecureRandom.hex(3)}",
+      user_id: user.id
+    )
+    step = Step.first || register_for_test_cleanup(Step.create!(name: "parsing", label: "Parsing"))
+    active_run = register_for_test_cleanup(
+      Run.create!(
+        project_id: project.id,
+        user_id: user.id,
+        step_id: step.id,
+        status_id: 2,
+        num: 1,
+        slurm_job_id: 99_001,
+        command_json: { container_name: "test_container", host_name: "localhost" }.to_json
+      )
+    )
+    done_run = register_for_test_cleanup(
+      Run.create!(
+        project_id: project.id,
+        user_id: user.id,
+        step_id: step.id,
+        status_id: 5,
+        num: 2
+      )
+    )
+
+    killed_ids = []
+    Basic.stub(:kill_run, ->(run) { killed_ids << run.id }) do
+      project.destroy!
+    end
+    @records_for_test_cleanup.delete(project)
+    @records_for_test_cleanup.delete(active_run)
+    @records_for_test_cleanup.delete(done_run)
+
+    assert_includes killed_ids, active_run.id
+    assert_not_includes killed_ids, done_run.id
+    assert_not Run.exists?(active_run.id)
+    assert_not Run.exists?(done_run.id)
   end
 
   test "update_archive_metadata does not touch updated_at" do

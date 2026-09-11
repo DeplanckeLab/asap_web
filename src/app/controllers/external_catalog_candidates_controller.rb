@@ -157,6 +157,12 @@ class ExternalCatalogCandidatesController < ApplicationController
   end
 
   def start_signed_in_import!
+    quota_result = UserStorageQuota.allow?(current_user, additional_bytes: @candidate.filesize.to_i)
+    unless quota_result.allowed?
+      redirect_to external_catalog_candidate_path(@candidate), alert: quota_result.reason
+      return
+    end
+
     @candidate.update!(
       import_status: 'importing',
       import_error: nil,

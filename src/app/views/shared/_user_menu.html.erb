@@ -17,15 +17,41 @@
                       else
                         'text-emerald-400'
                       end %>
+<%
+  user_storage_quota =
+    if user_signed_in? && !current_user.guest_account?
+      UserStorageQuota.status_for(current_user)
+    end
+  quota_dot_class =
+    case user_storage_quota&.usage_level
+    when :critical then 'bg-red-500'
+    when :warn then 'bg-amber-500'
+    when :ok then 'bg-emerald-500'
+    end
+  quota_dot_label =
+    case user_storage_quota&.usage_level
+    when :critical then 'Storage critically full'
+    when :warn then 'Storage mostly used'
+    when :ok then 'Storage OK'
+    end
+%>
 
 <div class="<%= wrapper_classes %>"
      id="user-nav-dropdown"
      data-controller="nav-dropdown">
   <button type="button"
-          class="<%= button_classes %>"
+          class="<%= button_classes %> relative"
           title="<%= user_signed_in? ? current_user.email : 'Guest' %>"
           data-nav-dropdown-toggle>
-    <i class="fas fa-user-circle text-lg <%= user_icon_color %>"></i>
+    <span class="relative inline-flex">
+      <i class="fas fa-user-circle text-lg <%= user_icon_color %>"></i>
+      <% if quota_dot_class %>
+        <span class="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full <%= quota_dot_class %> ring-2 ring-gray-900"
+              title="<%= quota_dot_label %>"
+              aria-label="<%= quota_dot_label %>"
+              data-testid="user-storage-quota-dot"></span>
+      <% end %>
+    </span>
   </button>
   <div class="hidden absolute right-0 mt-2 w-56 bg-white text-gray-800 rounded-lg shadow-lg border border-gray-200 z-[1000] top-full <%= 'dark:bg-gray-800 dark:border-gray-700' if dark_mode %>"
        data-nav-menu>
@@ -35,6 +61,7 @@
           <p class="text-xs text-gray-500 <%= 'dark:text-gray-400' if dark_mode %>">Signed in as</p>
           <p class="text-sm font-medium text-gray-900 truncate <%= 'dark:text-white' if dark_mode %>"><%= current_user.email %></p>
         </div>
+        <%= render 'projects/user_storage_quota', user_storage_quota: user_storage_quota, variant: :menu, dark_mode: dark_mode %>
         <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 <%= 'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode %>"
            href="<%= edit_user_registration_path %>">
           <i class="fas fa-user-cog mr-3 text-gray-400"></i>

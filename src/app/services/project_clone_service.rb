@@ -54,6 +54,7 @@ class ProjectCloneService
     copy_associations
     rename_run_folders
     @new_project.update_column(:being_cloned, false)
+    Basic.upd_project_size(@new_project)
     @new_project
   end
 
@@ -81,11 +82,22 @@ class ProjectCloneService
       return false
     end
 
-    return true unless source_project.project_type&.admin_report_only?
-    return true if EnvHelpers.email_in_list?('ADMIN_REPORT_EMAILS', user&.email)
+    if source_project.project_type&.admin_report_only? &&
+       !EnvHelpers.email_in_list?('ADMIN_REPORT_EMAILS', user&.email)
+      @errors << 'This project type is not available'
+      return false
+    end
 
-    @errors << 'This project type is not available'
-    false
+    quota_result = UserStorageQuota.allow?(
+      user,
+      additional_bytes: UserStorageQuota.project_bytes(source_project)
+    )
+    unless quota_result.allowed?
+      @errors << quota_result.reason
+      return false
+    end
+
+    true
   end
 
   def create_new_project

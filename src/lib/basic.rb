@@ -16,6 +16,8 @@ module Basic
   DE_CELL_UNIVERSE_RESTRICT_ATTR = 'restrict_cell_universe'
   DE_CELL_UNIVERSE_METADATA_ATTR = 'universe_groups'
   DE_CELL_UNIVERSE_CATEGORIES_ATTR = 'universe_groups_sel'
+  # Waiting (1), running (2), scheduler-submitted (6). Same set as runs#stop.
+  ACTIVE_RUN_STATUS_IDS_FOR_KILL = [1, 2, 6].freeze
 
 
   # Suggested embedded JSON key for the cross-tool metadata catalog (location depends on file format: LOOM attrs, H5AD, RDS, etc.).
@@ -7979,8 +7981,24 @@ puts "TEST RUN"
     end
 
     def kill_all_runs(project)
-      project.runs.each do |run|
-        kill_run(run)
+      project.runs.where(status_id: ACTIVE_RUN_STATUS_IDS_FOR_KILL).find_each do |run|
+        begin
+          kill_run(run)
+        rescue StandardError => e
+          Rails.logger.warn(
+            "[Basic.kill_all_runs] kill_run failed for Run##{run.id} " \
+            "project_id=#{project.id}: #{e.class} - #{e.message}"
+          )
+        end
+
+        # Local (non-SLURM) runs only; pid must not be signaled when slurm_job_id is set.
+        if run.pid.present? && run.slurm_job_id.blank?
+          begin
+            Process.kill('TERM', run.pid.to_i)
+          rescue Errno::ESRCH, Errno::EPERM
+            # Already gone or not permitted.
+          end
+        end
       end
     end
     

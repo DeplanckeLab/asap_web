@@ -20,6 +20,7 @@
     <p class="text-xs text-gray-500 <%= 'dark:text-gray-400' if dark_mode %>">Signed in as</p>
     <p class="text-sm font-medium text-gray-900 truncate <%= 'dark:text-white' if dark_mode %>"><%= current_user.email %></p>
   </div>
+  <%= render 'projects/user_storage_quota', variant: :menu, dark_mode: dark_mode %>
   <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 <%= 'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode %>"
      href="<%= edit_user_registration_path %>">
     <i class="fas fa-user-cog text-lg mr-3 <%= user_icon_color %>"></i>

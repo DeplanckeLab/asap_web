@@ -6,9 +6,12 @@ class Project < ApplicationRecord
   before_save :sanitize_non_raw_text_parsing_attrs!
 
   validates :key, presence: true, uniqueness: { case_sensitive: true }
-  # Remove fus rows first (raw delete). Upload rows must not block project delete if
-  # association-dependent cleanup is skipped or the running app is an older image.
+  # Cancel active compute before cascade-destroy removes run rows (slurm_job_id /
+  # command_json). Without this, project destroy left SLURM/Docker/R orphans.
+  # Remove fus rows (raw delete) so upload rows cannot block project delete.
+  # Both use prepend; kill is declared second so it runs first among them.
   before_destroy :purge_fus_for_project_destroy!, prepend: true
+  before_destroy :kill_active_runs_for_project_destroy!, prepend: true
   # Drop the on-disk project tree after the DB row is gone. Done in after_commit so a
   # large rm_rf does not hold the destroy transaction open (UI destroy previously left
   # USER_DATA_DIR/<user>/<key>/ behind as orphan project directories).
@@ -1153,6 +1156,15 @@ class Project < ApplicationRecord
 
   def purge_fus_for_project_destroy!
     Fu.where(project_id: id).delete_all
+  end
+
+  def kill_active_runs_for_project_destroy!
+    Basic.kill_all_runs(self)
+  rescue StandardError => e
+    Rails.logger.warn(
+      "[Project#kill_active_runs_for_project_destroy!] project_id=#{id} key=#{key.inspect}: " \
+      "#{e.class} - #{e.message}"
+    )
   end
 
   def remove_project_filesystem_after_destroy!

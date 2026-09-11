@@ -47,6 +47,7 @@ class ProjectsController < ApplicationController
   # GET /projects or /projects.json
   def index
     @query, @filters = project_search_query_and_filters
+    @user_storage_quota = UserStorageQuota.status_for(current_user) if user_signed_in? && !current_user.guest_account?
 
     # Use Elasticsearch for search
     search_results = Project.search(@query, @filters)
@@ -1072,6 +1073,27 @@ class ProjectsController < ApplicationController
       Rails.logger.info("[ProjectsController#create] input_file at save check: #{input_file.inspect}")
       Rails.logger.info("[ProjectsController#create] input_file.present?: #{input_file.present?}")
       Rails.logger.info("[ProjectsController#create] input_file.upload_file_name: #{input_file&.upload_file_name.inspect}")
+
+      additional_bytes =
+        if is_integrate
+          UserStorageQuota.bytes_for_integrate_keys(session[:integrate_project_keys])
+        else
+          input_file.upload_file_size.to_i
+        end
+      quota_result = UserStorageQuota.allow?(current_user, additional_bytes: additional_bytes)
+      unless quota_result.allowed?
+        Rails.logger.warn("[ProjectsController#create] Storage quota denied: #{quota_result.reason}")
+        @organisms = Organism.order(:name)
+        @project_types = selectable_project_types
+        @versions = available_versions
+        @file_formats = FileFormat.ordered
+        @grouped_organisms = group_organisms(fetch_organisms_for_version(@project.version_id), version_id: @project.version_id)
+        @project.errors.add(:base, quota_result.reason)
+        format.html { render template: 'projects/new', status: :unprocessable_entity }
+        format.turbo_stream { render template: 'projects/new', status: :unprocessable_entity }
+        format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
+        return
+      end
       
       if @project.save
         Rails.logger.info("[ProjectsController#create] ===== PROJECT SAVED SUCCESSFULLY =====")

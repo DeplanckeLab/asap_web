@@ -260,8 +260,9 @@ export default class extends Controller {
       const selectedOption = this.getSelectedMethodOption()
       const optionText = selectedOption?.dataset.methodLabel || ''
       const bracketMatch = optionText.match(/\[([^\]]+)\]/)
+      const packageName = (bracketMatch ? bracketMatch[1] : optionText).trim()
       this.methodLogoTarget.src = logoUrl
-      this.methodLogoTarget.alt = bracketMatch ? `${bracketMatch[1]} logo` : ''
+      this.methodLogoTarget.alt = packageName ? `${packageName} logo` : ''
       this.methodLogoTarget.classList.remove('hidden')
     } else {
       this.methodLogoTarget.removeAttribute('src')

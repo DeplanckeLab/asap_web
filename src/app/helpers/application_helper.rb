@@ -1644,14 +1644,14 @@ module ApplicationHelper
     "#{seo_site_base_url}#{path}"
   end
 
-  # "UMAP [Scanpy]" / "Leiden [Seurat]" -> "scanpy" / "seurat"
+  # "UMAP [Scanpy]" -> "scanpy"; "Seurat" / "Scanpy" -> same without brackets
   def method_package_key_from_label(label)
     return nil if label.blank?
 
-    match = label.to_s.match(/\[([^\]]+)\]/)
-    return nil unless match
-
-    match[1].to_s.strip.downcase.presence
+    text = label.to_s
+    match = text.match(/\[([^\]]+)\]/)
+    key = match ? match[1] : text
+    key.to_s.strip.downcase.presence
   end
 
   def tool_version_for_package(tool_versions, package_key)

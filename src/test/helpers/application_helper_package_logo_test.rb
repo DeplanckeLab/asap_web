@@ -5,11 +5,12 @@ require 'test_helper'
 class ApplicationHelperPackageLogoTest < ActionView::TestCase
   tests ApplicationHelper
 
-  test 'method_package_key_from_label reads bracketed package' do
+  test 'method_package_key_from_label reads package with or without brackets' do
     assert_equal 'scanpy', method_package_key_from_label('UMAP [Scanpy]')
     assert_equal 'seurat', method_package_key_from_label('Leiden [Seurat]')
     assert_equal 'scanpy', method_package_key_from_label('Seurat [Scanpy]')
-    assert_nil method_package_key_from_label('Seurat')
+    assert_equal 'seurat', method_package_key_from_label('Seurat')
+    assert_equal 'scanpy', method_package_key_from_label('Scanpy')
     assert_nil method_package_key_from_label(nil)
   end
 
@@ -39,6 +40,7 @@ class ApplicationHelperPackageLogoTest < ActionView::TestCase
     tools = { 'seurat' => '5.5.0' }
 
     assert_equal '/assets/seurat.5.png', helper.method_package_logo_url('PCA [Seurat]', tools)
+    assert_equal '/assets/seurat.5.png', helper.method_package_logo_url('Seurat', tools)
     assert_nil helper.method_package_logo_url('Custom method', tools)
   end
 

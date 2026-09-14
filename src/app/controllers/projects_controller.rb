@@ -13935,7 +13935,11 @@ class ProjectsController < ApplicationController
 
     # Failed (4) always gets a fresh run on Identify markers load.
     # Stopped (5) only restarts when the user explicitly requests it (Stop must stick).
-    should_create = marker_run.nil? || status_id == 4 || (force_restart && status_id == 5)
+    # Completed (3) may be re-run only by admins (Identify markers "Re-run FindMarkers").
+    should_create = marker_run.nil? ||
+                    status_id == 4 ||
+                    (force_restart && status_id == 5) ||
+                    (force_restart && admin? && status_id == 3)
     if should_create
       user_id = current_user&.id || @project.user_id
       res = Basic.find_markers(Rails.logger, @project, annot, user_id)

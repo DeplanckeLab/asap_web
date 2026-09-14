@@ -1314,12 +1314,38 @@ if (typeof openAnnotationPopup !== 'function') {
     return html;
   }
 
+  function annotPopupIsAdmin() {
+    if (typeof window.ANNOT_MARKERS_IS_ADMIN === 'boolean') return window.ANNOT_MARKERS_IS_ADMIN;
+    var root = document.querySelector('[data-controller~="visualization"]');
+    return !!(root && root.dataset.isAdmin === 'true');
+  }
+
+  function evidencesHeaderActionsHtml() {
+    if (!annotPopupIsAdmin()) return '';
+    var ev = _annotPopupData.evidences || {};
+    var state = (ev.state || '').toString();
+    if (state === 'loading' || state === 'running' || state === 'queued') return '';
+    return '<button type="button" onclick="rerunAnnotationMarkers()" style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap;" title="Admin: start a new FindMarkers run for this metadata">Re-run FindMarkers</button>';
+  }
+
+  function wrapEvidencesTabHtml(content) {
+    return templateHtml('annot-evidences-tab-template')
+      .replace('__HEADER_ACTIONS__', evidencesHeaderActionsHtml())
+      .replace('__CONTENT__', content);
+  }
+
+  function rerunAnnotationMarkers() {
+    if (!annotPopupIsAdmin()) return;
+    if (!confirm('Re-run FindMarkers for this metadata? A new run will be started; results update when it completes.')) return;
+    loadAnnotationEvidences(true, { restart: true });
+  }
+
   function renderEvidencesTab() {
     var ev = _annotPopupData.evidences || {};
     var content = '';
     if (ev.state === 'loading') {
       content += '<div style="display:flex;align-items:center;gap:8px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;color:#6b7280;background:#fff;"><i class="fas fa-spinner fa-spin"></i><span>' + escapeHtml(ev.message || 'Loading evidences...') + '</span></div>';
-      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+      return wrapEvidencesTabHtml(content);
     }
     if (ev.state === 'completed') {
       var upRows = Array.isArray(ev.rowsUp) ? ev.rowsUp : [];
@@ -1347,7 +1373,7 @@ if (typeof openAnnotationPopup !== 'function') {
           content += renderEvidenceGeneTableBlock(downRows, 'down', 'No down-regulated genes for this category at the current thresholds.');
         }
       }
-      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+      return wrapEvidencesTabHtml(content);
     }
     if (ev.state === 'running') {
       content += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border:1px solid #bfdbfe;border-radius:8px;color:#1e3a8a;background:#fff;">';
@@ -1358,7 +1384,7 @@ if (typeof openAnnotationPopup !== 'function') {
       }
       content += '<button type="button" onclick="loadAnnotationEvidences()" style="border:1px solid #93c5fd;background:#fff;color:#1d4ed8;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">Refresh</button>';
       content += '</div></div>';
-      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+      return wrapEvidencesTabHtml(content);
     }
     if (ev.state === 'queued') {
       content += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:12px;border:1px solid #d1d5db;border-radius:8px;color:#374151;background:#fff;">';
@@ -1387,25 +1413,25 @@ if (typeof openAnnotationPopup !== 'function') {
       }
       content += '<button type="button" onclick="loadAnnotationEvidences()" style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">Refresh</button>';
       content += '</div></div>';
-      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+      return wrapEvidencesTabHtml(content);
     }
     if (ev.state === 'analyze_forbidden') {
       content += '<div style="display:flex;align-items:flex-start;gap:8px;padding:12px;border:1px solid #d1d5db;border-radius:8px;color:#374151;background:#fff;"><i class="fas fa-info-circle" style="margin-top:2px;"></i><div>' + escapeHtml(ev.message || 'FindMarkers requires analyze permission on this project.') + '</div></div>';
-      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+      return wrapEvidencesTabHtml(content);
     }
     if (ev.state === 'stopped') {
       content += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border:1px solid #e5e7eb;border-radius:8px;color:#374151;background:#fff;">';
       content += '<div>' + escapeHtml(ev.message || 'FindMarkers was stopped for this metadata.') + '</div>';
       content += '<button type="button" onclick="loadAnnotationEvidences(true, { restart: true })" style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">Retry</button>';
       content += '</div>';
-      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+      return wrapEvidencesTabHtml(content);
     }
     if (ev.state === 'error' || ev.state === 'failed' || ev.state === 'unsupported') {
       content += '<div style="padding:12px;border:1px solid #fecaca;border-radius:8px;color:#991b1b;background:#fff;">' + escapeHtml(ev.message || 'Failed to load evidences.') + '</div>';
-      return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+      return wrapEvidencesTabHtml(content);
     }
     content += '<div style="text-align:center;padding:18px;border:1px solid #e5e7eb;border-radius:8px;color:#6b7280;background:#fff;">No evidence request has been made yet.</div>';
-    return templateHtml('annot-evidences-tab-template').replace('__CONTENT__', content);
+    return wrapEvidencesTabHtml(content);
   }
 
   function loadAnnotationEvidences(force, opts) {
@@ -1515,6 +1541,9 @@ if (typeof openAnnotationPopup !== 'function') {
 
   window.loadAnnotationEvidences = loadAnnotationEvidences;
   window.stopAnnotationMarkers = stopAnnotationMarkers;
+  window.rerunAnnotationMarkers = rerunAnnotationMarkers;
+  window.annotPopupIsAdmin = annotPopupIsAdmin;
+  window.ANNOT_MARKERS_IS_ADMIN = <%= admin? ? 'true' : 'false' %>;
   window.peekAnnotationMarkersStatus = peekAnnotationMarkersStatus;
 
   function prefetchMarkersStatusForVisibleMetadata() {

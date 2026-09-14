@@ -3195,20 +3195,6 @@ export default class extends Controller {
     `
   }
 
-  buildModuleScoreReadyBodyHtml(geneSetName) {
-    const label = String(geneSetName || '').trim() || 'gene set'
-    return `
-      <div style="font-size:14px;color:#111827;line-height:1.45;word-break:break-word;">
-        The module score <strong>${this.escapeHtml(label)}</strong> is ready.
-        <button type="button"
-                data-module-score-apply
-                style="display:inline;padding:0;margin:0;border:none;background:none;color:#2563eb;font-size:14px;font-weight:600;cursor:pointer;text-decoration:underline;">
-          Click here to color
-        </button>.
-      </div>
-    `
-  }
-
   openModuleScoreComputingPopup(options = {}) {
     const popupId = String(options.popupId || this.generateModuleScoreRequestId())
     const geneSetName = String(options.geneSetName || '').trim()
@@ -3330,9 +3316,9 @@ export default class extends Controller {
     entry.timer = window.setInterval(renderText, 100)
   }
 
-  markModuleScorePopupReady(popupId, result = {}) {
+  async finishModuleScoreComputation(popupId, result = {}) {
     const entry = this.getModuleScorePopupEntries().get(popupId)
-    if (!entry?.element || entry.cancelled) return
+    if (!entry || entry.cancelled) return
     if (entry.timer) {
       window.clearInterval(entry.timer)
       entry.timer = null
@@ -3341,13 +3327,11 @@ export default class extends Controller {
     entry.scoreValues = Array.isArray(result.scoreValues) ? result.scoreValues : []
     entry.minVal = Number.isFinite(Number(result.minVal)) ? Number(result.minVal) : null
     entry.maxVal = Number.isFinite(Number(result.maxVal)) ? Number(result.maxVal) : null
-    const body = entry.element.querySelector('[data-module-score-body]')
-    if (body) {
-      body.innerHTML = this.buildModuleScoreReadyBodyHtml(entry.geneSetName)
-      const applyBtn = body.querySelector('[data-module-score-apply]')
-      if (applyBtn) {
-        applyBtn.addEventListener('click', (event) => this.applyModuleScoreFromPopup(popupId, event))
-      }
+
+    try {
+      await this.applyModuleScoreFromPopup(popupId)
+    } finally {
+      this.removeModuleScorePopup(popupId)
     }
   }
 
@@ -3660,7 +3644,7 @@ export default class extends Controller {
         durationMs: moduleScoreDurationMs
       }).catch(() => {})
 
-      this.markModuleScorePopupReady(popupId, { scoreValues, minVal, maxVal })
+      await this.finishModuleScoreComputation(popupId, { scoreValues, minVal, maxVal })
     } catch (error) {
       if (entry.cancelled || error?.name === 'AbortError') {
         this.removeModuleScorePopup(popupId)

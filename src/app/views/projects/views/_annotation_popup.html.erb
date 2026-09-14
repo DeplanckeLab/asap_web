@@ -631,6 +631,8 @@
     if (col === 1) v = row.log2fc
     else if (col === 2) v = row.fdr
     else if (col === 3) v = row.p_value
+    else if (col === 4) v = row.tau
+    else if (col === 5) v = row.specificity
     else return 0
     if (v === null || v === undefined || v === '') return 0
     var n = parseFloat(v)

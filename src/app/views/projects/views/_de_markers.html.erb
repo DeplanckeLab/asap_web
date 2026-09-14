@@ -1264,6 +1264,7 @@ if (typeof openAnnotationPopup !== 'function') {
     var rowsToRender = (typeof window.annotEvidenceSortedRows === 'function')
       ? window.annotEvidenceSortedRows(rows, tone)
       : rows.slice();
+    var showTauSpec = !!(window._annotPopupData && window._annotPopupData.evidences && window._annotPopupData.evidences.hasTauSpecificity);
     var html = '';
     var thSticky = 'padding:6px 8px;border-bottom:1px solid #e5e7eb;text-align:left;font-weight:600;position:sticky;top:0;z-index:1;background:#fff;';
     var thStickyPlot = thSticky + 'text-align:center;';
@@ -1273,9 +1274,11 @@ if (typeof openAnnotationPopup !== 'function') {
     html += '<table class="annot-evidence-sortable-table" style="width:100%;border-collapse:separate;border-spacing:0;font-size:12px;color:#4b5563;">';
     html += '<thead><tr>';
     html += '<th class="annot-marker-plot-th" style="' + thStickyPlot + '" title="Include in violin tab">Plot</th>';
-    var thLabels = ['Gene', 'log2FC', 'FDR', 'P value'];
+    var thLabels = showTauSpec
+      ? ['Gene', 'log2FC', 'FDR', 'P value', 'Tau', 'Specificity']
+      : ['Gene', 'log2FC', 'FDR', 'P value'];
     var hci;
-    for (hci = 0; hci < 4; hci++) {
+    for (hci = 0; hci < thLabels.length; hci++) {
       if (typeof window.annotEvidenceSortThHtml === 'function') {
         html += window.annotEvidenceSortThHtml(tone, hci, thLabels[hci], thSticky);
       } else {
@@ -1298,6 +1301,10 @@ if (typeof openAnnotationPopup !== 'function') {
       html += '<td data-sort-value="' + escapeAttr(evidenceNumSortAttr(row.log2fc)) + '" style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(formatEvidenceNumericCell(row.log2fc)) + '</td>';
       html += '<td data-sort-value="' + escapeAttr(evidenceNumSortAttr(row.fdr)) + '" style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(formatEvidenceNumericCell(row.fdr)) + '</td>';
       html += '<td data-sort-value="' + escapeAttr(evidenceNumSortAttr(row.p_value)) + '" style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(formatEvidenceNumericCell(row.p_value)) + '</td>';
+      if (showTauSpec) {
+        html += '<td data-sort-value="' + escapeAttr(evidenceNumSortAttr(row.tau)) + '" style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(formatEvidenceNumericCell(row.tau)) + '</td>';
+        html += '<td data-sort-value="' + escapeAttr(evidenceNumSortAttr(row.specificity)) + '" style="padding:6px 8px;border-top:1px solid #f3f4f6;color:#111827;">' + escapeHtml(formatEvidenceNumericCell(row.specificity)) + '</td>';
+      }
       html += '<td style="padding:4px 6px;border-top:1px solid #f3f4f6;vertical-align:middle;text-align:center;white-space:nowrap;">';
       html += '<button type="button" style="border:1px solid #d1d5db;background:#fff;color:#374151;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;" data-evidence-tone="' + escapeAttr(tone) + '" data-evidence-gene-id="' + escapeAttr(String(row.gene_id != null ? row.gene_id : '')) + '" data-evidence-gene-symbol="' + escapeAttr(String(row.gene != null ? row.gene : '')) + '" onclick="event.stopPropagation();if(window.addAnnotEvidenceGeneToVisualizationFromBtn)window.addAnnotEvidenceGeneToVisualizationFromBtn(this)">Add to visualization</button>';
       html += '</td>';
@@ -1424,6 +1431,7 @@ if (typeof openAnnotationPopup !== 'function') {
           runId: data.run_id || null,
           rowsUp: Array.isArray(data.rows_up) ? data.rows_up : [],
           rowsDown: Array.isArray(data.rows_down) ? data.rows_down : [],
+          hasTauSpecificity: data.has_tau_specificity === true,
           markersQueueBase: data.markers_queue_base || '',
           markersQueueNote: data.markers_queue_note || '',
           slurmQueueHover: data.slurm_queue_hover || '',

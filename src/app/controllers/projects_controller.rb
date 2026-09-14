@@ -6810,7 +6810,8 @@ class ProjectsController < ApplicationController
           status_name: status_name,
           message: "FindMarkers evidences loaded for category #{cat_idx + 1}.",
           rows_up: parsed[:rows_up],
-          rows_down: parsed[:rows_down]
+          rows_down: parsed[:rows_down],
+          has_tau_specificity: parsed[:has_tau_specificity] == true
         }
       end
 
@@ -7002,7 +7003,8 @@ class ProjectsController < ApplicationController
       status_name: status_name,
       message: "FindMarkers evidences loaded for category #{cat_idx + 1}.",
       rows_up: parsed[:rows_up],
-      rows_down: parsed[:rows_down]
+      rows_down: parsed[:rows_down],
+      has_tau_specificity: parsed[:has_tau_specificity] == true
     }
   end
 
@@ -14333,7 +14335,10 @@ class ProjectsController < ApplicationController
       p_value: pick.call('pval', 'pvalue', 'pvalues'),
       fdr: pick.call('pvaladj', 'padj', 'fdr', 'adjpval', 'adjp'),
       gene_id: pick.call('ensembl', 'ensemblid', 'accession', 'geneid', 'stableid'),
-      gene: pick.call('gene', 'genename', 'symbol', 'name')
+      gene: pick.call('gene', 'genename', 'symbol', 'name'),
+      # v8+ de_approx FindAllMarkers / pairwise TSV may append Tau and Specificity
+      tau: pick.call('tau'),
+      specificity: pick.call('specificity')
     }
   end
 
@@ -14374,6 +14379,13 @@ class ProjectsController < ApplicationController
     fallback
   end
 
+  def parse_marker_metric_cell(cols, col_idx)
+    return nil if col_idx.nil? || col_idx >= cols.size
+
+    v = parse_marker_tsv_float(cols[col_idx])
+    (v.nil? || !v.finite?) ? nil : v
+  end
+
   def parse_marker_rows_for_category(marker_run, cat_idx, annot: nil)
     marker_file = marker_category_tsv_path(marker_run, cat_idx, annot: annot)
     return { error: 'FindMarkers output is not available yet. Please refresh shortly.' } unless File.exist?(marker_file)
@@ -14383,9 +14395,10 @@ class ProjectsController < ApplicationController
     fdr_cutoff = 0.05
     fc_cutoff = Math.log2(2.0)
     max_rows_per_group = 100
+    has_tau_specificity = false
 
     first_line = File.open(marker_file, 'r', &:gets)
-    return { rows_up: rows_up, rows_down: rows_down } if first_line.blank?
+    return { rows_up: rows_up, rows_down: rows_down, has_tau_specificity: false } if first_line.blank?
 
     first_cells = first_line.rstrip.split("\t")
     col = nil
@@ -14393,6 +14406,7 @@ class ProjectsController < ApplicationController
     if parse_marker_tsv_looks_like_header_row?(first_cells)
       col = parse_marker_tsv_column_indices_from_header(first_cells)
       skip_first = col[:log2fc].present? && col[:fdr].present?
+      has_tau_specificity = col[:tau].present? && col[:specificity].present?
     end
 
     File.foreach(marker_file).with_index do |line, line_idx|
@@ -14404,6 +14418,8 @@ class ProjectsController < ApplicationController
       log2fc = nil
       fdr = nil
       p_value = nil
+      tau = nil
+      specificity = nil
       gene_id = ''
       gene = ''
 
@@ -14412,6 +14428,10 @@ class ProjectsController < ApplicationController
         fdr = parse_marker_tsv_float(cols[col[:fdr]])
         if col[:p_value] && col[:p_value] < cols.size
           p_value = parse_marker_tsv_float(cols[col[:p_value]])
+        end
+        if has_tau_specificity
+          tau = parse_marker_metric_cell(cols, col[:tau])
+          specificity = parse_marker_metric_cell(cols, col[:specificity])
         end
         gid_i = col[:gene_id]
         g_i = col[:gene]
@@ -14450,6 +14470,10 @@ class ProjectsController < ApplicationController
         p_value: (p_value.nil? || !p_value.finite?) ? nil : p_value,
         fdr: fdr
       }
+      if has_tau_specificity
+        row[:tau] = tau.nil? ? nil : tau.round(4)
+        row[:specificity] = specificity.nil? ? nil : specificity.round(4)
+      end
 
       if log2fc >= 0
         rows_up << row if rows_up.size < max_rows_per_group
@@ -14460,7 +14484,7 @@ class ProjectsController < ApplicationController
       break if rows_up.size >= max_rows_per_group && rows_down.size >= max_rows_per_group
     end
 
-    { rows_up: rows_up, rows_down: rows_down }
+    { rows_up: rows_up, rows_down: rows_down, has_tau_specificity: has_tau_specificity }
   rescue StandardError => e
     Rails.logger.error("[get_annot_evidences] parse_marker_rows_for_category failed: #{e.class} - #{e.message}")
     { error: e.message }

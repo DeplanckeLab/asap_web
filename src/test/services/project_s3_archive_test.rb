@@ -4,6 +4,45 @@ require 'test_helper'
 require 'shellwords'
 
 class ProjectS3ArchiveTest < ActiveSupport::TestCase
+  test 'broadcast_archive_status publishes to the project ActionCable stream' do
+    user = register_for_test_cleanup(
+      User.create!(email: "s3bcast_#{SecureRandom.hex(4)}@example.com", password: 'password123')
+    )
+    project = create_test_project!(user_id: user.id, input_filename: 'input_file.loom')
+    payloads = []
+    cable_server = ActionCable.server
+
+    cable_server.singleton_class.class_eval do
+      alias_method :__orig_broadcast_for_archive_test, :broadcast
+    end
+    cable_server.define_singleton_method(:broadcast) do |stream, payload|
+      payloads << [stream, payload]
+      true
+    end
+
+    ProjectS3Archive.send(:broadcast_archive_status, project, 'archiving')
+    ProjectS3Archive.send(
+      :broadcast_archive_status,
+      project,
+      'archived',
+      project_archived: true
+    )
+    ProjectS3Archive.send(:broadcast_archive_status, project, 'failed')
+
+    assert_equal [
+      ["project_#{project.id}", { project_id: project.id, archive_status: 'archiving' }],
+      ["project_#{project.id}", { project_id: project.id, archive_status: 'archived', project_archived: true }],
+      ["project_#{project.id}", { project_id: project.id, archive_status: 'failed' }]
+    ], payloads
+  ensure
+    if defined?(cable_server) && cable_server
+      cable_server.singleton_class.class_eval do
+        alias_method :broadcast, :__orig_broadcast_for_archive_test if method_defined?(:__orig_broadcast_for_archive_test)
+        remove_method :__orig_broadcast_for_archive_test if method_defined?(:__orig_broadcast_for_archive_test)
+      end
+    end
+  end
+
   test 'archive returns missing_local_dir when the project directory is absent and S3 has no object' do
     user = register_for_test_cleanup(
       User.create!(email: "s3arch_#{SecureRandom.hex(4)}@example.com", password: 'password123')

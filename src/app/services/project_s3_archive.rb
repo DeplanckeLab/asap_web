@@ -50,6 +50,7 @@ class ProjectS3Archive
       File.delete(archive_file) if File.exist?(archive_file)
 
       project.update_archive_metadata!(archive_status_id: 2)
+      broadcast_archive_status(project, 'archiving')
       include_project_fus(project, project_dir)
 
       cmd = "tar -cf - -C #{Shellwords.escape(base_dir.to_s)} #{Shellwords.escape(project.key)} | pigz -9 -p 32 > #{Shellwords.escape(archive_file.to_s)}"
@@ -86,10 +87,14 @@ class ProjectS3Archive
       File.delete(archive_file) if File.exist?(archive_file)
       FileUtils.rm_r(project_dir) if File.exist?(project_dir)
       project.update_archive_metadata!(archive_status_id: 3, disk_size_archived: remote_size)
+      broadcast_archive_status(project, 'archived', project_archived: true)
       :archived
     rescue StandardError => e
       Rails.logger.error("[archive] project=#{project.id} key=#{project.key} error=#{e.class} #{e.message}")
-      project.update_archive_metadata!(archive_status_id: 1) if project.archive_status_id == 2
+      if project.archive_status_id == 2
+        project.update_archive_metadata!(archive_status_id: 1)
+        broadcast_archive_status(project, 'failed')
+      end
       :failed
     end
 
@@ -293,6 +298,16 @@ class ProjectS3Archive
       Project.guided_tour_demo_project&.id
     end
 
+    def broadcast_archive_status(project, status, project_archived: nil)
+      payload = {
+        project_id: project.id,
+        archive_status: status
+      }
+      payload[:project_archived] = project_archived unless project_archived.nil?
+      Rails.logger.info("[archive] Broadcasting archive status for project #{project.id} (#{project.key}): #{payload.inspect}")
+      ActionCable.server.broadcast("project_#{project.id}", payload)
+    end
+
     def mark_archived_from_s3_if_present!(project, s3b)
       h_s3_settings = Basic.get_s3_settings
       s3_client = Basic.connect_s3(s3b, h_s3_settings)
@@ -301,6 +316,7 @@ class ProjectS3Archive
       return false unless remote_size.positive?
 
       project.update_archive_metadata!(archive_status_id: 3, disk_size_archived: remote_size)
+      broadcast_archive_status(project, 'archived', project_archived: true)
       Rails.logger.info("[archive] project=#{project.key} local dir missing after interrupted archive; S3 object present size=#{remote_size}, set archive_status_id=3")
       true
     rescue Aws::S3::Errors::NotFound, Aws::S3::Errors::NoSuchKey

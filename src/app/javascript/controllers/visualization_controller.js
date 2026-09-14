@@ -24,6 +24,7 @@ import { resetInputDataWidgetToEmptyPlaceholder } from "lib/reset_input_data_wid
 import { formatNumberWithDelimiter } from "lib/number_format"
 import { dataUrlToJpegThumbnail, isCheckpointThumbnailDataUrl, canvasToJpegThumbnailDataUrl } from "lib/checkpoint_thumbnail"
 import { DEFAULT_NAN_COLOR_INT, nanColorToHex, parseNanColor } from "lib/nan_color"
+import { ARCHIVE_OVERLAY_EVENT } from "lib/project_archive_overlay"
 import consumer from "channels/consumer"
 
 const VISUALIZATION_ONTOP_UI_IDS = [
@@ -414,6 +415,11 @@ export default class extends Controller {
         const root = typeof elementOrId === 'string' ? document.getElementById(elementOrId) : elementOrId
         if (root) this.bringVisualizationOntopUiToFront(root)
       }
+    }
+
+    if (!this.boundArchiveOverlay) {
+      this.boundArchiveOverlay = (event) => this.handleArchiveOverlayEvent(event)
+      document.addEventListener(ARCHIVE_OVERLAY_EVENT, this.boundArchiveOverlay)
     }
     // console.log(`🚀 Visualization controller connected - Instance ID: ${this.instanceId}`)
     // console.trace(`🚀 Visualization controller connect() call stack:`)
@@ -1109,6 +1115,10 @@ export default class extends Controller {
     this.stopDeSelectionResize()
     this.stopModuleScorePopupDrag()
     this.clearAllModuleScorePopups({ cancelComputing: true })
+    if (this.boundArchiveOverlay) {
+      document.removeEventListener(ARCHIVE_OVERLAY_EVENT, this.boundArchiveOverlay)
+      this.boundArchiveOverlay = null
+    }
     console.info('[CheckpointPersist] disconnect; relying on prior beforeunload/turbo:before-cache save')
     if (this.boundTurboBeforeCache) {
       document.removeEventListener('turbo:before-cache', this.boundTurboBeforeCache)
@@ -24576,10 +24586,12 @@ export default class extends Controller {
   }
 
   startSelectionStatusPolling() {
+    if (this.archiveOverlayPaused) return
     if (this.selectionStatusPollingTimer) {
       clearInterval(this.selectionStatusPollingTimer)
     }
     this.selectionStatusPollingTimer = setInterval(() => {
+      if (this.archiveOverlayPaused) return
       this.refreshSelectionStates()
     }, 3000)
   }
@@ -24593,6 +24605,7 @@ export default class extends Controller {
   }
 
   setupSelectionStatesSubscription() {
+    if (this.archiveOverlayPaused) return
     if (this.selectionStatesSubscription) return
     const projectChannelId = this.getProjectChannelId()
     if (!projectChannelId) return
@@ -24615,14 +24628,58 @@ export default class extends Controller {
   }
 
   scheduleSelectionStatesRefresh(delayMs = 0) {
+    if (this.archiveOverlayPaused) return
     if (this.selectionStatesRefreshTimer) {
       window.clearTimeout(this.selectionStatesRefreshTimer)
       this.selectionStatesRefreshTimer = null
     }
     this.selectionStatesRefreshTimer = window.setTimeout(() => {
       this.selectionStatesRefreshTimer = null
+      if (this.archiveOverlayPaused) return
       this.refreshSelectionStates()
     }, Math.max(0, Number(delayMs) || 0))
+  }
+
+  handleArchiveOverlayEvent(event) {
+    const active = !!event?.detail?.active
+    if (active) {
+      this.pauseForArchiveOverlay()
+    } else {
+      this.resumeAfterArchiveOverlay()
+    }
+  }
+
+  pauseForArchiveOverlay() {
+    if (this.archiveOverlayPaused) return
+    this.archiveOverlayPaused = true
+    console.log('[Visualization] Pausing background work for archive overlay')
+
+    if (this.selectionStatusPollingTimer) {
+      window.clearInterval(this.selectionStatusPollingTimer)
+      this.selectionStatusPollingTimer = null
+    }
+    if (this.selectionStatesRefreshTimer) {
+      window.clearTimeout(this.selectionStatesRefreshTimer)
+      this.selectionStatesRefreshTimer = null
+    }
+    if (this.selectionStatesSubscription) {
+      this.selectionStatesSubscription.unsubscribe()
+      this.selectionStatesSubscription = null
+    }
+    if (this.checkpointMatchTimer) {
+      window.clearInterval(this.checkpointMatchTimer)
+      this.checkpointMatchTimer = null
+    }
+    this.clearAllModuleScorePopups({ cancelComputing: true })
+  }
+
+  resumeAfterArchiveOverlay() {
+    if (!this.archiveOverlayPaused) return
+    this.archiveOverlayPaused = false
+    console.log('[Visualization] Resuming background work after archive overlay cleared')
+    this.setupSelectionStatesSubscription()
+    this.startSelectionStatusPolling()
+    this.scheduleSelectionStatesRefresh(100)
   }
 
   serverItemsMatchPendingSelection(pendingItem, serverItems) {

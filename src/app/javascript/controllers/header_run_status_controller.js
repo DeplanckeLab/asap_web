@@ -1,6 +1,7 @@
 import { Controller } from "@hotwired/stimulus"
 import consumer, { dispatchProjectStepRunsChangedFromCable } from "channels/consumer"
 import { formatNumberWithDelimiter } from "lib/number_format"
+import { handleProjectArchiveBroadcast } from "lib/project_archive_overlay"
 
 export default class extends Controller {
   static targets = ["statusCount", "statusIcon", "statusButton", "cellCount"]
@@ -70,6 +71,9 @@ export default class extends Controller {
     if (data && data.project_unarchived === true) {
       console.log('[HeaderRunStatus] Project unarchive completed, reloading page')
       window.location.reload()
+      return
+    }
+    if (handleProjectArchiveBroadcast(data, this.projectIdValue)) {
       return
     }
     this.updateFromBroadcast(data)

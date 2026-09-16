@@ -35,24 +35,42 @@ class SlurmAccountService
 
     result = `#{db_cmd}`
 
-    if $?.success?
-      # Also create association for root user (uid 0) with this account
-      # This allows jobs submitted as root to use the account
-      assoc_cmd = <<~SQL
-        docker exec #{container} mysql -u slurm -pslurm slurm_acct_db -e "
-        INSERT IGNORE INTO asap_cluster_assoc_table 
-        (creation_time, mod_time, deleted, user, acct, \\\`partition\\\`, parent_acct, lft, rgt, shares, is_def, max_tres_pj, max_tres_pn, max_tres_mins_pj, grp_tres, qos, delta_qos)
-        VALUES 
-        (#{creation_time}, #{mod_time}, 0, 'root', '#{account_name}', '', 'root', 1, 1, 1, 0, '', '', '', '', '', '');
-        " 2>&1
-      SQL
-
-      `#{assoc_cmd}`
-      return $?.success?
-    else
+    unless $?.success?
       Rails.logger.error("[SlurmAccountService] Failed to create account in database (container=#{container}): #{result}")
       return false
     end
+
+    # Associations live in {cluster}_assoc_table, created only after the cluster is
+    # registered with slurmdbd. Prod may have acct_table rows without that schema yet;
+    # with AccountingStorageEnforce=none the account row is enough for --account=.
+    assoc_table = cluster_assoc_table_name(container)
+    unless assoc_table
+      Rails.logger.warn(
+        "[SlurmAccountService] Account #{account_name} created in acct_table on #{container}, " \
+        'but no cluster assoc table exists yet (register asap_cluster via sacctmgr / init script).'
+      )
+      return true
+    end
+
+    assoc_cmd = <<~SQL
+      docker exec #{container} mysql -u slurm -pslurm slurm_acct_db -e "
+      INSERT IGNORE INTO #{assoc_table}
+      (creation_time, mod_time, deleted, user, acct, \\\`partition\\\`, parent_acct, lft, rgt, shares, is_def, max_tres_pj, max_tres_pn, max_tres_mins_pj, grp_tres, qos, delta_qos)
+      VALUES
+      (#{creation_time}, #{mod_time}, 0, 'root', '#{account_name}', '', 'root', 1, 1, 1, 0, '', '', '', '', '', '');
+      " 2>&1
+    SQL
+
+    assoc_result = `#{assoc_cmd}`
+    unless $?.success?
+      Rails.logger.error(
+        "[SlurmAccountService] Account #{account_name} exists but assoc insert into #{assoc_table} failed " \
+        "(container=#{container}): #{assoc_result}"
+      )
+      return false
+    end
+
+    true
   rescue => e
     Rails.logger.error("[SlurmAccountService] Failed to create account via database: #{e.message}")
     false
@@ -69,5 +87,19 @@ class SlurmAccountService
   rescue => e
     Rails.logger.error("[SlurmAccountService] Error checking account: #{e.message}")
     false
+  end
+
+  # Returns e.g. "asap_cluster_assoc_table" when that table exists, else nil.
+  def self.cluster_assoc_table_name(container = slurmdb_container)
+    list_cmd = "docker exec #{container} mysql -u slurm -pslurm slurm_acct_db -Nse \"SHOW TABLES LIKE '%\\\\_assoc_table';\" 2>/dev/null"
+    tables = `#{list_cmd}`.to_s.split("\n").map(&:strip).reject(&:empty?)
+    return nil unless $?.success?
+
+    # Prefer asap_cluster_assoc_table when present (canonical ASAP cluster name).
+    preferred = 'asap_cluster_assoc_table'
+    return preferred if tables.include?(preferred)
+
+    # Otherwise first per-cluster assoc table (exclude generic cluster_assoc_table template name if alone).
+    tables.find { |t| t.end_with?('_assoc_table') && t != 'cluster_assoc_table' }
   end
 end

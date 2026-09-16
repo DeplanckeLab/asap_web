@@ -78,12 +78,13 @@ namespace :slurm do
   
   def list_accounts_via_db
     begin
-      db_cmd = "docker exec slurmdb mysql -u slurm -pslurm slurm_acct_db -e 'SELECT name, description FROM acct_table;' 2>&1"
+      container = SlurmAccountService.slurmdb_container
+      db_cmd = "docker exec #{container} mysql -u slurm -pslurm slurm_acct_db -e 'SELECT name, description FROM acct_table;' 2>&1"
       result = `#{db_cmd}`
       if $?.success?
         puts result
       else
-        puts "Failed to list accounts from database"
+        puts "Failed to list accounts from database (container=#{container})"
       end
     rescue => e
       puts "Error listing accounts: #{e.message}"

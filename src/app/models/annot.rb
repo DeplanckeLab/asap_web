@@ -26,6 +26,32 @@ class Annot < ApplicationRecord
   scope :embeddings, -> { where(data_type_id: DataType.where(name: ['umap', 'tsne', 'pca']).pluck(:id)) }
   scope :metadata, -> { where(data_type_id: DataType.where(name: 'metadata').pluck(:id)) }
   scope :expression, -> { where(data_type_id: DataType.where(name: 'expression').pluck(:id)) }
+  # Cell-level NUMERIC annots usable as viz coordinates (UMAP/t-SNE/PCA/...):
+  # nber_rows = n_axes (>= 2), nber_cols = n_cells. Excludes gene/row attrs,
+  # expression matrices, and known corrupted cell-vector shapes.
+  scope :plottable_embeddings, -> {
+    joins(:data_type)
+      .where(data_types: { name: 'NUMERIC' })
+      .where(dim: 1)
+      .where.not(filepath: nil)
+      .where('annots.nber_rows >= ?', 2)
+      .where('annots.nber_cols >= ?', 1)
+      .where(<<~SQL.squish)
+        NOT EXISTS (
+          SELECT 1 FROM annots matrices
+          WHERE matrices.project_id = annots.project_id
+            AND matrices.filepath = annots.filepath
+            AND matrices.name = '/matrix'
+            AND (
+              annots.nber_rows = matrices.nber_cols
+              OR (
+                annots.nber_rows = matrices.nber_rows
+                AND annots.nber_cols = matrices.nber_cols
+              )
+            )
+        )
+      SQL
+  }
   # Omit heavy JSON columns (notably headers_json) for catalog / list queries.
   # Do not call .count / .sum / other aggregates on this scope: the multi-column
   # select becomes COUNT(col1, col2, ...) on PostgreSQL and raises UndefinedFunction.

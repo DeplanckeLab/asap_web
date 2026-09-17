@@ -10819,27 +10819,7 @@ class ProjectsController < ApplicationController
     end
 
     def project_has_embeddings?
-      Annot.light.where(project_id: @project.id)
-           .where.not(filepath: nil)
-           .where(dim: 1)
-           .where('annots.nber_rows >= ?', 2)
-           .where('annots.nber_cols >= ?', 1)
-           .where(<<~SQL.squish)
-             NOT EXISTS (
-               SELECT 1 FROM annots matrices
-               WHERE matrices.project_id = annots.project_id
-                 AND matrices.filepath = annots.filepath
-                 AND matrices.name = '/matrix'
-                 AND (
-                   annots.nber_rows = matrices.nber_cols
-                   OR (
-                     annots.nber_rows = matrices.nber_rows
-                     AND annots.nber_cols = matrices.nber_cols
-                   )
-                 )
-             )
-           SQL
-           .exists?
+      Annot.plottable_embeddings.where(project_id: @project.id).exists?
     end
 
     def matrix_dims_by_filepath_from_annots(annots)
@@ -13178,10 +13158,15 @@ class ProjectsController < ApplicationController
       @summary_loom_file_count = 0
       @summary_loom_content_counts = { matrices: 0, col_attrs: 0, row_attrs: 0, global: 0 }
       @summary_shared_users_count = @project.shares.count
+      # Same criteria as visualization / project_has_embeddings?: cell NUMERIC
+      # annots with >= 2 axes, excluding matrix-shaped and corrupted shapes.
       # Do not use Annot.light here: its multi-column select makes .count emit
       # COUNT(col1, col2, ...) which PostgreSQL rejects.
-      embedding_scope = apply_publication_snapshot_to_annots(Annot.where(project_id: @project.id).where('nber_rows >= ?', 2))
-      @summary_embedding_count = embedding_scope.count
+      embedding_scope = apply_publication_snapshot_to_annots(
+        Annot.plottable_embeddings.where(project_id: @project.id)
+      )
+      @summary_embedding_records = embedding_scope.includes(:user, run: [:user, :step]).order(:filepath, :name).to_a
+      @summary_embedding_count = @summary_embedding_records.size
       @summary_run_user_count = apply_publication_snapshot_to_runs(@project.runs)
                                  .where.not(user_id: nil)
                                  .distinct

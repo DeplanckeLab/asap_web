@@ -175,7 +175,7 @@ else
 end
 end
 
-summary_embedding_records = Annot.where(project_id: @project.id, nber_rows: 2).includes(:user, run: [:user, :step]).order(:filepath, :name).to_a
+summary_embedding_records = @summary_embedding_records || []
 summary_checkpoint_records = @project.checkpoints.includes(:user).order(created_at: :desc).to_a
 summary_checkpoint_comment_groups = summary_checkpoint_records.filter_map do |cp|
   comments = Array(cp.comments)

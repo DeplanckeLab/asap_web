@@ -12143,6 +12143,11 @@ export default class extends Controller {
     }
     
     // Button is not active - select it
+    // Color range is global and tied to the previous coloring target. Drop it on every
+    // switch (including categorical), otherwise a prior continuous/gene range survives
+    // and maps the next NUMERIC metadata to a single pale gradient endpoint.
+    this.customColorRange = null
+
     // 1. Reset all water drop buttons to grey (cancel previous associations)
     //console.log('Step 1: Resetting all water drop buttons...')
     this.resetAllWaterDropButtons()
@@ -12214,9 +12219,17 @@ export default class extends Controller {
     
     // Keep one deterministic async path for both NUMERIC and DISCRETE metadata.
     // The previous numeric pre-load path could stall before visualization.
+    // Only adapt the color range to a filter selection when that option is enabled
+    // for this metadata (same rule as the range slider).
     if (button.dataset.metadataType === 'NUMERIC') {
+      const adaptEnabled = this.adaptColorRangeByMetadataId?.[normalizedMetadataId] === true
       const existingRange = this.selectedRanges?.[normalizedMetadataId]
-      if (existingRange && Number.isFinite(existingRange.min) && Number.isFinite(existingRange.max)) {
+      if (
+        adaptEnabled &&
+        existingRange &&
+        Number.isFinite(existingRange.min) &&
+        Number.isFinite(existingRange.max)
+      ) {
         this.setColorRange(existingRange.min, existingRange.max)
       }
     }

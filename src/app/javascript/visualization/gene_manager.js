@@ -3463,6 +3463,28 @@ export class GeneManager {
       // Expand with animation
       rangeSection.style.maxHeight = '1400px'
       rangeSection.style.opacity = '1'
+
+      const finishGeneExpand = () => {
+        rangeSection.style.maxHeight = 'none'
+        rangeSection.style.overflow = 'visible'
+        rangeSection.style.transition = ''
+        if (this.controller && typeof this.controller.applyFilterControlsStateForMetadata === 'function') {
+          const geneMetadataId = this.getGeneMetadataId(String(geneId), this.currentMatrixAnnotId)
+          this.controller.applyFilterControlsStateForMetadata(geneMetadataId)
+        }
+      }
+      const handleExpandTransitionEnd = (event) => {
+        if (event.propertyName !== 'max-height') return
+        rangeSection.removeEventListener('transitionend', handleExpandTransitionEnd)
+        finishGeneExpand()
+      }
+      rangeSection.addEventListener('transitionend', handleExpandTransitionEnd)
+      setTimeout(() => {
+        rangeSection.removeEventListener('transitionend', handleExpandTransitionEnd)
+        if (rangeSection.style.maxHeight !== 'none') {
+          finishGeneExpand()
+        }
+      }, 350)
       
       // Show filter state icon when unfolded
       const geneIdStr = String(geneId)
@@ -3505,6 +3527,11 @@ export class GeneManager {
               }
             }
             this.updateGeneCategoryBoxplot(geneId)
+            if (this.controller && typeof this.controller.applyFilterControlsStateForMetadata === 'function') {
+              this.controller.applyFilterControlsStateForMetadata(
+                this.getGeneMetadataId(String(geneId), this.currentMatrixAnnotId)
+              )
+            }
           }, 100)
         }, 350)
       }
@@ -3555,12 +3582,22 @@ export class GeneManager {
       }
       
       // Collapse with animation
+      rangeSection.style.transition = 'max-height 0.3s ease-out, opacity 0.2s ease-out'
+      rangeSection.style.overflow = 'hidden'
+      if (rangeSection.style.maxHeight === '' || rangeSection.style.maxHeight === 'none') {
+        rangeSection.style.maxHeight = `${rangeSection.scrollHeight}px`
+        rangeSection.offsetHeight
+      }
       rangeSection.style.maxHeight = '0px'
       rangeSection.style.opacity = '0'
       
       // Hide after transition
       setTimeout(() => {
         rangeSection.style.display = 'none'
+        rangeSection.style.maxHeight = ''
+        rangeSection.style.opacity = ''
+        rangeSection.style.transition = ''
+        rangeSection.style.overflow = ''
       }, 300)
     }
   }

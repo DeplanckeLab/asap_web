@@ -715,52 +715,68 @@ export class UIManager {
   enableRangeSliderForMetadata(metadataId) {
     const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
     if (!metadataItem) return
-    
+
     const rangeSection = metadataItem.querySelector('.metadata-range-section')
     if (!rangeSection) return
-    
-    // Find all interactive elements in the range slider
+
+    const rangeSliderElement = rangeSection.querySelector('[data-controller~="range-slider"]')
+    const sliderController = rangeSliderElement &&
+      this.controller?.application?.getControllerForElementAndIdentifier?.(rangeSliderElement, 'range-slider')
+    if (sliderController && typeof sliderController.setFilterControlsDisabled === 'function') {
+      sliderController.setFilterControlsDisabled(false)
+      return
+    }
+
     const minInput = rangeSection.querySelector('.range-min-input')
     const maxInput = rangeSection.querySelector('.range-max-input')
     const minHandle = rangeSection.querySelector('.range-slider-min-handle')
     const maxHandle = rangeSection.querySelector('.range-slider-max-handle')
     const adaptButton = rangeSection.querySelector('[data-range-slider-target="adaptColorRangeButton"]')
-    
-    // Enable all controls
+    const canvas = rangeSection.querySelector('[data-range-slider-target="canvas"]')
+    const selectedCount = rangeSection.querySelector('.selected-cells-count')
+
     if (minInput) minInput.disabled = false
     if (maxInput) maxInput.disabled = false
     if (minHandle) minHandle.style.pointerEvents = 'auto'
     if (maxHandle) maxHandle.style.pointerEvents = 'auto'
     if (adaptButton) adaptButton.disabled = false
-    
-    // Remove visual disabled state
-    if (rangeSection) rangeSection.style.opacity = '1'
+    if (canvas) canvas.style.opacity = '1'
+    if (selectedCount) selectedCount.style.opacity = '1'
+    rangeSection.classList.remove('filter-controls-disabled')
   }
 
   // Disable range slider for continuous metadata
   disableRangeSliderForMetadata(metadataId) {
     const metadataItem = document.querySelector(`[data-metadata-item="${metadataId}"]`)
     if (!metadataItem) return
-    
+
     const rangeSection = metadataItem.querySelector('.metadata-range-section')
     if (!rangeSection) return
-    
-    // Find all interactive elements in the range slider
+
+    const rangeSliderElement = rangeSection.querySelector('[data-controller~="range-slider"]')
+    const sliderController = rangeSliderElement &&
+      this.controller?.application?.getControllerForElementAndIdentifier?.(rangeSliderElement, 'range-slider')
+    if (sliderController && typeof sliderController.setFilterControlsDisabled === 'function') {
+      sliderController.setFilterControlsDisabled(true)
+      return
+    }
+
     const minInput = rangeSection.querySelector('.range-min-input')
     const maxInput = rangeSection.querySelector('.range-max-input')
     const minHandle = rangeSection.querySelector('.range-slider-min-handle')
     const maxHandle = rangeSection.querySelector('.range-slider-max-handle')
     const adaptButton = rangeSection.querySelector('[data-range-slider-target="adaptColorRangeButton"]')
-    
-    // Disable all controls
+    const canvas = rangeSection.querySelector('[data-range-slider-target="canvas"]')
+    const selectedCount = rangeSection.querySelector('.selected-cells-count')
+
     if (minInput) minInput.disabled = true
     if (maxInput) maxInput.disabled = true
     if (minHandle) minHandle.style.pointerEvents = 'none'
     if (maxHandle) maxHandle.style.pointerEvents = 'none'
     if (adaptButton) adaptButton.disabled = true
-    
-    // Add visual disabled state
-    if (rangeSection) rangeSection.style.opacity = '0.5'
+    if (canvas) canvas.style.opacity = '0.5'
+    if (selectedCount) selectedCount.style.opacity = '0.5'
+    rangeSection.classList.add('filter-controls-disabled')
   }
 
   // Enable category checkboxes for a metadata
@@ -777,23 +793,10 @@ export class UIManager {
   // Disable category checkboxes for a metadata
   disableCategoryCheckboxesForMetadata(metadataId) {
     const categoryCheckboxes = document.querySelectorAll(`.category-checkbox[data-metadata-id="${metadataId}"]`)
-    const selectedSet = this.controller.selectedCategories?.[metadataId] ||
-      this.controller.savedCategorySelections?.[metadataId] ||
-      null
-
     categoryCheckboxes.forEach(checkbox => {
       checkbox.style.pointerEvents = 'none'
       checkbox.style.opacity = '0.5'
       checkbox.style.cursor = 'not-allowed'
-
-      const icon = checkbox.querySelector('i')
-      if (!icon) return
-
-      const category = checkbox.dataset.category
-      const isSelected = !!(selectedSet && selectedSet.has(category))
-
-      icon.style.display = 'block'
-      icon.style.color = isSelected ? '#10b981' : '#9ca3af'
     })
   }
 

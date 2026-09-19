@@ -9044,6 +9044,9 @@ export default class extends Controller {
         
         // Draw the initial histogram
         controller.drawDensityPlot()
+
+        // Keep disabled/grey visuals on controls+plot only (never container opacity)
+        this.applyFilterControlsStateForMetadata(metadataId)
       } else {
         console.error('❌ Range slider controller not found for element:', rangeSliderElement)
       }
@@ -11213,34 +11216,58 @@ export default class extends Controller {
         rangeSection.style.opacity = '0'
         rangeSection.style.overflow = 'hidden'
         rangeSection.style.transition = 'max-height 0.3s ease-out, opacity 0.2s ease-out'
-        
+
         // Trigger reflow to ensure transition works
         rangeSection.offsetHeight
-        
+
         // Expand with animation
         rangeSection.style.maxHeight = '500px'
         rangeSection.style.opacity = '1'
         // console.log(`⏱️ [TOGGLE] Display change: ${(performance.now() - displayTime).toFixed(2)}ms`)
-        
-        // Get metadata info and initialize the range slider
+
+        const finishContinuousExpand = () => {
+          rangeSection.style.maxHeight = 'none'
+          rangeSection.style.overflow = 'visible'
+          rangeSection.style.transition = ''
+          // Re-apply disabled controls/plot greying without touching container opacity
+          this.applyFilterControlsStateForMetadata?.(metadataIdFromHeader)
+        }
+
         const metadataItem = headerElement.closest('[data-metadata-item]')
+        const metadataIdFromHeader = metadataItem?.dataset?.metadataItem || null
+
+        const handleExpandTransitionEnd = (event) => {
+          if (event.propertyName !== 'max-height') return
+          rangeSection.removeEventListener('transitionend', handleExpandTransitionEnd)
+          finishContinuousExpand()
+        }
+        rangeSection.addEventListener('transitionend', handleExpandTransitionEnd)
+        // Fallback if transitionend does not fire
+        setTimeout(() => {
+          rangeSection.removeEventListener('transitionend', handleExpandTransitionEnd)
+          if (rangeSection.style.maxHeight !== 'none') {
+            finishContinuousExpand()
+          }
+        }, 350)
+
+        // Get metadata info and initialize the range slider
         if (metadataItem) {
           const metadataId = metadataItem.dataset.metadataItem
           const metadataName = headerElement.querySelector('[data-metadata-name]')?.dataset.metadataName || 'Unknown'
-          
+
           // console.log('🎚️ Expanding continuous metadata:', metadataId, metadataName)
-          
+
           // Initialize the inline range slider
           const sliderTime = performance.now()
           this.toggleInlineRangeSlider(metadataId, metadataName)
           // console.log(`⏱️ [TOGGLE] Range slider init: ${(performance.now() - sliderTime).toFixed(2)}ms`)
-          
+
           // Preload metadata for continuous metadata (for future coloring)
           const memCheckTime = performance.now()
           const metadataVector = this.dataManager.getMetadataVectorById(metadataId)
           const isInMemory = !!metadataVector
           // console.log(`⏱️ [TOGGLE] Memory check: ${(performance.now() - memCheckTime).toFixed(2)}ms, In memory: ${isInMemory}`)
-          
+
           if (!isInMemory) {
             if (this.shouldDeferMetadataExpandLoad()) {
               // Checkpoint restore expands UI first; let the scheduled preload own the network load
@@ -11318,6 +11345,12 @@ export default class extends Controller {
             this.syncCategoryCheckboxUiForMetadata(metadataId, { reveal: true })
             this.uiManager.updateFilterSwitchVisibility(metadataId)
           }
+          const filtersGloballyEnabled = this.globalFiltersEnabled !== false
+          const individuallyEnabled = this.isIndividualFilterEnabledForMetadata(metadataId)
+          this.applyCategoricalMetadataControlsState(
+            metadataId,
+            filtersGloballyEnabled && individuallyEnabled
+          )
 
           if (isInMemory) {
             this.initializeCheckboxesForMetadata(metadataId).then(() => {
@@ -11357,12 +11390,22 @@ export default class extends Controller {
       
       if (isContinuousMetadata) {
         // Collapse with animation
+        rangeSection.style.transition = 'max-height 0.3s ease-out, opacity 0.2s ease-out'
+        rangeSection.style.overflow = 'hidden'
+        if (rangeSection.style.maxHeight === '' || rangeSection.style.maxHeight === 'none') {
+          rangeSection.style.maxHeight = `${rangeSection.scrollHeight}px`
+          rangeSection.offsetHeight
+        }
         rangeSection.style.maxHeight = '0px'
         rangeSection.style.opacity = '0'
-        
+
         // Hide after transition completes
         setTimeout(() => {
           rangeSection.style.display = 'none'
+          rangeSection.style.maxHeight = ''
+          rangeSection.style.opacity = ''
+          rangeSection.style.transition = ''
+          rangeSection.style.overflow = ''
         }, 300) // Match transition duration
       } else {
         // Collapse with animation
@@ -27361,6 +27404,39 @@ export default class extends Controller {
       this.uiManager.enableCategoryCheckboxesForMetadata(metadataId)
     } else {
       this.uiManager.disableCategoryCheckboxesForMetadata(metadataId)
+    }
+
+    // Grey category distribution plots without changing layout (no display/height changes)
+    document.querySelectorAll(
+      `.category-distribution-canvas[data-metadata-id="${this.escapeAttributeSelectorValue(String(metadataId))}"]`
+    ).forEach((canvas) => {
+      canvas.style.opacity = enabled ? '1' : '0.5'
+    })
+  }
+
+  applyFilterControlsStateForMetadata(metadataId) {
+    const normalizedId = String(metadataId || '').trim()
+    if (!normalizedId) return
+
+    const filtersGloballyEnabled = this.globalFiltersEnabled !== false
+    const individuallyEnabled = this.isIndividualFilterEnabledForMetadata(normalizedId)
+    const shouldEnableControls = filtersGloballyEnabled && individuallyEnabled
+
+    const rangeSliderElement = this.findRangeSliderElementByMetadataId?.(normalizedId) ||
+      document.querySelector(`[data-range-slider-metadata-id-value="${this.escapeAttributeSelectorValue(normalizedId)}"]`)
+    const sliderController = rangeSliderElement &&
+      this.application?.getControllerForElementAndIdentifier?.(rangeSliderElement, 'range-slider')
+    if (sliderController && typeof sliderController.setFilterControlsDisabled === 'function') {
+      sliderController.setFilterControlsDisabled(!shouldEnableControls)
+    }
+
+    if (!(this.disabledFilters instanceof Set)) {
+      this.disabledFilters = new Set(this.disabledFilters || [])
+    }
+    if (shouldEnableControls) {
+      this.disabledFilters.delete(normalizedId)
+    } else {
+      this.disabledFilters.add(normalizedId)
     }
   }
 

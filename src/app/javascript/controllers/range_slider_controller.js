@@ -435,10 +435,17 @@ export default class extends Controller {
   
   setFilterControlsDisabled(isDisabled) {
     const rangeSection = this.element.closest('.gene-range-section') || this.element.closest('.metadata-range-section')
+    // Never set opacity on rangeSection itself: fold/unfold animates that same
+    // property together with max-height. Changing container opacity mid-expand
+    // cancels the height transition and leaves the wrong vertical space.
     if (rangeSection) {
-      rangeSection.style.opacity = isDisabled ? '0.5' : '1'
+      rangeSection.classList.toggle('filter-controls-disabled', !!isDisabled)
+      // Clear legacy disabled greying that used container opacity
+      if (rangeSection.style.opacity === '0.5') {
+        rangeSection.style.opacity = '1'
+      }
     }
-    
+
     if (this.hasMinInputTarget) {
       this.minInputTarget.disabled = isDisabled
       this.minInputTarget.style.opacity = isDisabled ? '0.5' : '1'
@@ -449,7 +456,7 @@ export default class extends Controller {
       this.maxInputTarget.style.opacity = isDisabled ? '0.5' : '1'
       this.maxInputTarget.style.cursor = isDisabled ? 'not-allowed' : 'default'
     }
-    
+
     if (this.hasMinHandleTarget) {
       this.minHandleTarget.style.opacity = isDisabled ? '0.5' : '1'
       this.minHandleTarget.style.pointerEvents = isDisabled ? 'none' : 'auto'
@@ -462,17 +469,42 @@ export default class extends Controller {
       this.maxHandleTarget.style.cursor = isDisabled ? 'not-allowed' : 'grab'
       this.maxHandleTarget.style.backgroundColor = isDisabled ? '#d1d5db' : '#3b82f6'
     }
-    
+
     if (this.hasActiveTrackTarget) {
       this.activeTrackTarget.style.backgroundColor = isDisabled ? '#d1d5db' : '#3b82f6'
     }
-    
+
     if (this.hasAdaptColorRangeButtonTarget) {
       this.adaptColorRangeButtonTarget.disabled = isDisabled
       this.adaptColorRangeButtonTarget.style.opacity = isDisabled ? '0.5' : '1'
       this.adaptColorRangeButtonTarget.style.cursor = isDisabled ? 'not-allowed' : 'pointer'
     }
-    
+
+    if (this.hasCanvasTarget) {
+      this.canvasTarget.style.opacity = isDisabled ? '0.5' : '1'
+    }
+
+    if (this.hasHistogramIgnoreZerosTarget) {
+      this.histogramIgnoreZerosTarget.disabled = isDisabled
+      this.histogramIgnoreZerosTarget.style.cursor = isDisabled ? 'not-allowed' : 'pointer'
+    }
+    if (this.hasHistogramScaleTarget) {
+      this.histogramScaleTarget.disabled = isDisabled
+      this.histogramScaleTarget.style.opacity = isDisabled ? '0.5' : '1'
+      this.histogramScaleTarget.style.cursor = isDisabled ? 'not-allowed' : 'default'
+    }
+
+    const selectedCount = rangeSection?.querySelector('.selected-cells-count')
+    if (selectedCount) {
+      selectedCount.style.opacity = isDisabled ? '0.5' : '1'
+    }
+
+    const boxplotSection = rangeSection?.querySelector('.gene-category-boxplot-section')
+    if (boxplotSection) {
+      boxplotSection.style.opacity = isDisabled ? '0.5' : '1'
+      boxplotSection.style.pointerEvents = isDisabled ? 'none' : 'auto'
+    }
+
     if (typeof this.drawDensityPlot === 'function') {
       this.drawDensityPlot()
     }

@@ -2881,6 +2881,28 @@ module Basic
       h
     end
 
+    # After combinatorial expansion, attrs["group_pairs"] is one pair [ref, comp].
+    # Flattens that into group_ref / group_comp. Raises if a list-of-pairs is still
+    # present (expansion was skipped) — that previously stringified to CLI labels
+    # like '[0, ]' and failed DE.
+    def flatten_de_group_pairs!(h)
+      return h unless h.is_a?(Hash)
+
+      gp = h['group_pairs']
+      return h unless gp.is_a?(Array) && !gp.empty?
+
+      if gp[0].is_a?(Array)
+        raise StandardError,
+              "DE group_pairs was not expanded into combinatorial runs (#{gp.size} pairs left). " \
+              "Each run must receive a single [group_ref, group_comp] pair."
+      end
+
+      h['group_ref'] = gp[0]
+      h['group_comp'] = gp.size > 1 ? gp[1] : ''
+      h['group_pairs'] = nil
+      h
+    end
+
     # Inject DE form attrs for optional metadata-based cell universe (analysis form + layout).
     def ensure_de_cell_universe_attrs_and_layout!(step, h_attrs, attr_layout)
       return unless step&.name.to_s == 'de'

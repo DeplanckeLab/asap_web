@@ -17,9 +17,9 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access annotations].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public transfer_ownership cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_overlaps search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata stage_de_cell_universe delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone clone_status metadata_coordinates metadata_vectors gene_expression annotation_summary_stats heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public transfer_ownership cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_overlaps search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata stage_de_cell_universe delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
-  before_action :authorize_project_read_access, only: %i[show clone_status metadata_coordinates metadata_vectors gene_expression heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_overlaps search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
+  before_action :authorize_project_read_access, only: %i[show clone_status metadata_coordinates metadata_vectors gene_expression annotation_summary_stats heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_overlaps search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection collection_owned_project_autocomplete collection_add_project transfer_ownership]
   before_action :authorize_project_analyze_access, only: %i[save_metadata_from_selection save_batch_compose_metadata stage_de_cell_universe]
   before_action :authorize_project_owner_access, only: %i[export_consensus_annotation preview_consensus_annotation]
@@ -7760,6 +7760,43 @@ class ProjectsController < ApplicationController
       Rails.logger.error e.backtrace.join("\n")
       render json: { error: 'Failed to load gene expression', message: e.message }, status: 500
     end
+  end
+
+  # POST /projects/:id/annotation_summary_stats
+  # Compact long-format summary stats for many genes or metadata vs a discrete grouping annotation.
+  def annotation_summary_stats
+    loom_file = params[:loom_file].presence || 'parsing/output.loom'
+    grouping_metadata_id = params[:grouping_metadata_id]
+    mode = params[:mode].to_s
+
+    unless grouping_metadata_id.present?
+      render json: { error: 'grouping_metadata_id is required' }, status: :bad_request
+      return
+    end
+
+    gene_entries = unwrap_param_list(params[:genes]).presence || unwrap_param_list(params[:gene_stable_ids])
+    metadata_ids = unwrap_param_list(params[:metadata_ids])
+    filters = unwrap_param_hash(params[:filters])
+
+    result = AnnotationSummaryStatsService.new(project: @project, project_dir: @project_dir).call(
+      loom_file: loom_file,
+      grouping_metadata_id: grouping_metadata_id,
+      mode: mode,
+      gene_entries: gene_entries,
+      metadata_ids: metadata_ids,
+      annot_id: params[:annot_id],
+      layer: params[:layer],
+      filters: filters
+    )
+    render json: result
+  rescue AnnotationSummaryStatsService::ValidationError => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  rescue AnnotationSummaryStatsService::Error => e
+    render json: { error: e.message }, status: :unprocessable_entity
+  rescue => e
+    Rails.logger.error "Error computing annotation summary stats: #{e.class} - #{e.message}"
+    Rails.logger.error e.backtrace.join("\n")
+    render json: { error: 'Failed to compute annotation summary stats', message: e.message }, status: :internal_server_error
   end
 
   def fetch_organisms_for_version(version_id)
@@ -16273,6 +16310,26 @@ class ProjectsController < ApplicationController
     def bot_allowed_public_project_view?
       view = params[:view].to_s
       view.blank? || METADATA_ONLY_PROJECT_VIEWS.include?(view)
+    end
+
+    def unwrap_param_list(value)
+      Array(value).map do |entry|
+        if entry.respond_to?(:to_unsafe_h)
+          entry.to_unsafe_h
+        elsif entry.respond_to?(:to_h) && !entry.is_a?(String) && !entry.is_a?(Numeric)
+          entry.to_h
+        else
+          entry
+        end
+      end
+    end
+
+    def unwrap_param_hash(value)
+      return nil if value.blank?
+      return value.to_unsafe_h if value.respond_to?(:to_unsafe_h)
+      return value.to_h if value.respond_to?(:to_h)
+
+      value
     end
 
     def set_project

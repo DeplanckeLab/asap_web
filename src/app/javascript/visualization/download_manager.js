@@ -3,6 +3,7 @@ export class DownloadManager {
   constructor(controller) {
     this.controller = controller
     this.numContinuousBins = 20
+    this.maxBatchSummarySize = 200
   }
 
   // Download global distribution for all categories (discrete) or bins (continuous)
@@ -30,6 +31,311 @@ export class DownloadManager {
     }
 
     console.warn('Cannot download: unsupported metadata type', displayedMetadataVector.data_type)
+  }
+
+  // Summary-only Excel: long-format stats for all genes in the panel (or all
+  // continuous/categorical left-panel metadata), computed server-side.
+  async downloadBatchSummaryStats(event) {
+    event.preventDefault()
+    event.stopPropagation()
+    this.controller.closeAllDownloadMenus?.()
+
+    const button = event.currentTarget
+    const groupingMetadataId = parseInt(button.dataset.metadataId, 10)
+    if (!Number.isFinite(groupingMetadataId)) {
+      console.warn('Cannot download batch summary: missing metadata id')
+      return
+    }
+
+    const groupingVector = this.controller.dataManager.getMetadataVectorById(groupingMetadataId)
+    if (groupingVector?.data_type &&
+        groupingVector.data_type !== 'DISCRETE' &&
+        groupingVector.data_type !== 'STRING') {
+      window.alert('Batch summary stats require a categorical annotation.')
+      return
+    }
+
+    const coloring = this.resolveBatchColoringSource()
+    if (!coloring) {
+      window.alert('Color cells by a gene or metadata first, then download the batch summary.')
+      return
+    }
+
+    if (coloring.mode === 'genes' && coloring.genes.length > this.maxBatchSummarySize) {
+      window.alert(`Too many genes in the panel (max ${this.maxBatchSummarySize}). Remove some genes and try again.`)
+      return
+    }
+    if ((coloring.mode === 'continuous' || coloring.mode === 'categorical') &&
+        coloring.metadataIds.length > this.maxBatchSummarySize) {
+      window.alert(`Too many metadata items (max ${this.maxBatchSummarySize}).`)
+      return
+    }
+
+    const projectIdentifier = this.controller.getProjectIdentifier?.() || this.getProjectKey()
+    if (!projectIdentifier || projectIdentifier === 'project') {
+      window.alert('Cannot determine project for summary download.')
+      return
+    }
+
+    const loomFile = this.controller.getCurrentLoomFileForRequest?.() ||
+      this.controller.currentLoomFile ||
+      'parsing/output.loom'
+    const annotId = this.controller.geneManager?.currentMatrixAnnotId || null
+    const payload = {
+      loom_file: loomFile,
+      grouping_metadata_id: groupingMetadataId,
+      mode: coloring.mode,
+      annot_id: annotId,
+      filters: this.buildBatchFiltersPayload()
+    }
+    if (coloring.mode === 'genes') {
+      payload.genes = coloring.genes
+    } else {
+      payload.metadata_ids = coloring.metadataIds
+    }
+
+    const originalLabel = button.textContent
+    button.disabled = true
+    button.textContent = 'Computing summary...'
+
+    try {
+      if (!window.XLSX) {
+        await this.loadSheetJS()
+      }
+
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content')
+      const headers = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+      if (csrfToken) headers['X-CSRF-Token'] = csrfToken
+
+      const response = await fetch(
+        `/projects/${encodeURIComponent(projectIdentifier)}/annotation_summary_stats`,
+        {
+          method: 'POST',
+          headers,
+          credentials: 'same-origin',
+          body: JSON.stringify(payload)
+        }
+      )
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        const message = data.error || data.message || `Request failed (${response.status})`
+        window.alert(message)
+        return
+      }
+
+      const rows = Array.isArray(data.rows) ? data.rows : []
+      if (rows.length === 0) {
+        window.alert('No summary rows were returned.')
+        return
+      }
+
+      const sheetData = this.rowsToSheetAoA(rows)
+      const wb = window.XLSX.utils.book_new()
+      const ws = window.XLSX.utils.aoa_to_sheet(sheetData)
+      window.XLSX.utils.book_append_sheet(wb, ws, 'Summary Stats')
+
+      const annotName = this.sanitizeFilename(groupingVector?.name || `metadata_${groupingMetadataId}`)
+      const modeSuffix = coloring.mode === 'genes' ? 'genes' : coloring.mode
+      const filename = `${annotName}_summary_stats_${modeSuffix}.xlsx`
+      window.XLSX.writeFile(wb, filename, { cellStyles: true })
+
+      if (Array.isArray(data.warnings) && data.warnings.length > 0) {
+        console.warn('Batch summary warnings:', data.warnings)
+      }
+    } catch (error) {
+      console.error('Batch summary download failed:', error)
+      window.alert(error?.message || 'Failed to download batch summary stats.')
+    } finally {
+      button.disabled = false
+      button.textContent = originalLabel
+    }
+  }
+
+  resolveBatchColoringSource() {
+    const coloringId = String(this.controller.currentMetadataId || this.controller.currentMetadataVector?.id || '').trim()
+    const vector = this.controller.currentMetadataVector
+    if (!coloringId || !vector) return null
+
+    if (coloringId.startsWith('gene_') && !coloringId.startsWith('gene_set_item_')) {
+      const genes = this.collectGenePanelEntries(coloringId)
+      return { mode: 'genes', genes }
+    }
+
+    if (vector.data_type === 'NUMERIC') {
+      let metadataIds = this.collectLeftPanelMetadataIds('NUMERIC')
+      const numericId = parseInt(coloringId, 10)
+      if (Number.isFinite(numericId) && !metadataIds.includes(numericId)) {
+        metadataIds = [numericId, ...metadataIds]
+      }
+      if (metadataIds.length === 0 && Number.isFinite(numericId)) {
+        metadataIds = [numericId]
+      }
+      if (metadataIds.length === 0) return null
+      return { mode: 'continuous', metadataIds }
+    }
+
+    if (vector.data_type === 'DISCRETE' || vector.data_type === 'STRING') {
+      let metadataIds = this.collectLeftPanelMetadataIds('DISCRETE')
+      const discreteId = parseInt(coloringId, 10)
+      if (Number.isFinite(discreteId) && !metadataIds.includes(discreteId)) {
+        metadataIds = [discreteId, ...metadataIds]
+      }
+      if (metadataIds.length === 0 && Number.isFinite(discreteId)) {
+        metadataIds = [discreteId]
+      }
+      if (metadataIds.length === 0) return null
+      return { mode: 'categorical', metadataIds }
+    }
+
+    return null
+  }
+
+  getBatchSummaryHoverText(coloring = undefined) {
+    const source = coloring === undefined ? this.resolveBatchColoringSource() : coloring
+    if (!source) {
+      return 'Color cells by a gene or a metadata first to enable this export'
+    }
+    if (source.mode === 'genes') {
+      const n = Array.isArray(source.genes) ? source.genes.length : 0
+      if (n <= 1) {
+        return 'Export summary stats for the currently colored gene across annotation categories'
+      }
+      return `Export summary stats for all ${n} genes currently in the gene panel`
+    }
+    if (source.mode === 'continuous') {
+      const n = Array.isArray(source.metadataIds) ? source.metadataIds.length : 0
+      return `Export summary stats for all continuous metadata in the left panel (${n})`
+    }
+    if (source.mode === 'categorical') {
+      const n = Array.isArray(source.metadataIds) ? source.metadataIds.length : 0
+      return `Export summary stats for all categorical metadata in the left panel (${n})`
+    }
+    return 'Export summary stats for the current coloring'
+  }
+
+  getBatchSummaryButtonLabel(coloring = undefined) {
+    const source = coloring === undefined ? this.resolveBatchColoringSource() : coloring
+    if (!source) return 'Batch summary (color by a gene/metadata)'
+    if (source.mode === 'genes') return 'All genes summary (Excel)'
+    if (source.mode === 'continuous') return 'All cont. metadata summary (Excel)'
+    if (source.mode === 'categorical') return 'All cat. metadata summary (Excel)'
+    return 'Batch summary (color by a gene/metadata)'
+  }
+
+  updateBatchSummaryMenuButton(menu) {
+    if (!menu) return
+    const button = menu.querySelector('.batch-summary-stats-btn')
+    if (!button) return
+
+    const coloring = this.resolveBatchColoringSource()
+    button.title = this.getBatchSummaryHoverText(coloring)
+    button.textContent = this.getBatchSummaryButtonLabel(coloring)
+    const enabled = !!coloring
+    button.disabled = !enabled
+    button.style.opacity = enabled ? '' : '0.5'
+    button.style.cursor = enabled ? 'pointer' : 'not-allowed'
+    button.style.color = enabled ? '#374151' : '#9ca3af'
+  }
+
+  collectGenePanelEntries(coloringId) {
+    const tags = Array.isArray(this.controller.geneManager?.geneTags)
+      ? this.controller.geneManager.geneTags
+      : []
+    const entries = []
+    const seen = new Set()
+    tags.forEach((gene) => {
+      const stableId = String(gene.stableId || gene.stable_id || '').trim()
+      if (!stableId || seen.has(stableId)) return
+      seen.add(stableId)
+      entries.push({
+        stable_id: stableId,
+        symbol: String(gene.symbol || gene.query || stableId).trim() || stableId
+      })
+    })
+
+    if (entries.length === 0) {
+      const stableFromColor = coloringId.replace(/^gene_/, '').split('_')[0]
+      if (stableFromColor) {
+        const symbol = String(this.controller.currentMetadataVector?.name || '').trim() || stableFromColor
+        entries.push({ stable_id: stableFromColor, symbol })
+      }
+    }
+    return entries
+  }
+
+  collectLeftPanelMetadataIds(types) {
+    const wanted = new Set(Array.isArray(types) ? types.map(String) : [String(types)])
+    const ids = []
+    const seen = new Set()
+    document.querySelectorAll('[data-metadata-item]').forEach((item) => {
+      if (item.hidden || item.style.display === 'none') return
+      try {
+        if (window.getComputedStyle(item).display === 'none') return
+      } catch (_e) {
+        // ignore
+      }
+      const id = parseInt(item.dataset.metadataItem, 10)
+      if (!Number.isFinite(id) || seen.has(id)) return
+      const typeAttr = item.dataset.metadataType ||
+        item.querySelector('[data-metadata-type]')?.dataset?.metadataType ||
+        ''
+      if (!wanted.has(String(typeAttr))) return
+      seen.add(id)
+      ids.push(id)
+    })
+    return ids
+  }
+
+  buildBatchFiltersPayload() {
+    if (this.controller.globalFiltersEnabled === false) return null
+
+    const dm = this.controller.dataManager
+    if (!dm) return null
+
+    const categories = {}
+    const ranges = {}
+
+    Object.entries(this.controller.selectedCategories || {}).forEach(([metadataId, selections]) => {
+      if (!selections || typeof selections.size !== 'number') return
+      if (typeof dm.isDiscreteSelectionConstraining === 'function' &&
+          !dm.isDiscreteSelectionConstraining(metadataId, selections)) {
+        return
+      }
+      categories[metadataId] = Array.from(selections).map(String)
+    })
+
+    Object.entries(this.controller.selectedRanges || {}).forEach(([metadataId, range]) => {
+      if (!range || range.min === undefined || range.max === undefined) return
+      const disabled = this.controller.disabledFilters
+      if (disabled && (disabled.has(metadataId) || disabled.has(parseInt(metadataId, 10)))) return
+      if (typeof dm.isContinuousSelectionConstraining === 'function' &&
+          !dm.isContinuousSelectionConstraining(metadataId, range)) {
+        return
+      }
+      const entry = { min: range.min, max: range.max }
+      const idStr = String(metadataId)
+      if (idStr.startsWith('gene_')) {
+        entry.stable_id = idStr.replace(/^gene_/, '').split('_')[0]
+      }
+      ranges[metadataId] = entry
+    })
+
+    if (Object.keys(categories).length === 0 && Object.keys(ranges).length === 0) {
+      return null
+    }
+    return { categories, ranges }
+  }
+
+  rowsToSheetAoA(rows) {
+    const headers = Object.keys(rows[0])
+    const data = [headers]
+    rows.forEach((row) => {
+      data.push(headers.map((key) => (row[key] === undefined || row[key] === null ? '' : row[key])))
+    })
+    return data
   }
 
   async downloadDiscreteSummary(displayedMetadataVector) {

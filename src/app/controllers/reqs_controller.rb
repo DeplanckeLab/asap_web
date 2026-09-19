@@ -136,6 +136,11 @@ class ReqsController < ApplicationController
       puts "Elapsed time 2:" + (Time.now-t).to_s
       
       combinatorial_run_attrs = @h_attrs.keys.select{|k|  @h_attrs[k]['combinatorial_runs'] == true and (h_attr_values[k] and h_attr_values[k].size > 0)}
+      # all_against_compl synthesizes group_pairs (not a method attr). Expand one run per
+      # [category, complementary] pair before flattening to group_ref / group_comp.
+      if all_against_compl && h_attr_values['group_pairs'].is_a?(Array) && h_attr_values['group_pairs'].any?
+        combinatorial_run_attrs = (combinatorial_run_attrs + ['group_pairs']).uniq
+      end
       
       now = Time.now
       ### call the function for each combinatorial_runs
@@ -175,11 +180,7 @@ class ReqsController < ApplicationController
       list_of_runs.each_index do |run_i|
         run = list_of_runs[run_i]
         h_run_attrs = JSON.parse(run[0].attrs_json)
-        if gp = h_run_attrs['group_pairs'] and gp.size > 0
-          h_run_attrs['group_ref'] = gp[0]
-          h_run_attrs['group_comp'] = gp[1]
-          h_run_attrs['group_pairs'] = nil
-        end
+        Basic.flatten_de_group_pairs!(h_run_attrs)
         Basic.normalize_de_group_comp_complementary!(h_run_attrs)
         list_of_runs[run_i][0].attrs_json = h_run_attrs.to_json
         list_of_runs[run_i][1] = h_run_attrs

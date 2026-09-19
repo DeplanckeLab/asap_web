@@ -1260,7 +1260,7 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                             title="Download metadata">
                       <i class="fas fa-file-download" style="font-size: 14px;"></i>
                     </button>
-                    <div class="metadata-download-menu" style="display: none; position: fixed; min-width: 180px; padding: 6px; background-color: white; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12); z-index: 10000;">
+                    <div class="metadata-download-menu" style="display: none; position: fixed; min-width: 280px; padding: 6px; background-color: white; border: 1px solid #d1d5db; border-radius: 6px; box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12); z-index: 10000;">
                       <button type="button"
                               data-metadata-id="<%= metadata.id %>"
                               data-action="click->visualization#downloadGlobalDistribution"
@@ -1268,6 +1268,16 @@ entry_checkpoint_title = entry_checkpoint&.display_title.to_s
                               onmouseover="this.style.backgroundColor='#f3f4f6'"
                               onmouseout="this.style.backgroundColor=''">
                         Summary (Excel)
+                      </button>
+                      <button type="button"
+                              data-metadata-id="<%= metadata.id %>"
+                              data-action="click->visualization#downloadBatchSummaryStats"
+                              class="batch-summary-stats-btn"
+                              style="display: block; width: 100%; text-align: left; padding: 8px 10px; border: none; background: none; border-radius: 4px; cursor: pointer; font-size: 12px; color: #374151;"
+                              onmouseover="this.style.backgroundColor='#f3f4f6'"
+                              onmouseout="this.style.backgroundColor=''"
+                              title="Color cells by a gene or a metadata first to enable this export">
+                        Batch summary (color by a gene/metadata)
                       </button>
                       <button type="button"
                               data-metadata-id="<%= metadata.id %>"

@@ -9569,8 +9569,8 @@ export default class extends Controller {
     }
 
     const buttonRect = button.getBoundingClientRect()
-    const menuWidth = Math.max(menu.offsetWidth || 180, 180)
-    const estimatedMenuHeight = 80
+    const menuWidth = Math.max(menu.offsetWidth || 280, 280)
+    const estimatedMenuHeight = 120
     const gap = 4
     const viewportPadding = 8
 
@@ -9594,6 +9594,7 @@ export default class extends Controller {
       menu.style.top = `${buttonRect.bottom + gap}px`
     }
 
+    this.downloadManager?.updateBatchSummaryMenuButton?.(menu)
     menu.style.display = 'block'
   }
 
@@ -31475,6 +31476,10 @@ export default class extends Controller {
   // Delegate download to DownloadManager
   async downloadGlobalDistribution(event) {
     return this.downloadManager.downloadGlobalDistribution(event)
+  }
+
+  async downloadBatchSummaryStats(event) {
+    return this.downloadManager.downloadBatchSummaryStats(event)
   }
 
   async downloadRawMetadata(event) {

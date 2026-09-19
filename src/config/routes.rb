@@ -33,6 +33,7 @@ Rails.application.routes.draw do
       get :spatial_image
       get :metadata_vectors
       get :gene_expression
+      post :annotation_summary_stats
       get :heatmap_data
       get :heatmap_metadata_catalog
       get :heatmap_track

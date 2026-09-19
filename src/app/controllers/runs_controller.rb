@@ -672,10 +672,7 @@ class RunsController < ApplicationController
     # Flatten group_pairs into group_ref / group_comp, mirroring the
     # pre-set_run massaging done in ReqsController#create_runs.
     h_run_attrs = Basic.safe_parse_json(@run.attrs_json, {})
-    if (gp = h_run_attrs['group_pairs']) && gp.is_a?(Array) && gp.size >= 2
-      h_run_attrs['group_ref'] = gp[0]
-      h_run_attrs['group_comp'] = gp[1]
-    end
+    Basic.flatten_de_group_pairs!(h_run_attrs)
 
     h_p = {
       project: @project,

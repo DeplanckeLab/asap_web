@@ -44,4 +44,31 @@ class BasicDeAttrsMatrixMatchTest < ActiveSupport::TestCase
     key = Basic.de_de_filter_stats_key(run, annot: annot, reference_group: '0', contrast_index: 0)
     assert_equal '835550__0_0', key
   end
+
+  test 'de_output_txt_needs_rebuild? accepts identity layout when headers_json missing' do
+    Dir.mktmpdir('de_rebuild') do |dir|
+      path = File.join(dir, 'output.txt')
+      layout = File.join(dir, 'output.layout')
+      File.write(path, ([0, 'ENSG1', 'G', nil, nil, 1.0, 0.1, 0.01, 1.0, 2.0, 0.5, 0.5].join("\t") + "\n"))
+      File.write(layout, "#{Basic::DE_OUTPUT_TXT_LAYOUT_IDENTITY}\n")
+      annot = Struct.new(:headers_json_value).new(nil)
+      refute Basic.de_output_txt_needs_rebuild?(path, annot)
+    end
+  end
+
+  test 'de_output_txt_needs_rebuild? still requires expected ncols when headers present' do
+    Dir.mktmpdir('de_rebuild') do |dir|
+      path = File.join(dir, 'output.txt')
+      layout = File.join(dir, 'output.layout')
+      # 10 cols but headers imply 12
+      File.write(path, ([0, 'ENSG1', 'G', nil, nil, 1.0, 0.1, 0.01, 1.0, 2.0].join("\t") + "\n"))
+      File.write(layout, "#{Basic::DE_OUTPUT_TXT_LAYOUT_IDENTITY}\n")
+      headers = [
+        'ensembl_id', 'gene_name', 'log Fold-Change', 'p-value', 'FDR',
+        'Avg. Exp. Group 1', 'Avg. Exp. Group 2', 'Tau', 'Specificity'
+      ]
+      annot = Struct.new(:headers_json_value).new(headers.to_json)
+      assert Basic.de_output_txt_needs_rebuild?(path, annot)
+    end
+  end
 end

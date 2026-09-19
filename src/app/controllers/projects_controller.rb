@@ -14554,6 +14554,10 @@ class ProjectsController < ApplicationController
     # Prefer full Annot rows from de_table_rows (include headers_json). Annot.light omits it.
     annots_union = (table_rows.filter_map { |r| r[:annot] } + annots).uniq(&:id)
 
+    annots_union.each do |annot|
+      Basic.de_hydrate_annot_headers_from_run_output_json!(annot, project_dir)
+    end
+
     h_annots_by_loom_path = {}
     annots_to_do = annots_union.select do |annot|
       output_txt = Basic.de_annot_output_txt_path(project_dir, annot)
@@ -14621,6 +14625,7 @@ class ProjectsController < ApplicationController
           h_results = H5DataService.get_attrs_matrix_full_for_de_filter(loom_file.to_s, meta_norm, annot)
           vals = h_results['values']
           attrs_via_h5py = true
+          Basic.de_ensure_annot_headers_json!(annot, Basic.de_usable_column_names(h_results['column_names']))
         rescue => e
           Rails.logger.error(
             "[run_de_filter] attrs_matrix_h5py_failed project_id=#{@project.id} run_id=#{annot.run_id} annot_id=#{annot.id} " \

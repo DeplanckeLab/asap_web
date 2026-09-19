@@ -1943,14 +1943,73 @@ module Basic
 
       first_line = File.open(path, 'r', &:gets)
       ncol = first_line&.chomp&.split("\t")&.size.to_i
-      expected = de_output_txt_expected_ncols(annot, headers_override: headers_override)
-      return true if ncol != expected || de_output_txt_first_line_is_column_header?(first_line)
-      return false unless de_matrix_has_gene_identity_columns?(annot, headers_override: headers_override)
+      return true if de_output_txt_first_line_is_column_header?(first_line)
 
+      headers = de_headers_array_from_annot(annot, headers_override: headers_override)
+      if headers.any?
+        expected = de_output_txt_expected_ncols(annot, headers_override: headers_override)
+        return true if ncol != expected
+      else
+        # Missing headers_json (e.g. incomplete clone): accept a valid identity layout
+        # with base or specificity column counts instead of rebuilding forever.
+        return true if ncol < DE_GENE_LIST_BASE_NCOLS || ncol > DE_GENE_LIST_FIELD_NAMES.size
+      end
+
+      has_identity = de_matrix_has_gene_identity_columns?(annot, headers_override: headers_override)
       layout_path = de_output_txt_layout_path(path)
-      return true unless File.exist?(layout_path.to_s)
+      layout_ok = File.exist?(layout_path.to_s) &&
+                  File.read(layout_path.to_s).to_s.strip == DE_OUTPUT_TXT_LAYOUT_IDENTITY
 
-      File.read(layout_path.to_s).to_s.strip != DE_OUTPUT_TXT_LAYOUT_IDENTITY
+      if has_identity
+        return true unless layout_ok
+        return false
+      end
+
+      # No header-derived identity columns: trust an existing identity layout marker.
+      return false if layout_ok && ncol >= DE_GENE_LIST_BASE_NCOLS
+
+      false
+    end
+
+    # Persist Annot#headers_json from finish_run-style metadata when missing (clone gaps).
+    def de_ensure_annot_headers_json!(annot, headers)
+      return false unless annot && annot.id.to_i.positive?
+      return false unless headers.is_a?(Array) && headers.size >= 5
+      return false if headers.size > Annot::HEADERS_JSON_MAX_SIZE
+
+      existing = safe_parse_json(annot.headers_json_value, [])
+      return false if existing.is_a?(Array) && existing.size >= 5
+
+      json = headers.to_json
+      annot.update_column(:headers_json, json)
+      if annot.has_attribute?('headers_json')
+        annot.headers_json = json
+      end
+      true
+    end
+
+    # Load headers from de/<run_id>/output.json metadata[] when Annot#headers_json is blank.
+    def de_hydrate_annot_headers_from_run_output_json!(annot, project_dir)
+      return false unless annot && annot.run_id.to_i.positive?
+
+      existing = safe_parse_json(annot.headers_json_value, [])
+      return false if existing.is_a?(Array) && existing.size >= 5
+
+      base = project_dir.is_a?(Pathname) ? project_dir : Pathname.new(project_dir.to_s)
+      owner = de_attrs_de_output_matrix_match(annot.name)
+      rid = (owner && owner[0]) || annot.run_id
+      path = ((base + 'de') + rid.to_i.to_s) + 'output.json'
+      return false unless File.exist?(path)
+
+      parsed = safe_parse_json(File.read(path), {})
+      metas = parsed['metadata']
+      return false unless metas.is_a?(Array)
+
+      meta = metas.find { |m| m.is_a?(Hash) && m['name'].to_s == annot.name.to_s }
+      return false unless meta
+
+      headers = meta['headers']
+      de_ensure_annot_headers_json!(annot, headers)
     end
 
     def de_index_lookup_from_vector(vec)

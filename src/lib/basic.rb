@@ -1867,11 +1867,18 @@ module Basic
       extra = de_extra_metric_source_indices(headers, prefix, n)
 
       if headers.size >= 5
-        tail = headers.last(5)
-        if de_tail_headers_are_legacy_metric_pack?(tail)
-          start_h = headers.size - 5
-          idxs = (0...5).map { |k| start_h + k + prefix }
-          return { indices: idxs, sort_idx: idxs[0], extra_indices: extra } if idxs.max < n
+        # Only treat the last five header titles as the classic metric pack when they
+        # are not followed by Tau/Specificity in the header list (those extras live after).
+        classic_tail = headers.reject { |h|
+          x = de_normalize_de_header_label(h)
+          x == 'tau' || x == 'specificity'
+        }.last(5)
+        if de_tail_headers_are_legacy_metric_pack?(classic_tail)
+          start_h = headers.index(classic_tail.first)
+          if !start_h.nil?
+            idxs = (0...5).map { |k| start_h + k + prefix }
+            return { indices: idxs, sort_idx: idxs[0], extra_indices: extra } if idxs.max < n
+          end
         end
       end
 
@@ -1881,13 +1888,32 @@ module Basic
         return { indices: idxs, sort_idx: idxs[0], extra_indices: extra } if idxs.max < n
       end
 
-      if n > 5
-        start = n - 5
-        idxs = (0...5).map { |k| start + k }
-        return { indices: idxs, sort_idx: idxs[0], extra_indices: extra }
+      de_metric_fallback_indices_without_headers(n)
+    end
+
+    # When headers are missing/unusable: never use "last 5 columns" if Tau/Specificity
+    # may be present (n>=8). That fallback was correct for identity+5 metrics (n==7) but
+    # broke gene counts after Tau/Specificity made pairwise matrices n==9.
+    def de_metric_fallback_indices_without_headers(n)
+      n = n.to_i
+      return { indices: [0, 1, 2, 3, 4], sort_idx: 0, extra_indices: [] } if n <= 5
+
+      # v8 pairwise: ensembl, gene, 5 metrics [, tau, specificity]
+      if n == 7 || n == 9
+        extras = n == 9 ? [7, 8] : []
+        return { indices: [2, 3, 4, 5, 6], sort_idx: 2, extra_indices: extras }
       end
 
-      { indices: [0, 1, 2, 3, 4], sort_idx: 0, extra_indices: extra }
+      # v8 FindAllMarkers: compared group, ensembl, gene, 5 metrics [, tau, specificity]
+      if n == 8 || n == 10
+        extras = n == 10 ? [8, 9] : []
+        return { indices: [3, 4, 5, 6, 7], sort_idx: 3, extra_indices: extras }
+      end
+
+      # Legacy only: last five columns are the classic metrics (safe when no trailing extras).
+      start = n - 5
+      idxs = (0...5).map { |k| start + k }
+      { indices: idxs, sort_idx: idxs[0], extra_indices: [] }
     end
 
     def de_identity_column_indices_for_extract_metadata(annot, n_value_cols, headers_override: nil)

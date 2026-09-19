@@ -45,6 +45,28 @@ class BasicDeResultIndicesTest < ActiveSupport::TestCase
     assert_equal 12, Basic.de_output_txt_expected_ncols(annot)
   end
 
+  test 'without headers, pairwise n=9 does not treat Tau/Specificity as logFC/FDR' do
+    annot = StubAnnot.new(nil)
+    pack = Basic.de_metric_source_indices_for_extract_metadata(annot, 9)
+    assert_equal [2, 3, 4, 5, 6], pack[:indices]
+    assert_equal [7, 8], pack[:extra_indices]
+    assert_equal 2, pack[:sort_idx]
+  end
+
+  test 'without headers, pairwise n=7 keeps identity-prefixed classic metrics' do
+    annot = StubAnnot.new(nil)
+    pack = Basic.de_metric_source_indices_for_extract_metadata(annot, 7)
+    assert_equal [2, 3, 4, 5, 6], pack[:indices]
+    assert_equal [], pack[:extra_indices]
+  end
+
+  test 'without headers, FindAllMarkers n=10 keeps metrics after group and identity' do
+    annot = StubAnnot.new(nil)
+    pack = Basic.de_metric_source_indices_for_extract_metadata(annot, 10)
+    assert_equal [3, 4, 5, 6, 7], pack[:indices]
+    assert_equal [8, 9], pack[:extra_indices]
+  end
+
   test 'legacy five metric headers stay at columns 0-4' do
     annot = StubAnnot.new(LegacyMetricHeaders.to_json)
     pack = Basic.de_metric_source_indices_for_extract_metadata(annot, 5)

@@ -103,11 +103,20 @@ class H5DataService
                 block = d[:take_r, :take_c]
                 for i in range(block.shape[0]):
                     rows.append([cell(block[i, j]) for j in range(block.shape[1])])
+                col_names = None
+                if 'column_names' in d.attrs:
+                    raw = d.attrs['column_names']
+                    try:
+                        col_names = [cell(x) for x in list(raw)]
+                    except Exception:
+                        col_names = None
+                if not col_names or len(col_names) != sh[1]:
+                    col_names = [str(j) for j in range(sh[1])]
                 out = {
                     'rows': rows,
                     'nber_rows': sh[0],
                     'nber_cols': sh[1],
-                    'column_names': [str(j) for j in range(block.shape[1])],
+                    'column_names': col_names,
                 }
             elif len(sh) == 1:
                 block = d[:take_r]

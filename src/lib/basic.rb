@@ -2045,17 +2045,37 @@ module Basic
       t[0].strip.casecmp('gene index').zero?
     end
 
-    # v8 all-against-complementary DE: HDF paths like /attrs/de_<run_id>_<k> (k = contrast index).
-    # Returns [run_id_from_name, contrast_index] so paths work even when Annot.run_id points at another pipeline row.
+    # DE matrix HDF paths:
+    # - de.v8.py --write-metadata: /attrs/_de_<run_num>_<method> (run_num is Run#num, not Run#id)
+    # - combinatorial (name-encoded run id): /attrs/de_<run_id>_<contrast_index>
+    # Returns [run_id_or_nil, contrast_index]. When run_id is nil, ownership/paths use Annot#run_id.
     def de_attrs_de_output_matrix_match(name)
       s = name.to_s.strip
       return nil if s.blank?
 
       s = s.sub(/\Aattrs\//, '/attrs/')
-      m = s.match(%r{\A/attrs/de_(\d+)_(\d+)\z}i)
-      return nil unless m
 
-      [m[1].to_i, m[2].to_i]
+      m = s.match(%r{\A/attrs/de_(\d+)_(\d+)\z}i)
+      return [m[1].to_i, m[2].to_i] if m
+
+      # Actual v8 tool path, e.g. /attrs/_de_3_wilcoxon
+      m = s.match(%r{\A/attrs/_de_(\d+)_([A-Za-z][A-Za-z0-9_]*)\z}i)
+      return [nil, 0] if m
+
+      nil
+    end
+
+    # True when match identifies a DE matrix that belongs to this run id.
+    def de_attrs_de_output_match_for_run_id?(match, run_id, annot: nil)
+      return false unless match
+
+      rid = run_id.to_i
+      return false if rid <= 0
+
+      encoded_run_id = match[0]
+      return encoded_run_id == rid unless encoded_run_id.nil?
+
+      annot && annot.run_id.to_i == rid
     end
 
     def de_attrs_de_output_annot?(annot)
@@ -2084,7 +2104,7 @@ module Basic
       from_run = Array(by_run[rid])
       matched = from_run.select do |a|
         m = de_attrs_de_output_matrix_match(a.name)
-        m && m[0] == rid
+        de_attrs_de_output_match_for_run_id?(m, rid, annot: a)
       end
 
       if matched.size <= 1
@@ -2093,18 +2113,18 @@ module Basic
         extra = if fp.present?
                   rel_scope.where(filepath: fp).to_a.select do |a|
                     m = de_attrs_de_output_matrix_match(a.name)
-                    m && m[0] == rid
+                    de_attrs_de_output_match_for_run_id?(m, rid, annot: a)
                   end
                 elsif ApplicationRecord.connection.adapter_name.match?(/postgresql/i)
-                  pat = "^(/attrs/|attrs/)de_#{rid.to_i}_[0-9]+$"
-                  rel_scope.where('name ~* ?', pat).to_a.select do |a|
+                  # Classic: de_<run_id>_<k>. v8 tool paths use run.num and are found via Annot.run_id above.
+                  rel_scope.where('name ~* ?', "^(/attrs/|attrs/)de_#{rid.to_i}_[0-9]+$").to_a.select do |a|
                     m = de_attrs_de_output_matrix_match(a.name)
-                    m && m[0] == rid
+                    de_attrs_de_output_match_for_run_id?(m, rid, annot: a)
                   end
                 else
                   rel_scope.to_a.select do |a|
                     m = de_attrs_de_output_matrix_match(a.name)
-                    m && m[0] == rid
+                    de_attrs_de_output_match_for_run_id?(m, rid, annot: a)
                   end
                 end
         matched = (matched + extra).uniq(&:id)
@@ -2121,7 +2141,11 @@ module Basic
     def de_annot_output_txt_path(project_dir, annot, run_id: nil)
       base = project_dir.is_a?(Pathname) ? project_dir : Pathname.new(project_dir.to_s)
       m_attrs = annot && de_attrs_de_output_matrix_match(annot.name)
-      rid = m_attrs ? m_attrs[0] : (annot&.run_id || run_id)
+      rid = if m_attrs && !m_attrs[0].nil?
+              m_attrs[0]
+            else
+              annot&.run_id || run_id
+            end
       raise ArgumentError, 'de_annot_output_txt_path needs annot or run_id' if rid.blank?
 
       rid = rid.to_i
@@ -2139,9 +2163,9 @@ module Basic
       annot = nil
       if de_annot_id.to_i.positive?
         cand = Annot.find_by(id: de_annot_id.to_i)
-        if cand && de_attrs_de_output_matrix_match(cand.name)
-          m = de_attrs_de_output_matrix_match(cand.name)
-          annot = cand if m && m[0] == rid
+        m = cand && de_attrs_de_output_matrix_match(cand.name)
+        if m && de_attrs_de_output_match_for_run_id?(m, rid, annot: cand)
+          annot = cand
         elsif cand && cand.run_id.to_i == rid
           annot = cand
         end
@@ -2167,8 +2191,10 @@ module Basic
     def de_de_filter_stats_key(run, annot:, reference_group:, contrast_index:)
       return run.id.to_s if annot.nil?
 
-      rid = (de_attrs_de_output_matrix_match(annot.name)&.first || run.id).to_i
-      k = contrast_index.nil? ? (de_attrs_de_output_matrix_match(annot.name)&.last || 0) : contrast_index.to_i
+      match = de_attrs_de_output_matrix_match(annot.name)
+      rid = (match && match[0]) || run.id
+      rid = rid.to_i
+      k = contrast_index.nil? ? (match&.last || 0) : contrast_index.to_i
       slug = de_stats_key_category_slug(reference_group, k)
 
       "#{rid}__#{slug}"
@@ -2665,7 +2691,7 @@ module Basic
 
         from_run = Array(by_run[run.id]).select do |a|
           m = de_attrs_de_output_matrix_match(a.name)
-          m && m[0] == run.id
+          de_attrs_de_output_match_for_run_id?(m, run.id, annot: a)
         end
         attrs_des = (from_run + Array(by_de_run_from_name[run.id])).uniq(&:id).sort_by do |a|
           m = de_attrs_de_output_matrix_match(a.name)
@@ -2700,15 +2726,30 @@ module Basic
       scope = Annot.where(project_id: project_id)
       candidates =
         if ApplicationRecord.connection.adapter_name.match?(/postgresql/i)
-          scope.where('name ~* ?', "^(/attrs/|attrs/)de_(#{rid_list.join('|')})_[0-9]+$").to_a
+          classic = scope.where('name ~* ?', "^(/attrs/|attrs/)de_(#{rid_list.join('|')})_[0-9]+$").to_a
+          # v8 tool paths (/attrs/_de_<run_num>_<method>) are owned via Annot.run_id
+          v8 = scope.where(run_id: rid_list).where('name ~* ?', '^(/attrs/|attrs/)_de_[0-9]+_[A-Za-z]').to_a
+          (classic + v8).uniq(&:id)
         else
-          scope.where('name LIKE ? OR name LIKE ?', '%/de_%', 'attrs/de_%').to_a.select do |a|
+          scope.where('name LIKE ? OR name LIKE ? OR name LIKE ? OR name LIKE ?',
+                      '%/de_%', 'attrs/de_%', '%/_de_%', 'attrs/_de_%').to_a.select do |a|
             m = de_attrs_de_output_matrix_match(a.name)
-            m && rid_list.include?(m[0])
+            m && de_attrs_de_output_match_for_run_id?(m, a.run_id, annot: a) &&
+              (rid_list.include?(m[0]) || rid_list.include?(a.run_id.to_i))
           end
         end
 
-      candidates.group_by { |a| de_attrs_de_output_matrix_match(a.name)&.first }.tap { |h| h.delete(nil) }
+      by_run = Hash.new { |h, k| h[k] = [] }
+      candidates.each do |a|
+        m = de_attrs_de_output_matrix_match(a.name)
+        next unless m
+
+        owner = m[0].nil? ? a.run_id.to_i : m[0]
+        next unless rid_list.include?(owner)
+
+        by_run[owner] << a
+      end
+      by_run
     end
 
     # list_cat_json is normally a JSON array of category labels (metadata import / add_cell_sets).

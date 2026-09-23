@@ -6374,6 +6374,11 @@ export default class extends Controller {
   // Load a single metadata vector silently (for expand / opportunistic preload)
   async loadSingleMetadataVectorSilently(metadataId) {
     //console.log(`=== LOADING SINGLE METADATA VECTOR SILENTLY: ${metadataId} ===`)
+
+    // Gene expression keys must not hit /metadata_vectors (Annot.find_by).
+    if (this.geneManager?.isGeneExpressionMetadataId?.(metadataId)) {
+      return this.dataManager.loadSingleMetadataVector(metadataId)
+    }
     
     // Check if already loaded in memory
     if (this.loadedMetadataVectors[metadataId]) {
@@ -11092,6 +11097,14 @@ export default class extends Controller {
     const currentVectorName = String(this.currentMetadataVector?.name || '').trim()
     if (!currentId && !currentVectorName) return currentId
 
+    // Gene expression ids are not panel Annot ids. Remap only against gene color buttons
+    // when the gene card is present; otherwise keep the stable gene metadata id.
+    const geneManager = this.geneManager
+    if (geneManager?.isGeneExpressionMetadataId?.(currentId) ||
+        (!currentId && geneManager?.isGeneExpressionMetadataId?.(String(this.currentMetadataVector?.id || '')))) {
+      return this.syncCurrentGeneMetadataIdWithPanelByName(currentId, currentVectorName)
+    }
+
     if (currentId) {
       const currentPanelItem = document.querySelector(`[data-metadata-item="${currentId}"]`)
       if (currentPanelItem) return currentId
@@ -11106,7 +11119,14 @@ export default class extends Controller {
     }
 
     const candidates = Array.from(document.querySelectorAll('[data-action*="waterDropClicked"][data-metadata-id][data-metadata-name]'))
-      .filter((button) => String(button.dataset.metadataName || '').trim() === targetName)
+      .filter((button) => {
+        const action = String(button.dataset.action || '')
+        // Exclude gene / gene-set water drops; those are handled separately.
+        if (action.includes('geneWaterDropClicked') || action.includes('geneSetWaterDropClicked')) {
+          return false
+        }
+        return String(button.dataset.metadataName || '').trim() === targetName
+      })
 
     if (candidates.length !== 1) {
       console.error('[CheckpointSync] Metadata name mapping is not unique', {
@@ -11131,6 +11151,69 @@ export default class extends Controller {
     }
     this.checkpointDebug('syncCurrentMetadataIdWithPanelByName:mapped', {
       from: currentId || null,
+      to: resolvedId,
+      metadataName: targetName
+    })
+    return resolvedId
+  }
+
+  syncCurrentGeneMetadataIdWithPanelByName(currentId, currentVectorName) {
+    const geneId = String(currentId || '').trim()
+    if (geneId) {
+      const escaped = this.escapeAttributeSelectorValue(geneId)
+      const exactButton = document.querySelector(
+        `[data-action*="geneWaterDropClicked"][data-layer-metadata-id="${escaped}"], ` +
+        `[data-action*="geneWaterDropClicked"][data-metadata-id="${escaped}"]`
+      )
+      if (exactButton) return geneId
+    }
+
+    const targetName = String(currentVectorName || '').trim() ||
+      String(this.loadedMetadataVectors?.[geneId]?.name || '').trim() ||
+      String(this.geneManager?.resolveGeneSymbolForStableId?.(
+        this.geneManager?.parseGeneExpressionMetadataId?.(geneId)?.stableId
+      ) || '').trim()
+
+    if (!targetName) {
+      // Gene card may not be in the panel yet; keep the stable gene metadata id.
+      return geneId
+    }
+
+    const candidates = Array.from(document.querySelectorAll(
+      '[data-action*="geneWaterDropClicked"][data-gene-name], [data-action*="geneWaterDropClicked"][data-metadata-name]'
+    )).filter((button) => {
+      const name = String(button.dataset.geneName || button.dataset.metadataName || '').trim()
+      return name === targetName
+    })
+
+    if (candidates.length === 0) {
+      // Expected when checkpoint restores coloring/filters before the gene list is rebuilt.
+      return geneId
+    }
+
+    if (candidates.length !== 1) {
+      console.error('[CheckpointSync] Gene metadata name mapping is not unique', {
+        metadataName: targetName,
+        currentMetadataId: geneId || null,
+        candidateCount: candidates.length
+      })
+      return geneId
+    }
+
+    const resolvedId = String(
+      candidates[0].dataset.layerMetadataId ||
+      candidates[0].dataset.metadataId ||
+      ''
+    ).trim()
+    if (!resolvedId) return geneId
+
+    this.currentMetadataId = resolvedId
+    if (this.currentMetadataVector && typeof this.currentMetadataVector === 'object') {
+      this.currentMetadataVector.id = resolvedId
+      if (targetName) this.currentMetadataVector.name = targetName
+    }
+    this.checkpointDebug('syncCurrentGeneMetadataIdWithPanelByName:mapped', {
+      from: geneId || null,
       to: resolvedId,
       metadataName: targetName
     })
@@ -24633,6 +24716,11 @@ export default class extends Controller {
     }
     this.selectionStatusPollingTimer = setInterval(() => {
       if (this.archiveOverlayPaused) return
+      const hasIncomplete = (this.savedSelections || []).some((item) => {
+        const status = String(item.status || '')
+        return status === 'queued' || status === 'running'
+      })
+      if (!hasIncomplete && !this.recentlyCreatedSavedCellSetId) return
       this.refreshSelectionStates()
     }, 3000)
   }
@@ -28292,6 +28380,9 @@ export default class extends Controller {
   }
 
   filterRestoreLog(eventName, payload = null) {
+    if (window.FILTER_RESTORE_DEBUG !== true) {
+      return
+    }
     if (payload == null) {
       console.info(`ASAP_FILTER_RESTORE ${eventName}`)
       return
@@ -28300,6 +28391,9 @@ export default class extends Controller {
   }
 
   filterRestoreWarn(eventName, payload = null) {
+    if (window.FILTER_RESTORE_DEBUG !== true) {
+      return
+    }
     if (payload == null) {
       console.warn(`ASAP_FILTER_RESTORE ${eventName}`)
       return

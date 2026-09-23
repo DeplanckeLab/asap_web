@@ -28,6 +28,7 @@
       end
   %>
   <% if variant == :menu %>
+    <% largest_projects = user_storage_quota.largest_projects %>
     <div class="px-4 py-3 border-b border-gray-200 <%= 'dark:border-gray-700' if dark_mode %>"
          data-testid="user-storage-quota-menu">
       <div class="flex items-baseline justify-between gap-2 text-xs">
@@ -45,6 +46,27 @@
       <p class="mt-1 text-xs text-gray-500 <%= 'dark:text-gray-400' if dark_mode %>">
         <%= remaining_label %> remaining (<%= percent %>%)
       </p>
+      <% if largest_projects.any? %>
+        <div class="mt-2.5" data-testid="user-storage-quota-largest-projects">
+          <p class="text-[11px] font-medium uppercase tracking-wide text-gray-500 <%= 'dark:text-gray-400' if dark_mode %>">
+            Largest projects
+          </p>
+          <ul class="mt-1 space-y-1">
+            <% largest_projects.each do |entry| %>
+              <li>
+                <a href="<%= project_path(entry.key) %>"
+                   class="flex items-baseline justify-between gap-2 text-xs text-gray-700 hover:text-gray-900 <%= 'dark:text-gray-300 dark:hover:text-white' if dark_mode %>"
+                   title="<%= entry.display_name %>">
+                  <span class="min-w-0 truncate"><%= entry.display_name %></span>
+                  <span class="shrink-0 tabular-nums text-gray-500 <%= 'dark:text-gray-400' if dark_mode %>">
+                    <%= display_mem(entry.bytes) %>
+                  </span>
+                </a>
+              </li>
+            <% end %>
+          </ul>
+        </div>
+      <% end %>
     </div>
   <% elsif variant == :toolbar %>
     <div class="inline-flex items-center gap-2 min-w-[10rem] max-w-[14rem]"

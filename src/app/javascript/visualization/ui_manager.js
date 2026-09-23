@@ -999,6 +999,21 @@ export class UIManager {
     statusLine.style.color = '#10b981'
     statusLine.textContent = 'Enabled filters'
     heading.appendChild(statusLine)
+
+    const totalCells = this.controller.currentCoordinates?.length || 0
+    const displayedCells = Array.isArray(this.controller.currentVisibleCells)
+      ? this.controller.currentVisibleCells.length
+      : totalCells
+    const cellsLine = document.createElement('div')
+    cellsLine.style.fontSize = '12px'
+    cellsLine.style.color = displayedCells < totalCells ? '#b45309' : '#6b7280'
+    cellsLine.style.fontWeight = displayedCells < totalCells ? '600' : '400'
+    cellsLine.textContent = `${formatNumberWithDelimiter(displayedCells)} / ${formatNumberWithDelimiter(totalCells)} cells displayed`
+    if (totalCells > 0) {
+      const percentage = ((displayedCells / totalCells) * 100).toFixed(1)
+      cellsLine.title = `${formatNumberWithDelimiter(displayedCells)} of ${formatNumberWithDelimiter(totalCells)} cells (${percentage}%)`
+    }
+    heading.appendChild(cellsLine)
     
     if (!filtersEnabled && definedCount > 0) {
       const infoLine = document.createElement('div')

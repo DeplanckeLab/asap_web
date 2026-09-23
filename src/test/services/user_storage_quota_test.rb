@@ -88,4 +88,43 @@ class UserStorageQuotaTest < TestBaseWithoutFixtures
     @user.projects.update_all(disk_size: 95.gigabytes)
     assert_equal :critical, UserStorageQuota.status_for(@user.reload).usage_level
   end
+
+  test 'largest_projects returns owned projects ordered by size descending' do
+    create_test_project!(
+      name: 'Small',
+      key: "qs#{SecureRandom.hex(3)}",
+      user_id: @user.id,
+      disk_size: 2.gigabytes,
+      archive_status_id: 1
+    )
+    create_test_project!(
+      name: 'Large',
+      key: "ql#{SecureRandom.hex(3)}",
+      user_id: @user.id,
+      disk_size: 40.gigabytes,
+      archive_status_id: 1
+    )
+    create_test_project!(
+      name: 'Archived big',
+      key: "qa#{SecureRandom.hex(3)}",
+      user_id: @user.id,
+      disk_size: 1.gigabyte,
+      disk_size_archived: 25.gigabytes,
+      archive_status_id: 3
+    )
+    create_test_project!(
+      name: 'Empty',
+      key: "qe#{SecureRandom.hex(3)}",
+      user_id: @user.id,
+      disk_size: 0,
+      archive_status_id: 1
+    )
+
+    status = UserStorageQuota.status_for(@user)
+    names = status.largest_projects.map(&:display_name)
+
+    assert_equal ['Large', 'Archived big', 'Small'], names
+    assert_equal 40.gigabytes, status.largest_projects.first.bytes
+    assert_equal 67.gigabytes, status.used_bytes
+  end
 end

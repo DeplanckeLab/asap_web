@@ -411,6 +411,12 @@ export class DataManager {
   async loadSingleMetadataVector(metadataId, options = {}) {
     // console.log(`=== LOADING SINGLE METADATA VECTOR: ${metadataId} ===`) */
     // console.log(`Call stack:`, new Error().stack) */
+
+    // Gene expression keys are not Annot rows; route through GeneManager / gene_expression.
+    const geneManager = this.controller?.geneManager
+    if (geneManager?.isGeneExpressionMetadataId?.(metadataId)) {
+      return this.loadGeneExpressionMetadataVector(metadataId, options)
+    }
     
     // Check if already loaded in memory
     if (this.controller.loadedMetadataVectors[metadataId]) {
@@ -584,6 +590,58 @@ export class DataManager {
       throw error
     } finally {
       // Always clean up loading state
+      this.controller.loadingMetadataVectors.delete(metadataId)
+    }
+  }
+
+  async loadGeneExpressionMetadataVector(metadataId, options = {}) {
+    const geneManager = this.controller?.geneManager
+    if (!geneManager?.ensureGeneExpressionForMetadataId) {
+      throw new Error(`GeneManager unavailable for gene metadata id: ${metadataId}`)
+    }
+
+    if (this.controller.loadedMetadataVectors[metadataId]?.values?.length > 0) {
+      return this.ensureMetadataVectorValues(metadataId, this.controller.loadedMetadataVectors[metadataId])
+    }
+
+    if (this.controller.loadingMetadataVectors.has(metadataId)) {
+      const waitStart = Date.now()
+      while (this.controller.loadingMetadataVectors.has(metadataId)) {
+        const inMemoryVector = this.controller.loadedMetadataVectors[metadataId]
+        if (inMemoryVector?.values?.length > 0) {
+          this.perfLog('gene_metadata_wait_short_circuit', {
+            metadataId: metadataId ? String(metadataId) : null,
+            waitMs: Date.now() - waitStart
+          })
+          return this.ensureMetadataVectorValues(metadataId, inMemoryVector)
+        }
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      if (this.controller.loadedMetadataVectors[metadataId]?.values?.length > 0) {
+        return this.ensureMetadataVectorValues(metadataId, this.controller.loadedMetadataVectors[metadataId])
+      }
+    }
+
+    this.controller.loadingMetadataVectors.add(metadataId)
+    const parsed = geneManager.parseGeneExpressionMetadataId?.(metadataId)
+    if (parsed?.stableId && this.controller.uiManager?.updateGeneStatusIcon) {
+      this.controller.uiManager.updateGeneStatusIcon(parsed.stableId, 'downloading')
+    }
+
+    try {
+      const vectorData = await geneManager.ensureGeneExpressionForMetadataId(metadataId, options)
+      if (!vectorData?.values?.length) {
+        throw new Error(`No metadata vector found for ID: ${metadataId}`)
+      }
+      this.bumpMemoryLoadCounter(metadataId, 'network')
+      return this.ensureMetadataVectorValues(metadataId, vectorData)
+    } catch (error) {
+      console.error(`Failed to load gene expression metadata vector ${metadataId}:`, error)
+      if (parsed?.stableId && this.controller.uiManager?.updateGeneStatusIcon) {
+        this.controller.uiManager.updateGeneStatusIcon(parsed.stableId, 'error', error?.message)
+      }
+      throw error
+    } finally {
       this.controller.loadingMetadataVectors.delete(metadataId)
     }
   }
@@ -2583,24 +2641,33 @@ export class DataManager {
     return details
   }
 
-  // Get a summary of current filtering constraints
+  // Get a summary of current filtering constraints (only those that actually constrain cells).
+  // selectedCategories holds checkbox state (often "all selected" = no filter); do not list those.
   getFilteringSummary() {
-    if (!this.controller.selectedCategories || Object.keys(this.controller.selectedCategories).length === 0) {
+    if (this.controller.globalFiltersEnabled === false) {
       return null
     }
 
-    const summary = []
-    Object.keys(this.controller.selectedCategories).forEach(metadataId => {
-      const selections = this.controller.selectedCategories[metadataId]
-      if (selections && selections.size > 0) {
-        const metadataVector = this.getMetadataVectorById(metadataId)
-        if (metadataVector) {
-          const metadataName = metadataVector.name
-          const selectedCategories = Array.from(selections)
-          summary.push(`${metadataName}: ${selectedCategories.length} categories`)
+    const details = this.getFilterDetails()
+    if (!details || details.length === 0) {
+      return null
+    }
+
+    const summary = details.map((filter) => {
+      if (filter.type === 'categorical') {
+        if (filter.isEmptySelection) {
+          return `${filter.name}: none selected`
         }
+        const total = filter.totalCount > 0 ? `/${filter.totalCount}` : ''
+        return `${filter.name}: ${filter.selectedCount}${total} categories`
       }
-    })
+
+      if (filter.type === 'continuous' && filter.range) {
+        return `${filter.name}: ${filter.range.formattedMin} – ${filter.range.formattedMax}`
+      }
+
+      return filter.name
+    }).filter(Boolean)
 
     return summary.length > 0 ? summary.join(' • ') : null
   }

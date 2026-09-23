@@ -799,7 +799,7 @@ export class MemoryManager {
         // console.log('💾 ⚠️ Loom mismatch, skipping cached expression', { geneId, key, storedLoom, currentLoom })
         continue
       }
-      if (expectedAnnotId !== null && annotId !== expectedAnnotId) {
+      if (expectedAnnotId !== null && String(annotId ?? '') !== String(expectedAnnotId)) {
         // console.log('💾 ⚠️ Annot mismatch, skipping cached expression', { geneId, key, annotId, expectedAnnotId })
         continue
       }

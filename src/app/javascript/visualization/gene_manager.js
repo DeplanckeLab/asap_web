@@ -123,6 +123,234 @@ export class GeneManager {
     return { baseKey, layerKey }
   }
 
+  // True for gene expression keys (gene_{stableId}[_annotId]), not gene_set / gene_set_item.
+  isGeneExpressionMetadataId(metadataId) {
+    const id = String(metadataId || '').trim()
+    return id.startsWith('gene_') && !id.startsWith('gene_set')
+  }
+
+  // Parse gene_{stableId} or gene_{stableId}_{annotId}. Returns null for non-gene keys.
+  parseGeneExpressionMetadataId(metadataId) {
+    const id = String(metadataId || '').trim()
+    if (!this.isGeneExpressionMetadataId(id)) return null
+    const rest = id.slice('gene_'.length)
+    if (!rest) return null
+    const separatorIndex = rest.indexOf('_')
+    if (separatorIndex < 0) {
+      return {
+        stableId: rest,
+        annotId: null,
+        baseKey: id,
+        layerKey: id
+      }
+    }
+    const stableId = rest.slice(0, separatorIndex)
+    const annotId = rest.slice(separatorIndex + 1)
+    if (!stableId) return null
+    return {
+      stableId,
+      annotId: annotId || null,
+      baseKey: `gene_${stableId}`,
+      layerKey: id
+    }
+  }
+
+  resolveGeneSymbolForStableId(stableId, fallbackSymbol = null) {
+    const sid = String(stableId || '').trim()
+    if (!sid) return fallbackSymbol || null
+    if (fallbackSymbol) return String(fallbackSymbol)
+
+    const fromTags = (this.geneTags || []).find((gene) => String(gene?.stableId) === sid)
+    if (fromTags?.symbol) return String(fromTags.symbol)
+
+    const fromMemory = this.geneExpressionData?.[sid] || this.geneExpressionData?.[parseInt(sid, 10)]
+    if (fromMemory?.symbol) return String(fromMemory.symbol)
+
+    const geneDiv = document.querySelector(`[data-gene-item="${sid}"]`)
+    const fromDom = geneDiv?.dataset?.geneName ||
+      geneDiv?.querySelector('[data-gene-name]')?.dataset?.geneName ||
+      geneDiv?.querySelector('[data-metadata-name]')?.dataset?.metadataName
+    if (fromDom) return String(fromDom)
+
+    return sid
+  }
+
+  cacheGeneExpressionAsMetadataVector({
+    metadataId,
+    baseMetadataId,
+    symbol,
+    values,
+    geneIndex = null,
+    stableId = null,
+    annotId = null
+  }) {
+    if (!this.controller) return null
+    if (!this.controller.loadedMetadataVectors) {
+      this.controller.loadedMetadataVectors = {}
+    }
+    const minVal = this.controller.dataManager.safeMin(values)
+    const maxVal = this.controller.dataManager.safeMax(values)
+    const vector = {
+      id: metadataId,
+      name: symbol,
+      display_name: symbol,
+      data_type: 'NUMERIC',
+      values,
+      compression_info: {
+        min_val: minVal,
+        max_val: maxVal,
+        data_type: 'NUMERIC'
+      }
+    }
+    this.controller.loadedMetadataVectors[metadataId] = vector
+    if (baseMetadataId && baseMetadataId !== metadataId) {
+      this.controller.loadedMetadataVectors[baseMetadataId] = vector
+    }
+
+    const stableIdKey = String(stableId || metadataId.replace(/^gene_/, '').split('_')[0])
+    const expressionData = {
+      values,
+      stats: this.calculateExpressionStats(values),
+      geneIndex,
+      stableId: stableId != null ? stableId : stableIdKey,
+      symbol,
+      annotId,
+      metadataId,
+      baseMetadataId: baseMetadataId || this.getBaseGeneMetadataId(stableIdKey)
+    }
+    this.geneExpressionData[stableIdKey] = expressionData
+    const geneIdNum = parseInt(stableIdKey, 10)
+    if (!Number.isNaN(geneIdNum)) {
+      this.geneExpressionData[geneIdNum] = expressionData
+    }
+    return vector
+  }
+
+  // Load gene expression into loadedMetadataVectors for filter/coloring restore.
+  // Does not depend on the gene card being present in the DOM.
+  async ensureGeneExpressionForMetadataId(metadataId, options = {}) {
+    const parsed = this.parseGeneExpressionMetadataId(metadataId)
+    if (!parsed?.stableId) {
+      throw new Error(`Not a gene expression metadata id: ${metadataId}`)
+    }
+
+    const requestedKey = String(metadataId)
+    const existing =
+      this.controller?.loadedMetadataVectors?.[requestedKey] ||
+      this.controller?.loadedMetadataVectors?.[parsed.layerKey] ||
+      this.controller?.loadedMetadataVectors?.[parsed.baseKey]
+    if (existing?.values && existing.values.length > 0) {
+      if (!this.controller.loadedMetadataVectors[requestedKey]) {
+        this.controller.loadedMetadataVectors[requestedKey] = { ...existing, id: requestedKey }
+      }
+      return this.controller.loadedMetadataVectors[requestedKey]
+    }
+
+    const annotId = parsed.annotId != null && parsed.annotId !== ''
+      ? String(parsed.annotId)
+      : (this.currentMatrixAnnotId != null && this.currentMatrixAnnotId !== ''
+        ? String(this.currentMatrixAnnotId)
+        : null)
+    const { baseKey, layerKey } = this.getGeneMetadataKeys(parsed.stableId, annotId)
+    const symbol = this.resolveGeneSymbolForStableId(parsed.stableId, options.symbol)
+
+    if (this.controller?.memoryManager) {
+      const dbData = await this.controller.memoryManager.loadGeneExpressionFromIndexedDB(parsed.stableId, {
+        metadataKey: layerKey,
+        baseKey,
+        expectedAnnotId: annotId
+      })
+      if (dbData?.values?.length > 0) {
+        const vector = this.cacheGeneExpressionAsMetadataVector({
+          metadataId: requestedKey,
+          baseMetadataId: baseKey,
+          symbol: dbData.symbol || symbol,
+          values: dbData.values,
+          geneIndex: dbData.geneIndex,
+          stableId: dbData.stableId || parsed.stableId,
+          annotId: dbData.annotId ?? annotId
+        })
+        if (this.controller.uiManager?.updateGeneStatusIcon) {
+          this.controller.uiManager.updateGeneStatusIcon(parsed.stableId, 'in-memory')
+        }
+        return vector
+      }
+    }
+
+    let loomFile = options.loomFile || null
+    if (!loomFile) {
+      try {
+        loomFile = this.controller?.getCurrentLoomFileForRequest?.() ||
+          this.controller?.currentLoomFile ||
+          'parsing/output.loom'
+      } catch (e) {
+        loomFile = this.controller?.currentLoomFile || 'parsing/output.loom'
+      }
+    }
+
+    let url = `/projects/${encodeURIComponent(this.projectIdentifier)}/gene_expression.json?stable_id=${encodeURIComponent(parsed.stableId)}&loom_file=${encodeURIComponent(loomFile)}`
+    if (annotId) {
+      url += `&annot_id=${encodeURIComponent(annotId)}`
+    } else if (this.currentMatrixLayer && this.currentMatrixLayer !== '/matrix') {
+      url += `&layer=${encodeURIComponent(this.currentMatrixLayer)}`
+    }
+
+    const response = await fetch(url)
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }))
+      const errorMessage = errorData.message
+        ? `${errorData.error}: ${errorData.message}`
+        : (errorData.error || `HTTP ${response.status}`)
+      throw new Error(errorMessage)
+    }
+
+    const data = await response.json()
+    if (data.error) {
+      const errorMessage = data.message ? `${data.error}: ${data.message}` : data.error
+      throw new Error(errorMessage)
+    }
+    if (!data.expression_values || data.expression_values.length === 0) {
+      throw new Error(`No expression values returned for gene ${symbol}`)
+    }
+
+    const vector = this.cacheGeneExpressionAsMetadataVector({
+      metadataId: requestedKey,
+      baseMetadataId: baseKey,
+      symbol,
+      values: data.expression_values,
+      geneIndex: data.gene_index,
+      stableId: data.stable_id || parsed.stableId,
+      annotId
+    })
+
+    if (this.controller?.memoryManager) {
+      this.controller.memoryManager.storeGeneExpressionInIndexedDB(layerKey, parsed.stableId, {
+        values: data.expression_values,
+        stats: this.calculateExpressionStats(data.expression_values),
+        geneIndex: data.gene_index,
+        stableId: data.stable_id || parsed.stableId,
+        symbol,
+        annotId,
+        metadataId: layerKey,
+        baseMetadataId: baseKey
+      }).catch((error) => {
+        console.warn('Failed to store gene expression in IndexedDB:', error)
+      })
+    }
+
+    if (this.controller?.uiManager?.updateGeneStatusIcon) {
+      this.controller.uiManager.updateGeneStatusIcon(parsed.stableId, 'in-memory')
+    }
+    if (this.controller?.initializeInlineRangeSlider) {
+      this.controller.initializeInlineRangeSlider(requestedKey, data.expression_values, vector)
+      if (baseKey !== requestedKey && this.controller.inlineRangeSliderData) {
+        this.controller.inlineRangeSliderData[baseKey] = this.controller.inlineRangeSliderData[requestedKey]
+      }
+    }
+
+    return vector
+  }
+
   // Update gene row DOM ids before initializeInlineRangeSlider so findRangeSliderElementByMetadataId finds the slider.
   updateGeneCardRangeSliderMetadataIds(stableId, baseMetadataId, layerMetadataId) {
     const sid = String(stableId)
@@ -943,6 +1171,7 @@ export class GeneManager {
 
     const matchesGeneMetadataId = (metadataId) => {
       const id = String(metadataId || '')
+      if (!this.isGeneExpressionMetadataId(id)) return false
       return normalizedIds.some((geneId) => id === `gene_${geneId}` || id.startsWith(`gene_${geneId}_`))
     }
 
@@ -972,6 +1201,21 @@ export class GeneManager {
       })
     }
 
+    // Drop in-memory expression caches for removed genes (string and numeric keys).
+    normalizedIds.forEach((geneId) => {
+      if (this.geneExpressionData && typeof this.geneExpressionData === 'object') {
+        if (Object.prototype.hasOwnProperty.call(this.geneExpressionData, geneId)) {
+          delete this.geneExpressionData[geneId]
+          stateChanged = true
+        }
+        const geneIdNum = parseInt(geneId, 10)
+        if (!Number.isNaN(geneIdNum) && Object.prototype.hasOwnProperty.call(this.geneExpressionData, geneIdNum)) {
+          delete this.geneExpressionData[geneIdNum]
+          stateChanged = true
+        }
+      }
+    })
+
     const currentColoringId = String(controller.currentMetadataVector?.id || controller.currentMetadataId || '')
     if (matchesGeneMetadataId(currentColoringId) && typeof controller.clearMetadataColoring === 'function') {
       if (typeof controller.resetAllWaterDropButtons === 'function') {
@@ -985,6 +1229,7 @@ export class GeneManager {
     }
 
     if (stateChanged) {
+      controller.markCheckpointMatchDirty?.()
       if (controller.uiManager && typeof controller.uiManager.updateGlobalFilterSummary === 'function') {
         controller.uiManager.updateGlobalFilterSummary()
       }
@@ -1003,21 +1248,17 @@ export class GeneManager {
     const normalizedNextGeneIds = new Set(
       Array.isArray(nextGeneStableIds) ? nextGeneStableIds.map((id) => String(id || '').trim()).filter((id) => id.length > 0) : []
     )
-    const extractGeneIdFromMetadataId = (metadataId) => {
-      const match = String(metadataId || '').match(/^gene_([^_]+)(?:_|$)/)
-      return match ? String(match[1]) : null
-    }
     const shouldKeepMetadataId = (metadataId) => {
-      const geneId = extractGeneIdFromMetadataId(metadataId)
-      if (!geneId) return false
-      return normalizedNextGeneIds.has(geneId)
+      const parsed = this.parseGeneExpressionMetadataId(metadataId)
+      if (!parsed?.stableId) return false
+      return normalizedNextGeneIds.has(String(parsed.stableId))
     }
 
     // Remove active gene-expression ranges for genes not in the new set.
     let filtersChanged = false
     if (controller.selectedRanges && typeof controller.selectedRanges === 'object') {
       Object.keys(controller.selectedRanges).forEach((metadataId) => {
-        if (String(metadataId).startsWith('gene_') && !shouldKeepMetadataId(metadataId)) {
+        if (this.isGeneExpressionMetadataId(metadataId) && !shouldKeepMetadataId(metadataId)) {
           delete controller.selectedRanges[metadataId]
           filtersChanged = true
         }
@@ -1028,7 +1269,7 @@ export class GeneManager {
     if (controller.disabledFilters instanceof Set) {
       const toDelete = []
       controller.disabledFilters.forEach((metadataId) => {
-        if (String(metadataId).startsWith('gene_') && !shouldKeepMetadataId(metadataId)) {
+        if (this.isGeneExpressionMetadataId(metadataId) && !shouldKeepMetadataId(metadataId)) {
           toDelete.push(metadataId)
         }
       })
@@ -1041,7 +1282,7 @@ export class GeneManager {
     // Drop saved ranges only for removed genes.
     if (controller.savedRanges && typeof controller.savedRanges === 'object') {
       Object.keys(controller.savedRanges).forEach((metadataId) => {
-        if (String(metadataId).startsWith('gene_') && !shouldKeepMetadataId(metadataId)) {
+        if (this.isGeneExpressionMetadataId(metadataId) && !shouldKeepMetadataId(metadataId)) {
           delete controller.savedRanges[metadataId]
           filtersChanged = true
         }
@@ -1050,7 +1291,7 @@ export class GeneManager {
 
     // If coloring is currently gene-based and that gene is removed, revert to no coloring.
     const currentColoringId = String(controller.currentMetadataVector?.id || controller.currentMetadataId || '')
-    if (currentColoringId.startsWith('gene_') && !shouldKeepMetadataId(currentColoringId) && typeof controller.clearMetadataColoring === 'function') {
+    if (this.isGeneExpressionMetadataId(currentColoringId) && !shouldKeepMetadataId(currentColoringId) && typeof controller.clearMetadataColoring === 'function') {
       if (typeof controller.resetAllWaterDropButtons === 'function') {
         controller.resetAllWaterDropButtons()
       }
@@ -1062,12 +1303,27 @@ export class GeneManager {
 
     // Keep global filter summary/selection state in sync after removing stale filters.
     if (filtersChanged) {
+      controller.markCheckpointMatchDirty?.()
       if (controller.uiManager && typeof controller.uiManager.updateGlobalFilterSummary === 'function') {
         controller.uiManager.updateGlobalFilterSummary()
       }
       if (controller.dataManager && typeof controller.dataManager.updateCellFiltering === 'function') {
         controller.dataManager.updateCellFiltering(true)
       }
+    }
+  }
+
+  // After gene list changes, force a filter refresh so ghost gene filters cannot linger
+  // when state was already partially cleared (or a pending slider write races removal).
+  refreshFilteringAfterGeneListChange() {
+    const controller = this.controller
+    if (!controller) return
+    controller.markCheckpointMatchDirty?.()
+    if (controller.uiManager && typeof controller.uiManager.updateGlobalFilterSummary === 'function') {
+      controller.uiManager.updateGlobalFilterSummary()
+    }
+    if (controller.dataManager && typeof controller.dataManager.updateCellFiltering === 'function') {
+      controller.dataManager.updateCellFiltering(true)
     }
   }
 
@@ -1811,40 +2067,26 @@ export class GeneManager {
     if (index !== -1) {
       this.beginGeneListHistoryBatch()
       try {
-        const metadataKeys = this.getGeneMetadataKeys(stableId, this.currentMatrixAnnotId)
-        const metadataIds = [metadataKeys.baseKey, metadataKeys.layerKey]
-
-        metadataIds.forEach(id => {
-          if (!id) return
-          if (this.controller?.loadedMetadataVectors && this.controller.loadedMetadataVectors[id]) {
-            delete this.controller.loadedMetadataVectors[id]
-          }
-          if (this.controller?.inlineRangeSliderData && this.controller.inlineRangeSliderData[id]) {
-            delete this.controller.inlineRangeSliderData[id]
-          }
-          if (this.controller?.selectedRanges && this.controller.selectedRanges[id]) {
-            delete this.controller.selectedRanges[id]
-          }
-        })
-        
         this.geneTags.splice(index, 1)
-        this.clearGeneMetadataStateForStableIds([stableId])
-        const remainingGeneIds = this.geneTags.map((gene) => String(gene.stableId))
-        this.syncGeneExpressionFilterStateForGenes(remainingGeneIds)
-        // Update badge when gene is removed
-        this.updateGeneCountBadge()
-        // Remove the gene div from the UI
+
+        // Disconnect the gene card (and its range slider) before clearing filter state so a
+        // pending slider RAF cannot rewrite selectedRanges after cleanup.
         const geneDiv = document.getElementById(`gene-result-${stableId}`)
         if (geneDiv) {
           geneDiv.remove()
         }
-        // If no genes left, clear the results
         if (this.geneTags.length === 0) {
           const resultsDiv = document.getElementById('gene-expression-results')
           if (resultsDiv) {
             resultsDiv.innerHTML = ''
           }
         }
+
+        this.clearGeneMetadataStateForStableIds([stableId])
+        const remainingGeneIds = this.geneTags.map((gene) => String(gene.stableId))
+        this.syncGeneExpressionFilterStateForGenes(remainingGeneIds)
+        this.refreshFilteringAfterGeneListChange()
+        this.updateGeneCountBadge()
       } finally {
         this.endGeneListHistoryBatch()
       }
@@ -1857,32 +2099,12 @@ export class GeneManager {
     this.beginGeneListHistoryBatch()
     try {
       const stableIdsToClear = this.geneTags.map((gene) => String(gene.stableId || '').trim()).filter((id) => id.length > 0)
-      const metadataIdsToClear = new Set()
-      stableIdsToClear.forEach((stableId) => {
-        const metadataKeys = this.getGeneMetadataKeys(stableId, this.currentMatrixAnnotId)
-        if (metadataKeys.baseKey) metadataIdsToClear.add(metadataKeys.baseKey)
-        if (metadataKeys.layerKey) metadataIdsToClear.add(metadataKeys.layerKey)
-      })
-
-      metadataIdsToClear.forEach((metadataId) => {
-        if (this.controller?.loadedMetadataVectors && this.controller.loadedMetadataVectors[metadataId]) {
-          delete this.controller.loadedMetadataVectors[metadataId]
-        }
-        if (this.controller?.inlineRangeSliderData && this.controller.inlineRangeSliderData[metadataId]) {
-          delete this.controller.inlineRangeSliderData[metadataId]
-        }
-        if (this.controller?.selectedRanges && this.controller.selectedRanges[metadataId]) {
-          delete this.controller.selectedRanges[metadataId]
-        }
-      })
 
       this.geneTags = []
       this.notFoundQueries = []
       this.genePanelSavedKey = ''
-      this.clearGeneMetadataStateForStableIds(stableIdsToClear)
-      this.syncGeneExpressionFilterStateForGenes([])
-      this.updateGeneCountBadge()
 
+      // Remove gene cards first so range sliders disconnect before filter state is cleared.
       const resultsDiv = document.getElementById('gene-expression-results')
       if (resultsDiv) {
         while (resultsDiv.firstChild) {
@@ -1894,6 +2116,11 @@ export class GeneManager {
       if (summaryDiv) {
         summaryDiv.style.display = 'none'
       }
+
+      this.clearGeneMetadataStateForStableIds(stableIdsToClear)
+      this.syncGeneExpressionFilterStateForGenes([])
+      this.refreshFilteringAfterGeneListChange()
+      this.updateGeneCountBadge()
     } finally {
       this.endGeneListHistoryBatch()
     }

@@ -25,6 +25,7 @@ export default class extends Controller {
     // })
     
     // Initialize drag state
+    this.isDisconnected = false
     this.isDragging = false
     this.dragHandle = null
     this.dragStartX = 0
@@ -99,6 +100,7 @@ export default class extends Controller {
   }
 
   disconnect() {
+    this.isDisconnected = true
     // Clean up event listeners
     this.stopDrag()
     if (this.pendingDensityPlotTimeout) {
@@ -360,6 +362,7 @@ export default class extends Controller {
       requestAnimationFrame(() => {
         this.dragUpdateScheduled = false
         // console.log('🚀 [PERF] Scheduled expensive operations for metadata:', this.metadataIdValue)
+        if (this.isDisconnected || !this.element?.isConnected) return
         this.updateMainPlot()
         this.drawDensityPlot()
       })
@@ -766,6 +769,7 @@ export default class extends Controller {
 
   // Update the main plot with the new range (throttled for performance)
   updateMainPlot() {
+    if (this.isDisconnected || !this.element?.isConnected) return
     if (!this.visualizationController) return
     
     const startTime = performance.now()
@@ -780,6 +784,7 @@ export default class extends Controller {
           requestAnimationFrame(() => {
             this.plotUpdateScheduled = false
             // console.log('🚀 [PERF] Scheduled plot update for metadata:', this.metadataIdValue)
+            if (this.isDisconnected || !this.element?.isConnected) return
             this.performPlotUpdate()
           })
         }
@@ -798,6 +803,7 @@ export default class extends Controller {
   
   // Perform the actual plot update (separated for throttling)
   performPlotUpdate() {
+    if (this.isDisconnected || !this.element?.isConnected) return
     if (!this.visualizationController || !this.dataManager) return
     
     const isGene = this.metadataIdValue && this.metadataIdValue.startsWith('gene_')
@@ -805,6 +811,15 @@ export default class extends Controller {
     
     const startTime = performance.now()
     // console.log(`${logPrefix} performPlotUpdate started for metadata:`, this.metadataIdValue)
+
+    // Gene card may have been removed from the list; never re-apply its expression filter.
+    if (isGene) {
+      const geneIdToken = String(this.metadataIdValue).slice('gene_'.length)
+      const stableGeneId = geneIdToken.split('_')[0]
+      const geneStillListed = Array.isArray(this.visualizationController.geneManager?.geneTags) &&
+        this.visualizationController.geneManager.geneTags.some((gene) => String(gene.stableId) === String(stableGeneId))
+      if (!geneStillListed) return
+    }
 
     const activeColoringId = this.visualizationController.currentMetadataId
       ? String(this.visualizationController.currentMetadataId)

@@ -7,6 +7,13 @@
 class UserStorageQuota
   QUOTA_BYTES = Integer(ENV.fetch('USER_STORAGE_QUOTA_BYTES', 100.gigabytes.to_s))
   MIN_PROJECTS = Integer(ENV.fetch('USER_STORAGE_QUOTA_MIN_PROJECTS', '1'))
+  TOP_PROJECTS_LIMIT = 5
+
+  ProjectSize = Struct.new(:id, :key, :name, :bytes, keyword_init: true) do
+    def display_name
+      name.presence || key.presence || "Project #{id}"
+    end
+  end
 
   Result = Struct.new(
     :allowed,
@@ -15,6 +22,7 @@ class UserStorageQuota
     :quota_bytes,
     :additional_bytes,
     :project_count,
+    :largest_projects,
     keyword_init: true
   ) do
     def allowed?
@@ -42,6 +50,10 @@ class UserStorageQuota
       return :warn if percent >= 60
 
       :ok
+    end
+
+    def largest_projects
+      self[:largest_projects] || []
     end
   end
 
@@ -75,16 +87,7 @@ class UserStorageQuota
     end
 
     def used_bytes(user)
-      return 0 unless user
-
-      user.projects.pluck(:archive_status_id, :disk_size, :disk_size_archived).sum do |archive_status_id, disk_size, disk_size_archived|
-        if archive_status_id.to_i == 3
-          disk_size_archived.to_i
-        else
-          local = disk_size.to_i
-          local.positive? ? local : disk_size_archived.to_i
-        end
-      end
+      project_sizes(user).sum(&:bytes)
     end
 
     def project_count(user)
@@ -93,15 +96,27 @@ class UserStorageQuota
       user.projects.count
     end
 
+    # Owned projects ordered by quota-counted size (largest first).
+    def largest_projects(user, limit: TOP_PROJECTS_LIMIT)
+      project_sizes(user)
+        .sort_by { |entry| -entry.bytes }
+        .first(limit)
+        .reject { |entry| entry.bytes <= 0 }
+    end
+
     def status_for(user)
-      used = used_bytes(user)
+      sizes = project_sizes(user)
+      used = sizes.sum(&:bytes)
       Result.new(
         allowed: true,
         reason: nil,
         used_bytes: used,
         quota_bytes: quota_bytes,
         additional_bytes: 0,
-        project_count: project_count(user)
+        project_count: sizes.size,
+        largest_projects: sizes.sort_by { |entry| -entry.bytes }
+                                .first(TOP_PROJECTS_LIMIT)
+                                .reject { |entry| entry.bytes <= 0 }
       )
     end
 
@@ -185,6 +200,28 @@ class UserStorageQuota
 
     private
 
+    def project_sizes(user)
+      return [] unless user
+
+      user.projects.pluck(:id, :key, :name, :archive_status_id, :disk_size, :disk_size_archived).map do |id, key, name, archive_status_id, disk_size, disk_size_archived|
+        ProjectSize.new(
+          id: id,
+          key: key,
+          name: name,
+          bytes: bytes_from_columns(archive_status_id, disk_size, disk_size_archived)
+        )
+      end
+    end
+
+    def bytes_from_columns(archive_status_id, disk_size, disk_size_archived)
+      if archive_status_id.to_i == 3
+        disk_size_archived.to_i
+      else
+        local = disk_size.to_i
+        local.positive? ? local : disk_size_archived.to_i
+      end
+    end
+
     def deny(used:, quota:, additional:, count:, reason:)
       Result.new(
         allowed: false,
@@ -192,7 +229,8 @@ class UserStorageQuota
         used_bytes: used,
         quota_bytes: quota,
         additional_bytes: additional,
-        project_count: count
+        project_count: count,
+        largest_projects: []
       )
     end
   end

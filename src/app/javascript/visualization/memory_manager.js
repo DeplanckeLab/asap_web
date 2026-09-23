@@ -435,13 +435,28 @@ export class MemoryManager {
             
             // Handle both null values (empty strings) as equivalent
             const storedLoomNormalized = request.result.loomFile === '' ? null : request.result.loomFile
-            if (storedLoomNormalized === currentLoom) {
-              // console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk storage)`)
-              resolve(request.result)
-            } else {
+            if (storedLoomNormalized !== currentLoom) {
               // console.log(`💾 ⚠️ Loom file mismatch, ignoring cached data for ${metadataId}`)
               resolve(null) // Wrong loom file
+              return
             }
+
+            // After forcing DISCRETE -> NUMERIC (or the reverse) in the data view, the
+            // left-panel type in the HTML changes but IndexedDB can still hold the old
+            // compression payload. Reject that stale entry so we refetch.
+            const dataManager = this.controller.dataManager
+            if (
+              dataManager &&
+              typeof dataManager.isCachedMetadataCompatible === 'function' &&
+              !dataManager.isCachedMetadataCompatible(metadataId, request.result)
+            ) {
+              resolve(null)
+              this.clearMetadataFromIndexedDB(metadataId).catch(() => {})
+              return
+            }
+
+            // console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk storage)`)
+            resolve(request.result)
           } else {
             // console.log(`💾 Metadata ${metadataId} not found in IndexedDB`)
             
@@ -581,6 +596,32 @@ export class MemoryManager {
   }
 
   // Clear all IndexedDB cache (useful for debugging or when data is corrupted)
+  async clearMetadataFromIndexedDB(metadataId) {
+    if (!this.controller.db) return false
+
+    try {
+      const transaction = this.controller.db.transaction(['metadata'], 'readwrite')
+      const objectStore = transaction.objectStore('metadata')
+      const numericId = typeof metadataId === 'string' ? parseInt(metadataId, 10) : metadataId
+      const request = objectStore.delete(numericId)
+
+      return new Promise((resolve) => {
+        transaction.oncomplete = () => resolve(true)
+        transaction.onerror = () => {
+          console.error(`💾 Failed to clear metadata ${metadataId} from IndexedDB`)
+          resolve(false)
+        }
+        request.onerror = () => {
+          console.error(`💾 Failed to delete metadata ${metadataId} from IndexedDB:`, request.error)
+          resolve(false)
+        }
+      })
+    } catch (error) {
+      console.error(`💾 Error clearing metadata ${metadataId} from IndexedDB:`, error)
+      return false
+    }
+  }
+
   async clearIndexedDBCache() {
     if (!this.controller.db) {
       // console.log('💾 IndexedDB not available')

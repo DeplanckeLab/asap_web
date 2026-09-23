@@ -672,10 +672,21 @@
         script.remove()
       })
 
+      // Insert HTML first, then run inline scripts. Handlers that bind to nodes in
+      // the fetched HTML (e.g. DE gene-badge -> gene details popup) no-op if the
+      // DOM is still empty when the script runs.
       const finishInsert = () => {
-        // Insert HTML only after scripts/data are ready so Stimulus connects correctly
-        // (e.g. cell filtering needs Plotly + window.cellFilteringData first).
         controller.contentTarget.innerHTML = tempDiv.innerHTML
+
+        inlineScripts.forEach((scriptText, idx) => {
+          if (!scriptText || !String(scriptText).trim()) return
+          const script = document.createElement('script')
+          script.textContent = scriptText
+          document.head.appendChild(script)
+          document.head.removeChild(script)
+          console.log('[loadFormInRightPanel] Inline script executed:', idx)
+        })
+
         controller.showRightPanelContent()
 
         if (controller.hasLoadingStateTarget) {
@@ -699,7 +710,7 @@
         }
       }
       
-      // Load external scripts first, then execute inline scripts, then insert HTML
+      // Load external scripts first, then insert HTML and execute inline scripts
       const loadScripts = (index) => {
         if (index < externalScripts.length) {
           const src = externalScripts[index]
@@ -721,14 +732,6 @@
           }
           document.head.appendChild(script)
         } else {
-          // All external scripts loaded, now execute inline scripts
-          inlineScripts.forEach((scriptText, idx) => {
-            const script = document.createElement('script')
-            script.textContent = scriptText
-            document.head.appendChild(script)
-            document.head.removeChild(script) // Remove after execution
-            console.log('[loadFormInRightPanel] Inline script executed:', idx)
-          })
           finishInsert()
         }
       }
@@ -737,13 +740,6 @@
       if (externalScripts.length > 0) {
         loadScripts(0)
       } else {
-        // No external scripts, just execute inline scripts
-        inlineScripts.forEach((scriptText) => {
-          const script = document.createElement('script')
-          script.textContent = scriptText
-          document.head.appendChild(script)
-          document.head.removeChild(script)
-        })
         finishInsert()
       }
     })
@@ -873,8 +869,9 @@
         controller.showRightPanelContent()
         return
       }
-      // Update content with run — load scripts before inserting HTML so Stimulus
-      // controllers (e.g. cell-filtering QC plots) connect with deps ready.
+      // Update content with run — insert HTML first, then run inline scripts so
+      // DOM-binding handlers work. Stimulus connects on a microtask after this
+      // turn, so globals set by inline scripts (e.g. cellFilteringData) are ready.
       const tempDiv = document.createElement('div')
       tempDiv.innerHTML = html
       const externalScripts = []
@@ -890,6 +887,14 @@
 
       const finishRunInsert = () => {
         controller.contentTarget.innerHTML = tempDiv.innerHTML
+
+        inlineScripts.forEach((scriptText) => {
+          const script = document.createElement('script')
+          script.textContent = scriptText
+          document.head.appendChild(script)
+          document.head.removeChild(script)
+        })
+
         controller.showRightPanelContent()
 
         if (controller.hasLoadingStateTarget) {
@@ -927,12 +932,6 @@
           }
           document.head.appendChild(script)
         } else {
-          inlineScripts.forEach((scriptText) => {
-            const script = document.createElement('script')
-            script.textContent = scriptText
-            document.head.appendChild(script)
-            document.head.removeChild(script)
-          })
           finishRunInsert()
         }
       }
@@ -940,12 +939,6 @@
       if (externalScripts.length > 0) {
         loadScripts(0)
       } else {
-        inlineScripts.forEach((scriptText) => {
-          const script = document.createElement('script')
-          script.textContent = scriptText
-          document.head.appendChild(script)
-          document.head.removeChild(script)
-        })
         finishRunInsert()
       }
     })

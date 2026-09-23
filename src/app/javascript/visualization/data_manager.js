@@ -340,6 +340,74 @@ export class DataManager {
   }
 
   // Load a single metadata vector on demand
+  // Map annot data_type names to cache compatibility kinds.
+  // DISCRETE/STRING share discrete compression; NUMERIC uses continuous compression.
+  normalizeMetadataCacheKind(dataType) {
+    const t = String(dataType || '').toUpperCase()
+    if (t === 'NUMERIC' || t === 'CONTINUOUS') return 'NUMERIC'
+    if (t === 'DISCRETE' || t === 'CATEGORICAL' || t === 'STRING') return 'CATEGORICAL'
+    return t || null
+  }
+
+  // Declared type from the visualization left panel (authoritative after data-type edits).
+  getDeclaredMetadataDataType(metadataId, options = {}) {
+    if (options && options.expectedDataType) {
+      return String(options.expectedDataType).toUpperCase()
+    }
+    const id = String(metadataId == null ? '' : metadataId).trim()
+    if (!id) return null
+    const escaped = (typeof CSS !== 'undefined' && CSS.escape)
+      ? CSS.escape(id)
+      : id.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+    const button = document.querySelector(
+      `button[data-metadata-id="${escaped}"][data-metadata-type]`
+    )
+    const declared = button?.dataset?.metadataType || button?.getAttribute('data-metadata-type')
+    return declared ? String(declared).toUpperCase() : null
+  }
+
+  // True when cached vector encoding matches the type currently shown in the UI.
+  isCachedMetadataCompatible(metadataId, vectorData, options = {}) {
+    if (!vectorData) return false
+    const declaredType = this.getDeclaredMetadataDataType(metadataId, options)
+    if (!declaredType) return true
+
+    const declaredKind = this.normalizeMetadataCacheKind(declaredType)
+    const cachedKind = this.normalizeMetadataCacheKind(vectorData.data_type)
+    if (declaredKind && cachedKind && declaredKind !== cachedKind) {
+      return false
+    }
+
+    let compressionInfo = vectorData.compression_info
+    if (typeof compressionInfo === 'string') {
+      try {
+        compressionInfo = JSON.parse(compressionInfo)
+      } catch (e) {
+        compressionInfo = null
+      }
+    }
+    const compressionType = String(compressionInfo?.type || '').toLowerCase()
+    if (declaredKind === 'NUMERIC' && compressionType === 'discrete') return false
+    if (declaredKind === 'CATEGORICAL' && compressionType === 'continuous') return false
+
+    return true
+  }
+
+  async discardStaleMetadataCache(metadataId) {
+    const id = String(metadataId == null ? '' : metadataId).trim()
+    if (!id) return
+    if (this.controller.loadedMetadataVectors) {
+      delete this.controller.loadedMetadataVectors[id]
+      const numericKey = String(parseInt(id, 10))
+      if (numericKey !== id) {
+        delete this.controller.loadedMetadataVectors[numericKey]
+      }
+    }
+    if (this.controller.memoryManager?.clearMetadataFromIndexedDB) {
+      await this.controller.memoryManager.clearMetadataFromIndexedDB(id).catch(() => {})
+    }
+  }
+
   async loadSingleMetadataVector(metadataId, options = {}) {
     // console.log(`=== LOADING SINGLE METADATA VECTOR: ${metadataId} ===`) */
     // console.log(`Call stack:`, new Error().stack) */
@@ -348,13 +416,17 @@ export class DataManager {
     if (this.controller.loadedMetadataVectors[metadataId]) {
       // console.log(`💾 Metadata vector ${metadataId} already in memory`) */
       const cachedData = this.controller.loadedMetadataVectors[metadataId]
-      // console.log('Cached data:', cachedData) */
-      // console.log('Cached compressed_data:', cachedData.compressed_data) */
-      // console.log('Cached compression_info:', cachedData.compression_info) */
-      const enrichedData = this.ensureMetadataVectorValues(metadataId, cachedData)
-      // Update status icon to show it's in memory
-      this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
-      return enrichedData
+      if (!this.isCachedMetadataCompatible(metadataId, cachedData, options)) {
+        await this.discardStaleMetadataCache(metadataId)
+      } else {
+        // console.log('Cached data:', cachedData) */
+        // console.log('Cached compressed_data:', cachedData.compressed_data) */
+        // console.log('Cached compression_info:', cachedData.compression_info) */
+        const enrichedData = this.ensureMetadataVectorValues(metadataId, cachedData)
+        // Update status icon to show it's in memory
+        this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+        return enrichedData
+      }
     }
     
     // Try to load from IndexedDB (disk storage) first
@@ -367,20 +439,24 @@ export class DataManager {
       const indexDBDuration = (indexDBEnd - indexDBStart).toFixed(2)
       // console.log(`🔍 [DEBUG] loadMetadataFromIndexedDB completed for ${metadataId} in ${indexDBDuration}ms`) */
       if (diskData) {
-        // Silently load from disk (reduced logging)
-        // console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk) - saved bandwidth!`) */
-        
-        // Remove IndexedDB metadata fields before returning
-        const cleanData = { ...diskData }
-        delete cleanData.loomFile
-        delete cleanData.timestamp
-        
-        this.controller.loadedMetadataVectors[metadataId] = cleanData
-        this.bumpMemoryLoadCounter(metadataId, 'disk')
-        const enrichedData = this.ensureMetadataVectorValues(metadataId, cleanData)
-        // Update status icon to show it's in memory (loaded from disk)
-        this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
-        return enrichedData
+        if (!this.isCachedMetadataCompatible(metadataId, diskData, options)) {
+          await this.discardStaleMetadataCache(metadataId)
+        } else {
+          // Silently load from disk (reduced logging)
+          // console.log(`💾 ✅ Loaded metadata ${metadataId} from IndexedDB (disk) - saved bandwidth!`) */
+          
+          // Remove IndexedDB metadata fields before returning
+          const cleanData = { ...diskData }
+          delete cleanData.loomFile
+          delete cleanData.timestamp
+          
+          this.controller.loadedMetadataVectors[metadataId] = cleanData
+          this.bumpMemoryLoadCounter(metadataId, 'disk')
+          const enrichedData = this.ensureMetadataVectorValues(metadataId, cleanData)
+          // Update status icon to show it's in memory (loaded from disk)
+          this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+          return enrichedData
+        }
       }
     }
     
@@ -390,6 +466,10 @@ export class DataManager {
       while (this.controller.loadingMetadataVectors.has(metadataId)) {
         const inMemoryVector = this.controller.loadedMetadataVectors[metadataId]
         if (inMemoryVector) {
+          if (!this.isCachedMetadataCompatible(metadataId, inMemoryVector, options)) {
+            await this.discardStaleMetadataCache(metadataId)
+            break
+          }
           this.perfLog('metadata_wait_short_circuit', {
             metadataId: metadataId ? String(metadataId) : null,
             waitMs: Date.now() - waitStart
@@ -400,20 +480,28 @@ export class DataManager {
       }
 
       if (this.controller.loadedMetadataVectors[metadataId]) {
-        return this.ensureMetadataVectorValues(metadataId, this.controller.loadedMetadataVectors[metadataId])
+        const waitedVector = this.controller.loadedMetadataVectors[metadataId]
+        if (this.isCachedMetadataCompatible(metadataId, waitedVector, options)) {
+          return this.ensureMetadataVectorValues(metadataId, waitedVector)
+        }
+        await this.discardStaleMetadataCache(metadataId)
       }
 
       // Concurrent attempt finished without memory data; try disk once more, then fall through to network.
       const diskDataAfterWait = await this.controller.memoryManager.loadMetadataFromIndexedDB(metadataId)
       if (diskDataAfterWait) {
-        const cleanData = { ...diskDataAfterWait }
-        delete cleanData.loomFile
-        delete cleanData.timestamp
-        this.controller.loadedMetadataVectors[metadataId] = cleanData
-        this.bumpMemoryLoadCounter(metadataId, 'disk')
-        const enrichedData = this.ensureMetadataVectorValues(metadataId, cleanData)
-        this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
-        return enrichedData
+        if (!this.isCachedMetadataCompatible(metadataId, diskDataAfterWait, options)) {
+          await this.discardStaleMetadataCache(metadataId)
+        } else {
+          const cleanData = { ...diskDataAfterWait }
+          delete cleanData.loomFile
+          delete cleanData.timestamp
+          this.controller.loadedMetadataVectors[metadataId] = cleanData
+          this.bumpMemoryLoadCounter(metadataId, 'disk')
+          const enrichedData = this.ensureMetadataVectorValues(metadataId, cleanData)
+          this.controller.uiManager.updateMetadataStatusIcon(metadataId, 'in-memory')
+          return enrichedData
+        }
       }
     }
     

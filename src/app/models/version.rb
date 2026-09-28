@@ -1,6 +1,10 @@
 class Version < ApplicationRecord
   scope :activated, -> { where(activated: true) }
 
+  def self.latest_active
+    activated.order(id: :desc).first
+  end
+
   # Get the parsed env_json as a hash
   def env_data
     @env_data ||= (env_json.is_a?(Hash) ? env_json : JSON.parse(env_json.presence || '{}'))

@@ -499,17 +499,24 @@
             
             <% if clonable?(@project) %>
               <!-- Clone -->
+              <% clone_export_only = @project.older_than_latest_active_version? %>
+              <% clone_button_data = {
+                   controller: "clone-overlay",
+                   action: "click->clone-overlay#handleClick",
+                   clone_overlay_confirm_value: "Clone project \"#{@project.name.presence || @project.key}\"?"
+                 } %>
+              <% if clone_export_only %>
+                <% clone_button_data[:clone_overlay_export_only] = "true" %>
+                <% clone_button_data[:clone_overlay_looms_value] = @project.exportable_loom_filepaths.to_json %>
+                <% clone_button_data[:clone_overlay_export_url_value] = export_loom_to_new_project_project_path(@project) %>
+              <% end %>
               <%= button_to clone_project_path(@project), 
                   method: :post,
                   class: "flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100",
-                  data: {
-                    controller: "clone-overlay",
-                    action: "click->clone-overlay#handleClick",
-                    clone_overlay_confirm_value: "Clone project \"#{@project.name.presence || @project.key}\"?"
-                  },
+                  data: clone_button_data,
                   form: { data: { skip_visualization_leave_guard: "true" } } do %>
                 <i class="fas fa-clone text-lg mr-3 text-emerald-500"></i>
-                Clone
+                <%= clone_export_only ? 'Export to new project' : 'Clone' %>
               <% end %>
             <% end %>
 
@@ -641,15 +648,22 @@
               class: "p-2 rounded-lg hover:bg-gray-700 #{nav_available_icon_class} #{@view_type == 'access' ? 'bg-gray-700' : ''}", title: "Access analytics" do %><i class="fas fa-chart-area text-lg"></i><% end %>
         <% end %>
         <% if clonable?(@project) %>
+          <% clone_export_only = @project.older_than_latest_active_version? %>
+          <% clone_button_data = {
+               controller: "clone-overlay",
+               action: "click->clone-overlay#handleClick",
+               clone_overlay_confirm_value: "Clone project \"#{@project.name.presence || @project.key}\"?"
+             } %>
+          <% if clone_export_only %>
+            <% clone_button_data[:clone_overlay_export_only] = "true" %>
+            <% clone_button_data[:clone_overlay_looms_value] = @project.exportable_loom_filepaths.to_json %>
+            <% clone_button_data[:clone_overlay_export_url_value] = export_loom_to_new_project_project_path(@project) %>
+          <% end %>
           <%= button_to clone_project_path(@project),
               method: :post,
               class: "p-2 rounded-lg #{nav_available_icon_class} hover:bg-gray-700",
-              title: "Clone Project",
-              data: {
-                controller: "clone-overlay",
-                action: "click->clone-overlay#handleClick",
-                clone_overlay_confirm_value: "Clone project \"#{@project.name.presence || @project.key}\"?"
-              },
+              title: clone_export_only ? "Export LOOM to new project" : "Clone Project",
+              data: clone_button_data,
               form: { data: { skip_visualization_leave_guard: "true" } } do %><i class="fas fa-clone text-lg"></i><% end %>
         <% end %>
 

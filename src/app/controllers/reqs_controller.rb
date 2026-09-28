@@ -93,11 +93,11 @@ class ReqsController < ApplicationController
     @h_data_classes = {}
     DataClass.all.map{|dc| @h_data_classes[dc.id] = dc}
 
-    if @std_method && @step&.name.to_s == 'de'
-      de_nber_cols = de_input_matrix_nber_cols_from_attrs(h_attr_values)
-      de_nber_cols = @project.nber_cols.to_i if de_nber_cols <= 0
-      unless Basic.de_method_allowed_for_nber_cols?(@std_method, de_nber_cols)
-        msg = Basic.de_large_dataset_method_block_message(de_nber_cols)
+    if @std_method
+      nber_cols = Basic.input_matrix_nber_cols_from_attrs_or_payload(h_attr_values)
+      nber_cols = @project.nber_cols.to_i if nber_cols <= 0
+      unless Basic.method_allowed_for_large_dataset?(@std_method, nber_cols)
+        msg = Basic.large_dataset_block_message(nber_cols)
         respond_to do |format|
           format.html { redirect_to project_path(@project.key), alert: msg }
           format.json { render json: { error: msg }, status: :unprocessable_entity }
@@ -396,6 +396,15 @@ class ReqsController < ApplicationController
   # POST /reqs
   # POST /reqs.json
   def create
+
+    if @project.older_than_latest_active_version?
+      msg = helpers.legacy_version_new_analysis_message
+      respond_to do |format|
+        format.html { redirect_to project_path(@project, view: 'analysis'), alert: msg }
+        format.json { render json: { status: 'failed', errors: msg }, status: :unprocessable_entity }
+      end
+      return
+    end
 
     project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user.id.to_s + @project.key  
     
@@ -794,18 +803,7 @@ class ReqsController < ApplicationController
     end
 
     def de_input_matrix_nber_cols_from_attrs(h_attr_values)
-      raw = h_attr_values['input_matrix']
-      items = if raw.is_a?(Array)
-        raw
-      elsif raw.is_a?(Hash)
-        [raw]
-      else
-        []
-      end
-      annot_ids = items.filter_map { |item| item.is_a?(Hash) ? item['annot_id'] : nil }.map(&:to_i).reject(&:zero?)
-      return 0 if annot_ids.empty?
-
-      Annot.light.where(id: annot_ids).maximum(:nber_cols).to_i
+      Basic.input_matrix_nber_cols_from_attrs(h_attr_values)
     end
 
     # Move staged filtered_in.bin / filtered_out.bin from tmp into the DE run dir and

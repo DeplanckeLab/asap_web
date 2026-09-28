@@ -17,9 +17,13 @@ module Basic
   ].freeze
   DE_GENE_LIST_BASE_NCOLS = 10
   DE_GENE_LIST_WITH_SPECIFICITY_NCOLS = 12
-  # DE methods other than t_test_approx are blocked at or above this cell count.
-  DE_LARGE_DATASET_MIN_CELLS = 100_000
-  DE_LARGE_DATASET_ALLOWED_METHOD_NAMES = %w[t_test_approx].freeze
+  # Default threshold when ENV['ASAP_LARGE_DATASET_MIN_CELLS'] is unset/invalid.
+  # Methods/steps allowed above the threshold opt in via JSON flag large_dataset_ok
+  # (StdMethod.obj_attrs_json / Step.attrs_json).
+  LARGE_DATASET_MIN_CELLS_DEFAULT = 100_000
+  LARGE_DATASET_OK_ATTR = 'large_dataset_ok'
+  # Backward-compatible alias used by older call sites / comments.
+  DE_LARGE_DATASET_MIN_CELLS = LARGE_DATASET_MIN_CELLS_DEFAULT
   # Compared-group UI sentinel for one group vs rest; mapped to blank before CLI (null group-2).
   DE_COMPLEMENTARY_GROUP_VALUE = '__asap_complementary__'
   DE_CELL_UNIVERSE_RESTRICT_ATTR = 'restrict_cell_universe'
@@ -794,7 +798,8 @@ module Basic
       overlays = [
         ['python/doublet.calling.v8.py', '/srv/doublet.calling.v8.py'],
         ['python/doublet.scoring.v8.py', '/srv/doublet.scoring.v8.py'],
-        ['R/doublet.scoring.v8.R', '/srv/doublet.scoring.v8.R']
+        ['R/doublet.scoring.v8.R', '/srv/doublet.scoring.v8.R'],
+        ['R/hvg.asap.3.R', '/srv/hvg.asap.3.R']
       ]
       overlays.filter_map do |rel, dest|
         src = File.join(root, rel)
@@ -6934,29 +6939,145 @@ module Basic
       return nil
     end
 
+    def large_dataset_min_cells
+      raw = ENV['ASAP_LARGE_DATASET_MIN_CELLS'].to_s.strip
+      return LARGE_DATASET_MIN_CELLS_DEFAULT if raw.empty?
+
+      n = begin
+        Integer(raw)
+      rescue ArgumentError, TypeError
+        nil
+      end
+      return LARGE_DATASET_MIN_CELLS_DEFAULT if n.nil? || n <= 0
+
+      n
+    end
+
+    def large_dataset?(nber_cols)
+      nber_cols.to_i >= large_dataset_min_cells
+    end
+
     def de_large_dataset?(nber_cols)
-      nber_cols.to_i >= DE_LARGE_DATASET_MIN_CELLS
+      large_dataset?(nber_cols)
     end
 
-    def de_method_allowed_for_nber_cols?(std_method, nber_cols)
-      return true unless std_method
-      return true unless de_step_std_method?(std_method)
-      return true unless de_large_dataset?(nber_cols)
-
-      DE_LARGE_DATASET_ALLOWED_METHOD_NAMES.include?(std_method.name.to_s)
+    def json_flag_true?(value)
+      value == true || value.to_s.strip.downcase == 'true' || value.to_s.strip == '1'
     end
 
-    def de_step_std_method?(std_method)
+    def step_large_dataset_ok?(step)
+      return false unless step
+
+      attrs = safe_parse_json(step.attrs_json, {})
+      json_flag_true?(attrs[LARGE_DATASET_OK_ATTR])
+    end
+
+    def std_method_large_dataset_ok?(std_method)
       return false unless std_method
+
+      obj_attrs = safe_parse_json(std_method.obj_attrs_json, {})
+      json_flag_true?(obj_attrs[LARGE_DATASET_OK_ATTR])
+    end
+
+    def std_method_step(std_method)
+      return nil unless std_method
 
       step = std_method.respond_to?(:step) ? std_method.step : nil
       step ||= Step.find_by(id: std_method.step_id) if std_method.respond_to?(:step_id)
-      step&.name.to_s == 'de'
+      step
+    end
+
+    def method_allowed_for_large_dataset?(std_method, nber_cols)
+      return true unless std_method
+      return true unless large_dataset?(nber_cols)
+      return true if std_method_large_dataset_ok?(std_method)
+
+      step_large_dataset_ok?(std_method_step(std_method))
+    end
+
+    def de_method_allowed_for_nber_cols?(std_method, nber_cols)
+      method_allowed_for_large_dataset?(std_method, nber_cols)
+    end
+
+    def de_step_std_method?(std_method)
+      std_method_step(std_method)&.name.to_s == 'de'
+    end
+
+    def large_dataset_block_message(nber_cols)
+      n = large_dataset_min_cells
+      "ASAP cannot currently support full analysis of datasets with #{n} or more cells " \
+        "(selected input has #{nber_cols.to_i} cells), except visualization and scalable methods " \
+        "such as Approximate t-test. Please upload a dataset with fewer cells, or reduce the " \
+        "number of cells with a proper selection at the cell filtering step."
     end
 
     def de_large_dataset_method_block_message(nber_cols)
-      "Datasets with #{DE_LARGE_DATASET_MIN_CELLS} or more cells only support Approximate t-test " \
-        "(t_test_approx). Selected input has #{nber_cols.to_i} cells."
+      large_dataset_block_message(nber_cols)
+    end
+
+    # Analysis-view banner (no form input selected yet).
+    def large_dataset_analysis_notice(nber_cols)
+      n = large_dataset_min_cells
+      "ASAP cannot currently support full analysis of datasets with #{n} or more cells " \
+        "(the current uploaded dataset has #{nber_cols.to_i} cells), except visualization and " \
+        "scalable methods such as Approximate t-test. Please upload a dataset with fewer cells, " \
+        "or reduce the number of cells with a proper selection at the cell filtering step."
+    end
+
+    # Cell count used when filtering form dataset pickers (matrices / cell metadata).
+    # ASAP matrices and col attrs store cells on nber_cols when that axis is > 1.
+    def annot_nber_cells(annot)
+      return 0 unless annot
+
+      nc = annot.respond_to?(:nber_cols) ? annot.nber_cols.to_i : 0
+      return nc if nc > 1
+
+      0
+    end
+
+    def annot_large_dataset?(annot)
+      large_dataset?(annot_nber_cells(annot))
+    end
+
+    # Cell count from an attrs hash input_matrix (array or hash of annot refs).
+    def input_matrix_nber_cols_from_attrs(h_attr_values)
+      return 0 unless h_attr_values.is_a?(Hash)
+
+      raw = h_attr_values['input_matrix'] || h_attr_values[:input_matrix]
+      items = if raw.is_a?(Array)
+                raw
+              elsif raw.is_a?(Hash)
+                [raw]
+              else
+                []
+              end
+      annot_ids = items.filter_map { |item| item.is_a?(Hash) ? (item['annot_id'] || item[:annot_id]) : nil }
+                       .map(&:to_i).reject(&:zero?)
+      return 0 if annot_ids.empty?
+
+      Annot.light.where(id: annot_ids).maximum(:nber_cols).to_i
+    end
+
+    # Prefer explicit nber_cols on input_matrix payload; else annot lookup.
+    def input_matrix_nber_cols_from_attrs_or_payload(h_attr_values)
+      return 0 unless h_attr_values.is_a?(Hash)
+
+      raw = h_attr_values['input_matrix'] || h_attr_values[:input_matrix]
+      items = if raw.is_a?(Array)
+                raw
+              elsif raw.is_a?(Hash)
+                [raw]
+              else
+                []
+              end
+      payload_cols = items.filter_map do |item|
+        next unless item.is_a?(Hash)
+
+        item['nber_cols'] || item[:nber_cols]
+      end.map(&:to_i).reject(&:zero?)
+      return payload_cols.max if payload_cols.any?
+
+      input_matrix_nber_cols_from_attrs(h_attr_values)
     end
 
     # Keys listed under command_json["predict_params"] for a StdMethod.

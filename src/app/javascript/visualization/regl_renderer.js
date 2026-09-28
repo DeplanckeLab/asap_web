@@ -52,6 +52,10 @@ export class ReglRenderer {
       this.byteToFloat[i] = i / 255
     }
     
+    this.contextLost = false
+    this._onContextLost = null
+    this._onContextRestored = null
+
     this.initialize()
   }
   
@@ -65,6 +69,21 @@ export class ReglRenderer {
         preserveDrawingBuffer: false
       }
     })
+
+    // Browser may revoke this context when too many WebGL contexts are open.
+    // Prevent the default wipe and stop draw calls until the controller rebuilds.
+    this.contextLost = false
+    this._onContextLost = (event) => {
+      event.preventDefault()
+      this.contextLost = true
+      console.warn('[ReGL] WebGL context lost; scatter plot will not redraw until reinitialized')
+    }
+    this._onContextRestored = () => {
+      this.contextLost = false
+      console.warn('[ReGL] WebGL context restored; reinitialize the scatter plot to continue')
+    }
+    this.canvas.addEventListener('webglcontextlost', this._onContextLost, false)
+    this.canvas.addEventListener('webglcontextrestored', this._onContextRestored, false)
     
     // Create the draw command
     this.drawPoints = this.regl({
@@ -641,11 +660,21 @@ export class ReglRenderer {
     return outputCanvas.toDataURL(type)
   }
   
+  isContextLost() {
+    if (this.contextLost) return true
+    const gl = this.regl && this.regl._gl
+    return !!(gl && typeof gl.isContextLost === 'function' && gl.isContextLost())
+  }
+
   /**
    * Render the current frame
    */
   render() {
     // console.log('🚀 [ReGL] render() called')
+
+    if (this.isContextLost() || !this.regl || !this.drawPoints) {
+      return
+    }
     
     if (!this.positionBuffer || !this.colorBuffer) {
       // console.log('🚀 [ReGL] Missing buffers, skipping render')
@@ -675,25 +704,35 @@ export class ReglRenderer {
     // console.log(`🚀 [ReGL] Rendering ${count} points with pointSize=${this.pointSize}`)
     // console.log(`🚀 [ReGL] Canvas size: ${this.canvas.width}x${this.canvas.height}`)
     
-    // Clear canvas
-    this.regl.clear({
-      color: [1, 1, 1, 1], // White background
-      depth: 1
-    })
+    try {
+      // Clear canvas
+      this.regl.clear({
+        color: [1, 1, 1, 1], // White background
+        depth: 1
+      })
 
-    // Draw the tissue background image (spatial view) before the points so the
-    // spots are overlaid on top of the tissue.
-    this.drawBackgroundImage()
+      // Draw the tissue background image (spatial view) before the points so the
+      // spots are overlaid on top of the tissue.
+      this.drawBackgroundImage()
 
-    // console.log('🚀 [ReGL] Calling drawPoints...')
-    // Draw points (positions are already in screen/pixel coordinates)
-    this.drawPoints({
-      positions: this.positionBuffer,
-      colors: this.colorBuffer,
-      count: count,
-      pointSize: this.pointSize
-    })
-    // console.log('🚀 [ReGL] drawPoints completed')
+      // console.log('🚀 [ReGL] Calling drawPoints...')
+      // Draw points (positions are already in screen/pixel coordinates)
+      this.drawPoints({
+        positions: this.positionBuffer,
+        colors: this.colorBuffer,
+        count: count,
+        pointSize: this.pointSize
+      })
+      // console.log('🚀 [ReGL] drawPoints completed')
+    } catch (error) {
+      const message = error && error.message ? String(error.message) : ''
+      if (message.includes('context lost') || this.isContextLost()) {
+        this.contextLost = true
+        console.warn('[ReGL] Skipping draw after WebGL context loss')
+        return
+      }
+      throw error
+    }
   }
   
   /**
@@ -743,12 +782,37 @@ export class ReglRenderer {
    * Clean up resources
    */
   destroy() {
-    if (this.positionBuffer) this.positionBuffer.destroy()
-    if (this.colorBuffer) this.colorBuffer.destroy()
-    if (this.backgroundTexture) this.backgroundTexture.destroy()
-    if (this.imagePositionBuffer) this.imagePositionBuffer.destroy()
-    if (this.imageTexcoordBuffer) this.imageTexcoordBuffer.destroy()
-    if (this.regl) this.regl.destroy()
+    if (this.canvas) {
+      if (this._onContextLost) {
+        this.canvas.removeEventListener('webglcontextlost', this._onContextLost, false)
+      }
+      if (this._onContextRestored) {
+        this.canvas.removeEventListener('webglcontextrestored', this._onContextRestored, false)
+      }
+    }
+    this._onContextLost = null
+    this._onContextRestored = null
+
+    try {
+      if (this.positionBuffer) this.positionBuffer.destroy()
+      if (this.colorBuffer) this.colorBuffer.destroy()
+      if (this.backgroundTexture) this.backgroundTexture.destroy()
+      if (this.imagePositionBuffer) this.imagePositionBuffer.destroy()
+      if (this.imageTexcoordBuffer) this.imageTexcoordBuffer.destroy()
+      if (this.regl) this.regl.destroy()
+    } catch (_) {
+      // Context may already be lost
+    }
+
+    this.positionBuffer = null
+    this.colorBuffer = null
+    this.backgroundTexture = null
+    this.imagePositionBuffer = null
+    this.imageTexcoordBuffer = null
+    this.drawPoints = null
+    this.drawImage = null
+    this.regl = null
+    this.contextLost = true
   }
 }
 

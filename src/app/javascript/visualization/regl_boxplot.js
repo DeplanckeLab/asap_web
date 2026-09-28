@@ -1,9 +1,11 @@
 /**
- * Category box plots (gene expression by discrete metadata) using regl WebGL.
- * Replaces legacy Plotly box traces for the visualization gene panel.
+ * Category box plots (gene expression by discrete metadata) using Canvas 2D.
+ *
+ * Previously used one regl/WebGL context per gene card and left those contexts
+ * alive after draw. Coloring by metadata refreshes every gene boxplot, which
+ * quickly exceeded the browser WebGL context limit and lost the main scatter
+ * plot context (cells became invisible). Boxplots do not need WebGL.
  */
-
-import createREGL from 'regl'
 
 function quantileSorted (sorted, p) {
   if (!sorted.length) return NaN
@@ -30,25 +32,23 @@ export function computeBoxStats (values) {
   return { lowWhisker, q1, median, q3, highWhisker, mean, n: v.length }
 }
 
-function hslToRgb (h, s, l) {
+function hslToRgb255 (h, s, l) {
   const hh = ((h % 360) + 360) % 360 / 60
   const c = (1 - Math.abs(2 * l - 1)) * s
   const x = c * (1 - Math.abs((hh % 2) - 1))
   const m = l - c / 2
   let rp = 0; let gp = 0; let bp = 0
   if (hh < 1) { rp = c; gp = x } else if (hh < 2) { rp = x; gp = c } else if (hh < 3) { gp = c; bp = x } else if (hh < 4) { gp = x; bp = c } else if (hh < 5) { rp = x; bp = c } else { rp = c; bp = x }
-  return [rp + m, gp + m, bp + m]
+  return [
+    Math.round((rp + m) * 255),
+    Math.round((gp + m) * 255),
+    Math.round((bp + m) * 255)
+  ]
 }
 
-function clipX (px, w) {
-  return (px / w) * 2 - 1
-}
-
-function clipY (py, h) {
-  return 1 - (py / h) * 2
-}
-
-function destroyReglIfAny (canvas) {
+/** Release any leftover regl context from older builds (canvas stays WebGL-typed). */
+function destroyLegacyReglIfAny (canvas) {
+  if (!canvas) return
   const prev = canvas.__geneBoxplotRegl
   if (prev && typeof prev.destroy === 'function') {
     try { prev.destroy() } catch (_) { /* ignore */ }
@@ -57,35 +57,90 @@ function destroyReglIfAny (canvas) {
 }
 
 /**
- * @param {HTMLCanvasElement} webglCanvas
- * @param {HTMLCanvasElement|null} labelCanvas optional 2D overlay for axes and category labels
+ * Prefer a 2D context on `preferred`. If that canvas was previously bound to
+ * WebGL, replace it in the DOM so 2D works again.
+ */
+function acquire2dContext (preferred, fallback) {
+  const tryCanvas = (canvas) => {
+    if (!canvas) return null
+    destroyLegacyReglIfAny(canvas)
+    let ctx = null
+    try {
+      ctx = canvas.getContext('2d')
+    } catch (_) {
+      ctx = null
+    }
+    if (ctx) return { canvas, ctx }
+
+    const parent = canvas.parentNode
+    if (!parent) return null
+    const replacement = document.createElement('canvas')
+    replacement.className = canvas.className
+    const style = canvas.getAttribute('style')
+    if (style) replacement.setAttribute('style', style)
+    parent.replaceChild(replacement, canvas)
+    destroyLegacyReglIfAny(replacement)
+    try {
+      ctx = replacement.getContext('2d')
+    } catch (_) {
+      ctx = null
+    }
+    return ctx ? { canvas: replacement, ctx } : null
+  }
+
+  return tryCanvas(preferred) || tryCanvas(fallback)
+}
+
+function clearCanvas (entry, w, h) {
+  if (!entry) return
+  entry.canvas.width = w
+  entry.canvas.height = h
+  entry.ctx.setTransform(1, 0, 0, 1, 0, 0)
+  entry.ctx.clearRect(0, 0, w, h)
+}
+
+/**
+ * @param {HTMLCanvasElement} plotCanvas former WebGL canvas (now unused for GL)
+ * @param {HTMLCanvasElement|null} labelCanvas 2D overlay; plot is drawn here
  * @param {Array<{ name: string, values: number[] }>} groups ordered left-to-right
  * @param {object} opts
  * @param {string} [opts.yAxisLabel]
  */
-export function renderGeneCategoryBoxplot (webglCanvas, labelCanvas, groups, opts = {}) {
-  if (!webglCanvas) return
+export function renderGeneCategoryBoxplot (plotCanvas, labelCanvas, groups, opts = {}) {
+  if (!plotCanvas && !labelCanvas) return
 
+  destroyLegacyReglIfAny(plotCanvas)
+
+  const sizeSource = plotCanvas || labelCanvas
   const dpr = window.devicePixelRatio || 1
-  const cssW = webglCanvas.clientWidth || 300
-  const cssH = webglCanvas.clientHeight || 200
+  const cssW = sizeSource.clientWidth || 300
+  const cssH = sizeSource.clientHeight || 200
   const w = Math.max(2, Math.floor(cssW * dpr))
   const h = Math.max(2, Math.floor(cssH * dpr))
-  webglCanvas.width = w
-  webglCanvas.height = h
-  if (labelCanvas) {
-    labelCanvas.width = w
-    labelCanvas.height = h
+
+  // Draw the full plot on the label (top) canvas so we never open a WebGL context.
+  // Keep the underlying plot canvas blank after releasing any legacy regl handle.
+  const drawTarget = acquire2dContext(labelCanvas, plotCanvas)
+  if (!drawTarget) return
+
+  if (plotCanvas && plotCanvas !== drawTarget.canvas) {
+    destroyLegacyReglIfAny(plotCanvas)
+    // Blank the unused underlay when it still accepts 2D (never had WebGL).
+    try {
+      const under = plotCanvas.getContext('2d')
+      if (under) {
+        plotCanvas.width = w
+        plotCanvas.height = h
+        under.setTransform(1, 0, 0, 1, 0, 0)
+        under.clearRect(0, 0, w, h)
+      }
+    } catch (_) { /* canvas may still be WebGL-typed; ignore */ }
   }
 
-  destroyReglIfAny(webglCanvas)
+  clearCanvas(drawTarget, w, h)
+  const ctx = drawTarget.ctx
 
   if (!groups || groups.length === 0) {
-    const ctx2d = labelCanvas && labelCanvas.getContext('2d')
-    if (ctx2d) {
-      ctx2d.setTransform(1, 0, 0, 1, 0, 0)
-      ctx2d.clearRect(0, 0, w, h)
-    }
     return
   }
 
@@ -98,14 +153,11 @@ export function renderGeneCategoryBoxplot (webglCanvas, labelCanvas, groups, opt
 
   const statsList = groups.map(g => computeBoxStats(g.values)).filter(Boolean)
   if (statsList.length === 0) {
-    const ctx2d = labelCanvas && labelCanvas.getContext('2d')
-    if (ctx2d) {
-      ctx2d.setTransform(1, 0, 0, 1, 0, 0)
-      ctx2d.clearRect(0, 0, w, h)
-      ctx2d.fillStyle = '#6b7280'
-      ctx2d.font = `${12 * dpr}px sans-serif`
-      ctx2d.fillText('No numeric expression in visible cells', padL, padT + 20 * dpr)
-    }
+    ctx.fillStyle = '#6b7280'
+    ctx.font = `${12 * dpr}px sans-serif`
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'alphabetic'
+    ctx.fillText('No numeric expression in visible cells', padL, padT + 20 * dpr)
     return
   }
 
@@ -127,13 +179,32 @@ export function renderGeneCategoryBoxplot (webglCanvas, labelCanvas, groups, opt
   const yToPx = y => padT + innerH * (1 - (y - yMin) / (yMax - yMin))
   const n = groups.length
   const slotW = innerW / n
-
-  const triPositions = []
-  const triColors = []
-  const linePositions = []
-  const meanLinePositions = []
   const capHalf = Math.max(2 * dpr, slotW * 0.12)
   const nCat = groups.length
+  const lineW = Math.max(1, dpr)
+
+  // White plot background (matches previous regl clear)
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, w, h)
+
+  // Soft horizontal grid + y tick labels
+  ctx.font = `${11 * dpr}px sans-serif`
+  ctx.textAlign = 'right'
+  ctx.textBaseline = 'middle'
+  const ticks = 5
+  for (let t = 0; t <= ticks; t++) {
+    const frac = t / ticks
+    const val = yMin + (yMax - yMin) * (1 - frac)
+    const py = padT + innerH * frac
+    ctx.fillStyle = '#374151'
+    ctx.fillText(val.toExponential(2), padL - 6 * dpr, py)
+    ctx.strokeStyle = '#f3f4f6'
+    ctx.lineWidth = lineW
+    ctx.beginPath()
+    ctx.moveTo(padL, py)
+    ctx.lineTo(padL + innerW, py)
+    ctx.stroke()
+  }
 
   groups.forEach((grp, i) => {
     const s = computeBoxStats(grp.values)
@@ -147,169 +218,62 @@ export function renderGeneCategoryBoxplot (webglCanvas, labelCanvas, groups, opt
     const yMed = yToPx(s.median)
     const yQ3 = yToPx(s.q3)
     const yH = yToPx(s.highWhisker)
-    const [r, gc, b] = hslToRgb((i * 360) / Math.max(nCat, 1), 0.52, 0.5)
+    const [r, g, b] = hslToRgb255((i * 360) / Math.max(nCat, 1), 0.52, 0.5)
 
-    const pushTri = (xa, ya, xb, yb, xc, yc) => {
-      triPositions.push(clipX(xa, w), clipY(ya, h), clipX(xb, w), clipY(yb, h), clipX(xc, w), clipY(yc, h))
-      for (let k = 0; k < 3; k++) triColors.push(r, gc, b, 0.88)
-    }
+    // IQR box
+    ctx.fillStyle = `rgba(${r},${g},${b},0.88)`
+    ctx.fillRect(x0, Math.min(yQ3, yQ1), x1 - x0, Math.abs(yQ1 - yQ3))
 
-    pushTri(x0, yQ3, x1, yQ3, x0, yQ1)
-    pushTri(x1, yQ3, x1, yQ1, x0, yQ1)
+    // Whiskers, caps, median
+    ctx.strokeStyle = 'rgb(56,56,61)'
+    ctx.lineWidth = lineW
+    ctx.beginPath()
+    ctx.moveTo(cx, yL)
+    ctx.lineTo(cx, yQ1)
+    ctx.moveTo(cx, yQ3)
+    ctx.lineTo(cx, yH)
+    ctx.moveTo(cx - capHalf, yL)
+    ctx.lineTo(cx + capHalf, yL)
+    ctx.moveTo(cx - capHalf, yH)
+    ctx.lineTo(cx + capHalf, yH)
+    ctx.moveTo(x0, yMed)
+    ctx.lineTo(x1, yMed)
+    ctx.stroke()
 
-    const line = (arr, xA, yA, xB, yB) => {
-      arr.push(clipX(xA, w), clipY(yA, h), clipX(xB, w), clipY(yB, h))
-    }
-
-    line(linePositions, cx, yL, cx, yQ1)
-    line(linePositions, cx, yQ3, cx, yH)
-    line(linePositions, cx - capHalf, yL, cx + capHalf, yL)
-    line(linePositions, cx - capHalf, yH, cx + capHalf, yH)
-    line(linePositions, x0, yMed, x1, yMed)
-
+    // Mean marker
     const yMeanPx = yToPx(s.mean)
     const mw = bw * 0.35
-    line(meanLinePositions, cx - mw, yMeanPx, cx + mw, yMeanPx)
+    ctx.strokeStyle = 'rgb(237,148,15)'
+    ctx.beginPath()
+    ctx.moveTo(cx - mw, yMeanPx)
+    ctx.lineTo(cx + mw, yMeanPx)
+    ctx.stroke()
   })
 
-  const regl = createREGL({
-    canvas: webglCanvas,
-    attributes: { antialias: true, alpha: false, preserveDrawingBuffer: false }
+  // Category labels
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'top'
+  ctx.fillStyle = '#4b5563'
+  ctx.font = `${11 * dpr}px sans-serif`
+  groups.forEach((g, i) => {
+    const cx = padL + (i + 0.5) * slotW
+    let name = String(g.name ?? i)
+    if (name.length > 14) name = name.slice(0, 12) + '\u2026'
+    ctx.save()
+    ctx.translate(cx, h - padB + 4 * dpr)
+    ctx.rotate(-Math.PI / 5)
+    ctx.fillText(name, 0, 0)
+    ctx.restore()
   })
-  webglCanvas.__geneBoxplotRegl = regl
 
-  const triBuf = triPositions.length ? regl.buffer(new Float32Array(triPositions)) : null
-  const triColBuf = triColors.length ? regl.buffer(new Float32Array(triColors)) : null
-  const lineBuf = linePositions.length ? regl.buffer(new Float32Array(linePositions)) : null
-  const meanBuf = meanLinePositions.length ? regl.buffer(new Float32Array(meanLinePositions)) : null
-
-  const drawTris = triBuf && triPositions.length
-    ? regl({
-        vert: `
-          precision highp float;
-          attribute vec2 position;
-          attribute vec4 color;
-          varying vec4 vColor;
-          void main() {
-            vColor = color;
-            gl_Position = vec4(position, 0.0, 1.0);
-          }
-        `,
-        frag: `
-          precision highp float;
-          varying vec4 vColor;
-          void main() {
-            gl_FragColor = vColor;
-          }
-        `,
-        attributes: { position: triBuf, color: triColBuf },
-        count: triPositions.length / 2,
-        primitive: 'triangles',
-        depth: { enable: false }
-      })
-    : null
-
-  const drawLines = lineBuf && linePositions.length
-    ? regl({
-        vert: `
-          precision highp float;
-          attribute vec2 position;
-          void main() {
-            gl_Position = vec4(position, 0.0, 1.0);
-          }
-        `,
-        frag: `
-          precision highp float;
-          void main() {
-            gl_FragColor = vec4(0.22, 0.22, 0.24, 1.0);
-          }
-        `,
-        attributes: { position: lineBuf },
-        count: linePositions.length / 2,
-        primitive: 'lines',
-        lineWidth: 1,
-        depth: { enable: false }
-      })
-    : null
-
-  const drawMeanLines = meanBuf && meanLinePositions.length
-    ? regl({
-        vert: `
-          precision highp float;
-          attribute vec2 position;
-          void main() {
-            gl_Position = vec4(position, 0.0, 1.0);
-          }
-        `,
-        frag: `
-          precision highp float;
-          void main() {
-            gl_FragColor = vec4(0.93, 0.58, 0.06, 1.0);
-          }
-        `,
-        attributes: { position: meanBuf },
-        count: meanLinePositions.length / 2,
-        primitive: 'lines',
-        lineWidth: 1,
-        depth: { enable: false }
-      })
-    : null
-
-  regl.clear({ color: [1, 1, 1, 1] })
-  if (drawTris) drawTris()
-  if (drawLines) drawLines()
-  if (drawMeanLines) drawMeanLines()
-
-  if (triBuf) triBuf.destroy()
-  if (triColBuf) triColBuf.destroy()
-  if (lineBuf) lineBuf.destroy()
-  if (meanBuf) meanBuf.destroy()
-
-  if (labelCanvas) {
-    const ctx = labelCanvas.getContext('2d')
-    if (ctx) {
-      ctx.setTransform(1, 0, 0, 1, 0, 0)
-      ctx.clearRect(0, 0, w, h)
-      ctx.fillStyle = '#374151'
-      ctx.font = `${11 * dpr}px sans-serif`
-      ctx.textAlign = 'right'
-      ctx.textBaseline = 'middle'
-      const ticks = 5
-      for (let t = 0; t <= ticks; t++) {
-        const frac = t / ticks
-        const val = yMin + (yMax - yMin) * (1 - frac)
-        const py = padT + innerH * frac
-        ctx.fillText(val.toExponential(2), padL - 6 * dpr, py)
-        ctx.strokeStyle = '#f3f4f6'
-        ctx.lineWidth = 1 * dpr
-        ctx.beginPath()
-        ctx.moveTo(padL, py)
-        ctx.lineTo(padL + innerW, py)
-        ctx.stroke()
-      }
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'top'
-      ctx.fillStyle = '#4b5563'
-      groups.forEach((g, i) => {
-        const cx = padL + (i + 0.5) * slotW
-        let name = String(g.name ?? i)
-        if (name.length > 14) name = name.slice(0, 12) + '…'
-        ctx.save()
-        ctx.translate(cx, h - padB + 4 * dpr)
-        ctx.rotate(-Math.PI / 5)
-        ctx.fillText(name, 0, 0)
-        ctx.restore()
-      })
-      const yLabel = opts.yAxisLabel || 'Expression'
-      ctx.save()
-      ctx.translate(12 * dpr, padT + innerH / 2)
-      ctx.rotate(-Math.PI / 2)
-      ctx.textAlign = 'center'
-      ctx.font = `${10 * dpr}px sans-serif`
-      ctx.fillStyle = '#6b7280'
-      ctx.fillText(yLabel, 0, 0)
-      ctx.restore()
-    }
-  }
-
+  const yLabel = opts.yAxisLabel || 'Expression'
+  ctx.save()
+  ctx.translate(12 * dpr, padT + innerH / 2)
+  ctx.rotate(-Math.PI / 2)
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = `${10 * dpr}px sans-serif`
+  ctx.fillStyle = '#6b7280'
+  ctx.fillText(yLabel, 0, 0)
+  ctx.restore()
 }

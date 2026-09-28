@@ -30,8 +30,10 @@ class Project < ApplicationRecord
   belongs_to :project_origin
   belongs_to :project_collection, optional: true, inverse_of: :projects
   belongs_to :cloned_project, class_name: 'Project', foreign_key: 'cloned_project_id', optional: true
+  belongs_to :exported_project, class_name: 'Project', foreign_key: 'exported_project_id', optional: true, inverse_of: :exported_to_projects
   belongs_to :root_project, class_name: 'Project', foreign_key: 'root_project_id', optional: true, inverse_of: :lineage_clone_projects
   has_many :lineage_clone_projects, class_name: 'Project', foreign_key: 'root_project_id', dependent: :nullify, inverse_of: :root_project
+  has_many :exported_to_projects, class_name: 'Project', foreign_key: 'exported_project_id', dependent: :nullify, inverse_of: :exported_project
   before_validation :ensure_default_project_origin
   # Default association omits heavy JSON (headers_json). Use Annot.find / headers_json_value when needed.
   has_many :annots, -> { light }, dependent: :destroy
@@ -213,6 +215,27 @@ class Project < ApplicationRecord
     return nil unless source
 
     source.root_project_id.presence || source.id
+  end
+
+  # Strip trailing "cloned [n]" / "Clone [n]" suffixes used by ProjectCloneService.
+  def self.base_name_without_clone_suffix(name)
+    name.to_s.sub(/( cloned)+(?:\s*\[\d+\])?\s*$/i, '').sub(/( Clone)+(?:\s*\[\d+\])?\s*$/i, '').strip
+  end
+
+  def older_than_latest_active_version?
+    latest = Version.latest_active
+    return false unless latest && version_id.present?
+
+    version_id.to_i < latest.id
+  end
+
+  def exportable_loom_filepaths
+    Annot.where(project_id: id, dim: 3, name: '/matrix')
+         .where.not(filepath: nil)
+         .distinct
+         .pluck(:filepath)
+         .grep(/\.loom\z/i)
+         .sort
   end
 
   # Elasticsearch search functionality

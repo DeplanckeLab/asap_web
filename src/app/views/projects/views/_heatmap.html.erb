@@ -52,7 +52,7 @@
     </div>
     <div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px; flex-shrink:0;">
       <% if new_heatmap_form_path %>
-        <% if analyzable?(@project) %>
+        <% if analyzable?(@project) && new_analyses_allowed?(@project) %>
           <%= link_to new_heatmap_form_path,
               class: "inline-flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-xs transition-colors cursor-pointer border border-blue-600 shadow-sm",
               title: "Open the new heatmap form in analysis" do %>
@@ -62,7 +62,7 @@
         <% else %>
           <button type="button" disabled
                   class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-xs cursor-not-allowed border border-gray-300 shadow-sm"
-                  title="You need analysis rights to run new analyses">
+                  title="<%= new_analyses_allowed?(@project) ? 'You need analysis rights to run new analyses' : legacy_version_new_analysis_message %>">
             <i class="fas fa-plus"></i>
             <span>New heatmap</span>
           </button>

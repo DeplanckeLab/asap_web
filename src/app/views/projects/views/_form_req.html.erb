@@ -83,10 +83,10 @@
     </div>
   <% end %>
 
-  <% if @de_large_dataset_method_notice.present? %>
+  <% if @large_dataset_method_notice.present? || @de_large_dataset_method_notice.present? %>
     <div class="bg-amber-50 rounded-lg p-4 mb-6">
       <div class="text-sm text-amber-900">
-        <%= @de_large_dataset_method_notice %>
+        <%= @large_dataset_method_notice.presence || @de_large_dataset_method_notice %>
       </div>
     </div>
   <% end %>
@@ -229,8 +229,13 @@
   <% unless @h_step_attrs["hide_submit_btns"] %>
     <div class="std-form-req-footer flex-shrink-0 border-t border-gray-200 px-6 bg-white z-10">
       <div id="prevent_req_messages" class="alert alert-danger hidden mb-2" data-form-req-target="errorMessages"></div>
+      <% unless new_analyses_allowed?(@project) %>
+        <div class="mb-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">
+          <%= legacy_version_new_analysis_message %>
+        </div>
+      <% end %>
       <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-2 leading-none">
-        <% if analyzable?(@project) %>
+        <% if analyzable?(@project) && new_analyses_allowed?(@project) %>
           <button id="<%= @step.name %>_button" type="button" 
                   class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium transition-colors opacity-50 cursor-not-allowed req_submit"
                   disabled
@@ -241,7 +246,7 @@
         <% else %>
           <button id="<%= @step.name %>_button" type="button" disabled
                   class="px-4 py-2 bg-gray-300 text-gray-500 rounded-md font-medium cursor-not-allowed"
-                  title="You need analysis rights to run new analyses">
+                  title="<%= new_analyses_allowed?(@project) ? 'You need analysis rights to run new analyses' : legacy_version_new_analysis_message %>">
             <%= @h_step_attrs['action_button_label'] || 'Submit' %>
           </button>
         <% end %>

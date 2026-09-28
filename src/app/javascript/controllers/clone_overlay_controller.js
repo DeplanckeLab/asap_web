@@ -17,6 +17,11 @@ export default class extends Controller {
       return
     }
 
+    if (this.element.dataset.cloneOverlayExportOnly === "true") {
+      this.showExportModal()
+      return
+    }
+
     const form = this.element.closest("form")
     if (!form) {
       return
@@ -120,6 +125,150 @@ export default class extends Controller {
 
     document.addEventListener("keydown", this._onKeyDown)
     confirmButton.focus()
+  }
+
+  showExportModal() {
+    this.removeConfirmModal()
+
+    let looms = []
+    try {
+      looms = JSON.parse(this.element.dataset.cloneOverlayLoomsValue || "[]")
+    } catch (_e) {
+      looms = []
+    }
+    if (!Array.isArray(looms)) {
+      looms = []
+    }
+
+    const exportUrl = this.element.dataset.cloneOverlayExportUrlValue
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content")
+
+    const overlay = document.createElement("div")
+    overlay.id = "clone-confirm-modal"
+    overlay.className = "fixed inset-0 z-50 flex items-center justify-center"
+    overlay.setAttribute("role", "dialog")
+    overlay.setAttribute("aria-modal", "true")
+    overlay.setAttribute("aria-labelledby", "clone-export-modal-title")
+
+    const backdrop = document.createElement("div")
+    backdrop.className = "absolute inset-0 bg-black/40"
+
+    const panel = document.createElement("div")
+    panel.className = "relative bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 border border-gray-200"
+
+    const header = document.createElement("div")
+    header.className = "px-5 py-4 border-b border-gray-200"
+    const title = document.createElement("h2")
+    title.id = "clone-export-modal-title"
+    title.className = "text-base font-semibold text-gray-900 m-0"
+    title.textContent = "Export to new project"
+    header.appendChild(title)
+
+    const body = document.createElement("div")
+    body.className = "px-5 py-4 space-y-4"
+
+    const alertBox = document.createElement("div")
+    alertBox.className = "rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+    alertBox.textContent =
+      "Projects from older ASAP releases cannot be cloned. You can select a LOOM file from this project and export it to a new project on the latest ASAP release."
+
+    const loomRow = document.createElement("div")
+    loomRow.className = "flex flex-col sm:flex-row gap-2 sm:items-center"
+
+    const select = document.createElement("select")
+    select.className =
+      "flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+    select.setAttribute("aria-label", "LOOM file")
+
+    if (looms.length === 0) {
+      const emptyOption = document.createElement("option")
+      emptyOption.value = ""
+      emptyOption.textContent = "No LOOM files available"
+      select.appendChild(emptyOption)
+      select.disabled = true
+    } else {
+      looms.forEach((loom) => {
+        const option = document.createElement("option")
+        option.value = loom
+        option.textContent = loom
+        select.appendChild(option)
+      })
+    }
+
+    const exportButton = document.createElement("button")
+    exportButton.type = "button"
+    exportButton.className =
+      "inline-flex items-center justify-center px-4 py-2 rounded-md bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+    exportButton.textContent = "Export to new project"
+    exportButton.disabled = looms.length === 0 || !exportUrl
+
+    loomRow.appendChild(select)
+    loomRow.appendChild(exportButton)
+
+    body.appendChild(alertBox)
+    body.appendChild(loomRow)
+
+    const footer = document.createElement("div")
+    footer.className = "px-5 py-4 border-t border-gray-200 flex justify-end"
+
+    const cancelButton = document.createElement("button")
+    cancelButton.type = "button"
+    cancelButton.className =
+      "inline-flex items-center px-4 py-2 rounded-md border border-gray-200 text-sm text-gray-700 hover:bg-gray-50"
+    cancelButton.textContent = "Cancel"
+    footer.appendChild(cancelButton)
+
+    panel.appendChild(header)
+    panel.appendChild(body)
+    panel.appendChild(footer)
+    overlay.appendChild(backdrop)
+    overlay.appendChild(panel)
+    document.body.appendChild(overlay)
+    document.body.classList.add("overflow-hidden")
+
+    const close = () => this.removeConfirmModal()
+
+    cancelButton.addEventListener("click", close)
+    backdrop.addEventListener("click", close)
+    panel.addEventListener("click", (event) => event.stopPropagation())
+
+    exportButton.addEventListener("click", () => {
+      if (!exportUrl || !select.value || this.submitting) {
+        return
+      }
+      this.submitting = true
+      exportButton.disabled = true
+      exportButton.textContent = "Exporting..."
+
+      const form = document.createElement("form")
+      form.method = "POST"
+      form.action = exportUrl
+      form.style.display = "none"
+
+      if (csrfToken) {
+        const csrfInput = document.createElement("input")
+        csrfInput.type = "hidden"
+        csrfInput.name = "authenticity_token"
+        csrfInput.value = csrfToken
+        form.appendChild(csrfInput)
+      }
+
+      const loomInput = document.createElement("input")
+      loomInput.type = "hidden"
+      loomInput.name = "loom_file"
+      loomInput.value = select.value
+      form.appendChild(loomInput)
+
+      document.body.appendChild(form)
+      form.submit()
+    })
+
+    document.addEventListener("keydown", this._onKeyDown)
+    if (!select.disabled) {
+      select.focus()
+    } else {
+      cancelButton.focus()
+    }
   }
 
   _onKeyDown(event) {

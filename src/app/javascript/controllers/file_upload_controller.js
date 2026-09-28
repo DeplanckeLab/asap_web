@@ -126,6 +126,10 @@ export default class extends Controller {
         this.projectNameTouched = true
       }
       this.projectNameInputElement.addEventListener('input', this.projectNameInputHandler)
+      // Keep server-prefilled names (e.g. loom export from an older project).
+      if (this.projectNameInputElement.value && this.projectNameInputElement.value.trim() !== '') {
+        this.projectNameTouched = true
+      }
     }
 
     // Ensure spinner animation CSS is available

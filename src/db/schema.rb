@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_04_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_26_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -1236,6 +1236,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_120000) do
     t.text "doi"
     t.integer "duration"
     t.text "error_message"
+    t.integer "exported_project_id"
     t.string "extension", limit: 6, default: "txt"
     t.text "extra_info"
     t.text "filter_attrs_json"
@@ -1294,6 +1295,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_120000) do
     t.integer "version_id"
     t.datetime "viewed_at", precision: nil, default: -> { "now()" }
     t.text "write_access"
+    t.index ["exported_project_id"], name: "index_projects_on_exported_project_id"
     t.index ["input_content_sha256", "input_preparsing_fingerprint"], name: "index_projects_on_input_sha_and_preparsing_fp"
     t.index ["input_content_sha256"], name: "index_projects_on_input_content_sha256"
     t.index ["key"], name: "index_projects_on_key_unique", unique: true, where: "((key IS NOT NULL) AND (key <> ''::text))"
@@ -2001,6 +2003,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_04_120000) do
   add_foreign_key "projects", "project_collections", on_delete: :nullify
   add_foreign_key "projects", "project_origins"
   add_foreign_key "projects", "project_types", name: "projects_project_type_id_fkey"
+  add_foreign_key "projects", "projects", column: "exported_project_id"
   add_foreign_key "projects", "projects", column: "root_project_id", on_delete: :nullify
   add_foreign_key "projects", "statuses", name: "projects_status_id_fkey"
   add_foreign_key "projects", "steps", name: "projects_step_id_fkey"

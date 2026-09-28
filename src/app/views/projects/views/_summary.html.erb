@@ -410,6 +410,8 @@ summary_search_gene_url = search_gene_project_path(@project)
                 <% if summary_clone_lineage_projects.any? %>
                   <button id="summary-lineage-toggle-button" type="button" class="badge-text bg-gray-200 text-gray-700 px-1.5 rounded ml-1">Full lineage</button>
                 <% end %>
+              <% elsif @project.exported_project_id.present? %>
+                Exported from project <%= link_to Project.find_by(id: @project.exported_project_id)&.key || 'deleted', project_path(id: @project.exported_project_id), class: "text-blue-600 underline font-semibold" %>
               <% elsif @project.from_scfair_validation? %>
                 <%= @project.project_origin.display_label %>
               <% elsif @project.from_integration? %>

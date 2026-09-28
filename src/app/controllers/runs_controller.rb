@@ -164,7 +164,11 @@ class RunsController < ApplicationController
     
     # If panel parameter is present, render panel partial instead of full page
     if params[:panel] == '1'
-      render partial: 'panel', layout: false
+      if @step&.name.to_s == 'cell_filtering'
+        render partial: 'projects/views/cell_filtering_view', layout: false
+      else
+        render partial: 'panel', layout: false
+      end
       return
     end
   end
@@ -595,6 +599,11 @@ class RunsController < ApplicationController
   def restart
     unless editable?(@project) && analyzable?(@project)
       render json: { status: 'error', message: 'You do not have permission to restart runs on this project.' }, status: :forbidden
+      return
+    end
+
+    if @project.older_than_latest_active_version?
+      render json: { status: 'error', message: helpers.legacy_version_new_analysis_message }, status: :unprocessable_entity
       return
     end
 

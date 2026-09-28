@@ -4,7 +4,8 @@ require_relative 'de_preview_v8_std_methods'
 
 # Upserts the v8 DE StdMethod t_test_approx (de_approx.v8.py Welch; streams large looms).
 #
-# Large DE inputs (>= Basic::DE_LARGE_DATASET_MIN_CELLS cells) should only run this method.
+# Large DE inputs (>= Basic.large_dataset_min_cells) should only run this method
+# (StdMethod.obj_attrs_json large_dataset_ok; see LargeDatasetOkV8Flags).
 module DeTTestApproxV8StdMethods
   VERSION_ID = 8
   STEP_NAME = 'de'
@@ -49,6 +50,9 @@ module DeTTestApproxV8StdMethods
       )
       created = std_method.new_record?
 
+      obj_attrs = Basic.safe_parse_json(template&.obj_attrs_json.presence || '{}', {})
+      obj_attrs = obj_attrs.merge(Basic::LARGE_DATASET_OK_ATTR => true)
+
       attrs = {
         label: 'Approximate t-test (Welch)',
         short_label: 't-test approx',
@@ -59,7 +63,7 @@ module DeTTestApproxV8StdMethods
         speed_id: template&.speed_id || 3,
         command_json: JSON.pretty_generate(STD_METHOD_COMMAND_JSON),
         attrs_json: JSON.pretty_generate(DePreviewV8StdMethods::PREVIEW_ATTRS.deep_dup),
-        obj_attrs_json: template&.obj_attrs_json.presence || '{}',
+        obj_attrs_json: JSON.pretty_generate(obj_attrs),
         attr_layout_json: template&.attr_layout_json.presence || '[]',
         obsolete: false
       }

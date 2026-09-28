@@ -13,6 +13,20 @@
   <% analysis_import_loom_file = @selected_loom_file.presence || (defined?(@available_loom_files) && @available_loom_files&.first) %>
   <%= render partial: 'projects/views/add_metadata_modal', locals: { default_loom_file: analysis_import_loom_file } %>
 
+  <% if @large_dataset_analysis_notice.present? %>
+    <div class="mb-3 flex-shrink-0 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+         role="status">
+      <%= @large_dataset_analysis_notice %>
+    </div>
+  <% end %>
+
+  <% if @project.older_than_latest_active_version? %>
+    <div class="mb-3 flex-shrink-0 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+         role="alert">
+      <%= legacy_version_new_analysis_message %>
+    </div>
+  <% end %>
+
   <!-- Header -->
   <div class="mb-2 flex-shrink-0">
     <div class="flex items-center justify-between gap-3 mb-1">

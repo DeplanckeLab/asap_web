@@ -4,6 +4,14 @@ module ApplicationHelper
   # - Grey open lock: after public_at; only listed for users with full read access (owner/admin). Snapshot-only readers and guests must not see these rows (controller filters enforce that).
   SINGLE_RUN_RESTARTABLE_STATUSES = [1, 2, 3, 4, 6].freeze
 
+  def new_analyses_allowed?(project)
+    project.present? && !project.older_than_latest_active_version?
+  end
+
+  def legacy_version_new_analysis_message
+    'New analyses on older ASAP releases are no longer supported. Click the Clone button to export this project to the latest ASAP version.'
+  end
+
   def publication_locked_step_message
     'This analysis is included in the public snapshot and cannot be modified.'
   end
@@ -24,6 +32,7 @@ module ApplicationHelper
 
   # Whether a single-run step can be reset/restarted in the UI or via restart_step.
   def single_run_step_resettable?(project, step, project_step: nil, runs: nil)
+    return false unless new_analyses_allowed?(project)
     return false unless step && !step.multiple_runs
     return false if single_run_step_locked_from_publication?(project, step, runs: runs)
 
@@ -35,6 +44,7 @@ module ApplicationHelper
   def step_result_refinement_allowed?(project, run)
     return false unless project && run
     return false unless analyzable?(project) && editable?(project)
+    return false unless new_analyses_allowed?(project)
     return false if project.locked_from_publication?(run)
 
     true

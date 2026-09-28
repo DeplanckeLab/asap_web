@@ -56,6 +56,10 @@
   end
   total_cells_count = @project&.nber_cols.to_i
   kept_cells_count = (@h_res && @h_res['nber_cols']) ? @h_res['nber_cols'].to_i : nil
+  if (!kept_cells_count || kept_cells_count <= 0) && run_for_view
+    kept_cells_count = Annot.light.where(run_id: run_for_view.id, name: '/matrix').maximum(:nber_cols).to_i
+    kept_cells_count = nil unless kept_cells_count.positive?
+  end
   discarded_cells_count = discarded_indices.size
   if discarded_cells_count.zero? && kept_cells_count && total_cells_count.positive?
     discarded_cells_count = [total_cells_count - kept_cells_count, 0].max
@@ -99,6 +103,12 @@
                 data-restart-step-step-id-value="<%= @step.id %>"
                 data-restart-step-restart-url-value="<%= restart_step_project_path(@project, return_to_form: 1) %>"
                 data-action="click->restart-step#restart">
+          Reset
+        </button>
+      <% elsif !new_analyses_allowed?(@project) %>
+        <button type="button" disabled
+                class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                title="<%= legacy_version_new_analysis_message %>">
           Reset
         </button>
       <% elsif analyzable?(@project) && editable?(@project) && single_run_step_locked_from_publication?(@project, @step, runs: run_for_view) %>

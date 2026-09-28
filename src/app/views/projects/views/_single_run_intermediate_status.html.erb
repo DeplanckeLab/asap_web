@@ -73,6 +73,14 @@
           Reset
         </button>
       </div>
+    <% elsif !new_analyses_allowed?(@project) %>
+      <div class="mt-6">
+        <button type="button" disabled
+                class="px-4 py-2 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                title="<%= legacy_version_new_analysis_message %>">
+          Reset
+        </button>
+      </div>
     <% elsif analyzable?(@project) && editable?(@project) && single_run_step_locked_from_publication?(@project, @step, runs: run) %>
       <div class="mt-6">
         <button type="button" disabled

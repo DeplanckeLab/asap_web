@@ -17,7 +17,7 @@ class ProjectsController < ApplicationController
   # triggering an unarchive job.
   METADATA_ONLY_PROJECT_VIEWS = %w[summary settings access annotations].freeze
 
-  before_action :set_project, only: %i[ show edit update destroy clone clone_status metadata_coordinates metadata_vectors gene_expression annotation_summary_stats heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public transfer_ownership cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_overlaps search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata stage_de_cell_universe delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
+  before_action :set_project, only: %i[ show edit update destroy clone clone_status export_loom_to_new_project metadata_coordinates metadata_vectors gene_expression annotation_summary_stats heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel restart_step stop_parsing delete_all_runs_from_step reset_parsing queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files toggle_public transfer_ownership cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_overlaps search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata export_consensus_annotation preview_consensus_annotation related_clone_projects federated_annotations consensus_annotation_support sample_identifiers get_autocomplete_genes get_annot_info create_cla get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets save_metadata_from_selection save_batch_compose_metadata stage_de_cell_universe delete_selection rename_selection rename_gene_set_collection selection_states delete_gene_set_collection collection_owned_project_autocomplete collection_add_project spatial_data spatial_image]
   before_action :forbid_bot_html_access_to_public_project_show, only: %i[show]
   before_action :authorize_project_read_access, only: %i[show clone_status metadata_coordinates metadata_vectors gene_expression annotation_summary_stats heatmap_data heatmap_metadata_catalog heatmap_track get_file step_results refresh_steps_panel queue_position get_attributes upd_pred data_content run_status run_counts run_list unarchive_status graph pipeline_runs instructions get_commands get_loom_files_json export_h5ad data_file_metadata_catalog project_data_files cluster_comparison filter_de_results viz_de_results filter_ge_results filter_doublet_results search_gene search_gene_memberships search_gene_membership_items search_gene_set_overlaps search_gene_set_items gene_set_collection_items gene_set_collection_status gene_set_item_genes gene_set_item_module_score cancel_gene_set_item_module_score download_gene_set_collection sample_identifiers get_autocomplete_genes get_annot_info get_annot_evidences search_visualization_metadata get_cell_set_annotations discover_metadata_import_sources discover_metadata_import_from_project metadata_import_cell_sets related_clone_projects federated_annotations consensus_annotation_support selection_states spatial_data spatial_image]
   before_action :authorize_project_edit_access, only: %i[edit update destroy restart_step stop_parsing delete_all_runs_from_step reset_parsing save_manual_gene_set create_gene_set_collection save_de_gene_set import_gene_set_collection delete_manual_gene_set prepare_metadata prepare_metadata_from_project_annot do_import_metadata delete_selection rename_selection rename_gene_set_collection delete_gene_set_collection collection_owned_project_autocomplete collection_add_project transfer_ownership]
@@ -745,7 +745,7 @@ class ProjectsController < ApplicationController
     @project_types = selectable_project_types
     @versions = available_versions
     @file_formats = FileFormat.ordered
-    @project.version_id = @versions.first&.id if @project.version_id.blank?
+    @project.version_id = Version.latest_active&.id || @versions.first&.id
     default_version_for_organisms = @project.version_id
     @organisms = fetch_organisms_for_version(default_version_for_organisms)
     @grouped_organisms = group_organisms(@organisms, version_id: default_version_for_organisms)
@@ -783,6 +783,8 @@ class ProjectsController < ApplicationController
       end
     end
 
+    apply_export_prefill_for_new_project!
+
     @prefill_file_url = params[:file_url].to_s.strip.presence
     @project_origin_name = resolve_project_origin_name_for_new(
       params[:from],
@@ -811,6 +813,10 @@ class ProjectsController < ApplicationController
 
     # Guest sandbox projects must use the session sandbox key so access checks pass.
     @project.key = session[:sandbox] unless current_user
+
+    # New projects always use the latest activated ASAP release (version is not user-selectable).
+    latest_version_id = Version.latest_active&.id
+    @project.version_id = latest_version_id if latest_version_id.present?
     
     # Get file formats for parsing attributes handling
     @h_formats = {}
@@ -1649,10 +1655,10 @@ class ProjectsController < ApplicationController
       return
     end
 
-    if @project.version_id.to_i < 4
+    if @project.older_than_latest_active_version?
       respond_to do |format|
-        format.html { redirect_to projects_path, alert: "Cloning is not available for projects on ASAP release before v4." }
-        format.json { render json: { error: "Cloning is not available for this project release" }, status: :unprocessable_entity }
+        format.html { redirect_to project_path(@project), alert: "Projects from older ASAP releases cannot be cloned. Export a LOOM file to a new project instead." }
+        format.json { render json: { error: "Projects from older ASAP releases cannot be cloned", export_required: true }, status: :unprocessable_entity }
       end
       return
     end
@@ -1673,6 +1679,103 @@ class ProjectsController < ApplicationController
         format.json { render json: { error: error_message }, status: :unprocessable_entity }
       end
     end
+  end
+
+  # POST /projects/1/export_loom_to_new_project
+  # Copy a LOOM from an older-version project into a new Fu and open the create-project form.
+  def export_loom_to_new_project
+    unless clonable?(@project)
+      redirect_to project_path(@project), alert: "You don't have permission to export this project."
+      return
+    end
+
+    unless @project.older_than_latest_active_version?
+      redirect_to project_path(@project), alert: "This project is already on the latest ASAP release. Use Clone instead."
+      return
+    end
+
+    loom_file = params[:loom_file].to_s.strip
+    if loom_file.blank?
+      redirect_to project_path(@project), alert: "Please select a LOOM file to export."
+      return
+    end
+
+    allowed_looms = @project.exportable_loom_filepaths
+    unless allowed_looms.include?(loom_file)
+      redirect_to project_path(@project), alert: "The selected LOOM file is not available in this project."
+      return
+    end
+
+    latest_version = Version.latest_active
+    unless latest_version
+      redirect_to project_path(@project), alert: "No activated ASAP release is available."
+      return
+    end
+
+    if @project.archive_status_id == 3
+      unless Basic.unarchive(@project.key)
+        redirect_to project_path(@project), alert: "Could not unarchive the source project before exporting the LOOM file."
+        return
+      end
+    end
+
+    source_path = @project.storage_dir.join(loom_file)
+    unless File.exist?(source_path)
+      redirect_to project_path(@project), alert: "LOOM file not found on disk: #{loom_file}"
+      return
+    end
+
+    original_filename = File.basename(loom_file)
+    input_filename = "input_file#{File.extname(original_filename)}"
+    file_size = File.size(source_path)
+
+    fu = Fu.create!(
+      user_id: current_user&.id,
+      project_key: current_user ? nil : session[:sandbox],
+      upload_file_name: input_filename,
+      upload_file_size: file_size,
+      status: 'uploaded',
+      name: original_filename,
+      upload_type: UploadType.id_for('project_input'),
+      preparsing_version_id: latest_version.id
+    )
+
+    FileUtils.mkdir_p(fu.upload_dir)
+    FileUtils.cp(source_path, fu.file_path)
+
+    session[:file_upload] = {
+      fu_id: fu.id,
+      original_filename: original_filename,
+      input_filename: input_filename,
+      path: fu.file_path.to_s,
+      size: file_size,
+      total_size: file_size,
+      complete: true,
+      organism_id: @project.organism_id,
+      version_id: latest_version.id
+    }
+
+    fu.update!(status: 'preparsing')
+    FuPreparsingJob.perform_later(
+      fu.id,
+      {
+        organism_id: @project.organism_id,
+        version_id: latest_version.id,
+        enqueued_at: Time.current.iso8601
+      }.compact
+    )
+
+    redirect_to new_project_path(
+      fu_id: fu.id,
+      name: Project.base_name_without_clone_suffix(@project.name.presence || @project.key),
+      organism_id: @project.organism_id,
+      project_type_id: @project.project_type_id,
+      exported_project_id: @project.id
+    )
+  rescue StandardError => e
+    Rails.logger.error("[export_loom_to_new_project] #{e.class}: #{e.message}")
+    Rails.logger.error(e.backtrace.join("\n"))
+    redirect_to project_path(@project), alert: "Failed to export LOOM to a new project: #{e.message}"
   end
 
   def clone_status
@@ -8731,6 +8834,11 @@ class ProjectsController < ApplicationController
   # POST /projects/:id/restart_step
   def restart_step
     begin
+      if @project.older_than_latest_active_version?
+        redirect_to project_path(@project, view: 'analysis'), alert: helpers.legacy_version_new_analysis_message
+        return
+      end
+
       step_id = params[:step_id].to_i
       @step = Step.find_by(id: step_id)
       
@@ -9638,8 +9746,8 @@ class ProjectsController < ApplicationController
     )
 
     raw_cols = biggest_annot.nber_cols.to_i
-    unless Basic.de_method_allowed_for_nber_cols?(std_method, raw_cols)
-      msg = Basic.de_large_dataset_method_block_message(raw_cols)
+    unless Basic.method_allowed_for_large_dataset?(std_method, raw_cols)
+      msg = Basic.large_dataset_block_message(raw_cols)
       render json: empty_payload.merge(
         error: msg,
         prevent_submit: true,
@@ -9890,6 +9998,30 @@ class ProjectsController < ApplicationController
       }
       @existing_fu_id = fu.id
       @existing_filename = fu.name.presence || fu.upload_file_name
+    end
+
+    def apply_export_prefill_for_new_project!
+      if params[:name].present?
+        @project.name = params[:name].to_s
+      end
+
+      if params[:organism_id].present?
+        @project.organism_id = params[:organism_id].to_i
+      end
+
+      if params[:project_type_id].present?
+        allowed_type_ids = (@project_types || selectable_project_types).map(&:id)
+        type_id = params[:project_type_id].to_i
+        @project.project_type_id = type_id if allowed_type_ids.include?(type_id)
+      end
+
+      if params[:exported_project_id].present?
+        exported_id = params[:exported_project_id].to_i
+        if Project.exists?(id: exported_id)
+          @exported_project_id = exported_id
+          @project.exported_project_id = exported_id
+        end
+      end
     end
 
     def resolve_project_origin_name_for_new(from_param, fu_id, integrate: false)
@@ -12235,8 +12367,9 @@ class ProjectsController < ApplicationController
           description: method.description,
           link: (method.respond_to?(:link) ? method.link : '')
         }
-        if Basic.de_large_dataset?(@project.nber_cols) &&
-           !Basic.de_method_allowed_for_nber_cols?(method, @project.nber_cols)
+        viz_nber_cols = analysis_selected_matrix_nber_cols
+        if Basic.large_dataset?(viz_nber_cols) &&
+           !Basic.method_allowed_for_large_dataset?(method, viz_nber_cols)
           @visualization_de_unavailable_methods[method.id] = true
         end
       end
@@ -12338,6 +12471,13 @@ class ProjectsController < ApplicationController
 
       @runs = apply_publication_snapshot_to_runs(@project.runs.includes(:annots))
       prepare_steps_with_status
+
+      analysis_nber_cols = analysis_selected_matrix_nber_cols
+      @large_dataset_analysis_nber_cols = analysis_nber_cols
+      @large_dataset_analysis_notice =
+        if show_large_dataset_analysis_banner?(analysis_nber_cols)
+          Basic.large_dataset_analysis_notice(analysis_nber_cols)
+        end
 
       @parsing_step = parsing_step_for_project(@project)
       @parsing_step_id = @parsing_step&.id
@@ -12586,6 +12726,110 @@ class ProjectsController < ApplicationController
       end
 
       @selected_loom_file = cf_loom
+    end
+
+    # Cell count for large-dataset gating / analysis banner.
+    # Prefer an explicit loom scope; otherwise the latest successful cell-filtering
+    # /matrix (so the banner hides after filtering below the threshold); else parsing
+    # /matrix; else max /matrix / project.nber_cols.
+    def analysis_selected_matrix_nber_cols
+      loom_file = @selected_loom_file.presence
+      loom_file ||= preferred_cell_filtering_loom_file if version_v8_or_later?(@project.version_id)
+
+      if loom_file.present?
+        cols = matrix_nber_cols_for_filepath(loom_file)
+        return cols if cols.positive?
+      end
+
+      parsing_step = parsing_step_for_project(@project)
+      if parsing_step
+        parsing_run_id = Run.where(project_id: @project.id, step_id: parsing_step.id, status_id: 3)
+                            .order(created_at: :desc)
+                            .limit(1)
+                            .pick(:id)
+        if parsing_run_id
+          parsing_annot = Annot.light.where(
+            project_id: @project.id,
+            run_id: parsing_run_id,
+            name: '/matrix'
+          ).order(id: :desc).first
+          cols = parsing_annot&.nber_cols.to_i
+          return cols if cols.positive?
+        end
+      end
+
+      max_cols = Annot.light.where(project_id: @project.id, name: '/matrix').maximum(:nber_cols).to_i
+      return max_cols if max_cols.positive?
+
+      @project.nber_cols.to_i
+    end
+
+    # v<8 can have several cell-filtering runs. Hide the analysis banner when any
+    # successful filtering output has fewer cells than the large-dataset threshold.
+    def show_large_dataset_analysis_banner?(nber_cols)
+      return false unless Basic.large_dataset?(nber_cols)
+      return true if version_v8_or_later?(@project.version_id)
+
+      !any_cell_filtering_output_below_large_dataset_threshold?
+    end
+
+    def any_cell_filtering_output_below_large_dataset_threshold?
+      threshold = Basic.large_dataset_min_cells
+      cell_filtering_output_nber_cols_by_run_id.any? { |_run_id, cols| cols.positive? && cols < threshold }
+    end
+
+    # Successful cell-filtering runs -> kept cell counts (output /matrix or output.json).
+    def cell_filtering_output_nber_cols_by_run_id
+      cf_step = cell_filtering_step_for_project
+      return {} unless cf_step
+
+      cf_runs = Run.where(project_id: @project.id, step_id: cf_step.id, status_id: 3).to_a
+      return {} if cf_runs.empty?
+
+      run_ids = cf_runs.map(&:id)
+      cols_by_run = Annot.light.where(project_id: @project.id, run_id: run_ids, name: '/matrix')
+                         .group(:run_id)
+                         .maximum(:nber_cols)
+                         .transform_values(&:to_i)
+
+      cf_runs.each do |run|
+        next if cols_by_run[run.id].to_i.positive?
+
+        cols = cell_filtering_kept_cells_from_output_json(run, cf_step)
+        cols_by_run[run.id] = cols if cols.positive?
+      end
+
+      cols_by_run
+    end
+
+    def cell_filtering_kept_cells_from_output_json(run, step = nil)
+      step ||= @h_steps&.[](run.step_id) || Step.find_by(id: run.step_id)
+      return 0 unless step && @project
+
+      project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key
+      step_dir = project_dir + step.name
+      output_dir = step.multiple_runs ? (step_dir + run.id.to_s) : step_dir
+      output_json_file = output_dir + 'output.json'
+      return 0 unless File.exist?(output_json_file)
+
+      h_res = Basic.safe_parse_json(File.read(output_json_file), {})
+      h_res['nber_cols'].to_i
+    rescue StandardError
+      0
+    end
+
+    def matrix_nber_cols_for_filepath(filepath)
+      if defined?(@matrix_dims_by_loom) && @matrix_dims_by_loom.is_a?(Hash)
+        dims = @matrix_dims_by_loom[filepath]
+        cols = dims.is_a?(Hash) ? dims[:nber_cols].to_i : 0
+        return cols if cols.positive?
+      end
+
+      Annot.light.where(
+        project_id: @project.id,
+        filepath: filepath,
+        name: '/matrix'
+      ).order(id: :desc).limit(1).pick(:nber_cols).to_i
     end
 
     def analysis_single_visible_run_id_for_step(step, all_annots_for_loom, selected_loom_file)
@@ -16386,7 +16630,7 @@ class ProjectsController < ApplicationController
       params.fetch(:project, {}).permit(
         :name, :key, :description, :organism_id, :project_type_id, 
         :version_id, :step_id, :status_id, :technology, :tissue, :extra_info, :input_filename,
-        :parsing_attrs_json, :nber_cols, :nber_rows, :extension, :fu_id
+        :parsing_attrs_json, :nber_cols, :nber_rows, :extension, :fu_id, :exported_project_id
       )
     end
     
@@ -17608,17 +17852,16 @@ class ProjectsController < ApplicationController
         end
       end
 
-      # Large DE matrices: only t_test_approx is allowed (scalable streaming path).
-      if @step.name.to_s == 'de'
-        de_nber_cols = @project.nber_cols.to_i
-        if Basic.de_large_dataset?(de_nber_cols)
-          @std_methods.each do |std_method|
-            next if Basic.de_method_allowed_for_nber_cols?(std_method, de_nber_cols)
+      # Large selected input matrices: only steps/methods with large_dataset_ok may run.
+      form_nber_cols = analysis_selected_matrix_nber_cols
+      if Basic.large_dataset?(form_nber_cols)
+        @std_methods.each do |std_method|
+          next if Basic.method_allowed_for_large_dataset?(std_method, form_nber_cols)
 
-            @h_unavailable_methods[std_method.id] = true
-          end
-          @de_large_dataset_method_notice = Basic.de_large_dataset_method_block_message(de_nber_cols)
+          @h_unavailable_methods[std_method.id] = true
         end
+        @large_dataset_method_notice = Basic.large_dataset_block_message(form_nber_cols)
+        @de_large_dataset_method_notice = @large_dataset_method_notice if @step.name.to_s == 'de'
       end
       
       # Create a new Req object for the form
@@ -17838,12 +18081,30 @@ class ProjectsController < ApplicationController
         
         run_time = (run.start_time && run.duration) ? (run.start_time + run.duration) : Time.now
         estimated_time_txt = (run.pred_process_duration) ? "Estimated #{helpers.duration(run.pred_process_duration)} - " : ''
+
+        step_for_run = @h_steps[run.step_id]
+        cell_filtering_kept_html = ''
+        if step_for_run&.name.to_s == 'cell_filtering' && run.status_id == 3
+          kept_cells = h_res['nber_cols'].to_i
+          if kept_cells <= 0
+            kept_cells = Annot.light.where(run_id: run.id, name: '/matrix').maximum(:nber_cols).to_i
+          end
+          if kept_cells <= 0
+            kept_cells = cell_filtering_kept_cells_from_output_json(run, step_for_run)
+          end
+          if kept_cells.positive?
+            cell_filtering_kept_html =
+              "<div class='mb-2'><span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200'>" \
+              "Cells kept: #{helpers.number_with_delimiter(kept_cells)}</span></div>"
+          end
+        end
         
         card_body = [
           "<div class='flex items-center justify-between mb-2'><div class='font-semibold text-gray-900'>#{helpers.display_run(run)}</div><span class='inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium #{status_badge_classes}'>#{status_name}</span></div>",
+          cell_filtering_kept_html,
           "<p class='text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2'>Parameters</p>",
           helpers.display_run_attrs(run, h_attrs, h_std_method_attrs, {}),
-          ((run.status_id == 3 && @h_dashboard_card && @h_dashboard_card[run.step_id] && @h_dashboard_card[run.step_id]["output_values"] && @h_dashboard_card[run.step_id]["output_values"].size > 0) ? ("<p class='text-xs font-semibold text-gray-600 uppercase tracking-wide mt-3 mb-2'>Output summary</p><div class='flex flex-wrap gap-1.5'>" + @h_dashboard_card[run.step_id]["output_values"].select { |e| h_res.key?(e["key"]) }.map { |e| v = h_res[e["key"]]; disp = v.nil? ? "NA" : v; "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200'>#{e["label"]}:#{disp}</span>" }.join(" ") + "</div>") : ''),
+          ((run.status_id == 3 && @h_dashboard_card && @h_dashboard_card[run.step_id] && @h_dashboard_card[run.step_id]["output_values"] && @h_dashboard_card[run.step_id]["output_values"].size > 0) ? ("<p class='text-xs font-semibold text-gray-600 uppercase tracking-wide mt-3 mb-2'>Output summary</p><div class='flex flex-wrap gap-1.5'>" + @h_dashboard_card[run.step_id]["output_values"].select { |e| h_res.key?(e["key"]) }.map { |e| v = h_res[e["key"]]; disp = v.nil? ? "NA" : v; label = (step_for_run&.name.to_s == 'cell_filtering' && e['key'].to_s == 'nber_cols') ? 'cells kept' : e['label']; "<span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 border border-blue-200'>#{label}:#{disp}</span>" }.join(" ") + "</div>") : ''),
           ((h_files.keys.size > 0) ? ("<p class='text-xs font-semibold text-gray-600 uppercase tracking-wide mt-3 mb-2'>Results</p><div class='flex flex-wrap gap-1.5'>" + h_files.keys.map { |k| helpers.display_download_btn(run, h_files[k]) }.join(" ") + "</div>") : ""),
           ((run.status_id == 3 && h_res['warnings']) ? h_res['warnings'].map { |e|
             if e.is_a?(Hash)
@@ -18131,7 +18392,10 @@ class ProjectsController < ApplicationController
           end
         end
 
-        render_to_string(partial: 'runs/panel', layout: false)
+        render_to_string(
+          partial: (step.name.to_s == 'cell_filtering' ? 'projects/views/cell_filtering_view' : 'runs/panel'),
+          layout: false
+        )
       ensure
         saved_ivars.each { |ivar, val| instance_variable_set(ivar, val) }
         %i[@run @step @std_method @status @h_run_attrs @h_std_method_attrs @h_dashboard_card

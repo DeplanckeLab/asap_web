@@ -89,6 +89,7 @@ Rails.application.routes.draw do
       get :metadata_import_cell_sets
       post :prepare_metadata_from_project_annot
       post :clone
+      post :export_loom_to_new_project
       post :toggle_public
       post :transfer_ownership
       post :prepare_metadata

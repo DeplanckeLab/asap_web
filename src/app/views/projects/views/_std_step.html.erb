@@ -130,7 +130,7 @@
               <% end %>
               <!-- New Run Button -->
               <% if @step.has_std_form && @step.multiple_runs %>
-                <% if analyzable?(@project) %>
+                <% if analyzable?(@project) && new_analyses_allowed?(@project) %>
                   <button type="button" 
                           class="inline-flex items-center box-border h-8 px-3 border border-transparent bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-xs transition-colors cursor-pointer" 
                           onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, force_show_form: 1, format: :html) %>')"
@@ -141,7 +141,7 @@
                   <button type="button" disabled
                           class="inline-flex items-center box-border h-8 px-3 border border-transparent bg-gray-300 text-gray-500 rounded-md font-medium text-xs cursor-not-allowed"
                           style="flex-shrink: 0;"
-                          title="You need analysis rights to run new analyses">
+                          title="<%= new_analyses_allowed?(@project) ? 'You need analysis rights to run new analyses' : legacy_version_new_analysis_message %>">
                     <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New run</span>
                   </button>
                 <% end %>
@@ -179,6 +179,13 @@
                           data-restart-step-restart-url-value="<%= restart_step_project_path(@project) %>"
                           data-action="click->restart-step#restart"
                           style="flex-shrink: 0;">
+                    <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Restart</span>
+                  </button>
+                <% elsif !new_analyses_allowed?(@project) %>
+                  <button type="button" disabled
+                          class="inline-flex items-center box-border h-8 px-3 border border-transparent bg-gray-300 text-gray-500 rounded-md font-medium text-xs cursor-not-allowed"
+                          style="flex-shrink: 0;"
+                          title="<%= legacy_version_new_analysis_message %>">
                     <i class="fas fa-redo sm:mr-1"></i><span class="hidden sm:inline"> Restart</span>
                   </button>
                 <% elsif analyzable?(@project) && editable?(@project) && single_run_step_locked_from_publication?(@project, @step, runs: @runs) %>
@@ -307,7 +314,7 @@
               <% end %>
               <!-- New Run Button -->
               <% if @step.has_std_form && @step.multiple_runs %>
-                <% if analyzable?(@project) %>
+                <% if analyzable?(@project) && new_analyses_allowed?(@project) %>
                   <button type="button" 
                           class="inline-flex items-center box-border h-8 px-3 border border-transparent bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium text-xs transition-colors cursor-pointer" 
                           onclick="loadFormInRightPanel('<%= step_results_project_path(@project, step_id: @step.id, show_form: 1, force_show_form: 1, format: :html) %>')"
@@ -318,7 +325,7 @@
                   <button type="button" disabled
                           class="inline-flex items-center box-border h-8 px-3 border border-transparent bg-gray-300 text-gray-500 rounded-md font-medium text-xs cursor-not-allowed"
                           style="flex-shrink: 0;"
-                          title="You need analysis rights to run new analyses">
+                          title="<%= new_analyses_allowed?(@project) ? 'You need analysis rights to run new analyses' : legacy_version_new_analysis_message %>">
                     <i class="fas fa-plus sm:mr-1"></i><span class="hidden sm:inline"> New run</span>
                   </button>
                 <% end %>
@@ -425,6 +432,25 @@
                 <% h_clusters_count_by_run_id[run.id] = clusters_count if clusters_count > 0 %>
               <% end %>
             <% end %>
+            <% h_cells_kept_by_run_id = {} %>
+            <% if @step.name == 'cell_filtering' && @runs.present? %>
+              <% cf_run_ids = @runs.map(&:id) %>
+              <% Annot.light.where(run_id: cf_run_ids, name: '/matrix').group(:run_id).maximum(:nber_cols).each do |run_id, cols| %>
+                <% h_cells_kept_by_run_id[run_id] = cols.to_i if cols.to_i.positive? %>
+              <% end %>
+              <% project_dir = Pathname.new(ENV.fetch('USER_DATA_DIR')) + @project.user_id.to_s + @project.key %>
+              <% @runs.each do |run| %>
+                <% next if h_cells_kept_by_run_id[run.id].to_i.positive? %>
+                <% next unless run.status_id == 3 %>
+                <% step_dir = project_dir + @step.name %>
+                <% output_dir = @step.multiple_runs ? (step_dir + run.id.to_s) : step_dir %>
+                <% output_json_file = output_dir + 'output.json' %>
+                <% if File.exist?(output_json_file) %>
+                  <% cols = Basic.safe_parse_json(File.read(output_json_file), {})['nber_cols'].to_i %>
+                  <% h_cells_kept_by_run_id[run.id] = cols if cols.positive? %>
+                <% end %>
+              <% end %>
+            <% end %>
             <table id="runs-table" class="w-full divide-y divide-gray-200 bg-white" style="table-layout: auto;">
               <thead class="bg-gray-50">
                 <tr>
@@ -440,6 +466,11 @@
                   <% if @step.name == 'clustering' %>
                     <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap">
                       Clusters
+                    </th>
+                  <% end %>
+                  <% if @step.name == 'cell_filtering' %>
+                    <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider whitespace-nowrap cursor-pointer select-none" data-sort-numeric="true" onclick="sortRunsTable(this)">
+                      Cells kept <span class="sort-indicator"></span>
                     </th>
                   <% end %>
                   <th scope="col" class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24 cursor-pointer whitespace-nowrap select-none" data-sort-col="3" onclick="sortRunsTable(this)">Status <span class="sort-indicator"></span></th>
@@ -502,6 +533,18 @@
                         <% if clusters_count > 0 %>
                           <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800">
                             <%= clusters_count %>
+                          </span>
+                        <% else %>
+                          <span class="text-gray-400 text-xs">-</span>
+                        <% end %>
+                      </td>
+                    <% end %>
+                    <% if @step.name == 'cell_filtering' %>
+                      <% cells_kept = h_cells_kept_by_run_id[run.id].to_i %>
+                      <td class="px-3 py-4 whitespace-nowrap" data-sort-value="<%= cells_kept %>" data-run-table-cells-kept-cell>
+                        <% if cells_kept > 0 %>
+                          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                            <%= number_with_delimiter(cells_kept) %>
                           </span>
                         <% else %>
                           <span class="text-gray-400 text-xs">-</span>

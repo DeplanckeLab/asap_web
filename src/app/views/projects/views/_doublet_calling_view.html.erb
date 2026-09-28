@@ -53,6 +53,12 @@
                 data-action="click->restart-step#restart">
           Reset
         </button>
+      <% elsif !new_analyses_allowed?(@project) %>
+        <button type="button" disabled
+                class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"
+                title="<%= legacy_version_new_analysis_message %>">
+          Reset
+        </button>
       <% elsif analyzable?(@project) && editable?(@project) && single_run_step_locked_from_publication?(@project, @step, runs: run_for_view) %>
         <button type="button" disabled
                 class="px-3 py-1.5 bg-gray-300 text-gray-500 rounded-md font-medium text-sm cursor-not-allowed"

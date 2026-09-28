@@ -213,6 +213,13 @@
                            Array(or_group).any? { |valid_type| annot_data_class_names.include?(valid_type) }
                          end
                        end %>
+                    <%# Hide large matrices/cell metadata unless this step/method is large_dataset_ok. %>
+                    <% form_allows_large_datasets =
+                         Basic.std_method_large_dataset_ok?(@std_method) ||
+                         Basic.step_large_dataset_ok?(@step || Basic.std_method_step(@std_method)) %>
+                    <% unless form_allows_large_datasets %>
+                      <% matching_annots = matching_annots.reject { |annot| Basic.annot_large_dataset?(annot) } %>
+                    <% end %>
                     <% min_items = attr['min_nber_items'] || 0 %>
                     <% max_items = attr['max_nber_items'] %>
                     <% is_multiple = attr['req_data_structure'] == 'array' && (max_items.nil? || max_items > 1) %>

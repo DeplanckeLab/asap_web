@@ -5,6 +5,10 @@ console.log('🔵 [OrganismSelector] JavaScript file loaded!')
 
 export default class extends Controller {
   static targets = ["dropdownButton", "dropdownMenu", "groupHeader", "groupContent", "groupChevron", "groupCount", "option", "hiddenInput", "selectedText", "chevron", "searchInput"]
+  static values = {
+    versionId: String,
+    autoload: { type: Boolean, default: false }
+  }
 
   connect() {
     console.log('=== [OrganismSelector] Controller connecting... ===')
@@ -25,6 +29,7 @@ export default class extends Controller {
     
     this.isOpen = false
     this.ignoreNextClick = false
+    this.organismsLoadPromise = null
     
     // Expand group if it contains the selected organism
     if (this.hasHiddenInputTarget && this.hiddenInputTarget.value) {
@@ -51,6 +56,10 @@ export default class extends Controller {
       this.boundCloseOnOutsideClick = this.closeOnOutsideClick.bind(this)
       document.addEventListener('click', this.boundCloseOnOutsideClick, true)
     }, 200)
+
+    if (this.autoloadValue && this.versionIdValue) {
+      this.loadOrganismsForVersion(this.versionIdValue)
+    }
     
     console.log('[OrganismSelector] Controller connected successfully')
   }
@@ -89,6 +98,9 @@ export default class extends Controller {
     
     if (this.isOpen) {
       console.log('[OrganismSelector] Opening dropdown')
+      if (this.autoloadValue && this.versionIdValue && !this.hasLoadedOrganismOptions()) {
+        this.loadOrganismsForVersion(this.versionIdValue)
+      }
       this.dropdownMenuTarget.classList.remove('hidden')
       this.positionDropdown()
       console.log('[OrganismSelector] Dropdown menu classes after remove:', this.dropdownMenuTarget.className)
@@ -301,27 +313,52 @@ export default class extends Controller {
       return
     }
 
+    this.loadOrganismsForVersion(versionId)
+  }
+
+  hasLoadedOrganismOptions() {
+    return this.hasDropdownMenuTarget &&
+      this.dropdownMenuTarget.querySelector('[data-organism-id]') !== null
+  }
+
+  loadOrganismsForVersion(versionId) {
+    if (!versionId) {
+      return Promise.resolve()
+    }
+
+    if (this.organismsLoadPromise && this.organismsLoadingVersionId === String(versionId)) {
+      return this.organismsLoadPromise
+    }
+
     console.log('[OrganismSelector] Reloading organisms for version:', versionId)
     
     // Remember the currently selected organism before resetting
     const previouslySelectedOrganismId = this.hasHiddenInputTarget ? this.hiddenInputTarget.value : null
     console.log('[OrganismSelector] Previously selected organism ID:', previouslySelectedOrganismId)
     
-    // Show loading state
-    if (this.hasSelectedTextTarget) {
+    // Show loading state only when nothing is selected yet
+    if (this.hasSelectedTextTarget && !previouslySelectedOrganismId) {
       this.selectedTextTarget.textContent = 'Loading organisms...'
     }
     
-    // Fetch organisms for this version
-    fetch(`/projects/organisms_for_version?version_id=${encodeURIComponent(versionId)}`, {
+    this.organismsLoadingVersionId = String(versionId)
+    this.organismsLoadPromise = fetch(`/projects/organisms_for_version?version_id=${encodeURIComponent(versionId)}`, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
         'X-Requested-With': 'XMLHttpRequest'
       }
     })
-      .then(response => response.json())
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`organisms_for_version failed with status ${response.status}`)
+        }
+        return response.json()
+      })
       .then(data => {
+        if (data.error) {
+          throw new Error(data.error)
+        }
         console.log('[OrganismSelector] Received organisms data:', data)
         this.updateOrganismDropdown(data.organisms)
 
@@ -346,6 +383,13 @@ export default class extends Controller {
           }
         }
 
+        if (idsToTry.length === 0) {
+          if (this.hasSelectedTextTarget) {
+            this.selectedTextTarget.textContent = 'Please select an organism'
+          }
+          return
+        }
+
         console.log('[OrganismSelector] No matching organism in new list, resetting selection')
 
         if (this.hasHiddenInputTarget) {
@@ -357,10 +401,18 @@ export default class extends Controller {
       })
       .catch(error => {
         console.error('[OrganismSelector] Error loading organisms:', error)
-        if (this.hasSelectedTextTarget) {
+        if (this.hasSelectedTextTarget && !previouslySelectedOrganismId) {
           this.selectedTextTarget.textContent = 'Error loading organisms'
         }
       })
+      .finally(() => {
+        if (this.organismsLoadingVersionId === String(versionId)) {
+          this.organismsLoadPromise = null
+          this.organismsLoadingVersionId = null
+        }
+      })
+
+    return this.organismsLoadPromise
   }
 
   trySelectOrganismById(organismId) {

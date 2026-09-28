@@ -712,25 +712,33 @@ class ProjectsController < ApplicationController
   # GET /projects/organisms_for_version
   def organisms_for_version
     version_id = params[:version_id].presence
-    organisms = fetch_organisms_for_version(version_id)
-    grouped_organisms = group_organisms(organisms, version_id: version_id)
-    
-    render json: {
-      organisms: grouped_organisms.map do |domain, orgs|
-        {
-          domain: domain,
-          count: orgs.count,
-          organisms: orgs.map do |display_name, id, tax_id, assembly_status|
-            {
-              display_name: display_name,
-              id: id,
-              tax_id: tax_id,
-              assembly_status: assembly_status
-            }
-          end
-        }
-      end
-    }
+    version = version_id.present? ? Version.find_by(id: version_id) : nil
+    env_data = version ? Basic.safe_parse_json(version.env_json, {}) : {}
+    db_name = env_data['asap_data_db_name'].to_s
+    cache_key = ["projects", "organisms_for_version", version_id, db_name, version&.updated_at&.to_i]
+
+    payload = Rails.cache.fetch(cache_key, expires_in: 6.hours) do
+      organisms = fetch_organisms_for_version(version_id)
+      grouped_organisms = group_organisms(organisms, version_id: version_id)
+      {
+        organisms: grouped_organisms.map do |domain, orgs|
+          {
+            domain: domain,
+            count: orgs.count,
+            organisms: orgs.map do |display_name, id, tax_id, assembly_status|
+              {
+                display_name: display_name,
+                id: id,
+                tax_id: tax_id,
+                assembly_status: assembly_status
+              }
+            end
+          }
+        end
+      }
+    end
+
+    render json: payload
   rescue StandardError => e
     Rails.logger.error("[ProjectsController] Error fetching organisms for version #{version_id}: #{e.class} - #{e.message}")
     Rails.logger.error("[ProjectsController] Backtrace: #{e.backtrace.first(5).join("\n")}")
@@ -746,9 +754,11 @@ class ProjectsController < ApplicationController
     @versions = available_versions
     @file_formats = FileFormat.ordered
     @project.version_id = Version.latest_active&.id || @versions.first&.id
-    default_version_for_organisms = @project.version_id
-    @organisms = fetch_organisms_for_version(default_version_for_organisms)
-    @grouped_organisms = group_organisms(@organisms, version_id: default_version_for_organisms)
+    # Organism options are loaded asynchronously (see organism-selector) so the
+    # HTML response is not blocked by listing ~1000 remote organisms.
+    @organism_selector_autoload = true
+    @organisms = []
+    @grouped_organisms = {}
 
     # Handle integration mode
     # Source keys can arrive via URL params (from reset_parsing redirect) or session

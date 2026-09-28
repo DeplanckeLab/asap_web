@@ -6,21 +6,12 @@ class RemoteOrganism < Asap2RemoteRecord
 
   DISPLAY_ATTRIBUTES = %w[id name short_name tax_id ensembl_subdomain_id created_at updated_at].freeze
 
-  # Latest Ensembl release for gene mapping: organism record and gene table, not subdomain-wide.
+  # Target Ensembl release for assembly status on the organism selector.
+  # Use organisms.latest_ensembl_release only: aggregating MAX(latest_ensembl_release)
+  # over genes is multi-second on large shards (~tens of millions of rows) and blocked
+  # new-project page load. Keep that column up to date when loading Ensembl data.
   TARGET_LATEST_RELEASE_SQL = <<~SQL.squish
-    GREATEST(
-      COALESCE(NULLIF(organisms.latest_ensembl_release, 0), 0),
-      COALESCE(NULLIF(gene_latest.max_gene_latest, 0), 0)
-    )
-  SQL
-
-  GENE_LATEST_RELEASE_JOIN_SQL = <<~SQL.squish
-    LEFT JOIN (
-      SELECT organism_id, MAX(latest_ensembl_release) AS max_gene_latest
-      FROM genes
-      WHERE latest_ensembl_release IS NOT NULL AND latest_ensembl_release > 0
-      GROUP BY organism_id
-    ) gene_latest ON gene_latest.organism_id = organisms.id
+    COALESCE(NULLIF(organisms.latest_ensembl_release, 0), 0)
   SQL
 
   def self.list_for_version(version)
@@ -29,7 +20,6 @@ class RemoteOrganism < Asap2RemoteRecord
       assembly_name_sql = assembly_name_for_target_release_sql(release_sql)
       assembly_release_sql = assembly_release_for_target_release_sql(release_sql)
       joins('LEFT JOIN ensembl_subdomains ON organisms.ensembl_subdomain_id = ensembl_subdomains.id')
-        .joins(GENE_LATEST_RELEASE_JOIN_SQL)
         .select(
           'organisms.*',
           'ensembl_subdomains.name as domain_name',

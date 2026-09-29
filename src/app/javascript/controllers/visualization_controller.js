@@ -27866,13 +27866,23 @@ export default class extends Controller {
       return
     }
     
-    // Check if selected by looking at stable class first (survives Font Awesome SVG swap),
-    // then fall back to checkmark visibility/color.
-    const icon = checkbox.querySelector('i, svg')
-    const iconDisplay = icon ? (icon.style.display || window.getComputedStyle(icon).display) : 'none'
-    const iconColor = icon ? (icon.style.color || window.getComputedStyle(icon).color) : ''
-    const isSelected = checkbox.classList.contains('is-selected')
-      || (!checkbox.classList.contains('is-deselected') && iconDisplay !== 'none' && (iconColor === '#10b981' || iconColor === 'rgb(16, 185, 129)'))
+    // Prefer selectedCategories as source of truth. After continuous range updates, DOM
+    // icon/classes can briefly disagree with the Set; reading the Set avoids a no-op toggle
+    // that leaves the category visually stuck until another category is clicked.
+    const selectedSet =
+      (this.selectedCategories?.[metadataId] instanceof Set && this.selectedCategories[metadataId]) ||
+      (this.selectedCategories?.[String(metadataId)] instanceof Set && this.selectedCategories[String(metadataId)]) ||
+      null
+    let isSelected
+    if (selectedSet) {
+      isSelected = selectedSet.has(String(category))
+    } else {
+      const icon = checkbox.querySelector('i, svg')
+      const iconDisplay = icon ? (icon.style.display || window.getComputedStyle(icon).display) : 'none'
+      const iconColor = icon ? (icon.style.color || window.getComputedStyle(icon).color) : ''
+      isSelected = checkbox.classList.contains('is-selected')
+        || (!checkbox.classList.contains('is-deselected') && iconDisplay !== 'none' && (iconColor === '#10b981' || iconColor === 'rgb(16, 185, 129)'))
+    }
     
     // console.log(`🔄 Toggle category selection: ${category}, isSelected: ${isSelected}`)
     
@@ -27896,7 +27906,7 @@ export default class extends Controller {
     }
     
     // Initialize checkboxes for this metadata if not already done (only for discrete)
-    if ((metadataVector?.data_type === 'DISCRETE' || metadataVector?.data_type === 'STRING') && !this.selectedCategories[metadataId]) {
+    if ((metadataVector?.data_type === 'DISCRETE' || metadataVector?.data_type === 'STRING') && !this.selectedCategories[metadataId] && !this.selectedCategories[String(metadataId)]) {
       await this.initializeCheckboxesForMetadata(metadataId)
     }
     
@@ -28042,18 +28052,24 @@ export default class extends Controller {
     if (!this.selectedCategories) {
       this.selectedCategories = {}
     }
-    if (!this.selectedCategories[metadataId]) {
-      this.selectedCategories[metadataId] = new Set()
+    const mid = String(metadataId)
+    if (!this.selectedCategories[mid]) {
+      this.selectedCategories[mid] = new Set()
     }
-    this.selectedCategories[metadataId].add(String(category))
+    this.selectedCategories[mid].add(String(category))
   }
 
   deselectCategory(metadataId, category) {
-    if (this.selectedCategories && this.selectedCategories[metadataId]) {
+    const mid = String(metadataId)
+    const selected =
+      (this.selectedCategories?.[mid] instanceof Set && this.selectedCategories[mid]) ||
+      (this.selectedCategories?.[metadataId] instanceof Set && this.selectedCategories[metadataId]) ||
+      null
+    if (selected) {
       const key = String(category)
-      this.selectedCategories[metadataId].delete(key)
+      selected.delete(key)
       // Also remove a non-string twin if an older path stored the raw vector value.
-      this.selectedCategories[metadataId].delete(category)
+      selected.delete(category)
     }
   }
 

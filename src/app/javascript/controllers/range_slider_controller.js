@@ -931,6 +931,11 @@ export default class extends Controller {
     if (this.visualizationController.filterCache) {
       this.visualizationController.filterCache.clear()
     }
+    // Drop incremental early-return state so a following categorical toggle cannot reuse
+    // a pre-range lastFilterState / lastFilteredIndices snapshot.
+    this.visualizationController.lastFilterState = null
+    this.visualizationController.lastFilterStateHash = null
+    this.visualizationController.lastFilteredIndices = undefined
     const cacheClearTime = performance.now() - cacheClearStart
     // console.log(`${logPrefix} filterCache.clear took ${cacheClearTime.toFixed(2)}ms`)
     

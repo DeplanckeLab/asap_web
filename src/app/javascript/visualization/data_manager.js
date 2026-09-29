@@ -1284,6 +1284,11 @@ export class DataManager {
       })
     }
 
+    // Continuous slider drags schedule many async visibility rAFs. A late rAF from an older
+    // continuous update must not overwrite a newer category toggle (cells look "stuck").
+    const visibilityGeneration = (this.controller._filterVisibilityGeneration =
+      (this.controller._filterVisibilityGeneration || 0) + 1)
+
     // Use incremental filtering for better performance
     const filteredIndices = this.getIncrementalFilteredIndices()
     const previousVisibleCells = this.controller.currentVisibleCells
@@ -1345,6 +1350,9 @@ export class DataManager {
     }
     const rafScheduleTime = performance.now()
     requestAnimationFrame(async () => {
+      if (visibilityGeneration !== this.controller._filterVisibilityGeneration) {
+        return
+      }
       const rafStart = performance.now()
       if (perfEnabled) {
         this.controller.logPerf('pipeline_performCellFiltering_rafStart', rafStart - rafScheduleTime, {
@@ -1682,6 +1690,9 @@ export class DataManager {
               // console.log('🎨 [FILTER] Restoring coordinates and re-rendering plot...') */
               this.controller.currentCoordinates = coordinatesToRestore
               await this.controller.renderScatterPlot(coordinatesToRestore)
+              if (visibilityGeneration !== this.controller._filterVisibilityGeneration) {
+                return
+              }
               // console.log('🎨 [FILTER] Coordinates restored, proceeding with visibility update') */
               // After restoring, we now have renderer state, so continue with the update below
               // Don't return - fall through to the visibility update code
@@ -1712,6 +1723,9 @@ export class DataManager {
       // If no filters are active, we are not forcing a color update,
       // AND the filter mode didn't just change (e.g. from filtered to unfiltered),
       // skip the visibility pipeline entirely.
+      if (visibilityGeneration !== this.controller._filterVisibilityGeneration) {
+        return
+      }
       if (!hasFilterNow && !shouldUpdateColors && !filterModeChanged) {
         if (perfEnabled) {
           this.controller.logPerf('pipeline_performCellFiltering_rafSkip', performance.now() - rafStart, {
@@ -1721,6 +1735,10 @@ export class DataManager {
         }
         return
       }
+
+      // Prefer the latest committed filter result: a superseded rAF must not paint stale indices
+      // after awaiting (continuous slider updates race category toggles).
+      const indicesToApply = this.controller.currentVisibleCells
 
       // If we need to update colors (e.g., color range adapted), render colors first
       if (shouldUpdateColors && this.controller.currentMetadataVector) {
@@ -1733,10 +1751,13 @@ export class DataManager {
         }
       } else {
         const visibilityStart = perfEnabled ? performance.now() : 0
-        await this.controller.updatePointVisibility(filteredIndices)
+        await this.controller.updatePointVisibility(indicesToApply)
+        if (visibilityGeneration !== this.controller._filterVisibilityGeneration) {
+          return
+        }
         if (perfEnabled) {
           this.controller.logPerf('pipeline_performCellFiltering_rafVisibility', performance.now() - visibilityStart, {
-            filteredCount: filteredIndices ? filteredIndices.length : null
+            filteredCount: indicesToApply ? indicesToApply.length : null
           })
         }
       }
@@ -1843,6 +1864,8 @@ export class DataManager {
     if (incrementalResult !== null) {
       this.syncVisibleMaskFromIndices(incrementalResult)
       this.controller.lastFilterState = currentFilterState
+      this.controller.lastFilteredIndices = incrementalResult
+      this.controller.lastFilterStateHash = this.getFilterStateHash()
       return incrementalResult
     }
 

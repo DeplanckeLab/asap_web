@@ -28768,11 +28768,10 @@ export default class extends Controller {
     
     const startTime = performance.now()
     // Prefer Uint8Array mask (O(1) per point) over building a Set of up to 1M+ indices.
-    let visibleMask = this.currentVisibleMask
-    if (filteredIndices && !visibleMask && this.dataManager?.syncVisibleMaskFromIndices) {
-      visibleMask = this.dataManager.syncVisibleMaskFromIndices(filteredIndices)
-    } else if (!filteredIndices) {
-      visibleMask = null
+    let visibleMask = null
+    if (filteredIndices) {
+      visibleMask = this.dataManager.ensureVisibleMask(filteredIndices)
+    } else {
       this.currentVisibleMask = null
     }
     

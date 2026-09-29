@@ -1984,6 +1984,8 @@ export class DataManager {
     if (this.controller.filterCache.has(cacheKey)) {
       const cached = this.controller.filterCache.get(cacheKey)
       this.syncVisibleMaskFromIndices(cached)
+      this.controller.lastFilteredIndices = cached
+      this.controller.lastFilterStateHash = currentFilterHash
       return cached
     }
 
@@ -2048,8 +2050,9 @@ export class DataManager {
       return null
     }
 
-    this.controller.currentVisibleMask = resultMask
     const filteredIndices = this.maskToIndices(resultMask)
+    this.controller.currentVisibleMask = resultMask
+    this.controller.currentVisibleMaskSource = filteredIndices
 
     this.controller.filterCache.set(cacheKey, filteredIndices)
     this.controller.lastFilteredIndices = filteredIndices
@@ -2180,6 +2183,7 @@ export class DataManager {
       if (idx >= 0 && idx < cellCount) mask[idx] = 1
     }
     this.controller.currentVisibleMask = mask
+    this.controller.currentVisibleMaskSource = filteredIndices
     return mask
   }
 
@@ -2198,9 +2202,16 @@ export class DataManager {
       this.controller.currentVisibleMask = null
       return null
     }
+    // Only reuse the mask built from this exact index list: filter results are cached and
+    // re-served (filterCache / lastFilteredIndices), so a same-length mask may belong to
+    // another filter state.
     const existing = this.controller.currentVisibleMask
     const cellCount = this.getFilterUniverseSize()
-    if (existing && (!cellCount || existing.length === cellCount)) {
+    if (
+      existing &&
+      this.controller.currentVisibleMaskSource === filteredIndices &&
+      (!cellCount || existing.length === cellCount)
+    ) {
       return existing
     }
     return this.syncVisibleMaskFromIndices(filteredIndices)

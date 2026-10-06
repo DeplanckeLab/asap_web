@@ -134,6 +134,11 @@ class AnndataMappingBuilderTest < ActiveSupport::TestCase
         project_id: @project.id, user_id: @user.id, filepath: @loom,
         name: '/col_attrs/_doublet_scoring_doublet_finder_score_df', dim: 1,
         nber_rows: 50, nber_cols: 1
+      ),
+      # FilterCols bug: 1D CELL QC stamped as n_filtered x n_original — must not map to obsm.
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/col_attrs/_Depth', dim: 1, nber_rows: 48, nber_cols: 50
       )
     )
 
@@ -144,6 +149,7 @@ class AnndataMappingBuilderTest < ActiveSupport::TestCase
     refute payload['obsm'].key?('X_tsne.sel_3')
     refute payload['obsm'].key?('cell_type')
     refute payload['obsm'].key?('_doublet_scoring_doublet_finder_score_df')
+    refute payload['obsm'].key?('_Depth')
     assert_equal %w[in out], payload['categoricals']['X_tsne.sel_3']['categories']
     assert_equal %w[T B myeloid], payload['categoricals']['cell_type']['categories']
     assert_includes payload['uns_json_keys'], 'analysis_pipeline'

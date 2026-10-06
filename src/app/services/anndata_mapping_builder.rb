@@ -209,13 +209,20 @@ class AnndataMappingBuilder
     # nber_rows > 1 (coordinate axes) and nber_cols > 1 (cells).
     # 1D vectors are 1 x n_cells. Transposed tool bugs (n_cells x 1) must not
     # land in obsm — including numeric doublet scores and X_*-prefixed selections.
-    return false unless annot.dim.to_i == 1 && annot.nber_rows.to_i > 1 && annot.nber_cols.to_i > 1
+    rows = annot.nber_rows.to_i
+    cols = annot.nber_cols.to_i
+    return false unless annot.dim.to_i == 1 && rows > 1 && cols > 1
+
+    # FilterCols (LoomFile.copyMetadata) wrongly stamps 1D CELL vectors as
+    # n_filtered x n_original. Real embeddings have a small axis count.
+    return false unless rows < cols && rows <= 100
 
     return true if annot.embedding?
     return true if key == 'spatial' || key.start_with?('X_')
     return true if key.match?(/\A_(umap|tsne|pca|dr)_/i)
 
-    true
+    # Do not map arbitrary multi-row col_attrs (QC, doublet scores, StableID, …).
+    false
   end
 
   def varm_annot?(annot, key)

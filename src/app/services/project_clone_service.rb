@@ -512,20 +512,37 @@ class ProjectCloneService
 
   def replace_path_references(value)
     return value unless value.is_a?(String)
-    
-    # Match pattern: /user_id/project_key/step_name/run_id/
-    if (match = value.match(%r{/(\d+)/#{source_project.key}/\w+?/(\d+)/?}))
-      user_id = match[1]
-      run_id = match[2]
-      
-      if @h_runs[run_id.to_i]
-        value = value.gsub(%r{/#{run_id}/}, "/#{@h_runs[run_id.to_i].id}/")
-        value = value.gsub(%r{/#{run_id}$}, "/#{@h_runs[run_id.to_i].id}")
-        value = value.gsub(%r{/#{source_project.key}/}, "/#{new_project.key}/")
-        value = value.gsub(%r{/#{user_id}/}, "/#{new_project.user_id}/") if new_project.user_id
-      end
+
+    source_key = source_project.key.to_s
+    return value if source_key.blank?
+    return value unless value.include?("/#{source_key}/") || value.end_with?("/#{source_key}")
+
+    # Remap embedded run directories: /user_id/source_key/step_name/run_id(/...)
+    value.scan(%r{/#{Regexp.escape(source_key)}/\w+?/(\d+)(?:/|$)}).flatten.uniq.each do |run_id|
+      new_run = @h_runs[run_id.to_i]
+      next unless new_run
+
+      value = value.gsub("/#{run_id}/", "/#{new_run.id}/")
+      value = value.gsub(%r{/#{run_id}\z}, "/#{new_run.id}")
     end
-    
+
+    # Always rewrite project key, including export_h5ad abs paths like
+    # /data/asap/users/<uid>/<key>/parsing/output.loom (no run_id segment).
+    value = value.gsub("/#{source_key}/", "/#{new_project.key}/")
+    value = value.sub(%r{/#{Regexp.escape(source_key)}\z}, "/#{new_project.key}")
+
+    if new_project.user_id && source_project.user_id &&
+       source_project.user_id.to_i != new_project.user_id.to_i
+      value = value.gsub(
+        "/#{source_project.user_id}/#{new_project.key}/",
+        "/#{new_project.user_id}/#{new_project.key}/"
+      )
+      value = value.sub(
+        %r{/#{source_project.user_id}/#{Regexp.escape(new_project.key)}\z},
+        "/#{new_project.user_id}/#{new_project.key}"
+      )
+    end
+
     value
   end
 

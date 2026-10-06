@@ -4061,6 +4061,9 @@ module Basic
       existing = latest_h5ad_export_run(project, loom_rel)
       current_status = h5ad_export_status(project, loom_rel, run: existing)
       mapping_needed = anndata_mapping_needs_update?(project, loom_rel)
+      # Failed exports often leave a stale anndata_mapping (e.g. 1D X_*.sel_* in obsm).
+      # Always rebuild mapping before retrying so the exporter sees the current Annot dims.
+      mapping_needed = true if current_status == 'failed'
 
       # Ready H5AD and mapping unchanged: skip both.
       if current_status == 'ready' && !mapping_needed
@@ -5750,6 +5753,21 @@ module Basic
               AND a.nber_cols > 1
               AND a.nber_cols = m.nber_rows
             )
+            OR (
+              -- FilterCols copyMetadata stamps 1D CELL vectors as n_filtered x n_original
+              a.dim = 1
+              AND a.name LIKE '/col_attrs/%'
+              AND a.nber_rows > 100
+              AND a.nber_cols > 1
+              AND a.nber_rows < a.nber_cols
+            )
+            OR (
+              a.dim = 2
+              AND a.name LIKE '/row_attrs/%'
+              AND a.nber_cols > 100
+              AND a.nber_rows > 1
+              AND a.nber_cols < a.nber_rows
+            )
           )
           AND (
             a.name LIKE '/col_attrs/%'
@@ -5781,11 +5799,35 @@ module Basic
         annot = annots_by_id[row['annot_id'].to_i]
         next unless annot
 
-        to_rows, to_cols = inferred_vector_dims_for_annot(
-          annot,
-          matrix_rows: row['matrix_rows'].to_i,
-          matrix_cols: row['matrix_cols'].to_i
-        )
+        from_rows = row['from_rows'].to_i
+        from_cols = row['from_cols'].to_i
+        # FilterCols CELL stamp: n_filtered x n_original. Prefer filtered length in
+        # nber_rows; matrix_cols may itself be wrong after FilterCols (often 1).
+        filter_cols_cell_stamp =
+          annot.dim.to_i == 1 &&
+          annot.name.to_s.start_with?('/col_attrs/') &&
+          from_rows > 100 &&
+          from_cols > 1 &&
+          from_rows < from_cols
+        filter_rows_gene_stamp =
+          annot.dim.to_i == 2 &&
+          annot.name.to_s.start_with?('/row_attrs/') &&
+          from_cols > 100 &&
+          from_rows > 1 &&
+          from_cols < from_rows
+
+        to_rows, to_cols =
+          if filter_cols_cell_stamp
+            [1, from_rows]
+          elsif filter_rows_gene_stamp
+            [from_cols, 1]
+          else
+            inferred_vector_dims_for_annot(
+              annot,
+              matrix_rows: row['matrix_rows'].to_i,
+              matrix_cols: row['matrix_cols'].to_i
+            )
+          end
         next if to_rows.nil? || to_cols.nil?
         next if annot.nber_rows.to_i == to_rows && annot.nber_cols.to_i == to_cols
 
@@ -5796,7 +5838,7 @@ module Basic
           from_cols: annot.nber_cols.to_i,
           to_rows: to_rows,
           to_cols: to_cols,
-          source: 'matrix_shape+dim'
+          source: filter_cols_cell_stamp || filter_rows_gene_stamp ? 'filter_cols_vector_stamp' : 'matrix_shape+dim'
         }
       end
       { changes: changes }
@@ -5824,6 +5866,7 @@ module Basic
     end
 
     # Tools sometimes emit 1D CELL/GENE vectors transposed (n_cells x 1 or 1 x n_genes).
+    # FilterCols copyMetadata also stamps CELL vectors as n_filtered x n_original.
     # ASAP Annot convention is CELL => 1 x n_cells, GENE => n_genes x 1.
     # True embeddings are n_dims x n_cells with both dimensions > 1 — leave those alone.
     def normalize_vector_metadata_dims!(meta)
@@ -5838,9 +5881,17 @@ module Basic
         if nc == 1 && nr > 1
           meta['nber_rows'] = 1
           meta['nber_cols'] = nr
+        elsif nr > 1 && nc > 1 && nr < nc && (nr > 100 || nr * 10 >= nc)
+          # FilterCols: n_filtered x n_original on a 1D CELL vector.
+          meta['nber_rows'] = 1
+          meta['nber_cols'] = nr
         end
       when 'GENE'
         if nr == 1 && nc > 1
+          meta['nber_rows'] = nc
+          meta['nber_cols'] = 1
+        elsif nr > 1 && nc > 1 && nc < nr && (nc > 100 || nc * 10 >= nr)
+          # Symmetric gene-filter stamp: n_original x n_filtered on a 1D GENE vector.
           meta['nber_rows'] = nc
           meta['nber_cols'] = 1
         end

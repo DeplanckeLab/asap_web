@@ -214,6 +214,84 @@ class ProjectCloneServiceTest < TestBaseWithoutFixtures
     assert_equal '{"3":1}', cloned_ps.nber_runs_json
   end
 
+  test "clone rewrites export_h5ad absolute loom and h5ad paths without run_id" do
+    # Do not register the user for teardown: destroying export runs inserts del_runs
+    # rows that still FK to users, and user.delete then fails the FK check.
+    user = User.create!(email: "clone_h5ad_#{SecureRandom.hex(4)}@example.com", password: "password123")
+    source = create_test_project!(
+      name: "H5AD export source",
+      key: "h5s#{SecureRandom.hex(3)}",
+      user_id: user.id,
+      version_id: 8
+    )
+    step = Step.find_by(name: "export_h5ad") || Step.find_by!(name: "parsing", version_id: 8)
+    loom_abs = "/data/asap/users/#{user.id}/#{source.key}/parsing/output.loom"
+    h5ad_abs = "/data/asap/users/#{user.id}/#{source.key}/parsing/output.h5ad"
+    source_run = Run.create!(
+      project_id: source.id,
+      user_id: user.id,
+      step_id: step.id,
+      status_id: 4,
+      num: 1,
+      attrs_json: {
+        input_loom: "parsing/output.loom",
+        input_loom_abs: loom_abs,
+        output_h5ad_abs: h5ad_abs,
+        dburl: "postgres:5434/asap_data_v8"
+      }.to_json,
+      output_json: "{}",
+      command_json: "{}"
+    )
+
+    source_dir = Pathname.new(ENV["USER_DATA_DIR"]) + user.id.to_s + source.key
+    FileUtils.mkdir_p(source_dir + "parsing")
+    File.write(source_dir + "parsing/output.loom", "loom")
+
+    service = ProjectCloneService.new(source, user: user, session: {})
+    clone = service.call
+    assert clone, "Expected clone to succeed: #{service.errors.inspect}"
+    register_for_test_cleanup(clone)
+
+    cloned_run = clone.runs.find_by!(cloned_run_id: source_run.id)
+    attrs = JSON.parse(cloned_run.attrs_json)
+    assert_equal "parsing/output.loom", attrs["input_loom"]
+    assert_equal(
+      "/data/asap/users/#{user.id}/#{clone.key}/parsing/output.loom",
+      attrs["input_loom_abs"]
+    )
+    assert_equal(
+      "/data/asap/users/#{user.id}/#{clone.key}/parsing/output.h5ad",
+      attrs["output_h5ad_abs"]
+    )
+    refute_includes attrs["input_loom_abs"], "/#{source.key}/"
+    refute_includes attrs["output_h5ad_abs"], "/#{source.key}/"
+  end
+
+  test "replace_path_references rewrites user id for export_h5ad abs paths" do
+    source_owner = User.create!(email: "clone_uid_src_#{SecureRandom.hex(4)}@example.com", password: "password123")
+    clone_owner = User.create!(email: "clone_uid_dst_#{SecureRandom.hex(4)}@example.com", password: "password123")
+    source = create_test_project!(
+      name: "UID rewrite source",
+      key: "uid#{SecureRandom.hex(3)}",
+      user_id: source_owner.id,
+      version_id: 8
+    )
+    clone = create_test_project!(
+      name: "UID rewrite clone",
+      key: "uic#{SecureRandom.hex(3)}",
+      user_id: clone_owner.id,
+      version_id: 8,
+      cloned_project_id: source.id
+    )
+    service = ProjectCloneService.new(source, user: clone_owner, session: {})
+    service.instance_variable_set(:@new_project, clone)
+    service.instance_variable_set(:@h_runs, {})
+
+    abs = "/data/asap/users/#{source_owner.id}/#{source.key}/parsing/output.loom"
+    rewritten = service.send(:replace_path_references, abs)
+    assert_equal "/data/asap/users/#{clone_owner.id}/#{clone.key}/parsing/output.loom", rewritten
+  end
+
   test "ensure_project_steps does nothing while being_cloned" do
     user = register_for_test_cleanup(User.create!(email: "clone_ens_#{SecureRandom.hex(4)}@example.com", password: "password123"))
     project = create_test_project!(

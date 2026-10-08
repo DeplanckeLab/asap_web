@@ -7,10 +7,16 @@ default: &default
       threads: 1
       processes: 1
       polling_interval: 0.5
-    # Parsing / SLURM submit / SLURM monitor. Kept off the default worker so a job that
-    # polls for parse (catalog import) cannot occupy a default thread and also claim the
-    # ProjectParsingJob it is waiting on (queues: "*" would match pipeline too).
+    # Parsing / SLURM submit. Kept off the default worker so a job that polls for parse
+    # (catalog import) cannot occupy a default thread and also claim the ProjectParsingJob
+    # it is waiting on (queues: "*" would match pipeline too).
     - queues: pipeline
+      threads: 3
+      processes: 1
+      polling_interval: 0.1
+    # SLURM monitor / finish_run (may do loom I/O). Isolated so a hung finish cannot
+    # starve ProjectParsingJob on the pipeline queue.
+    - queues: pipeline_monitor
       threads: 3
       processes: 1
       polling_interval: 0.1

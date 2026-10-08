@@ -3,15 +3,18 @@ require 'json'
 require 'shellwords'
 require 'securerandom'
 require 'pathname'
+require 'timeout'
 
 class H5DataService
   ASAP_RUN_CONTAINER = ENV.fetch('ASAP_RUN_CONTAINER').freeze
   # Reserved in ASAP-owned selection columns only (not imported metadata).
   FILTERED_OUT_SELECTION_CODE = -1
   FILTERED_OUT_SELECTION_LABEL = '__filtered_out__'
+  # Global-attr / small loom mutations must not wedge Solid Queue forever (HDF5 hang).
+  DOCKER_EXEC_TIMEOUT_SECONDS = Integer(ENV.fetch('H5_DOCKER_EXEC_TIMEOUT_SECONDS', 5.minutes.to_i))
 
-  # Serialize writers for a loom. h5py "r+" takes an exclusive HDF5 lock; concurrent
-  # opens raise BlockingIOError. Same pattern as Basic.ensure_markers_original_gene_attr.
+  # Serialize loom I/O (reads and writes). h5py "r+" takes an exclusive HDF5 lock;
+  # concurrent opens raise BlockingIOError. Same pattern as Basic.ensure_markers_original_gene_attr.
   def self.with_loom_write_lock(loom_path)
     path = loom_path.to_s
     lock_path = "#{path}.asap_h5_lock"
@@ -29,18 +32,95 @@ class H5DataService
     end
   end
 
-  # docker exec python for loom mutations. HDF5_USE_FILE_LOCKING=FALSE avoids
-  # BlockingIOError when another client still holds an HDF5 advisory lock; writers
+  # docker exec python for loom attr read/write. HDF5_USE_FILE_LOCKING=FALSE avoids
+  # BlockingIOError when another client still holds an HDF5 advisory lock; callers
   # must still use with_loom_write_lock for mutual exclusion.
-  def self.docker_exec_h5_write_python3!(*argv, stdin_data:)
-    Open3.capture3(
+  # On timeout, kill the docker-exec process group so orphaned python does not spin forever.
+  def self.docker_exec_h5_python3!(*argv, stdin_data:, timeout_seconds: DOCKER_EXEC_TIMEOUT_SECONDS)
+    cmd = [
       'docker', 'exec', '-i',
       '-e', 'HDF5_USE_FILE_LOCKING=FALSE',
       ASAP_RUN_CONTAINER, 'python3', '-',
-      *argv,
-      stdin_data: stdin_data
-    )
+      *argv
+    ]
+    timeout_s = Integer(timeout_seconds)
+    raise ArgumentError, 'timeout_seconds must be positive' if timeout_s <= 0
+
+    stdout_str = +''
+    stderr_str = +''
+    status = nil
+
+    Open3.popen3(*cmd, pgroup: true) do |stdin, stdout, stderr, wait_thr|
+      pid = wait_thr.pid
+      begin
+        stdin.write(stdin_data.to_s) unless stdin_data.nil?
+        stdin.close
+
+        stdout_reader = Thread.new { stdout.read.to_s }
+        stderr_reader = Thread.new { stderr.read.to_s }
+
+        unless wait_thr.join(timeout_s)
+          terminate_docker_exec_process_group!(pid)
+          wait_thr.join(10)
+          stdout_reader.join(2)
+          stderr_reader.join(2)
+          raise Timeout::Error,
+                "docker exec h5 python timed out after #{timeout_s}s " \
+                "(container=#{ASAP_RUN_CONTAINER} argv=#{argv.map(&:to_s).join(' ')})"
+        end
+
+        status = wait_thr.value
+        stdout_str = stdout_reader.value
+        stderr_str = stderr_reader.value
+      rescue StandardError
+        terminate_docker_exec_process_group!(pid) if wait_thr.alive?
+        raise
+      end
+    end
+
+    [stdout_str, stderr_str, status]
   end
+
+  def self.docker_exec_h5_write_python3!(*argv, stdin_data:, timeout_seconds: DOCKER_EXEC_TIMEOUT_SECONDS)
+    docker_exec_h5_python3!(*argv, stdin_data: stdin_data, timeout_seconds: timeout_seconds)
+  end
+
+  def self.terminate_docker_exec_process_group!(pid)
+    normalized = pid.to_i
+    return if normalized <= 0
+
+    begin
+      Process.kill('-TERM', normalized)
+    rescue Errno::ESRCH, Errno::EPERM
+      begin
+        Process.kill('TERM', normalized)
+      rescue Errno::ESRCH, Errno::EPERM
+        return
+      end
+    end
+
+    20.times do
+      sleep 0.1
+      begin
+        Process.getpgid(normalized)
+      rescue Errno::ESRCH
+        return
+      rescue StandardError
+        break
+      end
+    end
+
+    begin
+      Process.kill('-KILL', normalized)
+    rescue Errno::ESRCH, Errno::EPERM
+      begin
+        Process.kill('KILL', normalized)
+      rescue Errno::ESRCH, Errno::EPERM, StandardError
+        nil
+      end
+    end
+  end
+  private_class_method :terminate_docker_exec_process_group!
 
   # ASAP.jar ExtractDataset only accepts /matrix or /layers/* (JSON error otherwise).
   # /attrs/* DE tables are compound or non-float HDF5; read a small slice with h5py in the run container.
@@ -1018,11 +1098,13 @@ class H5DataService
     PYTHON
 
     begin
-      stdout, stderr, status = Open3.capture3(
-        'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-',
-        loom_path.to_s, attr_name, out_path.to_s,
-        stdin_data: script
-      )
+      stdout, stderr, status = nil
+      with_loom_write_lock(loom_path) do
+        stdout, stderr, status = docker_exec_h5_python3!(
+          loom_path.to_s, attr_name, out_path.to_s,
+          stdin_data: script
+        )
+      end
       unless status.success? && stdout.strip.start_with?('OK')
         raise "Failed to read global attr #{metadata_path}: #{stderr.presence || stdout}"
       end
@@ -1104,11 +1186,13 @@ class H5DataService
     PYTHON
 
     begin
-      stdout, stderr, status = Open3.capture3(
-        'docker', 'exec', '-i', ASAP_RUN_CONTAINER, 'python3', '-',
-        loom_path.to_s, names_path.to_s, out_path.to_s, max_chars.to_i.to_s,
-        stdin_data: script
-      )
+      stdout, stderr, status = nil
+      with_loom_write_lock(loom_path) do
+        stdout, stderr, status = docker_exec_h5_python3!(
+          loom_path.to_s, names_path.to_s, out_path.to_s, max_chars.to_i.to_s,
+          stdin_data: script
+        )
+      end
       unless status.success? && stdout.strip.start_with?('OK')
         Rails.logger.error("Failed to batch-read global attrs: #{stderr.presence || stdout}")
         return {}

@@ -9,8 +9,16 @@ production:
   clear_solid_queue_finished_jobs:
     command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
     schedule: every hour at minute 12
+  reclaim_stuck_solid_queue_jobs:
+    class: ReclaimStuckSolidQueueJobsJob
+    queue: default
+    schedule: every hour at minute 42
 
 development:
   clear_solid_queue_finished_jobs:
     command: "SolidQueue::Job.clear_finished_in_batches(sleep_between_batches: 0.3)"
     schedule: every hour at minute 12
+  reclaim_stuck_solid_queue_jobs:
+    class: ReclaimStuckSolidQueueJobsJob
+    queue: default
+    schedule: every hour at minute 42

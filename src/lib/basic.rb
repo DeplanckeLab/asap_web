@@ -798,6 +798,8 @@ module Basic
       overlays = [
         ['python/doublet.calling.v8.py', '/srv/doublet.calling.v8.py'],
         ['python/doublet.scoring.v8.py', '/srv/doublet.scoring.v8.py'],
+        ['python/loom_to_h5ad.v8.py', '/srv/loom_to_h5ad.v8.py'],
+        ['python/loom_to_h5ad_chunked.v8.py', '/srv/loom_to_h5ad_chunked.v8.py'],
         ['R/doublet.scoring.v8.R', '/srv/doublet.scoring.v8.R'],
         ['R/hvg.asap.3.R', '/srv/hvg.asap.3.R']
       ]

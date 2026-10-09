@@ -800,6 +800,7 @@ module Basic
         ['python/doublet.scoring.v8.py', '/srv/doublet.scoring.v8.py'],
         ['python/loom_to_h5ad.v8.py', '/srv/loom_to_h5ad.v8.py'],
         ['python/loom_to_h5ad_chunked.v8.py', '/srv/loom_to_h5ad_chunked.v8.py'],
+        ['python/anndata_mapping_loom_export.py', '/srv/anndata_mapping_loom_export.py'],
         ['R/doublet.scoring.v8.R', '/srv/doublet.scoring.v8.R'],
         ['R/hvg.asap.3.R', '/srv/hvg.asap.3.R']
       ]

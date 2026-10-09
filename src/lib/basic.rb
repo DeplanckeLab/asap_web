@@ -4683,7 +4683,8 @@ module Basic
         end
 
         puts "H_STEPS: " + h_steps.to_json
-        if h_steps[run.step_id].name != 'parsing'
+        run_step = h_steps[run.step_id]
+        if run_step && run_step.name != 'parsing'
           #   h_attrs['nber_cols'] = p.nber_cols.to_i
           #   h_attrs['nber_rows'] = p.nber_rows.to_i
           # else
@@ -4694,28 +4695,30 @@ module Basic
 #          end
                     
           if input_matrix_run
-            run_dir = project_dir + h_steps[input_matrix_run.step_id].name
-            run_dir += input_matrix_run.id.to_s if h_steps[input_matrix_run.step_id].multiple_runs == true #) ? (local_step_dir + a.run_id.to_s) : local_step_dir)  
-            output_file = run_dir + 'output.json'
-            h_tmp = {}
-            if File.exist? output_file
-              h_tmp = Basic.safe_parse_json(File.read(output_file), {})
-            end
-            
-            h_tmp.each_key do |k|
-              h_attrs[k] = h_tmp[k]
-            end
-            
-            ['nber_cols', 'nber_rows'].each do |k|
-              if !h_attrs[k] and h_attrs['metadata']
-                if h_attrs['metadata'][0]
-                  h_attrs[k] =h_attrs['metadata'][0][k].to_i
-                else
-                  puts h_attrs['metadata'].to_json
+            input_step = h_steps[input_matrix_run.step_id]
+            if input_step
+              run_dir = project_dir + input_step.name
+              run_dir += input_matrix_run.id.to_s if input_step.multiple_runs == true #) ? (local_step_dir + a.run_id.to_s) : local_step_dir)  
+              output_file = run_dir + 'output.json'
+              h_tmp = {}
+              if File.exist? output_file
+                h_tmp = Basic.safe_parse_json(File.read(output_file), {})
+              end
+              
+              h_tmp.each_key do |k|
+                h_attrs[k] = h_tmp[k]
+              end
+              
+              ['nber_cols', 'nber_rows'].each do |k|
+                if !h_attrs[k] and h_attrs['metadata']
+                  if h_attrs['metadata'][0]
+                    h_attrs[k] =h_attrs['metadata'][0][k].to_i
+                  else
+                    puts h_attrs['metadata'].to_json
+                  end
                 end
               end
             end
-            
           end
         end
         
@@ -7601,10 +7604,16 @@ module Basic
       Step.where(:docker_image_id => asap_docker_image.id).all.each do |s| 
         h_steps[s.id] = s
       end
+      # export_h5ad / other utility steps may use the latest asap_run image (v8),
+      # not the project's historical pipeline image — keep the current step visible.
+      h_steps[step.id] ||= step
+      if run.step_id && !h_steps[run.step_id]
+        h_steps[run.step_id] = run.step if run.step
+      end
       
       h_runs = {}
-      project.runs.select{|r| r.status_id == 3}.each do |run|
-        h_runs[run.id] = run
+      project.runs.select { |r| r.status_id == 3 }.each do |ok_run|
+        h_runs[ok_run.id] = ok_run
       end
       
       start_time = run.start_time

@@ -172,4 +172,54 @@ class BasicSyncRunAnnotsFromOutputJsonTest < TestBaseWithoutFixtures
     assert_equal [1, 2919], [cell[:to_rows], cell[:to_cols]]
     refute by_name.key?('/matrix')
   end
+
+  test 'normalize_vector_metadata_dims repairs FilterCols GENE stamp including negative rows' do
+    negative = Basic.normalize_vector_metadata_dims!(
+      'on' => 'GENE', 'nber_rows' => -31865, 'nber_cols' => 33694
+    )
+    assert_equal 33694, negative['nber_rows']
+    assert_equal 1, negative['nber_cols']
+
+    positive = Basic.normalize_vector_metadata_dims!(
+      'on' => 'GENE', 'nber_rows' => 33594, 'nber_cols' => 33694
+    )
+    assert_equal 33694, positive['nber_rows']
+    assert_equal 1, positive['nber_cols']
+
+    # Real varm-shaped gene embedding must stay untouched
+    varm = Basic.normalize_vector_metadata_dims!(
+      'on' => 'GENE', 'nber_rows' => 33694, 'nber_cols' => 50
+    )
+    assert_equal 33694, varm['nber_rows']
+    assert_equal 50, varm['nber_cols']
+  end
+
+  test 'plan_matrix_shaped_vector_annot_repairs catches FilterCols GENE negative rows' do
+    stamped = register_for_test_cleanup(
+      Annot.create!(
+        project_id: @project.id,
+        run_id: @run.id,
+        store_run_id: @run.id,
+        ori_run_id: @run.id,
+        step_id: @step.id,
+        filepath: 'parsing/output.loom',
+        name: '/row_attrs/_StableID',
+        dim: 2,
+        data_type_id: DataType.find_by(name: 'NUMERIC')&.id || 1,
+        nber_rows: -31865,
+        nber_cols: 27998,
+        user_id: @user.id,
+        latest_version: true,
+        version_nber: 1
+      )
+    )
+
+    plan = Basic.plan_matrix_shaped_vector_annot_repairs(run_id: @run.id)
+    change = plan[:changes].find { |c| c[:name] == '/row_attrs/_StableID' }
+    assert change, 'expected FilterCols GENE stamp repair'
+    assert_equal [27998, 1], [change[:to_rows], change[:to_cols]]
+    assert_equal 'filter_cols_vector_stamp', change[:source]
+  ensure
+    stamped&.destroy! if stamped&.persisted?
+  end
 end

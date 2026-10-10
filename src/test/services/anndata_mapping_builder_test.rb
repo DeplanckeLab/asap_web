@@ -96,6 +96,39 @@ class AnndataMappingBuilderTest < ActiveSupport::TestCase
     assert_equal '/matrix', payload['raw_x_path']
   end
 
+  test 'does not map 1D gene vectors or FilterCols-stamped dims to varm' do
+    register_for_test_cleanup(
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/matrix', dim: 3, nber_rows: 100, nber_cols: 50
+      ),
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/row_attrs/_StableID', dim: 2, nber_rows: 100, nber_cols: 1
+      ),
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/row_attrs/feature_name', dim: 2, nber_rows: 100, nber_cols: 1
+      ),
+      # FilterCols cell-filter stamp on a GENE vector (ide9c9 shape): negative rows x n_genes
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/row_attrs/feature_biotype', dim: 2, nber_rows: -50, nber_cols: 100
+      ),
+      # Real varm: n_genes x n_pcs
+      Annot.create!(
+        project_id: @project.id, user_id: @user.id, filepath: @loom,
+        name: '/row_attrs/PCs', dim: 2, nber_rows: 100, nber_cols: 50
+      )
+    )
+
+    payload = AnndataMappingBuilder.call(project: @project, loom_filepath: @loom)
+    refute payload['varm'].key?('_StableID')
+    refute payload['varm'].key?('feature_name')
+    refute payload['varm'].key?('feature_biotype')
+    assert_equal '/row_attrs/PCs', payload['varm']['PCs']
+  end
+
   test 'maps multi-dim col_attrs and named embeddings to obsm' do
     register_for_test_cleanup(
       Annot.create!(

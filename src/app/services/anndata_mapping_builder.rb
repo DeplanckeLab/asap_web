@@ -227,9 +227,18 @@ class AnndataMappingBuilder
 
   def varm_annot?(annot, key)
     return false if RESERVED_VAR_INDEX_KEYS.include?(key)
-    return true if annot.dim.to_i == 2 && annot.nber_cols.to_i > 1
+    # AnnData varm must be 2D. ASAP stores that as dim=2 row_attrs with
+    # nber_rows = n_genes and nber_cols = n_axes (> 1).
+    # 1D gene vectors are n_genes x 1. FilterCols copyMetadata wrongly stamps
+    # them as (n_genes - n_filtered_cells) x n_genes (nber_rows can be <= 0).
+    rows = annot.nber_rows.to_i
+    cols = annot.nber_cols.to_i
+    return false unless annot.dim.to_i == 2 && rows > 1 && cols > 1
 
-    false
+    # Real varm embeddings have a small feature-axis count in nber_cols.
+    return false unless cols < rows && cols <= 100
+
+    true
   end
 
   def build_categoricals(annots)

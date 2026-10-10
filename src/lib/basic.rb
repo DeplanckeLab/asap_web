@@ -5859,11 +5859,23 @@ module Basic
               AND a.nber_rows < a.nber_cols
             )
             OR (
+              -- Gene-filter stamp: n_original x n_filtered on a 1D GENE vector
               a.dim = 2
               AND a.name LIKE '/row_attrs/%'
               AND a.nber_cols > 100
               AND a.nber_rows > 1
               AND a.nber_cols < a.nber_rows
+            )
+            OR (
+              -- FilterCols cell-filter of a 1D GENE vector:
+              -- (n_genes - n_filtered_cells) x n_genes; nber_rows can be <= 0
+              a.dim = 2
+              AND a.name LIKE '/row_attrs/%'
+              AND a.nber_cols > 100
+              AND (
+                a.nber_rows <= 0
+                OR (a.nber_rows > 1 AND a.nber_cols >= a.nber_rows)
+              )
             )
           )
           AND (
@@ -5912,12 +5924,19 @@ module Basic
           from_cols > 100 &&
           from_rows > 1 &&
           from_cols < from_rows
+        filter_cols_gene_stamp =
+          annot.dim.to_i == 2 &&
+          annot.name.to_s.start_with?('/row_attrs/') &&
+          from_cols > 100 &&
+          (from_rows <= 0 || (from_rows > 1 && from_cols >= from_rows))
 
         to_rows, to_cols =
           if filter_cols_cell_stamp
             [1, from_rows]
-          elsif filter_rows_gene_stamp
-            [from_cols, 1]
+          elsif filter_rows_gene_stamp || filter_cols_gene_stamp
+            genes = row['matrix_rows'].to_i
+            genes = from_cols if genes <= 0
+            [genes, 1]
           else
             inferred_vector_dims_for_annot(
               annot,
@@ -5935,7 +5954,11 @@ module Basic
           from_cols: annot.nber_cols.to_i,
           to_rows: to_rows,
           to_cols: to_cols,
-          source: filter_cols_cell_stamp || filter_rows_gene_stamp ? 'filter_cols_vector_stamp' : 'matrix_shape+dim'
+          source: if filter_cols_cell_stamp || filter_rows_gene_stamp || filter_cols_gene_stamp
+                    'filter_cols_vector_stamp'
+                  else
+                    'matrix_shape+dim'
+                  end
         }
       end
       { changes: changes }
@@ -5963,7 +5986,8 @@ module Basic
     end
 
     # Tools sometimes emit 1D CELL/GENE vectors transposed (n_cells x 1 or 1 x n_genes).
-    # FilterCols copyMetadata also stamps CELL vectors as n_filtered x n_original.
+    # FilterCols copyMetadata also stamps CELL vectors as n_filtered x n_original, and
+    # GENE vectors as (n_genes - n_filtered_cells) x n_genes (nber_rows can be <= 0).
     # ASAP Annot convention is CELL => 1 x n_cells, GENE => n_genes x 1.
     # True embeddings are n_dims x n_cells with both dimensions > 1 — leave those alone.
     def normalize_vector_metadata_dims!(meta)
@@ -5971,7 +5995,7 @@ module Basic
 
       nr = meta['nber_rows'].to_i
       nc = meta['nber_cols'].to_i
-      return meta if nr <= 0 || nc <= 0
+      return meta if nc <= 0 && nr <= 0
 
       case meta['on'].to_s
       when 'CELL'
@@ -5987,8 +6011,17 @@ module Basic
         if nr == 1 && nc > 1
           meta['nber_rows'] = nc
           meta['nber_cols'] = 1
+        elsif nc > 1 && nr <= 0
+          # FilterCols cell-filter of a GENE vector: (n_genes - n_cells_filtered) x n_genes
+          # with n_cells_filtered > n_genes yields a non-positive nber_rows.
+          meta['nber_rows'] = nc
+          meta['nber_cols'] = 1
+        elsif nr > 1 && nc > 1 && nc >= nr && nc > 100
+          # FilterCols cell-filter of a GENE vector when nber_rows stayed positive.
+          meta['nber_rows'] = nc
+          meta['nber_cols'] = 1
         elsif nr > 1 && nc > 1 && nc < nr && (nc > 100 || nc * 10 >= nr)
-          # Symmetric gene-filter stamp: n_original x n_filtered on a 1D GENE vector.
+          # Gene-filter stamp: n_original x n_filtered on a 1D GENE vector.
           meta['nber_rows'] = nc
           meta['nber_cols'] = 1
         end

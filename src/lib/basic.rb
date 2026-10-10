@@ -1228,42 +1228,31 @@ module Basic
       }
     end
 
-    # Dimensions only: count data rows without splitting every line into fields, and
-    # derive cell count from the header + first data line. Full per-row field splits
-    # (raw_text_matrix_scan) are reserved for consistency checks on wide matrices
-    # (tens of thousands of columns) where splitting each line is prohibitively slow.
+    # Dimensions only: wc -l for row count + parse header/first data line for columns.
+    # Matches the Python preparser approach. Full per-row field splits stay in
+    # raw_text_matrix_scan for consistency checks.
     def raw_text_matrix_dimensions(file_path, gene_name_col: 'first', delimiter: nil, has_header: true)
       raise ArgumentError, "Not a file: #{file_path}" unless File.file?(file_path.to_s)
 
-      delim = raw_text_matrix_delimiter(delimiter)
       header_row = raw_text_matrix_has_header_row?(has_header)
-      header_field_count = nil
-      data_field_count = nil
-      n_cells = nil
-      n_rows = 0
-
-      File.foreach(file_path.to_s, mode: 'r:ASCII-8BIT') do |line|
-        stripped = line.b.delete_suffix("\n").delete_suffix("\r")
-        next if stripped.empty?
-
-        if header_row && header_field_count.nil?
-          header_field_count = raw_text_matrix_field_count(stripped, delim)
-          next
-        end
-
-        if data_field_count.nil?
-          data_field_count = raw_text_matrix_field_count(stripped, delim)
-          n_cells = raw_text_matrix_java_ncells(
-            header_field_count,
-            data_field_count,
-            gene_name_col,
-            header_row
-          )
-        end
-        n_rows += 1
-      end
+      line_count = raw_text_matrix_wc_l(file_path)
+      n_rows = header_row ? [line_count - 1, 0].max : line_count
+      n_cells = raw_text_matrix_column_count(
+        file_path,
+        gene_name_col: gene_name_col,
+        delimiter: delimiter,
+        has_header: has_header
+      )
 
       { nber_rows: n_rows, nber_cols: n_cells }
+    end
+
+    def raw_text_matrix_wc_l(file_path)
+      require 'open3'
+      out, status = Open3.capture2('wc', '-l', file_path.to_s)
+      raise "wc -l failed for #{file_path}" unless status.success?
+
+      Integer(out.strip.split.first)
     end
 
     def raw_text_matrix_java_ncells(header_field_count, data_field_count, gene_name_col, has_header)
@@ -1471,6 +1460,35 @@ module Basic
       end
     end
 
+    # Column count from header + first data line only (no full-file pass).
+    def raw_text_matrix_column_count(file_path, gene_name_col: 'first', delimiter: nil, has_header: true)
+      raise ArgumentError, "Not a file: #{file_path}" unless File.file?(file_path.to_s)
+
+      delim = raw_text_matrix_delimiter(delimiter)
+      header_row = raw_text_matrix_has_header_row?(has_header)
+      header_field_count = nil
+
+      File.foreach(file_path.to_s, mode: 'r:ASCII-8BIT') do |line|
+        stripped = line.b.delete_suffix("\n").delete_suffix("\r")
+        next if stripped.empty?
+
+        field_count = raw_text_matrix_field_count(stripped, delim)
+        if header_row && header_field_count.nil?
+          header_field_count = field_count
+          next
+        end
+
+        return raw_text_matrix_java_ncells(
+          header_field_count,
+          field_count,
+          gene_name_col,
+          header_row
+        )
+      end
+
+      nil
+    end
+
     def sync_raw_text_dimensions_from_file!(output, gene_name_col: 'first', delimiter: nil, has_header: true)
       return output unless output.is_a?(Hash)
 
@@ -1478,10 +1496,35 @@ module Basic
       return output unless raw_text_matrix_file?(fp)
 
       groups = Array(output['list_groups'])
-      # Trust preparser dimensions when already usable. Re-scanning multi-GB wide
-      # matrices after a delimiter change made preparsing appear to hang forever.
+      # Trust preparser when it already reported both dimensions — including
+      # nber_cols == 0 (wrong delimiter). Re-reading multi-GB matrices with the
+      # same delimiter cannot fix that and made initial preparsing look hung.
       if groups.any? &&
-         groups.all? { |g| g.is_a?(Hash) && g['nber_rows'].to_i.positive? && g['nber_cols'].to_i.positive? }
+         groups.all? { |g|
+           g.is_a?(Hash) && g.key?('nber_rows') && g.key?('nber_cols') &&
+             !g['nber_rows'].nil? && !g['nber_cols'].nil?
+         }
+        return output
+      end
+
+      rows_known = groups.any? &&
+                   groups.all? { |g| g.is_a?(Hash) && g['nber_rows'].to_i.positive? }
+
+      if rows_known
+        n_cols = raw_text_matrix_column_count(
+          fp,
+          gene_name_col: gene_name_col,
+          delimiter: delimiter,
+          has_header: has_header
+        )
+        return output unless n_cols.to_i.positive?
+
+        groups.each do |g|
+          next unless g.is_a?(Hash)
+
+          g['nber_cols'] = n_cols
+          g['nb_cells'] = n_cols if g.key?('nb_cells')
+        end
         return output
       end
 

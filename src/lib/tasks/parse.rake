@@ -851,12 +851,21 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
         unless cmd_exitstatus == 0
           begin
-            raw_error = parse_stdout.present? ? parse_stdout : "Python parser failed with exit status #{cmd_exitstatus}"
-            displayed = Hdf5FileCheck.user_message(raw_error).presence || raw_error
-            error_payload = {
-              displayed_error: displayed
-            }
-            File.open(output_json_v8, 'w') { |fw| fw.write(error_payload.to_json) }
+            preparsing_warnings = []
+            if fu_upload_dir
+              prep_output = fu_upload_dir + 'output.json'
+              if File.exist?(prep_output)
+                h_prep = Basic.safe_parse_json(File.read(prep_output), {})
+                preparsing_warnings = Array(h_prep['warnings'])
+              end
+            end
+            displayed = PythonParseFailureMessage.displayed_error(
+              output_json_path: output_json_v8,
+              parse_stdout: parse_stdout,
+              exitstatus: cmd_exitstatus,
+              preparsing_warnings: preparsing_warnings
+            )
+            File.open(output_json_v8, 'w') { |fw| fw.write({ displayed_error: displayed }.to_json) }
           rescue => write_err
             logger.error("[ParseRake] Failed to persist parser error output to #{output_json_v8}: #{write_err.class} - #{write_err.message}")
           end

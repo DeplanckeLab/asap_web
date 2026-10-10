@@ -681,7 +681,14 @@ class FuPreparsingService
 
     # Add prediction debug data to summary (always include, even if empty)
     summary[:prediction_debug] = @prediction_debug_data
-    
+
+    # No matrix group but preparsing left warnings (e.g. Seurat v5 split counts.* layers):
+    # surface them as displayed_error so the upload UI blocks create and shows a clear message.
+    if datasets.empty? && summary[:displayed_error].blank?
+      msgs = Array(output['warnings']).flatten.map { |w| w.to_s.strip }.reject(&:blank?)
+      summary[:displayed_error] = msgs.join("\n") if msgs.any?
+    end
+
     summary
   end
 
@@ -827,6 +834,9 @@ class FuPreparsingService
   def collect_warnings(output)
     warnings = []
     warnings << output['displayed_error'] if output['displayed_error'].present?
+    Array(output['warnings']).each do |w|
+      warnings << w if w.present?
+    end
 
     error_file = upload_dir + 'output.err'
     if error_file.exist?

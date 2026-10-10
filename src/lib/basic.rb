@@ -1228,14 +1228,42 @@ module Basic
       }
     end
 
+    # Dimensions only: count data rows without splitting every line into fields, and
+    # derive cell count from the header + first data line. Full per-row field splits
+    # (raw_text_matrix_scan) are reserved for consistency checks on wide matrices
+    # (tens of thousands of columns) where splitting each line is prohibitively slow.
     def raw_text_matrix_dimensions(file_path, gene_name_col: 'first', delimiter: nil, has_header: true)
-      scan = raw_text_matrix_scan(
-        file_path,
-        gene_name_col: gene_name_col,
-        delimiter: delimiter,
-        has_header: has_header
-      )
-      { nber_rows: scan[:n_rows], nber_cols: scan[:n_cells] }
+      raise ArgumentError, "Not a file: #{file_path}" unless File.file?(file_path.to_s)
+
+      delim = raw_text_matrix_delimiter(delimiter)
+      header_row = raw_text_matrix_has_header_row?(has_header)
+      header_field_count = nil
+      data_field_count = nil
+      n_cells = nil
+      n_rows = 0
+
+      File.foreach(file_path.to_s, mode: 'r:ASCII-8BIT') do |line|
+        stripped = line.b.delete_suffix("\n").delete_suffix("\r")
+        next if stripped.empty?
+
+        if header_row && header_field_count.nil?
+          header_field_count = raw_text_matrix_field_count(stripped, delim)
+          next
+        end
+
+        if data_field_count.nil?
+          data_field_count = raw_text_matrix_field_count(stripped, delim)
+          n_cells = raw_text_matrix_java_ncells(
+            header_field_count,
+            data_field_count,
+            gene_name_col,
+            header_row
+          )
+        end
+        n_rows += 1
+      end
+
+      { nber_rows: n_rows, nber_cols: n_cells }
     end
 
     def raw_text_matrix_java_ncells(header_field_count, data_field_count, gene_name_col, has_header)
@@ -1418,6 +1446,19 @@ module Basic
       line.b.delete_suffix("\n").delete_suffix("\r").split(delim.b, -1)
     end
 
+    # Field count without allocating one String per column (critical for very wide CSVs).
+    def raw_text_matrix_field_count(line_bytes, delim)
+      s = line_bytes.b
+      return 0 if s.empty?
+
+      d = delim.b
+      if d.bytesize == 1
+        s.count(d) + 1
+      else
+        s.split(d, -1).size
+      end
+    end
+
     def raw_text_matrix_cell_column_count(field_count, gene_name_col)
       count = field_count.to_i
       return count if count <= 0
@@ -1436,6 +1477,14 @@ module Basic
       fp = output['file_path'].to_s
       return output unless raw_text_matrix_file?(fp)
 
+      groups = Array(output['list_groups'])
+      # Trust preparser dimensions when already usable. Re-scanning multi-GB wide
+      # matrices after a delimiter change made preparsing appear to hang forever.
+      if groups.any? &&
+         groups.all? { |g| g.is_a?(Hash) && g['nber_rows'].to_i.positive? && g['nber_cols'].to_i.positive? }
+        return output
+      end
+
       dims = raw_text_matrix_dimensions(
         fp,
         gene_name_col: gene_name_col,
@@ -1444,7 +1493,6 @@ module Basic
       )
       return output if dims[:nber_rows].to_i <= 0 || dims[:nber_cols].to_i <= 0
 
-      groups = Array(output['list_groups'])
       if groups.any?
         groups.each do |g|
           next unless g.is_a?(Hash)

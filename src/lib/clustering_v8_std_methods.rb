@@ -30,18 +30,21 @@ module ClusteringV8StdMethods
     "not_null" => 1
   }.merge(NBER_PCS_EXPRESSIONS).freeze
 
+  # PCA embeddings only: pipeline pca/pca_sc outputs, or imported metadata mapped to those steps.
+  INPUT_MATRIX_ATTR = {
+    "label" => "PCA matrix",
+    "widget" => "input_data",
+    "valid_types" => [["dataset"], ["col_mdata"], ["numeric_mdata"]],
+    "source_steps" => %w[pca pca_sc],
+    "combinatorial_runs" => true,
+    "req_data_structure" => "array",
+    "constraints" => {},
+    "min_nber_items" => 1,
+    "max_nber_items" => 1
+  }.freeze
+
   SEURAT_ATTRS_JSON = {
-    "input_matrix" => {
-      "label" => "PCA matrix",
-      "widget" => "input_data",
-      "valid_types" => [["dataset"], ["col_mdata"], ["discrete_mdata", "numeric_mdata"]],
-      "source_steps" => %w[import_metadata pca pca_sc],
-      "combinatorial_runs" => true,
-      "req_data_structure" => "array",
-      "constraints" => {},
-      "min_nber_items" => 1,
-      "max_nber_items" => 1
-    },
+    "input_matrix" => INPUT_MATRIX_ATTR,
     "nber_dims" => SEURAT_NBER_DIMS_ATTR,
     "n_neighbors" => {
       "label" => "Number of neighbors",
@@ -82,17 +85,7 @@ module ClusteringV8StdMethods
   }.freeze
 
   SCANPY_ATTRS_JSON = {
-    "input_matrix" => {
-      "label" => "PCA matrix",
-      "widget" => "input_data",
-      "valid_types" => [["dataset"], ["col_mdata"], ["discrete_mdata", "numeric_mdata"]],
-      "source_steps" => %w[import_metadata pca pca_sc],
-      "combinatorial_runs" => true,
-      "req_data_structure" => "array",
-      "constraints" => {},
-      "min_nber_items" => 1,
-      "max_nber_items" => 1
-    },
+    "input_matrix" => INPUT_MATRIX_ATTR,
     "nber_dims" => SCANPY_NBER_DIMS_ATTR,
     "n_neighbors" => {
       "label" => "Number of neighbors",
@@ -188,8 +181,9 @@ module ClusteringV8StdMethods
       speed = Speed.find_by(id: 1) || Speed.first
       raise "No Speed row found" unless speed
 
-      summary = { created: [], updated: [], unchanged: [] }
+      summary = { created: [], updated: [], unchanged: [], step_updated: false }
 
+      sync_step_input_matrix!(step, summary)
       sync_louvain_template!(step: step, docker_image: docker_image, speed: speed, summary: summary)
 
       upsert_definitions!(SEURAT_DEFINITIONS, step: step, docker_image: docker_image, speed: speed,
@@ -203,6 +197,20 @@ module ClusteringV8StdMethods
     end
 
     private
+
+    def sync_step_input_matrix!(step, summary)
+      h = JSON.parse(step.method_attrs_json.presence || "{}")
+      current = h["input_matrix"].is_a?(Hash) ? h["input_matrix"] : {}
+      desired = INPUT_MATRIX_ATTR.merge(current).merge(
+        "valid_types" => INPUT_MATRIX_ATTR["valid_types"],
+        "source_steps" => INPUT_MATRIX_ATTR["source_steps"]
+      )
+      return if current == desired
+
+      h["input_matrix"] = desired
+      step.update!(method_attrs_json: JSON.pretty_generate(h))
+      summary[:step_updated] = true
+    end
 
     def resolve_docker_image!(version_id, docker_image_id)
       if docker_image_id.present?

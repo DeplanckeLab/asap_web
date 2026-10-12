@@ -14,6 +14,7 @@ namespace :reference_data do
     )
 
     puts "Clustering v#{version_id} std_methods:"
+    puts "  step:      #{summary[:step_updated] ? 'updated input_matrix' : 'unchanged'}"
     puts "  created:   #{summary[:created].join(', ').presence || '(none)'}"
     puts "  updated:   #{summary[:updated].join(', ').presence || '(none)'}"
     puts "  unchanged: #{summary[:unchanged].join(', ').presence || '(none)'}"

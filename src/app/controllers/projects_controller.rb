@@ -137,12 +137,9 @@ class ProjectsController < ApplicationController
     track_project_view!
     set_sandbox_self_destruct_at!
 
-    # ASAP1 projects live on asap-old. v1-v3 always redirect; v4 redirects when
-    # project files were never migrated to this instance (data still on asap-old).
-    if @project.version_id < 4 ||
-       (@project.version_id == 4 && @project.filesystem_project_data_missing?)
-      redirect_to "https://asap-old.epfl.ch/projects/#{@project.key}", allow_other_host: true
-      return
+    if @project.version_id < 4
+       redirect_to "https://asap-old.epfl.ch/projects/#{@project.key}", allow_other_host: true
+       return
     end
 
     # Bare project URLs should open the curated landing checkpoint when set

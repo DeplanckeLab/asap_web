@@ -88,3 +88,6 @@ __pycache__/
 /slurm/install-slurm-host.sh
 /slurm/fresh-install-slurm-host.sh
 /slurm/SECURITY_AND_PERFORMANCE.md
+
+# Test-only Solid Cache/Cable databases (see config/database.yml test section)
+src/solid/*_test.sqlite3

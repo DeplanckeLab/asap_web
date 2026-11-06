@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# (Re)creates the test databases on THIS instance's postgres container, structure only.
+#   asap_test      <- schema of asap2_development (no data)
+#   asap_data_test <- db/asap_data_schema.rb
+# Run from the host: src/bin/setup-test-db   (uses docker compose in the parent dir)
+set -euo pipefail
+cd "$(dirname "$0")/../.."
+PG_CONTAINER="$(docker compose ps -q postgres)"
+SRC_DB="${SOURCE_DEV_DB:-asap2_development}"
+
+docker exec -i "$PG_CONTAINER" bash -s "$SRC_DB" <<'SQL'
+set -euo pipefail
+P="-p 5434 -U $POSTGRES_USER"
+dropdb $P --if-exists asap_test
+createdb $P asap_test
+pg_dump $P --schema-only --no-owner --no-privileges "$1" | psql $P -q -v ON_ERROR_STOP=1 -d asap_test >/dev/null
+pg_dump $P --data-only --no-owner -t schema_migrations -t ar_internal_metadata "$1" | psql $P -q -v ON_ERROR_STOP=1 -d asap_test >/dev/null
+psql $P -d asap_test -qc "UPDATE ar_internal_metadata SET value='test' WHERE key='environment'"
+
+# Reference/configuration tables only (no users, projects, uploads, runs, shares...).
+REF_TABLES="archive_statuses cell_ontologies cell_ontologies_organisms cla_sources cluster_methods
+  compliance_mappings compliance_schemas compliance_term_replacements data_classes
+  data_transformations data_types db_sets diff_expr_methods dim_reductions docker_images
+  docker_versions ensembl_subdomains file_formats filter_methods gene_set_collection_types
+  guided_tour_steps guided_tours identifier_types journals norms ontology_term_types organisms
+  output_attrs project_origins project_types providers speeds statuses std_methods steps
+  todo_types tool_types tools upload_types versions"
+T_ARGS=""; for t in $REF_TABLES; do T_ARGS="$T_ARGS -t public.$t"; done
+pg_dump $P --data-only --no-owner --disable-triggers $T_ARGS "$1" | psql $P -q -v ON_ERROR_STOP=1 -d asap_test >/dev/null
+
+# Placeholder for user id 1 (owner of guest/anonymous projects); no real accounts are copied.
+psql $P -d asap_test -qv ON_ERROR_STOP=1 -c "INSERT INTO users (id, email, encrypted_password, created_at, updated_at) VALUES (1, 'anonymous@test.invalid', '', now(), now()); SELECT setval(pg_get_serial_sequence('users','id'), 100000);"
+SQL
+
+docker compose exec -T website bash -lc 'RAILS_ENV=test bin/rails db:drop:asap_data db:create:asap_data db:schema:load:asap_data db:schema:load:cache db:schema:load:cable' >/dev/null
+echo "Test databases ready: asap_test, asap_data_test (structure + reference tables, no user data)."

@@ -1,3 +1,12 @@
+# The container environment sets DATABASE_URL for the development database. Rails
+# would merge it into the test primary config, so tests would run against
+# development data. Tests always use the databases defined in config/database.yml.
+ENV.delete("DATABASE_URL")
+
+# db/schema.rb cannot rebuild this database (legacy sequence names), so never let
+# Rails purge/reload the test schema automatically. Refresh it with bin/setup-test-db.
+Rails.application.config.active_record.maintain_test_schema = false
+
 # The test environment is used exclusively to run your application's
 # test suite. You never need to work with it otherwise. Remember that
 # your test database is "scratch space" for the test suite and is wiped

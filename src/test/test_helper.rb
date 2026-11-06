@@ -1,16 +1,30 @@
 ENV["RAILS_ENV"] ||= "test"
 require_relative "../config/environment"
-require "rails/test_help"
 
-# Refuse production only. Shared/dev DBs are allowed solely under the create-then-destroy
-# policy below (no ActiveRecord fixtures, no touching pre-existing projects).
-db_name = ActiveRecord::Base.connection_db_config&.database.to_s
-if db_name.match?(/production/i)
+# [TEST SAFETY] Runs BEFORE rails/test_help, which may purge and reload the schema
+# (maintain_test_schema). Every PostgreSQL database configured for this environment
+# (primary, asap_data, asap_data_v*) must be a dedicated test database: its name must
+# contain "test". This rejects the app's development/production databases (e.g. a
+# DATABASE_URL pointing at asap2_development) and the shared asap_data_v* databases on
+# the production PostgreSQL server.
+unsafe_test_dbs = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env).filter_map do |cfg|
+  next unless cfg.adapter.to_s.match?(/postg/i)
+
+  name = cfg.database.to_s
+  "#{cfg.name}=#{name.presence || '(none)'}@#{cfg.host}:#{cfg.configuration_hash[:port]}" unless name.match?(/test/i)
+end
+primary_db = ActiveRecord::Base.connection_db_config&.database.to_s
+unsafe_test_dbs.unshift("primary(effective)=#{primary_db}") unless primary_db.match?(/test/i)
+
+if unsafe_test_dbs.any?
   abort(
-    "[TEST SAFETY] Refusing to run tests against production database '#{db_name}'. " \
-    "Set POSTGRES_TEST_DB (and DATABASE_URL) to a dedicated test database."
+    "[TEST SAFETY] Refusing to run tests: these databases are not dedicated test databases " \
+    "(name must contain 'test'): #{unsafe_test_dbs.uniq.join(', ')}. " \
+    "Point DATABASE_URL / POSTGRES_TEST_DB and the asap_data test configs at test-only databases."
   )
 end
+
+require "rails/test_help"
 
 # Suppress ActiveRecord SQL logging in tests
 ActiveRecord::Base.logger = nil if ENV['SUPPRESS_SQL_LOGS'] != 'false'
@@ -18,7 +32,10 @@ ActiveRecord::Base.logger = nil if ENV['SUPPRESS_SQL_LOGS'] != 'false'
 module ActiveSupport
   class TestCase
     # Run tests in parallel with specified workers
-    parallelize(workers: :number_of_processors)
+    # Single worker by default: parallel workers create per-worker databases from
+    # db/schema.rb, which cannot be loaded. Override with PARALLEL_WORKERS only if
+    # those databases have been prepared.
+    parallelize(workers: ENV.fetch("PARALLEL_WORKERS", 1).to_i)
 
     # Policy: never load ActiveRecord fixtures (they DELETE all rows in fixture tables).
     # Tests may only touch projects they create via create_test_project!, and those

@@ -1,0 +1,171 @@
+services:
+  nginx:
+    image: nginx:latest
+    volumes:
+      - ./nginx.prod.conf:/etc/nginx/nginx.conf
+      - '/data/asap/:/data/asap'
+      - '/data/asap/nginx_logs:/var/log/nginx'
+    links:
+      - website
+    ports:
+      - 8080:8080
+    restart: always
+    networks:
+      - asap_network
+
+  postgres:
+    image: 'postgres:13-alpine'
+    volumes:
+      - '/data/asap/pgsql-data.bkp:/var/lib/postgresql/data'
+      - './startdb:/docker-entrypoint-initdb.d/'
+    command: -p 5434
+    env_file:
+      - '.env.prod'
+    ports:
+      - '5433:5434'
+    expose:
+      - "5434"
+    restart: always
+    networks:
+      - asap_network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:9.5.5
+    container_name: ${ELASTICSEARCH_CONTAINER}
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "${ELASTICSEARCH_HTTP_PORT}:9200"
+      - "${ELASTICSEARCH_TRANSPORT_PORT}:9300"
+    restart: always
+    networks:
+      - asap_network
+
+  redis:
+    image: 'redis:4.0-alpine'
+    command: redis-server --requirepass yourpassword
+    volumes:
+      - 'redis:/data'
+    restart: always
+    networks:
+      - asap_network
+
+  asap_run:
+    build:
+      context: /srv/asap_run_new
+      dockerfile: Dockerfile.v8.7
+    container_name: ${ASAP_RUN_CONTAINER}
+    volumes:
+      - '/data/asap/:/data/asap'
+    command: tail -f /dev/null
+    env_file:
+      - '/srv/asap_run_new/.env'
+    restart: always
+    networks:
+      - asap_network
+
+  # SLURM Database (MySQL for accounting)
+  # Port 3307 is published on localhost so the host slurmdbd can reach MySQL
+  # via 127.0.0.1:3307 (stable address, survives container IP changes).
+  slurmdb:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: slurm_acct_db
+      MYSQL_USER: slurm
+      MYSQL_PASSWORD: slurm
+    volumes:
+      - slurmdb_data:/var/lib/mysql
+    ports:
+      - '127.0.0.1:3307:3306'
+    restart: always
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "slurm", "-pslurm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - asap_network
+
+  website:
+    depends_on:
+      - 'postgres'
+      - 'redis'
+      - 'elasticsearch'
+      - 'asap_run'
+    build: .
+    user: "1006:985"
+    group_add:
+      - 985
+      - 106
+    ports:
+      - '3000:3000'
+    tty: true
+    volumes:
+      - './src:/app'
+      - '/data/asap/:/data/asap'
+      - '/srv/asap_run_new:/srv/asap_run_new'
+      - '/mnt/asap_data/input_examples/:/mnt/asap_data/input_examples/:ro'
+      - '/mnt/asap_data/input_examples/:/app/public/data/rcp/input_examples/:ro'
+      - '/mnt/asap-backup/:/mnt/asap-backup'
+      - '/var/run/docker.sock:/var/run/docker.sock'
+      - './slurm/slurm.conf.client:/etc/slurm/slurm.conf:ro'
+      - '/etc/munge/munge.key:/etc/munge/munge.key:ro'
+      - '/run/munge:/run/munge:ro'
+    env_file:
+      - '.env.prod'
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+    networks:
+      - asap_network
+
+  # Solid Queue worker. Same app image as website; queued jobs (parsing, archive,
+  # catalog follow-up) sit in Postgres until this process claims them.
+  jobs:
+    image: asap-website
+    depends_on:
+      - postgres
+      - redis
+      - asap_run
+    user: "1006:985"
+    group_add:
+      - 985
+      - 106
+    volumes:
+      - './src:/app'
+      - '/data/asap/:/data/asap'
+      - '/srv/asap_run_new:/srv/asap_run_new'
+      - '/mnt/asap_data/input_examples/:/mnt/asap_data/input_examples/:ro'
+      - '/mnt/asap_data/input_examples/:/app/public/data/rcp/input_examples/:ro'
+      - '/mnt/asap-backup/:/mnt/asap-backup'
+      - '/var/run/docker.sock:/var/run/docker.sock'
+      - './slurm/slurm.conf.client:/etc/slurm/slurm.conf:ro'
+      - '/etc/munge/munge.key:/etc/munge/munge.key:ro'
+      - '/run/munge:/run/munge:ro'
+    env_file:
+      - '.env.prod'
+    environment:
+      WATCHMAN_DISABLE: "1"
+      RAILS_MAX_THREADS: "10"
+    command: ["bundle", "exec", "ruby", "bin/jobs"]
+    stop_grace_period: 2m
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
+    networks:
+      - asap_network
+
+volumes:
+  redis:
+  elasticsearch_data:
+  slurmdb_data:
+
+networks:
+  asap_network:
+    name: asap_network
+    driver: bridge

@@ -42,7 +42,9 @@ Rails.application.configure do
   cable_origins = ENV.fetch("ACTION_CABLE_ALLOWED_REQUEST_ORIGINS", "").to_s
   if cable_origins.present?
     origin_patterns = cable_origins.split(",").map(&:strip).reject(&:blank?)
-    config.action_cable.allowed_request_origins = origin_patterns.map { |origin| /#{origin}/ }
+    # Entries are regex sources (e.g. https:\/\/asap\.epfl\.ch). Anchor them so
+    # https://asap.epfl.ch.evil.com cannot match.
+    config.action_cable.allowed_request_origins = origin_patterns.map { |origin| /\A(?:#{origin})\z/ }
   else
     config.action_cable.allowed_request_origins = [
       "https://asap-test.epfl.ch",

@@ -675,9 +675,46 @@ module Scfair
       %w[CF-2a CF-2b CF-2c CF-2d].freeze
     end
 
+    ORGANISM_TAXON_MATCH_MODES = %w[self_or_descendant exact].freeze
+
+    # cross_field.organism_taxon_match: how NCBITaxon keys of the organism_* maps match the file organism.
+    # self_or_descendant (default): a key applies to that taxon and every descendant (NCBI taxonomy);
+    # the most specific (closest ancestor) key wins. exact: plain string equality.
+    def organism_taxon_match
+      mode = (data.dig(:cross_field, :organism_taxon_match) || 'self_or_descendant').to_s
+      unless ORGANISM_TAXON_MATCH_MODES.include?(mode)
+        raise ArgumentError, "cross_field.organism_taxon_match must be one of #{ORGANISM_TAXON_MATCH_MODES.join(', ')} (got #{mode.inspect})"
+      end
+
+      mode
+    end
+
+    # Key of mapping (NCBITaxon:<id> => value) that applies to organism, or nil.
+    def organism_mapping_key_for(mapping, organism)
+      organism = organism.to_s.strip
+      return nil if organism.empty?
+      return organism if mapping.key?(organism)
+      return nil if organism_taxon_match == 'exact'
+
+      tax_id = organism[/\ANCBITaxon:(\d+)\z/, 1]
+      return nil unless tax_id
+
+      ::NcbiTaxonomyLineageResolver.shared.self_and_ancestors(tax_id).each do |ancestor_id|
+        key = "NCBITaxon:#{ancestor_id}"
+        return key if mapping.key?(key)
+      end
+      nil
+    end
+
     def organism_dev_stage_mapping
       raw = data.dig(:cross_field, :organism_dev_stage_mapping) || {}
       raw.each_with_object({}) { |(org, prefix), h| h[org.to_s] = prefix.to_s }.freeze
+    end
+
+    # Development stage prefix required for organism (clade-aware), or nil when no mapping applies.
+    def organism_dev_stage_prefix_for(organism)
+      key = organism_mapping_key_for(organism_dev_stage_mapping, organism)
+      key && organism_dev_stage_mapping[key]
     end
 
     def organism_cell_type_mapping
@@ -691,8 +728,13 @@ module Scfair
       Array(data.dig(:cross_field, :organism_cell_type_default_prefixes) || %w[CL]).map(&:to_s).freeze
     end
 
+    def organism_cell_type_mapped?(organism)
+      !organism_mapping_key_for(organism_cell_type_mapping, organism).nil?
+    end
+
     def organism_cell_type_prefixes_for(organism)
-      organism_cell_type_mapping[organism.to_s] || organism_cell_type_default_prefixes
+      key = organism_mapping_key_for(organism_cell_type_mapping, organism)
+      (key && organism_cell_type_mapping[key]) || organism_cell_type_default_prefixes
     end
 
     def organism_tissue_mapping
@@ -706,8 +748,13 @@ module Scfair
       Array(data.dig(:cross_field, :organism_tissue_default_prefixes) || %w[UBERON]).map(&:to_s).freeze
     end
 
+    def organism_tissue_mapped?(organism)
+      !organism_mapping_key_for(organism_tissue_mapping, organism).nil?
+    end
+
     def organism_tissue_prefixes_for(organism)
-      organism_tissue_mapping[organism.to_s] || organism_tissue_default_prefixes
+      key = organism_mapping_key_for(organism_tissue_mapping, organism)
+      (key && organism_tissue_mapping[key]) || organism_tissue_default_prefixes
     end
 
     def organism_ethnicity_human
@@ -1656,7 +1703,8 @@ module Scfair
           'organism_cell_type_mapping' => organism_cell_type_mapping,
           'organism_cell_type_default_prefixes' => organism_cell_type_default_prefixes,
           'organism_tissue_mapping' => organism_tissue_mapping,
-          'organism_tissue_default_prefixes' => organism_tissue_default_prefixes
+          'organism_tissue_default_prefixes' => organism_tissue_default_prefixes,
+          'organism_taxon_match' => organism_taxon_match
         }
       }
     end

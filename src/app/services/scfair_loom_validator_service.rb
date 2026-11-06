@@ -653,7 +653,7 @@ class ScfairLoomValidatorService
       valid_co_ids = ott.cell_ontology_ids_list.select do |co_id|
         co = ontologies[co_id]
         next false unless co
-        co.tax_ids.blank? || (tax_id_str.present? && co.tax_ids.to_s.split(',').map(&:strip).include?(tax_id_str))
+        co.applies_to_tax_id?(tax_id_str)
       end
 
       # Collect allowed free-text values (e.g. "unknown", "na")

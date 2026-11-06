@@ -115,7 +115,7 @@ module NcbiTaxonomyLoader
     node_by_tax_id
   end
 
-  # Scientific names for tax_ids in set only (NCBI names.dmp; name class "scientific name").
+  # Scientific names (NCBI names.dmp; name class "scientific name"). tax_id_set nil = all tax_ids.
   def parse_names_file!(path, tax_id_set)
     return {} unless path.present? && File.exist?(path)
 
@@ -125,7 +125,7 @@ module NcbiTaxonomyLoader
 
       parts = line.split("|").map { |value| value.to_s.strip }
       tax_id = parts[0].to_i
-      next unless tax_id_set.include?(tax_id)
+      next if tax_id_set && !tax_id_set.include?(tax_id)
 
       name_txt = parts[1].to_s
       name_class = parts[3].to_s
@@ -174,26 +174,37 @@ module NcbiTaxonomyLoader
     selected
   end
 
-  # First ancestor (including self) with rank "order" when walking toward root; nil if none (e.g. above order).
-  def order_tax_id_from_map(tax_id, node_by_tax_id)
+  # order_tax_id for every tax_id in tax_ids, memoized along shared lineages (fast for the full taxonomy).
+  def order_tax_ids_for(tax_ids, node_by_tax_id)
     rank_order = NcbiTaxonomyNode::ORDER_RANK
-    seen = Set.new
-    current = tax_id.to_i
-    while current.positive?
-      break if seen.include?(current)
+    memo = {}
+    tax_ids.each do |tax_id|
+      path = []
+      current = tax_id.to_i
+      result = nil
+      while current.positive?
+        if memo.key?(current)
+          result = memo[current]
+          break
+        end
+        info = node_by_tax_id[current]
+        break unless info
 
-      seen << current
-      info = node_by_tax_id[current]
-      return nil unless info
+        path << current
+        if info[:rank].to_s == rank_order
+          result = current
+          break
+        end
 
-      return current if info[:rank].to_s == rank_order
+        parent = info[:parent_tax_id]
+        break if parent.nil? || parent == current || path.size > 500
 
-      parent = info[:parent_tax_id]
-      break if parent.nil? || parent == current
-
-      current = parent
+        current = parent
+      end
+      # Every node on the walked path shares the result (no order node lies between them and it).
+      path.each { |id| memo[id] = result }
     end
-    nil
+    memo
   end
 
   def upsert_rows!(rows)
@@ -221,52 +232,72 @@ module NcbiTaxonomyLoader
   end
 
   def prune!(keep_tax_ids)
-    return if keep_tax_ids.empty?
+    return 0 if keep_tax_ids.empty?
 
     keep = keep_tax_ids.map(&:to_i).to_set
-    NcbiTaxonomyNode.where.not(tax_id: keep.to_a).delete_all
+    stale = NcbiTaxonomyNode.pluck(:tax_id).reject { |tax_id| keep.include?(tax_id) }
+    stale.each_slice(10_000) { |slice| NcbiTaxonomyNode.where(tax_id: slice).delete_all }
+    stale.size
   end
 end
 
 namespace :ncbi_taxonomy do
-  desc "Load NCBI taxonomy into main DB (downloads taxdump.tar.gz unless SKIP_DOWNLOAD=1). Env: PROD_DATA_DIR, DATA_DIR, NCBI_TAXONOMY_DATA_DIR, TAXDUMP_URL, NODES_DMP_PATH, NAMES_DMP_PATH, SKIP_DOWNLOAD, FORCE_DOWNLOAD, KEEP_TAXDUMP_TAR, ASAP_DATA_DB_NAME, PRUNE=1"
+  desc "Load NCBI taxonomy into main DB (downloads taxdump.tar.gz unless SKIP_DOWNLOAD=1). Loads the full taxonomy by default " \
+       "(needed to match any organism against clade-based CellOntology#tax_ids / rules.yaml organism maps); " \
+       "SEEDED=1 keeps only asap_data organisms + ancestors. Env: PROD_DATA_DIR, DATA_DIR, NCBI_TAXONOMY_DATA_DIR, TAXDUMP_URL, " \
+       "NODES_DMP_PATH, NAMES_DMP_PATH, SKIP_DOWNLOAD, FORCE_DOWNLOAD, KEEP_TAXDUMP_TAR, ASAP_DATA_DB_NAME, SEEDED=1, PRUNE=1"
   task load_nodes: :environment do
     NcbiTaxonomyLoader.ensure_taxdump_files!
 
     path = NcbiTaxonomyLoader.nodes_dmp_path
     names_path = NcbiTaxonomyLoader.names_dmp_path
-    source_db = NcbiTaxonomyLoader.source_asap_data_db_name
-    raise ArgumentError, "Could not resolve source asap_data DB (check ASAP2_DATA_VERSIONS)" if source_db.blank?
+    seeded = ENV["SEEDED"].to_s == "1"
 
     node_by_tax_id = NcbiTaxonomyLoader.parse_nodes_file!(path)
-    seeds = NcbiTaxonomyLoader.organism_tax_ids_from_asap_data(source_db)
-    selected = NcbiTaxonomyLoader.selected_tax_ids(node_by_tax_id, seeds)
-    names_by_id = NcbiTaxonomyLoader.parse_names_file!(names_path, selected)
+    puts "[ncbi_taxonomy:load_nodes] nodes_file=#{path} parsed_nodes=#{node_by_tax_id.size}"
 
-    rows = selected.filter_map do |tax_id|
-      info = node_by_tax_id[tax_id]
-      next unless info
+    selected = if seeded
+                 source_db = NcbiTaxonomyLoader.source_asap_data_db_name
+                 raise ArgumentError, "Could not resolve source asap_data DB (check ASAP2_DATA_VERSIONS)" if source_db.blank?
 
-      {
-        tax_id: tax_id,
-        parent_tax_id: info[:parent_tax_id],
-        order_tax_id: NcbiTaxonomyLoader.order_tax_id_from_map(tax_id, node_by_tax_id),
-        rank: info[:rank],
-        scientific_name: names_by_id[tax_id].to_s
-      }
+                 seeds = NcbiTaxonomyLoader.organism_tax_ids_from_asap_data(source_db)
+                 puts "[ncbi_taxonomy:load_nodes] SEEDED=1 source_asap_data=#{source_db} organism_distinct_tax_ids=#{seeds.size}"
+                 NcbiTaxonomyLoader.selected_tax_ids(node_by_tax_id, seeds)
+               else
+                 node_by_tax_id.keys.to_set
+               end
+
+    names_by_id = NcbiTaxonomyLoader.parse_names_file!(names_path, seeded ? selected : nil)
+    puts "[ncbi_taxonomy:load_nodes] names_file=#{names_path} (exists=#{File.exist?(names_path)}) names=#{names_by_id.size}"
+
+    order_by_tax_id = NcbiTaxonomyLoader.order_tax_ids_for(selected, node_by_tax_id)
+
+    loaded = 0
+    selected.each_slice(10_000) do |slice|
+      rows = slice.filter_map do |tax_id|
+        info = node_by_tax_id[tax_id]
+        next unless info
+
+        {
+          tax_id: tax_id,
+          parent_tax_id: info[:parent_tax_id],
+          order_tax_id: order_by_tax_id[tax_id],
+          rank: info[:rank],
+          scientific_name: names_by_id[tax_id].to_s
+        }
+      end
+      NcbiTaxonomyLoader.upsert_rows!(rows)
+      loaded += rows.size
     end
-
-    puts "[ncbi_taxonomy:load_nodes] nodes_file=#{path}"
-    puts "[ncbi_taxonomy:load_nodes] names_file=#{names_path} (exists=#{File.exist?(names_path)})"
-    puts "[ncbi_taxonomy:load_nodes] source_asap_data=#{source_db} organism_distinct_tax_ids=#{seeds.size}"
-    puts "[ncbi_taxonomy:load_nodes] selected_nodes=#{rows.size} (seeds + ancestors)"
-
-    NcbiTaxonomyLoader.upsert_rows!(rows)
+    puts "[ncbi_taxonomy:load_nodes] upserted_nodes=#{loaded} (#{seeded ? 'seeds + ancestors' : 'full taxonomy'})"
 
     missing = selected.reject { |tid| node_by_tax_id.key?(tid) }
     puts "[ncbi_taxonomy:load_nodes] WARNING tax_ids absent from nodes.dmp: #{missing.first(20).join(',')}" if missing.any?
 
-    NcbiTaxonomyLoader.prune!(selected.to_a) if ENV["PRUNE"] == "1"
+    if ENV["PRUNE"] == "1"
+      pruned = NcbiTaxonomyLoader.prune!(selected.to_a)
+      puts "[ncbi_taxonomy:load_nodes] pruned_nodes=#{pruned}"
+    end
 
     puts "[ncbi_taxonomy:load_nodes] ncbi_taxonomy_nodes rows=#{NcbiTaxonomyNode.count}"
   end

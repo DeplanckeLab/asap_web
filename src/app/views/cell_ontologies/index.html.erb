@@ -66,8 +66,7 @@
                                     ["All organisms"]
                                   else
                                     names = ontology.tax_id_list.map do |tax_id|
-                                      record = @organisms_by_tax_id[tax_id]
-                                      record&.name || "Tax ID #{tax_id}"
+                                      @organisms_by_tax_id[tax_id] || "Tax ID #{tax_id}"
                                     end
                                     names.presence || ["No match"]
                                   end %>

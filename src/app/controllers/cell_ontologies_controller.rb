@@ -63,10 +63,24 @@ class CellOntologiesController < ApplicationController
   end
 
   def fetch_organisms_by_tax_id(cell_ontologies)
-    tax_ids = cell_ontologies.flat_map(&:tax_id_list).uniq
+    taxon_names_by_tax_id(cell_ontologies.flat_map(&:tax_id_list).uniq)
+  end
+
+  # tax_id => display name. tax_ids may be clades (e.g. 7147 Diptera): ASAP organism name first,
+  # then NCBI scientific name with its rank when above species.
+  def taxon_names_by_tax_id(tax_ids)
     return {} if tax_ids.empty?
 
-    Organism.where(tax_id: tax_ids).index_by(&:tax_id)
+    names = Organism.where(tax_id: tax_ids).pluck(:tax_id, :name).to_h
+    missing = tax_ids - names.keys
+    if missing.any? && NcbiTaxonomyNode.table_exists?
+      NcbiTaxonomyNode.where(tax_id: missing).pluck(:tax_id, :scientific_name, :rank).each do |tax_id, name, rank|
+        next if name.blank?
+
+        names[tax_id] = rank.present? && rank != "species" ? "#{name} (#{rank})" : name
+      end
+    end
+    names
   end
 
   def term_counts_for(cell_ontologies)
@@ -85,8 +99,8 @@ class CellOntologiesController < ApplicationController
     tax_ids = cell_ontology.tax_id_list
     return ["No match"] if tax_ids.empty?
 
-    names_by_tax_id = Organism.where(tax_id: tax_ids).index_by(&:tax_id)
-    names = tax_ids.map { |tax_id| names_by_tax_id[tax_id]&.name || "Tax ID #{tax_id}" }
+    names_by_tax_id = taxon_names_by_tax_id(tax_ids)
+    names = tax_ids.map { |tax_id| names_by_tax_id[tax_id] || "Tax ID #{tax_id}" }
     names.presence || ["No match"]
   end
 end

@@ -63,7 +63,7 @@ module Scfair
         co = ontologies[co_id]
         next false unless co
 
-        co.tax_ids.blank? || (tax_id_str.present? && co.tax_ids.to_s.split(',').map(&:strip).include?(tax_id_str))
+        co.applies_to_tax_id?(tax_id_str)
       end
 
       allowed_free_text = Set.new(ott.free_text_entries.map { |e| e.is_a?(Hash) ? e['value'].to_s : e.to_s })

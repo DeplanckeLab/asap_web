@@ -11,7 +11,7 @@ module Scfair
       new.allowed_gene_reference?(reference)
     end
 
-    def initialize(lineage_resolver: NcbiTaxonomyLineageResolver.new, remote_lookup: EnsemblReferenceLookup.new)
+    def initialize(lineage_resolver: ::NcbiTaxonomyLineageResolver.shared, remote_lookup: EnsemblReferenceLookup.new)
       @lineage_resolver = lineage_resolver
       @remote_lookup = remote_lookup
       @config = Rules.feature_reference_policy
@@ -93,43 +93,6 @@ module Scfair
       return nil unless match
 
       match[1].to_i
-    end
-  end
-
-  # Walks parent_tax_id in ncbi_taxonomy_nodes when available.
-  class NcbiTaxonomyLineageResolver
-    def descendant_of?(tax_id, ancestor_tax_id)
-      tax_id = tax_id.to_i
-      ancestor_tax_id = ancestor_tax_id.to_i
-      return false unless tax_id.positive? && ancestor_tax_id.positive?
-      return true if tax_id == ancestor_tax_id
-      return false unless taxonomy_available?
-
-      seen = Set.new
-      current = tax_id
-      while current.positive?
-        return true if current == ancestor_tax_id
-        break if seen.include?(current)
-
-        seen << current
-        node = NcbiTaxonomyNode.find_by(tax_id: current)
-        return false unless node
-
-        parent = node.parent_tax_id
-        break if parent.nil? || parent == current
-
-        current = parent.to_i
-      end
-
-      false
-    end
-
-    def taxonomy_available?
-      return @taxonomy_available unless @taxonomy_available.nil?
-
-      @taxonomy_available = defined?(NcbiTaxonomyNode) && NcbiTaxonomyNode.table_exists?
-    rescue StandardError
-      @taxonomy_available = false
     end
   end
 end

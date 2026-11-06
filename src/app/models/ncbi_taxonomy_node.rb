@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
 # NCBI taxonomy nodes loaded from nodes.dmp + names.dmp (see ncbi_taxonomy:load_nodes).
-# Seeds: distinct tax_id from latest asap_data.organisms plus all ancestors.
+# Full NCBI taxonomy by default (SEEDED=1: asap_data organisms plus ancestors only).
+# Lineage queries: NcbiTaxonomyLineageResolver (clade-based CellOntology#tax_ids, rules.yaml organism maps).
 #
 # order_tax_id: denormalized NCBI tax_id of the rank "order" ancestor (self if this row is an order).
 #               nil when the lineage has no order node (e.g. ranks strictly above order).

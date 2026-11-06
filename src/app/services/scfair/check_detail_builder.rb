@@ -1151,7 +1151,6 @@ module Scfair
 
     def append_organism_dev_stage_semantic_context(rows)
       organism = organism_from_field_values
-      mapping = Rules.organism_dev_stage_mapping
       term_id = organism[:term_id]
 
       if term_id.blank?
@@ -1159,7 +1158,7 @@ module Scfair
         return
       end
 
-      expected_prefix = mapping[term_id]
+      expected_prefix = Rules.organism_dev_stage_prefix_for(term_id)
       organism_display = organism_display_name(organism)
 
       if expected_prefix.blank?
@@ -1195,7 +1194,7 @@ module Scfair
       end
 
       allowed_prefixes = Rules.organism_cell_type_prefixes_for(term_id)
-      mapped = Rules.organism_cell_type_mapping.key?(term_id)
+      mapped = Rules.organism_cell_type_mapped?(term_id)
       prefix_list = allowed_prefixes.map { |prefix| "#{prefix}:*" }.join(' or ')
 
       rows << organism_context_row('Organism-specific prefix rules', :applicable_under_category)
@@ -1295,7 +1294,18 @@ module Scfair
       )
     end
 
+    def append_organism_taxon_match_constraint(rows)
+      text = if Rules.organism_taxon_match == 'exact'
+               'Organism keys match the declared NCBITaxon term exactly'
+             else
+               'Each organism key applies to that taxon and all its descendants (NCBI taxonomy); the most specific key wins'
+             end
+      rows << constraint_row('Taxon matching', text, from_rules: true, rules_path: Rules.organism_specific_mappings_yaml_path('organism_taxon_match'))
+    end
+
     def append_organism_specific_check_constraints(rows, rule)
+      append_organism_taxon_match_constraint(rows) if %w[development_stage cell_type tissue].include?(rule.to_s)
+
       case rule
       when 'development_stage'
         mapping = Rules.organism_dev_stage_mapping

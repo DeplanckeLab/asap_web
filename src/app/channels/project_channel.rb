@@ -2,6 +2,13 @@ class ProjectChannel < ApplicationCable::Channel
   def subscribed
     project_id = params[:project_id]
     if project_id.present?
+      project = Project.find_by(id: project_id)
+      unless project && readable?(project)
+        Rails.logger.warn("[ProjectChannel] rejected unauthorized project_id=#{project_id.to_s[0, 40]}")
+        reject
+        return
+      end
+      project_id = project.id
       Rails.logger.info("[ProjectChannel] subscribed stream=project_#{project_id}")
       stream_from "project_#{project_id}"
       transmit_initial_snapshot(project_id)

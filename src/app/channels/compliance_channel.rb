@@ -1,8 +1,8 @@
 class ComplianceChannel < ApplicationCable::Channel
   def subscribed
-    project_id = params[:project_id]
-    if project_id.present?
-      stream_from "compliance_#{project_id}"
+    project = Project.find_by(id: params[:project_id]) if params[:project_id].present?
+    if project && readable?(project)
+      stream_from "compliance_#{project.id}"
     else
       reject
     end

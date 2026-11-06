@@ -29,7 +29,7 @@ module Scfair
 
     def evaluate_development_stage
       organism = organism_term_id
-      expected_prefix = Rules.organism_dev_stage_mapping[organism]
+      expected_prefix = Rules.organism_dev_stage_prefix_for(organism)
       if expected_prefix.blank?
         return skipped_check('development_stage', :no_mapping)
       end

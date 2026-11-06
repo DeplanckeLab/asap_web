@@ -1598,8 +1598,8 @@ class ComplianceController < ApplicationController
   # resolve_suspension_type_for_assay are provided by ScfairSchemaRules.
 
   # Filter ontology prefixes to only those applicable for the project's organism.
-  # An ontology is applicable if its tax_ids is blank (universal) or contains
-  # the organism's tax_id.
+  # An ontology is applicable if its tax_ids is blank (universal) or lists the
+  # organism's tax_id or one of its ancestor clades (CellOntology#applies_to_tax_id?).
   # Development-stage fields additionally restrict to the organism's mapped
   # prefix (e.g. mouse -> MmusDv only), so universal UBERON same-name terms
   # cannot win over the taxon-specific ontology.
@@ -1612,24 +1612,21 @@ class ComplianceController < ApplicationController
     restricted = restrict_development_stage_prefixes(prefixes, tax_id)
     return restricted if restricted
 
-    applicable_tags = CellOntology.where(tag: prefixes).select { |co|
-      co.tax_ids.blank? || co.tax_id_list.map(&:to_s).include?(tax_id)
-    }.map(&:tag)
-    applicable_tags
+    CellOntology.where(tag: prefixes).select { |co| co.applies_to_tax_id?(tax_id) }.map(&:tag)
   end
 
   # Filter CellOntology IDs from the given prefix tags by organism applicability.
-  # Returns ontology IDs that are either universal or match the given tax_id.
+  # Returns ontology IDs that are either universal or cover the given tax_id's clade.
   def organism_scoped_ontology_ids(prefixes, project_identifier)
-    ontology_ids = CellOntology.where(tag: prefixes).pluck(:id, :tag, :tax_ids)
-    return ontology_ids.map(&:first) unless project_identifier.present?
+    ontologies = CellOntology.where(tag: prefixes).to_a
+    return ontologies.map(&:id) unless project_identifier.present?
 
     project = if project_identifier.to_s.match?(/^\d+$/)
                 Project.find_by(id: project_identifier.to_i)
               else
                 Project.find_by(key: project_identifier)
               end
-    return ontology_ids.map(&:first) unless project&.organism&.tax_id.present?
+    return ontologies.map(&:id) unless project&.organism&.tax_id.present?
 
     tax_id_str = project.organism.tax_id.to_s
     restricted = restrict_development_stage_prefixes(prefixes, tax_id_str)
@@ -1637,16 +1634,14 @@ class ComplianceController < ApplicationController
       return CellOntology.where(tag: restricted).pluck(:id)
     end
 
-    ontology_ids.select { |_id, _tag, tax_ids|
-      tax_ids.blank? || tax_ids.to_s.split(',').map(&:strip).include?(tax_id_str)
-    }.map(&:first)
+    ontologies.select { |co| co.applies_to_tax_id?(tax_id_str) }.map(&:id)
   end
 
   # When the requested prefixes are the development_stage set and the organism
   # has a mapped Dv ontology, return only that prefix. Otherwise nil.
   def restrict_development_stage_prefixes(prefixes, tax_id)
     prefix_list = Array(prefixes).map(&:to_s)
-    mapped = Scfair::Rules.organism_dev_stage_mapping["NCBITaxon:#{tax_id}"]
+    mapped = Scfair::Rules.organism_dev_stage_prefix_for("NCBITaxon:#{tax_id}")
     return nil if mapped.blank?
 
     mapped_dev_prefixes = Scfair::Rules.organism_dev_stage_mapping.values.map(&:to_s).uniq

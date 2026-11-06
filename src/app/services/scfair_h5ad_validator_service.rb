@@ -579,16 +579,33 @@ class ScfairH5adValidatorService
       cell_default = cfg.get("organism_cell_type_default_prefixes", ["CL"])
       tissue_map = cfg.get("organism_tissue_mapping", {})
       tissue_default = cfg.get("organism_tissue_default_prefixes", ["UBERON"])
+      clade_match = cfg.get("organism_taxon_match", "self_or_descendant") != "exact"
       tissue_type = (tissue_type or "").strip()
       organism = (organism or "").strip()
+
+      # Organism keys are clades (cross_field.organism_taxon_match). Lineage is not available here, so an
+      # organism that is not an exact key accepts every mapped prefix; OrganismSpecificConstraintEvaluator
+      # (Ruby, NCBI taxonomy aware) enforces the organism-specific prefix afterwards.
+      def lookup(mapping, default):
+        if organism in mapping:
+          return list(mapping[organism])
+        if clade_match and organism.startswith("NCBITaxon:"):
+          merged = list(default)
+          for prefixes in mapping.values():
+            for prefix in prefixes:
+              if prefix not in merged:
+                merged.append(prefix)
+          return merged
+        return list(default)
+
       if tissue_type == cell_line:
         return [cvcl_tag]
       if tissue_type == primary:
-        return list(cell_map.get(organism, cell_default))
+        return lookup(cell_map, cell_default)
       if not tissue_type:
         return list(default_prefixes)
       if organism:
-        return list(tissue_map.get(organism, tissue_default))
+        return lookup(tissue_map, tissue_default)
       return list(default_prefixes)
 
     def check_ontology_values(field_path, values, obs_group=None, uns_group=None):

@@ -774,6 +774,9 @@ class ProjectsController < ApplicationController
       # Persist in session so a page refresh of the form still works
       session[:integrate_project_keys] = integrate_keys if integrate_keys.present?
       @integrate_projects = integrate_keys.present? ? Project.where(key: integrate_keys).includes(:organism).to_a : []
+      # Never expose (or carry forward) source projects the user cannot export.
+      @integrate_projects.select! { |p| exportable?(p) }
+      session[:integrate_project_keys] = @integrate_projects.map(&:key) if integrate_keys.present?
       if @integrate_projects.any?
         # Pre-fill organism from the integration projects
         @project.organism_id = @integrate_projects.first.organism_id
@@ -832,6 +835,16 @@ class ProjectsController < ApplicationController
     @h_formats = {}
     FileFormat.all.map { |f| @h_formats[f.name] = f }
     
+    # Authorize integration sources before any destructive step below.
+    raw_attrs_for_auth = params[:attrs].respond_to?(:to_unsafe_h) ? params[:attrs].to_unsafe_h : {}
+    early_integrate_attrs = raw_attrs_for_auth.merge(
+      params.to_unsafe_h.slice('integrate_source_keys', 'integrate_batch_paths')
+    )
+    unless integration_source_projects_exportable?(integration_source_keys_from_attrs(early_integrate_attrs))
+      handle_project_unauthorized_access
+      return
+    end
+
     # Delete project if already exists with this key (if editable)
     # Note: This allows reusing project keys for the same user
     if @project.key.present? && (existing_project = Project.find_by(key: @project.key))
@@ -906,6 +919,13 @@ class ProjectsController < ApplicationController
       end
     end
     
+    # Integration source keys arrive from the client; the integrate task copies
+    # their data unconditionally, so authorize them here.
+    unless integration_source_projects_exportable?(integration_source_keys_from_attrs(tmp_attrs))
+      handle_project_unauthorized_access
+      return
+    end
+
     # Set project attributes
     @project.parsing_attrs_json = tmp_attrs.to_json
     @project.nber_cols = params[:nber_cols] if params[:nber_cols]
@@ -1589,8 +1609,13 @@ class ProjectsController < ApplicationController
       return
     end
 
-    project_ids = project_ids.map(&:to_i).compact
-    projects = Project.where(id: project_ids).includes(:organism, :project_type)
+    project_ids = project_ids.map(&:to_i).compact.uniq
+    projects = Project.where(id: project_ids).includes(:organism, :project_type).to_a
+
+    unless projects.size == project_ids.size && projects.all? { |project| exportable?(project) }
+      render json: { success: false, error: "You do not have export access to all selected projects." }, status: :forbidden
+      return
+    end
 
     unknown_type_projects = projects.select { |project| project.project_type_id.nil? }
     if unknown_type_projects.any?
@@ -10937,6 +10962,23 @@ class ProjectsController < ApplicationController
       return if owner?(@project)
 
       handle_project_unauthorized_access
+    end
+
+    # Integration copies source project data into a project owned by the
+    # current user, so every source must be exportable by that user.
+    def integration_source_projects_exportable?(keys)
+      keys = Array(keys).map(&:to_s).reject(&:blank?).uniq
+      return true if keys.empty?
+
+      projects = Project.where(key: keys).to_a
+      projects.size == keys.size && projects.all? { |p| exportable?(p) }
+    end
+
+    def integration_source_keys_from_attrs(h_attrs)
+      h = h_attrs.respond_to?(:deep_stringify_keys) ? h_attrs.deep_stringify_keys : {}
+      keys = Basic.integration_source_keys(h)
+      keys += h['integrate_batch_paths'].keys.map(&:to_s) if h['integrate_batch_paths'].is_a?(Hash)
+      keys.reject(&:blank?).uniq
     end
 
     def handle_project_unauthorized_access

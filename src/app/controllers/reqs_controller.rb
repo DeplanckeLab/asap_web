@@ -2,7 +2,10 @@ require 'open3'
 
 class ReqsController < ApplicationController
 
+  # Only create/destroy are used by the UI; the remaining scaffold actions are admin-only.
+  before_action :authorize_admin, only: [:index, :show, :new, :edit, :update]
   before_action :set_project, only: [:create]
+  before_action :authorize_req_project_analyze_access, only: [:create]
   before_action :set_req, only: [:show, :edit, :update, :destroy]
 
   # GET /reqs
@@ -795,6 +798,18 @@ class ReqsController < ApplicationController
   
     def set_req
       @req = Req.find(params[:id])
+    end
+
+    # Launching analyses requires analyze rights on the target project
+    # (owner, admin, guest's own sandbox, or a share with analyze_perm).
+    def authorize_req_project_analyze_access
+      return if @project && analyzable?(@project)
+
+      respond_to do |format|
+        format.html { render 'shared/unauthorized', status: :forbidden }
+        format.json { render json: { status: 'failed', errors: 'Not authorized' }, status: :forbidden }
+        format.any { render plain: 'Not authorized', status: :forbidden }
+      end
     end
 
     # Never trust parameters from the scary internet, only allow the white list through.

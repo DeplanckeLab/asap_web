@@ -3,7 +3,7 @@
 # Verifies Cla rows created by Basic.add_clas (ASAP auto annotations) against the same rules used at creation:
 # - ASAP auto Clas must have a perfect ontology term match (no name-only free-text rows)
 # - category string maps via Basic.h_cell_ontology_terms_by_cat_label (identifier before name, stable id;
-#   chosen term: exact species ontology > same NCBI order > universal (empty tax_ids); multiple_cot_rows uses same tier)
+#   chosen term: exact taxon > closest clade in CellOntology#tax_ids > universal (empty tax_ids); multiple_cot_rows uses same distance)
 # - cell_ontology_term_ids must equal that chosen term id
 # - name must be blank when an ontology term is linked
 # - ontology_term_type_id must match ClaOntologyTermTypeResolver when uniquely resolvable
@@ -71,21 +71,20 @@ namespace :cla do
       end
 
       project_tax_id = cla.project&.organism&.tax_id
-      order_memo = {}
       chosen = Basic.h_cell_ontology_terms_by_cat_label([cat], project_tax_id)[cat]
-      tier = if project_tax_id.present?
-               chosen && Basic.cell_ontology_match_tier(chosen, project_tax_id, order_tax_id_memo: order_memo)
-             end
+      distance = if project_tax_id.present?
+                   chosen && Basic.cell_ontology_taxon_distance(chosen, project_tax_id)
+                 end
 
       all_matches = CellOntologyTerm.original.with_active_cell_ontology
         .where("cell_ontology_terms.identifier IN (?) OR cell_ontology_terms.name IN (?)", [cat], [cat])
         .includes(:cell_ontology)
         .order(:id)
         .to_a
-        .select { |term| Basic.cell_ontology_term_applicable_to_tax_id?(term, project_tax_id, order_tax_id_memo: order_memo) }
+        .select { |term| Basic.cell_ontology_term_applicable_to_tax_id?(term, project_tax_id) }
 
-      if tier
-        all_matches = all_matches.select { |t| Basic.cell_ontology_match_tier(t, project_tax_id, order_tax_id_memo: order_memo) == tier }
+      unless distance.nil?
+        all_matches = all_matches.select { |t| Basic.cell_ontology_taxon_distance(t, project_tax_id) == distance }
       end
 
       stored_raw = cla.cell_ontology_term_ids.to_s.strip

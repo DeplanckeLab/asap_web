@@ -15,7 +15,8 @@
 #   constants               - shared lookup tables (not column enums)
 #   spatial_extension, perturb_extension - optional schema extensions
 #   cross_field             - rules that depend on multiple fields (CF-1 .. CF-9)
-#   organism_specific_*     - taxon-dependent ontology prefix rules
+#   organism_specific_*     - taxon-dependent ontology prefix rules (keys match clades, see
+#                             cross_field.organism_taxon_match)
 #   checks                  - compliance report categories, nested checks, defaults, semantic labels
 
 # Release metadata. schema_version is what files must declare (exact string from
@@ -985,13 +986,22 @@ cross_field:
     assay_suspension_lock_reason: 'suspension_type is determined by assay (%{assay}).'
     assay_suspension_restrict_message: 'Schema constraint: suspension_type is restricted by assay (%{assay}).'
     assay_suspension_restrict_detail: 'Allowed values: %{allowed}. Please select one.'
+  # How the NCBITaxon keys of organism_dev_stage_mapping, organism_cell_type_prefixes and
+  # organism_tissue_prefixes match the dataset organism (scFAIR Appendix B: a clade-specific ontology
+  # MUST NOT be used for an organism outside the clade it covers).
+  #   self_or_descendant - a key applies to that taxon and every descendant in the NCBI taxonomy
+  #                        (ncbi_taxonomy_nodes); when several keys apply, the most specific one wins.
+  #   exact              - the key must equal organism_ontology_term_id.
+  # Keep consistent with cell_ontologies.tax_ids (same clade semantics, CellOntology#applies_to_tax_id?).
+  organism_taxon_match: self_or_descendant
   # Organism -> development stage ontology prefix (ontology.organism_specific.development_stage).
+  # FBdv covers Diptera (NCBITaxon:7147), e.g. Drosophila and Aedes, not only D. melanogaster.
   organism_dev_stage_mapping:
     NCBITaxon:9606: HsapDv
     NCBITaxon:10090: MmusDv
     NCBITaxon:6239: WBls
     NCBITaxon:7955: ZFS
-    NCBITaxon:7227: FBdv
+    NCBITaxon:7147: FBdv
   organism_cell_type_prefixes:
     NCBITaxon:6239: [CL, WBbt]
     NCBITaxon:7955: [CL, ZFA]
@@ -1504,6 +1514,7 @@ checks:
     summary: Metadata fields whose allowed ontology terms depend on the dataset organism.
     rollup:
     - Uses organism_ontology_term_id to select taxon-specific ontology prefix rules
+    - Organism keys cover the taxon and its descendants (cross_field.organism_taxon_match)
     - Development stage prefixes (HsapDv, MmusDv, WBls, ZFS, FBdv)
     - Cell type and tissue prefixes for model organisms (C. elegans, zebrafish, fly)
     - Ethnicity rules for human vs non-human datasets
@@ -1516,7 +1527,8 @@ checks:
         checks_performed:
         - Reads organism_ontology_term_id from uns metadata
         - Maps the organism to a required development stage ontology prefix (HsapDv,
-          MmusDv, WBls, ZFS, FBdv, or UBERON)
+          MmusDv, WBls, ZFS, FBdv, or UBERON) using the closest mapped ancestor taxon
+          (e.g. any Diptera species -> FBdv)
         - Each development_stage_ontology_term_id value must use the mapped prefix
           (or special values unknown, na)
       cell_type:

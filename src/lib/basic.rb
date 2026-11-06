@@ -5368,95 +5368,47 @@ module Basic
       return h_cell_set_by_cat_idx
     end
 
-    # Memo key: tax_id -> NcbiTaxonomyNode.order_tax_id_for(tax_id) (may be nil). Pass {} from batch resolvers.
-    def ncbi_order_tax_id_for_memo(tid, memo)
-      tid = tid.to_i
-      return nil unless tid.positive?
-
-      if memo
-        return memo[tid] if memo.key?(tid)
-
-        memo[tid] = ::NcbiTaxonomyNode.order_tax_id_for(tid)
-      else
-        ::NcbiTaxonomyNode.order_tax_id_for(tid)
-      end
-    end
-
-    def ncbi_taxonomy_nodes_available?
-      defined?(::NcbiTaxonomyNode) && ::NcbiTaxonomyNode.table_exists?
-    rescue StandardError
-      false
-    end
-
-    # :exact = ontology tax_ids lists project species; :order = same NCBI order as an anchor (ncbi_taxonomy_nodes);
-    # :universal = ontology has no tax_ids restriction; nil = not applicable.
-    def cell_ontology_match_tier(term, organism_tax_id, order_tax_id_memo: nil)
+    # Taxon distance between the project organism and the term's ontology (CellOntology#taxon_distance):
+    # 0 = ontology lists the organism itself, n = closest listed clade is n ranks up,
+    # Float::INFINITY = taxon-neutral ontology (or term without ontology), nil = not applicable.
+    def cell_ontology_taxon_distance(term, organism_tax_id, lineage: ::NcbiTaxonomyLineageResolver.shared)
       return nil unless term.original == true
 
       tax_id = organism_tax_id.to_i
       return nil if tax_id <= 0
 
       ontology = term.cell_ontology
-      return :universal unless ontology
+      return Float::INFINITY unless ontology
 
-      tax_ids = ontology.tax_id_list
-      return :universal if tax_ids.empty?
-
-      return :exact if tax_ids.include?(tax_id)
-
-      return nil unless ncbi_taxonomy_nodes_available?
-
-      project_order = ncbi_order_tax_id_for_memo(tax_id, order_tax_id_memo)
-      return nil if project_order.blank?
-
-      if tax_ids.any? { |anchor|
-        aid = anchor.to_i
-        next false unless aid.positive?
-
-        anchor_order = ncbi_order_tax_id_for_memo(aid, order_tax_id_memo)
-        anchor_order.present? && anchor_order == project_order
-      }
-        :order
-      else
-        nil
-      end
+      ontology.taxon_distance(tax_id, lineage: lineage)
     end
 
-    def cell_ontology_term_applicable_to_tax_id?(term, organism_tax_id, order_tax_id_memo: nil)
+    # :exact = ontology lists the organism's taxon; :clade = ontology lists an ancestor clade;
+    # :universal = ontology has no tax_ids restriction; nil = not applicable.
+    def cell_ontology_match_tier(term, organism_tax_id, lineage: ::NcbiTaxonomyLineageResolver.shared)
+      distance = cell_ontology_taxon_distance(term, organism_tax_id, lineage: lineage)
+      return nil if distance.nil?
+      return :universal if distance == Float::INFINITY
+
+      distance.zero? ? :exact : :clade
+    end
+
+    def cell_ontology_term_applicable_to_tax_id?(term, organism_tax_id, lineage: ::NcbiTaxonomyLineageResolver.shared)
       tid = organism_tax_id.to_i
       return true if tid <= 0
 
-      !cell_ontology_match_tier(term, organism_tax_id, order_tax_id_memo: order_tax_id_memo).nil?
+      !cell_ontology_taxon_distance(term, organism_tax_id, lineage: lineage).nil?
     end
 
-    # Prefer exact species ontologies, then same-order (e.g. Diptera), then tax-unrestricted ontologies.
-    def pick_terms_by_taxonomy_priority(matches, organism_tax_id, order_tax_id_memo)
+    # Keep only the terms whose ontology targets the organism most specifically (smallest taxon distance:
+    # exact taxon, then the closest clade, then taxon-neutral ontologies). Non-applicable terms are dropped
+    # unless nothing applies, in which case matches are returned unchanged.
+    def pick_terms_by_taxonomy_priority(matches, organism_tax_id, lineage: ::NcbiTaxonomyLineageResolver.shared)
       return matches if matches.empty?
 
-      exact = []
-      order = []
-      universal = []
-
-      matches.each do |term|
-        case cell_ontology_match_tier(term, organism_tax_id, order_tax_id_memo: order_tax_id_memo)
-        when :exact
-          exact << term
-        when :order
-          order << term
-        when :universal
-          universal << term
-        end
-      end
-
-      pool = if exact.any?
-               exact
-             elsif order.any?
-               order
-             elsif universal.any?
-               universal
-             else
-               matches
-             end
+      by_distance = matches.group_by { |term| cell_ontology_taxon_distance(term, organism_tax_id, lineage: lineage) }
+      by_distance.delete(nil)
+      pool = by_distance.empty? ? matches : by_distance[by_distance.keys.min]
 
       pool.sort_by(&:id)
     end
@@ -5464,7 +5416,7 @@ module Basic
     # Map metadata category labels to original Cell Ontology terms (one query per distinct label set).
     # Prefer identifier match over name; lowest id wins when several rows share the same identifier or name.
     # Skips obsolete terms and terms in obsolete ontologies (see CellOntologyTerm.with_active_cell_ontology).
-    # When organism_tax_id is present: filter by applicability, then exact species > same NCBI order > universal ontology.
+    # When organism_tax_id is present: filter by applicability, then exact taxon > closest clade > universal ontology.
     def h_cell_ontology_terms_by_cat_label(labels, organism_tax_id = nil)
       labels = labels.map(&:to_s).uniq.reject(&:empty?)
       return {} if labels.empty?
@@ -5474,9 +5426,8 @@ module Basic
         .includes(:cell_ontology)
         .order(:id)
       if organism_tax_id.present?
-        order_memo = {}
-        terms = terms.select { |term| cell_ontology_term_applicable_to_tax_id?(term, organism_tax_id, order_tax_id_memo: order_memo) }
-        terms = pick_terms_by_taxonomy_priority(terms, organism_tax_id, order_memo)
+        terms = terms.select { |term| cell_ontology_term_applicable_to_tax_id?(term, organism_tax_id) }
+        terms = pick_terms_by_taxonomy_priority(terms, organism_tax_id)
       end
       by_ident = {}
       by_name = {}
@@ -7433,18 +7384,28 @@ module Basic
     end
     private :command_json_opt_shell_fragment
 
+    # Characters that let a value escape its argument position in the generated
+    # command line. Values pass through several shell layers (host spawn shell,
+    # `docker run ... "..."`, then `sh -c '...'`), so these cannot be quoted
+    # reliably and are rejected instead.
+    UNSAFE_CMDLINE_CHARS = /[`$'\\;&|<>\n\r\0]/
+    # Single-character delimiter values that are legitimately passed to parsers;
+    # a backslash escape survives all shell layers and yields the literal char.
+    # "\\t" (backslash + t) is a legacy tab-delimiter spelling, passed unchanged.
+    CMDLINE_DELIMITER_VALUES = { ';' => '\\;', '|' => '\\|', '\\t' => '\\t' }.freeze
+
+    class UnsafeCommandParameterError < ArgumentError; end
+
     def safe_cmdline_param p
       p = p.to_s
-      contains_quotes = false
-      if p.match(/["']/)
-        contains_quotes = true
+      return CMDLINE_DELIMITER_VALUES[p] if CMDLINE_DELIMITER_VALUES.key?(p)
+      if p.match?(UNSAFE_CMDLINE_CHARS)
+        raise UnsafeCommandParameterError,
+              "Parameter value contains characters that are not allowed (` $ ' \\ ; & | < > or line breaks): #{p[0, 80].inspect}"
       end
-      if p.match(/['"<>\s]/) 
+      if p.match(/["\s]/)
         p = "\"#{p}\""
         p.gsub!(/(["])/){|var| "\\#{var}"}
-      end
-      if p == ';'
-        p = "\\;"
       end
       return p
     end

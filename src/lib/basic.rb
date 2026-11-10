@@ -1647,6 +1647,16 @@ module Basic
       val == true || val == 1 || val.to_s.strip.casecmp('true').zero?
     end
 
+    # Flag name for a bool_flag opt entry: the opt itself when truthy, otherwise
+    # entry['false_opt'] or the opt with "no_" inserted after the leading dashes.
+    def command_json_bool_flag_opt(entry, value)
+      opt = entry['opt'].to_s
+      return opt if command_json_boolean_truthy?(value)
+      return entry['false_opt'].to_s if entry['false_opt'].present?
+
+      opt.sub(/\A(-*)/) { "#{$1}no_" }
+    end
+
     # Resolve CLI arg/opt raw value: command_json entry value, then run attr, then std_method attr default.
     # Blank strings are treated as missing so attrs_json defaults still apply (e.g. form sending metric="").
     def command_json_resolve_param_raw(entry, h_var, std_method_attr)
@@ -1697,6 +1707,9 @@ module Basic
     # valueless_flag: for argparse-style boolean flags (store_true). When the resolved value is
     # truthy, emit only the flag name (e.g. --chunked) with no following argument; when falsy,
     # skip the entry entirely. Do not combine with a truthy checkbox value on the command line.
+    # bool_flag: for paired argparse flags (--x / --no_x, e.g. scaling.v8.py --zero_center).
+    # When the resolved value is truthy, emit the flag name alone (--zero_center); when falsy,
+    # emit the negated flag (--no_zero_center, or the entry's "false_opt" when given).
     # omit_when_all_against_compl skips when attrs["all_against_compl"] is true (same mechanism,
     # useful when the value can be non-empty but the flag must still drop the cli flag).
     # omit_when_param_blank: "<param_key>" skips this entry when that attr is blank / complementary
@@ -6936,6 +6949,11 @@ module Basic
 
           if command_json_boolean_truthy?(opt['valueless_flag'])
             list_opts.push({:opt => opt['opt'], :param_key => opt['param_key'], :value => ''})
+            next
+          end
+
+          if command_json_boolean_truthy?(opt['bool_flag'])
+            list_opts.push({:opt => command_json_bool_flag_opt(opt, value), :param_key => opt['param_key'], :value => ''})
             next
           end
 

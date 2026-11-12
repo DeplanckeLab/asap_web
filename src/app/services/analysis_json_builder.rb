@@ -191,8 +191,8 @@ class AnalysisJsonBuilder
     opts = []
 
     sel_name = attrs['sel_name'] || attrs['sel']
-    if file_type.to_s.upcase == 'H5AD' && sel_name.present? && !sel_name.to_s.start_with?('/')
-      sel_name = (sel_name.to_s == 'X') ? '/X' : "/layers/#{sel_name}"
+    if file_type.to_s.upcase == 'H5AD' && sel_name.present?
+      sel_name = Basic.h5ad_v8_sel_path(sel_name)
     end
     opts << { 'opt' => '--sel', 'value' => sel_name } if sel_name.present?
 

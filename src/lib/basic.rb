@@ -989,6 +989,36 @@ module Basic
       File.file?(prep_path) ? prep_path : nil
     end
 
+    ARCHIVE_MEMBER_FILE_EXT_RE = /\.(h5ad|h5|hdf5|loom|rds|zip|tar|tgz|gz|bz2|xz|7z)\z/i
+
+    # HDF5 dataset path to pass as parse.v8.py --sel for an H5AD input.
+    # For archive uploads the UI stores the selected archive member (e.g.
+    # "dir/sample.h5ad") as sel_name; it is not an HDF5 group. In that case use the
+    # matrix group preparsing found in the extracted file ("/X" first, else the only one),
+    # or nil so parse.v8.py falls back to its own /X detection.
+    def h5ad_v8_sel_path(sel_name, h_preparsing = nil)
+      sel = sel_name.to_s.strip
+      return nil if sel.blank?
+      return sel if sel.start_with?('/')
+
+      h_prep = h_preparsing.is_a?(Hash) ? h_preparsing : {}
+      prep_base = File.basename(h_prep['file_path'].to_s)
+      archive_member = sel.match?(ARCHIVE_MEMBER_FILE_EXT_RE) ||
+                       (prep_base.present? && File.basename(sel) == prep_base)
+      return (sel == 'X') ? '/X' : "/layers/#{sel}" unless archive_member
+
+      groups = Array(h_prep['list_groups']).filter_map do |g|
+        name = g.is_a?(Hash) ? g['group'].to_s.strip : ''
+        next if name.blank?
+
+        name.start_with?('/') ? name : "/#{name}"
+      end.uniq
+      return '/X' if groups.include?('/X')
+      return groups.first if groups.size == 1
+
+      nil
+    end
+
     # Archive members are often listed with a directory prefix; the UI may submit only the basename.
     def reconcile_archive_sel_name!(parsing_attrs, upload_dir)
       return parsing_attrs unless parsing_attrs.is_a?(Hash)

@@ -779,8 +779,16 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
         opts = []
         sel_name = p['sel_name'] || p[:sel_name] || p['sel'] || p[:sel]
-        if file_type == 'H5AD' && sel_name.present? && !sel_name.start_with?('/')
-          sel_name = (sel_name == 'X') ? '/X' : "/layers/#{sel_name}"
+        if file_type == 'H5AD' && sel_name.present? && !sel_name.to_s.start_with?('/')
+          h_prep_sel = {}
+          if fu_upload_dir && File.exist?((fu_upload_dir + 'output.json').to_s)
+            h_prep_sel = Basic.safe_parse_json(File.read((fu_upload_dir + 'output.json').to_s), {})
+          end
+          resolved_sel = Basic.h5ad_v8_sel_path(sel_name, h_prep_sel)
+          if resolved_sel != ((sel_name.to_s == 'X') ? '/X' : "/layers/#{sel_name}")
+            logger.info("[ParseRake] H5AD sel_name #{sel_name.inspect} is an archive member; using HDF5 group #{resolved_sel.inspect}")
+          end
+          sel_name = resolved_sel
         end
         opts.push({'opt' => "--sel", 'value' => sel_name}) if sel_name.present?
         if file_type == 'RAW_TEXT'

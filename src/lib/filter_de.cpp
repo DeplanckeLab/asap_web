@@ -14,7 +14,8 @@
 //   MODE=de_results filters PROJECT/de/RUN_ID/output.txt
 //
 // Compile (no Boost):
-//   g++ -O2 -std=c++17 -o filter_de filter_de.cpp
+//   g++ -O2 -std=c++17 -static-libstdc++ -static-libgcc -o filter_de filter_de.cpp
+//   (static C++ runtime: built on an older glibc, the binary runs in the website container without extra libraries)
 
 #include <cmath>
 #include <cstdlib>
@@ -26,10 +27,17 @@
 
 namespace {
 
+// Whole-token number parse. Anything else ("NaN", "Inf", "Infinity", text, trailing junk) gives NaN, and
+// filter_output_txt skips non-finite values, like the Ruby fallback (Float(str, exception: false) => nil).
+// stringstream >> double used to turn these into 0, so a row with NaN FDR and NaN logFC passed as "up"
+// with the default fold-change cutoff of 1 (log2 = 0).
 double parse_double(const std::string& str) {
-  std::stringstream ss(str);
-  double d = 0.0;
-  ss >> d;
+  const char* begin = str.c_str();
+  char* end = nullptr;
+  const double d = std::strtod(begin, &end);
+  if (end == begin) return std::nan("");
+  while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') ++end;
+  if (*end != '\0' || !std::isfinite(d)) return std::nan("");
   return d;
 }
 

@@ -41,6 +41,7 @@ gem 'tailwindcss-rails' #, '~> 4.2'
 #gem 'tailwindcss-ruby', '~> 4.1.16'
 
 gem "bootsnap", "~> 1.18", require: false
+gem "msgpack", ">= 1.8.7"
 gem "thruster", "~> 0.1.8", require: false
 
 # Search with Elasticsearch

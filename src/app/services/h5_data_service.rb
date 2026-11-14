@@ -32,14 +32,20 @@ class H5DataService
     end
   end
 
-  # docker exec python for loom attr read/write. HDF5_USE_FILE_LOCKING=FALSE avoids
-  # BlockingIOError when another client still holds an HDF5 advisory lock; callers
-  # must still use with_loom_write_lock for mutual exclusion.
+  # Longest time a web-side loom write waits for the HDF5 file lock (kept below the docker exec timeout).
+  H5_WRITE_LOCK_WAIT_SECONDS = Integer(ENV.fetch('H5_WRITE_LOCK_WAIT_SECONDS', 240))
+
+  # docker exec python for loom attr read/write.
+  # - Reads (hdf5_locking: false) run with HDF5_USE_FILE_LOCKING=FALSE: they cannot damage the file and must not block
+  #   (or be blocked by) a running compute job.
+  # - Writes (docker_exec_h5_write_python3!) keep the HDF5 lock. Compute runs write the same loom with locking on, and an
+  #   unlocked writer next to them corrupts it (later runs fail with "bad object header version number").
+  #   with_loom_write_lock (Ruby flock) only orders web callers among themselves; compute jobs do not take it.
   # On timeout, kill the docker-exec process group so orphaned python does not spin forever.
-  def self.docker_exec_h5_python3!(*argv, stdin_data:, timeout_seconds: DOCKER_EXEC_TIMEOUT_SECONDS)
+  def self.docker_exec_h5_python3!(*argv, stdin_data:, timeout_seconds: DOCKER_EXEC_TIMEOUT_SECONDS, hdf5_locking: false)
     cmd = [
       'docker', 'exec', '-i',
-      '-e', 'HDF5_USE_FILE_LOCKING=FALSE',
+      '-e', "HDF5_USE_FILE_LOCKING=#{hdf5_locking ? 'TRUE' : 'FALSE'}",
       ASAP_RUN_CONTAINER, 'python3', '-',
       *argv
     ]
@@ -81,8 +87,38 @@ class H5DataService
     [stdout_str, stderr_str, status]
   end
 
+  # Loom write: HDF5 locking on, and h5py.File waits while a compute run (or another writer) holds the lock.
   def self.docker_exec_h5_write_python3!(*argv, stdin_data:, timeout_seconds: DOCKER_EXEC_TIMEOUT_SECONDS)
-    docker_exec_h5_python3!(*argv, stdin_data: stdin_data, timeout_seconds: timeout_seconds)
+    wait_s = [H5_WRITE_LOCK_WAIT_SECONDS, Integer(timeout_seconds) - 30].min
+    docker_exec_h5_python3!(
+      *argv,
+      stdin_data: h5_lock_wait_prelude(wait_s) + stdin_data.to_s,
+      timeout_seconds: timeout_seconds,
+      hdf5_locking: true
+    )
+  end
+
+  # Python prepended to write scripts: h5py.File retries while the file is locked ("unable to lock file, errno = 11"),
+  # for at most wait_seconds, then raises the original error.
+  def self.h5_lock_wait_prelude(wait_seconds)
+    <<~PYTHON
+      import time as _asap_time
+      import h5py as _asap_h5py
+
+      class _AsapLockWaitFile(_asap_h5py.File):
+          def __init__(self, *args, **kwargs):
+              deadline = _asap_time.monotonic() + #{[Integer(wait_seconds), 0].max}
+              while True:
+                  try:
+                      super().__init__(*args, **kwargs)
+                      return
+                  except OSError as e:  # BlockingIOError (errno 11) is an OSError
+                      if "lock" not in str(e).lower() or _asap_time.monotonic() >= deadline:
+                          raise
+                      _asap_time.sleep(2)
+
+      _asap_h5py.File = _AsapLockWaitFile
+    PYTHON
   end
 
   def self.terminate_docker_exec_process_group!(pid)

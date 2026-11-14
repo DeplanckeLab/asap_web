@@ -1,11 +1,16 @@
 # frozen_string_literal: true
 
 class ExternalCatalogCandidatesController < ApplicationController
-  skip_before_action :authenticate_user!, only: %i[index show create_project import_status], raise: false
+  MATRIX_CHOICE_ACTIONS = %i[choose_matrix cancel_import].freeze
+
+  skip_before_action :authenticate_user!,
+                     only: %i[index show create_project import_status] + MATRIX_CHOICE_ACTIONS,
+                     raise: false
   before_action :authenticate_user!, only: %i[destroy]
   before_action :authorize_admin, only: %i[destroy]
   before_action :ensure_synced_reference_data_writable!, only: %i[destroy]
-  before_action :set_candidate, only: %i[show create_project destroy import_status]
+  before_action :set_candidate, only: %i[show create_project destroy import_status] + MATRIX_CHOICE_ACTIONS
+  before_action :release_expired_matrix_choice, only: %i[show create_project import_status] + MATRIX_CHOICE_ACTIONS
 
   PER_PAGE = 25
   # Same technical owner as projects#create for guest sandboxes.
@@ -61,9 +66,11 @@ class ExternalCatalogCandidatesController < ApplicationController
       session_unarchive_cleared? &&
       session[:pending_external_catalog_import_id].to_i == @candidate.id
     session.delete(:pending_external_catalog_import_id) if @auto_start_guest_import
+    @matrix_choice_owner = @candidate.awaiting_matrix? && matrix_choice_owner?
     @watch_import =
       ActiveModel::Type::Boolean.new.cast(params[:importing]) ||
-      @auto_start_guest_import
+      @auto_start_guest_import ||
+      @matrix_choice_owner
   end
 
   def create_project
@@ -104,12 +111,49 @@ class ExternalCatalogCandidatesController < ApplicationController
         end
       end
 
-    render json: {
+    payload = {
       import_status: @candidate.import_status,
       import_error: error,
       project_url: project_url,
       project_key: project&.key
     }.merge(import_progress_payload)
+    payload.merge!(awaiting_matrix_payload) if @candidate.awaiting_matrix?
+    render json: payload
+  end
+
+  # POST: the user who started the import picked the H5AD matrix; resume with the downloaded file.
+  def choose_matrix
+    return unless pending_matrix_choice_owned!
+
+    sel = params[:sel].to_s
+    unless @candidate.pending_matrix_choices.any? { |c| c['path'] == sel }
+      redirect_to external_catalog_candidate_path(@candidate),
+                  alert: 'Please choose one of the listed matrices.', status: :see_other
+      return
+    end
+
+    resume = @candidate.import_resume
+    guest = resume['sandbox_key_digest'].present?
+    @candidate.update!(import_status: 'importing', import_error: nil)
+    ExternalCatalog::ImportProgress.report(@candidate.id, step: 'preparsing', message: "Importing with #{sel}...")
+    ExternalCatalogImportCandidateJob.perform_later(
+      @candidate.id,
+      @candidate.import_user_id,
+      version_id: resume['version_id'],
+      skip_archive: resume.key?('skip_archive') ? resume['skip_archive'] : true,
+      sandbox_key: guest ? session[:sandbox] : nil,
+      sel: sel,
+      fu_id: resume['fu_id']
+    )
+    redirect_to external_catalog_candidate_path(@candidate, importing: 1), status: :see_other
+  end
+
+  # POST: give up on a paused import (deletes the downloaded file).
+  def cancel_import
+    return unless pending_matrix_choice_owned!
+
+    @candidate.cancel_matrix_choice!
+    redirect_to external_catalog_candidate_path(@candidate), notice: 'Import cancelled.', status: :see_other
   end
 
   def destroy
@@ -145,6 +189,48 @@ class ExternalCatalogCandidatesController < ApplicationController
 
   def set_candidate
     @candidate = ExternalCatalogCandidate.find(params[:id])
+  end
+
+  def release_expired_matrix_choice
+    @candidate.cancel_matrix_choice! if @candidate.matrix_choice_expired?
+  end
+
+  def matrix_choice_owner?
+    @candidate.matrix_choice_owner?(user: current_user, sandbox_key: session[:sandbox])
+  end
+
+  def pending_matrix_choice_owned!
+    unless @candidate.awaiting_matrix?
+      redirect_to external_catalog_candidate_path(@candidate),
+                  alert: 'This import is no longer waiting for a matrix choice.', status: :see_other
+      return false
+    end
+    unless matrix_choice_owner?
+      redirect_to external_catalog_candidate_path(@candidate),
+                  alert: 'Only the person who started this import can choose its matrix.', status: :see_other
+      return false
+    end
+    true
+  end
+
+  # Matrix list for the overlay; only the person who started the import gets it.
+  # String keys: they override the same keys from import_progress_payload.
+  def awaiting_matrix_payload
+    unless matrix_choice_owner?
+      return {
+        'can_choose_matrix' => false,
+        'message' => 'Waiting for the person who started this import to choose a matrix.'
+      }
+    end
+
+    choices = @candidate.pending_matrix_choices
+    {
+      'can_choose_matrix' => choices.any?,
+      'matrix_choices' => choices,
+      'recommended_matrix' => ExternalCatalog::H5adMatrixChoice.recommended(choices),
+      'choose_matrix_url' => choose_matrix_external_catalog_candidate_path(@candidate),
+      'cancel_import_url' => cancel_import_external_catalog_candidate_path(@candidate)
+    }
   end
 
   def guest_import_challenge_requested?

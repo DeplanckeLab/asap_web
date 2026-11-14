@@ -13,6 +13,10 @@ production:
     class: ReclaimStuckSolidQueueJobsJob
     queue: default
     schedule: every hour at minute 42
+  # Catalog imports left waiting for an H5AD matrix choice: delete the download, free the candidate.
+  release_expired_catalog_matrix_choices:
+    command: "ExternalCatalogCandidate.release_expired_matrix_choices!"
+    schedule: every hour at minute 27
 
 development:
   clear_solid_queue_finished_jobs:
@@ -22,3 +26,6 @@ development:
     class: ReclaimStuckSolidQueueJobsJob
     queue: default
     schedule: every hour at minute 42
+  release_expired_catalog_matrix_choices:
+    command: "ExternalCatalogCandidate.release_expired_matrix_choices!"
+    schedule: every hour at minute 27

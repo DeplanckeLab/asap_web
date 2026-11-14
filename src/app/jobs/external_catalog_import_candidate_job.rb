@@ -4,7 +4,8 @@
 class ExternalCatalogImportCandidateJob < ApplicationJob
   queue_as :default
 
-  def perform(candidate_id, user_id, version_id: nil, skip_archive: true, sandbox_key: nil)
+  # sel / fu_id: second run after the user chose the H5AD matrix (the first run paused in awaiting_matrix).
+  def perform(candidate_id, user_id, version_id: nil, skip_archive: true, sandbox_key: nil, sel: nil, fu_id: nil)
     sandbox_key = sandbox_key.to_s.strip.presence
     guest_import = sandbox_key.present?
 
@@ -34,9 +35,10 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
     candidate.update!(
       import_status: 'importing',
       import_error: nil,
-      import_user_id: user.id
+      import_user_id: user.id,
+      import_resume_json: nil
     )
-    ExternalCatalog::ImportProgress.report(candidate.id, step: 'queued')
+    ExternalCatalog::ImportProgress.report(candidate.id, step: 'queued') if fu_id.blank?
 
     importer = nil
 
@@ -73,12 +75,15 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       archiver: nil,
       sandbox: guest_import,
       sandbox_key: sandbox_key,
-      progress_candidate_id: candidate.id
+      progress_candidate_id: candidate.id,
+      ask_matrix_choice: true
     )
 
     project_ready = false
     result = importer.import_one(
       candidate.to_entry,
+      sel: sel.presence,
+      fu_id: fu_id.presence,
       on_project_ready: lambda { |project, outcome|
         project_ready = true
         if outcome == :created
@@ -118,6 +123,24 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} " \
       "outcome=#{importer.last_import_outcome} project=#{result.id} key=#{result.key} " \
       "sandbox=#{guest_import} import_project_id=#{candidate.import_project_id}"
+    )
+  rescue ExternalCatalog::ProjectImporter::NeedsMatrixChoice => e
+    # Not a failure: keep the download and let the user who started the import pick the matrix.
+    candidate.await_matrix_choice!(
+      fu: e.fu,
+      version_id: version.id,
+      skip_archive: skip_archive,
+      sandbox_key: sandbox_key
+    )
+    ExternalCatalog::ImportProgress.report(
+      candidate.id,
+      step: 'choose_matrix',
+      matrix_choices: e.choices,
+      recommended_matrix: e.recommended
+    )
+    Rails.logger.info(
+      "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} waiting for a matrix choice " \
+      "fu=#{e.fu.id} choices=#{e.choices.map { |c| c['path'] }.join(',')} recommended=#{e.recommended}"
     )
   rescue ExternalCatalog::ProjectImporter::SkipEntry => e
     project = candidate&.asap_projects&.order(id: :desc)&.first

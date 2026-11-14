@@ -26,6 +26,8 @@ module ExternalCatalog
       'queued' => 'Import queued...',
       'downloading' => 'Downloading dataset...',
       'preparsing' => 'Preparsing file...',
+      # Not in STEPS: only shown for H5AD files with several matrices.
+      'choose_matrix' => 'Choose the expression matrix to import',
       'creating_project' => 'Creating project...',
       'linking_project' => 'Linking existing project...',
       'opening' => 'Opening analysis...',
@@ -79,7 +81,7 @@ module ExternalCatalog
 
         payload = {
           'candidate_id' => candidate_id.to_i,
-          'import_status' => step == 'failed' ? 'failed' : 'importing',
+          'import_status' => import_status_for_step(step),
           'step' => step,
           'message' => message.presence || STEP_MESSAGES[step] || step.to_s.humanize,
           'steps_completed' => completed,
@@ -122,6 +124,14 @@ module ExternalCatalog
       end
 
       private
+
+      def import_status_for_step(step)
+        case step
+        when 'failed' then 'failed'
+        when 'choose_matrix' then 'awaiting_matrix'
+        else 'importing'
+        end
+      end
 
       def write(candidate_id, payload, expires_in: DEFAULT_TTL)
         if redis_available?

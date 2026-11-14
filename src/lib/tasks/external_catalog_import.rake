@@ -287,6 +287,8 @@ namespace :external_catalog do
       if released.positive?
         puts "Released #{released} stale importing candidate(s) with no running import job"
       end
+      expired = ExternalCatalogCandidate.release_expired_matrix_choices!
+      puts "Released #{expired} candidate(s) left waiting for a matrix choice" if expired.positive?
     end
 
     candidates = external_catalog_select_candidates(

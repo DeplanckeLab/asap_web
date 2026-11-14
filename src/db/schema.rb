@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_06_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_14_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -684,6 +684,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_06_120000) do
     t.text "identifiers_json"
     t.text "import_error"
     t.integer "import_project_id"
+    t.text "import_resume_json"
     t.string "import_status", default: "idle", null: false
     t.integer "import_user_id"
     t.datetime "last_seen_at"

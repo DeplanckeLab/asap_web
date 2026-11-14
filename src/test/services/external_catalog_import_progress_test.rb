@@ -25,6 +25,25 @@ class ExternalCatalogImportProgressTest < ActiveSupport::TestCase
     refute_includes payload['steps_completed'], 'linking_project'
   end
 
+  test 'choose_matrix step reports awaiting_matrix with the choices' do
+    ExternalCatalog::ImportProgress.report(@candidate_id, step: 'preparsing')
+    payload = ExternalCatalog::ImportProgress.report(
+      @candidate_id,
+      step: 'choose_matrix',
+      matrix_choices: [{ 'path' => '/X' }, { 'path' => '/layers/counts' }],
+      recommended_matrix: '/layers/counts'
+    )
+
+    assert_equal 'awaiting_matrix', payload['import_status']
+    assert_equal 'Choose the expression matrix to import', payload['message']
+    assert_equal '/layers/counts', payload['recommended_matrix']
+    assert_includes payload['steps_completed'], 'preparsing'
+
+    resumed = ExternalCatalog::ImportProgress.report(@candidate_id, step: 'creating_project')
+    assert_equal 'importing', resumed['import_status']
+    refute resumed.key?('matrix_choices')
+  end
+
   test 'linking path does not keep creating_project as completed' do
     ExternalCatalog::ImportProgress.report(@candidate_id, step: 'preparsing')
     ExternalCatalog::ImportProgress.report(@candidate_id, step: 'linking_project')

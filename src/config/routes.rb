@@ -169,6 +169,8 @@ Rails.application.routes.draw do
     member do
       post :create_project
       get :import_status
+      post :choose_matrix
+      post :cancel_import
     end
   end
   resources :data_classes

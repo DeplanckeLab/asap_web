@@ -4,7 +4,10 @@ class ExternalCatalogCandidate < ApplicationRecord
   SOURCES = %w[cellxgene bgee ebi_sc hca hubmap broad_scp allen_abc matkp geo].freeze
   # Prefer better-annotated sources first when SOURCE=all (importer + catalog UI).
   IMPORT_SOURCE_ORDER = %w[cellxgene bgee ebi_sc hca hubmap broad_scp allen_abc matkp geo].freeze
-  IMPORT_STATUSES = %w[idle importing failed].freeze
+  # awaiting_matrix: the import downloaded an H5AD with several matrices and waits for the user to pick one.
+  IMPORT_STATUSES = %w[idle importing awaiting_matrix failed].freeze
+  # An unanswered matrix choice is cancelled (download deleted, candidate freed) after this long.
+  MATRIX_CHOICE_TTL = 2.hours
   SERIES_IDENTIFIER_KINDS = %w[geo_series array_express bioproject ega_study].freeze
   COLLECTION_URL_RE = %r{/collections/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})}i
 
@@ -433,6 +436,102 @@ class ExternalCatalogCandidate < ApplicationRecord
     import_status.to_s == 'failed'
   end
 
+  def awaiting_matrix?
+    import_status.to_s == 'awaiting_matrix'
+  end
+
+  # State kept while awaiting_matrix: fu_id (the download), version_id, skip_archive,
+  # sandbox_key_digest (guest imports; the raw key stays in the guest's session) and awaiting_since.
+  def import_resume
+    parsed = JSON.parse(import_resume_json.to_s)
+    parsed.is_a?(Hash) ? parsed : {}
+  rescue JSON::ParserError
+    {}
+  end
+
+  def await_matrix_choice!(fu:, version_id:, skip_archive:, sandbox_key: nil)
+    update!(
+      import_status: 'awaiting_matrix',
+      import_error: nil,
+      import_resume_json: {
+        'fu_id' => fu.id,
+        'version_id' => version_id,
+        'skip_archive' => skip_archive ? true : false,
+        'sandbox_key_digest' => sandbox_key.present? ? Digest::SHA256.hexdigest(sandbox_key.to_s) : nil,
+        'awaiting_since' => Time.current.iso8601
+      }.to_json
+    )
+  end
+
+  def pending_matrix_fu
+    return nil unless awaiting_matrix?
+
+    fu_id = import_resume['fu_id']
+    fu_id.present? ? Fu.find_by(id: fu_id) : nil
+  end
+
+  def pending_matrix_choices
+    fu = pending_matrix_fu
+    fu ? ExternalCatalog::H5adMatrixChoice.choices_for_fu(fu) : []
+  end
+
+  # Only whoever started the import may choose: the same signed-in user, or the same guest session.
+  def matrix_choice_owner?(user:, sandbox_key:)
+    return false unless awaiting_matrix?
+
+    digest = import_resume['sandbox_key_digest'].to_s
+    if digest.present?
+      sandbox_key.present? &&
+        ActiveSupport::SecurityUtils.secure_compare(Digest::SHA256.hexdigest(sandbox_key.to_s), digest)
+    else
+      user.present? && import_user_id.present? && import_user_id.to_i == user.id
+    end
+  end
+
+  def matrix_choice_expired?
+    return false unless awaiting_matrix?
+
+    since = begin
+      Time.zone.parse(import_resume['awaiting_since'].to_s)
+    rescue ArgumentError
+      nil
+    end
+    since.nil? || since < MATRIX_CHOICE_TTL.ago
+  end
+
+  # Cancel (or expire) a pending choice: delete the download, which can be several GB, and free the candidate.
+  def cancel_matrix_choice!
+    return false unless awaiting_matrix?
+
+    fu = pending_matrix_fu
+    if fu && fu.project_id.blank?
+      upload_dir = begin
+        fu.upload_dir
+      rescue StandardError
+        nil
+      end
+      fu.destroy!
+      FileUtils.rm_rf(upload_dir) if upload_dir && File.directory?(upload_dir)
+    end
+    update!(import_status: 'idle', import_error: nil, import_resume_json: nil)
+    ExternalCatalog::ImportProgress.clear(id)
+    true
+  end
+
+  def self.release_expired_matrix_choices!
+    released = 0
+    where(import_status: 'awaiting_matrix').find_each do |candidate|
+      next unless candidate.matrix_choice_expired?
+
+      released += 1 if candidate.cancel_matrix_choice!
+    rescue StandardError => e
+      Rails.logger.warn(
+        "[ExternalCatalogCandidate] could not release matrix choice candidate=#{candidate.id}: #{e.class} #{e.message}"
+      )
+    end
+    released
+  end
+
   def scfair_validation_error?
     import_error.to_s.match?(/scFAIR/i)
   end
@@ -474,6 +573,7 @@ class ExternalCatalogCandidate < ApplicationRecord
   def can_create_project?(accessible_asap_projects: nil)
     return false if obsolete?
     return false if importing? && import_job_in_flight?
+    return false if awaiting_matrix? && !matrix_choice_expired?
 
     blocking =
       if accessible_asap_projects

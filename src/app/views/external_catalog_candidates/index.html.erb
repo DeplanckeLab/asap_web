@@ -256,8 +256,8 @@
               <% end %>
             </td>
             <td class="px-3 py-2 text-xs">
-              <% if candidate.importing? %>
-                <span class="inline-flex rounded bg-amber-100 px-2 py-0.5 font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">Importing</span>
+              <% if candidate.importing? || candidate.awaiting_matrix? %>
+                <span class="inline-flex rounded bg-amber-100 px-2 py-0.5 font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"><%= candidate.awaiting_matrix? ? "Awaiting matrix choice" : "Importing" %></span>
               <% elsif asap_projects.any? %>
                 <% asap_projects.first(3).each do |project| %>
                   <div>

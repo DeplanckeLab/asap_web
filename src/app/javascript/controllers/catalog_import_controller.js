@@ -33,6 +33,7 @@ export default class extends Controller {
   connect() {
     this.polling = false
     this.redirecting = false
+    this.choiceShown = false
     this.subscription = null
     this.currentTransferProgress = 0
     this.overallProgress = 0
@@ -114,14 +115,17 @@ export default class extends Controller {
             50% { opacity: 1; }
           }
         </style>
-        <div style="display:flex;align-items:center;justify-content:center;margin-bottom:14px;">
+        <div data-catalog-import-progress
+             style="display:flex;align-items:center;justify-content:center;margin-bottom:14px;">
           <div style="width:22px;height:22px;border:3px solid #d1d5db;border-top-color:#3b82f6;border-radius:50%;animation:catalog-import-spin 1s linear infinite;"></div>
         </div>
         <p data-catalog-import-status
            style="font-size:16px;font-weight:500;color:#1f2937;margin:0 0 12px;">
           Importing dataset...
         </p>
-        <div style="width:100%;height:10px;background-color:#e5e7eb;border-radius:9999px;overflow:hidden;margin-bottom:16px;">
+        <div data-catalog-import-choice style="display:none;text-align:left;"></div>
+        <div data-catalog-import-progress
+             style="width:100%;height:10px;background-color:#e5e7eb;border-radius:9999px;overflow:hidden;margin-bottom:16px;">
           <div data-catalog-import-bar
                style="height:100%;width:8%;background-color:#3b82f6;transition:width 0.4s ease;"></div>
         </div>
@@ -137,7 +141,7 @@ export default class extends Controller {
                  style="height:100%;width:0%;background-color:#60a5fa;transition:width 0.35s ease;"></div>
           </div>
         </div>
-        <div data-catalog-import-steps
+        <div data-catalog-import-steps data-catalog-import-progress
              style="text-align:left;font-size:13px;color:#6b7280;line-height:1.7;">
           <div data-step-key="queued">1. Queued</div>
           <div data-step-key="downloading">2. Downloading dataset</div>
@@ -236,6 +240,20 @@ export default class extends Controller {
 
   handleStatus(data) {
     if (!data) return
+
+    if (data.import_status === "awaiting_matrix") {
+      this.unsubscribe()
+      this.stopPolling()
+      if (data.can_choose_matrix && Array.isArray(data.matrix_choices) && data.matrix_choices.length > 0) {
+        this.showMatrixChoice(data)
+      } else {
+        // Someone else's import is waiting for their choice: leave this page usable.
+        this._clearRemembered()
+        this.hideOverlay()
+      }
+      return
+    }
+
     this.handleProgress(data)
 
     if (data.project_url) {
@@ -272,6 +290,11 @@ export default class extends Controller {
     if (!this.overlayEls) return
 
     const step = (data.step || "").toString()
+    if (step === "choose_matrix") {
+      // The broadcast is the same for every viewer; the status endpoint says whether this one may choose.
+      if (!this.choiceShown) this.pollStatus()
+      return
+    }
     const rank = this.stepRank(step)
     // Ignore stale websocket/poll payloads that would move the overall UI backwards.
     if (step !== "failed" && rank >= 0 && rank < this.highestStepRank) {
@@ -287,6 +310,135 @@ export default class extends Controller {
     this.updateSteps(step, data.steps_completed)
     this.updateOverallBar(step)
     this.updateTransferBar(step, data)
+  }
+
+  // H5AD with several matrices: radio list in the overlay. Plain form POSTs (the server redirects back to this
+  // page, which resumes the overlay). Paths come from the uploaded file, so text is set with textContent only.
+  showMatrixChoice(data) {
+    if (this.choiceShown) return
+    if (!document.getElementById("catalog-import-overlay")) this.showOverlay()
+    this.cacheOverlayEls()
+    const root = document.getElementById("catalog-import-overlay")
+    const panel = root && root.querySelector("[data-catalog-import-choice]")
+    if (!panel) return
+    this.choiceShown = true
+
+    root.querySelectorAll("[data-catalog-import-progress], [data-catalog-import-transfer-wrap]").forEach((el) => {
+      el.style.display = "none"
+    })
+    root.setAttribute("aria-label", "Choose the expression matrix")
+    if (this.overlayEls && this.overlayEls.status) {
+      this.overlayEls.status.textContent = "Choose the expression matrix"
+      this.overlayEls.status.style.fontWeight = "600"
+    }
+
+    const el = (tag, text, css) => {
+      const node = document.createElement(tag)
+      if (text != null) node.textContent = text
+      if (css) node.style.cssText = css
+      return node
+    }
+
+    panel.replaceChildren()
+    panel.appendChild(el(
+      "p",
+      "This file contains several matrices. The one you pick becomes the main matrix of the project; " +
+        "the others are kept as extra layers.",
+      "font-size:13px;color:#4b5563;margin:0 0 14px;"
+    ))
+
+    const form = this.buildPostForm(data.choose_matrix_url)
+    const choices = data.matrix_choices
+    const recommended = data.recommended_matrix || choices[0].path
+    choices.forEach((choice) => {
+      const label = el(
+        "label",
+        null,
+        "display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid #e5e7eb;" +
+          "border-radius:8px;margin-bottom:8px;cursor:pointer;"
+      )
+      const input = document.createElement("input")
+      input.type = "radio"
+      input.name = "sel"
+      input.value = choice.path
+      input.checked = choice.path === recommended
+      input.style.marginTop = "3px"
+      const text = el("div", null, "min-width:0;")
+      const title = el("div", null, "display:flex;flex-wrap:wrap;gap:6px;align-items:center;")
+      title.appendChild(el(
+        "span",
+        choice.path,
+        "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#111827;word-break:break-all;"
+      ))
+      if (choice.path === recommended) {
+        title.appendChild(el(
+          "span",
+          "Recommended",
+          "font-size:11px;font-weight:600;color:#1e40af;background:#dbeafe;border-radius:9999px;padding:1px 8px;"
+        ))
+      }
+      text.appendChild(title)
+      text.appendChild(el("div", this.describeMatrix(choice), "font-size:12px;color:#6b7280;margin-top:2px;"))
+      label.appendChild(input)
+      label.appendChild(text)
+      form.appendChild(label)
+    })
+
+    const submit = el(
+      "button",
+      "Import with this matrix",
+      "background:#111827;color:white;border:0;border-radius:6px;padding:8px 16px;font-size:14px;" +
+        "font-weight:500;cursor:pointer;margin-top:6px;"
+    )
+    submit.type = "submit"
+    form.addEventListener("submit", () => { submit.disabled = true })
+    form.appendChild(submit)
+    panel.appendChild(form)
+
+    if (data.cancel_import_url) {
+      const cancelForm = this.buildPostForm(data.cancel_import_url)
+      const cancel = el(
+        "button",
+        "Cancel import",
+        "background:none;border:0;color:#6b7280;font-size:13px;text-decoration:underline;cursor:pointer;" +
+          "padding:0;margin-top:12px;"
+      )
+      cancel.type = "submit"
+      cancelForm.appendChild(cancel)
+      cancelForm.addEventListener("submit", () => this._clearRemembered())
+      panel.appendChild(cancelForm)
+    }
+
+    panel.style.display = "block"
+  }
+
+  buildPostForm(action) {
+    const form = document.createElement("form")
+    form.method = "post"
+    form.action = action
+    form.setAttribute("data-turbo", "false")
+    const token = document.querySelector('meta[name="csrf-token"]')
+    const param = document.querySelector('meta[name="csrf-param"]')
+    if (token) {
+      const input = document.createElement("input")
+      input.type = "hidden"
+      input.name = (param && param.content) || "authenticity_token"
+      input.value = token.content
+      form.appendChild(input)
+    }
+    return form
+  }
+
+  describeMatrix(choice) {
+    const parts = []
+    const fmt = (n) => Number(n).toLocaleString()
+    if (choice.nber_rows != null && choice.nber_cols != null) {
+      parts.push(`${fmt(choice.nber_rows)} genes × ${fmt(choice.nber_cols)} cells`)
+    }
+    if (choice.is_count === true) parts.push("integer counts")
+    else if (choice.is_count === false) parts.push("non-integer values (e.g. normalized)")
+    if (choice.dtype) parts.push(choice.dtype)
+    return parts.join(" · ")
   }
 
   stepRank(step) {

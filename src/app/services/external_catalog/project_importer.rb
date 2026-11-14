@@ -43,6 +43,19 @@ module ExternalCatalog
     class Error < StandardError; end
     class SkipEntry < StandardError; end
 
+    # Raised (only when the importer was built with ask_matrix_choice: true) for an H5AD with several
+    # matrices and no /raw/X. The download is kept: resume with import_one(entry, sel:, fu_id:).
+    class NeedsMatrixChoice < StandardError
+      attr_reader :fu, :choices, :recommended
+
+      def initialize(fu:, choices:, recommended:)
+        @fu = fu
+        @choices = choices
+        @recommended = recommended
+        super("Several H5AD matrices (#{choices.map { |c| c['path'] }.join(', ')}): waiting for a choice")
+      end
+    end
+
     def initialize(
       user:,
       version:,
@@ -56,7 +69,8 @@ module ExternalCatalog
       archiver: nil,
       sandbox: false,
       sandbox_key: nil,
-      progress_candidate_id: nil
+      progress_candidate_id: nil,
+      ask_matrix_choice: false
     )
       @user = user
       @version = version
@@ -71,6 +85,8 @@ module ExternalCatalog
       @sandbox = ActiveModel::Type::Boolean.new.cast(sandbox)
       @sandbox_key = sandbox_key.to_s.strip.presence
       @progress_candidate_id = progress_candidate_id
+      # UI imports stop and ask when an H5AD has several matrices; batch imports use the recommended one.
+      @ask_matrix_choice = ask_matrix_choice
       @last_pipeline_status = ExternalCatalog::ImportSuccessRegistry.empty_status
       raise Error, 'sandbox_key required for sandbox import' if @sandbox && @sandbox_key.blank?
 
@@ -107,7 +123,9 @@ module ExternalCatalog
       results
     end
 
-    def import_one(entry, on_project_ready: nil)
+    # sel: H5AD matrix to use as the main matrix (chosen by the user).
+    # fu_id: resume from this already downloaded and preparsed Fu instead of downloading again.
+    def import_one(entry, on_project_ready: nil, sel: nil, fu_id: nil)
       @logger.info(
         "[ExternalCatalog] start source=#{entry.source} id=#{entry.external_id} " \
         "title=#{entry.title.inspect} format=#{entry.format_kind} url=#{entry.url}"
@@ -131,10 +149,14 @@ module ExternalCatalog
 
       @last_import_outcome = nil
       reset_pipeline_status!
-      report_progress!(step: 'downloading')
-      fu = download_and_preparse!(entry, organism)
+      if fu_id.present?
+        fu = resume_fu!(fu_id)
+      else
+        report_progress!(step: 'downloading')
+        fu = download_and_preparse!(entry, organism)
+      end
       report_progress!(step: 'preparsing')
-      sel_name, dims, file_type = choose_matrix_selection!(fu, organism)
+      sel_name, dims, file_type = choose_matrix_selection!(fu, organism, sel: sel)
       parsing_attrs = build_parsing_attrs(entry, sel_name, dims, file_type)
       preparsing_fp = preparsing_fingerprint(parsing_attrs)
       content_sha = InputFileSha256.ensure_for_fu!(fu)
@@ -799,7 +821,19 @@ module ExternalCatalog
       fu.update!(status: 'preparsed')
     end
 
-    def choose_matrix_selection!(fu, organism)
+    # Fu kept from an import paused for a matrix choice (same user, file and preparsing output still there).
+    def resume_fu!(fu_id)
+      fu = Fu.find_by(id: fu_id, user_id: @user.id)
+      dir = fu&.upload_dir
+      unless fu && fu.project_id.blank? && File.exist?(dir.join(fu.upload_file_name)) && File.exist?(dir.join('output.json'))
+        raise Error, 'The downloaded file is no longer available. Please start the import again.'
+      end
+
+      @logger.info("[ExternalCatalog] resuming with downloaded Fu##{fu.id}")
+      fu
+    end
+
+    def choose_matrix_selection!(fu, organism, sel: nil)
       output_path = fu.upload_dir.join('output.json')
       raise Error, "Missing preparsing output.json for Fu##{fu.id}" unless File.exist?(output_path)
 
@@ -815,13 +849,27 @@ module ExternalCatalog
 
       sel_name = nil
       if file_type.to_s.upcase == 'H5AD'
+        choices = H5adMatrixChoice.choices(groups)
         sel_name =
-          if paths.include?(RAW_SEL)
+          if sel.present?
+            requested = H5adMatrixChoice.normalize_path(sel)
+            unless choices.any? { |c| c['path'] == requested }
+              raise Error, "Matrix #{sel} is not in this H5AD file (#{choices.map { |c| c['path'] }.join(', ')})"
+            end
+
+            requested
+          elsif paths.include?(RAW_SEL)
             RAW_SEL
           elsif paths.size == 1
             normalize_sel_path(paths.first)
+          elsif @ask_matrix_choice
+            raise NeedsMatrixChoice.new(fu: fu, choices: choices, recommended: H5adMatrixChoice.recommended(choices))
           else
-            raise Error, "Ambiguous H5AD matrices without #{RAW_SEL}: #{paths.join(', ')}"
+            H5adMatrixChoice.recommended(choices).tap do |chosen|
+              @logger.info(
+                "[ExternalCatalog] Fu##{fu.id} has several H5AD matrices (#{paths.join(', ')}); using #{chosen}"
+              )
+            end
           end
 
         if sel_name == RAW_SEL
@@ -852,7 +900,9 @@ module ExternalCatalog
 
       selected =
         if sel_name
-          groups.find { |g| g['group'].to_s == sel_name } || groups.first
+          groups.find { |g| g['group'].to_s == sel_name } ||
+            groups.find { |g| H5adMatrixChoice.normalize_path(g['group']) == sel_name } ||
+            groups.first
         else
           groups.first
         end

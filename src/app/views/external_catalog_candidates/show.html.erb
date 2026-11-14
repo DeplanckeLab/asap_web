@@ -37,7 +37,7 @@
                         }
                       },
                       class: "inline-flex items-center rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900" %>
-      <% elsif @candidate.importing? || @watch_import %>
+      <% elsif @candidate.importing? || @watch_import || @candidate.awaiting_matrix? %>
         <div id="catalog-import-watcher"
              data-controller="catalog-import"
              data-catalog-import-status-url-value="<%= import_status_external_catalog_candidate_path(@candidate) %>"
@@ -183,6 +183,14 @@
     <h2 class="text-lg font-semibold text-gray-900 dark:text-white">ASAP projects</h2>
     <% if @candidate.importing? %>
       <p class="text-sm text-amber-700 dark:text-amber-300">Import in progress. The analysis view will open when parsing starts.</p>
+    <% elsif @candidate.awaiting_matrix? %>
+      <p class="text-sm text-amber-700 dark:text-amber-300">
+        <% if @matrix_choice_owner %>
+          This file contains several expression matrices. Choose the one to import.
+        <% else %>
+          An import of this dataset is waiting for the person who started it to choose an expression matrix.
+        <% end %>
+      </p>
     <% end %>
     <% if @candidate.failed? && @candidate.import_error.present? %>
       <% if admin? || !@candidate.scfair_validation_error? %>

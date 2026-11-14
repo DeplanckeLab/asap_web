@@ -78,6 +78,56 @@ class ExternalCatalogCandidateMatrixChoiceTest < ActiveSupport::TestCase
     refute File.exist?(@dir)
   end
 
+  test 'marking the entry obsolete while it waits deletes the download at once' do
+    @candidate.await_matrix_choice!(fu: @fu, version_id: 7, skip_archive: true)
+    @candidate.mark_obsolete!
+
+    @candidate.reload
+    assert @candidate.obsolete?
+    assert_equal 'idle', @candidate.import_status
+    assert_nil @candidate.import_resume_json
+    assert_nil Fu.find_by(id: @fu.id)
+    refute File.exist?(@dir)
+  end
+
+  test 'deleting the entry while it waits deletes the download' do
+    @candidate.await_matrix_choice!(fu: @fu, version_id: 7, skip_archive: true)
+    @candidate.destroy!
+
+    assert_nil Fu.find_by(id: @fu.id)
+    refute File.exist?(@dir)
+  end
+
+  test 'a killed resumed run frees its download when released as stale' do
+    # Set by choose_matrix just before enqueueing: not a started run, the download stays.
+    @candidate.await_matrix_choice!(fu: @fu, version_id: 7, skip_archive: true)
+    @candidate.update!(import_status: 'importing')
+    assert @candidate.release_if_stale_importing!
+    assert Fu.find_by(id: @fu.id)
+
+    @candidate.update!(import_status: 'importing', import_resume_json: { 'fu_id' => @fu.id, 'resumed' => true }.to_json)
+    assert @candidate.release_if_stale_importing!
+    @candidate.reload
+    assert_equal 'idle', @candidate.import_status
+    assert_nil @candidate.import_resume_json
+    assert_nil Fu.find_by(id: @fu.id)
+  end
+
+  test 'only an unused download of the given user is deleted' do
+    refute ExternalCatalogCandidate.discard_unused_download!(@fu.id, user_id: @other.id)
+    assert Fu.find_by(id: @fu.id)
+
+    project = create_test_project!(user_id: @user.id, public: false)
+    @fu.update_column(:project_id, project.id)
+    refute ExternalCatalogCandidate.discard_unused_download!(@fu.id, user_id: @user.id)
+    assert Fu.find_by(id: @fu.id)
+
+    @fu.update_column(:project_id, nil)
+    assert ExternalCatalogCandidate.discard_unused_download!(@fu.id, user_id: @user.id)
+    assert_nil Fu.find_by(id: @fu.id)
+    refute File.exist?(@dir)
+  end
+
   test 'unanswered choices expire after MATRIX_CHOICE_TTL' do
     @candidate.await_matrix_choice!(fu: @fu, version_id: 7, skip_archive: true)
     refute @candidate.matrix_choice_expired?

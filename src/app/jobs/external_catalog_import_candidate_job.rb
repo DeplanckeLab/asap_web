@@ -36,7 +36,8 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       import_status: 'importing',
       import_error: nil,
       import_user_id: user.id,
-      import_resume_json: nil
+      # A resumed run keeps the id of its download so a killed run can still free it (release_if_stale_importing!).
+      import_resume_json: fu_id.present? ? { 'fu_id' => fu_id.to_i, 'resumed' => true }.to_json : nil
     )
     ExternalCatalog::ImportProgress.report(candidate.id, step: 'queued') if fu_id.blank?
 
@@ -167,9 +168,30 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
     ExternalCatalog::ImportSuccessRegistry.record_import_attempt!(project: failed_project, importer: importer) if failed_project
   ensure
     ExternalCatalog::ImportRateLimit.release_inflight!(session_key: sandbox_key) if sandbox_key.present?
+    discard_resumed_download!(candidate_id, fu_id, user_id) if fu_id.present?
   end
 
   private
+
+  # A resumed run that ends without a project using its download (dataset already in ASAP, failure
+  # before the project was created) deletes it: retrying means starting a fresh import anyway.
+  # A created project owns the Fu (project_id set) and keeps it; a content match already discarded it.
+  def discard_resumed_download!(candidate_id, fu_id, user_id)
+    candidate = ExternalCatalogCandidate.find_by(id: candidate_id)
+    return if candidate&.awaiting_matrix?
+
+    if ExternalCatalogCandidate.discard_unused_download!(fu_id, user_id: user_id)
+      Rails.logger.info(
+        "[ExternalCatalogImportCandidateJob] candidate=#{candidate_id} deleted unused download fu=#{fu_id}"
+      )
+    end
+    candidate.update_column(:import_resume_json, nil) if candidate&.import_resume_json.present?
+  rescue StandardError => e
+    Rails.logger.warn(
+      "[ExternalCatalogImportCandidateJob] could not delete download fu=#{fu_id} candidate=#{candidate_id}: " \
+      "#{e.class} #{e.message}"
+    )
+  end
 
   def fail_import!(candidate, message)
     return unless candidate

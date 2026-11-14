@@ -18,6 +18,9 @@ class ExternalCatalogCandidate < ApplicationRecord
   has_many :matched_projects, through: :external_catalog_candidate_projects, source: :project
 
   before_validation :assign_series_fields
+  # A paused import keeps its download (several GB for large H5ADs); free it when the entry
+  # goes away instead of waiting for MATRIX_CHOICE_TTL (or forever, for a deleted row).
+  after_commit :release_matrix_choice_of_removed_entry, on: %i[update destroy]
 
   validates :source, presence: true, inclusion: { in: SOURCES }
   validates :external_id, presence: true
@@ -503,18 +506,48 @@ class ExternalCatalogCandidate < ApplicationRecord
   def cancel_matrix_choice!
     return false unless awaiting_matrix?
 
-    fu = pending_matrix_fu
-    if fu && fu.project_id.blank?
-      upload_dir = begin
-        fu.upload_dir
-      rescue StandardError
-        nil
-      end
-      fu.destroy!
-      FileUtils.rm_rf(upload_dir) if upload_dir && File.directory?(upload_dir)
-    end
+    discard_kept_download!
     update!(import_status: 'idle', import_error: nil, import_resume_json: nil)
     ExternalCatalog::ImportProgress.clear(id)
+    true
+  end
+
+  # Marked obsolete (catalog sync, admin) or deleted while awaiting a choice.
+  def release_matrix_choice_of_removed_entry
+    return unless awaiting_matrix?
+
+    if destroyed?
+      discard_kept_download!
+    elsif saved_change_to_obsolete?(to: true)
+      cancel_matrix_choice!
+    end
+  rescue StandardError => e
+    Rails.logger.warn(
+      "[ExternalCatalogCandidate] could not release matrix choice of removed candidate=#{id}: #{e.class} #{e.message}"
+    )
+  end
+
+  # The download kept in import_resume_json (while awaiting a choice, or during the resumed run).
+  def discard_kept_download!
+    self.class.discard_unused_download!(import_resume['fu_id'], user_id: import_user_id)
+  end
+
+  # Delete a catalog download (Fu row and upload dir) unless a project uses it. Returns true when deleted.
+  def self.discard_unused_download!(fu_id, user_id: nil)
+    return false if fu_id.blank?
+
+    scope = Fu.where(id: fu_id)
+    scope = scope.where(user_id: user_id) if user_id.present?
+    fu = scope.first
+    return false if fu.nil? || fu.project_id.present? || Project.exists?(fu_id: fu.id)
+
+    upload_dir = begin
+      fu.upload_dir
+    rescue StandardError
+      nil
+    end
+    fu.destroy!
+    FileUtils.rm_rf(upload_dir) if upload_dir && File.directory?(upload_dir)
     true
   end
 
@@ -544,7 +577,10 @@ class ExternalCatalogCandidate < ApplicationRecord
     return false unless importing?
     return false if import_job_in_flight?
 
-    update!(import_status: 'idle')
+    # A resumed run killed before its end leaves the download it was given behind. Only a run that
+    # started ('resumed', set by the job): choose_matrix sets importing just before enqueueing.
+    discard_kept_download! if import_resume['resumed']
+    update!(import_status: 'idle', import_resume_json: nil)
     true
   end
 

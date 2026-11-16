@@ -126,6 +126,7 @@ module ExternalCatalog
     # sel: H5AD matrix to use as the main matrix (chosen by the user).
     # fu_id: resume from this already downloaded and preparsed Fu instead of downloading again.
     def import_one(entry, on_project_ready: nil, sel: nil, fu_id: nil)
+      @downloaded_fu = nil
       @logger.info(
         "[ExternalCatalog] start source=#{entry.source} id=#{entry.external_id} " \
         "title=#{entry.title.inspect} format=#{entry.format_kind} url=#{entry.url}"
@@ -228,6 +229,11 @@ module ExternalCatalog
       )
       @last_import_outcome = :created
       project
+    rescue NeedsMatrixChoice
+      raise
+    rescue StandardError
+      discard_failed_download!
+      raise
     end
 
     attr_reader :last_import_outcome, :last_pipeline_status
@@ -296,6 +302,18 @@ module ExternalCatalog
         "provider=#{provider.tag} onto project=#{project.key}"
       )
       project
+    end
+
+    # A failed import deletes the download it made unless a project already uses it: a retry downloads
+    # again anyway. A paused import (NeedsMatrixChoice) keeps it; a resumed run's download (fu_id) is
+    # handled by ExternalCatalogImportCandidateJob.
+    def discard_failed_download!
+      fu = @downloaded_fu && Fu.find_by(id: @downloaded_fu.id)
+      @downloaded_fu = nil
+      return if fu.nil? || fu.project_id.present? || Project.exists?(fu_id: fu.id)
+
+      @logger.info("[ExternalCatalog] import failed: deleting unused download Fu##{fu.id}")
+      discard_unused_fu!(fu)
     end
 
     def discard_unused_fu!(fu)
@@ -468,6 +486,7 @@ module ExternalCatalog
         name: original_name,
         url: entry.url
       )
+      @downloaded_fu = fu
 
       FuDownloadFromUrlJob.perform_now(
         fu.id,
@@ -518,6 +537,7 @@ module ExternalCatalog
         name: matrix_name,
         url: entry.url
       )
+      @downloaded_fu = fu
 
       bundle_dir = fu.upload_dir.join('input_file')
       FileUtils.mkdir_p(bundle_dir)

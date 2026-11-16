@@ -17,6 +17,10 @@ class User < ApplicationRecord
   has_many :ratings, dependent: :destroy
   has_many :news_items, dependent: :nullify
   has_many :standalone_compliance_checks, dependent: :nullify
+  # Destroying a finished run archives it to del_runs (Run#archive_to_del_run!), which has a foreign key
+  # on users. Keep the archived runs but unlink them; declared after :projects and :runs so it also
+  # covers the archives written while those are destroyed.
+  has_many :del_runs, dependent: :nullify
   has_and_belongs_to_many :ips
   belongs_to :orcid_user, optional: true
 

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'test_base_without_fixtures'
+require 'minitest/mock'
 
 class ScfairVarMetadataValidatorTest < TestBaseWithoutFixtures
   REQUIRED_COLUMNS = %w[
@@ -31,19 +32,24 @@ class ScfairVarMetadataValidatorTest < TestBaseWithoutFixtures
   end
 
   test 'passes when all required columns are present with valid values' do
-    result = Scfair::VarMetadataValidator.new(
-      field_values: {
-        'metadata/var/columns' => REQUIRED_COLUMNS,
-        'var/feature_is_filtered' => %w[false],
-        'var/feature_biotype' => %w[gene],
-        'var/feature_length' => %w[1200],
-        'var/feature_name' => %w[GENE1],
-        'var/feature_reference' => %w[NCBITaxon:9606],
-        'var/feature_type' => %w[protein_coding],
-        'var/feature_chromosome' => %w[1]
-      },
-      format: 'h5ad'
-    ).call
+    # NCBITaxon:9606 is allowed through its Vertebrata lineage, read from ncbi_taxonomy_nodes,
+    # which the test database does not contain.
+    human_lineage = NcbiTaxonomyLineageResolver.new(cache: { 9606 => [9606, 7742, 33208, 2759, 131567, 1] })
+    result = NcbiTaxonomyLineageResolver.stub(:shared, human_lineage) do
+      Scfair::VarMetadataValidator.new(
+        field_values: {
+          'metadata/var/columns' => REQUIRED_COLUMNS,
+          'var/feature_is_filtered' => %w[false],
+          'var/feature_biotype' => %w[gene],
+          'var/feature_length' => %w[1200],
+          'var/feature_name' => %w[GENE1],
+          'var/feature_reference' => %w[NCBITaxon:9606],
+          'var/feature_type' => %w[protein_coding],
+          'var/feature_chromosome' => %w[1]
+        },
+        format: 'h5ad'
+      ).call
+    end
 
     assert_empty result[:errors]
     REQUIRED_COLUMNS.each do |column|

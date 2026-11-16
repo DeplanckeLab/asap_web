@@ -12,7 +12,7 @@ class DockerImageTest < ActiveSupport::TestCase
       ]
     }
 
-    DockerImage.stub(:docker_image_inspect_json!, payload) do
+    DockerImage.stub(:inspect_json!, payload) do
       digest = DockerImage.fetch_digest_from_docker!('fabdavid/asap_run:v8')
       assert_equal 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', digest
     end
@@ -24,7 +24,7 @@ class DockerImageTest < ActiveSupport::TestCase
       'RepoDigests' => []
     }
 
-    DockerImage.stub(:docker_image_inspect_json!, payload) do
+    DockerImage.stub(:inspect_json!, payload) do
       digest = DockerImage.fetch_digest_from_docker!('fabdavid/asap_run:v8')
       assert_equal 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', digest
     end
@@ -34,7 +34,7 @@ class DockerImageTest < ActiveSupport::TestCase
     payload = { 'Id' => 'not-a-digest', 'RepoDigests' => [] }
 
     error = assert_raises(RuntimeError) do
-      DockerImage.stub(:docker_image_inspect_json!, payload) do
+      DockerImage.stub(:inspect_json!, payload) do
         DockerImage.fetch_digest_from_docker!('fabdavid/asap_run:v8')
       end
     end

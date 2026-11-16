@@ -46,7 +46,7 @@ class ScfairRulesValidationMessagesTest < TestBaseWithoutFixtures
 
   test 'cross-field cell line checks load from rules.yaml' do
     checks = Scfair::Rules.cross_field_cell_line_checks
-    assert checks.size >= 6
+    assert_equal %w[CF-2a CF-2b CF-2c CF-2d CF-2f], checks.map { |entry| entry[:key] }.sort
     ethnicity = checks.find { |entry| entry[:id] == 'CF-2a-cell-line-ethnicity' }
     assert_equal 'self_reported_ethnicity_ontology_term_id', ethnicity[:token]
     assert_includes ethnicity[:fail], 'must be "na"'

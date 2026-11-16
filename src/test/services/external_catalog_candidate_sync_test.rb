@@ -66,7 +66,7 @@ class ExternalCatalogCandidateSyncTest < ActiveSupport::TestCase
       @catalogs = catalogs
     end
 
-    def each_entry(source, limit:, geo_mode:, skip_accessions: nil)
+    def each_entry(source, limit:, geo_mode:, skip_accessions: nil, only_bulk_samples: nil)
       catalog = @catalogs.fetch(source)
       if source == 'geo'
         catalog.each(limit: limit, mode: geo_mode, skip_accessions: skip_accessions) { |entry| yield entry }

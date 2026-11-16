@@ -64,7 +64,8 @@ class ScfairEnsemblReferenceLookupTest < TestBaseWithoutFixtures
 
   test 'resolve_release_for_gene_reference uses assembly latest release when release missing' do
     lookup = Scfair::EnsemblReferenceLookup.new
-    skip 'ASAP assemblies unavailable' unless lookup.remote_available?
+    # The asap_data test database is structure-only unless reference data was loaded into it.
+    skip 'ASAP assemblies unavailable' unless lookup.remote_available? && lookup.assemblies_for_tax_id(9606).any?
 
     release = lookup.resolve_release_for_gene_reference(
       feature_reference: 'NCBITaxon:9606',

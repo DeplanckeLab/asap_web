@@ -2,6 +2,7 @@
 
 require 'logger'
 require 'test_helper'
+require 'minitest/mock'
 
 class ExternalCatalogBroadScpTokenTest < ActiveSupport::TestCase
   setup do
@@ -61,8 +62,11 @@ class ExternalCatalogBroadScpTokenTest < ActiveSupport::TestCase
     end
 
     begin
-      assert_equal 'fresh-access', ExternalCatalog::BroadScpToken.access_token!
-      assert_equal 'fresh-access', ExternalCatalog::BroadScpToken.access_token!
+      # The test environment uses :null_store, which never caches.
+      Rails.stub(:cache, ActiveSupport::Cache::MemoryStore.new) do
+        assert_equal 'fresh-access', ExternalCatalog::BroadScpToken.access_token!
+        assert_equal 'fresh-access', ExternalCatalog::BroadScpToken.access_token!
+      end
       assert_equal 1, call_count
     ensure
       ExternalCatalog::BroadScpToken.class_eval do

@@ -150,6 +150,9 @@ class BasicH5adExportStatusTest < ActiveSupport::TestCase
   end
 
   test 'find_or_start_h5ad_export skips refresh when h5ad is ready and mapping unchanged' do
+    image, export_step, std_method = Basic.export_h5ad_step_and_std_method
+    skip 'export_h5ad not configured' unless image && export_step && std_method
+
     File.write(@h5ad_abs, 'h5ad-bytes')
     FileUtils.touch(@h5ad_abs, mtime: Time.now + 2)
 

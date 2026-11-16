@@ -16,7 +16,8 @@ class ScfairFixFormFieldSourcesAuditTest < TestBaseWithoutFixtures
   test 'builds expected rows from rules.yaml for paired ontology and enum fields' do
     result = Scfair::FixFormFieldSourcesAudit.call(ott_records: [])
 
-    assert_equal 18, result.expected_rows.size
+    # uns fields, obs ontology/enum pairs (incl. experimental_condition) and the var feature_* columns.
+    assert_equal 29, result.expected_rows.size
     paths = result.expected_rows.map { |r| r[:term_path] }
     assert_includes paths, '/col_attrs/assay_ontology_term_id'
     assert_includes paths, '/col_attrs/tissue_type'
@@ -40,7 +41,8 @@ class ScfairFixFormFieldSourcesAuditTest < TestBaseWithoutFixtures
     missing_fields = result.missing_from_ott.map { |r| r[:term_field] }
 
     refute_includes missing_fields, 'organism_ontology_term_id'
-    assert_equal 7, result.missing_from_ott.size
+    assert_includes missing_fields, 'experimental_condition_ontology_term_id'
+    assert_equal 8, result.missing_from_ott.size
   end
 
   test 'classifies paired ontology OTT rows as A' do

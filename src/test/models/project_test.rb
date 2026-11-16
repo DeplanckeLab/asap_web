@@ -211,7 +211,7 @@ class ProjectTest < TestBaseWithoutFixtures
   end
 
   test "apply_project_type_from_assay_metadata assigns spat from visium annot when type is blank" do
-    spat = ProjectType.find_by!(tag: "spat")
+    spat = ProjectType.ensure_for_tag!("spat")
     project = create_test_project!(name: "Visium infer", key: "vis#{SecureRandom.hex(3)}", project_type_id: nil)
     register_for_test_cleanup(
       Annot.create!(
@@ -248,7 +248,7 @@ class ProjectTest < TestBaseWithoutFixtures
   end
 
   test "apply_project_type_from_assay_metadata assigns atac from scATAC annot when type is blank" do
-    atac = ProjectType.find_by!(tag: "atac")
+    atac = ProjectType.ensure_for_tag!("atac")
     project = create_test_project!(name: "ATAC infer", key: "ata#{SecureRandom.hex(3)}", project_type_id: nil)
     register_for_test_cleanup(
       Annot.create!(
@@ -265,7 +265,7 @@ class ProjectTest < TestBaseWithoutFixtures
   end
 
   test "apply_project_type_from_assay_metadata assigns multi from multiome annot when type is blank" do
-    multi = ProjectType.find_by!(tag: "multi")
+    multi = ProjectType.ensure_for_tag!("multi")
     project = create_test_project!(name: "Multiome infer", key: "mul#{SecureRandom.hex(3)}", project_type_id: nil)
     register_for_test_cleanup(
       Annot.create!(
@@ -282,7 +282,7 @@ class ProjectTest < TestBaseWithoutFixtures
   end
 
   test "apply_project_type_from_assay_metadata does not override a set type" do
-    sc = ProjectType.find_by!(tag: "sc")
+    sc = ProjectType.ensure_for_tag!("sc")
     project = create_test_project!(name: "Keep sc", key: "ksc#{SecureRandom.hex(3)}", project_type_id: sc.id)
     register_for_test_cleanup(
       Annot.create!(

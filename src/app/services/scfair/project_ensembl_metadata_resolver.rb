@@ -208,8 +208,7 @@ module Scfair
     def resolve_assembly(organism, release, _remote_db)
       return nil if release.blank?
 
-      lookup = @lookup_override || EnsemblReferenceLookup.new
-      return nil unless lookup.assemblies_remote_available?
+      return nil unless assemblies_available?
 
       lookup.assembly_name_at_release_for_organism(organism.tax_id, release)
     end
@@ -219,14 +218,24 @@ module Scfair
       return name if name.match?(/\AGCA[_\d]/i)
       return nil if name.blank?
 
-      lookup = @lookup_override || EnsemblReferenceLookup.new
-      return nil unless lookup.assemblies_remote_available?
+      return nil unless assemblies_available?
 
       lookup.genome_browser_assembly(
         tax_id: organism.tax_id,
         assembly_name: name,
         release: release
       )
+    end
+
+    # One lookup and one availability check per call (each check queries the asap_data databases).
+    def lookup
+      @lookup ||= @lookup_override || EnsemblReferenceLookup.new
+    end
+
+    def assemblies_available?
+      return @assemblies_available unless @assemblies_available.nil?
+
+      @assemblies_available = lookup.assemblies_remote_available? ? true : false
     end
   end
 end

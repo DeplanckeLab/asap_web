@@ -78,6 +78,8 @@ module Scfair
       field = (entry[:field] || entry['field']).to_s
       message = (entry[:message] || entry['message']).to_s
       return nil if field.blank?
+      # Ensembl check ids (uns.ensembl.release, ...) match no presence path below: never drop them.
+      return 'uns.ensembl' if field.start_with?('uns.ensembl.')
 
       unless presence_message?(message)
         return 'schema.version' if field.match?(/\A(uns\/schema_version|\/attrs\/schema_version)\z/)

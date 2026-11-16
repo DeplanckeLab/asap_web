@@ -14,7 +14,7 @@ class ScfairComplianceCheckGroupsBuilderTest < TestBaseWithoutFixtures
 
     ensembl = groups.find { |g| g[:id] == 'uns.ensembl' }
     assert ensembl.present?, 'expected uns.ensembl category'
-    assert_equal 'uns.ensembl', ensembl[:items].first[:field]
+    assert_equal 'uns.ensembl.release', ensembl[:items].first[:field]
   end
 
   test 'rebuilds category labels from rules.yaml catalog' do

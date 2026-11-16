@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_14_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -619,13 +619,13 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_120000) do
     t.text "url"
   end
 
-  create_table "ensembl_subdomains_old", id: :integer, default: -> { "nextval('ensembl_subdomains_id_seq'::regclass)" }, force: :cascade do |t|
+  create_table "ensembl_subdomains_old", id: :serial, force: :cascade do |t|
     t.integer "latest_ensembl_release"
     t.text "name"
     t.text "url"
   end
 
-  create_table "exp_entries", id: :integer, default: -> { "nextval('geo_entries_id_seq'::regclass)" }, force: :cascade do |t|
+  create_table "exp_entries", id: :serial, force: :cascade do |t|
     t.text "contact_emails"
     t.text "contributors"
     t.datetime "created_at", precision: nil
@@ -738,7 +738,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_120000) do
     t.boolean "parsing_mandatory_sel"
   end
 
-  create_table "filter_methods", id: :integer, default: -> { "nextval('filters_id_seq'::regclass)" }, force: :cascade do |t|
+  create_table "filter_methods", id: :serial, force: :cascade do |t|
     t.text "attrs_json"
     t.datetime "created_at", precision: nil
     t.text "description"
@@ -762,7 +762,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_120000) do
     t.integer "user_id"
   end
 
-  create_table "fus", id: :integer, default: -> { "nextval('courses_id_seq'::regclass)" }, force: :cascade do |t|
+  create_table "fus", id: :serial, force: :cascade do |t|
     t.boolean "admin_run", default: false, null: false
     t.string "compliance_schema_id"
     t.string "compliance_task_id"
@@ -805,7 +805,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_120000) do
     t.integer "user_id"
   end
 
-  create_table "gene_filterings", id: :integer, default: -> { "nextval('filterings_id_seq'::regclass)" }, force: :cascade do |t|
+  create_table "gene_filterings", id: :serial, force: :cascade do |t|
     t.text "attrs_json"
     t.datetime "created_at", precision: nil
     t.text "error"
@@ -1310,7 +1310,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_14_120000) do
     t.integer "provider_project_id"
   end
 
-  create_table "provider_projects", id: :integer, default: -> { "nextval('hca_projects_id_seq'::regclass)" }, force: :cascade do |t|
+  create_table "provider_projects", id: :serial, force: :cascade do |t|
     t.text "attrs_json", default: "{}"
     t.text "comment"
     t.text "filename"

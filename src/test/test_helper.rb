@@ -33,8 +33,8 @@ module ActiveSupport
   class TestCase
     # Run tests in parallel with specified workers
     # Single worker by default: parallel workers create per-worker databases from
-    # db/schema.rb, which cannot be loaded. Override with PARALLEL_WORKERS only if
-    # those databases have been prepared.
+    # db/schema.rb, without the reference tables bin/setup-test-db copies. Override with
+    # PARALLEL_WORKERS only if those databases have been prepared.
     parallelize(workers: ENV.fetch("PARALLEL_WORKERS", 1).to_i)
 
     # Policy: never load ActiveRecord fixtures (they DELETE all rows in fixture tables).

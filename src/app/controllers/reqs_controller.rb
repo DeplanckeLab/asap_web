@@ -490,12 +490,13 @@ class ReqsController < ApplicationController
       selected_dataset = '/matrix' unless selected_dataset == '/matrix' || selected_dataset.start_with?('/layers/')
 
       if parsing_run
-        sanitized_output_filename = sanitize_cell_filtering_input_loom(project_dir)
+        # filter.v8.py reads the parsing loom as is (DE tables and other 2D /attrs included), so there is no
+        # stripped copy any more (parsing/output_cell_filtering_input.loom, which also lost the spatial images).
         tmp_attrs ||= {}
         tmp_attrs['input_matrix'] = [{
           'run_id' => parsing_run.id,
           'output_attr_name' => 'output_matrix',
-          'output_filename' => sanitized_output_filename,
+          'output_filename' => 'parsing/output.loom',
           'output_dataset' => selected_dataset
         }]
       end
@@ -853,71 +854,6 @@ class ReqsController < ApplicationController
         list_of_runs2[run_i][0].save!
         list_of_runs2[run_i][1] = h_run_attrs if list_of_runs2[run_i][1].is_a?(Hash)
       end
-    end
-
-    def sanitize_cell_filtering_input_loom(project_dir)
-      source = project_dir + 'parsing' + 'output.loom'
-      target = project_dir + 'parsing' + 'output_cell_filtering_input.loom'
-
-      raise "Cell filtering input loom not found: #{source}" unless File.exist?(source)
-
-      attrs_to_copy = []
-      removed_attrs = []
-      attrs_list_stdout, attrs_list_stderr, attrs_list_status = Open3.capture3('h5dump', '-n', source.to_s)
-      unless attrs_list_status.success?
-        raise "Failed to list datasets in loom: #{attrs_list_stderr.presence || attrs_list_stdout.presence || 'unknown error'}"
-      end
-
-      attrs_dataset_paths = attrs_list_stdout
-        .each_line
-        .map(&:strip)
-        .filter_map { |line| (m = line.match(%r{\Adataset\s+(/attrs/[^\s]+)\z})) ? m[1] : nil }
-
-      attrs_dataset_paths.each do |dataset_path|
-        shape_stdout, shape_stderr, shape_status = Open3.capture3('h5dump', '-H', '-d', dataset_path, source.to_s)
-        unless shape_status.success?
-          raise "Failed to inspect #{dataset_path} in loom: #{shape_stderr.presence || shape_stdout.presence || 'unknown error'}"
-        end
-
-        # h5dump -H prints the dataset DATASPACE first, then any ATTRIBUTE
-        # DATASPACE lines. Using .last misclassified 2D /attrs datasets that
-        # carry 1D attribute metadata (e.g. /attrs/_de_* with column_names).
-        dataspaces = shape_stdout.scan(/DATASPACE\s+([^\n]+)/).flatten.map(&:strip)
-        shape_desc = dataspaces.first
-        unless shape_desc
-          raise "Unexpected shape output for #{dataset_path}: #{shape_stdout}"
-        end
-
-        # Keep only scalar or true 1-D datasets (single extent in the shape).
-        one_d = shape_desc.match?(/SIMPLE\s*\{\s*\(\s*\d+\s*\)\s*\//)
-        if shape_desc.include?('SCALAR') || one_d
-          attrs_to_copy << dataset_path
-        else
-          removed_attrs << dataset_path
-        end
-      end
-
-      File.delete(target) if File.exist?(target)
-
-      base_objects = ['/matrix', '/col_attrs', '/row_attrs', '/layers', '/col_graphs', '/row_graphs']
-      copied_any = false
-
-      (base_objects + attrs_to_copy).each do |obj_path|
-        _out, err, status = Open3.capture3('h5copy', '-p', '-i', source.to_s, '-o', target.to_s, '-s', obj_path, '-d', obj_path)
-        unless status.success?
-          Rails.logger.debug("[cell_filtering] Skip copy for #{obj_path}: #{err.presence || 'not found or not copyable'}")
-          next
-        end
-        copied_any = true
-      end
-
-      raise 'Sanitized loom creation failed: no objects were copied.' unless copied_any && File.exist?(target)
-
-      if removed_attrs.any?
-        Rails.logger.warn("[cell_filtering] Excluded multidimensional /attrs datasets from sanitized loom: #{removed_attrs.join(', ')}")
-      end
-
-      'parsing/output_cell_filtering_input.loom'
     end
 
 end

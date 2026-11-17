@@ -29,7 +29,7 @@ task :integrate, [:project_key] => [:environment] do |t, args|
   end
 
   h_env_docker_image = h_env['docker_images']['asap_run']
-  image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
+  image_name = DockerImage.runtime_ref_for(h_env_docker_image)
   docker_build = DockerBuild.find_or_create_for_image_ref!(image_name)
 
   asap_data_db_name = Basic.asap_data_db_name_from_env!(h_env)

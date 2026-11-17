@@ -816,7 +816,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
 
 
         h_env_docker_image = h_env['docker_images']['asap_run']
-        image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
+        image_name = DockerImage.runtime_ref_for(h_env_docker_image)
         docker_call = h_env_docker_image['call'].gsub(/\#image_name/, image_name)
         user_data_mount = ENV.fetch('USER_DATA_DIR')
         mount_arg = "-v #{user_data_mount}:#{user_data_mount}"
@@ -887,7 +887,7 @@ task :parse, [:project_key] => [:environment] do |t, args|
       
       mem = p["nber_cols"].to_i * p["nber_rows"].to_i * 128 / (31053 * 1474560)
       h_env_docker_image = h_env['docker_images']['asap_run']
-      image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
+      image_name = DockerImage.runtime_ref_for(h_env_docker_image)
             
       asap_instance_name = ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev')
       h_cmd_parse = {

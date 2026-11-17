@@ -988,7 +988,7 @@ class FuPreparsingService
       
       # Build prediction command (following original application pattern)
       docker_image_tag = asap_docker_image.tag || "v#{version_id}"
-      docker_image = "fabdavid/asap_run:#{docker_image_tag}"
+      docker_image = DockerImage.runtime_ref('fabdavid/asap_run', docker_image_tag)
       
       # Build the R script command inside the container
       models_base = Basic.prediction_models_path_for_r
@@ -1109,7 +1109,7 @@ class FuPreparsingService
                              else
                                "v#{version_id}"
                              end
-          docker_image = "fabdavid/asap_run:#{docker_image_tag}"
+          docker_image = DockerImage.runtime_ref('fabdavid/asap_run', docker_image_tag)
           
           docker_cmd_preview = [
             'docker', 'run',

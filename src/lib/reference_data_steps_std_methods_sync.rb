@@ -106,6 +106,9 @@ class ReferenceDataStepsStdMethodsSync
       docker_images_unchanged: 0,
       docker_builds_created: 0,
       docker_builds_created_tags: [],
+      # [{ name:, major:, from:, to: }] when a synced DockerImage changes its runtime_tag pin
+      # (dev -> prod promotion of a patch build; see DockerImage.runtime_ref).
+      docker_image_runtime_tag_changes: [],
       docker_builds_updated: 0,
       docker_builds_unchanged: 0,
       versions_created: 0,
@@ -575,6 +578,7 @@ class ReferenceDataStepsStdMethodsSync
       if record.nil?
         log_change(:create, "DockerImage #{label}")
         summary[:docker_images_created] += 1
+        note_runtime_tag_change!(summary, name, tag, nil, prepared["runtime_tag"])
         next if @dry_run
 
         if match_by_id?
@@ -593,10 +597,22 @@ class ReferenceDataStepsStdMethodsSync
       log_change(:update, "DockerImage #{label} (target id=#{record.id})")
       log_verbose_diff!(record, prepared)
       summary[:docker_images_updated] += 1
+      if prepared.key?("runtime_tag")
+        note_runtime_tag_change!(summary, name, tag, record.runtime_tag, prepared["runtime_tag"])
+      end
       next if @dry_run
 
       record.update!(prepared)
     end
+  end
+
+  def note_runtime_tag_change!(summary, name, major, from, to)
+    from = from.to_s.presence
+    to = to.to_s.presence
+    return if from == to
+
+    summary[:docker_image_runtime_tag_changes] << { name: name, major: major, from: from, to: to }
+    log_change(:update, "DockerImage #{name}:#{major} runtime_tag #{from || '(none)'} -> #{to || '(none)'}")
   end
 
   def apply_docker_builds!(docker_builds_in, docker_remap, summary)
@@ -1584,6 +1600,11 @@ class ReferenceDataStepsStdMethodsSync
     if created_tags.any?
       puts ""
       puts "  docker_builds created tags: #{created_tags.join(', ')}"
+    end
+
+    Array(summary[:docker_image_runtime_tag_changes]).each do |change|
+      puts "  runtime pin #{change[:name]}:#{change[:major]}: " \
+           "#{change[:from] || '(none)'} -> #{change[:to] || '(none)'}"
     end
 
     changed = rows.select { |row| row[:created].positive? || row[:updated].positive? || row[:deleted].to_i.positive? }

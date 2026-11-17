@@ -806,7 +806,7 @@ class Project < ApplicationRecord
     # Build command hash matching the format used by ProjectParsingJob
     asap_instance_name = ENV.fetch('ASAP_INSTANCE_NAME', 'asap_dev')
     h_env_docker_image = h_env['docker_images']['asap_run']
-    image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
+    image_name = DockerImage.runtime_ref_for(h_env_docker_image)
     docker_build = DockerBuild.find_or_create_for_image_ref!(image_name)
 
     h_cmd = {

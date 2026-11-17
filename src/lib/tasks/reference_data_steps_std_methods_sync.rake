@@ -317,24 +317,44 @@ namespace :reference_data do
       run_host_cmd!(*cmd)
     end
 
-    # When sync_from_dev creates DockerBuild rows, rebuild the long-running compose asap_run
-    # service with the highest newly created tag that has a Dockerfile on disk.
-    # Set SKIP_COMPOSE=1 to skip (e.g. bulk historical DockerBuild import).
-    def maybe_rebuild_compose_asap_run_after_docker_build_sync!(summary, dry_run:)
+    # Rebuild the long-running compose asap_run service after sync_from_dev:
+    # - when the synced asap_run DockerImage runtime_tag pin changed (dev -> prod promotion),
+    #   with that pinned patch tag;
+    # - legacy (no runtime_tag pin on this instance): with the highest newly created DockerBuild tag.
+    # A new DockerBuild alone never switches a pinned instance: dev may have built it without
+    # promoting it. Set SKIP_COMPOSE=1 to skip (e.g. bulk historical DockerBuild import).
+    def compose_asap_run_tag_after_sync(summary)
+      asap_name = ENV.fetch("ASAP_DOCKER_NAME", "fabdavid/asap_run")
+      pinned_to = Array(summary[:docker_image_runtime_tag_changes])
+                  .select { |c| c[:name] == asap_name }
+                  .map { |c| c[:to].to_s }
+                  .reject(&:empty?)
+      return [highest_docker_build_tag(pinned_to), "runtime pin -> #{pinned_to.join(', ')}"] if pinned_to.any?
+
       created_tags = Array(summary[:docker_builds_created_tags]).map(&:to_s).reject(&:empty?)
-      return if created_tags.empty?
+      return [nil, nil] if created_tags.empty?
+
+      if DockerImage.where(name: asap_name).where.not(runtime_tag: [nil, ""]).exists?
+        puts "New DockerBuild tags #{created_tags.join(', ')} synced, but the #{asap_name} runtime pin " \
+             "did not change; not rebuilding compose asap_run."
+        return [nil, nil]
+      end
+
+      [highest_docker_build_tag(created_tags), "created DockerBuild tags: #{created_tags.join(', ')}"]
+    end
+
+    def maybe_rebuild_compose_asap_run_after_docker_build_sync!(summary, dry_run:)
+      tag, reason = compose_asap_run_tag_after_sync(summary)
+      return if reason.nil?
 
       if ENV["SKIP_COMPOSE"].to_s.strip == "1"
-        puts "SKIP_COMPOSE=1: not rebuilding compose asap_run " \
-             "(created DockerBuild tags: #{created_tags.join(', ')})"
+        puts "SKIP_COMPOSE=1: not rebuilding compose asap_run (#{reason})"
         return
       end
 
       asap_run_dir = ENV.fetch("ASAP_RUN_DIR", "/srv/asap_run_new")
-      tag = highest_docker_build_tag(created_tags)
       if tag.nil?
-        puts "New DockerBuild tags are not version-shaped; not rebuilding compose asap_run: " \
-             "#{created_tags.join(', ')}"
+        puts "Tags are not version-shaped; not rebuilding compose asap_run (#{reason})"
         return
       end
 
@@ -347,8 +367,7 @@ namespace :reference_data do
       end
 
       if dry_run
-        puts "[dry-run] would rebuild compose asap_run with #{dockerfile_name} " \
-             "(created tags: #{created_tags.join(', ')})"
+        puts "[dry-run] would rebuild compose asap_run with #{dockerfile_name} (#{reason})"
         return
       end
 
@@ -369,7 +388,7 @@ namespace :reference_data do
         raise "Compose labels missing on #{container}; cannot rebuild asap_run automatically"
       end
 
-      puts "Rebuilding compose asap_run from new DockerBuild tag #{tag}"
+      puts "Rebuilding compose asap_run with #{tag} (#{reason})"
       puts "  image=#{image}  dockerfile=#{dockerfile_path}"
       puts "  compose project=#{project} dir=#{working_dir} file=#{File.basename(compose_file)}"
 
@@ -439,7 +458,8 @@ namespace :reference_data do
          "Also runs external_catalog:sync_from_dev unless SKIP_EXTERNAL_CATALOG=1 " \
          "(marks missing catalog entries obsolete; deletes blank-URL test entries only). " \
          "Hidden steps and obsolete std_methods included (so obsolete flags propagate). " \
-         "If new DockerBuild rows are created, rebuilds compose asap_run from the highest new tag Dockerfile. " \
+         "DockerImage.runtime_tag is synced too: that promotes dev's pinned asap_run patch build to " \
+         "production, and compose asap_run is rebuilt from that tag's Dockerfile when the pin changes. " \
          "Set DEV_POSTGRES_DB (and DEV_DB_HOST/DEV_DB_PORT). DRY_RUN=1, VERBOSE=1, SKIP_COMPOSE=1, SKIP_EXTERNAL_CATALOG=1"
     task sync_from_dev: :environment do
       unless Rails.env.production?

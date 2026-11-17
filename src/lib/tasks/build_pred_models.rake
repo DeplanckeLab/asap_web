@@ -26,7 +26,7 @@ task build_pred_models: :environment do
     FileUtils.mkdir_p(version_models_dir)
 
     # Do not mount over /srv: prediction.tool.2.R ships in the asap_run image WORKDIR (/srv).
-    cmd_str = "docker run --entrypoint '/bin/sh' --rm #{vol} fabdavid/asap_run:#{asap_docker_image.tag} -c \"Rscript prediction.tool.2.R build #{version_models_dir} #{output_file}\""
+    cmd_str = "docker run --entrypoint '/bin/sh' --rm #{vol} #{asap_docker_image.runtime_ref} -c \"Rscript prediction.tool.2.R build #{version_models_dir} #{output_file}\""
     puts cmd_str
     system(cmd_str) || raise("build_pred_models failed for version #{v.id}")
   end

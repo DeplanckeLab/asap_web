@@ -310,7 +310,7 @@ class AnalysisJsonBuilder
 
     docker_call = h_cmd['docker_call'].to_s
     # Match user/repo:vN (major tag). Avoid false positives like bin/sh from --entrypoint.
-    if (m = docker_call.match(%r{(?<![./\w-])([a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]+:v\d+)(?![.\w-])}i))
+    if (m = docker_call.match(%r{(?<![./\w-])([a-z0-9][a-z0-9_.-]*/[a-z0-9][a-z0-9_.-]+:v\d+(?:\.\d+)?)(?![.\w-])}i))
       return m[1]
     end
 

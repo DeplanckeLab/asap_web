@@ -1,50 +1,45 @@
 #!/usr/bin/env bash
-# Build fabdavid/asap_run for a patch version, retag major/latest, push to the registry,
-# point dev/prod compose at that Dockerfile, rebuild compose asap_run, and register the
-# build in the development database.
+# Build fabdavid/asap_run:vX.Y for TESTING ON DEV: build, push the patch tag, register the
+# DockerBuild in the development database and pin dev to it (docker_images.runtime_tag,
+# which Rails uses for every docker run; plus the dev compose asap_run service).
+#
+# This script never moves :vX (e.g. :v8) or :latest and never touches prod: dev and prod
+# share this docker daemon and Docker Hub, so moving :v8 would silently switch prod too.
+# Release a tested build to prod with reference_data:steps_std_methods:sync_from_dev
+# (copies the pin and the DockerBuild, rebuilds prod compose asap_run), then optionally
+# ./retag_asap_run_major.sh to move :vX / :latest on Docker Hub.
 #
 # Usage:
-#   ./build_asap_run.sh <version>
+#   ./build_asap_run.sh <patch version>
 #   ./build_asap_run.sh 8.3
 #   ./build_asap_run.sh v8.3
 #
 # Optional env:
 #   ASAP_RUN_DIR   (default /srv/asap_run_new)
 #   ASAP2_DIR      (default /srv/asap2_test)  # dev instance
-#   ASAP_DIR       (default /srv/asap)       # prod instance
 #   IMAGE_NAME     (default fabdavid/asap_run)
 #   SKIP_REGISTER=1  skip docker_builds:register rake
-#   SKIP_COMPOSE=1   skip compose dockerfile edit and asap_run rebuild
+#   SKIP_PIN=1       register the build without pinning dev to it (dev keeps its current pin)
+#   SKIP_COMPOSE=1   skip the dev compose asap_run Dockerfile edit and rebuild
 #   SKIP_PUSH=1      skip docker push
-#   FORCE=1          overwrite existing local image tags without prompting;
+#   FORCE=1          overwrite an existing local patch tag without prompting;
 #                    also skips the DockerBuild replace prompt (including non-operator usage)
 #   ALLOW_REPLACE    set automatically by this script after replace confirmation
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=asap_run_common.sh
+source "${SCRIPT_DIR}/asap_run_common.sh"
+
 usage() {
-  echo "Usage: $0 <version>"
+  echo "Usage: $0 <patch version>"
   echo "  Example: $0 8.3   or   $0 v8.3"
   echo ""
-  echo "Builds ${IMAGE_NAME:-fabdavid/asap_run}:vX.Y from Dockerfile.vX.Y,"
-  echo "tags :latest and :vX, pushes them, updates docker-compose asap_run dockerfile"
-  echo "in dev and prod (after confirmation), rebuilds compose asap_run, and registers DockerBuild."
+  echo "Builds ${IMAGE_NAME:-fabdavid/asap_run}:vX.Y from Dockerfile.vX.Y, pushes that tag,"
+  echo "registers the DockerBuild in the dev database and pins dev to it."
+  echo "Does not move :vX or :latest and does not touch prod (promote with sync_from_dev)."
   exit 1
-}
-
-confirm_yes() {
-  local prompt="$1"
-  local answer=""
-  if [[ ! -t 0 ]]; then
-    echo "Non-interactive stdin: refusing without confirmation."
-    echo "Re-run with a TTY, or set FORCE=1 to overwrite."
-    return 1
-  fi
-  read -r -p "${prompt} [y/N] " answer
-  case "${answer}" in
-    y|Y|yes|YES) return 0 ;;
-    *) return 1 ;;
-  esac
 }
 
 VERSION_RAW="${1:-}"
@@ -54,23 +49,12 @@ fi
 
 ASAP_RUN_DIR="${ASAP_RUN_DIR:-/srv/asap_run_new}"
 ASAP2_DIR="${ASAP2_DIR:-/srv/asap2_test}"
-ASAP_DIR="${ASAP_DIR:-/srv/asap}"
 IMAGE_NAME="${IMAGE_NAME:-fabdavid/asap_run}"
 
-VERSION_NUM="${VERSION_RAW#v}"
-if [[ ! "${VERSION_NUM}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-  echo "Invalid version: ${VERSION_RAW}"
-  echo "Expected forms: 8, 8.3, v8, v8.3"
-  exit 1
-fi
-
-PATCH_TAG="v${VERSION_NUM}"
-MAJOR_TAG="v${VERSION_NUM%%.*}"
+parse_version_arg "${VERSION_RAW}" patch_only
 DOCKERFILE_NAME="Dockerfile.${PATCH_TAG}"
 DOCKERFILE_PATH="${ASAP_RUN_DIR}/${DOCKERFILE_NAME}"
-IMAGE_REF_MAJOR="${IMAGE_NAME}:${MAJOR_TAG}"
 IMAGE_REF_PATCH="${IMAGE_NAME}:${PATCH_TAG}"
-IMAGE_REF_LATEST="${IMAGE_NAME}:latest"
 
 if [[ ! -d "${ASAP_RUN_DIR}" ]]; then
   echo "ASAP_RUN_DIR does not exist: ${ASAP_RUN_DIR}"
@@ -123,33 +107,22 @@ ensure_dockerfile() {
   exit 1
 }
 
-confirm_overwrite_existing_images() {
+confirm_overwrite_existing_image() {
+  if ! docker image inspect "${IMAGE_REF_PATCH}" >/dev/null 2>&1; then
+    return 0
+  fi
   if [[ "${FORCE:-0}" == "1" ]]; then
-    echo "FORCE=1: overwriting existing local tags if present."
+    echo "FORCE=1: overwriting existing local tag ${IMAGE_REF_PATCH}."
     return 0
   fi
 
-  local existing=()
-  local ref
-  for ref in "${IMAGE_REF_PATCH}" "${IMAGE_REF_MAJOR}" "${IMAGE_REF_LATEST}"; do
-    if docker image inspect "${ref}" >/dev/null 2>&1; then
-      existing+=("${ref}")
-    fi
-  done
-
-  if [[ ${#existing[@]} -eq 0 ]]; then
-    return 0
-  fi
-
-  echo "Local image tag(s) already exist and would be rewritten:"
   local id
-  for ref in "${existing[@]}"; do
-    id="$(docker image inspect --format '{{.Id}}' "${ref}" 2>/dev/null || echo unknown)"
-    echo "  ${ref}  (${id})"
-  done
+  id="$(docker image inspect --format '{{.Id}}' "${IMAGE_REF_PATCH}" 2>/dev/null || echo unknown)"
+  echo "Local image tag already exists and would be rewritten:"
+  echo "  ${IMAGE_REF_PATCH}  (${id})"
   echo ""
 
-  if confirm_yes "Overwrite these image tag(s) and continue the build?"; then
+  if confirm_yes "Overwrite this image tag and continue the build?"; then
     return 0
   fi
 
@@ -259,129 +232,8 @@ confirm_replace_existing_docker_build() {
   exit 1
 }
 
-# Resolve compose file path for an instance (follow docker-compose.yml symlink when present).
-compose_file_for_instance() {
-  local instance_dir="$1"
-  local compose="${instance_dir}/docker-compose.yml"
-  if [[ -L "${compose}" ]]; then
-    local target
-    target="$(readlink "${compose}")"
-    if [[ "${target}" != /* ]]; then
-      target="${instance_dir}/${target}"
-    fi
-    printf '%s\n' "${target}"
-    return 0
-  fi
-  if [[ -f "${compose}" ]]; then
-    printf '%s\n' "${compose}"
-    return 0
-  fi
-  echo "No docker-compose.yml in ${instance_dir}" >&2
-  return 1
-}
-
-# Current asap_run dockerfile declaration (first non-comment dockerfile: line).
-current_asap_run_dockerfile_line() {
-  local compose_file="$1"
-  grep -E '^[[:space:]]*dockerfile:' "${compose_file}" | head -n 1 || true
-}
-
-# Rewrite asap_run dockerfile to DOCKERFILE_NAME.
-# Supports both:
-#   dockerfile: Dockerfile.vX.Y
-#   dockerfile: ${ASAP_RUN_DOCKERFILE:-Dockerfile.vX.Y}
-update_asap_run_dockerfile_in_compose() {
-  local compose_file="$1"
-  local dockerfile_name="$2"
-  local before after
-
-  if [[ ! -f "${compose_file}" ]]; then
-    echo "Compose file not found: ${compose_file}"
-    return 1
-  fi
-
-  before="$(current_asap_run_dockerfile_line "${compose_file}")"
-  if [[ -z "${before}" ]]; then
-    echo "No active dockerfile: line found in ${compose_file}"
-    return 1
-  fi
-
-  if ! grep -Eq '^[[:space:]]*dockerfile:.*Dockerfile\.v[0-9]' "${compose_file}"; then
-    echo "Unexpected dockerfile line in ${compose_file}:"
-    echo "  ${before}"
-    return 1
-  fi
-
-  # Prefer updating the ${ASAP_RUN_DOCKERFILE:-...} default when present; else plain dockerfile.
-  if grep -Eq '^[[:space:]]*dockerfile:[[:space:]]*\$\{ASAP_RUN_DOCKERFILE:-Dockerfile\.v[0-9][^}]*\}' "${compose_file}"; then
-    sed -i -E \
-      "s|^([[:space:]]*dockerfile:[[:space:]]*\\\$\{ASAP_RUN_DOCKERFILE:-)Dockerfile\.v[0-9][^}]*(\})|\1${dockerfile_name}\2|" \
-      "${compose_file}"
-  else
-    sed -i -E \
-      "s|^([[:space:]]*dockerfile:[[:space:]]*)Dockerfile\.v[0-9][^[:space:]]*|\1${dockerfile_name}|" \
-      "${compose_file}"
-  fi
-
-  after="$(current_asap_run_dockerfile_line "${compose_file}")"
-  if [[ "${after}" != *"${dockerfile_name}"* ]]; then
-    echo "Failed to set dockerfile to ${dockerfile_name} in ${compose_file}"
-    echo "  before: ${before}"
-    echo "  after:  ${after}"
-    return 1
-  fi
-
-  echo "Updated ${compose_file}"
-  echo "  ${before}"
-  echo "  -> ${after}"
-}
-
-update_compose_and_rebuild_asap_run() {
-  local instances=("${ASAP2_DIR}" "${ASAP_DIR}")
-  local instance compose_files=() compose labels=()
-  local i
-
-  for instance in "${instances[@]}"; do
-    if [[ ! -d "${instance}" ]]; then
-      echo "Instance directory missing: ${instance}"
-      return 1
-    fi
-    compose="$(compose_file_for_instance "${instance}")" || return 1
-    compose_files+=("${compose}")
-    labels+=("${instance}")
-  done
-
-  echo ""
-  echo "Will set asap_run dockerfile to ${DOCKERFILE_NAME} in:"
-  for i in "${!compose_files[@]}"; do
-    echo "  ${labels[$i]}"
-    echo "    file: ${compose_files[$i]}"
-    echo "    now:  $(current_asap_run_dockerfile_line "${compose_files[$i]}")"
-  done
-  echo "Then run: docker-compose build asap_run (and up -d) in each instance."
-  echo ""
-
-  if ! confirm_yes "Edit both compose files and rebuild asap_run?"; then
-    echo "Skipping compose dockerfile update and asap_run rebuild."
-    return 0
-  fi
-
-  for i in "${!compose_files[@]}"; do
-    update_asap_run_dockerfile_in_compose "${compose_files[$i]}" "${DOCKERFILE_NAME}"
-  done
-
-  for instance in "${instances[@]}"; do
-    echo "Building compose asap_run in ${instance}"
-    (
-      cd "${instance}"
-      docker-compose build asap_run
-      docker-compose up -d asap_run
-    )
-  done
-}
-
 ensure_dockerfile
-confirm_overwrite_existing_images
+confirm_overwrite_existing_image
 ALLOW_REPLACE=0
 confirm_replace_existing_docker_build
 
@@ -389,30 +241,39 @@ echo "Building ${IMAGE_REF_PATCH} from ${DOCKERFILE_PATH}"
 cd "${ASAP_RUN_DIR}"
 docker build -t "${IMAGE_REF_PATCH}" -f "${DOCKERFILE_PATH}" ./ 2>&1 | tee build.log
 
-echo "Tagging ${IMAGE_REF_PATCH} as ${IMAGE_REF_LATEST} and ${IMAGE_REF_MAJOR}"
-docker tag "${IMAGE_REF_PATCH}" "${IMAGE_REF_LATEST}"
-docker tag "${IMAGE_REF_PATCH}" "${IMAGE_REF_MAJOR}"
-
 if [[ "${SKIP_PUSH:-0}" != "1" ]]; then
-  echo "Pushing ${IMAGE_REF_PATCH}, ${IMAGE_REF_MAJOR}, and ${IMAGE_REF_LATEST}"
+  echo "Pushing ${IMAGE_REF_PATCH}"
   docker push "${IMAGE_REF_PATCH}"
-  docker push "${IMAGE_REF_MAJOR}"
-  docker push "${IMAGE_REF_LATEST}"
 fi
 
-if [[ "${SKIP_COMPOSE:-0}" != "1" ]]; then
-  update_compose_and_rebuild_asap_run
+PIN=0
+if [[ "${SKIP_PIN:-0}" != "1" ]]; then
+  current_pin="$(db_runtime_tag "${ASAP2_DIR}" "${IMAGE_NAME}" "${MAJOR_TAG}")"
+  echo ""
+  echo "Dev currently runs ${IMAGE_NAME}:${current_pin:-${MAJOR_TAG}} for ${MAJOR_TAG} projects."
+  if [[ "${FORCE:-0}" == "1" ]] || confirm_yes "Pin dev to ${PATCH_TAG} (docker_images.runtime_tag in the dev DB)?"; then
+    PIN=1
+  else
+    echo "Dev pin left at ${current_pin:-${MAJOR_TAG}}."
+  fi
 fi
 
 if [[ "${SKIP_REGISTER:-0}" != "1" ]]; then
-  echo "Registering DockerBuild for ${IMAGE_REF_MAJOR} in development DB"
-  cd "${ASAP2_DIR}"
-  docker-compose exec -T \
-    -e "ALLOW_REPLACE=${ALLOW_REPLACE:-0}" \
-    website \
-    bundle exec rake docker_builds:register \
-    "IMAGE_REF=${IMAGE_REF_MAJOR}" \
-    "PATCH_TAG=${PATCH_TAG}"
+  register_docker_build "${ASAP2_DIR}" "${IMAGE_REF_PATCH}" "${PATCH_TAG}" "${ALLOW_REPLACE:-0}" "${PIN}"
+elif [[ "${PIN}" == "1" ]]; then
+  echo "SKIP_REGISTER=1: dev not pinned (pinning goes through docker_builds:register PIN=1)."
+  PIN=0
 fi
 
-echo "Done: ${IMAGE_REF_PATCH} (major ${IMAGE_REF_MAJOR})"
+if [[ "${PIN}" == "1" && "${SKIP_COMPOSE:-0}" != "1" ]]; then
+  echo "Rebuilding dev compose asap_run from ${DOCKERFILE_NAME}"
+  rebuild_compose_asap_run "${ASAP2_DIR}" "${DOCKERFILE_NAME}"
+fi
+
+if [[ "${PIN}" == "1" ]]; then
+  echo "Done: ${IMAGE_REF_PATCH} built and pinned on dev."
+else
+  echo "Done: ${IMAGE_REF_PATCH} built (dev not pinned to it)."
+fi
+echo "Prod and :${MAJOR_TAG} / :latest are unchanged. When tested, promote with sync_from_dev, then:"
+echo "  ${SCRIPT_DIR}/retag_asap_run_major.sh ${MAJOR_TAG}"

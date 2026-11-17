@@ -24,7 +24,7 @@ task update_tools: :environment do
 
   h_dockers = {}
   h_env['docker_images'].each_key do |k|  
-    h_dockers[k] = {:name => h_env['docker_images'][k]['name'], :ref => "#{h_env['docker_images'][k]['name']}:#{h_env['docker_images'][k]['tag']}", :tag => h_env['docker_images'][k]['tag']}
+    h_dockers[k] = {:name => h_env['docker_images'][k]['name'], :ref => DockerImage.runtime_ref_for(h_env['docker_images'][k]), :tag => h_env['docker_images'][k]['tag']}
   end				  
   #docker_name = "#{h_env['docker_images']['asap_run']['name']}:#{h_env['docker_images']['asap_run']['tag']}"
 

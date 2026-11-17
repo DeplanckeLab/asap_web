@@ -2108,7 +2108,7 @@ class ProjectsController < ApplicationController
       return render plain: e.message.to_s, status: :unprocessable_entity
     end
 
-    docker_name = "#{h_env['docker_images']['asap_run']['name']}:#{h_env['docker_images']['asap_run']['tag']}"
+    docker_name = DockerImage.runtime_ref_for(h_env['docker_images']['asap_run'])
     server_url = ENV.fetch('SERVER_URL').to_s.chomp('/')
     project_dir = @project_dir
 
@@ -2139,7 +2139,7 @@ class ProjectsController < ApplicationController
     list_cmds.push("## Pull Docker images (must run before any docker run in this script)")
     list_cmds.push('')
     h_env['docker_images'].each_key do |img_key|
-      tmp = "#{h_env['docker_images'][img_key]['name']}:#{h_env['docker_images'][img_key]['tag']}"
+      tmp = DockerImage.runtime_ref_for(h_env['docker_images'][img_key])
       list_cmds.push("docker pull #{tmp}")
     end
     list_cmds.push('')
@@ -9800,7 +9800,7 @@ class ProjectsController < ApplicationController
       return
     end
 
-    asap_docker_name = "fabdavid/asap_run:#{asap_docker_image.tag}"
+    asap_docker_name = asap_docker_image.runtime_ref
     vol = Basic.prediction_docker_volume_mount_arg
     models_base = Basic.prediction_models_path_for_r
     # Do not mount over /srv: prediction.tool.2.R ships in the asap_run image WORKDIR (/srv).

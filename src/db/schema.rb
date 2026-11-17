@@ -10,67 +10,67 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_11_17_090000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
   create_table "active_runs", id: :serial, force: :cascade do |t|
-    t.boolean "async", default: true
-    t.text "attrs_json", default: "{}"
-    t.text "children_run_ids", default: ""
-    t.text "command_json"
-    t.datetime "created_at", precision: nil
-    t.bigint "docker_build_id"
-    t.float "duration"
-    t.text "error"
-    t.text "lineage_run_ids"
-    t.float "max_ram"
-    t.integer "nber_cores"
-    t.integer "num"
-    t.text "output_json", default: "{}"
-    t.integer "pid"
-    t.text "pipeline_parent_run_ids", default: ""
-    t.integer "pred_max_ram"
-    t.integer "pred_process_duration"
-    t.float "process_duration"
-    t.integer "process_idle_duration"
-    t.integer "project_id"
-    t.integer "req_id"
-    t.boolean "return_stdout", default: false
-    t.text "run_children_json"
     t.integer "run_id"
-    t.text "run_parents_json"
-    t.datetime "start_time", precision: nil
-    t.integer "status_id"
-    t.integer "std_method_id"
+    t.integer "project_id"
     t.integer "step_id"
-    t.datetime "submitted_at", precision: nil
+    t.integer "std_method_id"
+    t.integer "req_id"
+    t.text "attrs_json", default: "{}"
+    t.text "output_json", default: "{}"
+    t.integer "num"
+    t.text "command_json"
+    t.float "duration"
+    t.integer "pid"
+    t.integer "nber_cores"
+    t.float "max_ram"
+    t.text "error"
+    t.integer "status_id"
+    t.text "run_parents_json"
+    t.text "run_children_json"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
+    t.boolean "async", default: true
+    t.float "process_duration"
+    t.text "lineage_run_ids"
+    t.text "children_run_ids", default: ""
+    t.integer "process_idle_duration"
     t.float "waiting_duration"
+    t.datetime "start_time", precision: nil
+    t.datetime "submitted_at", precision: nil
+    t.boolean "return_stdout", default: false
+    t.integer "pred_process_duration"
+    t.integer "pred_max_ram"
+    t.text "pipeline_parent_run_ids", default: ""
+    t.bigint "docker_build_id"
     t.index ["docker_build_id"], name: "index_active_runs_on_docker_build_id"
   end
 
   create_table "annot_cell_sets", id: :serial, force: :cascade do |t|
+    t.integer "project_id"
+    t.integer "cell_set_id"
     t.integer "annot_id"
     t.integer "cat_idx"
-    t.integer "cell_set_id"
     t.datetime "created_at", precision: nil
-    t.integer "project_id"
     t.datetime "updated_at", precision: nil
     t.index ["annot_id"], name: "idx_annot_cell_sets_annot_id"
     t.index ["cell_set_id"], name: "cell_set_id_annot_cell_sets"
   end
 
   create_table "annotation_statuses", force: :cascade do |t|
+    t.integer "project_id", null: false
     t.integer "annot_id", null: false
-    t.integer "best_cla_id"
     t.integer "cat_idx", null: false
     t.integer "cell_set_id"
+    t.string "status", default: "none", null: false
+    t.integer "best_cla_id"
+    t.integer "markers_run_id"
     t.datetime "computed_at"
     t.datetime "created_at", null: false
-    t.integer "markers_run_id"
-    t.integer "project_id", null: false
-    t.string "status", default: "none", null: false
     t.datetime "updated_at", null: false
     t.index ["annot_id", "cat_idx"], name: "idx_annotation_statuses_annot_cat", unique: true
     t.index ["cell_set_id"], name: "idx_annotation_statuses_cell_set"
@@ -79,72 +79,72 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "annots", id: :serial, force: :cascade do |t|
-    t.text "attr_name"
-    t.integer "attr_output_id"
-    t.text "attrs_json"
-    t.text "cat_aliases_json"
-    t.text "cat_info_json"
-    t.text "categories_json"
-    t.datetime "created_at", precision: nil
-    t.text "data_class_ids"
-    t.integer "data_transformation_id"
-    t.integer "data_type_id"
-    t.integer "dim", limit: 2
+    t.integer "project_id"
+    t.integer "step_id"
+    t.integer "run_id"
     t.text "filepath"
-    t.text "headers_json"
-    t.boolean "imported", default: false
-    t.text "label"
-    t.boolean "latest_version", default: true
-    t.text "list_cat_json"
+    t.integer "data_type_id"
+    t.text "name"
+    t.integer "nber_cats"
+    t.integer "nb_na"
+    t.integer "nb_zero"
+    t.float "min_val"
     t.float "max_val"
     t.float "mean_val"
     t.float "median_val"
-    t.bigint "mem_size"
-    t.float "min_val"
-    t.text "name"
-    t.integer "nb_na"
-    t.integer "nb_zero"
-    t.integer "nber_cats"
-    t.integer "nber_cols"
+    t.text "attrs_json"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
+    t.text "label"
     t.integer "nber_rows"
+    t.integer "nber_cols"
+    t.integer "dim", limit: 2
+    t.text "categories_json"
+    t.bigint "mem_size"
+    t.integer "user_id"
+    t.integer "store_run_id"
+    t.text "headers_json"
+    t.text "cat_aliases_json"
+    t.text "data_class_ids"
+    t.boolean "imported", default: false
+    t.text "attr_name"
+    t.integer "attr_output_id"
+    t.integer "output_attr_id"
     t.integer "ori_run_id"
     t.integer "ori_step_id"
-    t.integer "output_attr_id"
-    t.integer "project_id"
-    t.integer "run_id"
+    t.text "list_cat_json"
+    t.text "cat_info_json"
     t.integer "sim_step_id"
-    t.integer "step_id"
-    t.integer "store_run_id"
-    t.datetime "updated_at", precision: nil
-    t.integer "user_id"
     t.integer "version_nber", default: 1
+    t.boolean "latest_version", default: true
+    t.integer "data_transformation_id"
     t.index ["data_transformation_id"], name: "index_annots_on_data_transformation_id"
     t.index ["project_id", "name"], name: "idx_annots_project_name"
     t.index ["project_id", "store_run_id", "filepath", "name"], name: "idx_annots_finish_run_lookup"
   end
 
   create_table "archive_statuses", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "icon_class"
     t.text "name"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.text "icon_class"
   end
 
   create_table "articles", id: :serial, force: :cascade do |t|
-    t.text "abstract"
     t.text "authors"
-    t.text "authors_json"
-    t.datetime "created_at", precision: nil
-    t.text "doi"
-    t.text "first_author"
-    t.text "issue"
+    t.text "title"
     t.integer "journal_id"
     t.integer "pmid"
     t.datetime "published_at", precision: nil
-    t.text "title"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
     t.text "volume"
+    t.text "issue"
     t.integer "year"
+    t.text "abstract"
+    t.text "doi"
+    t.text "authors_json"
+    t.text "first_author"
   end
 
   create_table "articles_projects", id: false, force: :cascade do |t|
@@ -153,36 +153,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "attr_outputs", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
     t.text "name"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
   end
 
   create_table "cell_filterings", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.text "error"
-    t.integer "job_id"
-    t.integer "num"
-    t.integer "pid"
     t.integer "project_id"
+    t.text "attrs_json"
+    t.integer "num"
+    t.integer "job_id"
+    t.integer "pid"
+    t.text "error"
     t.integer "status_id"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
   end
 
   create_table "cell_ontologies", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "file_url"
-    t.text "file_url_bkp"
-    t.text "format"
-    t.text "latest_version"
     t.text "name"
-    t.boolean "obsolete", default: false
-    t.text "tag"
-    t.text "tax_ids"
+    t.text "file_url"
+    t.text "latest_version"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
     t.text "url"
+    t.text "tag"
+    t.text "format"
+    t.text "tax_ids"
+    t.boolean "obsolete", default: false
     t.text "url_mask"
+    t.text "file_url_bkp"
   end
 
   create_table "cell_ontologies_organisms", id: false, force: :cascade do |t|
@@ -191,53 +191,53 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "cell_ontology_terms", id: :serial, force: :cascade do |t|
-    t.text "alt_identifiers"
     t.integer "cell_ontology_id"
-    t.text "children_term_ids"
-    t.text "comment"
+    t.text "identifier"
+    t.text "name"
+    t.text "description"
     t.text "content_json"
     t.datetime "created_at", precision: nil
-    t.text "description"
-    t.text "identifier"
-    t.text "latest_version"
-    t.text "lineage"
-    t.text "lineage_cot_ids"
-    t.text "name"
-    t.text "node_gene_ids"
-    t.text "node_term_ids"
+    t.datetime "updated_at", precision: nil
     t.boolean "obsolete", default: false
-    t.boolean "original", default: false
-    t.text "parent_term_ids"
+    t.text "latest_version"
+    t.text "lineage_cot_ids"
     t.text "related_gene_ids"
     t.text "related_term_ids"
+    t.text "parent_term_ids"
+    t.text "lineage"
+    t.text "node_gene_ids"
+    t.text "node_term_ids"
+    t.text "alt_identifiers"
+    t.text "children_term_ids"
+    t.boolean "original", default: false
     t.integer "tax_id"
-    t.datetime "updated_at", precision: nil
+    t.text "comment"
     t.index ["original", "identifier"], name: "idx_cot_original_identifier"
     t.index ["original", "name"], name: "idx_cot_original_name"
   end
 
   create_table "cell_sets", id: :serial, force: :cascade do |t|
-    t.integer "cla_id"
-    t.datetime "created_at", precision: nil
     t.text "key"
-    t.integer "nber_cells"
-    t.integer "nber_clas"
     t.integer "project_cell_set_id"
+    t.integer "nber_cells"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.integer "cla_id"
+    t.integer "nber_clas"
     t.index ["project_cell_set_id", "key"], name: "project_cell_set_id_key_cell_sets"
   end
 
   create_table "checkpoints", force: :cascade do |t|
+    t.integer "project_id", null: false
+    t.integer "user_id"
+    t.string "title", null: false
+    t.text "state_json", default: "{}", null: false
     t.text "comments_json", default: "[]", null: false
     t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
     t.boolean "is_landing_page", default: false, null: false
     t.string "kind", default: "visualization", null: false
-    t.integer "project_id", null: false
     t.integer "run_id"
-    t.text "state_json", default: "{}", null: false
-    t.string "title", null: false
-    t.datetime "updated_at", null: false
-    t.integer "user_id"
     t.index ["kind"], name: "index_checkpoints_on_kind"
     t.index ["project_id", "kind", "run_id"], name: "index_checkpoints_on_project_kind_run"
     t.index ["project_id"], name: "index_checkpoints_on_project_id"
@@ -247,398 +247,399 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "cla_sources", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "label"
     t.text "name"
-    t.datetime "updated_at", precision: nil
     t.text "url"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
+    t.text "label"
   end
 
   create_table "cla_votes", id: :serial, force: :cascade do |t|
-    t.boolean "agree"
-    t.integer "cla_id"
     t.integer "cla_source_id"
-    t.text "comment"
-    t.datetime "created_at", precision: nil
+    t.integer "cla_id"
     t.integer "orcid_user_id"
-    t.datetime "updated_at", precision: nil
-    t.integer "user_id"
     t.text "user_name"
+    t.integer "user_id"
+    t.text "comment"
     t.text "voter_key"
+    t.boolean "agree"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
   end
 
   create_table "clas", id: :serial, force: :cascade do |t|
+    t.integer "num"
+    t.text "name"
+    t.text "comment"
+    t.integer "cell_set_id"
+    t.integer "project_id"
+    t.integer "clone_id"
     t.integer "annot_id"
     t.text "cat"
     t.integer "cat_idx"
     t.text "cell_ontology_term_ids"
-    t.integer "cell_set_id"
-    t.integer "cla_source_id"
-    t.integer "clone_id"
-    t.text "comment"
-    t.datetime "created_at", precision: nil
+    t.text "up_gene_ids"
     t.text "down_gene_ids"
-    t.text "name"
+    t.integer "orcid_user_id"
+    t.integer "user_id"
+    t.integer "cla_source_id"
     t.integer "nber_agree", default: 0
     t.integer "nber_disagree", default: 0
-    t.integer "num"
     t.boolean "obsolete", default: false
-    t.integer "ontology_term_type_id"
-    t.integer "orcid_user_id"
-    t.integer "project_id"
-    t.text "sorted_cell_ontology_term_ids"
-    t.text "sorted_down_gene_ids"
-    t.text "sorted_up_gene_ids"
-    t.text "up_gene_ids"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
-    t.integer "user_id"
+    t.text "sorted_up_gene_ids"
+    t.text "sorted_down_gene_ids"
+    t.text "sorted_cell_ontology_term_ids"
+    t.integer "ontology_term_type_id"
     t.index ["annot_id"], name: "idx_clas_annot_id"
     t.index ["ontology_term_type_id"], name: "index_clas_on_ontology_term_type_id"
     t.index ["project_id"], name: "index_clas_on_project_id"
   end
 
   create_table "cluster_methods", id: :serial, force: :cascade do |t|
+    t.text "name"
+    t.text "label"
+    t.text "description"
+    t.text "program"
     t.text "attrs_json"
     t.datetime "created_at", precision: nil
-    t.text "description"
-    t.text "label"
-    t.text "link"
-    t.text "name"
-    t.text "program"
-    t.integer "speed_id", limit: 2
     t.datetime "updated_at", precision: nil
+    t.integer "speed_id", limit: 2
+    t.text "link"
     t.text "warning"
   end
 
   create_table "clusters", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
+    t.integer "project_id"
     t.integer "cluster_method_id"
+    t.text "attrs_json"
     t.datetime "created_at", precision: nil
-    t.integer "dim_reduction_id"
+    t.datetime "updated_at", precision: nil
+    t.text "label"
+    t.integer "status_id"
     t.integer "duration"
+    t.integer "num"
+    t.integer "dim_reduction_id"
+    t.integer "pid"
+    t.integer "step_id"
     t.text "error"
     t.integer "job_id"
-    t.text "label"
-    t.integer "num"
-    t.integer "pid"
-    t.integer "project_id"
-    t.integer "status_id"
-    t.integer "step_id"
-    t.datetime "updated_at", precision: nil
     t.integer "user_id"
   end
 
   create_table "compliance_mappings", force: :cascade do |t|
-    t.string "action_type", null: false
-    t.datetime "applied_at", null: false
-    t.integer "compliance_schema_id"
-    t.datetime "created_at", null: false
-    t.string "field_group_id", null: false
-    t.integer "ontology_term_type_id"
     t.integer "project_id", null: false
-    t.text "resolve_map_json"
-    t.string "set_value"
+    t.string "field_group_id", null: false
+    t.string "target_path", null: false
+    t.string "action_type", null: false
     t.integer "source_annot_id"
     t.string "source_path"
-    t.string "target_path", null: false
+    t.string "set_value"
+    t.text "resolve_map_json"
+    t.datetime "applied_at", null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "ontology_term_type_id"
+    t.integer "compliance_schema_id"
     t.index ["compliance_schema_id"], name: "index_compliance_mappings_on_compliance_schema_id"
     t.index ["ontology_term_type_id"], name: "index_compliance_mappings_on_ontology_term_type_id"
     t.index ["project_id", "field_group_id"], name: "index_compliance_mappings_on_project_id_and_field_group_id"
   end
 
   create_table "compliance_schemas", force: :cascade do |t|
-    t.boolean "active", default: true, null: false
-    t.string "compliant_icon"
-    t.datetime "created_at", null: false
-    t.text "description"
-    t.datetime "ended_at"
-    t.string "if_compliant"
     t.string "name", null: false
+    t.string "version"
+    t.string "source_schema_name"
+    t.text "description"
+    t.string "source_url"
+    t.string "url"
+    t.string "compliant_icon"
     t.string "not_compliant_icon"
     t.string "project_type_tags", null: false
-    t.string "source_schema_name"
-    t.string "source_url"
+    t.string "if_compliant"
+    t.boolean "active", default: true, null: false
     t.datetime "started_at"
+    t.datetime "ended_at"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.string "url"
-    t.string "version"
     t.index ["active"], name: "index_compliance_schemas_on_active"
   end
 
   create_table "compliance_term_replacements", force: :cascade do |t|
-    t.integer "cell_ontology_term_id"
     t.bigint "compliance_mapping_id", null: false
-    t.datetime "created_at", null: false
     t.string "original_value", null: false
     t.string "replacement_identifier"
     t.string "replacement_name"
+    t.integer "cell_ontology_term_id"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["compliance_mapping_id"], name: "index_compliance_term_replacements_on_compliance_mapping_id"
     t.index ["original_value"], name: "index_compliance_term_replacements_on_original_value"
   end
 
   create_table "compliance_validations", force: :cascade do |t|
-    t.integer "compliance_schema_id"
-    t.datetime "created_at", null: false
-    t.integer "errors_count", default: 0, null: false
-    t.boolean "passed", default: false, null: false
     t.integer "project_id", null: false
-    t.string "result_digest", limit: 32
-    t.datetime "updated_at", null: false
-    t.integer "valid_checks_count", default: 0, null: false
-    t.datetime "validated_at", null: false
+    t.integer "compliance_schema_id"
+    t.boolean "passed", default: false, null: false
+    t.integer "errors_count", default: 0, null: false
     t.integer "warnings_count", default: 0, null: false
+    t.integer "valid_checks_count", default: 0, null: false
+    t.string "result_digest", limit: 32
+    t.datetime "validated_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
     t.index ["compliance_schema_id"], name: "index_compliance_validations_on_compliance_schema_id"
     t.index ["project_id", "validated_at"], name: "index_compliance_validations_on_project_id_and_validated_at"
     t.index ["project_id"], name: "index_compliance_validations_on_project_id"
   end
 
   create_table "correlations", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.text "error"
-    t.integer "job_id"
-    t.integer "num"
-    t.integer "pid"
     t.integer "project_id"
+    t.text "attrs_json"
+    t.integer "num"
+    t.integer "job_id"
+    t.integer "pid"
+    t.text "error"
     t.integer "status_id"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
   end
 
   create_table "covariates", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.text "error"
-    t.integer "job_id"
-    t.integer "num"
-    t.integer "pid"
     t.integer "project_id"
+    t.text "attrs_json"
+    t.integer "num"
+    t.integer "job_id"
+    t.integer "pid"
+    t.text "error"
     t.integer "status_id"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
   end
 
   create_table "data_classes", id: :serial, force: :cascade do |t|
-    t.string "category"
-    t.datetime "created_at", precision: nil
-    t.string "label_template"
     t.text "name"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.string "label_template"
+    t.string "category"
   end
 
   create_table "data_repos", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
     t.text "name"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
   end
 
   create_table "data_transformations", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.text "description"
-    t.string "label", null: false
     t.string "name", null: false
+    t.string "label", null: false
+    t.text "description"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
   end
 
   create_table "data_types", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "label"
     t.text "name"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.text "label"
   end
 
   create_table "db_sets", id: :serial, force: :cascade do |t|
+    t.integer "tool_id"
     t.text "label"
     t.text "tag"
-    t.integer "tool_id"
   end
 
   create_table "del_runs", id: :serial, force: :cascade do |t|
-    t.boolean "async", default: true
-    t.text "attrs_json", default: "{}"
-    t.text "children_run_ids", default: ""
-    t.integer "cloned_run_id"
-    t.text "command_json"
-    t.datetime "created_at", precision: nil
-    t.bigint "docker_build_id"
-    t.float "duration"
-    t.text "error"
-    t.text "lineage_run_ids"
-    t.float "max_ram"
-    t.integer "nber_cores"
-    t.integer "num"
-    t.text "output_json", default: "{}"
-    t.integer "pid"
-    t.text "pipeline_parent_run_ids", default: ""
-    t.bigint "pred_max_ram"
-    t.text "pred_params_json"
-    t.integer "pred_process_duration"
-    t.float "process_duration"
-    t.integer "process_idle_duration"
-    t.integer "project_id"
-    t.integer "req_id"
-    t.boolean "return_stdout", default: false
-    t.text "run_children_json"
     t.integer "run_id"
-    t.text "run_parents_json"
-    t.datetime "start_time", precision: nil
-    t.integer "status_id"
-    t.integer "std_method_id"
+    t.integer "project_id"
     t.integer "step_id"
-    t.datetime "submitted_at", precision: nil
+    t.integer "std_method_id"
+    t.integer "req_id"
+    t.text "attrs_json", default: "{}"
+    t.text "output_json", default: "{}"
+    t.integer "num"
+    t.text "command_json"
+    t.float "duration"
+    t.integer "pid"
+    t.integer "nber_cores"
+    t.float "max_ram"
+    t.text "error"
+    t.boolean "async", default: true
+    t.integer "status_id"
+    t.text "run_parents_json"
+    t.text "run_children_json"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
+    t.float "process_duration"
+    t.text "lineage_run_ids"
+    t.text "children_run_ids", default: ""
+    t.integer "process_idle_duration"
     t.float "waiting_duration"
+    t.datetime "start_time", precision: nil
+    t.datetime "submitted_at", precision: nil
+    t.text "pred_params_json"
+    t.boolean "return_stdout", default: false
+    t.integer "pred_process_duration"
+    t.bigint "pred_max_ram"
+    t.text "pipeline_parent_run_ids", default: ""
+    t.integer "cloned_run_id"
+    t.bigint "docker_build_id"
     t.index ["docker_build_id"], name: "index_del_runs_on_docker_build_id"
     t.index ["project_id"], name: "project_id_del_runs"
   end
 
   create_table "delayed_jobs", force: :cascade do |t|
+    t.integer "priority", default: 0, null: false
     t.integer "attempts", default: 0, null: false
-    t.datetime "created_at", precision: nil
-    t.datetime "failed_at", precision: nil
     t.text "handler", null: false
     t.text "last_error"
-    t.datetime "locked_at", precision: nil
-    t.string "locked_by"
-    t.integer "priority", default: 0, null: false
-    t.string "queue"
     t.datetime "run_at", precision: nil
+    t.datetime "locked_at", precision: nil
+    t.datetime "failed_at", precision: nil
+    t.string "locked_by"
+    t.string "queue"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
     t.index ["priority", "run_at"], name: "delayed_jobs_priority"
   end
 
   create_table "diff_expr_methods", id: :serial, force: :cascade do |t|
+    t.text "name"
+    t.text "label"
+    t.text "description"
+    t.text "program"
+    t.text "link"
+    t.integer "speed_id", limit: 2
     t.text "attrs_json"
     t.datetime "created_at", precision: nil
-    t.boolean "creates_av_norm", default: false
-    t.text "description"
-    t.boolean "handles_log", default: false
-    t.text "label"
-    t.text "link"
-    t.text "name"
-    t.text "program"
-    t.integer "speed_id", limit: 2
     t.datetime "updated_at", precision: nil
+    t.boolean "creates_av_norm", default: false
+    t.boolean "handles_log", default: false
   end
 
   create_table "diff_exprs", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
+    t.integer "project_id"
     t.integer "diff_expr_method_id"
+    t.integer "selection1_id"
+    t.integer "selection2_id"
+    t.text "attrs_json"
+    t.integer "status_id"
     t.integer "duration"
-    t.text "error"
-    t.integer "job_id"
+    t.datetime "created_at", precision: nil
+    t.integer "pid"
+    t.integer "num"
     t.text "label"
+    t.integer "nber_up_genes"
+    t.integer "nber_down_genes"
     t.text "md5_sel1"
     t.text "md5_sel2"
     t.integer "nb_cells_sel1"
     t.integer "nb_cells_sel2"
-    t.integer "nber_down_genes"
-    t.integer "nber_up_genes"
-    t.integer "num"
-    t.integer "pid"
-    t.integer "project_id"
-    t.integer "selection1_id"
-    t.integer "selection2_id"
+    t.text "error"
     t.text "short_label"
-    t.integer "status_id"
+    t.integer "job_id"
     t.integer "user_id"
   end
 
   create_table "dim_reductions", id: :serial, force: :cascade do |t|
+    t.text "name"
+    t.text "label"
+    t.text "description"
+    t.text "program"
     t.text "attrs_json"
     t.datetime "created_at", precision: nil
-    t.text "description"
-    t.boolean "dim_reduction", default: false
-    t.text "label"
-    t.text "link"
-    t.text "name"
-    t.text "program"
-    t.integer "rank"
-    t.integer "speed_id", limit: 2
     t.datetime "updated_at", precision: nil
+    t.integer "speed_id", limit: 2
+    t.text "link"
+    t.integer "rank"
+    t.boolean "dim_reduction", default: false
   end
 
   create_table "direct_links", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.integer "nber_views", default: 0
-    t.text "params_json"
     t.integer "project_id"
-    t.datetime "updated_at", precision: nil
     t.text "view_key"
+    t.text "params_json"
+    t.integer "nber_views", default: 0
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
   end
 
   create_table "docker_builds", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.text "digest", null: false
     t.bigint "docker_image_id", null: false
     t.text "tag", null: false
+    t.text "digest", null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["digest"], name: "index_docker_builds_on_digest", unique: true
     t.index ["docker_image_id"], name: "index_docker_builds_on_docker_image_id"
   end
 
   create_table "docker_images", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "description"
-    t.text "digest"
-    t.text "full_name"
-    t.text "metadata_json"
     t.text "name"
     t.text "tag"
-    t.text "tool_versions_json"
-    t.text "tools_json"
-    t.datetime "updated_at", precision: nil
     t.integer "version"
+    t.text "tools_json"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
+    t.text "full_name"
+    t.text "digest"
+    t.text "description"
+    t.text "tool_versions_json"
+    t.text "metadata_json"
+    t.text "runtime_tag"
   end
 
   create_table "docker_patches", id: :serial, force: :cascade do |t|
-    t.datetime "activated_at", precision: nil
+    t.integer "version_id"
     t.text "container_name"
-    t.datetime "created_at", precision: nil
+    t.integer "tag"
     t.text "description"
+    t.datetime "activated_at", precision: nil
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
     t.text "std_method_ids"
     t.text "step_ids"
-    t.integer "tag"
-    t.datetime "updated_at", precision: nil
-    t.integer "version_id"
   end
 
   create_table "docker_versions", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
     t.text "name"
     t.text "tag"
-    t.text "tools_json"
-    t.datetime "updated_at", precision: nil
     t.integer "version"
+    t.text "tools_json"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
   end
 
   create_table "ensembl_subdomains", id: :serial, force: :cascade do |t|
-    t.integer "latest_ensembl_release"
     t.text "name"
     t.text "url"
+    t.integer "latest_ensembl_release"
   end
 
   create_table "ensembl_subdomains_old", id: :serial, force: :cascade do |t|
-    t.integer "latest_ensembl_release"
     t.text "name"
     t.text "url"
+    t.integer "latest_ensembl_release"
   end
 
   create_table "exp_entries", id: :serial, force: :cascade do |t|
-    t.text "contact_emails"
-    t.text "contributors"
-    t.datetime "created_at", precision: nil
-    t.text "description"
-    t.text "doi"
     t.text "identifier"
-    t.integer "identifier_type_id"
-    t.text "identifiers_json"
-    t.text "pmid"
-    t.text "srp"
-    t.datetime "submitted_at", precision: nil
     t.text "title"
+    t.text "pmid"
+    t.datetime "submitted_at", precision: nil
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.text "contributors"
+    t.text "description"
+    t.text "contact_emails"
+    t.text "srp"
+    t.text "identifiers_json"
+    t.integer "identifier_type_id"
+    t.text "doi"
   end
 
   create_table "exp_entries_projects", id: false, force: :cascade do |t|
@@ -652,18 +653,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "exp_entry_identifiers", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.integer "exp_entry_id"
     t.text "identifier"
     t.integer "identifier_type_id"
+    t.integer "exp_entry_id"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
   end
 
   create_table "external_catalog_candidate_projects", force: :cascade do |t|
-    t.datetime "created_at", null: false
     t.bigint "external_catalog_candidate_id", null: false
-    t.string "link_kind", default: "content_match", null: false
     t.bigint "project_id", null: false
+    t.string "link_kind", default: "content_match", null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["external_catalog_candidate_id", "project_id"], name: "index_ext_catalog_cand_projects_on_candidate_and_project", unique: true
     t.index ["external_catalog_candidate_id"], name: "index_ext_catalog_cand_projects_on_candidate_id"
@@ -672,36 +673,36 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "external_catalog_candidates", force: :cascade do |t|
-    t.text "attrs_json"
-    t.string "collection_id"
-    t.datetime "created_at", null: false
-    t.text "dois_json"
-    t.bigint "external_catalog_collection_id"
+    t.string "source", null: false
     t.string "external_id", null: false
+    t.string "provider_tag", null: false
+    t.text "title"
+    t.string "organism_label"
+    t.integer "tax_id"
+    t.string "project_type_tag", default: "sc", null: false
+    t.string "format_kind"
     t.string "filename"
     t.bigint "filesize", default: 0, null: false
-    t.string "format_kind"
+    t.text "url"
+    t.text "source_page_url"
+    t.text "dois_json"
+    t.text "pmids_json"
     t.text "identifiers_json"
+    t.text "attrs_json"
+    t.string "import_status", default: "idle", null: false
     t.text "import_error"
     t.integer "import_project_id"
-    t.text "import_resume_json"
-    t.string "import_status", default: "idle", null: false
     t.integer "import_user_id"
     t.datetime "last_seen_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "collection_id"
+    t.string "series_key"
+    t.boolean "obsolete", default: false, null: false
+    t.bigint "external_catalog_collection_id"
     t.bigint "n_obs"
     t.bigint "n_vars"
-    t.boolean "obsolete", default: false, null: false
-    t.string "organism_label"
-    t.text "pmids_json"
-    t.string "project_type_tag", default: "sc", null: false
-    t.string "provider_tag", null: false
-    t.string "series_key"
-    t.string "source", null: false
-    t.text "source_page_url"
-    t.integer "tax_id"
-    t.text "title"
-    t.datetime "updated_at", null: false
-    t.text "url"
+    t.text "import_resume_json"
     t.index ["collection_id"], name: "index_external_catalog_candidates_on_collection_id"
     t.index ["external_catalog_collection_id"], name: "index_ext_catalog_candidates_on_collection_id"
     t.index ["import_status"], name: "index_external_catalog_candidates_on_import_status"
@@ -716,130 +717,130 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "external_catalog_collections", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.text "description"
-    t.string "external_key", null: false
     t.string "source", null: false
-    t.text "source_page_url"
+    t.string "external_key", null: false
     t.text "title", null: false
+    t.text "description"
+    t.text "source_page_url"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["source", "external_key"], name: "index_ext_catalog_collections_on_source_and_external_key", unique: true
   end
 
   create_table "file_formats", id: :serial, force: :cascade do |t|
+    t.text "label"
+    t.text "description"
     t.text "child_format"
     t.text "color"
-    t.text "description"
-    t.text "ext"
-    t.integer "introduced_in_version_id"
-    t.text "label"
     t.boolean "many_files"
     t.text "name"
     t.boolean "parsing_mandatory_sel"
+    t.text "ext"
+    t.integer "introduced_in_version_id"
   end
 
   create_table "filter_methods", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.text "description"
-    t.boolean "handles_log", default: false
-    t.text "label"
-    t.text "link"
     t.text "name"
+    t.text "description"
     t.text "program"
-    t.integer "speed_id", limit: 2
+    t.text "attrs_json"
+    t.text "label"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.integer "speed_id", limit: 2
+    t.text "link"
+    t.boolean "handles_log", default: false
   end
 
   create_table "fos", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "ext"
-    t.text "filepath"
-    t.bigint "filesize"
     t.integer "project_id"
     t.integer "run_id"
-    t.datetime "updated_at", precision: nil
+    t.text "filepath"
+    t.bigint "filesize"
     t.integer "user_id"
+    t.datetime "updated_at", precision: nil
+    t.datetime "created_at", precision: nil
+    t.text "ext"
   end
 
   create_table "fus", id: :serial, force: :cascade do |t|
-    t.boolean "admin_run", default: false, null: false
+    t.integer "project_id"
+    t.integer "upload_type"
+    t.text "name"
+    t.text "status"
+    t.text "upload_file_name"
+    t.text "upload_content_type"
+    t.bigint "upload_file_size"
+    t.datetime "upload_updated_at", precision: nil
+    t.boolean "visible"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
+    t.text "project_key"
+    t.integer "user_id"
+    t.text "url"
+    t.integer "preparsing_version_id"
+    t.string "content_sha256", limit: 64
     t.string "compliance_schema_id"
     t.string "compliance_task_id"
-    t.string "content_sha256", limit: 64
-    t.datetime "created_at", precision: nil
+    t.boolean "admin_run", default: false, null: false
     t.string "creator_ip"
-    t.text "name"
-    t.integer "preparsing_version_id"
-    t.integer "project_id"
-    t.text "project_key"
-    t.text "status"
-    t.datetime "updated_at", precision: nil
-    t.text "upload_content_type"
-    t.text "upload_file_name"
-    t.bigint "upload_file_size"
-    t.integer "upload_type"
-    t.datetime "upload_updated_at", precision: nil
-    t.text "url"
-    t.integer "user_id"
-    t.boolean "visible"
     t.index ["compliance_task_id"], name: "index_fus_on_compliance_task_id"
     t.index ["content_sha256"], name: "index_fus_on_content_sha256"
     t.index ["preparsing_version_id"], name: "index_fus_on_preparsing_version_id"
   end
 
   create_table "gene_enrichments", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
+    t.integer "num"
+    t.text "label"
+    t.integer "project_id"
     t.integer "diff_expr_id"
+    t.text "attrs_json"
+    t.integer "status_id"
     t.integer "duration"
+    t.integer "pid"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
+    t.integer "nber_pathways"
     t.text "error"
     t.integer "job_id"
-    t.text "label"
-    t.integer "nber_pathways"
-    t.integer "num"
-    t.integer "pid"
-    t.integer "project_id"
-    t.integer "status_id"
-    t.datetime "updated_at", precision: nil
     t.integer "user_id"
   end
 
   create_table "gene_filterings", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.text "error"
-    t.integer "filter_method_id"
-    t.integer "job_id"
-    t.integer "num"
-    t.integer "pid"
     t.integer "project_id"
+    t.integer "filter_method_id"
+    t.text "attrs_json"
+    t.integer "num"
+    t.integer "job_id"
+    t.integer "pid"
+    t.text "error"
     t.integer "status_id"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
   end
 
   create_table "gene_set_collection_types", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "icon", null: false
-    t.string "icon_color", null: false
     t.string "key", null: false
     t.string "label", null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "icon", null: false
+    t.string "icon_color", null: false
     t.index ["key"], name: "index_gene_set_collection_types_on_key", unique: true
   end
 
   create_table "gene_set_collections", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "file_key", null: false
-    t.bigint "gene_set_collection_type_id", null: false
-    t.string "import_id"
-    t.string "import_loom_file"
-    t.string "name", null: false
     t.integer "project_id", null: false
-    t.string "source_kind", null: false
-    t.string "staged_upload_path"
-    t.datetime "updated_at", null: false
     t.integer "user_id"
+    t.string "name", null: false
+    t.string "file_key", null: false
+    t.string "source_kind", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.bigint "gene_set_collection_type_id", null: false
+    t.string "staged_upload_path"
+    t.string "import_loom_file"
+    t.string "import_id"
     t.index ["file_key"], name: "index_gene_set_collections_on_file_key", unique: true
     t.index ["gene_set_collection_type_id"], name: "index_gene_set_collections_on_gene_set_collection_type_id"
     t.index ["import_id"], name: "index_gene_set_collections_on_import_id"
@@ -850,81 +851,81 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "guided_tour_steps", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.text "description"
-    t.boolean "exclude_from_page_replay", default: false, null: false
-    t.string "focus_element", null: false
     t.bigint "guided_tour_id", null: false
-    t.string "page_url", null: false
     t.integer "rank", null: false
-    t.jsonb "step_actions", default: [], null: false
+    t.string "page_url", null: false
     t.string "title", null: false
+    t.string "focus_element", null: false
+    t.text "description"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.jsonb "step_actions", default: [], null: false
+    t.boolean "exclude_from_page_replay", default: false, null: false
     t.index ["guided_tour_id", "rank"], name: "index_guided_tour_steps_on_guided_tour_id_and_rank", unique: true
     t.index ["guided_tour_id"], name: "index_guided_tour_steps_on_guided_tour_id"
   end
 
   create_table "guided_tours", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.integer "duration_time"
-    t.boolean "hidden", default: false, null: false
     t.string "name", null: false
     t.integer "rank", null: false
+    t.integer "duration_time"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.boolean "hidden", default: false, null: false
     t.index ["rank"], name: "index_guided_tours_on_rank"
   end
 
   create_table "heatmaps", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.text "error"
-    t.integer "job_id"
-    t.integer "num"
-    t.integer "pid"
     t.integer "project_id"
+    t.text "attrs_json"
+    t.integer "num"
+    t.integer "job_id"
+    t.integer "pid"
+    t.text "error"
     t.integer "status_id"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
   end
 
   create_table "identifier_types", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
     t.text "name"
-    t.boolean "pluralizable", default: false
     t.text "prefix"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
     t.text "url_mask"
+    t.boolean "pluralizable", default: false
   end
 
   create_table "imputation_methods", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.text "description"
-    t.boolean "hidden", default: false
-    t.boolean "is_parallelized"
-    t.text "label"
     t.text "name"
+    t.text "label"
+    t.text "description"
     t.text "program"
     t.integer "speed_id", limit: 2
+    t.boolean "is_parallelized"
+    t.text "attrs_json"
+    t.boolean "hidden", default: false
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
   end
 
   create_table "imputations", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.text "error"
-    t.integer "imputation_method_id"
-    t.integer "job_id"
-    t.integer "num"
-    t.integer "pid"
     t.integer "project_id"
+    t.integer "imputation_method_id"
+    t.text "attrs_json"
+    t.integer "num"
+    t.integer "job_id"
+    t.integer "pid"
+    t.text "error"
     t.integer "status_id"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
   end
 
   create_table "info_types", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "label"
     t.text "name"
+    t.text "label"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
   end
 
@@ -939,50 +940,50 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "jobs", id: :serial, force: :cascade do |t|
-    t.integer "cloned_job_id"
+    t.integer "project_id"
+    t.integer "step_id"
+    t.integer "status_id"
     t.text "command_line"
-    t.datetime "created_at", precision: nil
-    t.integer "delayed_job_id"
     t.integer "duration"
     t.integer "pid"
-    t.integer "project_id"
-    t.integer "speed_id"
-    t.integer "status_id"
-    t.integer "step_id"
-    t.datetime "updated_at", precision: nil
     t.integer "user_id"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
+    t.integer "cloned_job_id"
+    t.integer "speed_id"
+    t.integer "delayed_job_id"
   end
 
   create_table "journals", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
     t.text "name"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
   end
 
   create_table "module_score_requests", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "dataset", null: false
-    t.text "error_message"
+    t.string "request_id", null: false
+    t.integer "project_id", null: false
+    t.integer "user_id"
     t.string "item_id", null: false
     t.string "loom_file", null: false
-    t.integer "pid"
-    t.integer "project_id", null: false
-    t.string "request_id", null: false
-    t.string "result_path"
+    t.string "dataset", null: false
     t.string "status", null: false
+    t.string "result_path"
+    t.text "error_message"
+    t.integer "pid"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.integer "user_id"
     t.index ["project_id"], name: "index_module_score_requests_on_project_id"
     t.index ["request_id"], name: "index_module_score_requests_on_request_id", unique: true
     t.index ["status"], name: "index_module_score_requests_on_status"
   end
 
   create_table "ncbi_taxonomy_nodes", primary_key: "tax_id", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.integer "order_tax_id"
     t.integer "parent_tax_id"
+    t.integer "order_tax_id"
     t.string "rank", default: "", null: false
     t.string "scientific_name", default: "", null: false
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["order_tax_id"], name: "index_ncbi_taxonomy_nodes_on_order_tax_id"
     t.index ["parent_tax_id"], name: "index_ncbi_taxonomy_nodes_on_parent_tax_id"
@@ -990,20 +991,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "news_items", force: :cascade do |t|
-    t.text "body", null: false
-    t.datetime "created_at", null: false
-    t.string "github_discussion_node_id"
-    t.integer "github_discussion_number"
-    t.string "github_discussion_url"
-    t.datetime "github_synced_at"
-    t.string "icon", null: false
-    t.string "news_type", default: "announcement", null: false
-    t.boolean "published", default: true, null: false
-    t.datetime "published_at", null: false
-    t.boolean "show_on_welcome", default: true, null: false
     t.string "title", null: false
-    t.datetime "updated_at", null: false
+    t.text "body", null: false
+    t.string "news_type", default: "announcement", null: false
+    t.string "icon", null: false
+    t.datetime "published_at", null: false
+    t.boolean "published", default: true, null: false
+    t.boolean "show_on_welcome", default: true, null: false
     t.integer "user_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "github_discussion_node_id"
+    t.string "github_discussion_url"
+    t.integer "github_discussion_number"
+    t.datetime "github_synced_at"
     t.index ["github_discussion_node_id"], name: "index_news_items_on_github_discussion_node_id", unique: true
     t.index ["github_discussion_number"], name: "index_news_items_on_github_discussion_number"
     t.index ["news_type"], name: "index_news_items_on_news_type"
@@ -1014,288 +1015,288 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "normalizations", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.text "error"
-    t.integer "job_id"
-    t.integer "norm_id"
-    t.integer "num"
-    t.integer "pid"
     t.integer "project_id"
+    t.integer "norm_id"
+    t.text "attrs_json"
+    t.integer "num"
+    t.integer "job_id"
+    t.integer "pid"
+    t.text "error"
     t.integer "status_id"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
   end
 
   create_table "norms", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.text "description"
-    t.boolean "handles_log", default: false
-    t.boolean "hidden", default: false
-    t.text "label"
-    t.text "link"
     t.text "name"
-    t.boolean "output_is_log", default: true
+    t.text "description"
     t.text "program"
-    t.integer "speed_id", limit: 2
+    t.text "attrs_json"
+    t.text "label"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.integer "speed_id", limit: 2
+    t.text "link"
+    t.boolean "output_is_log", default: true
+    t.boolean "hidden", default: false
+    t.boolean "handles_log", default: false
   end
 
   create_table "ontology_term_types", id: :serial, force: :cascade do |t|
-    t.string "auto_from_project"
-    t.text "cell_ontology_ids"
-    t.string "color"
+    t.text "name"
     t.datetime "created_at", precision: nil
-    t.text "description"
-    t.integer "display_order", default: 99
-    t.text "field_group_id"
-    t.string "field_type", default: "col_attr"
-    t.text "free_text_json"
-    t.string "icon"
-    t.text "in_lineage_term_ids"
+    t.datetime "updated_at", precision: nil
     t.text "label"
+    t.text "cell_ontology_ids"
+    t.text "in_lineage_term_ids"
+    t.text "term_ids"
+    t.text "free_text_json"
+    t.integer "rank"
+    t.text "field_group_id"
+    t.text "description"
+    t.string "field_type", default: "col_attr"
+    t.string "auto_from_project"
+    t.string "term_path"
+    t.string "term_format_hint"
     t.string "label_path"
     t.boolean "multi_value", default: false
-    t.text "name"
-    t.integer "rank"
-    t.string "term_format_hint"
-    t.text "term_ids"
-    t.string "term_path"
     t.text "term_valid_values_json"
-    t.datetime "updated_at", precision: nil
+    t.integer "display_order", default: 99
+    t.string "color"
+    t.string "icon"
   end
 
   create_table "orcid_users", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "key"
     t.text "name"
+    t.text "key"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
   end
 
   create_table "organisms", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "ensembl_db_name"
-    t.integer "ensembl_subdomain_id"
-    t.text "genrep_key"
-    t.text "go_short_name"
-    t.integer "latest_ensembl_release"
     t.text "name"
-    t.boolean "obsolete", default: false, null: false
+    t.integer "tax_id"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
+    t.text "genrep_key"
     t.text "short_name"
     t.text "tag"
-    t.integer "tax_id"
-    t.datetime "updated_at", precision: nil
+    t.text "go_short_name"
+    t.integer "ensembl_subdomain_id"
+    t.text "ensembl_db_name"
+    t.integer "latest_ensembl_release"
+    t.boolean "obsolete", default: false, null: false
     t.index ["obsolete"], name: "index_organisms_on_obsolete"
   end
 
   create_table "organisms_bkp", id: :integer, default: nil, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "ensembl_db_name"
-    t.integer "ensembl_subdomain_id"
-    t.text "genrep_key"
-    t.text "go_short_name"
-    t.integer "latest_ensembl_release"
     t.text "name"
+    t.integer "tax_id"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
+    t.text "genrep_key"
     t.text "short_name"
     t.text "tag"
-    t.integer "tax_id"
-    t.datetime "updated_at", precision: nil
+    t.text "go_short_name"
+    t.integer "ensembl_subdomain_id"
+    t.text "ensembl_db_name"
+    t.integer "latest_ensembl_release"
   end
 
   create_table "ot_projects", id: :serial, force: :cascade do |t|
-    t.integer "annot_id"
-    t.integer "cell_ontology_term_id"
-    t.datetime "created_at", precision: nil
-    t.text "free_text"
     t.integer "ontology_term_type_id"
     t.integer "project_id"
+    t.integer "cell_ontology_term_id"
+    t.text "free_text"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.integer "annot_id"
     t.index ["project_id", "annot_id"], name: "idx_ot_projects_project_annot"
   end
 
   create_table "ott_projects", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.boolean "not_applicable"
-    t.integer "ontology_term_type_id"
     t.integer "project_id"
+    t.integer "ontology_term_type_id"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.boolean "not_applicable"
   end
 
   create_table "output_attrs", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
     t.text "name"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
   end
 
   create_table "project_cell_sets", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
     t.text "key"
     t.text "nber_cells"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
     t.index ["key"], name: "key_project_cell_sets"
   end
 
   create_table "project_collections", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.integer "created_by_user_id"
-    t.text "description"
-    t.string "external_key"
-    t.string "source", null: false
-    t.text "source_page_url"
     t.text "title", null: false
+    t.text "description"
+    t.string "source", null: false
+    t.string "external_key"
+    t.text "source_page_url"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.integer "created_by_user_id"
     t.index ["created_by_user_id"], name: "index_project_collections_on_created_by_user_id"
     t.index ["source", "external_key"], name: "index_project_collections_on_source_and_external_key", unique: true, where: "(external_key IS NOT NULL)"
   end
 
   create_table "project_dim_reductions", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.integer "dim_reduction_id"
-    t.integer "duration"
-    t.integer "job_id"
-    t.integer "pid"
     t.integer "project_id"
+    t.integer "dim_reduction_id"
     t.integer "status_id"
+    t.integer "duration"
+    t.datetime "created_at", precision: nil
+    t.text "attrs_json"
+    t.integer "pid"
+    t.integer "job_id"
     t.integer "user_id"
   end
 
   create_table "project_infos", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
     t.integer "info_type_id"
-    t.datetime "updated_at", precision: nil
     t.text "value"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
   end
 
   create_table "project_origins", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.text "label"
     t.text "name", null: false
+    t.text "label"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["name"], name: "index_project_origins_on_name", unique: true
   end
 
   create_table "project_steps", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "error_message"
-    t.integer "job_id"
-    t.text "nber_runs_json", default: "{}"
     t.integer "project_id"
-    t.integer "status_id"
     t.integer "step_id"
+    t.integer "status_id"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.integer "job_id"
+    t.text "error_message"
+    t.text "nber_runs_json", default: "{}"
     t.index ["project_id", "step_id"], name: "index_project_steps_on_project_id_and_step_id", unique: true
   end
 
   create_table "project_tags", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
     t.text "name"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
   end
 
   create_table "project_tags_projects", id: false, force: :cascade do |t|
-    t.integer "project_id"
     t.integer "project_tag_id"
+    t.integer "project_id"
   end
 
   create_table "project_types", id: :serial, force: :cascade do |t|
-    t.boolean "admin_report_only", default: false, null: false
-    t.text "col_label"
-    t.datetime "created_at", precision: nil
     t.text "name"
-    t.text "row_label"
     t.text "tag"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.text "row_label"
+    t.text "col_label"
+    t.boolean "admin_report_only", default: false, null: false
   end
 
   create_table "project_view_logs", force: :cascade do |t|
-    t.datetime "created_at", null: false
     t.bigint "project_id", null: false
-    t.datetime "updated_at", null: false
-    t.date "viewed_on", null: false
     t.string "viewer_token", limit: 128, null: false
+    t.date "viewed_on", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
     t.index ["project_id", "viewed_on"], name: "index_project_view_logs_on_project_id_and_viewed_on"
     t.index ["project_id", "viewer_token", "viewed_on"], name: "idx_pvl_on_project_viewer_day", unique: true
     t.index ["project_id"], name: "index_project_view_logs_on_project_id"
   end
 
   create_table "projects", id: :serial, force: :cascade do |t|
-    t.integer "archive_status_id", default: 1
-    t.boolean "being_cloned", default: false, null: false
-    t.boolean "being_deleted", default: false
-    t.boolean "being_published", default: false, null: false
-    t.boolean "being_validated", default: false, null: false
-    t.integer "cloned_project_id"
+    t.text "name"
+    t.text "key"
+    t.text "input_filename"
+    t.text "group_filename"
+    t.integer "organism_id", default: 1
+    t.integer "norm_id"
+    t.text "norm_attrs_json"
+    t.integer "filter_id"
+    t.text "filter_attrs_json"
+    t.integer "step", limit: 2
+    t.integer "status_id", default: 1
+    t.integer "user_id"
     t.datetime "created_at", precision: nil
-    t.string "creator_ip"
-    t.text "de_filter_json"
+    t.datetime "updated_at", precision: nil
+    t.integer "step_id", default: 1
+    t.text "parsing_attrs_json"
+    t.integer "duration"
     t.integer "delayed_job_id"
-    t.text "description"
+    t.text "error_message"
+    t.integer "pid"
+    t.boolean "public", default: false
+    t.integer "filter_method_id"
+    t.text "filter_method_attrs_json"
+    t.integer "session_id"
+    t.integer "cloned_project_id"
+    t.boolean "sandbox", default: false
+    t.integer "pmid"
+    t.integer "nber_rows"
+    t.integer "nber_cols"
+    t.string "extension", limit: 6, default: "txt"
+    t.text "de_filter_json"
+    t.text "ge_filter_json"
+    t.integer "parsing_job_id"
+    t.integer "normalization_job_id"
+    t.integer "filtering_job_id"
+    t.text "read_access"
+    t.text "write_access"
+    t.text "graph_json"
+    t.integer "version_id"
     t.bigint "disk_size"
     t.bigint "disk_size_archive"
-    t.bigint "disk_size_archived"
-    t.text "doi"
-    t.integer "duration"
-    t.text "error_message"
-    t.integer "exported_project_id"
-    t.string "extension", limit: 6, default: "txt"
-    t.text "extra_info"
-    t.text "filter_attrs_json"
-    t.integer "filter_id"
-    t.text "filter_method_attrs_json"
-    t.integer "filter_method_id"
-    t.integer "filtering_job_id"
-    t.datetime "frozen_at", precision: nil
-    t.integer "fu_id"
-    t.text "ge_filter_json"
-    t.text "graph_json"
-    t.text "group_filename"
-    t.string "input_content_sha256", limit: 64
-    t.text "input_filename"
-    t.string "input_preparsing_fingerprint", limit: 64
-    t.text "key"
-    t.text "landing_page_json", default: "{}"
-    t.text "landing_page_key"
-    t.text "last_day_session_ids", default: ""
     t.datetime "modified_at", precision: nil
-    t.text "name"
-    t.integer "nber_cloned", default: 0
-    t.integer "nber_cols"
-    t.integer "nber_rows"
+    t.integer "archive_status_id", default: 1
+    t.bigint "disk_size_archived"
+    t.datetime "viewed_at", precision: nil, default: -> { "now()" }
     t.text "nber_runs_json", default: "{}"
-    t.integer "nber_views", default: 0
-    t.text "norm_attrs_json"
-    t.integer "norm_id"
-    t.integer "normalization_job_id"
-    t.integer "organism_id", default: 1
-    t.text "parsing_attrs_json"
-    t.integer "parsing_job_id"
-    t.integer "pid"
-    t.integer "pmid"
-    t.integer "project_cell_set_id"
-    t.bigint "project_collection_id"
-    t.integer "project_origin_id", default: 1, null: false
-    t.integer "project_type_id"
-    t.boolean "public", default: false
-    t.datetime "public_at", precision: nil
     t.integer "public_id"
-    t.text "publication_error"
-    t.text "read_access"
-    t.text "replaced_by_comment"
+    t.datetime "public_at", precision: nil
+    t.datetime "frozen_at", precision: nil
     t.text "replaced_by_project_key"
-    t.integer "root_project_id"
-    t.boolean "sandbox", default: false
-    t.integer "session_id"
-    t.integer "status_id", default: 1
-    t.integer "step", limit: 2
-    t.integer "step_id", default: 1
+    t.text "replaced_by_comment"
+    t.text "last_day_session_ids", default: ""
+    t.integer "nber_views", default: 0
+    t.integer "nber_cloned", default: 0
+    t.integer "fu_id"
+    t.boolean "being_deleted", default: false
     t.text "technology"
     t.text "tissue"
-    t.datetime "updated_at", precision: nil
-    t.integer "user_id"
-    t.integer "version_id"
-    t.datetime "viewed_at", precision: nil, default: -> { "now()" }
-    t.text "write_access"
+    t.text "extra_info"
+    t.text "description"
+    t.text "landing_page_json", default: "{}"
+    t.integer "root_project_id"
+    t.integer "project_cell_set_id"
+    t.integer "project_type_id"
+    t.text "doi"
+    t.text "landing_page_key"
+    t.integer "project_origin_id", default: 1, null: false
+    t.string "input_content_sha256", limit: 64
+    t.bigint "project_collection_id"
+    t.string "input_preparsing_fingerprint", limit: 64
+    t.boolean "being_published", default: false, null: false
+    t.text "publication_error"
+    t.boolean "being_cloned", default: false, null: false
+    t.boolean "being_validated", default: false, null: false
+    t.string "creator_ip"
+    t.integer "exported_project_id"
     t.index ["exported_project_id"], name: "index_projects_on_exported_project_id"
     t.index ["input_content_sha256", "input_preparsing_fingerprint"], name: "index_projects_on_input_sha_and_preparsing_fp"
     t.index ["input_content_sha256"], name: "index_projects_on_input_content_sha256"
@@ -1311,125 +1312,125 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "provider_projects", id: :serial, force: :cascade do |t|
-    t.text "attrs_json", default: "{}"
-    t.text "comment"
-    t.text "filename"
     t.text "key"
-    t.boolean "not_add_in_asap", default: false
     t.integer "provider_id"
     t.text "title"
+    t.text "attrs_json", default: "{}"
+    t.text "comment"
+    t.boolean "not_add_in_asap", default: false
+    t.text "filename"
   end
 
   create_table "providers", id: :serial, force: :cascade do |t|
-    t.text "attrs_json", default: "{}"
-    t.text "description"
     t.text "name"
-    t.text "tag"
-    t.text "url"
     t.text "url_mask"
+    t.text "tag"
+    t.text "attrs_json", default: "{}"
+    t.text "url"
+    t.text "description"
   end
 
   create_table "ratings", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.boolean "display_publicly", default: false, null: false
-    t.text "review"
-    t.integer "stars", null: false
-    t.datetime "updated_at", null: false
-    t.boolean "use_for_funding", default: false, null: false
     t.integer "user_id", null: false
+    t.integer "stars", null: false
+    t.text "review"
+    t.boolean "display_publicly", default: false, null: false
+    t.boolean "use_for_funding", default: false, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
     t.index ["stars"], name: "index_ratings_on_stars"
     t.index ["user_id"], name: "index_ratings_on_user_id"
   end
 
   create_table "reqs", id: :serial, force: :cascade do |t|
+    t.integer "project_id"
+    t.integer "step_id"
+    t.integer "std_method_id"
     t.text "attrs_json", default: "{}"
-    t.datetime "created_at", precision: nil
-    t.integer "delayed_job_id"
-    t.text "error"
     t.integer "num"
     t.integer "pid"
-    t.integer "project_id"
-    t.integer "std_method_id"
-    t.integer "step_id"
+    t.text "error"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
+    t.integer "delayed_job_id"
   end
 
   create_table "runs", id: :serial, force: :cascade do |t|
-    t.boolean "async", default: true
-    t.text "attrs_json", default: "{}"
-    t.text "children_run_ids", default: ""
-    t.integer "cloned_run_id"
-    t.text "command_json"
-    t.datetime "created_at", precision: nil
-    t.bigint "docker_build_id"
-    t.float "duration"
-    t.text "error"
-    t.text "lineage_run_ids", default: ""
-    t.float "max_ram"
-    t.integer "nber_cores"
-    t.integer "num"
-    t.text "output_json", default: "{}"
-    t.integer "pid"
-    t.text "pipeline_parent_run_ids", default: ""
-    t.bigint "pred_max_ram"
-    t.text "pred_params_json"
-    t.integer "pred_process_duration"
-    t.float "process_duration"
-    t.integer "process_idle_duration"
     t.integer "project_id"
-    t.integer "req_id"
-    t.boolean "return_stdout", default: false
-    t.text "run_children_json"
-    t.text "run_parents_json"
-    t.integer "slurm_job_id"
-    t.datetime "start_time", precision: nil
-    t.integer "status_id"
-    t.integer "std_method_id"
     t.integer "step_id"
-    t.datetime "submitted_at", precision: nil
+    t.integer "std_method_id"
+    t.text "attrs_json", default: "{}"
+    t.text "output_json", default: "{}"
+    t.integer "num"
+    t.integer "pid"
+    t.text "error"
+    t.integer "status_id"
+    t.text "run_parents_json"
+    t.text "run_children_json"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
+    t.integer "req_id"
+    t.float "duration"
+    t.float "max_ram"
+    t.text "command_json"
+    t.integer "nber_cores"
+    t.boolean "async", default: true
+    t.float "process_duration"
+    t.text "lineage_run_ids", default: ""
+    t.text "children_run_ids", default: ""
+    t.integer "process_idle_duration"
     t.float "waiting_duration"
+    t.datetime "start_time", precision: nil
+    t.datetime "submitted_at", precision: nil
+    t.text "pred_params_json"
+    t.boolean "return_stdout", default: false
+    t.bigint "pred_max_ram"
+    t.integer "pred_process_duration"
+    t.text "pipeline_parent_run_ids", default: ""
+    t.integer "cloned_run_id"
+    t.integer "slurm_job_id"
+    t.bigint "docker_build_id"
     t.index ["docker_build_id"], name: "index_runs_on_docker_build_id"
     t.index ["project_id"], name: "index_runs_on_project_id"
     t.index ["slurm_job_id"], name: "index_runs_on_slurm_job_id"
   end
 
   create_table "sample_identifiers", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "identifier"
     t.integer "identifier_type_id"
+    t.text "identifier"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
   end
 
   create_table "selections", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.boolean "edited", default: false
     t.text "label"
     t.integer "manual_num"
-    t.text "md5"
-    t.integer "nb_items"
     t.integer "obj_id"
     t.integer "obj_num"
+    t.integer "nb_items"
     t.integer "project_id"
-    t.integer "selection_type_id", default: 1
+    t.boolean "edited", default: false
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.text "md5"
+    t.integer "selection_type_id", default: 1
     t.integer "user_id"
   end
 
   create_table "server_errors", force: :cascade do |t|
-    t.text "backtrace"
-    t.datetime "created_at", null: false
     t.string "exception_class", default: "UnknownError", null: false
-    t.text "filtered_params"
-    t.string "http_method", limit: 16, default: "GET", null: false
-    t.string "ip", limit: 64
     t.text "message"
+    t.text "backtrace"
     t.string "path", default: "", null: false
-    t.string "request_id", limit: 64
+    t.string "http_method", limit: 16, default: "GET", null: false
     t.integer "status", default: 500, null: false
-    t.datetime "updated_at", null: false
-    t.text "user_agent"
+    t.string "request_id", limit: 64
+    t.string "ip", limit: 64
     t.bigint "user_id"
+    t.text "user_agent"
+    t.text "filtered_params"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
     t.index ["created_at"], name: "index_server_errors_on_created_at"
     t.index ["exception_class"], name: "index_server_errors_on_exception_class"
     t.index ["status"], name: "index_server_errors_on_status"
@@ -1437,65 +1438,65 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "sessions", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "data"
     t.string "session_id", null: false
+    t.text "data"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
     t.index ["session_id"], name: "index_sessions_on_session_id", unique: true
     t.index ["updated_at"], name: "index_sessions_on_updated_at"
   end
 
   create_table "shares", id: :serial, force: :cascade do |t|
+    t.integer "project_id"
+    t.integer "user_id"
+    t.text "email"
+    t.boolean "view_perm", default: true
     t.boolean "analyze_perm", default: false
     t.boolean "clone_perm"
-    t.datetime "created_at", precision: nil
     t.boolean "download_perm"
-    t.text "email"
-    t.boolean "export_perm", default: false
-    t.integer "project_id"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
-    t.integer "user_id"
-    t.boolean "view_perm", default: true
+    t.boolean "export_perm", default: false
     t.index ["project_id"], name: "index_shares_on_project_id"
   end
 
   create_table "solid_queue_blocked_executions", force: :cascade do |t|
-    t.string "concurrency_key", null: false
-    t.datetime "created_at", null: false
-    t.datetime "expires_at", null: false
     t.bigint "job_id", null: false
-    t.integer "priority", default: 0, null: false
     t.string "queue_name", null: false
+    t.integer "priority", default: 0, null: false
+    t.string "concurrency_key", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "created_at", null: false
     t.index ["concurrency_key", "priority", "job_id"], name: "index_solid_queue_blocked_executions_for_release"
     t.index ["expires_at", "concurrency_key"], name: "index_solid_queue_blocked_executions_for_maintenance"
     t.index ["job_id"], name: "index_solid_queue_blocked_executions_on_job_id", unique: true
   end
 
   create_table "solid_queue_claimed_executions", force: :cascade do |t|
-    t.datetime "created_at", null: false
     t.bigint "job_id", null: false
     t.bigint "process_id"
+    t.datetime "created_at", null: false
     t.index ["job_id"], name: "index_solid_queue_claimed_executions_on_job_id", unique: true
     t.index ["process_id", "job_id"], name: "index_solid_queue_claimed_executions_on_process_id_and_job_id"
   end
 
   create_table "solid_queue_failed_executions", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.text "error"
     t.bigint "job_id", null: false
+    t.text "error"
+    t.datetime "created_at", null: false
     t.index ["job_id"], name: "index_solid_queue_failed_executions_on_job_id", unique: true
   end
 
   create_table "solid_queue_jobs", force: :cascade do |t|
-    t.string "active_job_id"
-    t.text "arguments"
+    t.string "queue_name", null: false
     t.string "class_name", null: false
+    t.text "arguments"
+    t.integer "priority", default: 0, null: false
+    t.string "active_job_id"
+    t.datetime "scheduled_at"
+    t.datetime "finished_at"
     t.string "concurrency_key"
     t.datetime "created_at", null: false
-    t.datetime "finished_at"
-    t.integer "priority", default: 0, null: false
-    t.string "queue_name", null: false
-    t.datetime "scheduled_at"
     t.datetime "updated_at", null: false
     t.index ["active_job_id"], name: "index_solid_queue_jobs_on_active_job_id"
     t.index ["class_name"], name: "index_solid_queue_jobs_on_class_name"
@@ -1505,102 +1506,102 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "solid_queue_pauses", force: :cascade do |t|
-    t.datetime "created_at", null: false
     t.string "queue_name", null: false
+    t.datetime "created_at", null: false
     t.index ["queue_name"], name: "index_solid_queue_pauses_on_queue_name", unique: true
   end
 
   create_table "solid_queue_processes", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.string "hostname"
     t.string "kind", null: false
     t.datetime "last_heartbeat_at", null: false
-    t.text "metadata"
-    t.string "name", null: false
-    t.integer "pid", null: false
     t.bigint "supervisor_id"
+    t.integer "pid", null: false
+    t.string "hostname"
+    t.text "metadata"
+    t.datetime "created_at", null: false
+    t.string "name", null: false
     t.index ["last_heartbeat_at"], name: "index_solid_queue_processes_on_last_heartbeat_at"
     t.index ["name", "supervisor_id"], name: "index_solid_queue_processes_on_name_and_supervisor_id", unique: true
     t.index ["supervisor_id"], name: "index_solid_queue_processes_on_supervisor_id"
   end
 
   create_table "solid_queue_ready_executions", force: :cascade do |t|
-    t.datetime "created_at", null: false
     t.bigint "job_id", null: false
-    t.integer "priority", default: 0, null: false
     t.string "queue_name", null: false
+    t.integer "priority", default: 0, null: false
+    t.datetime "created_at", null: false
     t.index ["job_id"], name: "index_solid_queue_ready_executions_on_job_id", unique: true
     t.index ["priority", "job_id"], name: "index_solid_queue_poll_all"
     t.index ["queue_name", "priority", "job_id"], name: "index_solid_queue_poll_by_queue"
   end
 
   create_table "solid_queue_recurring_executions", force: :cascade do |t|
-    t.datetime "created_at", null: false
     t.bigint "job_id", null: false
-    t.datetime "run_at", null: false
     t.string "task_key", null: false
+    t.datetime "run_at", null: false
+    t.datetime "created_at", null: false
     t.index ["job_id"], name: "index_solid_queue_recurring_executions_on_job_id", unique: true
     t.index ["task_key", "run_at"], name: "index_solid_queue_recurring_executions_on_task_key_and_run_at", unique: true
   end
 
   create_table "solid_queue_recurring_tasks", force: :cascade do |t|
-    t.text "arguments"
-    t.string "class_name"
-    t.string "command", limit: 2048
-    t.datetime "created_at", null: false
-    t.text "description"
     t.string "key", null: false
-    t.integer "priority", default: 0
-    t.string "queue_name"
     t.string "schedule", null: false
+    t.string "command", limit: 2048
+    t.string "class_name"
+    t.text "arguments"
+    t.string "queue_name"
+    t.integer "priority", default: 0
     t.boolean "static", default: true, null: false
+    t.text "description"
+    t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["key"], name: "index_solid_queue_recurring_tasks_on_key", unique: true
     t.index ["static"], name: "index_solid_queue_recurring_tasks_on_static"
   end
 
   create_table "solid_queue_scheduled_executions", force: :cascade do |t|
-    t.datetime "created_at", null: false
     t.bigint "job_id", null: false
-    t.integer "priority", default: 0, null: false
     t.string "queue_name", null: false
+    t.integer "priority", default: 0, null: false
     t.datetime "scheduled_at", null: false
+    t.datetime "created_at", null: false
     t.index ["job_id"], name: "index_solid_queue_scheduled_executions_on_job_id", unique: true
     t.index ["scheduled_at", "priority", "job_id"], name: "index_solid_queue_dispatch_all"
   end
 
   create_table "solid_queue_semaphores", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.datetime "expires_at", null: false
     t.string "key", null: false
-    t.datetime "updated_at", null: false
     t.integer "value", default: 1, null: false
+    t.datetime "expires_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
     t.index ["expires_at"], name: "index_solid_queue_semaphores_on_expires_at"
     t.index ["key", "value"], name: "index_solid_queue_semaphores_on_key_and_value"
     t.index ["key"], name: "index_solid_queue_semaphores_on_key", unique: true
   end
 
   create_table "speeds", id: :serial, force: :cascade do |t|
-    t.text "logo"
     t.text "name"
+    t.text "logo"
   end
 
   create_table "standalone_compliance_checks", force: :cascade do |t|
-    t.boolean "admin_run", default: false, null: false
+    t.integer "user_id"
+    t.string "filename"
+    t.text "source_url"
+    t.string "format"
+    t.string "schema_id"
+    t.boolean "passed", default: false, null: false
+    t.string "status", default: "completed", null: false
+    t.jsonb "result_json", default: {}, null: false
+    t.string "task_id"
+    t.integer "fu_id"
     t.datetime "checked_at", null: false
     t.datetime "created_at", null: false
-    t.string "creator_ip"
-    t.string "filename"
-    t.string "format"
-    t.integer "fu_id"
-    t.boolean "passed", default: false, null: false
-    t.jsonb "result_json", default: {}, null: false
-    t.string "schema_id"
-    t.text "source_url"
-    t.string "status", default: "completed", null: false
-    t.string "task_id"
     t.datetime "updated_at", null: false
-    t.integer "user_id"
+    t.boolean "admin_run", default: false, null: false
+    t.string "creator_ip"
     t.index ["admin_run"], name: "index_standalone_compliance_checks_on_admin_run"
     t.index ["checked_at"], name: "index_standalone_compliance_checks_on_checked_at"
     t.index ["filename"], name: "index_standalone_compliance_checks_on_filename"
@@ -1613,137 +1614,137 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "statuses", id: :serial, force: :cascade do |t|
+    t.text "name"
+    t.text "label"
+    t.text "color"
+    t.text "img_extension"
+    t.text "icon_class"
+    t.integer "rank"
+    t.text "icon_spin"
     t.text "active_color"
+    t.text "inactive_color"
     t.text "badge_bg_class"
     t.text "badge_text_class"
-    t.text "color"
     t.text "display_label"
-    t.text "icon_class"
-    t.text "icon_spin"
-    t.text "img_extension"
-    t.text "inactive_color"
-    t.text "label"
-    t.text "name"
-    t.integer "rank"
   end
 
   create_table "std_methods", id: :serial, force: :cascade do |t|
-    t.boolean "async"
-    t.text "attr_layout_json", default: "[]"
-    t.text "attrs_json", default: "{}"
-    t.text "command_json", default: "{}"
-    t.datetime "created_at", precision: nil
-    t.text "description"
-    t.integer "docker_image_id"
-    t.text "label"
-    t.text "link"
     t.text "name"
-    t.integer "nber_cores"
-    t.text "obj_attrs_json", default: "{}"
-    t.boolean "obsolete", default: false
-    t.text "output_json", default: "{}"
-    t.text "program"
-    t.text "short_label"
-    t.integer "speed_id", limit: 2
+    t.text "label"
     t.integer "step_id"
+    t.text "description"
+    t.text "program"
+    t.text "link"
+    t.integer "speed_id", limit: 2
+    t.text "attrs_json", default: "{}"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.text "obj_attrs_json", default: "{}"
+    t.text "short_label"
+    t.text "output_json", default: "{}"
+    t.text "attr_layout_json", default: "[]"
+    t.boolean "async"
+    t.text "command_json", default: "{}"
+    t.integer "nber_cores"
     t.integer "version_id"
+    t.boolean "obsolete", default: false
+    t.integer "docker_image_id"
   end
 
   create_table "std_runs", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.text "error"
-    t.integer "job_id"
-    t.integer "num"
-    t.text "output_json", default: "{}"
-    t.integer "pid"
     t.integer "project_id"
-    t.integer "status_id"
-    t.integer "std_method_id"
     t.integer "step_id"
+    t.integer "std_method_id"
+    t.text "attrs_json"
+    t.integer "num"
+    t.integer "job_id"
+    t.integer "pid"
+    t.text "error"
+    t.integer "status_id"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
+    t.text "output_json", default: "{}"
   end
 
   create_table "steps", id: :serial, force: :cascade do |t|
-    t.boolean "admin", default: false
-    t.text "attrs_json", default: "{}"
-    t.text "color"
-    t.text "command_json", default: "{}"
-    t.text "dashboard_card_json", default: "{}"
+    t.text "name"
+    t.text "label"
+    t.text "obj_name"
     t.text "description"
-    t.integer "docker_image_id"
+    t.integer "rank"
     t.text "group_name"
+    t.text "method_obj_name"
+    t.boolean "is_std_step", default: true
+    t.text "method_attrs_json", default: "{}"
+    t.text "attrs_json", default: "{}"
+    t.text "output_json", default: "{}"
     t.boolean "has_std_dashboard", default: true
     t.boolean "has_std_form", default: true
     t.boolean "has_std_view", default: true
-    t.boolean "hidden", default: false
-    t.boolean "is_std_step", default: true
-    t.text "label"
-    t.text "method_attrs_json", default: "{}"
-    t.text "method_obj_name"
-    t.boolean "multiple_runs", default: true
-    t.text "name"
-    t.text "obj_name"
-    t.text "output_json", default: "{}"
-    t.integer "rank"
-    t.text "show_view_json", default: "{}"
-    t.text "tag"
     t.integer "version_id"
+    t.text "command_json", default: "{}"
+    t.boolean "multiple_runs", default: true
+    t.text "dashboard_card_json", default: "{}"
+    t.text "show_view_json", default: "{}"
+    t.boolean "hidden", default: false
     t.text "warnings"
+    t.text "color"
+    t.text "tag"
+    t.boolean "admin", default: false
+    t.integer "docker_image_id"
   end
 
   create_table "tmp_fos", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "ext"
-    t.text "filepath"
-    t.bigint "filesize"
     t.integer "project_id"
     t.integer "run_id"
-    t.datetime "updated_at", precision: nil
+    t.text "filepath"
+    t.bigint "filesize"
     t.integer "user_id"
+    t.datetime "updated_at", precision: nil
+    t.datetime "created_at", precision: nil
+    t.text "ext"
   end
 
   create_table "tmp_genes", id: :serial, force: :cascade do |t|
-    t.text "alt_names"
+    t.text "ensembl_id"
+    t.integer "ncbi_gene_id"
+    t.text "name"
     t.text "biotype"
     t.text "chr"
-    t.datetime "created_at", precision: nil
-    t.text "description"
-    t.text "ensembl_id"
     t.integer "gene_length"
-    t.integer "latest_ensembl_release"
-    t.text "name"
-    t.integer "ncbi_gene_id"
-    t.text "obsolete_alt_names"
-    t.integer "organism_id"
     t.integer "sum_exon_length"
+    t.integer "organism_id"
+    t.text "alt_names"
+    t.integer "latest_ensembl_release"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.text "obsolete_alt_names"
+    t.text "description"
     t.index ["ensembl_id"], name: "tmp_genes_ensembl_id_idx"
     t.index ["name"], name: "tmp_genes_name_idx"
   end
 
   create_table "todo_types", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "label"
     t.text "name"
+    t.text "label"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
   end
 
   create_table "todo_votes", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
     t.integer "todo_id"
     t.integer "user_id"
+    t.datetime "created_at", precision: nil
   end
 
   create_table "todos", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "description"
-    t.integer "nber_votes", default: 0
     t.integer "status_id", default: 1
     t.text "title"
-    t.integer "todo_type_id"
+    t.text "description"
+    t.integer "nber_votes", default: 0
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.integer "todo_type_id"
     t.integer "user_id"
     t.boolean "validated", default: false
   end
@@ -1753,89 +1754,89 @@ ActiveRecord::Schema[8.1].define(version: 2026_11_16_120000) do
   end
 
   create_table "tools", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "description"
-    t.text "label"
     t.text "name"
-    t.text "package"
-    t.text "step_ids"
-    t.text "tag"
-    t.text "title"
-    t.integer "tool_type_id"
+    t.text "description"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.text "label"
+    t.text "step_ids"
+    t.integer "tool_type_id"
+    t.text "tag"
+    t.text "package"
+    t.text "title"
     t.text "url"
   end
 
   create_table "trajectories", id: :serial, force: :cascade do |t|
-    t.text "attrs_json"
-    t.datetime "created_at", precision: nil
-    t.text "error"
-    t.integer "job_id"
-    t.integer "num"
-    t.integer "pid"
     t.integer "project_id"
+    t.text "attrs_json"
+    t.integer "num"
+    t.integer "job_id"
+    t.integer "pid"
+    t.text "error"
     t.integer "status_id"
+    t.datetime "created_at", precision: nil
     t.integer "user_id"
   end
 
   create_table "upload_types", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
     t.text "name"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
   end
 
   create_table "uploads", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.text "name"
     t.integer "project_id"
-    t.text "status"
-    t.datetime "updated_at", precision: nil
-    t.text "upload_content_type"
-    t.text "upload_file_name"
-    t.integer "upload_file_size"
     t.integer "upload_type"
+    t.text "name"
+    t.text "status"
+    t.text "upload_file_name"
+    t.text "upload_content_type"
+    t.integer "upload_file_size"
     t.datetime "upload_updated_at", precision: nil
     t.boolean "visible"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
   end
 
   create_table "user_types", id: :serial, force: :cascade do |t|
+    t.text "name"
     t.integer "max_nber_cpus"
     t.integer "max_total_memory"
-    t.text "name"
   end
 
   create_table "users", id: :serial, force: :cascade do |t|
-    t.datetime "created_at", precision: nil
-    t.datetime "current_sign_in_at", precision: nil
-    t.inet "current_sign_in_ip"
-    t.text "displayed_name"
     t.string "email", default: "", null: false
     t.string "encrypted_password", default: "", null: false
-    t.datetime "last_sign_in_at", precision: nil
-    t.inet "last_sign_in_ip"
-    t.integer "orcid_user_id"
-    t.datetime "remember_created_at", precision: nil
-    t.datetime "reset_password_sent_at", precision: nil
     t.string "reset_password_token"
+    t.datetime "reset_password_sent_at", precision: nil
+    t.datetime "remember_created_at", precision: nil
     t.integer "sign_in_count", default: 0, null: false
+    t.datetime "current_sign_in_at", precision: nil
+    t.datetime "last_sign_in_at", precision: nil
+    t.inet "current_sign_in_ip"
+    t.inet "last_sign_in_ip"
+    t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+    t.integer "orcid_user_id"
+    t.text "displayed_name"
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["reset_password_token"], name: "index_users_on_reset_password_token", unique: true
   end
 
   create_table "versions", id: :serial, force: :cascade do |t|
-    t.boolean "activated", default: false
-    t.datetime "activated_at", precision: nil
-    t.boolean "beta", default: true
-    t.datetime "created_at", precision: nil
+    t.datetime "release_date", precision: nil
     t.text "description"
+    t.text "tools_json"
+    t.datetime "created_at", precision: nil
+    t.datetime "updated_at", precision: nil
+    t.integer "tool_type_id"
+    t.integer "step_id"
     t.text "docker_json"
     t.text "env_json"
-    t.datetime "release_date", precision: nil
-    t.integer "step_id"
-    t.integer "tool_type_id"
-    t.text "tools_json"
-    t.datetime "updated_at", precision: nil
+    t.boolean "activated", default: false
+    t.boolean "beta", default: true
+    t.datetime "activated_at", precision: nil
   end
 
   add_foreign_key "active_runs", "docker_builds"

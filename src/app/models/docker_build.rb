@@ -183,8 +183,10 @@ class DockerBuild < ApplicationRecord
   end
   private :usage_label_for
 
-  # Resolve/create the build for the image ref that will actually run (e.g. fabdavid/asap_run:v8).
-  # Digest is the live RepoDigest; tag prefers a local vX.Y patch tag when present.
+  # Resolve/create the build for the image ref that will actually run: either a pinned patch
+  # ref (fabdavid/asap_run:v8.7, see DockerImage.runtime_ref) or a major ref (…:v8).
+  # Digest is the live RepoDigest; the catalog row is the major tag. For a major ref the
+  # build tag prefers a local vX.Y patch tag on the same image when present.
   def self.find_or_create_for_image_ref!(image_ref)
     ref = image_ref.to_s.strip
     raise ArgumentError, 'Docker image ref is required' if ref.blank?
@@ -193,13 +195,14 @@ class DockerBuild < ApplicationRecord
     existing = find_by(digest: digest)
     return existing if existing
 
-    name, major_tag = ref.split(':', 2)
-    raise ArgumentError, "Docker image ref must be name:tag (got #{ref.inspect})" if name.blank? || major_tag.blank?
+    name, ref_tag = ref.split(':', 2)
+    raise ArgumentError, "Docker image ref must be name:tag (got #{ref.inspect})" if name.blank? || ref_tag.blank?
 
+    major_tag = DockerImage.major_tag_of(ref_tag)
     docker_image = DockerImage.find_by(name: name, tag: major_tag)
-    raise "DockerImage not found for #{ref.inspect}" unless docker_image
+    raise "DockerImage not found for #{name}:#{major_tag}" unless docker_image
 
-    patch_tag = patch_tag_from_local_image!(ref) || major_tag
+    patch_tag = ref_tag.match?(DockerImage::PATCH_TAG_RE) ? ref_tag : (patch_tag_from_local_image!(ref) || major_tag)
     create!(docker_image: docker_image, tag: patch_tag, digest: digest)
   rescue ActiveRecord::RecordNotUnique
     find_by!(digest: digest)

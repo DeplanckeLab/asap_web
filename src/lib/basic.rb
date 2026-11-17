@@ -280,7 +280,7 @@ module Basic
       command = sanitize_export_command_paths(command, project, project_dir)
       command = command.gsub(/postgres\:\d+\/asap_data_v\d+/, ('$ASAP_DATA_DB_HOST:$ASAP_DATA_DB_PORT/' + asap_data_db))
       docker_image_name = ""
-      if h_command['docker_call'] and m = h_command['docker_call'].match(/([\w\d\:\/]+) -c$/)
+      if h_command['docker_call'] and m = h_command['docker_call'].match(/([\w\d\:\/.-]+) -c$/)
         docker_image_name = m[1]
       end
       docker_image_url = dockerhub_layers_url(docker_image_name)
@@ -7017,7 +7017,7 @@ module Basic
       end
 
       logger.debug(h_env_docker_image.to_json)
-      image_name = h_env_docker_image['name'] + ":" + h_env_docker_image['tag']
+      image_name = DockerImage.runtime_ref_for(h_env_docker_image)
       docker_build = DockerBuild.find_or_create_for_image_ref!(image_name)
       h_cmd = {
         :host_name => host_name,
@@ -7066,7 +7066,7 @@ module Basic
         )
         version = h_p[:project].version
         asap_docker_image = get_asap_docker(version)
-        asap_docker_name = "fabdavid/asap_run:#{asap_docker_image.tag}"
+        asap_docker_name = asap_docker_image.runtime_ref
 #        cmd = "docker run --entrypoint '/bin/sh' --rm -v /data/asap2:/data/asap2 -v /srv/asap_run/srv:/srv fabdavid/asap_run:v#{h_p[:project].version_id} -c 'Rscript prediction.tool.2.R predict /data/asap2/pred_models/#{h_p[:project].version_id} #{run.std_method_id} " + "#{h_var['nber_rows']} #{h_var['nber_cols']} 2>&1'"
         vol = Basic.prediction_docker_volume_mount_arg
         models_base = Basic.prediction_models_path_for_r

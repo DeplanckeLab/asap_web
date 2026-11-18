@@ -247,7 +247,13 @@ module ExternalCatalog
     def report_progress!(step:, **extra)
       return if @progress_candidate_id.blank?
 
+      raise_if_cancelled!
       ExternalCatalog::ImportProgress.report(@progress_candidate_id, step: step, **extra)
+    end
+
+    # Guest started another sandbox project meanwhile: stop before touching its sandbox.
+    def raise_if_cancelled!
+      ExternalCatalog::ImportProgress.raise_if_cancelled!(@progress_candidate_id) if @progress_candidate_id.present?
     end
 
     def mark_pipeline!(**attrs)
@@ -943,7 +949,11 @@ module ExternalCatalog
 
     def create_project!(entry, fu, organism, parsing_attrs, preparsing_fp)
       ptype = project_type_for(entry)
-      replace_existing_sandbox_project! if @sandbox
+      if @sandbox
+        # Last check: replacing now would destroy the sandbox project the guest just created.
+        raise_if_cancelled!
+        replace_existing_sandbox_project!
+      end
 
       project = Project.new(
         user_id: @user.id,
@@ -1142,6 +1152,7 @@ module ExternalCatalog
       deadline = Time.now + @parse_timeout_sec
 
       loop do
+        raise_if_cancelled!
         project.reload
         run = latest_parsing_run(project)
         if run && [failed_id, stopped_id].include?(run.status_id)

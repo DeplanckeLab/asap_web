@@ -11,10 +11,16 @@ class ExternalCatalogCandidatesController < ApplicationController
   before_action :ensure_synced_reference_data_writable!, only: %i[destroy]
   before_action :set_candidate, only: %i[show create_project destroy import_status] + MATRIX_CHOICE_ACTIONS
   before_action :release_expired_matrix_choice, only: %i[show create_project import_status] + MATRIX_CHOICE_ACTIONS
+  before_action :release_dead_import, only: %i[show create_project import_status]
 
   PER_PAGE = 25
   # Same technical owner as projects#create for guest sandboxes.
   GUEST_SANDBOX_USER_ID = User::GUEST_SANDBOX_USER_ID
+  # Session key: the candidate whose import this browser started (guests have no import_user_id of their own).
+  STARTED_IMPORT_SESSION_KEY = :external_catalog_import_started_id
+  # Between create_project/choose_matrix setting importing and the job row existing, the import looks dead.
+  DEAD_IMPORT_GRACE = 1.minute
+  DEAD_IMPORT_MESSAGE = 'The import stopped unexpectedly (the import worker was interrupted). Please try again.'
 
   def index
     @source = params[:source].to_s.presence
@@ -70,7 +76,8 @@ class ExternalCatalogCandidatesController < ApplicationController
     @watch_import =
       ActiveModel::Type::Boolean.new.cast(params[:importing]) ||
       @auto_start_guest_import ||
-      @matrix_choice_owner
+      @matrix_choice_owner ||
+      own_import_running?
   end
 
   def create_project
@@ -134,7 +141,13 @@ class ExternalCatalogCandidatesController < ApplicationController
 
     resume = @candidate.import_resume
     guest = resume['sandbox_key_digest'].present?
-    @candidate.update!(import_status: 'importing', import_error: nil)
+    @candidate.update!(
+      import_status: 'importing',
+      import_error: nil,
+      import_resume_json: resume.merge(ExternalCatalogCandidate::IMPORT_JOB_MARKER => true).to_json
+    )
+    ExternalCatalog::ImportProgress.clear_cancel(@candidate.id)
+    remember_started_import!
     ExternalCatalog::ImportProgress.report(@candidate.id, step: 'preparsing', message: "Importing with #{sel}...")
     ExternalCatalogImportCandidateJob.perform_later(
       @candidate.id,
@@ -195,6 +208,33 @@ class ExternalCatalogCandidatesController < ApplicationController
     @candidate.cancel_matrix_choice! if @candidate.matrix_choice_expired?
   end
 
+  # importing with no live job (worker killed or restarted mid-import): without this the candidate
+  # stays importing forever and the overlay of whoever watches it never ends.
+  def release_dead_import
+    # Rake imports run inline, without a Solid Queue job: never release those from here.
+    return unless @candidate.importing_via_job?
+    return if @candidate.updated_at && @candidate.updated_at > DEAD_IMPORT_GRACE.ago
+
+    @candidate.release_if_stale_importing!(error: DEAD_IMPORT_MESSAGE)
+  rescue StandardError => e
+    Rails.logger.warn("[ExternalCatalogCandidates] could not release dead import candidate=#{@candidate.id}: #{e.class} #{e.message}")
+  end
+
+  def remember_started_import!
+    session[STARTED_IMPORT_SESSION_KEY] = @candidate.id
+  end
+
+  # Coming back to the page of an import this user (or this guest session) started: show its progress
+  # again. Not once a project can be opened, otherwise Back from that project would bounce to it again.
+  def own_import_running?
+    return false unless @candidate.importing?
+
+    started_here =
+      session[STARTED_IMPORT_SESSION_KEY].to_i == @candidate.id ||
+      (user_signed_in? && @candidate.import_user_id.present? && @candidate.import_user_id == current_user.id)
+    started_here && import_redirect_project.nil?
+  end
+
   def matrix_choice_owner?
     @candidate.matrix_choice_owner?(user: current_user, sandbox_key: session[:sandbox])
   end
@@ -252,8 +292,13 @@ class ExternalCatalogCandidatesController < ApplicationController
     @candidate.update!(
       import_status: 'importing',
       import_error: nil,
-      import_user_id: current_user.id
+      import_user_id: current_user.id,
+      import_resume_json: { ExternalCatalogCandidate::IMPORT_JOB_MARKER => true }.to_json
     )
+    ExternalCatalog::ImportProgress.clear_cancel(@candidate.id)
+    remember_started_import!
+    # Drop the previous run's progress (steps completed, error) so the overlay starts from scratch.
+    ExternalCatalog::ImportProgress.clear(@candidate.id)
     ExternalCatalog::ImportProgress.report(@candidate.id, step: 'queued')
 
     ExternalCatalogImportCandidateJob.perform_later(@candidate.id, current_user.id)
@@ -287,11 +332,24 @@ class ExternalCatalogCandidatesController < ApplicationController
       return
     end
 
+    # One sandbox per guest: a previous import still paused on its matrix choice would replace this one later.
+    previous = guest_ongoing_catalog_import
+    previous.cancel_for_new_sandbox! if previous && previous.id != @candidate.id
+
     @candidate.update!(
       import_status: 'importing',
       import_error: nil,
-      import_user_id: guest_user.id
+      import_user_id: guest_user.id,
+      import_resume_json: {
+        ExternalCatalogCandidate::IMPORT_JOB_MARKER => true,
+        'sandbox_key_digest' => ExternalCatalogCandidate.sandbox_key_digest(session[:sandbox]),
+        'started_at' => Time.current.iso8601(3)
+      }.to_json
     )
+    ExternalCatalog::ImportProgress.clear_cancel(@candidate.id)
+    remember_started_import!
+    # Drop the previous run's progress (steps completed, error) so the overlay starts from scratch.
+    ExternalCatalog::ImportProgress.clear(@candidate.id)
     ExternalCatalog::ImportProgress.report(@candidate.id, step: 'queued')
 
     ExternalCatalogImportCandidateJob.perform_later(

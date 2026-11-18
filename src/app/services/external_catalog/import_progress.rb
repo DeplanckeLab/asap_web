@@ -22,6 +22,12 @@ module ExternalCatalog
 
     STEP_KEYS = STEPS.map { |s| s[:key] }.freeze
 
+    # Raised inside a running import once its cancellation was requested (guest started another sandbox project).
+    class Cancelled < StandardError; end
+
+    CANCEL_PREFIX = 'external_catalog_import_cancel'.freeze
+    CANCEL_TTL = 1.day
+
     STEP_MESSAGES = {
       'queued' => 'Import queued...',
       'downloading' => 'Downloading dataset...',
@@ -123,7 +129,48 @@ module ExternalCatalog
         )
       end
 
+      # Cancellation is a flag the running job polls (it cannot be interrupted from a web request).
+      def request_cancel!(candidate_id)
+        return if candidate_id.blank?
+
+        if redis_available?
+          redis.setex(cancel_key(candidate_id), CANCEL_TTL.to_i, '1')
+        else
+          Rails.cache.write(cancel_key(candidate_id), true, expires_in: CANCEL_TTL)
+        end
+      end
+
+      def cancel_requested?(candidate_id)
+        return false if candidate_id.blank?
+
+        if redis_available?
+          redis.exists(cancel_key(candidate_id)).to_i.positive?
+        else
+          Rails.cache.read(cancel_key(candidate_id)).present?
+        end
+      rescue StandardError
+        false
+      end
+
+      def clear_cancel(candidate_id)
+        return if candidate_id.blank?
+
+        if redis_available?
+          redis.del(cancel_key(candidate_id))
+        else
+          Rails.cache.delete(cancel_key(candidate_id))
+        end
+      end
+
+      def raise_if_cancelled!(candidate_id)
+        raise Cancelled, 'Import cancelled' if cancel_requested?(candidate_id)
+      end
+
       private
+
+      def cancel_key(candidate_id)
+        "#{CANCEL_PREFIX}:#{candidate_id}"
+      end
 
       def import_status_for_step(step)
         case step

@@ -158,7 +158,13 @@ class FuDownloadFromUrlJob < ApplicationJob
     candidate_id = @import_progress_candidate_id
     return nil if candidate_id.blank?
 
+    last_cancel_check = nil
     lambda do |downloaded, total|
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      if last_cancel_check.nil? || now - last_cancel_check >= 3
+        last_cancel_check = now
+        ExternalCatalog::ImportProgress.raise_if_cancelled!(candidate_id)
+      end
       ExternalCatalog::ImportProgress.report_download(
         candidate_id,
         downloaded: downloaded,

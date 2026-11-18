@@ -1,0 +1,18 @@
+<%# Link to a guest import that has not produced its sandbox project yet (see guest_sandbox_pending_import).
+   The dataset page shows the import progress again and opens the project when parsing starts.
+   Parameters:
+   - import: ExternalCatalogCandidate
+   - css: classes of the link (to match the surrounding menu or buttons)
+   - show_title: also print the dataset title under the link (menus). Default: false
+%>
+<% import = local_assigns.fetch(:import) %>
+<% title = import.title.presence || import.external_id %>
+<%= link_to external_catalog_candidate_path(import),
+    class: local_assigns.fetch(:css, ''),
+    title: "#{guest_sandbox_pending_import_label(import)}: #{title}" do %>
+  <i class="fas <%= import.awaiting_matrix? ? 'fa-list-ul' : 'fa-spinner fa-spin' %> me-1.5" aria-hidden="true"></i>
+  <%= guest_sandbox_pending_import_label(import) %>
+<% end %>
+<% if local_assigns.fetch(:show_title, false) %>
+  <p class="px-4 pb-2 text-xs text-gray-500 dark:text-gray-400 truncate"><%= title.truncate(60) %></p>
+<% end %>

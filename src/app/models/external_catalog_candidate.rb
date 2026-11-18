@@ -460,7 +460,7 @@ class ExternalCatalogCandidate < ApplicationRecord
         'fu_id' => fu.id,
         'version_id' => version_id,
         'skip_archive' => skip_archive ? true : false,
-        'sandbox_key_digest' => sandbox_key.present? ? Digest::SHA256.hexdigest(sandbox_key.to_s) : nil,
+        'sandbox_key_digest' => self.class.sandbox_key_digest(sandbox_key),
         'awaiting_since' => Time.current.iso8601
       }.to_json
     )
@@ -573,25 +573,96 @@ class ExternalCatalogCandidate < ApplicationRecord
     self.class.import_job_in_flight?(id)
   end
 
-  def release_if_stale_importing!
+  # Marker in import_resume_json for a run driven by ExternalCatalogImportCandidateJob (web UI), as
+  # opposed to the external_catalog:import rake, which imports inline with no Solid Queue job.
+  IMPORT_JOB_MARKER = 'job'
+
+  def importing_via_job?
+    importing? && (import_resume[IMPORT_JOB_MARKER] == true || import_resume['resumed'] == true)
+  end
+
+  # Guest imports keep this digest of the guest's sandbox key in import_resume_json (the raw key stays in
+  # the guest's session): the import ends up as that guest's sandbox project.
+  def self.sandbox_key_digest(sandbox_key)
+    sandbox_key.present? ? Digest::SHA256.hexdigest(sandbox_key.to_s) : nil
+  end
+
+  # The import (running, or paused on a matrix choice) that will replace this guest's sandbox project.
+  def self.ongoing_import_for_sandbox(sandbox_key)
+    digest = sandbox_key_digest(sandbox_key)
+    return nil if digest.nil?
+
+    where(import_status: %w[importing awaiting_matrix])
+      .where('import_resume_json LIKE ?', "%#{digest}%")
+      .order(updated_at: :desc)
+      .detect { |candidate| candidate.import_resume['sandbox_key_digest'] == digest }
+  end
+
+  # When this run started (set by the controller and again by the job); nil for older rows.
+  def import_started_at
+    raw = import_resume['started_at'].to_s
+    raw.present? ? Time.zone.parse(raw) : nil
+  rescue ArgumentError
+    nil
+  end
+
+  # Whether this (guest) import already produced the given sandbox project: imports create it only after
+  # download and preparsing, so until then the sandbox (if any) is an older project the import will replace.
+  def produced_sandbox_project?(project)
+    return false if project.nil?
+
+    started = import_started_at
+    return import_project_id.present? && import_project_id == project.id if started.nil?
+
+    project.created_at >= started
+  end
+
+  # The guest started another sandbox project: this import would replace it (or was replaced by it), so stop it.
+  # A running job notices the flag at its next step and ends itself; with no live job, free the candidate here.
+  def cancel_for_new_sandbox!
+    if awaiting_matrix?
+      cancel_matrix_choice!
+    elsif importing?
+      if import_job_in_flight?
+        ExternalCatalog::ImportProgress.request_cancel!(id)
+      else
+        discard_kept_download! if import_resume['resumed']
+        update!(import_status: 'idle', import_error: nil, import_resume_json: nil)
+        ExternalCatalog::ImportProgress.clear(id)
+      end
+    end
+    true
+  end
+
+  # error: nil frees the candidate (idle, rake cleanup); a message marks it failed so whoever
+  # watches the import in the UI learns it stopped instead of seeing the overlay vanish.
+  def release_if_stale_importing!(error: nil)
     return false unless importing?
     return false if import_job_in_flight?
 
     # A resumed run killed before its end leaves the download it was given behind. Only a run that
     # started ('resumed', set by the job): choose_matrix sets importing just before enqueueing.
     discard_kept_download! if import_resume['resumed']
-    update!(import_status: 'idle', import_resume_json: nil)
+    if error.present?
+      update!(import_status: 'failed', import_error: error, import_resume_json: nil)
+      ExternalCatalog::ImportProgress.report(id, step: 'failed', import_error: error, message: error)
+    else
+      update!(import_status: 'idle', import_resume_json: nil)
+    end
     true
   end
 
   # Catalog import is driven by the rake or by an explicit UI enqueue.
-  # A killed rake leaves import_status=importing with no Solid Queue job.
+  # A killed rake leaves import_status=importing with no Solid Queue job. A worker killed
+  # mid-run leaves the job unfinished with a failed execution: not in flight either.
   def self.import_job_in_flight?(candidate_id)
     return false unless defined?(SolidQueue::Job)
     return false unless SolidQueue::Job.table_exists?
     return false if candidate_id.nil?
 
-    SolidQueue::Job.where(class_name: 'ExternalCatalogImportCandidateJob', finished_at: nil).any? do |job|
+    jobs = SolidQueue::Job.where(class_name: 'ExternalCatalogImportCandidateJob', finished_at: nil)
+    jobs = jobs.where.not(id: SolidQueue::FailedExecution.select(:job_id)) if defined?(SolidQueue::FailedExecution)
+    jobs.any? do |job|
       args = job.arguments
       first = args.is_a?(Hash) ? (args['arguments'] || args[:arguments] || []).first : nil
       first.to_i == candidate_id.to_i

@@ -3,6 +3,9 @@ require "shellwords"
 class Project < ApplicationRecord
   include Elasticsearch::Model
   include Elasticsearch::Model::Callbacks
+  # Tests share the dev Elasticsearch server (same ELASTICSEARCH_URL), so they need their own
+  # index; otherwise test projects land in the dev "projects" index with ids missing from the dev DB.
+  index_name Rails.env.test? ? "projects_test" : "projects"
   before_save :sanitize_non_raw_text_parsing_attrs!
 
   validates :key, presence: true, uniqueness: { case_sensitive: true }

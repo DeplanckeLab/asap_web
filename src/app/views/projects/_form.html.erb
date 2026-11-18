@@ -359,8 +359,7 @@
       <% else %>
         <%= link_to "Back to projects", projects_browse_url, class: "px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md font-medium transition-colors" %>
       <% end %>
-      <% existing_guest_sandbox = (!user_signed_in? && !@is_resetting_parsing && !@integrate_mode) ? guest_sandbox_project : nil %>
-      <% replace_msg = existing_guest_sandbox ? "Creating a new sandbox project will permanently replace your current sandbox (#{existing_guest_sandbox.display_name}). Continue?" : nil %>
+      <% replace_msg = (!user_signed_in? && !@is_resetting_parsing && !@integrate_mode) ? guest_sandbox_replace_confirm : nil %>
       <% submit_label =
            if @is_resetting_parsing
              "Recreate project"

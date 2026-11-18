@@ -135,6 +135,8 @@ namespace :external_catalog do
       attrs[:import_project_id] = project.id
     end
     attrs[:import_user_id] = user.id if user
+    # Inline rake run: no job marker, so the web UI never declares it dead for lack of a Solid Queue job.
+    attrs[:import_resume_json] = nil if status == 'importing'
     attrs[:import_error] = nil if status == 'idle' && error.nil?
     candidate.update!(attrs)
     return unless project

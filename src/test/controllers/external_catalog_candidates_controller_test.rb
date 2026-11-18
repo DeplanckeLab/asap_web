@@ -231,4 +231,113 @@ class ExternalCatalogCandidatesControllerTest < ActionDispatch::IntegrationTest
     assert_equal 'idle', candidate.reload.import_status
     assert_nil Fu.find_by(id: fu.id)
   end
+
+  def importing_candidate!(owner, resume: { 'job' => true })
+    external_id = "imp-#{SecureRandom.hex(4)}"
+    register_for_test_cleanup(
+      ExternalCatalogCandidate.create!(
+        source: 'cellxgene',
+        external_id: external_id,
+        provider_tag: 'CELLxGENE',
+        title: "Importing #{external_id}",
+        url: "https://example.com/#{external_id}.h5ad",
+        import_status: 'importing',
+        import_user_id: owner.id,
+        import_resume_json: resume&.to_json,
+        tax_id: 9606
+      )
+    )
+  end
+
+  def watch_value
+    response.body[/data-catalog-import-watch-value="(\w+)"/, 1]
+  end
+
+  test 'show re-opens the import progress for the user who started it, not for others' do
+    owner = register_for_test_cleanup(User.create!(email: "ecc_io_#{SecureRandom.hex(4)}@example.com", password: 'password123'))
+    other = register_for_test_cleanup(User.create!(email: "ecc_ix_#{SecureRandom.hex(4)}@example.com", password: 'password123'))
+    candidate = importing_candidate!(owner)
+
+    sign_in owner
+    get external_catalog_candidate_path(candidate)
+    assert_response :success
+    assert_equal 'true', watch_value
+    sign_out owner
+
+    sign_in other
+    get external_catalog_candidate_path(candidate)
+    assert_response :success
+    assert_equal 'false', watch_value
+  end
+
+  test 'a web import whose job is gone is reported as failed instead of importing forever' do
+    owner = register_for_test_cleanup(User.create!(email: "ecc_id_#{SecureRandom.hex(4)}@example.com", password: 'password123'))
+    candidate = importing_candidate!(owner)
+    candidate.update_column(:updated_at, 10.minutes.ago)
+
+    sign_in owner
+    get import_status_external_catalog_candidate_path(candidate, format: :json)
+    body = JSON.parse(response.body)
+    assert_equal 'failed', body['import_status']
+    assert_match(/stopped unexpectedly/, body['import_error'])
+    assert_equal 'failed', candidate.reload.import_status
+
+    # Back on the page after the failure: no overlay, so no alert/reload loop.
+    get external_catalog_candidate_path(candidate)
+    assert_equal 'false', watch_value
+  end
+
+  test 'a recent or rake-driven import is not released for lack of a job' do
+    owner = register_for_test_cleanup(User.create!(email: "ecc_ir_#{SecureRandom.hex(4)}@example.com", password: 'password123'))
+    fresh = importing_candidate!(owner)
+    rake = importing_candidate!(owner, resume: nil)
+    rake.update_column(:updated_at, 10.minutes.ago)
+
+    sign_in owner
+    [fresh, rake].each do |candidate|
+      get import_status_external_catalog_candidate_path(candidate, format: :json)
+      assert_equal 'importing', JSON.parse(response.body)['import_status']
+      assert_equal 'importing', candidate.reload.import_status
+    end
+  end
+
+  test 'guests are told that a new sandbox project cancels their running import' do
+    get new_project_path
+    sandbox_key = session[:sandbox]
+    skip 'no guest sandbox session' if sandbox_key.blank?
+
+    candidate = register_for_test_cleanup(
+      ExternalCatalogCandidate.create!(
+        source: 'cellxgene',
+        external_id: "gw-#{SecureRandom.hex(4)}",
+        provider_tag: 'CELLxGENE',
+        title: 'Running guest import',
+        url: 'https://example.com/gw.h5ad',
+        import_status: 'importing',
+        import_user_id: User::GUEST_SANDBOX_USER_ID,
+        import_resume_json: {
+          'job' => true,
+          'sandbox_key_digest' => ExternalCatalogCandidate.sandbox_key_digest(sandbox_key)
+        }.to_json,
+        tax_id: 9606
+      )
+    )
+
+    get new_project_path
+    assert_response :success
+    body = CGI.unescapeHTML(response.body)
+    assert_includes body,
+                    'Creating a new sandbox project will cancel the import of "Running guest import", which is still running.'
+    # No sandbox project yet: menus and the form point to the import progress page.
+    assert_includes body, external_catalog_candidate_path(candidate)
+    assert_includes body, 'Import in progress'
+
+    get root_path
+    assert_response :success
+    assert_includes CGI.unescapeHTML(response.body), 'Importing into your sandbox:'
+
+    candidate.update!(import_status: 'idle')
+    get new_project_path
+    assert_not_includes CGI.unescapeHTML(response.body), 'Running guest import'
+  end
 end

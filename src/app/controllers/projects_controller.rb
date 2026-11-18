@@ -845,16 +845,13 @@ class ProjectsController < ApplicationController
       return
     end
 
-    # Delete project if already exists with this key (if editable)
+    # Project already using this key (guest sandbox, or the project a parsing reset recreates), if editable.
+    # It is replaced only at the save below, once every check passed: a rejected form keeps it, and keeps
+    # the guest's running catalog import (see replace_project_and_save!).
     # Note: This allows reusing project keys for the same user
+    replaced_project = nil
     if @project.key.present? && (existing_project = Project.find_by(key: @project.key))
-      if editable?(existing_project)
-        # Clear Fu records that reference this project to avoid foreign key constraint violations
-        Fu.where(project_id: existing_project.id).update_all(project_id: nil)
-
-        # Destroy DB row; Project after_commit removes USER_DATA_DIR/<user>/<key>/ (and .tgz).
-        existing_project.destroy
-      end
+      replaced_project = existing_project if editable?(existing_project)
     end
     
     # Handle parsing attributes from params
@@ -1087,22 +1084,10 @@ class ProjectsController < ApplicationController
         @file_formats = FileFormat.ordered
         @grouped_organisms = group_organisms(fetch_organisms_for_version(@project.version_id), version_id: @project.version_id)
         @project.errors.add(:base, "A valid uploaded file record is required to create a project. Please upload a file again.")
-        format.html { 
-          Rails.logger.info("[ProjectsController#create] Rendering :new template (HTML format)")
-          render template: 'projects/new', status: :unprocessable_entity 
+        render_create_rejection!
         return
-        }
-        format.turbo_stream { 
-          Rails.logger.info("[ProjectsController#create] Rendering :new template (turbo_stream format)")
-          render template: 'projects/new', status: :unprocessable_entity 
-          return
-        }
-        format.json { 
-          render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity 
-          return
-        }
       end
-      
+
       Rails.logger.info("[ProjectsController#create] ===== BEFORE PROJECT SAVE =====")
       Rails.logger.info("[ProjectsController#create] Attempting to save project: #{@project.inspect}")
       Rails.logger.info("[ProjectsController#create] Request format: #{request.format}")
@@ -1125,13 +1110,11 @@ class ProjectsController < ApplicationController
         @file_formats = FileFormat.ordered
         @grouped_organisms = group_organisms(fetch_organisms_for_version(@project.version_id), version_id: @project.version_id)
         @project.errors.add(:base, quota_result.reason)
-        format.html { render template: 'projects/new', status: :unprocessable_entity }
-        format.turbo_stream { render template: 'projects/new', status: :unprocessable_entity }
-        format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
+        render_create_rejection!
         return
       end
       
-      if @project.save
+      if replace_project_and_save!(replaced_project, input_file)
         Rails.logger.info("[ProjectsController#create] ===== PROJECT SAVED SUCCESSFULLY =====")
         Rails.logger.info("[ProjectsController#create] Project saved successfully with ID: #{@project.id}, key: #{@project.key}")
         
@@ -1170,9 +1153,7 @@ class ProjectsController < ApplicationController
         unless input_file.present? && input_file.id.present?
           Rails.logger.error("[ProjectsController#create] Fu record missing after validation; aborting")
           @project.errors.add(:base, "Internal error: uploaded file record not found")
-          format.html { render template: 'projects/new', status: :unprocessable_entity }
-          format.turbo_stream { render template: 'projects/new', status: :unprocessable_entity }
-          format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
+          render_create_rejection!
           return
         end
         
@@ -1193,9 +1174,7 @@ class ProjectsController < ApplicationController
         rescue => e
           Rails.logger.error("[ProjectsController#create] Upload finalization failed: #{e.class} - #{e.message}")
           @project.errors.add(:base, e.message)
-          format.html { render template: 'projects/new', status: :unprocessable_entity }
-          format.turbo_stream { render template: 'projects/new', status: :unprocessable_entity }
-          format.json { render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity }
+          render_create_rejection!
           return
         end
         
@@ -10833,6 +10812,44 @@ class ProjectsController < ApplicationController
       return nil unless s.match?(/\A-?\d+(\.\d+)?([eE][+-]?\d+)?\z/)
 
       s.to_f.to_i
+    end
+
+    # Early rejection inside #create's respond_to block. Declaring format.html { ... } there and returning
+    # leaves the response empty (204): the format blocks only run after the respond_to block, which the
+    # return skips. So render now, from the request format.
+    def render_create_rejection!
+      if request.format.json?
+        render json: { errors: @project.errors.full_messages }, status: :unprocessable_entity
+      else
+        render template: 'projects/new', formats: [:html], status: :unprocessable_entity
+      end
+    end
+
+    # Point of no return of #create, reached only once the form passed every check. A guest's catalog import
+    # into the sandbox is cancelled first (else it could replace the new project when it finishes, or be
+    # replaced mid-parse), then the old project is destroyed and the new one saved in one transaction: a
+    # failed save rolls the destroy back. Project#after_commit removes the old USER_DATA_DIR/<user>/<key>/
+    # only on commit, before #create creates the new project's directory.
+    def replace_project_and_save!(replaced_project, input_file)
+      guest_ongoing_catalog_import&.cancel_for_new_sandbox! unless current_user
+
+      saved = false
+      Project.transaction do
+        if replaced_project
+          # Clear Fu records that reference this project to avoid foreign key constraint violations
+          Fu.where(project_id: replaced_project.id).update_all(project_id: nil)
+          unless replaced_project.destroy
+            # A before_destroy guard refused (e.g. runs locked by a publication): keep it, report on the form.
+            @project.errors.add(:base, 'The existing project with this key could not be replaced.')
+            raise ActiveRecord::Rollback
+          end
+        end
+        saved = @project.save
+        raise ActiveRecord::Rollback unless saved
+      end
+      # The input Fu was loaded while it still pointed to the replaced project.
+      input_file&.reload if saved && replaced_project && input_file&.persisted?
+      saved
     end
 
     def clear_stale_sandbox_parsing_output!(project_dir)

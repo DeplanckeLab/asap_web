@@ -15,7 +15,8 @@
   </div>
 
   <% unless user_signed_in? %>
-    <% sandbox = guest_sandbox_project %>
+    <% pending_import = guest_sandbox_pending_import %>
+    <% sandbox = pending_import ? nil : guest_sandbox_project %>
     <% sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '1').to_i %>
     <% sandbox_delete_label = sandbox_idle_days == 1 ? '24 hours' : "#{sandbox_idle_days} days" %>
     <div class="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-left shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10">
@@ -28,7 +29,18 @@
             You are in guest mode. This project will be created as a temporary sandbox and will be
             <strong>automatically deleted</strong> after <%= sandbox_delete_label %> without activity.
           </p>
-          <% if sandbox %>
+          <% if pending_import %>
+            <p class="mt-2 text-sm text-amber-900 dark:text-amber-200">
+              A dataset is being imported into your sandbox:
+              <%= link_to (pending_import.title.presence || pending_import.external_id), external_catalog_candidate_path(pending_import),
+                  class: "font-medium text-blue-700 hover:underline dark:text-blue-400" %>.
+              Submitting this form will <strong>cancel that import</strong><%= guest_sandbox_project ? " and permanently replace your current sandbox" : "" %>.
+            </p>
+            <p class="mt-2">
+              <%= render "shared/guest_sandbox_import_link", import: pending_import,
+                  css: "inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700" %>
+            </p>
+          <% elsif sandbox %>
             <p class="mt-2 text-sm text-amber-900 dark:text-amber-200">
               You already have a sandbox:
               <%= link_to sandbox.display_name, project_path(sandbox), class: "font-medium text-blue-700 hover:underline dark:text-blue-400" %>.

@@ -54,7 +54,12 @@
                 New project
               </a>
             <% else %>
-              <% sandbox = guest_sandbox_project %>
+              <% pending_import = guest_sandbox_pending_import %>
+              <% sandbox = pending_import ? nil : guest_sandbox_project %>
+              <% if pending_import %>
+                <%= render "shared/guest_sandbox_import_link", import: pending_import,
+                    css: "flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" %>
+              <% end %>
               <% if sandbox %>
                 <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
                    href="<%= project_path(sandbox) %>"
@@ -66,8 +71,8 @@
                    href="<%= raw(new_project_path) %>"
                    data-controller="nav-item"
                    data-action="click->nav-item#navigate"
-                   data-confirm="Creating a new sandbox project will permanently replace your current sandbox (<%= sandbox.display_name %>). Continue?"
-                   data-turbo-confirm="Creating a new sandbox project will permanently replace your current sandbox (<%= sandbox.display_name %>). Continue?">
+                   data-confirm="<%= guest_sandbox_replace_confirm %>"
+                   data-turbo-confirm="<%= guest_sandbox_replace_confirm %>">
                   <i class="fas fa-plus w-4 text-center"></i>
                   New sandbox project
                 </a>
@@ -75,7 +80,8 @@
                 <a class="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700"
                    href="<%= raw(new_project_path) %>"
                    data-controller="nav-item"
-                   data-action="click->nav-item#navigate">
+                   data-action="click->nav-item#navigate"
+                   <% if (import_confirm = guest_sandbox_replace_confirm) %>data-confirm="<%= import_confirm %>" data-turbo-confirm="<%= import_confirm %>"<% end %>>
                   <i class="fas fa-plus w-4 text-center"></i>
                   New sandbox project
                 </a>
@@ -322,7 +328,11 @@
                   New project
                 </a>
               <% else %>
-                <% sandbox = guest_sandbox_project %>
+                <% pending_import = guest_sandbox_pending_import %>
+                <% sandbox = pending_import ? nil : guest_sandbox_project %>
+                <% if pending_import %>
+                  <%= render "shared/guest_sandbox_import_link", import: pending_import, css: tw_menu_item %>
+                <% end %>
                 <% if sandbox %>
                   <a class="<%= tw_menu_item %>"
                      href="<%= project_path(sandbox) %>"
@@ -334,15 +344,16 @@
                   <a class="<%= tw_menu_item %>"
                      href="<%= raw(new_project_path) %>"
                      title="Replaces your current sandbox project"
-                     data-confirm="Creating a new sandbox project will permanently replace your current sandbox (<%= sandbox.display_name %>). Continue?"
-                     data-turbo-confirm="Creating a new sandbox project will permanently replace your current sandbox (<%= sandbox.display_name %>). Continue?">
+                     data-confirm="<%= guest_sandbox_replace_confirm %>"
+                     data-turbo-confirm="<%= guest_sandbox_replace_confirm %>">
                     <i class="fas fa-plus me-1.5"></i>
                     New sandbox project
                   </a>
                 <% else %>
                   <a class="<%= tw_menu_item %>"
                      href="<%= raw(new_project_path) %>"
-                     title="Creates a temporary sandbox project">
+                     title="Creates a temporary sandbox project"
+                     <% if (import_confirm = guest_sandbox_replace_confirm) %>data-confirm="<%= import_confirm %>" data-turbo-confirm="<%= import_confirm %>"<% end %>>
                     <i class="fas fa-plus me-1.5"></i>
                     New sandbox project
                   </a>

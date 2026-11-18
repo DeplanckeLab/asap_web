@@ -9,8 +9,9 @@ module ExternalCatalog
     SESSION_KEY_PREFIX = 'asap:ext_catalog_import:session'
     INFLIGHT_KEY_PREFIX = 'asap:ext_catalog_import:inflight'
 
-    IP_LIMIT = Integer(ENV.fetch('EXT_CATALOG_IMPORT_IP_LIMIT', '3'))
-    SESSION_LIMIT = Integer(ENV.fetch('EXT_CATALOG_IMPORT_SESSION_LIMIT', '2'))
+    # The IP limit stays above the session one: it is checked first, and guests on one network share it.
+    IP_LIMIT = Integer(ENV.fetch('EXT_CATALOG_IMPORT_IP_LIMIT', '10'))
+    SESSION_LIMIT = Integer(ENV.fetch('EXT_CATALOG_IMPORT_SESSION_LIMIT', '5'))
     WINDOW_SECONDS = Integer(ENV.fetch('EXT_CATALOG_IMPORT_WINDOW_SEC', 1.hour.to_i.to_s))
     INFLIGHT_TTL_SECONDS = Integer(ENV.fetch('EXT_CATALOG_IMPORT_INFLIGHT_TTL_SEC', 2.hours.to_i.to_s))
 

@@ -17,6 +17,8 @@ class ApplicationController < ActionController::Base
   before_action :init_session
 
   # Make authorization methods available to views
+  helper_method :guest_ongoing_catalog_import, :guest_sandbox_replace_confirm,
+                :guest_sandbox_pending_import, :guest_sandbox_pending_import_label
   helper_method :admin?, :uab?, :admin_report?, :authorized?, :readable?, :exportable?, :exportable_item?, :editable?, :owner?, :owner_or_admin?, :owner_or_admin_obj?, :read_only?, :clonable?, :analyzable?, :analyzable_item?, :annotable?, :annotable_item?, :cla_votable?, :checkpoint_commentable?, :downloadable?, :publication_snapshot_reader?, :annot_visible_under_publication_rules?, :run_visible_under_publication_rules?, :guest_sandbox_project, :synced_reference_data_writable?, :can_edit_synced_reference_data?, :search_engine_crawler?
 
   protected
@@ -216,6 +218,48 @@ class ApplicationController < ActionController::Base
   # Generate a random key for sandbox sessions
   def create_sandbox_key
     Array.new(6) { [*'0'..'9', *'a'..'z'].sample }.join
+  end
+
+  # Catalog import (running or waiting for a matrix choice) that will become this guest's sandbox project.
+  def guest_ongoing_catalog_import
+    return nil if user_signed_in?
+    return nil if session[:sandbox].blank?
+    return @guest_ongoing_catalog_import if defined?(@guest_ongoing_catalog_import)
+
+    @guest_ongoing_catalog_import = ExternalCatalogCandidate.ongoing_import_for_sandbox(session[:sandbox])
+  end
+
+  # Guest import whose sandbox project does not exist yet (download/preparsing, or waiting for a matrix choice).
+  # Menus link to its progress page instead of "Open sandbox", which would open the project it replaces.
+  def guest_sandbox_pending_import
+    import = guest_ongoing_catalog_import
+    return nil unless import
+    return nil if import.importing? && import.produced_sandbox_project?(guest_sandbox_project)
+
+    import
+  end
+
+  def guest_sandbox_pending_import_label(import)
+    import.awaiting_matrix? ? 'Choose the matrix to import' : 'Import in progress'
+  end
+
+  # Confirm text for a guest action that replaces the sandbox (nil: nothing to lose, no confirm).
+  # action: :create (new sandbox project) or :import (catalog import).
+  def guest_sandbox_replace_confirm(action: :create)
+    return nil if user_signed_in?
+
+    sandbox = guest_sandbox_project
+    import = guest_ongoing_catalog_import
+    return nil unless sandbox || import
+
+    verb = action == :import ? 'Importing this dataset' : 'Creating a new sandbox project'
+    consequences = []
+    if import
+      state = import.awaiting_matrix? ? 'is waiting for you to choose a matrix' : 'is still running'
+      consequences << "cancel the import of \"#{import.title.presence || import.external_id}\", which #{state}"
+    end
+    consequences << "permanently replace your current sandbox (#{sandbox.display_name})" if sandbox
+    "#{verb} will #{consequences.join(' and ')}. Continue?"
   end
 
   # Current guest sandbox project for this browser session, if any.

@@ -3,7 +3,22 @@
 <% sandbox_idle_days = ENV.fetch('SANDBOX_DELETE_IDLE_DAYS', '1').to_i %>
 <% sandbox_delete_label = sandbox_idle_days == 1 ? '24 hours' : "#{sandbox_idle_days} days" %>
 
-<% if sandbox %>
+<% if (pending_import = guest_sandbox_pending_import) %>
+  <div class="mt-4 max-w-2xl mx-auto rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-left shadow-sm dark:border-blue-500/30 dark:bg-blue-500/10">
+    <p class="text-sm font-medium text-gray-900 dark:text-neutral-200">
+      Importing into your sandbox:
+      <%= link_to (pending_import.title.presence || pending_import.external_id), external_catalog_candidate_path(pending_import),
+          class: "text-blue-700 hover:underline dark:text-blue-400" %>
+    </p>
+    <p class="mt-1 text-sm text-gray-700 dark:text-neutral-300">
+      <% if pending_import.awaiting_matrix? %>
+        The dataset is downloaded: open it to choose the expression matrix.
+      <% else %>
+        Your sandbox project will open when parsing starts. Creating a new sandbox project cancels this import.
+      <% end %>
+    </p>
+  </div>
+<% elsif sandbox %>
   <div class="mt-4 max-w-2xl mx-auto rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-left shadow-sm dark:border-amber-500/30 dark:bg-amber-500/10">
     <p class="text-sm font-medium text-gray-900 dark:text-neutral-200">
       Your sandbox:

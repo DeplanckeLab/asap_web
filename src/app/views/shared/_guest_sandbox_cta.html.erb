@@ -5,13 +5,21 @@
 %>
 <% variant = local_assigns.fetch(:variant, :compact) %>
 <% align = local_assigns.fetch(:align, :end) %>
-<% sandbox = guest_sandbox_project %>
-<% replace_confirm = sandbox ? "Creating a new sandbox project will permanently replace your current sandbox (#{sandbox.display_name}). Continue?" : nil %>
+<% pending_import = guest_sandbox_pending_import %>
+<% sandbox = pending_import ? nil : guest_sandbox_project %>
+<%# Also set without a sandbox project while a catalog import into the sandbox is running. %>
+<% replace_confirm = guest_sandbox_replace_confirm %>
 <% align_items = align == :center ? 'items-center' : 'items-end' %>
 <% justify = align == :center ? 'justify-center' : 'justify-end' %>
 
 <% if variant == :hero %>
-  <% if sandbox %>
+  <% if pending_import %>
+    <%= render "shared/guest_sandbox_import_link", import: pending_import,
+        css: "#{tw_btn(:primary)} justify-center px-8 py-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500" %>
+    <%= link_to "New sandbox project", new_project_path,
+        class: "#{tw_btn(:light)} justify-center px-8 py-3 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-amber-400 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/20",
+        data: { confirm: replace_confirm, turbo_confirm: replace_confirm } %>
+  <% elsif sandbox %>
     <%= link_to project_path(sandbox),
         class: "#{tw_btn(:primary)} justify-center px-8 py-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500",
         data: { guided_tour: "welcome-create-project-cta" } do %>
@@ -23,14 +31,20 @@
   <% else %>
     <%= link_to new_project_path,
         class: "#{tw_btn(:primary)} justify-center px-8 py-3 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 focus:ring-2 focus:ring-offset-2 focus:ring-blue-500",
-        data: { guided_tour: "welcome-create-project-cta" } do %>
+        data: { guided_tour: "welcome-create-project-cta", confirm: replace_confirm, turbo_confirm: replace_confirm } do %>
       Try a sandbox project
     <% end %>
   <% end %>
 <% else %>
   <div class="flex flex-col <%= align_items %> gap-2">
     <div class="flex flex-wrap items-center <%= justify %> gap-2">
-      <% if sandbox %>
+      <% if pending_import %>
+        <%= render "shared/guest_sandbox_import_link", import: pending_import,
+            css: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 whitespace-nowrap" %>
+        <%= link_to "New sandbox project", new_project_path,
+            class: "inline-flex items-center px-4 py-2 border border-amber-300 text-sm font-medium rounded-md text-amber-900 bg-amber-50 hover:bg-amber-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-400 whitespace-nowrap",
+            data: { guided_tour: "projects-new-project-link", confirm: replace_confirm, turbo_confirm: replace_confirm } %>
+      <% elsif sandbox %>
         <%= link_to "Open sandbox", project_path(sandbox),
             class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 whitespace-nowrap" %>
         <%= link_to "New sandbox project", new_project_path,
@@ -43,7 +57,7 @@
       <% else %>
         <%= link_to "New sandbox project", new_project_path,
             class: "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 whitespace-nowrap",
-            data: { guided_tour: "projects-new-project-link" } %>
+            data: { guided_tour: "projects-new-project-link", confirm: replace_confirm, turbo_confirm: replace_confirm } %>
       <% end %>
     </div>
   </div>

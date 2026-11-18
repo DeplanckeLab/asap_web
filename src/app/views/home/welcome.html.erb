@@ -42,7 +42,7 @@
         <%= render "cite_button" %>
       </div>
       <% unless user_signed_in? %>
-        <% if guest_sandbox_project %>
+        <% if guest_sandbox_project || guest_sandbox_pending_import %>
           <%= render "shared/guest_sandbox_note" %>
         <% end %>
       <% end %>

@@ -86,7 +86,13 @@ class UrlDownloadService
     Open3.popen3(*cmd) do |stdin, _stdout, stderr, wait_thr|
       stdin.close
       File.write(pid_path, wait_thr.pid.to_s)
-      heartbeat_until(wait_thr)
+      begin
+        heartbeat_until(wait_thr)
+      rescue ExternalCatalog::ImportProgress::Cancelled
+        # Leaving the popen3 block would otherwise wait for curl to finish the whole file.
+        stop_curl(wait_thr.pid)
+        raise
+      end
       err = stderr.read.to_s
       status = wait_thr.value
       unless status.success?
@@ -126,10 +132,22 @@ class UrlDownloadService
       rescue Errno::EPERM
         # Process exists.
       end
-      report_progress!
+      begin
+        report_progress!
+      rescue ExternalCatalog::ImportProgress::Cancelled
+        stop_curl(pid)
+        raise
+      end
       @fu.touch
       sleep(@progress_callback ? PROGRESS_INTERVAL_SEC : HEARTBEAT_SEC)
     end
+  end
+
+  def stop_curl(pid)
+    Process.kill('TERM', pid)
+    @logger.info("[UrlDownloadService] Fu##{@fu.id} import cancelled, stopped curl pid=#{pid}")
+  rescue Errno::ESRCH, Errno::EPERM
+    nil
   end
 
   def report_progress!(downloaded: nil)
@@ -144,6 +162,8 @@ class UrlDownloadService
         0
       end
     @progress_callback.call(bytes, @expected_size)
+  rescue ExternalCatalog::ImportProgress::Cancelled
+    raise
   rescue StandardError => e
     @logger.warn("[UrlDownloadService] progress callback failed: #{e.class}: #{e.message}")
   end

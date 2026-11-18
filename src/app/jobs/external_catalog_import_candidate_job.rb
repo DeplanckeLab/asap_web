@@ -21,6 +21,9 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       return
     end
 
+    # Cancelled while still queued (the guest started another sandbox project).
+    return if cancelled!(candidate)
+
     version =
       if version_id.present?
         Version.find_by(id: version_id)
@@ -37,7 +40,13 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       import_error: nil,
       import_user_id: user.id,
       # A resumed run keeps the id of its download so a killed run can still free it (release_if_stale_importing!).
-      import_resume_json: fu_id.present? ? { 'fu_id' => fu_id.to_i, 'resumed' => true }.to_json : nil
+      # The job marker tells the web UI this run can be declared dead once its job is gone (rake runs have none).
+      import_resume_json: (
+        fu_id.present? ? { 'fu_id' => fu_id.to_i, 'resumed' => true } : { ExternalCatalogCandidate::IMPORT_JOB_MARKER => true }
+      ).merge(
+        'sandbox_key_digest' => ExternalCatalogCandidate.sandbox_key_digest(sandbox_key),
+        'started_at' => Time.current.iso8601(3)
+      ).to_json
     )
     ExternalCatalog::ImportProgress.report(candidate.id, step: 'queued') if fu_id.blank?
 
@@ -126,6 +135,8 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       "sandbox=#{guest_import} import_project_id=#{candidate.import_project_id}"
     )
   rescue ExternalCatalog::ProjectImporter::NeedsMatrixChoice => e
+    return if cancelled!(candidate, discard_fu: e.fu)
+
     # Not a failure: keep the download and let the user who started the import pick the matrix.
     candidate.await_matrix_choice!(
       fu: e.fu,
@@ -144,6 +155,8 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       "fu=#{e.fu.id} choices=#{e.choices.map { |c| c['path'] }.join(',')} recommended=#{e.recommended}"
     )
   rescue ExternalCatalog::ProjectImporter::SkipEntry => e
+    return if cancelled!(candidate)
+
     project = candidate&.asap_projects&.order(id: :desc)&.first
     if project && !guest_import
       candidate.update!(import_status: 'idle', import_error: nil)
@@ -159,6 +172,9 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
     end
     Rails.logger.warn("[ExternalCatalogImportCandidateJob] skip candidate=#{candidate_id}: #{e.message}")
   rescue StandardError => e
+    # Cancelled (or broken by the guest replacing the sandbox mid-import): not a failure.
+    return if cancelled!(candidate)
+
     Rails.logger.error(
       "[ExternalCatalogImportCandidateJob] fail candidate=#{candidate_id}: #{e.class} #{e.message}"
     )
@@ -168,7 +184,11 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
     ExternalCatalog::ImportSuccessRegistry.record_import_attempt!(project: failed_project, importer: importer) if failed_project
   ensure
     ExternalCatalog::ImportRateLimit.release_inflight!(session_key: sandbox_key) if sandbox_key.present?
-    discard_resumed_download!(candidate_id, fu_id, user_id) if fu_id.present?
+    if fu_id.present?
+      discard_resumed_download!(candidate_id, fu_id, user_id)
+    else
+      clear_job_marker!(candidate_id)
+    end
   end
 
   private
@@ -191,6 +211,28 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       "[ExternalCatalogImportCandidateJob] could not delete download fu=#{fu_id} candidate=#{candidate_id}: " \
       "#{e.class} #{e.message}"
     )
+  end
+
+  # Acknowledge a cancellation (ExternalCatalogCandidate#cancel_for_new_sandbox!): back to idle, no error shown.
+  def cancelled!(candidate, discard_fu: nil)
+    return false unless candidate && ExternalCatalog::ImportProgress.cancel_requested?(candidate.id)
+
+    ExternalCatalogCandidate.discard_unused_download!(discard_fu.id, user_id: candidate.import_user_id) if discard_fu
+    candidate.update!(import_status: 'idle', import_error: nil)
+    ExternalCatalog::ImportProgress.clear(candidate.id)
+    ExternalCatalog::ImportProgress.clear_cancel(candidate.id)
+    Rails.logger.info("[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} import cancelled")
+    true
+  end
+
+  # Run over: drop the job marker (awaiting_matrix keeps its own resume state).
+  def clear_job_marker!(candidate_id)
+    candidate = ExternalCatalogCandidate.find_by(id: candidate_id)
+    return if candidate.nil? || candidate.awaiting_matrix? || candidate.import_resume_json.blank?
+
+    candidate.update_column(:import_resume_json, nil)
+  rescue StandardError => e
+    Rails.logger.warn("[ExternalCatalogImportCandidateJob] could not clear resume state candidate=#{candidate_id}: #{e.class} #{e.message}")
   end
 
   def fail_import!(candidate, message)

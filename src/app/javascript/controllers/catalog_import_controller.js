@@ -42,7 +42,13 @@ export default class extends Controller {
     this._onSubmitStart = this._onSubmitStart.bind(this)
     this.element.addEventListener("turbo:submit-start", this._onSubmitStart)
 
-    if (this.watchValue || this._shouldResumeFromStorage()) {
+    const watch = this.watchValue || this._shouldResumeFromStorage()
+    // ?importing=1 is only the hand-off from the Import POST. Left in the URL, a reload or Back
+    // re-opens the overlay for an import that is long over (failed: alert + reload, again and again;
+    // done: bounced to the project each time). The server re-enables watching while the import runs.
+    this._dropImportingParam()
+
+    if (watch) {
       this.showOverlay()
       this.subscribe()
       this.startPolling()
@@ -60,6 +66,17 @@ export default class extends Controller {
     this.showOverlay()
     this.subscribe()
     this.startPolling()
+  }
+
+  _urlWithoutImportingParam() {
+    const url = new URL(window.location.href)
+    url.searchParams.delete("importing")
+    return url.toString()
+  }
+
+  _dropImportingParam() {
+    if (!new URL(window.location.href).searchParams.has("importing")) return
+    window.history.replaceState(window.history.state, "", this._urlWithoutImportingParam())
   }
 
   _storageKey() {
@@ -272,7 +289,8 @@ export default class extends Controller {
       this.hideOverlay()
       const message = data.import_error || "Import failed."
       window.alert(message)
-      window.location.reload()
+      // Never plain reload(): with ?importing=1 still there the page would watch, see "failed" and reload forever.
+      window.location.replace(this._urlWithoutImportingParam())
       return
     }
 

@@ -81,7 +81,10 @@
         <div class="px-4 py-2 border-b border-gray-200 <%= 'dark:border-gray-700' if dark_mode %>">
           <p class="text-sm font-medium text-gray-500 <%= 'dark:text-gray-400' if dark_mode %>">Guest Mode</p>
         </div>
-        <% if (sandbox = guest_sandbox_project) %>
+        <% if (pending_import = guest_sandbox_pending_import) %>
+          <%= render "shared/guest_sandbox_import_link", import: pending_import, show_title: true,
+              css: "flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 #{'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode}" %>
+        <% elsif (sandbox = guest_sandbox_project) %>
           <a class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 <%= 'dark:text-gray-300 dark:hover:bg-gray-700' if dark_mode %>"
              href="<%= project_path(sandbox) %>">
             Open sandbox

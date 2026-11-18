@@ -77,7 +77,8 @@ module ExternalCatalog
       raise MissingCredentials,
             'Broad SCP downloads need SCP_GOOGLE_CLIENT_ID, SCP_GOOGLE_CLIENT_SECRET, ' \
             'and SCP_GOOGLE_REFRESH_TOKEN (or a short-lived SCP_ACCESS_TOKEN override). ' \
-            'See docs/external-catalog-import.md (Broad SCP auth).'
+            'Set them in the env file of the website and jobs containers; to get a refresh token, run: ' \
+            'bin/rails external_catalog:broad_scp:oauth_url'
     end
 
     def oauth_authorization_url

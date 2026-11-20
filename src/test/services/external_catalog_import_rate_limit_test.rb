@@ -75,4 +75,32 @@ class ExternalCatalogImportRateLimitTest < TestBaseWithoutFixtures
     assert_not denied.allowed?
     assert_match(/session/i, denied.reason)
   end
+
+  test 'a start replacing the session ongoing import is not blocked by its lock' do
+    first = ExternalCatalog::ImportRateLimit.allow_guest_start!(ip: '203.0.113.20', session_key: 'swap', candidate_id: 11)
+    assert first.allowed?
+
+    other = ExternalCatalog::ImportRateLimit.allow_guest_start!(
+      ip: '203.0.113.20', session_key: 'swap', candidate_id: 12, replacing_candidate_id: 99
+    )
+    refute other.allowed?
+
+    replacing = ExternalCatalog::ImportRateLimit.allow_guest_start!(
+      ip: '203.0.113.20', session_key: 'swap', candidate_id: 12, replacing_candidate_id: 11
+    )
+    assert replacing.allowed?
+  end
+
+  test 'the cancelled import finishing does not release the lock of the import that replaced it' do
+    ExternalCatalog::ImportRateLimit.allow_guest_start!(ip: '203.0.113.21', session_key: 'swap2', candidate_id: 11)
+    ExternalCatalog::ImportRateLimit.allow_guest_start!(
+      ip: '203.0.113.21', session_key: 'swap2', candidate_id: 12, replacing_candidate_id: 11
+    )
+
+    ExternalCatalog::ImportRateLimit.release_inflight!(session_key: 'swap2', candidate_id: 11)
+    refute ExternalCatalog::ImportRateLimit.allow_guest_start!(ip: '203.0.113.21', session_key: 'swap2', candidate_id: 13).allowed?
+
+    ExternalCatalog::ImportRateLimit.release_inflight!(session_key: 'swap2', candidate_id: 12)
+    assert ExternalCatalog::ImportRateLimit.allow_guest_start!(ip: '203.0.113.21', session_key: 'swap2', candidate_id: 13).allowed?
+  end
 end

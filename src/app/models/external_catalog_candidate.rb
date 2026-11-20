@@ -4,10 +4,14 @@ class ExternalCatalogCandidate < ApplicationRecord
   SOURCES = %w[cellxgene bgee ebi_sc hca hubmap broad_scp allen_abc matkp geo].freeze
   # Prefer better-annotated sources first when SOURCE=all (importer + catalog UI).
   IMPORT_SOURCE_ORDER = %w[cellxgene bgee ebi_sc hca hubmap broad_scp allen_abc matkp geo].freeze
-  # awaiting_matrix: the import downloaded an H5AD with several matrices and waits for the user to pick one.
+  # awaiting_matrix: the import is paused for a choice of the user who started it: the matrix of an H5AD
+  # with several matrices or, when import_resume['choice'] == 'organism', the species (the dataset's tax_id
+  # is missing or not in ASAP). Both share the ownership, expiry and cancel rules below.
   IMPORT_STATUSES = %w[idle importing awaiting_matrix failed].freeze
   # An unanswered matrix choice is cancelled (download deleted, candidate freed) after this long.
   MATRIX_CHOICE_TTL = 2.hours
+  # import_resume['choice'] of an import paused for the user, who continues in the project form.
+  FORM_CHOICE = 'form'
   SERIES_IDENTIFIER_KINDS = %w[geo_series array_express bioproject ega_study].freeze
   COLLECTION_URL_RE = %r{/collections/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})}i
 
@@ -443,8 +447,16 @@ class ExternalCatalogCandidate < ApplicationRecord
     import_status.to_s == 'awaiting_matrix'
   end
 
-  # State kept while awaiting_matrix: fu_id (the download), version_id, skip_archive,
-  # sandbox_key_digest (guest imports; the raw key stays in the guest's session) and awaiting_since.
+  # Paused for the user (awaiting_matrix, the historical name): species, matrix, text parsing... are chosen
+  # in the project form, opened on the kept download. Pauses from before the form had no download to open.
+  def awaiting_form?
+    awaiting_matrix? && import_resume['choice'] == FORM_CHOICE && pending_download_fu.present?
+  end
+
+  # State kept while awaiting_matrix: choice ('form'), fu_id (the download), reason (organism, matrix, text,
+  # archive, dataset), version_id, skip_archive, sandbox_key_digest (guest imports; the raw key stays in the
+  # guest's session), awaiting_since, organism_id (species resolved from the catalog), suggested_organism_id
+  # and suggestion (species found in the file), tax_id and organism_label (what the catalog said).
   def import_resume
     parsed = JSON.parse(import_resume_json.to_s)
     parsed.is_a?(Hash) ? parsed : {}
@@ -452,30 +464,39 @@ class ExternalCatalogCandidate < ApplicationRecord
     {}
   end
 
-  def await_matrix_choice!(fu:, version_id:, skip_archive:, sandbox_key: nil)
+  def await_form_choice!(fu:, reason:, version_id:, skip_archive:, sandbox_key: nil, organism_id: nil,
+                         suggested_organism_id: nil, suggestion: nil, tax_id: nil, organism_label: nil)
     update!(
       import_status: 'awaiting_matrix',
       import_error: nil,
       import_resume_json: {
+        'choice' => FORM_CHOICE,
+        'reason' => reason.to_s,
         'fu_id' => fu.id,
         'version_id' => version_id,
         'skip_archive' => skip_archive ? true : false,
         'sandbox_key_digest' => self.class.sandbox_key_digest(sandbox_key),
-        'awaiting_since' => Time.current.iso8601
-      }.to_json
+        'awaiting_since' => Time.current.iso8601,
+        'organism_id' => organism_id.presence&.to_i,
+        'suggested_organism_id' => suggested_organism_id.presence&.to_i,
+        'suggestion' => suggestion,
+        'tax_id' => tax_id,
+        'organism_label' => organism_label
+      }.compact.to_json
     )
   end
 
-  def pending_matrix_fu
+  # The download kept for the project form while awaiting it.
+  def pending_download_fu
     return nil unless awaiting_matrix?
 
     fu_id = import_resume['fu_id']
     fu_id.present? ? Fu.find_by(id: fu_id) : nil
   end
 
-  def pending_matrix_choices
-    fu = pending_matrix_fu
-    fu ? ExternalCatalog::H5adMatrixChoice.choices_for_fu(fu) : []
+  # Species the project form starts with: the catalog's, else the one found in the file.
+  def form_organism_id
+    (import_resume['organism_id'] || import_resume['suggested_organism_id']).presence&.to_i
   end
 
   # Only whoever started the import may choose: the same signed-in user, or the same guest session.
@@ -537,7 +558,8 @@ class ExternalCatalogCandidate < ApplicationRecord
     return false if fu_id.blank?
 
     scope = Fu.where(id: fu_id)
-    scope = scope.where(user_id: user_id) if user_id.present?
+    # nil: a guest download handed to the project form belongs to the guest session (fus.user_id nil).
+    scope = scope.where(user_id: [user_id, nil]) if user_id.present?
     fu = scope.first
     return false if fu.nil? || fu.project_id.present? || Project.exists?(fu_id: fu.id)
 
@@ -578,7 +600,7 @@ class ExternalCatalogCandidate < ApplicationRecord
   IMPORT_JOB_MARKER = 'job'
 
   def importing_via_job?
-    importing? && (import_resume[IMPORT_JOB_MARKER] == true || import_resume['resumed'] == true)
+    importing? && import_resume[IMPORT_JOB_MARKER] == true
   end
 
   # Guest imports keep this digest of the guest's sandbox key in import_resume_json (the raw key stays in
@@ -626,7 +648,6 @@ class ExternalCatalogCandidate < ApplicationRecord
       if import_job_in_flight?
         ExternalCatalog::ImportProgress.request_cancel!(id)
       else
-        discard_kept_download! if import_resume['resumed']
         update!(import_status: 'idle', import_error: nil, import_resume_json: nil)
         ExternalCatalog::ImportProgress.clear(id)
       end
@@ -640,9 +661,6 @@ class ExternalCatalogCandidate < ApplicationRecord
     return false unless importing?
     return false if import_job_in_flight?
 
-    # A resumed run killed before its end leaves the download it was given behind. Only a run that
-    # started ('resumed', set by the job): choose_matrix sets importing just before enqueueing.
-    discard_kept_download! if import_resume['resumed']
     if error.present?
       update!(import_status: 'failed', import_error: error, import_resume_json: nil)
       ExternalCatalog::ImportProgress.report(id, step: 'failed', import_error: error, message: error)

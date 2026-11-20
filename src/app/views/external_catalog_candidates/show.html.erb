@@ -182,13 +182,29 @@
     <% if @candidate.importing? %>
       <p class="text-sm text-amber-700 dark:text-amber-300">Import in progress. The analysis view will open when parsing starts.</p>
     <% elsif @candidate.awaiting_matrix? %>
-      <p class="text-sm text-amber-700 dark:text-amber-300">
-        <% if @matrix_choice_owner %>
-          This file contains several expression matrices. Choose the one to import.
-        <% else %>
-          An import of this dataset is waiting for the person who started it to choose an expression matrix.
-        <% end %>
-      </p>
+      <% if @matrix_choice_owner && @candidate.awaiting_form? %>
+        <p class="text-sm text-amber-700 dark:text-amber-300">
+          The dataset is downloaded and preparsed. Check its preparsing (species, matrix, parsing parameters) in
+          the project form, then create the project to finish the import.
+        </p>
+        <div class="flex flex-wrap items-center gap-3">
+          <%= link_to "Continue in the project form", new_project_path(catalog_import: @candidate.id),
+              class: "inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700",
+              data: { turbo: false } %>
+          <%= button_to "Cancel import", cancel_import_external_catalog_candidate_path(@candidate),
+              method: :post, form: { data: { turbo: false } },
+              class: "text-sm text-gray-600 underline hover:text-gray-800 dark:text-gray-400 bg-transparent border-0 p-0 cursor-pointer" %>
+        </div>
+      <% elsif @matrix_choice_owner %>
+        <p class="text-sm text-amber-700 dark:text-amber-300">This import cannot be continued. Cancel it and start it again.</p>
+        <%= button_to "Cancel import", cancel_import_external_catalog_candidate_path(@candidate),
+            method: :post, form: { data: { turbo: false } },
+            class: "text-sm text-gray-600 underline hover:text-gray-800 dark:text-gray-400 bg-transparent border-0 p-0 cursor-pointer" %>
+      <% else %>
+        <p class="text-sm text-amber-700 dark:text-amber-300">
+          An import of this dataset is waiting for the person who started it to check it in the project form.
+        </p>
+      <% end %>
     <% end %>
     <% if @candidate.failed? && @candidate.import_error.present? %>
       <% if admin? || !@candidate.scfair_validation_error? %>

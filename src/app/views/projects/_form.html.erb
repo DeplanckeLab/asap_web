@@ -236,100 +236,32 @@
             %>
             <%= form.hidden_field :organism_id, value: effective_organism_id || "", data: { organism_selector_target: "hiddenInput", action: "change->file-upload#checkSubmitButton change->organism-selector#syncSelectionFromHiddenInput" } %>
             
-            <!-- Dropdown button -->
-            <button type="button"
-                    class="w-full px-3 py-2 text-left border border-gray-300 dark:border-gray-600 rounded-md <%= @integrate_mode ? 'bg-gray-100 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed' : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500' %> flex items-center justify-between"
-                    data-organism-selector-target="dropdownButton"
-                    <%= 'disabled' if @integrate_mode %>
-                    data-action="click->organism-selector#toggleDropdown">
-              <span data-organism-selector-target="selectedText">
-                <% if effective_organism_id.present? %>
-                  <%
-                    selected_display =
-                      if @organisms.is_a?(Array) && @organisms.any?
-                        selected_org = @organisms.find { |o| o.is_a?(Hash) ? o['id'].to_i == effective_organism_id.to_i : o.id == effective_organism_id }
-                        if selected_org.is_a?(Hash)
-                          Organism.selector_label(selected_org['name'], selected_org['short_name'])
-                        else
-                          Organism.selector_label(selected_org&.name, selected_org&.short_name)
-                        end
-                      elsif @organisms.respond_to?(:find)
-                        selected_org = @organisms.find { |o| o.id == effective_organism_id }
-                        Organism.selector_label(selected_org&.name, selected_org&.short_name)
-                      end
-                    if selected_display.blank?
-                      local_org = Organism.find_by(id: effective_organism_id)
-                      selected_display = Organism.selector_label(local_org&.name, local_org&.short_name) if local_org
+            <%
+              selected_display = nil
+              if effective_organism_id.present?
+                if @organisms.is_a?(Array) && @organisms.any?
+                  selected_org = @organisms.find { |o| o.is_a?(Hash) ? o['id'].to_i == effective_organism_id.to_i : o.id == effective_organism_id }
+                  selected_display =
+                    if selected_org.is_a?(Hash)
+                      Organism.selector_label(selected_org['name'], selected_org['short_name'])
+                    else
+                      Organism.selector_label(selected_org&.name, selected_org&.short_name)
                     end
-                  %>
-                  <%= selected_display.presence || "Please select an organism" %>
-                <% else %>
-                  Please select an organism
-                <% end %>
-              </span>
-              <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" data-organism-selector-target="chevron">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-              </svg>
-            </button>
-            
-            <!-- Dropdown menu -->
-            <div class="hidden absolute z-50 w-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg max-h-60 overflow-y-auto"
-                 style="top: calc(100% + 4px);"
-                 data-organism-selector-target="dropdownMenu">
-              <div class="sticky top-0 z-10 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-2">
-                <input type="text"
-                       class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-white"
-                       placeholder="Search organisms..."
-                       autocomplete="off"
-                       data-organism-selector-target="searchInput"
-                       data-action="input->organism-selector#filterOptions click->organism-selector#preventDropdownCloseOnInput keydown->organism-selector#preventDropdownCloseOnInput">
-              </div>
-              <% (@grouped_organisms || {}).each do |domain, organisms| %>
-                <div class="organism-group">
-                  <!-- Group header (collapsible) -->
-                  <button type="button"
-                          class="w-full px-4 py-2 text-left text-sm font-semibold text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center"
-                          data-organism-selector-target="groupHeader"
-                          data-action="click->organism-selector#toggleGroup">
-                    <div class="mr-3" style="color: #9ca3af;">
-                      <i class="fas fa-chevron-right" style="font-size: 14px; transition: transform 0.3s ease-out;" data-organism-selector-target="groupChevron"></i>
-                    </div>
-                    <span class="flex-1"><%= domain %></span>
-                    <span class="inline-flex items-center justify-center px-2 py-1 text-xs font-semibold rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 ml-2"
-                          data-organism-selector-target="groupCount"
-                          data-total-count="<%= organisms.count %>">
-                      <%= organisms.count %>
-                    </span>
-                  </button>
-                  
-                  <!-- Group content (collapsible) -->
-                  <div class="hidden" data-organism-selector-target="groupContent">
-                    <% organisms.each do |organism_data| %>
-                      <% 
-                        # Handle array format: [display_name, organism_id, tax_id, assembly_status]
-                        display_name = organism_data[0]
-                        organism_id = organism_data[1]
-                        tax_id = organism_data[2]
-                        assembly_status = organism_data[3]
-                      %>
-                      <button type="button"
-                              class="w-full px-6 py-2 text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-2 <%= 'bg-blue-50 dark:bg-blue-900/30 font-medium' if organism_id == effective_organism_id %>"
-                              data-organism-id="<%= organism_id %>"
-                              data-display-name="<%= display_name %>"
-                              data-search-text="<%= [display_name, tax_id].compact.join(' ').downcase %>"
-                              data-organism-selector-target="option"
-                              data-action="click->organism-selector#selectOrganism">
-                        <span class="min-w-0 truncate"><%= display_name %></span>
-                        <% if tax_id.present? %>
-                          <span class="text-gray-500 dark:text-gray-400 text-xs flex-shrink-0"><%= tax_id %></span>
-                        <% end %>
-                        <%= organism_assembly_status_tag(assembly_status) %>
-                      </button>
-                    <% end %>
-                  </div>
-                </div>
-              <% end %>
-            </div>
+                elsif @organisms.respond_to?(:find)
+                  selected_org = @organisms.find { |o| o.id == effective_organism_id }
+                  selected_display = Organism.selector_label(selected_org&.name, selected_org&.short_name)
+                end
+                if selected_display.blank?
+                  local_org = Organism.find_by(id: effective_organism_id)
+                  selected_display = Organism.selector_label(local_org&.name, local_org&.short_name) if local_org
+                end
+              end
+            %>
+            <%= render "shared/organism_dropdown",
+                       selected_id: effective_organism_id,
+                       selected_label: selected_display,
+                       grouped_organisms: @grouped_organisms,
+                       disabled: @integrate_mode %>
           </div>
           <p class="mt-1 text-xs text-red-600 dark:text-red-400">Mandatory</p>
         </div>
@@ -343,6 +275,9 @@
     <%= form.hidden_field :status_id, value: project.status_id || 1 %>
     <% origin_name = @project_origin_name.presence || params[:project_origin].presence || ProjectOrigin::UPLOAD %>
     <%= hidden_field_tag :project_origin, origin_name %>
+    <% if @catalog_import_candidate %>
+      <%= hidden_field_tag :catalog_import_id, @catalog_import_candidate.id %>
+    <% end %>
     <% if @exported_project_id.present? || project.exported_project_id.present? %>
       <%= form.hidden_field :exported_project_id, value: (@exported_project_id.presence || project.exported_project_id) %>
     <% end %>
@@ -359,7 +294,7 @@
       <% else %>
         <%= link_to "Back to projects", projects_browse_url, class: "px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md font-medium transition-colors" %>
       <% end %>
-      <% replace_msg = (!user_signed_in? && !@is_resetting_parsing && !@integrate_mode) ? guest_sandbox_replace_confirm : nil %>
+      <% replace_msg = (!user_signed_in? && !@is_resetting_parsing && !@integrate_mode) ? guest_sandbox_replace_confirm(continued_import: @catalog_import_candidate) : nil %>
       <% submit_label =
            if @is_resetting_parsing
              "Recreate project"

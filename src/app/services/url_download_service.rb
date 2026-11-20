@@ -32,13 +32,16 @@ class UrlDownloadService
   end
 
   # progress_callback receives (downloaded_bytes, total_bytes_or_nil) while curl runs.
-  def initialize(fu:, url:, dest_path:, logger: Rails.logger, progress_callback: nil)
+  # size_hint: expected size from elsewhere (e.g. the catalog entry), reported as the total when the server
+  # sends no Content-Length (Broad SCP); progress only, never used to judge the download complete.
+  def initialize(fu:, url:, dest_path:, logger: Rails.logger, progress_callback: nil, size_hint: nil)
     @fu = fu
     @url = url.to_s
     @dest_path = dest_path.to_s
     @logger = logger
     @progress_callback = progress_callback
     @expected_size = nil
+    @size_hint = size_hint.to_i.positive? ? size_hint.to_i : nil
   end
 
   def call
@@ -161,7 +164,7 @@ class UrlDownloadService
       else
         0
       end
-    @progress_callback.call(bytes, @expected_size)
+    @progress_callback.call(bytes, @expected_size || @size_hint)
   rescue ExternalCatalog::ImportProgress::Cancelled
     raise
   rescue StandardError => e

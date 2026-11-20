@@ -240,22 +240,30 @@ class ApplicationController < ActionController::Base
   end
 
   def guest_sandbox_pending_import_label(import)
-    import.awaiting_matrix? ? 'Choose the matrix to import' : 'Import in progress'
+    # Same label whatever the import waits for: the dataset page links to the project form.
+    import.awaiting_matrix? ? 'Finish the import' : 'Import in progress'
   end
 
   # Confirm text for a guest action that replaces the sandbox (nil: nothing to lose, no confirm).
   # action: :create (new sandbox project) or :import (catalog import).
-  def guest_sandbox_replace_confirm(action: :create)
+  # continued_import: the catalog import the project form continues; submitting finishes it, not cancels it.
+  def guest_sandbox_replace_confirm(action: :create, continued_import: nil)
     return nil if user_signed_in?
 
     sandbox = guest_sandbox_project
     import = guest_ongoing_catalog_import
+    import = nil if import && continued_import && import.id == continued_import.id
     return nil unless sandbox || import
 
-    verb = action == :import ? 'Importing this dataset' : 'Creating a new sandbox project'
+    verb = action == :import || continued_import ? 'Importing this dataset' : 'Creating a new sandbox project'
     consequences = []
     if import
-      state = import.awaiting_matrix? ? 'is waiting for you to choose a matrix' : 'is still running'
+      state =
+        if import.awaiting_matrix?
+          'is waiting for you in the project form'
+        else
+          'is still running'
+        end
       consequences << "cancel the import of \"#{import.title.presence || import.external_id}\", which #{state}"
     end
     consequences << "permanently replace your current sandbox (#{sandbox.display_name})" if sandbox

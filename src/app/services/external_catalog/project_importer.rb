@@ -43,18 +43,69 @@ module ExternalCatalog
     class Error < StandardError; end
     class SkipEntry < StandardError; end
 
-    # Raised (only when the importer was built with ask_matrix_choice: true) for an H5AD with several
-    # matrices and no /raw/X. The download is kept: resume with import_one(entry, sel:, fu_id:).
-    class NeedsMatrixChoice < StandardError
-      attr_reader :fu, :choices, :recommended
+    # Raised (only when the importer was built with ask_user_choice: true) once the file is downloaded and
+    # preparsed, when the import needs the user: species missing from the catalog or not in ASAP (reason
+    # :organism), several H5AD matrices without /raw/X (:matrix), a text matrix whose delimiter / gene column /
+    # header must be checked (:text), several archive members (:archive) or datasets (:dataset). The download
+    # is kept (fu): the user continues in the project form, and complete_form_import finishes the import.
+    class NeedsUserChoice < StandardError
+      attr_reader :reason, :fu, :organism_id, :suggested_organism_id, :suggestion, :tax_id, :organism_label
 
-      def initialize(fu:, choices:, recommended:)
+      def initialize(message, reason:, fu: nil, organism_id: nil, suggested_organism_id: nil, suggestion: nil,
+                     tax_id: nil, organism_label: nil)
+        @reason = reason.to_sym
         @fu = fu
-        @choices = choices
-        @recommended = recommended
-        super("Several H5AD matrices (#{choices.map { |c| c['path'] }.join(', ')}): waiting for a choice")
+        @organism_id = organism_id
+        @suggested_organism_id = suggested_organism_id
+        @suggestion = suggestion
+        @tax_id = tax_id.to_i.positive? ? tax_id.to_i : nil
+        @organism_label = organism_label.presence
+        super(message)
+      end
+
+      def with(**attrs)
+        self.class.new(
+          message,
+          **{ reason: reason, fu: fu, organism_id: organism_id, suggested_organism_id: suggested_organism_id,
+              suggestion: suggestion, tax_id: tax_id, organism_label: organism_label }.merge(attrs)
+        )
       end
     end
+
+    # Ensembl gene id prefixes (and model-organism ids) -> NCBI taxonomy id, to suggest the species of a
+    # file whose metadata does not give it.
+    GENE_ID_PREFIX_TAX = [
+      [/\AENSMUSG\d/, 10_090], [/\AENSRNOG\d/, 10_116], [/\AENSDARG\d/, 7955], [/\AENSGALG\d/, 9031],
+      [/\AENSSSCG\d/, 9823], [/\AENSBTAG\d/, 9913], [/\AENSMMUG\d/, 9544], [/\AENSCAFG\d/, 9615],
+      [/\AENSXETG\d/, 8364], [/\AENSG\d/, 9606], [/\AFBgn\d/, 7227], [/\AWBGene\d/, 6239]
+    ].freeze
+
+    # /uns keys of an H5AD (CELLxGENE schema) read to suggest the species.
+    H5AD_UNS_ORGANISM_TERM = '/uns/organism_ontology_term_id'
+    H5AD_UNS_ORGANISM = '/uns/organism'
+    H5AD_UNS_ORGANISM_PY = <<~'PYTHON'
+      import h5py, json, sys
+
+      def scalar(f, key):
+          if key not in f:
+              return None
+          item = f[key]
+          if not isinstance(item, h5py.Dataset):
+              return None
+          value = item[()]
+          if hasattr(value, "shape") and getattr(value, "shape", ()) != ():
+              value = value.ravel()[0] if value.size else None
+          if isinstance(value, bytes):
+              value = value.decode("utf-8", "replace")
+          return None if value is None else str(value).strip()
+
+      with h5py.File(sys.argv[1], "r") as f:
+          print(json.dumps({
+              "organism_ontology_term_id": scalar(f, "uns/organism_ontology_term_id"),
+              "organism": scalar(f, "uns/organism"),
+          }))
+    PYTHON
+    H5AD_UNS_READ_TIMEOUT_SECONDS = 60
 
     def initialize(
       user:,
@@ -70,7 +121,7 @@ module ExternalCatalog
       sandbox: false,
       sandbox_key: nil,
       progress_candidate_id: nil,
-      ask_matrix_choice: false
+      ask_user_choice: false
     )
       @user = user
       @version = version
@@ -85,8 +136,9 @@ module ExternalCatalog
       @sandbox = ActiveModel::Type::Boolean.new.cast(sandbox)
       @sandbox_key = sandbox_key.to_s.strip.presence
       @progress_candidate_id = progress_candidate_id
-      # UI imports stop and ask when an H5AD has several matrices; batch imports use the recommended one.
-      @ask_matrix_choice = ask_matrix_choice
+      # UI imports stop for the project form (NeedsUserChoice) instead of guessing or skipping; batch
+      # imports use the recommended matrix and skip entries without a species in ASAP.
+      @ask_user_choice = ask_user_choice
       @last_pipeline_status = ExternalCatalog::ImportSuccessRegistry.empty_status
       raise Error, 'sandbox_key required for sandbox import' if @sandbox && @sandbox_key.blank?
 
@@ -123,9 +175,7 @@ module ExternalCatalog
       results
     end
 
-    # sel: H5AD matrix to use as the main matrix (chosen by the user).
-    # fu_id: resume from this already downloaded and preparsed Fu instead of downloading again.
-    def import_one(entry, on_project_ready: nil, sel: nil, fu_id: nil)
+    def import_one(entry, on_project_ready: nil)
       @downloaded_fu = nil
       @logger.info(
         "[ExternalCatalog] start source=#{entry.source} id=#{entry.external_id} " \
@@ -137,7 +187,17 @@ module ExternalCatalog
         raise SkipEntry, "already imported provider=#{provider.name} key=#{entry.external_id}"
       end
 
-      organism = resolve_organism!(entry)
+      organism_question = nil
+      organism =
+        begin
+          resolve_organism!(entry)
+        rescue NeedsUserChoice => e
+          # Asked once downloaded and preparsed, with the species found in the file as default.
+          raise if @dry_run
+
+          organism_question = e
+          nil
+        end
       if @dry_run
         @logger.info(
           "[ExternalCatalog][dry-run] would import #{entry.source}/#{entry.external_id} " \
@@ -150,14 +210,19 @@ module ExternalCatalog
 
       @last_import_outcome = nil
       reset_pipeline_status!
-      if fu_id.present?
-        fu = resume_fu!(fu_id)
-      else
-        report_progress!(step: 'downloading')
-        fu = download_and_preparse!(entry, organism)
+      report_progress!(step: 'downloading')
+      fu = download_and_preparse!(entry, organism)
+      if organism.nil?
+        suggested_id, suggestion = suggest_organism_for(fu, entry)
+        raise organism_question.with(fu: fu, suggested_organism_id: suggested_id, suggestion: suggestion)
+      end
+      if @ask_user_choice && user_text_matrix?(fu, entry)
+        raise NeedsUserChoice.new(
+          "Text matrix Fu##{fu.id}: waiting for its parsing parameters", reason: :text, fu: fu, organism_id: organism.id
+        )
       end
       report_progress!(step: 'preparsing')
-      sel_name, dims, file_type = choose_matrix_selection!(fu, organism, sel: sel)
+      sel_name, dims, file_type = choose_matrix_selection!(fu, organism)
       parsing_attrs = build_parsing_attrs(entry, sel_name, dims, file_type)
       preparsing_fp = preparsing_fingerprint(parsing_attrs)
       content_sha = InputFileSha256.ensure_for_fu!(fu)
@@ -179,6 +244,47 @@ module ExternalCatalog
 
       report_progress!(step: 'creating_project')
       project = create_project!(entry, fu, organism, parsing_attrs, preparsing_fp)
+      finish_created_project!(entry, project, provider, on_project_ready: on_project_ready)
+    rescue NeedsUserChoice
+      raise
+    rescue StandardError
+      discard_failed_download!
+      raise
+    end
+
+    # The user continued a paused UI import (NeedsUserChoice) in the project form, which created +project+
+    # from the kept download with the parsing parameters chosen there (and queued its parsing): attach the
+    # catalog metadata and run the rest of the import on it.
+    def complete_form_import(entry, project, on_project_ready: nil)
+      @logger.info(
+        "[ExternalCatalog] completing form import source=#{entry.source} id=#{entry.external_id} " \
+        "project_id=#{project.id} key=#{project.key}"
+      )
+      @last_import_outcome = nil
+      reset_pipeline_status!
+      provider = ensure_provider!(entry)
+      attrs = {}
+      attrs[:description] = project_import_description(entry) if project.description.blank?
+      if project.input_preparsing_fingerprint.blank?
+        attrs[:input_preparsing_fingerprint] =
+          preparsing_fingerprint(Basic.safe_parse_json(project.parsing_attrs_json, {}))
+      end
+      project.update_columns(attrs) if attrs.any?
+      finish_created_project!(entry, project, provider, on_project_ready: on_project_ready)
+    end
+
+    # Parsing attributes of a project form submission, hashed like an import's (content match of later imports).
+    def self.preparsing_fingerprint(attrs)
+      h = attrs.is_a?(Hash) ? attrs.deep_stringify_keys : {}
+      h['sel_name'] ||= h['sel'] if h['sel'].present?
+      h['has_header'] = %w[1 true].include?(h['has_header'].to_s) ? '1' : '0' if h.key?('has_header')
+      payload = PREPARSING_FINGERPRINT_KEYS.index_with { |k| h[k].nil? ? nil : h[k].to_s }
+      Digest::SHA256.hexdigest(payload.to_json)
+    end
+
+    private
+
+    def finish_created_project!(entry, project, provider, on_project_ready: nil)
       attach_project_collection!(project, entry)
       attach_provider_label!(project, provider, entry)
       # parse_files has already been queued inside create_project!; notify so the UI can open analysis.
@@ -229,12 +335,9 @@ module ExternalCatalog
       )
       @last_import_outcome = :created
       project
-    rescue NeedsMatrixChoice
-      raise
-    rescue StandardError
-      discard_failed_download!
-      raise
     end
+
+    public
 
     attr_reader :last_import_outcome, :last_pipeline_status
 
@@ -270,9 +373,7 @@ module ExternalCatalog
     end
 
     def preparsing_fingerprint(attrs)
-      h = attrs.is_a?(Hash) ? attrs.deep_stringify_keys : {}
-      payload = PREPARSING_FINGERPRINT_KEYS.index_with { |k| h[k].nil? ? nil : h[k].to_s }
-      Digest::SHA256.hexdigest(payload.to_json)
+      self.class.preparsing_fingerprint(attrs)
     end
 
     def build_parsing_attrs(entry, sel_name, dims, file_type)
@@ -311,8 +412,7 @@ module ExternalCatalog
     end
 
     # A failed import deletes the download it made unless a project already uses it: a retry downloads
-    # again anyway. A paused import (NeedsMatrixChoice) keeps it; a resumed run's download (fu_id) is
-    # handled by ExternalCatalogImportCandidateJob.
+    # again anyway. A paused import (NeedsUserChoice) keeps it for the project form.
     def discard_failed_download!
       fu = @downloaded_fu && Fu.find_by(id: @downloaded_fu.id)
       @downloaded_fu = nil
@@ -429,17 +529,15 @@ module ExternalCatalog
       end
 
       if tax_id <= 0
-        raise SkipEntry, "Missing tax_id for #{entry.source}/#{entry.external_id} (#{label})"
+        organism_not_resolved!(
+          "Missing tax_id for #{entry.source}/#{entry.external_id} (#{label})",
+          tax_id: nil, label: label
+        )
       end
 
-      env_data = Basic.safe_parse_json(@version.env_json, {})
-      db_name = env_data['asap_data_db_name'].to_s.strip
-      raise Error, "Version #{@version.id} missing asap_data_db_name" if db_name.blank?
-
-      remote_orgs = RemoteOrganism.list_for_version(db_name)
-      matches = remote_orgs.select { |o| o['tax_id'].to_i == tax_id }
+      matches = version_organisms.select { |o| o['tax_id'].to_i == tax_id }
       if matches.empty?
-        raise SkipEntry, "No ASAP organism for tax_id=#{tax_id} (#{label})"
+        organism_not_resolved!("No ASAP organism for tax_id=#{tax_id} (#{label})", tax_id: tax_id, label: label)
       end
 
       chosen =
@@ -454,6 +552,122 @@ module ExternalCatalog
         "name=#{organism.name} short_name=#{chosen['short_name']}"
       )
       organism
+    end
+
+    def organism_not_resolved!(message, tax_id:, label:)
+      if @ask_user_choice
+        raise NeedsUserChoice.new(message, reason: :organism, tax_id: tax_id, organism_label: label)
+      end
+
+      raise SkipEntry, message
+    end
+
+    def h5ad_entry?(entry)
+      entry.format_kind.to_s == 'h5ad' && normalized_mtx_companions(entry).nil?
+    end
+
+    # Text matrices the importer rewrites itself (GEO tables, MATKP) have fixed parsing parameters.
+    def converted_text_entry?(entry)
+      (entry.source.to_s == 'geo' && %w[series_matrix counts_table].include?(entry.format_kind.to_s)) ||
+        (entry.source.to_s == 'matkp' && entry.format_kind.to_s == 'zip')
+    end
+
+    # Downloaded file preparsed as a text matrix whose delimiter / gene column / header the user may set.
+    def user_text_matrix?(fu, entry)
+      return false if converted_text_entry?(entry) || normalized_mtx_companions(entry)
+
+      preparsing_output(fu)['detected_format'].to_s.upcase == 'RAW_TEXT'
+    end
+
+    def preparsing_output(fu)
+      path = fu&.upload_dir&.join('output.json')
+      path && File.exist?(path) ? Basic.safe_parse_json(File.read(path), {}) : {}
+    end
+
+    # [organism_id, "where it was found"]: an H5AD's /uns first, then the gene ids of the preparsed matrix.
+    def suggest_organism_for(fu, entry)
+      suggested = h5ad_entry?(entry) ? suggest_organism_from_h5ad(fu) : [nil, nil]
+      suggested = suggest_organism_from_gene_ids(fu) if suggested.first.nil?
+      suggested
+    end
+
+    def suggest_organism_from_gene_ids(fu)
+      genes = Array(preparsing_output(fu)['list_groups']).flat_map { |g| Array(g['genes']) }.map(&:to_s)
+      tax_ids = genes.filter_map do |gene|
+        GENE_ID_PREFIX_TAX.find { |re, _tax| gene.match?(re) }&.last
+      end
+      return [nil, nil] if tax_ids.empty?
+
+      tax_id, count = tax_ids.tally.max_by { |_tax, n| n }
+      return [nil, nil] if count * 2 <= genes.size
+
+      organism = version_organism_for_tax_id(tax_id)
+      return [nil, nil] unless organism
+
+      example = genes.find { |g| GENE_ID_PREFIX_TAX.any? { |re, t| t == tax_id && g.match?(re) } }
+      [organism.id, "gene ids such as #{example}"]
+    rescue StandardError => e
+      @logger.warn("[ExternalCatalog] could not read the gene ids of Fu##{fu&.id}: #{e.class} #{e.message}")
+      [nil, nil]
+    end
+
+    # [organism_id, "where it was found"] from the H5AD's /uns (CELLxGENE schema), or [nil, nil] when the
+    # file says nothing usable or names a species that is not in this ASAP version either.
+    def suggest_organism_from_h5ad(fu)
+      uns = read_h5ad_uns_organism(fu)
+      term = uns['organism_ontology_term_id'].to_s
+      name = uns['organism'].to_s
+
+      tax_id = term[/\ANCBITaxon:(\d+)\z/i, 1].to_i
+      if tax_id.positive? && (organism = version_organism_for_tax_id(tax_id))
+        return [organism.id, "#{H5AD_UNS_ORGANISM_TERM} = #{term}"]
+      end
+
+      if name.present?
+        row = version_organisms.find { |o| o['name'].to_s.casecmp?(name) }
+        organism = Organism.find_by(id: row['id']) if row
+        organism ||= version_organism_for_tax_id(HcaCatalog::SPECIES_TAX[name.downcase].to_i)
+        return [organism.id, "#{H5AD_UNS_ORGANISM} = #{name}"] if organism
+      end
+
+      @logger.info("[ExternalCatalog] no ASAP organism in /uns of Fu##{fu.id}: term=#{term.inspect} name=#{name.inspect}")
+      [nil, nil]
+    rescue StandardError => e
+      @logger.warn("[ExternalCatalog] could not read the organism in /uns of Fu##{fu&.id}: #{e.class} #{e.message}")
+      [nil, nil]
+    end
+
+    def read_h5ad_uns_organism(fu)
+      path = fu.upload_dir.join(fu.upload_file_name)
+      return {} unless File.exist?(path)
+
+      stdout, stderr, status = H5DataService.docker_exec_h5_python3!(
+        path.to_s,
+        stdin_data: H5AD_UNS_ORGANISM_PY,
+        timeout_seconds: H5AD_UNS_READ_TIMEOUT_SECONDS
+      )
+      raise Error, "h5py failed: #{stderr.presence || stdout}".truncate(500) unless status.success?
+
+      parsed = JSON.parse(stdout.to_s.lines.last.to_s)
+      parsed.is_a?(Hash) ? parsed : {}
+    end
+
+    def version_organism_for_tax_id(tax_id)
+      return nil unless tax_id.to_i.positive?
+
+      matches = version_organisms.select { |o| o['tax_id'].to_i == tax_id.to_i }
+      chosen = matches.find { |o| o['short_name'].to_s.split.size == 1 } || matches.min_by { |o| o['id'].to_i }
+      chosen && Organism.find_by(id: chosen['id'])
+    end
+
+    def version_organisms
+      @version_organisms ||= begin
+        env_data = Basic.safe_parse_json(@version.env_json, {})
+        db_name = env_data['asap_data_db_name'].to_s.strip
+        raise Error, "Version #{@version.id} missing asap_data_db_name" if db_name.blank?
+
+        RemoteOrganism.list_for_version(db_name)
+      end
     end
 
     def download_and_preparse!(entry, organism)
@@ -497,9 +711,10 @@ module ExternalCatalog
       FuDownloadFromUrlJob.perform_now(
         fu.id,
         entry.url,
-        organism_id: organism.id,
+        organism_id: organism&.id,
         version_id: @version.id,
-        import_progress_candidate_id: @progress_candidate_id
+        import_progress_candidate_id: @progress_candidate_id,
+        size_hint: entry.filesize
       )
       fu.reload
 
@@ -590,7 +805,7 @@ module ExternalCatalog
 
       FuPreparsingService.new(
         fu,
-        organism_id: organism.id,
+        organism_id: organism&.id,
         version_id: @version.id
       ).call
       fu.update!(status: 'preparsed')
@@ -685,7 +900,7 @@ module ExternalCatalog
       )
       FuPreparsingService.new(
         fu,
-        organism_id: organism.id,
+        organism_id: organism&.id,
         version_id: @version.id,
         delimiter: "\t"
       ).call
@@ -792,7 +1007,7 @@ module ExternalCatalog
       )
       FuPreparsingService.new(
         fu,
-        organism_id: organism.id,
+        organism_id: organism&.id,
         version_id: @version.id,
         delimiter: ''
       ).call
@@ -840,26 +1055,14 @@ module ExternalCatalog
       )
       FuPreparsingService.new(
         fu,
-        organism_id: organism.id,
+        organism_id: organism&.id,
         version_id: @version.id,
         delimiter: ''
       ).call
       fu.update!(status: 'preparsed')
     end
 
-    # Fu kept from an import paused for a matrix choice (same user, file and preparsing output still there).
-    def resume_fu!(fu_id)
-      fu = Fu.find_by(id: fu_id, user_id: @user.id)
-      dir = fu&.upload_dir
-      unless fu && fu.project_id.blank? && File.exist?(dir.join(fu.upload_file_name)) && File.exist?(dir.join('output.json'))
-        raise Error, 'The downloaded file is no longer available. Please start the import again.'
-      end
-
-      @logger.info("[ExternalCatalog] resuming with downloaded Fu##{fu.id}")
-      fu
-    end
-
-    def choose_matrix_selection!(fu, organism, sel: nil)
+    def choose_matrix_selection!(fu, organism)
       output_path = fu.upload_dir.join('output.json')
       raise Error, "Missing preparsing output.json for Fu##{fu.id}" unless File.exist?(output_path)
 
@@ -877,19 +1080,15 @@ module ExternalCatalog
       if file_type.to_s.upcase == 'H5AD'
         choices = H5adMatrixChoice.choices(groups)
         sel_name =
-          if sel.present?
-            requested = H5adMatrixChoice.normalize_path(sel)
-            unless choices.any? { |c| c['path'] == requested }
-              raise Error, "Matrix #{sel} is not in this H5AD file (#{choices.map { |c| c['path'] }.join(', ')})"
-            end
-
-            requested
-          elsif paths.include?(RAW_SEL)
+          if paths.include?(RAW_SEL)
             RAW_SEL
           elsif paths.size == 1
             normalize_sel_path(paths.first)
-          elsif @ask_matrix_choice
-            raise NeedsMatrixChoice.new(fu: fu, choices: choices, recommended: H5adMatrixChoice.recommended(choices))
+          elsif @ask_user_choice
+            raise NeedsUserChoice.new(
+              "Several H5AD matrices (#{choices.map { |c| c['path'] }.join(', ')}): waiting for a choice",
+              reason: :matrix, fu: fu, organism_id: organism&.id
+            )
           else
             H5adMatrixChoice.recommended(choices).tap do |chosen|
               @logger.info(
@@ -919,7 +1118,19 @@ module ExternalCatalog
         sel_name = paths.first
         sel_name = nil if file_type.to_s.upcase == 'LOOM'
       elsif %w[ARCHIVE ARCHIVE_COMPRESSED COMPRESSED].include?(file_type.to_s.upcase)
+        if @ask_user_choice
+          raise NeedsUserChoice.new(
+            "Several archive members (#{paths.join(', ')}): waiting for a choice", reason: :archive, fu: fu,
+            organism_id: organism&.id
+          )
+        end
+
         raise Error, "Ambiguous archive members: #{paths.join(', ')}"
+      elsif @ask_user_choice
+        raise NeedsUserChoice.new(
+          "Several datasets (#{paths.join(', ')}): waiting for a choice", reason: :dataset, fu: fu,
+          organism_id: organism&.id
+        )
       else
         sel_name = paths.first
       end

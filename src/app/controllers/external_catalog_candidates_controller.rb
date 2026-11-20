@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 class ExternalCatalogCandidatesController < ApplicationController
-  MATRIX_CHOICE_ACTIONS = %i[choose_matrix cancel_import].freeze
+  MATRIX_CHOICE_ACTIONS = %i[cancel_import].freeze
 
   skip_before_action :authenticate_user!,
                      only: %i[index show create_project import_status] + MATRIX_CHOICE_ACTIONS,
@@ -18,7 +18,7 @@ class ExternalCatalogCandidatesController < ApplicationController
   GUEST_SANDBOX_USER_ID = User::GUEST_SANDBOX_USER_ID
   # Session key: the candidate whose import this browser started (guests have no import_user_id of their own).
   STARTED_IMPORT_SESSION_KEY = :external_catalog_import_started_id
-  # Between create_project/choose_matrix setting importing and the job row existing, the import looks dead.
+  # Between create_project (or the project form) setting importing and the job row existing, the import looks dead.
   DEAD_IMPORT_GRACE = 1.minute
   DEAD_IMPORT_MESSAGE = 'The import stopped unexpectedly (the import worker was interrupted). Please try again.'
 
@@ -128,39 +128,6 @@ class ExternalCatalogCandidatesController < ApplicationController
     render json: payload
   end
 
-  # POST: the user who started the import picked the H5AD matrix; resume with the downloaded file.
-  def choose_matrix
-    return unless pending_matrix_choice_owned!
-
-    sel = params[:sel].to_s
-    unless @candidate.pending_matrix_choices.any? { |c| c['path'] == sel }
-      redirect_to external_catalog_candidate_path(@candidate),
-                  alert: 'Please choose one of the listed matrices.', status: :see_other
-      return
-    end
-
-    resume = @candidate.import_resume
-    guest = resume['sandbox_key_digest'].present?
-    @candidate.update!(
-      import_status: 'importing',
-      import_error: nil,
-      import_resume_json: resume.merge(ExternalCatalogCandidate::IMPORT_JOB_MARKER => true).to_json
-    )
-    ExternalCatalog::ImportProgress.clear_cancel(@candidate.id)
-    remember_started_import!
-    ExternalCatalog::ImportProgress.report(@candidate.id, step: 'preparsing', message: "Importing with #{sel}...")
-    ExternalCatalogImportCandidateJob.perform_later(
-      @candidate.id,
-      @candidate.import_user_id,
-      version_id: resume['version_id'],
-      skip_archive: resume.key?('skip_archive') ? resume['skip_archive'] : true,
-      sandbox_key: guest ? session[:sandbox] : nil,
-      sel: sel,
-      fu_id: resume['fu_id']
-    )
-    redirect_to external_catalog_candidate_path(@candidate, importing: 1), status: :see_other
-  end
-
   # POST: give up on a paused import (deletes the downloaded file).
   def cancel_import
     return unless pending_matrix_choice_owned!
@@ -227,7 +194,9 @@ class ExternalCatalogCandidatesController < ApplicationController
   # Coming back to the page of an import this user (or this guest session) started: show its progress
   # again. Not once a project can be opened, otherwise Back from that project would bounce to it again.
   def own_import_running?
-    return false unless @candidate.importing?
+    # Only runs of the web import job report progress (and get released once their job dies); a rake
+    # run or a row left importing by an old run would keep the overlay polling forever.
+    return false unless @candidate.importing_via_job?
 
     started_here =
       session[STARTED_IMPORT_SESSION_KEY].to_i == @candidate.id ||
@@ -242,35 +211,46 @@ class ExternalCatalogCandidatesController < ApplicationController
   def pending_matrix_choice_owned!
     unless @candidate.awaiting_matrix?
       redirect_to external_catalog_candidate_path(@candidate),
-                  alert: 'This import is no longer waiting for a matrix choice.', status: :see_other
+                  alert: 'This import is no longer waiting for the project form.', status: :see_other
       return false
     end
     unless matrix_choice_owner?
       redirect_to external_catalog_candidate_path(@candidate),
-                  alert: 'Only the person who started this import can choose its matrix.', status: :see_other
+                  alert: 'Only the person who started this import can continue or cancel it.', status: :see_other
       return false
     end
     true
   end
 
-  # Matrix list for the overlay; only the person who started the import gets it.
   # String keys: they override the same keys from import_progress_payload.
+  # Paused for the user: whoever started the import continues in the project form, opened on the download.
   def awaiting_matrix_payload
+    payload = { 'choice' => ExternalCatalogCandidate::FORM_CHOICE, 'reason' => @candidate.import_resume['reason'] }
     unless matrix_choice_owner?
-      return {
-        'can_choose_matrix' => false,
-        'message' => 'Waiting for the person who started this import to choose a matrix.'
-      }
+      return payload.merge(
+        'can_continue' => false,
+        'message' => 'Waiting for the person who started this import to check it in the project form.'
+      )
     end
 
-    choices = @candidate.pending_matrix_choices
-    {
-      'can_choose_matrix' => choices.any?,
-      'matrix_choices' => choices,
-      'recommended_matrix' => ExternalCatalog::H5adMatrixChoice.recommended(choices),
-      'choose_matrix_url' => choose_matrix_external_catalog_candidate_path(@candidate),
+    unless @candidate.awaiting_form?
+      # Paused before the project form existed, or its download is gone: only cancelling is left.
+      return payload.merge(
+        'can_continue' => false,
+        'message' => 'This import cannot be continued. Cancel it and start it again.',
+        'cancel_import_url' => cancel_import_external_catalog_candidate_path(@candidate)
+      )
+    end
+
+    payload.merge(
+      'can_continue' => true,
+      'form_url' => new_project_path(catalog_import: @candidate.id),
+      # Identifies this pause: the overlay opens the form by itself once per pause (not again after Back).
+      'awaiting_since' => @candidate.import_resume['awaiting_since'],
+      'tax_id' => @candidate.import_resume['tax_id'],
+      'organism_label' => @candidate.import_resume['organism_label'],
       'cancel_import_url' => cancel_import_external_catalog_candidate_path(@candidate)
-    }
+    )
   end
 
   def guest_import_challenge_requested?
@@ -315,9 +295,15 @@ class ExternalCatalogCandidatesController < ApplicationController
     end
 
     session[:sandbox] ||= create_sandbox_key
+    # One sandbox per guest: the session's ongoing import (running, or paused on its matrix choice) is
+    # cancelled below, so its in-flight lock must not refuse this start.
+    previous = guest_ongoing_catalog_import
+    previous = nil if previous&.id == @candidate.id
     rate = ExternalCatalog::ImportRateLimit.allow_guest_start!(
       ip: request.remote_ip.to_s,
-      session_key: session[:sandbox]
+      session_key: session[:sandbox],
+      candidate_id: @candidate.id,
+      replacing_candidate_id: previous&.id
     )
     unless rate.allowed?
       redirect_to external_catalog_candidate_path(@candidate), alert: rate.reason
@@ -326,15 +312,13 @@ class ExternalCatalogCandidatesController < ApplicationController
 
     guest_user = User.find_by(id: GUEST_SANDBOX_USER_ID)
     unless guest_user
-      ExternalCatalog::ImportRateLimit.release_inflight!(session_key: session[:sandbox])
+      ExternalCatalog::ImportRateLimit.release_inflight!(session_key: session[:sandbox], candidate_id: @candidate.id)
       redirect_to external_catalog_candidate_path(@candidate),
                   alert: 'Guest import is temporarily unavailable.'
       return
     end
 
-    # One sandbox per guest: a previous import still paused on its matrix choice would replace this one later.
-    previous = guest_ongoing_catalog_import
-    previous.cancel_for_new_sandbox! if previous && previous.id != @candidate.id
+    previous&.cancel_for_new_sandbox!
 
     @candidate.update!(
       import_status: 'importing',

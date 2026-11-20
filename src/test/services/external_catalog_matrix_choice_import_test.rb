@@ -41,17 +41,38 @@ class ExternalCatalogMatrixChoiceImportTest < ActiveSupport::TestCase
       version: @version,
       skip_archive: true,
       skip_publish: true,
-      ask_matrix_choice: ask
+      ask_user_choice: ask
     )
   end
 
-  test 'UI import pauses with the choices and the recommended matrix' do
-    err = assert_raises(ExternalCatalog::ProjectImporter::NeedsMatrixChoice) do
+  test 'UI import pauses for the project form' do
+    err = assert_raises(ExternalCatalog::ProjectImporter::NeedsUserChoice) do
       importer(ask: true).send(:choose_matrix_selection!, @fu, nil)
     end
+    assert_equal :matrix, err.reason
     assert_equal @fu, err.fu
-    assert_equal %w[/X /layers/raw_count_cellbender /layers/raw_count_cellranger], err.choices.map { |c| c['path'] }
-    assert_equal '/layers/raw_count_cellbender', err.recommended
+  end
+
+  test 'UI import pauses for an archive or a file with several datasets' do
+    File.write(
+      @dir.join('output.json'),
+      { 'detected_format' => 'ARCHIVE', 'list_groups' => [{ 'group' => 'a.h5ad' }, { 'group' => 'b.h5ad' }] }.to_json
+    )
+    err = assert_raises(ExternalCatalog::ProjectImporter::NeedsUserChoice) do
+      importer(ask: true).send(:choose_matrix_selection!, @fu, nil)
+    end
+    assert_equal :archive, err.reason
+    assert_raises(ExternalCatalog::ProjectImporter::Error) { importer(ask: false).send(:choose_matrix_selection!, @fu, nil) }
+
+    File.write(
+      @dir.join('output.json'),
+      { 'detected_format' => 'RDS', 'list_groups' => [{ 'group' => 'RNA' }, { 'group' => 'ADT' }] }.to_json
+    )
+    err = assert_raises(ExternalCatalog::ProjectImporter::NeedsUserChoice) do
+      importer(ask: true).send(:choose_matrix_selection!, @fu, nil)
+    end
+    assert_equal :dataset, err.reason
+    assert_equal 'RNA', importer(ask: false).send(:choose_matrix_selection!, @fu, nil).first
   end
 
   test 'batch import uses the recommended matrix and its dimensions' do
@@ -59,33 +80,5 @@ class ExternalCatalogMatrixChoiceImportTest < ActiveSupport::TestCase
     assert_equal '/layers/raw_count_cellbender', sel
     assert_equal({ nber_rows: 31, nber_cols: 40 }, dims)
     assert_equal 'H5AD', file_type
-  end
-
-  test 'a chosen matrix is used, also when given as a bare layer name' do
-    sel, dims, = importer(ask: true).send(:choose_matrix_selection!, @fu, nil, sel: '/layers/raw_count_cellranger')
-    assert_equal '/layers/raw_count_cellranger', sel
-    assert_equal 32, dims[:nber_rows]
-
-    sel, = importer(ask: true).send(:choose_matrix_selection!, @fu, nil, sel: 'raw_count_cellranger')
-    assert_equal '/layers/raw_count_cellranger', sel
-  end
-
-  test 'a matrix that is not in the file is rejected' do
-    err = assert_raises(ExternalCatalog::ProjectImporter::Error) do
-      importer(ask: true).send(:choose_matrix_selection!, @fu, nil, sel: '/layers/nope')
-    end
-    assert_match(%r{/layers/nope}, err.message)
-  end
-
-  test 'resume refuses a Fu of another user' do
-    other = register_for_test_cleanup(
-      User.create!(email: "mchoice_o_#{SecureRandom.hex(4)}@example.com", password: 'password123')
-    )
-    fu = register_for_test_cleanup(
-      Fu.create!(user_id: other.id, upload_file_name: 'input_file.h5ad', upload_file_size: 0, status: 'preparsed')
-    )
-    assert_raises(ExternalCatalog::ProjectImporter::Error) do
-      importer(ask: true).send(:resume_fu!, fu.id)
-    end
   end
 end

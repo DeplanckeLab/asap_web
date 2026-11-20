@@ -5,7 +5,8 @@ class FuDownloadFromUrlJob < ApplicationJob
   queue_as :default
 
   # import_progress_candidate_id: optional ExternalCatalogCandidate id for catalog-import overlay.
-  def perform(fu_id, url, organism_id: nil, version_id: nil, import_progress_candidate_id: nil)
+  # size_hint: expected size (catalog entry) for the progress bar when the server sends no Content-Length.
+  def perform(fu_id, url, organism_id: nil, version_id: nil, import_progress_candidate_id: nil, size_hint: nil)
     @import_progress_candidate_id = import_progress_candidate_id
     fu = Fu.find_by(id: fu_id)
     return unless fu
@@ -39,7 +40,8 @@ class FuDownloadFromUrlJob < ApplicationJob
         fu: fu,
         url: url,
         dest_path: upload_file_path,
-        progress_callback: import_download_progress_callback
+        progress_callback: import_download_progress_callback,
+        size_hint: size_hint
       ).call
     end
 

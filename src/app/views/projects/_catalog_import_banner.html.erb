@@ -1,0 +1,38 @@
+<%# Project form continuing a paused catalog import (projects#new?catalog_import=): why the import stopped,
+   and a way to give up on it. Parameters:
+   - candidate: ExternalCatalogCandidate awaiting the form %>
+<% candidate = local_assigns.fetch(:candidate) %>
+<% resume = candidate.import_resume %>
+<% title = candidate.title.presence || candidate.external_id %>
+<% reason =
+     case resume['reason']
+     when 'organism'
+       if resume['tax_id'].present?
+         "The species of this dataset (#{[resume['organism_label'], "NCBI taxonomy ID #{resume['tax_id']}"].compact.join(', ')}) is not available in ASAP: choose an organism."
+       elsif resume['organism_label'].present?
+         "The species of this dataset (\"#{resume['organism_label']}\") could not be matched to an organism in ASAP: choose one."
+       else
+         'The source catalog does not give the species of this dataset: choose an organism.'
+       end
+     when 'matrix' then 'This file contains several expression matrices: choose the one to import.'
+     when 'text' then 'This is a text matrix: check the delimiter, the gene name column and the header line.'
+     when 'archive' then 'This archive contains several files: choose the one to import.'
+     when 'dataset' then 'This file contains several datasets: choose the one to import.'
+     else 'Check the preparsing of this dataset.'
+     end %>
+<div class="mb-6 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-left shadow-sm dark:border-blue-500/30 dark:bg-blue-500/10" data-test="catalog-import-banner">
+  <p class="text-sm font-medium text-gray-900 dark:text-neutral-200">
+    Importing from <%= candidate.provider_tag %>:
+    <%= link_to title, external_catalog_candidate_path(candidate), class: "text-blue-700 hover:underline dark:text-blue-400" %>
+  </p>
+  <p class="mt-1 text-sm text-gray-700 dark:text-neutral-300">
+    The file is downloaded and preparsed. <%= reason %>
+    Then create the project: ASAP finishes the import (catalog metadata, analysis pipeline, exports) once it is parsed.
+  </p>
+  <% if resume['suggestion'].present? %>
+    <p class="mt-1 text-xs text-blue-800 dark:text-blue-300">Organism pre-selected from the file (<%= resume['suggestion'] %>).</p>
+  <% end %>
+  <%= button_to "Cancel this import", cancel_import_external_catalog_candidate_path(candidate),
+      method: :post, form: { data: { turbo: false } },
+      class: "mt-2 text-sm text-gray-600 underline hover:text-gray-800 dark:text-gray-400 bg-transparent border-0 p-0 cursor-pointer" %>
+</div>

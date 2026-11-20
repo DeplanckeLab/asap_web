@@ -32,8 +32,8 @@ module ExternalCatalog
       'queued' => 'Import queued...',
       'downloading' => 'Downloading dataset...',
       'preparsing' => 'Preparsing file...',
-      # Not in STEPS: only shown for H5AD files with several matrices.
-      'choose_matrix' => 'Choose the expression matrix to import',
+      # Not in STEPS: the import needs the user (species, matrix, text parsing...): continue in the project form.
+      'choose_in_form' => 'Check the preparsing in the project form',
       'creating_project' => 'Creating project...',
       'linking_project' => 'Linking existing project...',
       'opening' => 'Opening analysis...',
@@ -175,7 +175,7 @@ module ExternalCatalog
       def import_status_for_step(step)
         case step
         when 'failed' then 'failed'
-        when 'choose_matrix' then 'awaiting_matrix'
+        when 'choose_in_form' then 'awaiting_matrix'
         else 'importing'
         end
       end

@@ -494,20 +494,25 @@ module ExternalCatalog
       out.uniq { |h| [h[:kind], h[:value].to_s.upcase] }
     end
 
+    PREFLIGHT_TIMEOUT_SECONDS = 60
+
+    # Only the HTTP status matters. The SCP download redirects to Google Storage, which ignores the one-byte
+    # Range and sends the whole file (several GB, before the real download even starts): read the response
+    # headers as they arrive and stop curl at the first final (non-redirect) status.
     def preflight_download_allowed!(url)
       auth = self.class.authorization_header_for!(url)
       cmd = [
-        'curl', '-sS', '-o', '/dev/null', '-w', '%{http_code}',
+        'curl', '-sS', '-D', '-', '-o', '/dev/null',
         '--connect-timeout', '20',
+        '--max-time', PREFLIGHT_TIMEOUT_SECONDS.to_s,
         '-A', UrlDownloadService::USER_AGENT,
         '-H', "Authorization: #{auth}",
         '-H', 'Range: bytes=0-0',
         '-L',
         url
       ]
-      output, err, status = Open3.capture3(*cmd)
-      code = output.to_s.strip.to_i
-      return true if (200..299).cover?(code) || code == 206
+      code, err = self.class.final_http_status(cmd)
+      return true if (200..299).cover?(code)
 
       body_hint = err.to_s.strip
       body_hint = body_hint.truncate(200) if body_hint.present?
@@ -517,7 +522,36 @@ module ExternalCatalog
               "#{body_hint.present? ? ": #{body_hint}" : ''} " \
               '(private, embargoed, download agreement, or quota)'
       end
-      raise NotRedistributable, "SCP download preflight failed (HTTP #{code} curl_ok=#{status.success?})"
+      raise NotRedistributable,
+            "SCP download preflight failed (HTTP #{code.to_i}#{body_hint.present? ? ": #{body_hint}" : ''})"
+    end
+
+    # [status of the first non-redirect response, curl stderr] for a curl command dumping headers to stdout
+    # (-D -). curl is stopped as soon as that status is read, so no body is transferred.
+    def self.final_http_status(cmd)
+      code = nil
+      err = +''
+      Open3.popen3(*cmd) do |stdin, stdout, stderr, wait_thr|
+        stdin.close
+        begin
+          stdout.each_line do |line|
+            status = line[%r{\AHTTP/\S+\s+(\d{3})}, 1]&.to_i
+            next if status.nil? || (300..399).cover?(status)
+
+            code = status
+            break
+          end
+        ensure
+          begin
+            Process.kill('TERM', wait_thr.pid) if wait_thr.alive?
+          rescue Errno::ESRCH, Errno::EPERM
+            nil
+          end
+          wait_thr.join(5)
+          err = stderr.read.to_s if code.nil?
+        end
+      end
+      [code, err]
     end
 
     def fetch_json(url, query: nil)

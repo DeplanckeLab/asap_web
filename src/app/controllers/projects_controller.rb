@@ -810,6 +810,7 @@ class ProjectsController < ApplicationController
       @lock_project_type = true
     end
     adopt_upload_fu_for_new_project(params[:fu_id])
+    prepare_catalog_import_form!(params[:catalog_import]) if params[:catalog_import].present?
   end
 
   # GET /projects/1/edit
@@ -823,6 +824,7 @@ class ProjectsController < ApplicationController
   # POST /projects or /projects.json
   def create
     @project = Project.new(project_params)
+    @catalog_import_candidate = catalog_import_for_create
 
     # Guest sandbox projects must use the session sandbox key so access checks pass.
     @project.key = session[:sandbox] unless current_user
@@ -1114,6 +1116,12 @@ class ProjectsController < ApplicationController
         return
       end
       
+      if @catalog_import_candidate && !is_integrate &&
+         (existing = catalog_import_content_match(input_file, tmp_attrs))
+        open_catalog_import_content_match!(@catalog_import_candidate, existing, input_file, format)
+        return
+      end
+
       if replace_project_and_save!(replaced_project, input_file)
         Rails.logger.info("[ProjectsController#create] ===== PROJECT SAVED SUCCESSFULLY =====")
         Rails.logger.info("[ProjectsController#create] Project saved successfully with ID: #{@project.id}, key: #{@project.key}")
@@ -1188,7 +1196,10 @@ class ProjectsController < ApplicationController
         
         # Clean up session
         session.delete(:file_upload)
-        
+
+        # A paused catalog import continued in this form: the import job finishes it on this project.
+        hand_project_to_catalog_import!(@catalog_import_candidate, @project) if @catalog_import_candidate
+
         Rails.logger.info("[ProjectsController#create] About to redirect to project #{@project.id}")
         format.html { redirect_to project_path(@project, view: 'analysis'), notice: "Project was successfully created." }
         format.turbo_stream { 
@@ -9994,9 +10005,13 @@ class ProjectsController < ApplicationController
     def adopt_upload_fu_for_new_project(fu_id)
       return if fu_id.blank?
 
-      fu = find_upload_fu_for_new_project(fu_id)
+      adopt_fu_as_form_input!(find_upload_fu_for_new_project(fu_id))
+    end
+
+    # The form opens on this already uploaded (or downloaded) file: projects#create takes it from the session.
+    def adopt_fu_as_form_input!(fu)
       path = fu&.file_path&.to_s
-      return unless path.present? && File.exist?(path)
+      return false unless path.present? && File.exist?(path)
 
       fu.adopt_as_project_input!
 
@@ -10012,6 +10027,125 @@ class ProjectsController < ApplicationController
       }
       @existing_fu_id = fu.id
       @existing_filename = fu.name.presence || fu.upload_file_name
+      true
+    end
+
+    # Session key: the paused catalog import this browser continues in the project form, and its download.
+    CATALOG_IMPORT_FORM_SESSION_KEY = :catalog_import_form
+
+    # GET /projects/new?catalog_import=<candidate id>: a catalog import paused for the user (species, matrix,
+    # text parsing parameters...) continues here, on the file it downloaded and preparsed, prefilled from the
+    # catalog entry. Only whoever started the import (same user or guest session) may open it.
+    def prepare_catalog_import_form!(candidate_id)
+      candidate = ExternalCatalogCandidate.find_by(id: candidate_id)
+      unless candidate&.awaiting_form? &&
+             candidate.matrix_choice_owner?(user: current_user, sandbox_key: session[:sandbox])
+        redirect_to (candidate ? external_catalog_candidate_path(candidate) : external_catalog_candidates_path),
+                    alert: 'This import is not waiting for the project form.'
+        return
+      end
+
+      fu = candidate.pending_download_fu
+      # Guest imports download as the guest user; the form's upload endpoints find a guest's file by session.
+      fu.update!(user_id: nil, project_key: session[:sandbox]) unless current_user
+      unless adopt_fu_as_form_input!(fu)
+        redirect_to external_catalog_candidate_path(candidate),
+                    alert: 'The downloaded file is no longer available. Cancel the import and start it again.'
+        return
+      end
+      session[CATALOG_IMPORT_FORM_SESSION_KEY] = { 'candidate_id' => candidate.id, 'fu_id' => fu.id }
+
+      @catalog_import_candidate = candidate
+      entry = candidate.to_entry
+      @project.name = entry.project_name if @project.name.blank?
+      @project.organism_id = candidate.form_organism_id if candidate.form_organism_id
+      tag = entry.project_type_tag.to_s == 'bulk' ? 'bulk' : 'sc'
+      @project.project_type_id ||= ProjectType.find_by(tag: tag)&.id
+    end
+
+    # The catalog import a project form submission continues (see prepare_catalog_import_form!): the form
+    # says so, this session opened it on the file being submitted, and the import still waits for it.
+    def catalog_import_for_create
+      return nil if params[:catalog_import_id].blank?
+
+      pending = session[CATALOG_IMPORT_FORM_SESSION_KEY]
+      return nil unless pending.is_a?(Hash) && pending['candidate_id'].to_i == params[:catalog_import_id].to_i
+
+      upload = session[:file_upload]
+      upload_fu_id = upload && (upload[:fu_id] || upload['fu_id'])
+      return nil unless upload_fu_id.to_i == pending['fu_id'].to_i
+
+      candidate = ExternalCatalogCandidate.find_by(id: pending['candidate_id'])
+      return nil unless candidate&.awaiting_form? && candidate.pending_download_fu&.id == pending['fu_id'].to_i
+      return nil unless candidate.matrix_choice_owner?(user: current_user, sandbox_key: session[:sandbox])
+
+      candidate
+    end
+
+    # Signed-in imports reuse a project with the same input content and parsing parameters (as the import
+    # job does) instead of creating a duplicate; guests always get their own sandbox.
+    def catalog_import_content_match(input_file, parsing_attrs)
+      return nil unless current_user && input_file
+
+      sha = InputFileSha256.ensure_for_fu!(input_file)
+      fingerprint = ExternalCatalog::ProjectImporter.preparsing_fingerprint(parsing_attrs)
+      return nil if sha.blank?
+
+      Project.where(input_content_sha256: sha.to_s, input_preparsing_fingerprint: fingerprint)
+             .where(being_deleted: [false, nil])
+             .order(Arel.sql('CASE WHEN public THEN 0 ELSE 1 END'), id: :asc)
+             .detect { |project| readable?(project) }
+    rescue StandardError => e
+      Rails.logger.warn("[ProjectsController#create] catalog import content match failed: #{e.class} #{e.message}")
+      nil
+    end
+
+    def open_catalog_import_content_match!(candidate, project, input_file, format)
+      candidate.update!(import_status: 'idle', import_error: nil, import_resume_json: nil)
+      candidate.link_matched_project!(project, link_kind: 'content_match')
+      ExternalCatalog::ImportProgress.clear(candidate.id)
+      ExternalCatalogCandidate.discard_unused_download!(input_file.id, user_id: candidate.import_user_id)
+      session.delete(:file_upload)
+      session.delete(CATALOG_IMPORT_FORM_SESSION_KEY)
+      notice = 'This dataset is already in ASAP with the same parsing parameters: opening that project.'
+      format.html { redirect_to project_path(project, view: 'analysis'), notice: notice }
+      format.turbo_stream { redirect_to project_path(project, view: 'analysis'), status: :see_other, notice: notice }
+      format.json { render :show, status: :ok, location: project }
+    end
+
+    # The project was created (and its parsing queued) from the import's download: the import job attaches
+    # the catalog metadata and runs the rest of the import on it.
+    def hand_project_to_catalog_import!(candidate, project)
+      resume = candidate.import_resume
+      guest = resume['sandbox_key_digest'].present?
+      candidate.update!(
+        import_status: 'importing',
+        import_error: nil,
+        import_project_id: project.id,
+        import_resume_json: {
+          ExternalCatalogCandidate::IMPORT_JOB_MARKER => true,
+          'sandbox_key_digest' => resume['sandbox_key_digest'],
+          'started_at' => Time.current.iso8601(3)
+        }.compact.to_json
+      )
+      candidate.link_matched_project!(project, link_kind: 'import')
+      ExternalCatalog::ImportProgress.clear(candidate.id)
+      ExternalCatalog::ImportProgress.clear_cancel(candidate.id)
+      session.delete(CATALOG_IMPORT_FORM_SESSION_KEY)
+      ExternalCatalogImportCandidateJob.perform_later(
+        candidate.id,
+        candidate.import_user_id,
+        version_id: resume['version_id'],
+        skip_archive: resume.key?('skip_archive') ? resume['skip_archive'] : true,
+        sandbox_key: guest ? session[:sandbox] : nil,
+        project_id: project.id
+      )
+    rescue StandardError => e
+      # The project exists and parses: only the catalog finishing steps are lost.
+      Rails.logger.error(
+        "[ProjectsController#create] could not hand project=#{project.id} to catalog import " \
+        "candidate=#{candidate.id}: #{e.class} #{e.message}"
+      )
     end
 
     def apply_export_prefill_for_new_project!
@@ -10831,7 +10965,11 @@ class ProjectsController < ApplicationController
     # failed save rolls the destroy back. Project#after_commit removes the old USER_DATA_DIR/<user>/<key>/
     # only on commit, before #create creates the new project's directory.
     def replace_project_and_save!(replaced_project, input_file)
-      guest_ongoing_catalog_import&.cancel_for_new_sandbox! unless current_user
+      unless current_user
+        ongoing = guest_ongoing_catalog_import
+        # The catalog import this form continues is not replaced: its job finishes the new project.
+        ongoing.cancel_for_new_sandbox! if ongoing && ongoing.id != @catalog_import_candidate&.id
+      end
 
       saved = false
       Project.transaction do
@@ -10999,6 +11137,8 @@ class ProjectsController < ApplicationController
     end
 
     def handle_project_unauthorized_access
+      # The layout then shows the site header, not the project header (name, owner, runs, menus).
+      @access_denied = true
       respond_to do |format|
         # 403 on the requested URL (not a 200/soft-404 via /unauthorized redirect).
         format.html { render 'shared/unauthorized', status: :forbidden }

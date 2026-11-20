@@ -42,7 +42,7 @@ class ExternalCatalogFailedDownloadTest < ActiveSupport::TestCase
       version: @version,
       skip_archive: true,
       skip_publish: true,
-      ask_matrix_choice: true
+      ask_user_choice: true
     )
   end
 
@@ -87,12 +87,12 @@ class ExternalCatalogFailedDownloadTest < ActiveSupport::TestCase
     assert_empty Dir.children(@upload_root)
   end
 
-  test 'a download waiting for a matrix choice is kept' do
+  test 'a download waiting for the project form is kept' do
     groups = [
       { 'group' => '/X', 'nber_rows' => 3, 'nber_cols' => 4, 'is_count' => 0 },
       { 'group' => '/layers/counts', 'nber_rows' => 3, 'nber_cols' => 4, 'is_count' => 1 }
     ]
-    err = assert_raises(ExternalCatalog::ProjectImporter::NeedsMatrixChoice) do
+    err = assert_raises(ExternalCatalog::ProjectImporter::NeedsUserChoice) do
       run_import(fake_download(status: 'preparsed', list_groups: groups))
     end
 

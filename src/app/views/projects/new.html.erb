@@ -29,7 +29,11 @@
             You are in guest mode. This project will be created as a temporary sandbox and will be
             <strong>automatically deleted</strong> after <%= sandbox_delete_label %> without activity.
           </p>
-          <% if pending_import %>
+          <% if pending_import && pending_import == @catalog_import_candidate %>
+            <p class="mt-2 text-sm text-amber-900 dark:text-amber-200">
+              Creating this project finishes the import of the dataset below<%= guest_sandbox_project ? " and permanently replaces your current sandbox" : "" %>.
+            </p>
+          <% elsif pending_import %>
             <p class="mt-2 text-sm text-amber-900 dark:text-amber-200">
               A dataset is being imported into your sandbox:
               <%= link_to (pending_import.title.presence || pending_import.external_id), external_catalog_candidate_path(pending_import),
@@ -60,6 +64,10 @@
         </div>
       </div>
     </div>
+  <% end %>
+
+  <% if @catalog_import_candidate %>
+    <%= render "catalog_import_banner", candidate: @catalog_import_candidate %>
   <% end %>
 
   <%= render "form", project: @project %>

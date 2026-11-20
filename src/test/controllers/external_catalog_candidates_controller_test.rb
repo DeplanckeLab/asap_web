@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'test_helper'
+require 'minitest/mock'
 
 class ExternalCatalogCandidatesControllerTest < ActionDispatch::IntegrationTest
   include Devise::Test::IntegrationHelpers
@@ -122,23 +123,23 @@ class ExternalCatalogCandidatesControllerTest < ActionDispatch::IntegrationTest
     assert candidate.already_in_asap?
   end
 
-  # Candidate paused after preparsing an H5AD with two matrices and no /raw/X.
-  def awaiting_matrix_candidate!(owner)
-    external_id = "mtx-#{SecureRandom.hex(4)}"
+  # Candidate paused for the project form after downloading and preparsing an H5AD with two matrices.
+  def awaiting_form_candidate!(owner_id:, sandbox_key: nil, reason: :matrix, tax_id: 9606)
+    external_id = "form-#{SecureRandom.hex(4)}"
     candidate = register_for_test_cleanup(
       ExternalCatalogCandidate.create!(
         source: 'cellxgene',
         external_id: external_id,
         provider_tag: 'CELLxGENE',
-        title: "Several matrices #{external_id}",
+        title: "Form import #{external_id}",
         url: "https://example.com/#{external_id}.h5ad",
         import_status: 'importing',
-        import_user_id: owner.id,
-        tax_id: 9606
+        import_user_id: owner_id,
+        tax_id: tax_id
       )
     )
     fu = register_for_test_cleanup(
-      Fu.create!(user_id: owner.id, upload_file_name: 'input_file.h5ad', upload_file_size: 0, status: 'preparsed')
+      Fu.create!(user_id: owner_id, upload_file_name: 'input_file.h5ad', upload_file_size: 10, status: 'preparsed')
     )
     @matrix_dirs = Array(@matrix_dirs) << fu.upload_dir
     FileUtils.mkdir_p(fu.upload_dir)
@@ -153,7 +154,10 @@ class ExternalCatalogCandidatesControllerTest < ActionDispatch::IntegrationTest
         ]
       }.to_json
     )
-    candidate.await_matrix_choice!(fu: fu, version_id: 11, skip_archive: true)
+    candidate.await_form_choice!(
+      fu: fu, reason: reason, version_id: 11, skip_archive: true, sandbox_key: sandbox_key,
+      organism_id: Organism.order(:id).first&.id
+    )
     [candidate, fu]
   end
 
@@ -161,73 +165,164 @@ class ExternalCatalogCandidatesControllerTest < ActionDispatch::IntegrationTest
     Array(@matrix_dirs).each { |dir| FileUtils.rm_rf(dir) }
   end
 
-  test 'import_status lists the matrices only for the user who started the import' do
-    owner = register_for_test_cleanup(User.create!(email: "ecc_mo_#{SecureRandom.hex(4)}@example.com", password: 'password123'))
-    other = register_for_test_cleanup(User.create!(email: "ecc_mx_#{SecureRandom.hex(4)}@example.com", password: 'password123'))
-    candidate, = awaiting_matrix_candidate!(owner)
+  def new_user(prefix)
+    register_for_test_cleanup(User.create!(email: "#{prefix}_#{SecureRandom.hex(4)}@example.com", password: 'password123'))
+  end
+
+  test 'import_status sends only the user who started the import to the project form' do
+    owner = new_user('ecc_fo')
+    other = new_user('ecc_fx')
+    candidate, = awaiting_form_candidate!(owner_id: owner.id)
 
     sign_in other
     get import_status_external_catalog_candidate_path(candidate, format: :json)
     body = JSON.parse(response.body)
     assert_equal 'awaiting_matrix', body['import_status']
-    assert_equal false, body['can_choose_matrix']
-    assert_nil body['matrix_choices']
+    assert_equal 'form', body['choice']
+    assert_equal false, body['can_continue']
+    assert_nil body['form_url']
     sign_out other
 
     sign_in owner
     get import_status_external_catalog_candidate_path(candidate, format: :json)
     body = JSON.parse(response.body)
-    assert_equal true, body['can_choose_matrix']
-    assert_equal %w[/X /layers/raw_count_cellbender], body['matrix_choices'].map { |c| c['path'] }
-    assert_equal '/layers/raw_count_cellbender', body['recommended_matrix']
-    assert_equal choose_matrix_external_catalog_candidate_path(candidate), body['choose_matrix_url']
+    assert_equal true, body['can_continue']
+    assert_equal 'matrix', body['reason']
+    assert_equal new_project_path(catalog_import: candidate.id), body['form_url']
+    assert_equal candidate.import_resume['awaiting_since'], body['awaiting_since']
+
+    get external_catalog_candidate_path(candidate)
+    assert_includes response.body, 'Continue in the project form'
   end
 
-  test 'choose_matrix resumes the import with the downloaded file and the chosen matrix' do
-    owner = register_for_test_cleanup(User.create!(email: "ecc_mo_#{SecureRandom.hex(4)}@example.com", password: 'password123'))
-    candidate, fu = awaiting_matrix_candidate!(owner)
+  test 'a pause from before the project form can only be cancelled' do
+    owner = new_user('ecc_fo')
+    candidate, = awaiting_form_candidate!(owner_id: owner.id)
+    candidate.update!(import_resume_json: { 'choice' => 'organism', 'awaiting_since' => Time.current.iso8601 }.to_json)
 
     sign_in owner
-    assert_enqueued_with(
-      job: ExternalCatalogImportCandidateJob,
-      args: [
-        candidate.id,
-        owner.id,
-        { version_id: 11, skip_archive: true, sandbox_key: nil, sel: '/layers/raw_count_cellbender', fu_id: fu.id }
-      ]
-    ) do
-      post choose_matrix_external_catalog_candidate_path(candidate), params: { sel: '/layers/raw_count_cellbender' }
-    end
-    assert_redirected_to external_catalog_candidate_path(candidate, importing: 1)
-    assert_equal 'importing', candidate.reload.import_status
-  end
+    get import_status_external_catalog_candidate_path(candidate, format: :json)
+    body = JSON.parse(response.body)
+    assert_equal false, body['can_continue']
+    assert_equal cancel_import_external_catalog_candidate_path(candidate), body['cancel_import_url']
 
-  test 'choose_matrix refuses another user and matrices that are not in the file' do
-    owner = register_for_test_cleanup(User.create!(email: "ecc_mo_#{SecureRandom.hex(4)}@example.com", password: 'password123'))
-    other = register_for_test_cleanup(User.create!(email: "ecc_mx_#{SecureRandom.hex(4)}@example.com", password: 'password123'))
-    candidate, = awaiting_matrix_candidate!(owner)
-
-    sign_in other
-    assert_no_enqueued_jobs(only: ExternalCatalogImportCandidateJob) do
-      post choose_matrix_external_catalog_candidate_path(candidate), params: { sel: '/X' }
-    end
+    get new_project_path(catalog_import: candidate.id)
     assert_redirected_to external_catalog_candidate_path(candidate)
-    sign_out other
-
-    sign_in owner
-    assert_no_enqueued_jobs(only: ExternalCatalogImportCandidateJob) do
-      post choose_matrix_external_catalog_candidate_path(candidate), params: { sel: '/layers/../../etc' }
-    end
-    assert_equal 'awaiting_matrix', candidate.reload.import_status
   end
 
   test 'cancel_import deletes the download and frees the candidate' do
-    owner = register_for_test_cleanup(User.create!(email: "ecc_mo_#{SecureRandom.hex(4)}@example.com", password: 'password123'))
-    candidate, fu = awaiting_matrix_candidate!(owner)
+    owner = new_user('ecc_fo')
+    candidate, fu = awaiting_form_candidate!(owner_id: owner.id)
 
     sign_in owner
     post cancel_import_external_catalog_candidate_path(candidate)
     assert_redirected_to external_catalog_candidate_path(candidate)
+    assert_equal 'idle', candidate.reload.import_status
+    assert_nil Fu.find_by(id: fu.id)
+  end
+
+  test 'the project form opens on the download, prefilled, only for the user who started the import' do
+    owner = new_user('ecc_fo')
+    other = new_user('ecc_fx')
+    candidate, fu = awaiting_form_candidate!(owner_id: owner.id, reason: :text)
+
+    sign_in other
+    get new_project_path(catalog_import: candidate.id)
+    assert_redirected_to external_catalog_candidate_path(candidate)
+    sign_out other
+
+    sign_in owner
+    get new_project_path(catalog_import: candidate.id)
+    assert_response :success
+    body = CGI.unescapeHTML(response.body)
+    assert_includes body, %(data-file-upload-existing-fu-id-value="#{fu.id}")
+    assert_includes body, %(name="catalog_import_id" id="catalog_import_id" value="#{candidate.id}")
+    assert_includes body, 'This is a text matrix: check the delimiter'
+    assert_includes body, candidate.to_entry.project_name
+    assert_equal fu.id, session[:file_upload]['fu_id'] || session[:file_upload][:fu_id]
+  end
+
+  test 'creating the project from the form hands it to the import job' do
+    owner = new_user('ecc_fo')
+    candidate, fu = awaiting_form_candidate!(owner_id: owner.id)
+    organism = Organism.order(:id).first
+    ptype = ProjectType.find_by(tag: 'sc')
+    skip 'no organism or single-cell type in the test database' unless organism && ptype
+
+    sign_in owner
+    get new_project_path(catalog_import: candidate.id)
+    assert_response :success
+
+    ProjectInputFinalizerService.stub(:call, nil) do
+      post projects_path, params: {
+        catalog_import_id: candidate.id,
+        file_type: 'H5AD', sel: '/layers/raw_count_cellbender',
+        project: { name: 'From the form', organism_id: organism.id, project_type_id: ptype.id }
+      }
+    end
+    project = Project.find_by(name: 'From the form', user_id: owner.id)
+    assert project, 'project created'
+    register_for_test_cleanup(project)
+    assert_redirected_to project_path(project, view: 'analysis')
+
+    assert_enqueued_with(
+      job: ExternalCatalogImportCandidateJob,
+      args: [candidate.id, owner.id, { version_id: 11, skip_archive: true, sandbox_key: nil, project_id: project.id }]
+    )
+    candidate.reload
+    assert_equal 'importing', candidate.import_status
+    assert_equal project.id, candidate.import_project_id
+    assert candidate.importing_via_job?
+    assert Fu.exists?(fu.id)
+  end
+
+  test 'a project form without the import id does not finish the import' do
+    owner = new_user('ecc_fo')
+    candidate, = awaiting_form_candidate!(owner_id: owner.id)
+    organism = Organism.order(:id).first
+    ptype = ProjectType.find_by(tag: 'sc')
+    skip 'no organism or single-cell type in the test database' unless organism && ptype
+
+    sign_in owner
+    get new_project_path(catalog_import: candidate.id)
+    ProjectInputFinalizerService.stub(:call, nil) do
+      assert_no_enqueued_jobs(only: ExternalCatalogImportCandidateJob) do
+        post projects_path, params: {
+          file_type: 'H5AD', project: { name: 'Plain upload', organism_id: organism.id, project_type_id: ptype.id }
+        }
+      end
+    end
+    register_for_test_cleanup(Project.find_by(name: 'Plain upload', user_id: owner.id))
+    assert candidate.reload.awaiting_form?
+  end
+
+  test 'a guest continues the import in the form without cancelling it' do
+    get new_project_path
+    sandbox_key = session[:sandbox]
+    skip 'no guest sandbox session' if sandbox_key.blank?
+
+    candidate, fu = awaiting_form_candidate!(owner_id: User::GUEST_SANDBOX_USER_ID, sandbox_key: sandbox_key)
+    get new_project_path(catalog_import: candidate.id)
+    assert_response :success
+    # The form's upload endpoints find a guest's file by its session.
+    fu.reload
+    assert_nil fu.user_id
+    assert_equal sandbox_key, fu.project_key
+    assert_includes CGI.unescapeHTML(response.body), 'Creating this project finishes the import of the dataset below'
+
+    # With a sandbox already there, submitting replaces it, but never cancels the import being continued.
+    create_test_project!(key: sandbox_key, sandbox: true, user_id: User::GUEST_SANDBOX_USER_ID)
+    get new_project_path(catalog_import: candidate.id)
+    # The submit button's confirm (the menu's "new sandbox project" link rightly still warns about the import).
+    submit_confirm = CGI.unescapeHTML(response.body)[/return confirm\(([^)]*\))/, 1].to_s
+    assert_includes submit_confirm, 'Importing this dataset will permanently replace your current sandbox'
+    assert_not_includes submit_confirm, 'cancel the import'
+
+    get preparsing_status_fu_path(fu, format: :json)
+    assert_response :success
+
+    # Cancelling still deletes the (now session-owned) download.
+    post cancel_import_external_catalog_candidate_path(candidate)
     assert_equal 'idle', candidate.reload.import_status
     assert_nil Fu.find_by(id: fu.id)
   end
@@ -339,5 +434,15 @@ class ExternalCatalogCandidatesControllerTest < ActionDispatch::IntegrationTest
     candidate.update!(import_status: 'idle')
     get new_project_path
     assert_not_includes CGI.unescapeHTML(response.body), 'Running guest import'
+  end
+
+  test 'a row left importing by a rake or old run does not re-open the progress overlay' do
+    owner = register_for_test_cleanup(User.create!(email: "ecc_il_#{SecureRandom.hex(4)}@example.com", password: 'password123'))
+    candidate = importing_candidate!(owner, resume: nil)
+
+    sign_in owner
+    get external_catalog_candidate_path(candidate)
+    assert_response :success
+    assert_equal 'false', watch_value
   end
 end

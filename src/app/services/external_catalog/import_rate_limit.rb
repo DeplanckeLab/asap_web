@@ -27,14 +27,18 @@ module ExternalCatalog
       end
 
       # Reserve a guest import start. Call +release_inflight!+ when the job finishes.
-      def allow_guest_start!(ip:, session_key:)
+      # The lock holds the id of the import that took it (+candidate_id+). +replacing_candidate_id+ is the
+      # session's ongoing import that this start cancels: its lock does not block the new one.
+      def allow_guest_start!(ip:, session_key:, candidate_id: nil, replacing_candidate_id: nil)
         ip = ip.to_s.strip
         session_key = session_key.to_s.strip
         return Result.new(allowed: false, reason: 'Missing session.') if session_key.blank?
         return Result.new(allowed: false, reason: 'Missing client address.') if ip.blank?
 
         inflight_key = "#{INFLIGHT_KEY_PREFIX}:#{session_key}"
-        if redis.exists(inflight_key).to_i.positive?
+        holder = redis.get(inflight_key)
+        replaced = replacing_candidate_id.present? && holder.to_s == replacing_candidate_id.to_s
+        if holder.present? && !replaced
           return Result.new(
             allowed: false,
             reason: 'An import is already running for this browser session. Wait for it to finish.'
@@ -57,18 +61,25 @@ module ExternalCatalog
           )
         end
 
-        redis.setex(inflight_key, INFLIGHT_TTL_SECONDS, '1')
+        redis.setex(inflight_key, INFLIGHT_TTL_SECONDS, (candidate_id.presence || '1').to_s)
         Result.new(allowed: true, reason: nil)
       rescue Redis::BaseError => e
         Rails.logger.error("[ExternalCatalog::ImportRateLimit] redis error: #{e.class} #{e.message}")
         Result.new(allowed: false, reason: 'Import temporarily unavailable. Try again shortly.')
       end
 
-      def release_inflight!(session_key:)
+      # With +candidate_id+, only releases the lock that import holds (or an old lock without an id): a
+      # cancelled job finishing after the guest started another import must not free the new import's lock.
+      def release_inflight!(session_key:, candidate_id: nil)
         key = session_key.to_s.strip
         return if key.blank?
 
-        redis.del("#{INFLIGHT_KEY_PREFIX}:#{key}")
+        inflight_key = "#{INFLIGHT_KEY_PREFIX}:#{key}"
+        if candidate_id.present?
+          holder = redis.get(inflight_key).to_s
+          return unless holder == candidate_id.to_s || holder == '1'
+        end
+        redis.del(inflight_key)
       rescue Redis::BaseError => e
         Rails.logger.warn("[ExternalCatalog::ImportRateLimit] release failed: #{e.class} #{e.message}")
       end

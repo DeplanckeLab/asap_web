@@ -261,10 +261,10 @@ export default class extends Controller {
     if (data.import_status === "awaiting_matrix") {
       this.unsubscribe()
       this.stopPolling()
-      if (data.can_choose_matrix && Array.isArray(data.matrix_choices) && data.matrix_choices.length > 0) {
-        this.showMatrixChoice(data)
+      if (data.form_url || data.cancel_import_url) {
+        this.showFormChoice(data)
       } else {
-        // Someone else's import is waiting for their choice: leave this page usable.
+        // Someone else's import is waiting for them: leave this page usable.
         this._clearRemembered()
         this.hideOverlay()
       }
@@ -308,7 +308,7 @@ export default class extends Controller {
     if (!this.overlayEls) return
 
     const step = (data.step || "").toString()
-    if (step === "choose_matrix") {
+    if (step === "choose_in_form") {
       // The broadcast is the same for every viewer; the status endpoint says whether this one may choose.
       if (!this.choiceShown) this.pollStatus()
       return
@@ -330,104 +330,107 @@ export default class extends Controller {
     this.updateTransferBar(step, data)
   }
 
-  // H5AD with several matrices: radio list in the overlay. Plain form POSTs (the server redirects back to this
-  // page, which resumes the overlay). Paths come from the uploaded file, so text is set with textContent only.
-  showMatrixChoice(data) {
+  // The import needs the user (species, matrix, text parsing parameters...): it continues in the project form,
+  // opened on the downloaded file. The form opens by itself once per pause; coming back (Back button, page
+  // reload) shows a link instead, so this page never bounces to the form again.
+  showFormChoice(data) {
     if (this.choiceShown) return
+    if (data.form_url && this._openFormOnce(data)) return
+    const panel = this.prepareChoicePanel("Continue in the project form")
+    if (!panel) return
+
+    const el = this.constructor.el
+    const reasons = {
+      organism: "The species of this dataset is missing from the catalog or not available in ASAP.",
+      matrix: "This file contains several expression matrices.",
+      text: "This is a text matrix: its delimiter, gene name column and header line need checking.",
+      archive: "This archive contains several files.",
+      dataset: "This file contains several datasets."
+    }
+    const reason = reasons[data.reason] || "This dataset needs a check before import."
+    if (data.form_url) {
+      panel.appendChild(el(
+        "p",
+        `The file is downloaded and preparsed. ${reason} Check the preparsing in the project form, ` +
+          "then create the project: the import finishes once it is parsed.",
+        "font-size:13px;color:#4b5563;margin:0 0 14px;"
+      ))
+      const link = el(
+        "a",
+        "Continue in the project form",
+        "display:inline-block;background:#111827;color:white;border-radius:6px;padding:8px 16px;font-size:14px;" +
+          "font-weight:500;text-decoration:none;"
+      )
+      link.href = data.form_url
+      link.setAttribute("data-turbo", "false")
+      link.addEventListener("click", () => this._clearRemembered())
+      panel.appendChild(link)
+    } else {
+      panel.appendChild(el("p", data.message || "This import cannot be continued.", "font-size:13px;color:#4b5563;margin:0;"))
+    }
+    this.appendCancelForm(panel, data)
+    panel.style.display = "block"
+  }
+
+  _openFormOnce(data) {
+    const key = `catalog-import-form-opened:${this._candidateIdFromStatusUrl()}:${data.awaiting_since || ""}`
+    try {
+      if (window.sessionStorage.getItem(key)) return false
+      window.sessionStorage.setItem(key, "1")
+    } catch (_error) {
+      // No storage (blocked site data...): the link only, or Back would bounce to the form every time.
+      return false
+    }
+    this.redirecting = true
+    this._clearRemembered()
+    if (this.overlayEls && this.overlayEls.status) {
+      this.overlayEls.status.textContent = "Opening the project form..."
+    }
+    window.location.assign(data.form_url)
+    return true
+  }
+
+  // Hides the progress parts of the overlay and returns its emptied choice panel (null if none).
+  prepareChoicePanel(title) {
     if (!document.getElementById("catalog-import-overlay")) this.showOverlay()
     this.cacheOverlayEls()
     const root = document.getElementById("catalog-import-overlay")
     const panel = root && root.querySelector("[data-catalog-import-choice]")
-    if (!panel) return
+    if (!panel) return null
     this.choiceShown = true
 
-    root.querySelectorAll("[data-catalog-import-progress], [data-catalog-import-transfer-wrap]").forEach((el) => {
-      el.style.display = "none"
+    root.querySelectorAll("[data-catalog-import-progress], [data-catalog-import-transfer-wrap]").forEach((node) => {
+      node.style.display = "none"
     })
-    root.setAttribute("aria-label", "Choose the expression matrix")
+    root.setAttribute("aria-label", title)
     if (this.overlayEls && this.overlayEls.status) {
-      this.overlayEls.status.textContent = "Choose the expression matrix"
+      this.overlayEls.status.textContent = title
       this.overlayEls.status.style.fontWeight = "600"
     }
-
-    const el = (tag, text, css) => {
-      const node = document.createElement(tag)
-      if (text != null) node.textContent = text
-      if (css) node.style.cssText = css
-      return node
-    }
-
     panel.replaceChildren()
-    panel.appendChild(el(
-      "p",
-      "This file contains several matrices. The one you pick becomes the main matrix of the project; " +
-        "the others are kept as extra layers.",
-      "font-size:13px;color:#4b5563;margin:0 0 14px;"
-    ))
+    return panel
+  }
 
-    const form = this.buildPostForm(data.choose_matrix_url)
-    const choices = data.matrix_choices
-    const recommended = data.recommended_matrix || choices[0].path
-    choices.forEach((choice) => {
-      const label = el(
-        "label",
-        null,
-        "display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid #e5e7eb;" +
-          "border-radius:8px;margin-bottom:8px;cursor:pointer;"
-      )
-      const input = document.createElement("input")
-      input.type = "radio"
-      input.name = "sel"
-      input.value = choice.path
-      input.checked = choice.path === recommended
-      input.style.marginTop = "3px"
-      const text = el("div", null, "min-width:0;")
-      const title = el("div", null, "display:flex;flex-wrap:wrap;gap:6px;align-items:center;")
-      title.appendChild(el(
-        "span",
-        choice.path,
-        "font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#111827;word-break:break-all;"
-      ))
-      if (choice.path === recommended) {
-        title.appendChild(el(
-          "span",
-          "Recommended",
-          "font-size:11px;font-weight:600;color:#1e40af;background:#dbeafe;border-radius:9999px;padding:1px 8px;"
-        ))
-      }
-      text.appendChild(title)
-      text.appendChild(el("div", this.describeMatrix(choice), "font-size:12px;color:#6b7280;margin-top:2px;"))
-      label.appendChild(input)
-      label.appendChild(text)
-      form.appendChild(label)
-    })
+  static el(tag, text, css) {
+    const node = document.createElement(tag)
+    if (text != null) node.textContent = text
+    if (css) node.style.cssText = css
+    return node
+  }
 
-    const submit = el(
+  appendCancelForm(panel, data) {
+    if (!data.cancel_import_url) return
+    const cancelForm = this.buildPostForm(data.cancel_import_url)
+    const cancel = this.constructor.el(
       "button",
-      "Import with this matrix",
-      "background:#111827;color:white;border:0;border-radius:6px;padding:8px 16px;font-size:14px;" +
-        "font-weight:500;cursor:pointer;margin-top:6px;"
+      "Cancel import",
+      "background:none;border:0;color:#6b7280;font-size:13px;text-decoration:underline;cursor:pointer;" +
+        "padding:0;margin-top:12px;"
     )
-    submit.type = "submit"
-    form.addEventListener("submit", () => { submit.disabled = true })
-    form.appendChild(submit)
-    panel.appendChild(form)
-
-    if (data.cancel_import_url) {
-      const cancelForm = this.buildPostForm(data.cancel_import_url)
-      const cancel = el(
-        "button",
-        "Cancel import",
-        "background:none;border:0;color:#6b7280;font-size:13px;text-decoration:underline;cursor:pointer;" +
-          "padding:0;margin-top:12px;"
-      )
-      cancel.type = "submit"
-      cancelForm.appendChild(cancel)
-      cancelForm.addEventListener("submit", () => this._clearRemembered())
-      panel.appendChild(cancelForm)
-    }
-
-    panel.style.display = "block"
+    cancel.type = "submit"
+    cancelForm.appendChild(cancel)
+    cancelForm.addEventListener("submit", () => this._clearRemembered())
+    panel.appendChild(cancelForm)
   }
 
   buildPostForm(action) {
@@ -445,18 +448,6 @@ export default class extends Controller {
       form.appendChild(input)
     }
     return form
-  }
-
-  describeMatrix(choice) {
-    const parts = []
-    const fmt = (n) => Number(n).toLocaleString()
-    if (choice.nber_rows != null && choice.nber_cols != null) {
-      parts.push(`${fmt(choice.nber_rows)} genes × ${fmt(choice.nber_cols)} cells`)
-    }
-    if (choice.is_count === true) parts.push("integer counts")
-    else if (choice.is_count === false) parts.push("non-integer values (e.g. normalized)")
-    if (choice.dtype) parts.push(choice.dtype)
-    return parts.join(" · ")
   }
 
   stepRank(step) {

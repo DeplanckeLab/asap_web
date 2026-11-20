@@ -4,8 +4,9 @@
 class ExternalCatalogImportCandidateJob < ApplicationJob
   queue_as :default
 
-  # sel / fu_id: second run after the user chose the H5AD matrix (the first run paused in awaiting_matrix).
-  def perform(candidate_id, user_id, version_id: nil, skip_archive: true, sandbox_key: nil, sel: nil, fu_id: nil)
+  # project_id: the import paused for the user (NeedsUserChoice), who created this project in the project form
+  # from the kept download; finish the import on it (catalog metadata, analysis pipeline, exports...).
+  def perform(candidate_id, user_id, version_id: nil, skip_archive: true, sandbox_key: nil, project_id: nil)
     sandbox_key = sandbox_key.to_s.strip.presence
     guest_import = sandbox_key.present?
 
@@ -35,24 +36,28 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       return
     end
 
+    form_project = project_id.present? ? Project.find_by(id: project_id) : nil
+    if project_id.present? && (form_project.nil? || form_project.being_deleted)
+      fail_import!(candidate, 'The project created in the form no longer exists.')
+      return
+    end
+
     candidate.update!(
       import_status: 'importing',
       import_error: nil,
       import_user_id: user.id,
-      # A resumed run keeps the id of its download so a killed run can still free it (release_if_stale_importing!).
       # The job marker tells the web UI this run can be declared dead once its job is gone (rake runs have none).
-      import_resume_json: (
-        fu_id.present? ? { 'fu_id' => fu_id.to_i, 'resumed' => true } : { ExternalCatalogCandidate::IMPORT_JOB_MARKER => true }
-      ).merge(
+      import_resume_json: {
+        ExternalCatalogCandidate::IMPORT_JOB_MARKER => true,
         'sandbox_key_digest' => ExternalCatalogCandidate.sandbox_key_digest(sandbox_key),
         'started_at' => Time.current.iso8601(3)
-      ).to_json
+      }.to_json
     )
-    ExternalCatalog::ImportProgress.report(candidate.id, step: 'queued') if fu_id.blank?
+    ExternalCatalog::ImportProgress.report(candidate.id, step: 'queued') unless form_project
 
     importer = nil
 
-    unless guest_import
+    unless guest_import || form_project
       accessible = candidate.asap_projects_accessible_to(user)
       if accessible.exists?
         project = accessible.order(id: :desc).first
@@ -86,15 +91,11 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       sandbox: guest_import,
       sandbox_key: sandbox_key,
       progress_candidate_id: candidate.id,
-      ask_matrix_choice: true
+      ask_user_choice: true
     )
 
     project_ready = false
-    result = importer.import_one(
-      candidate.to_entry,
-      sel: sel.presence,
-      fu_id: fu_id.presence,
-      on_project_ready: lambda { |project, outcome|
+    on_project_ready = lambda { |project, outcome|
         project_ready = true
         if outcome == :created
           candidate.update!(import_project_id: project.id)
@@ -107,7 +108,12 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
           "outcome=#{outcome} project=#{project.id} key=#{project.key}"
         )
       }
-    )
+    result =
+      if form_project
+        importer.complete_form_import(candidate.to_entry, form_project, on_project_ready: on_project_ready)
+      else
+        importer.import_one(candidate.to_entry, on_project_ready: on_project_ready)
+      end
     if result == :dry_run
       fail_import!(candidate, 'dry_run unexpected')
       return
@@ -134,25 +140,27 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
       "outcome=#{importer.last_import_outcome} project=#{result.id} key=#{result.key} " \
       "sandbox=#{guest_import} import_project_id=#{candidate.import_project_id}"
     )
-  rescue ExternalCatalog::ProjectImporter::NeedsMatrixChoice => e
+  rescue ExternalCatalog::ProjectImporter::NeedsUserChoice => e
     return if cancelled!(candidate, discard_fu: e.fu)
 
-    # Not a failure: keep the download and let the user who started the import pick the matrix.
-    candidate.await_matrix_choice!(
+    # Not a failure: keep the download; whoever started the import continues in the project form (species,
+    # matrix, text parsing parameters...), which creates the project, then a run with project_id finishes it.
+    candidate.await_form_choice!(
       fu: e.fu,
+      reason: e.reason,
       version_id: version.id,
       skip_archive: skip_archive,
-      sandbox_key: sandbox_key
+      sandbox_key: sandbox_key,
+      organism_id: e.organism_id,
+      suggested_organism_id: e.suggested_organism_id,
+      suggestion: e.suggestion,
+      tax_id: e.tax_id,
+      organism_label: e.organism_label
     )
-    ExternalCatalog::ImportProgress.report(
-      candidate.id,
-      step: 'choose_matrix',
-      matrix_choices: e.choices,
-      recommended_matrix: e.recommended
-    )
+    ExternalCatalog::ImportProgress.report(candidate.id, step: 'choose_in_form')
     Rails.logger.info(
-      "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} waiting for a matrix choice " \
-      "fu=#{e.fu.id} choices=#{e.choices.map { |c| c['path'] }.join(',')} recommended=#{e.recommended}"
+      "[ExternalCatalogImportCandidateJob] candidate=#{candidate.id} waiting for the project form " \
+      "(#{e.reason}): #{e.message} fu=#{e.fu&.id.inspect} suggested_organism=#{e.suggested_organism_id.inspect}"
     )
   rescue ExternalCatalog::ProjectImporter::SkipEntry => e
     return if cancelled!(candidate)
@@ -183,35 +191,13 @@ class ExternalCatalogImportCandidateJob < ApplicationJob
     failed_project = candidate&.import_project.presence || candidate&.asap_projects&.order(id: :desc)&.first
     ExternalCatalog::ImportSuccessRegistry.record_import_attempt!(project: failed_project, importer: importer) if failed_project
   ensure
-    ExternalCatalog::ImportRateLimit.release_inflight!(session_key: sandbox_key) if sandbox_key.present?
-    if fu_id.present?
-      discard_resumed_download!(candidate_id, fu_id, user_id)
-    else
-      clear_job_marker!(candidate_id)
+    if sandbox_key.present?
+      ExternalCatalog::ImportRateLimit.release_inflight!(session_key: sandbox_key, candidate_id: candidate_id)
     end
+    clear_job_marker!(candidate_id)
   end
 
   private
-
-  # A resumed run that ends without a project using its download (dataset already in ASAP, failure
-  # before the project was created) deletes it: retrying means starting a fresh import anyway.
-  # A created project owns the Fu (project_id set) and keeps it; a content match already discarded it.
-  def discard_resumed_download!(candidate_id, fu_id, user_id)
-    candidate = ExternalCatalogCandidate.find_by(id: candidate_id)
-    return if candidate&.awaiting_matrix?
-
-    if ExternalCatalogCandidate.discard_unused_download!(fu_id, user_id: user_id)
-      Rails.logger.info(
-        "[ExternalCatalogImportCandidateJob] candidate=#{candidate_id} deleted unused download fu=#{fu_id}"
-      )
-    end
-    candidate.update_column(:import_resume_json, nil) if candidate&.import_resume_json.present?
-  rescue StandardError => e
-    Rails.logger.warn(
-      "[ExternalCatalogImportCandidateJob] could not delete download fu=#{fu_id} candidate=#{candidate_id}: " \
-      "#{e.class} #{e.message}"
-    )
-  end
 
   # Acknowledge a cancellation (ExternalCatalogCandidate#cancel_for_new_sandbox!): back to idle, no error shown.
   def cancelled!(candidate, discard_fu: nil)
